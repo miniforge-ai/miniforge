@@ -22,8 +22,7 @@
    Manages worktree and Docker capsule acquisition, release, and
    workspace persistence at phase boundaries. Extracted from runner.clj."
   (:require
-   [ai.miniforge.dag-executor.executor :as dag-exec]
-   [ai.miniforge.dag-executor.result :as dag-result]
+   [ai.miniforge.dag-executor.interface :as dag]
    [ai.miniforge.logging.interface :as log]
    [ai.miniforge.response.interface :as response]
    [ai.miniforge.workflow.messages :as messages]
@@ -38,12 +37,12 @@
 (defn dag-executor-fns
   "DAG executor function references — resolved at call time so with-redefs works."
   []
-  {:create-registry dag-exec/create-executor-registry
-   :select-exec     dag-exec/select-executor
-   :acquire-env!    dag-exec/acquire-environment!
-   :executor-type   dag-exec/executor-type
-   :result-ok?      dag-result/ok?
-   :result-unwrap   dag-result/unwrap})
+  {:create-registry dag/create-executor-registry
+   :select-exec     dag/select-executor
+   :acquire-env!    dag/acquire-environment!
+   :executor-type   dag/executor-type
+   :result-ok?      dag/ok?
+   :result-unwrap   dag/unwrap})
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Configuration
@@ -139,7 +138,7 @@
   [executor environment-id]
   (when (and executor environment-id)
     (try
-      (dag-exec/release-environment! executor environment-id)
+      (dag/release-environment! executor environment-id)
       (catch Exception e
         (println (messages/t :env/release-failed {:error (ex-message e)}))))))
 
@@ -152,7 +151,7 @@
             branch (get context :execution/task-branch)
             phase  (get phase-ctx :execution/current-phase :unknown)]
         (try
-          (dag-exec/persist-workspace! executor env-id
+          (dag/persist-workspace! executor env-id
                                        {:branch  branch
                                         :message (messages/t :env/persist-message {:phase (name phase)})
                                         :workdir (get context :execution/worktree-path)})

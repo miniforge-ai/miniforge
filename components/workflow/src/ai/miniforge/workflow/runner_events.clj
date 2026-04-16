@@ -23,7 +23,7 @@
    All functions are safe to call with nil event-stream (no-op)."
   (:require
    [ai.miniforge.event-stream.interface :as es]
-   [ai.miniforge.phase.registry :as registry]
+   [ai.miniforge.phase.interface :as phase]
    [ai.miniforge.self-healing.interface :as self-healing]
    [ai.miniforge.workflow.messages :as messages]
    [cheshire.core :as json]))
@@ -70,7 +70,7 @@
 (defn- build-phase-event-data
   "Build event data map for a phase completion event."
   [result]
-  (let [succeeded? (get result :success? (registry/succeeded-or-done? result))
+  (let [succeeded? (get result :success? (phase/succeeded-or-done? result))
         outcome    (if succeeded? :success :failure)
         duration-ms (get result :duration-ms
                       (get-in result [:phase/metrics :duration-ms]
@@ -138,7 +138,7 @@
       (let [wf-id        (:execution/id context)
             metrics-opts (build-completion-metrics context)
             last-phase   (or (some-> (:execution/current-phase context) name) "")]
-        (if (registry/failed? context)
+        (if (phase/failed? context)
           (publish-event! event-stream
                           (merge (es/workflow-failed event-stream wf-id
                                                     {:message (messages/t :status/failed)

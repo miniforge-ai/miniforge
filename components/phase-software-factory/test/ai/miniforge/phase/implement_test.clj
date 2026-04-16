@@ -66,7 +66,7 @@
 (deftest default-config-test
   (testing "implement phase has correct default configuration"
     (is (= :implementer (:agent implement/default-config)))
-    (is (= [:syntax :lint] (:gates implement/default-config)))
+    (is (= [:syntax :format :lint] (:gates implement/default-config)))
     (is (map? (:budget implement/default-config)))
     (is (= 30000 (get-in implement/default-config [:budget :tokens])))
     (is (= 8 (get-in implement/default-config [:budget :iterations])))
@@ -77,7 +77,7 @@
     (let [defaults (registry/phase-defaults :implement)]
       (is (some? defaults))
       (is (= :implementer (:agent defaults)))
-      (is (= [:syntax :lint] (:gates defaults))))))
+      (is (= [:syntax :format :lint] (:gates defaults))))))
 
 ;------------------------------------------------------------------------------ Layer 1: Interceptor Enter Tests
 

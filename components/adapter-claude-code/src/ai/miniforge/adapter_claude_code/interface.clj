@@ -27,8 +27,8 @@
   (:require
    [ai.miniforge.adapter-claude-code.discovery :as discovery]
    [ai.miniforge.config.interface :as config]
-   [ai.miniforge.control-plane.messages :as messages]
-   [ai.miniforge.control-plane-adapter.protocol :as proto]
+   [ai.miniforge.control-plane.interface :as control-plane]
+   [ai.miniforge.control-plane-adapter.interface :as proto]
    [clojure.java.io :as io]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -103,8 +103,8 @@
             {:success? true}
             (catch Exception e
               {:success? false :error (ex-message e)}))
-          {:success? false :error (messages/t :adapter/unknown-command {:command command})})
-        {:success? false :error (messages/t :adapter/no-pid)}))))
+          {:success? false :error (control-plane/t :adapter/unknown-command {:command command})})
+        {:success? false :error (control-plane/t :adapter/no-pid)}))))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Factory

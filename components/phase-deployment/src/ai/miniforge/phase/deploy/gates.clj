@@ -21,7 +21,7 @@
 
    Gate metadata is loaded from EDN so descriptions and registration stay
    declarative while checks remain focused in code."
-  (:require [ai.miniforge.gate.registry :as registry]
+  (:require [ai.miniforge.gate.interface :as gate]
             [ai.miniforge.phase.deploy.messages :as msg]
             [ai.miniforge.response.interface :as response]
             [ai.miniforge.schema.interface :as schema]
@@ -217,17 +217,17 @@
 ;; Registration
 
 (doseq [gate-kw (keys @gate-definitions)]
-  (registry/register-gate! gate-kw))
+  (gate/register-gate! gate-kw))
 
-(defmethod registry/get-gate :provision-validated
+(defmethod gate/get-gate :provision-validated
   [_]
   (gate-map :provision-validated check-provision-validated))
 
-(defmethod registry/get-gate :deploy-healthy
+(defmethod gate/get-gate :deploy-healthy
   [_]
   (gate-map :deploy-healthy check-deploy-healthy))
 
-(defmethod registry/get-gate :health-check
+(defmethod gate/get-gate :health-check
   [_]
   (gate-map :health-check check-health-endpoint))
 

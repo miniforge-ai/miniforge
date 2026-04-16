@@ -32,7 +32,6 @@
             [ai.miniforge.phase.knowledge-helpers :as kb-helpers]
             [ai.miniforge.agent.interface :as agent]
             [ai.miniforge.context-pack.interface :as context-pack]
-            [ai.miniforge.context-pack.factory :as ctx-factory]
             [ai.miniforge.knowledge.interface :as knowledge]
             [ai.miniforge.repo-index.interface :as repo-index]
             [ai.miniforge.logging.interface :as log]
@@ -87,7 +86,7 @@
                     :search-index search-index
                     :search-query (when (seq files-in-scope)
                                     (first files-in-scope))})]
-        (ctx-factory/->pack-context index pack)))
+        (context-pack/->pack-context index pack)))
     (catch Exception _e
       nil)))
 
@@ -243,7 +242,7 @@
               (assoc-in [:execution/cached-files] (:task/existing-files task))
               (and (:task/context-pack task) (not (get-in ctx [:execution/pack-context])))
               (assoc-in [:execution/pack-context]
-                        (ctx-factory/->pack-context
+                        (context-pack/->pack-context
                           (:task/repo-index task)
                           (:task/context-pack task))))
         on-chunk (create-streaming-callback ctx)

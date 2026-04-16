@@ -97,14 +97,12 @@
 
 (def affinity-groups
   "Bricks that share with-redefs targets and must NOT run in parallel.
-   phase-software-factory tests redefine agent/invoke, agent/create-implementer,
-   etc., so they must run in the same sequential group as the agent brick."
-  {;; phase-software-factory tests redefine agent/invoke etc.
-   "agent+phases" #{"agent" "phase-software-factory"}
-   ;; workflow and phase tests both dynamically require context_pack via
-   ;; ensure-phase-implementations-loaded! — concurrent pmap loading causes
-   ;; Compiler$CompilerException races on context_pack/interface.clj.
-   "workflow+phase" #{"workflow" "phase"}})
+   workflow, phase, agent, and phase-software-factory all exercise the same
+   phase pipeline and redefine shared globals such as agent/invoke,
+   agent/create-implementer, verify/run-tests!, and
+   release-executor/execute-release-phase. Running them in separate pmap
+   groups causes intermittent cross-brick test pollution."
+  {"workflow+agent+phases" #{"workflow" "phase" "agent" "phase-software-factory"}})
 
 (defn coalesce-by-affinity
   "Merge brick-groups that belong to the same affinity group into a single
@@ -152,12 +150,17 @@
           (println (str "    " brick " (" (count nses) " namespaces)"))
           (doseq [ns nses] (println (str "      " ns))))
         (let [expr (build-test-expr brick-groups)
-              ;; Strip GIT_INDEX_FILE from the test JVM's environment.
-              ;; When committing from a git worktree, GIT_INDEX_FILE points to
-              ;; the worktree-specific index. Test subprocesses that run git
-              ;; commands (e.g., create-worktree in runner tests) can corrupt
-              ;; this index, causing the commit to produce an empty tree.
-              test-env (dissoc (into {} (System/getenv)) "GIT_INDEX_FILE")
+              ;; Strip git worktree vars from the test JVM's environment.
+              ;; Changed-brick detection may need the caller's GIT_DIR /
+              ;; GIT_WORK_TREE, but test namespaces shell out to git against
+              ;; temp repos and worktrees. If those vars leak into the test
+              ;; JVM, git commands inside tests resolve against the committing
+              ;; repo instead of the test fixture repo, causing false failures.
+              test-env (dissoc (into {} (System/getenv))
+                               "GIT_INDEX_FILE"
+                               "GIT_DIR"
+                               "GIT_WORK_TREE"
+                               "GIT_COMMON_DIR")
               {:keys [exit]} (deref (p/process {:out :inherit :err :inherit
                                                 :env test-env}
                                                "clojure" "-M:dev:test" "-e" expr))]

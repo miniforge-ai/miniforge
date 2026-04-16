@@ -21,6 +21,7 @@
    Public API groups are decomposed into ai.miniforge.agent.interface.* namespaces,
    while this namespace remains the Polylith entrypoint."
   (:require
+   [ai.miniforge.agent.file-artifacts :as file-artifacts]
    [ai.miniforge.agent.interface.classification :as classification]
    [ai.miniforge.agent.interface.llm :as llm]
    [ai.miniforge.agent.interface.memory :as memory]
@@ -28,7 +29,8 @@
    [ai.miniforge.agent.interface.meta :as meta]
    [ai.miniforge.agent.interface.protocols :as protocols]
    [ai.miniforge.agent.interface.runtime :as runtime]
-   [ai.miniforge.agent.interface.specialized :as specialized]))
+   [ai.miniforge.agent.interface.specialized :as specialized]
+   [ai.miniforge.agent.tool-supervisor :as tool-supervisor]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Protocols and configuration
@@ -158,3 +160,26 @@
 
 (def classify-task classification/classify-task)
 (def get-task-characteristics classification/get-task-characteristics)
+
+;------------------------------------------------------------------------------ Layer 3
+;; File artifacts — working tree snapshot and fallback artifact collection
+
+(def empty-snapshot
+  "Return an empty working tree snapshot."
+  file-artifacts/empty-snapshot)
+
+(def collect-written-files
+  "Collect files written during the agent session into a synthetic code artifact."
+  file-artifacts/collect-written-files)
+
+;------------------------------------------------------------------------------ Layer 3
+;; Tool supervision
+
+(def evaluate-tool-use
+  "Evaluate a tool use request against policy.
+   Returns {:decision \"allow\"} or {:decision \"deny\" :reason string}."
+  tool-supervisor/evaluate-tool-use)
+
+(def hook-eval-stdin!
+  "CLI entry point for tool-use evaluation from stdin."
+  tool-supervisor/hook-eval-stdin!)

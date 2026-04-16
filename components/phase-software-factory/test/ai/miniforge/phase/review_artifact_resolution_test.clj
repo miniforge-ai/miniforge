@@ -22,10 +22,10 @@
    Validates the three-strategy resolution:
    1. Serialized :artifact key on implement result
    2. Result itself when it contains :code/files (IS the artifact)
-   3. Worktree fallback via file-artifacts/collect-written-files"
+   3. Worktree fallback via agent/collect-written-files"
   (:require
    [clojure.test :refer [deftest is testing]]
-   [ai.miniforge.agent.file-artifacts :as file-artifacts]
+   [ai.miniforge.agent.interface :as agent]
    [ai.miniforge.phase.review]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -118,7 +118,7 @@
                          :code/summary "1 files collected from agent working directory (no MCP submit)"}
           impl-result (make-bare-result)
           ctx (make-ctx)]
-      (with-redefs [file-artifacts/collect-written-files
+      (with-redefs [agent/collect-written-files
                     (fn [_snapshot working-dir]
                       (is (= "/tmp/test-worktree" working-dir)
                           "Should pass worktree-path to collect-written-files")
@@ -135,7 +135,7 @@
           impl-result (make-bare-result)
           ctx (make-ctx {:execution/worktree-path nil
                          :worktree-path "/tmp/alt-worktree"})]
-      (with-redefs [file-artifacts/collect-written-files
+      (with-redefs [agent/collect-written-files
                     (fn [_snapshot working-dir]
                       (is (= "/tmp/alt-worktree" working-dir)
                           "Should use :worktree-path as fallback")

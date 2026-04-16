@@ -12,8 +12,8 @@
    Layer 1: LLM invocation and response parsing
    Layer 2: File selection and batch analysis"
   (:require
-   [ai.miniforge.compliance-scanner.factory :as factory]
-   [ai.miniforge.policy-pack.prompt-template :as pt]
+   [ai.miniforge.compliance-scanner.interface :as factory]
+   [ai.miniforge.policy-pack.interface :as pt]
    [clojure.edn :as edn]
    [clojure.java.io :as io]
    [clojure.string :as str]))

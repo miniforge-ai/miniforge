@@ -37,7 +37,9 @@
                                (staged-by-ext ".cljc")
                                (staged-by-ext ".edn"))
                        ;; Exclude .clj-kondo imports (library configs)
-                       (remove (fn [f] (str/starts-with? f ".clj-kondo/"))))]
+                       (remove (fn [f] (str/starts-with? f ".clj-kondo/")))
+                       ;; Exclude generated pack EDN (machine-generated, not parseable by kondo)
+                       (remove (fn [f] (str/ends-with? f ".pack.edn"))))]
     (if (seq clj-files)
       (let [_ (println "🔍 Linting" (count clj-files) "Clojure file(s)...")
             _ (println "Files:" (str/join ", " clj-files))

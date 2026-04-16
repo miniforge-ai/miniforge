@@ -1,0 +1,46 @@
+{
+  "$schema": "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json",
+  "version": "2.1.0",
+  "runs": [
+    {
+      "tool": {
+        "driver": {
+          "name": "BinaryAPIScanner",
+          "version": "3.2.1",
+          "rules": [
+            { "id": "API-001", "shortDescription": { "text": "Undocumented API call detected" }, "defaultConfiguration": { "level": "error" } },
+            { "id": "API-002", "shortDescription": { "text": "Dynamic loading pattern detected" }, "defaultConfiguration": { "level": "warning" } },
+            { "id": "API-003", "shortDescription": { "text": "Deprecated API usage" }, "defaultConfiguration": { "level": "error" } }
+          ]
+        }
+      },
+      "results": [
+        {
+          "ruleId": "API-002", "level": "warning",
+          "message": { "text": "Dynamic load via LoadLibrary/GetProcAddress: shlwapi.dll!none — cannot resolve target symbol" },
+          "locations": [{ "physicalLocation": { "artifactLocation": { "uri": "src/win32/shell_utils.cpp" }, "region": { "startLine": 142, "startColumn": 5 } } }]
+        },
+        {
+          "ruleId": "API-001", "level": "error",
+          "message": { "text": "Call to undocumented API: ntdll.dll!RtlAdjustPrivilege" },
+          "locations": [{ "physicalLocation": { "artifactLocation": { "uri": "src/core/privilege_escalation.cpp" }, "region": { "startLine": 87, "startColumn": 12 } } }]
+        },
+        {
+          "ruleId": "API-002", "level": "warning",
+          "message": { "text": "Dynamic load via LoadLibrary/GetProcAddress: kernel32.dll!none — cannot resolve target symbol" },
+          "locations": [{ "physicalLocation": { "artifactLocation": { "uri": "src/io/async_file_ops.cpp" }, "region": { "startLine": 223, "startColumn": 8 } } }]
+        },
+        {
+          "ruleId": "API-001", "level": "error",
+          "message": { "text": "Call to undocumented API: user32.dll!NtUserSetWindowPos" },
+          "locations": [{ "physicalLocation": { "artifactLocation": { "uri": "src/ui/window_manager.cpp" }, "region": { "startLine": 456, "startColumn": 3 } } }]
+        },
+        {
+          "ruleId": "API-003", "level": "error",
+          "message": { "text": "Deprecated API: advapi32.dll!CryptEncrypt — use BCrypt* APIs instead" },
+          "locations": [{ "physicalLocation": { "artifactLocation": { "uri": "src/crypto/legacy_encrypt.cpp" }, "region": { "startLine": 34, "startColumn": 1 } } }]
+        }
+      ]
+    }
+  ]
+}

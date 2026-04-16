@@ -54,6 +54,10 @@
      Gate map with :name, :check, :repair"
   registry/get-gate)
 
+(def register-gate!
+  "Track a gate as registered."
+  registry/register-gate!)
+
 (def list-gates
   "List all registered gate types.
 

@@ -104,6 +104,39 @@
       :else
       ["bb" "miniforge"])))
 
+(def ^:private codex-artifact-table-pattern
+  #"^\[mcp_servers\.artifact(?:\..+)?\]\s*$")
+
+(def ^:private toml-table-pattern
+  #"^\[[^]]+\]\s*$")
+
+(defn- strip-codex-artifact-config
+  "Remove the full mcp_servers.artifact subtree from a Codex TOML config.
+
+   This strips both the root server block and any nested tables such as
+   [mcp_servers.artifact.tools.context_read], which newer Codex builds treat
+   as invalid if the parent server definition has already been removed."
+  [content]
+  (let [lines (str/split-lines content)]
+    (loop [remaining lines
+           cleaned []
+           skipping? false]
+      (if-let [line (first remaining)]
+        (let [trimmed (str/trim line)]
+          (cond
+            (re-matches codex-artifact-table-pattern trimmed)
+            (recur (rest remaining) cleaned true)
+
+            (and skipping? (re-matches toml-table-pattern trimmed))
+            (recur remaining cleaned false)
+
+            skipping?
+            (recur (rest remaining) cleaned true)
+
+            :else
+            (recur (rest remaining) (conj cleaned line) false)))
+        (str/join "\n" cleaned)))))
+
 (defn create-session!
   "Create a new artifact session with a temporary directory.
 
@@ -114,13 +147,15 @@
    - {:dir <path>, :mcp-config-path <path>, :artifact-path <path>}"
   ([] (create-session! nil))
   ([{:keys [workdir]}]
-  (let [working-dir (or workdir (System/getProperty "user.dir"))
-        dir (str (Files/createTempDirectory
+  (let [dir (str (Files/createTempDirectory
                   "miniforge-artifact-"
                   (into-array FileAttribute [])))
+        working-dir (or workdir (System/getProperty "user.dir"))
         config-path (str dir "/mcp-config.json")
         artifact-path (str dir "/artifact.edn")]
     {:dir dir
+     :workdir working-dir
+     :config-root (or workdir dir)
      :mcp-config-path config-path
      :artifact-path artifact-path
      :pre-session-snapshot (try
@@ -167,6 +202,39 @@
 ;------------------------------------------------------------------------------ Layer 1
 ;; MCP config generation
 
+(def ^:private codex-artifact-table-pattern
+  #"^\[mcp_servers\.artifact(?:\..+)?\]\s*$")
+
+(def ^:private toml-table-pattern
+  #"^\[[^]]+\]\s*$")
+
+(defn- strip-codex-artifact-config
+  "Remove the full mcp_servers.artifact subtree from a Codex TOML config.
+
+   This strips both the root server block and any nested tables such as
+   [mcp_servers.artifact.tools.context_read], which newer Codex builds treat
+   as invalid if the parent server definition has already been removed."
+  [content]
+  (let [lines (str/split-lines content)]
+    (loop [remaining lines
+           cleaned []
+           skipping? false]
+      (if-let [line (first remaining)]
+        (let [trimmed (str/trim line)]
+          (cond
+            (re-matches codex-artifact-table-pattern trimmed)
+            (recur (rest remaining) cleaned true)
+
+            (and skipping? (re-matches toml-table-pattern trimmed))
+            (recur remaining cleaned false)
+
+            skipping?
+            (recur (rest remaining) cleaned true)
+
+            :else
+            (recur (rest remaining) (conj cleaned line) false)))
+        (str/join "\n" cleaned)))))
+
 (defn write-codex-mcp-config!
   "Write or update .codex/config.toml with [mcp_servers.artifact] block.
 
@@ -174,9 +242,10 @@
    replaces it. Otherwise appends the block. Creates .codex/ dir if needed.
 
    Returns the path to the config file."
-  [server-cmd]
+  [config-root server-cmd]
   (let [{:keys [command args]} server-cmd
-        dir (io/file ".codex")
+        root (or config-root (System/getProperty "user.dir"))
+        dir (io/file root ".codex")
         config-file (io/file dir "config.toml")
         block-header "[mcp_servers.artifact]"
         block (str block-header "\n"
@@ -184,15 +253,12 @@
                    "args = " (json/generate-string args) "\n")]
     (.mkdirs dir)
     (if (.exists config-file)
-      (let [content (slurp config-file)]
-        (if (str/includes? content block-header)
-          ;; Replace existing block (up to next section or EOF)
-          (let [replaced (str/replace content
-                                      #"(?s)\[mcp_servers\.artifact\]\n(?:(?!\n\[).)*"
-                                      block)]
-            (spit config-file replaced))
-          ;; Append
-          (spit config-file (str content "\n" block) :append false)))
+      (let [content (slurp config-file)
+            preserved (-> content strip-codex-artifact-config str/trim)]
+        (spit config-file
+              (if (str/blank? preserved)
+                block
+                (str preserved "\n\n" block))))
       (spit config-file block))
     (str config-file)))
 
@@ -202,9 +268,10 @@
    If the file exists, merges into existing JSON. Creates .cursor/ dir if needed.
 
    Returns the path to the config file."
-  [server-cmd]
+  [config-root server-cmd]
   (let [{:keys [command args]} server-cmd
-        dir (io/file ".cursor")
+        root (or config-root (System/getProperty "user.dir"))
+        dir (io/file root ".cursor")
         config-file (io/file dir "mcp.json")
         entry {"command" command "args" args}
         existing (when (.exists config-file)
@@ -254,13 +321,14 @@
    Returns: session (for threading)"
   [session]
   (let [srv-cmd       (server-command (:dir session))
+        config-root   (:config-root session)
         mcp-config    {"mcpServers" {"context" {"command" (:command srv-cmd)
                                                 "args"    (:args srv-cmd)}}}
         _             (spit (:mcp-config-path session)
                             (json/generate-string mcp-config {:pretty true}))
         settings-path (write-claude-settings! (:dir session))
-        codex-path    (write-codex-mcp-config! srv-cmd)
-        cursor-path   (write-cursor-mcp-config! srv-cmd)
+        codex-path    (write-codex-mcp-config! config-root srv-cmd)
+        cursor-path   (write-cursor-mcp-config! config-root srv-cmd)
         [hook-cmd & hook-args] (resolve-miniforge-command)
         hook-eval-cmd (str/join " " (concat [hook-cmd] hook-args ["hook-eval"]))]
     (assoc session
@@ -418,13 +486,10 @@
   [path]
   (let [f (io/file path)]
     (when (.exists f)
-      (let [content (slurp f)
-            cleaned (str/replace content
-                                 #"(?s)\n?\[mcp_servers\.artifact\]\n(?:(?!\n\[).)*"
-                                 "")]
-        (if (str/blank? (str/trim cleaned))
+      (let [cleaned (-> (slurp f) strip-codex-artifact-config str/trim)]
+        (if (str/blank? cleaned)
           (.delete f)
-          (spit f cleaned))))))
+          (spit f (str cleaned "\n")))))))
 
 (defn cleanup-cursor-mcp-config!
   "Remove artifact key from .cursor/mcp.json.
@@ -645,9 +710,10 @@
           session  (-> (create-capsule-session! executor env-id workdir)
                        write-capsule-mcp-config!)]
       (run-session session body-fn read-capsule-artifact cleanup-capsule-session! :capsule))
-    (let [session (-> (create-session!
-                        {:workdir (or (:execution/worktree-path context)
-                                      (System/getProperty "user.dir"))})
+    (let [workdir (:execution/worktree-path context)
+          session (-> (if workdir
+                        (create-session! {:workdir workdir})
+                        (create-session!))
                       write-mcp-config!)]
       (run-session session body-fn read-artifact cleanup-session! :host))))
 

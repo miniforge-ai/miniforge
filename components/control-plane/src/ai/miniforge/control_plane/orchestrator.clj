@@ -30,7 +30,7 @@
    [ai.miniforge.control-plane.registry :as registry]
    [ai.miniforge.control-plane.decision-queue :as dq]
    [ai.miniforge.control-plane.heartbeat :as heartbeat]
-   [ai.miniforge.control-plane-adapter.protocol :as adapter]
+   [ai.miniforge.control-plane-adapter.interface :as adapter]
    [ai.miniforge.event-stream.interface.events :as events]
    [ai.miniforge.event-stream.interface.stream :as stream]))
 
