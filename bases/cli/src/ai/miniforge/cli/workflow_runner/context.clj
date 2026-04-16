@@ -25,6 +25,7 @@
    [babashka.process :as p]
    [cheshire.core :as json]
    [ai.miniforge.cli.config :as config]
+   [ai.miniforge.cli.worktree :as worktree]
    [ai.miniforge.cli.workflow-runner.display :as display]
    [ai.miniforge.event-stream.interface :as es]
    [ai.miniforge.response.interface :as response]))
@@ -65,14 +66,19 @@
 
 (defn get-git-info []
   (try
-    (let [branch-result (p/shell {:out :string :err :string :continue true}
-                                 "git" "rev-parse" "--abbrev-ref" "HEAD")
-          commit-result (p/shell {:out :string :err :string :continue true}
-                                 "git" "rev-parse" "--short" "HEAD")]
-      (when (and (zero? (:exit branch-result))
-                 (zero? (:exit commit-result)))
-        {:git-branch (str/trim (:out branch-result))
-         :git-commit (str/trim (:out commit-result))}))
+    (when-let [root (worktree/worktree-root)]
+      (let [branch-result (p/shell {:out :string :err :string :continue true :dir root}
+                                   "git" "rev-parse" "--abbrev-ref" "HEAD")
+            commit-result (p/shell {:out :string :err :string :continue true :dir root}
+                                   "git" "rev-parse" "--short" "HEAD")
+            branch (some-> branch-result :out str/trim not-empty)
+            commit (some-> commit-result :out str/trim not-empty)
+            branch-exit (get branch-result :exit 1)
+            commit-exit (get commit-result :exit 1)]
+        (when (and (zero? branch-exit)
+                   (zero? commit-exit))
+          {:git-branch branch
+           :git-commit commit})))
     (catch Exception _ nil)))
 
 (defn get-files-in-scope
@@ -118,11 +124,12 @@
 ;; Context decoration
 
 (defn decorate-spec-with-runtime-context [spec {:keys [iteration parent-task-id] :or {iteration 1}}]
-  (let [git-info (get-git-info)
+  (let [cwd (or (worktree/worktree-root) (str (fs/cwd)))
+        git-info (get-git-info)
         files-in-scope (get-files-in-scope (:spec/intent spec))]
     (assoc spec
            :spec/context
-           (cond-> {:cwd (str (fs/cwd))
+           (cond-> {:cwd cwd
                     :files-in-scope files-in-scope
                     :environment :development}
              git-info (merge git-info))
@@ -171,4 +178,5 @@
       control-state (assoc :control-state control-state)
       skip-lifecycle-events (assoc :skip-lifecycle-events true)
       execution-opts (assoc :execution/opts execution-opts)
-      true (assoc :worktree-path (System/getProperty "user.dir")))))
+      true (assoc :worktree-path (or (worktree/worktree-root)
+                                     (System/getProperty "user.dir"))))))

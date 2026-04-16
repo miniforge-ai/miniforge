@@ -10,6 +10,10 @@
    "    --worktree <path> Custom worktree path"
    "    --resume <id>     Resume a workflow from its last checkpoint"
    ""
+   "  worktree <subcommand>  Resolve or run inside the active git worktree"
+   "    path              Print the resolved git worktree root"
+   "    run -- <cmd...>   Run a command inside that worktree root"
+   ""
    "  scan [repo-path]    Run compliance scanner against a repository"
    "    -p, --pack <name> Policy pack to use (e.g., foundations-1.0.0)"
    "    -r, --rules <sel> Rule selector: all, always-apply, or rule ID"
@@ -209,6 +213,11 @@
   :run/unrecognized-format "Unrecognized file format in: {path}\nExpected :spec/title (spec), :dag-id (DAG), or :plan/id (plan)"
   :run/failed "Failed to run workflow: {error}"
   :run/error-details "  Details: {details}"
+
+  ;; ── Worktree ──────────────────────────────────────────────────────────
+  :worktree/root-not-found "No git worktree found from: {path}"
+  :worktree/usage "Usage: {command}"
+  :worktree/run-usage "Usage: {command}"
 
   ;; ── Recommender ───────────────────────────────────────────────────────
   :recommender/parse-warning "Warning: Failed to parse LLM response: {error}"
