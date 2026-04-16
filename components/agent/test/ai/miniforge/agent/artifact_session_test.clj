@@ -255,6 +255,35 @@
           (doseq [f (reverse (file-seq tmp))]
             (.delete ^java.io.File f)))))))
 
+(deftest cleanup-codex-config-removes-nested-artifact-tables-test
+  (testing "cleanup removes nested artifact tool tables as part of the same subtree"
+    (let [tmp (io/file (System/getProperty "java.io.tmpdir")
+                       (str "codex-nested-test-" (random-uuid)))
+          config-file (io/file tmp "config.toml")
+          cleanup-fn  @#'session/cleanup-codex-mcp-config!]
+      (try
+        (.mkdirs tmp)
+        (spit config-file (str "sandbox_mode = \"workspace-write\"\n"
+                               "\n"
+                               "[mcp_servers.artifact]\n"
+                               "command = \"bb\"\n"
+                               "args = [\"miniforge\",\"mcp-serve\"]\n"
+                               "\n"
+                               "[mcp_servers.artifact.tools.context_read]\n"
+                               "approval_mode = \"approve\"\n"
+                               "\n"
+                               "[sandbox_workspace_write]\n"
+                               "network_access = true\n"))
+        (cleanup-fn (str config-file))
+        (let [content (slurp config-file)]
+          (is (not (str/includes? content "[mcp_servers.artifact]")))
+          (is (not (str/includes? content "[mcp_servers.artifact.tools.context_read]")))
+          (is (str/includes? content "sandbox_mode = \"workspace-write\""))
+          (is (str/includes? content "[sandbox_workspace_write]")))
+        (finally
+          (doseq [f (reverse (file-seq tmp))]
+            (.delete ^java.io.File f)))))))
+
 (deftest cleanup-cursor-config-test
   (testing "cleanup removes artifact entry but preserves other servers"
     (let [tmp (io/file (System/getProperty "java.io.tmpdir")
