@@ -53,6 +53,16 @@
   []
   (get (workflow-config) :phase-defaults {}))
 
+(defn registered-phase-keys
+  "Ordered phase keywords declared in the workflow pipeline, excluding the
+   terminal `:done` marker. These are the phases this component registers
+   defaults for on load."
+  []
+  (->> (get @workflow-definition :workflow/pipeline [])
+       (map :phase)
+       (remove #{:done})
+       vec))
+
 (defn known-apis
   []
   (get (workflow-config) :known-apis #{}))

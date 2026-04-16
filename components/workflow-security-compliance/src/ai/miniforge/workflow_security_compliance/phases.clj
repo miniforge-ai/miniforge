@@ -37,16 +37,10 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Config + context helpers
 
-(def ^:private phase-keys
-  [:sec-parse-scan
-   :sec-trace-source
-   :sec-verify-docs
-   :sec-classify
-   :sec-generate-exclusions])
-
 (defn- register-defaults!
+  "Register phase defaults for every phase declared in the workflow resource."
   []
-  (doseq [phase-kw phase-keys]
+  (doseq [phase-kw (config/registered-phase-keys)]
     (phase/register-phase-defaults! phase-kw (config/phase-defaults phase-kw))))
 
 (defn- phase-config

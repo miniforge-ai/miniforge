@@ -17,7 +17,7 @@
  :workflow/pipeline
  [{:phase :sec-parse-scan}
   {:phase :sec-trace-source}
- {:phase :sec-verify-docs}
+  {:phase :sec-verify-docs}
   {:phase :sec-classify}
   {:phase :sec-generate-exclusions}
   {:phase :done}]
