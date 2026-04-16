@@ -13,7 +13,6 @@
    Layer 1: Gate registration"
   (:require
    [ai.miniforge.connector-linter.interface :as linter]
-   [ai.miniforge.cli.repo-analyzer :as analyzer]
    [ai.miniforge.gate.registry :as registry]
    [clojure.string :as str]))
 
@@ -68,7 +67,7 @@
   [artifact ctx]
   (let [worktree   (resolve-worktree ctx)
         techs      (detect-technologies artifact)
-        fps        @analyzer/fingerprints
+        fps        @@(requiring-resolve 'ai.miniforge.cli.repo-analyzer/fingerprints)
         result     (linter/run-all worktree fps techs)
         violations (:violations result)]
     (if (empty? violations)

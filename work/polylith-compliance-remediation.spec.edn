@@ -1,0 +1,76 @@
+;; =============================================================================
+;; Spec: Polylith Compliance Remediation
+;; =============================================================================
+;;
+;; `poly check` reports 41 errors. Components bypass interfaces, circular
+;; dependencies exist, project deps are incomplete. Must fix.
+;;
+;; Fix groups in dependency order:
+;;
+;; GROUP 1: Break circular dependency (Error 104)
+;;   gate > cli > workflow > gate
+;;
+;; GROUP 2: Fix 31 interface bypass violations (Error 101)
+;;   Components reaching into internal namespaces instead of .interface
+;;
+;; GROUP 3: Fix missing interface definitions (Error 103)
+;;   phase-deployment and phase-software-factory
+;;
+;; GROUP 4: Fix multi-implementation interfaces (Error 106/108)
+;;   data-foundry and phase multi-impl need profiles
+;;
+;; GROUP 5: Fix project completeness (Error 107, 112)
+;;
+;; GROUP 6: Clean up warnings (202, 207)
+
+{:spec/title "Polylith compliance remediation — fix all poly check errors"
+
+ :spec/description
+ "Fix all 41 errors from `poly check`. Every component must depend only on
+  interfaces, circular dependencies must be broken, and project configs must
+  be complete.
+
+  GROUP 1: Break circular dependency (Error 104)
+  gate > cli > workflow > gate. Use requiring-resolve or extract shared
+  concern to break the cycle.
+
+  GROUP 2: Fix interface bypass violations (Error 101 — 31 sites)
+  For each: change require to .interface, add pass-through if missing.
+  Key components: workflow (5), gate (3), control-plane cluster (4),
+  phase-software-factory (2), semantic-analyzer (2), remaining singles.
+
+  GROUP 3: Fix missing interface definitions (Error 103 — 2 sites)
+  phase-deployment and phase-software-factory missing many phase interface fns.
+
+  GROUP 4: Fix multi-impl interfaces (Error 106/108 — 7 sites)
+  data-foundry and phase need Polylith profiles.
+
+  GROUP 5: Fix project completeness (Error 107, 112 — 4 sites)
+  Add missing components to project deps.edn. Fix mcp-context-server
+  base direct brick dependency.
+
+  GROUP 6: Clean up warnings (202, 207)
+  Missing resource paths, unnecessary components in projects."
+
+ :spec/intent {:type :refactor
+               :scope ["components/*/src"
+                       "components/*/deps.edn"
+                       "bases/*/deps.edn"
+                       "projects/*/deps.edn"
+                       "workspace.edn"]}
+
+ :spec/constraints
+ ["Do not change component behavior — only dependency wiring"
+  "Interface pass-throughs must preserve existing function signatures"
+  "Run poly check after each group to verify progress"
+  "Run bb test after each group to verify no regressions"
+  "Each group should be a separate commit for reviewability"]
+
+ :spec/acceptance-criteria
+ ["poly check reports 0 errors"
+  "No circular dependencies in the component graph"
+  "All cross-component requires use .interface namespaces"
+  "All existing tests pass"
+  "Project deps.edn files are complete per poly check"]
+
+ :spec/workflow-type :canonical-sdlc}

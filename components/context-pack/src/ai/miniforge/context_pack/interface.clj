@@ -12,6 +12,7 @@
    Layer 1: Budget queries
    Layer 2: Pack building and auditing"
   (:require [ai.miniforge.context-pack.schema :as schema]
+            [ai.miniforge.context-pack.factory :as factory]
             [ai.miniforge.context-pack.builder :as builder]
             [ai.miniforge.context-pack.budget :as budget]
             [ai.miniforge.context-pack.config :as config]))
@@ -22,6 +23,14 @@
 (def ContextPack schema/ContextPack)
 (def BudgetAudit schema/BudgetAudit)
 (def Source schema/Source)
+
+;------------------------------------------------------------------------------ Layer 0
+;; Factory re-exports
+
+(def ->context-pack factory/->context-pack)
+(def ->budget-audit factory/->budget-audit)
+(def ->source factory/->source)
+(def ->pack-context factory/->pack-context)
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Budget queries

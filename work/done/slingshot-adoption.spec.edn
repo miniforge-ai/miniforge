@@ -1,0 +1,68 @@
+{:spec/title "Adopt slingshot try+/throw+ across the codebase"
+
+ :spec/description
+ "slingshot/slingshot 0.12.2 is verified bb-compatible.
+
+  Phase 1 (DONE — PRs #519, #521, #523):
+  - try+ at catch sites in workflow/runner, CLI base, agent component
+  - catch Object as universal fallback (ex-info maps bypass catch Exception)
+
+  Phase 2 (THIS SPEC):
+  Create an anomaly component with throw-anomaly! function that standardizes
+  the throw shape. All throw sites migrate from ad-hoc ex-info to
+  throw-anomaly! with canonical :type keywords. Catch sites destructure
+  directly from the thrown map.
+
+  throw-anomaly! is a function (not a macro) that:
+  1. Builds a canonical map {:type :message :timestamp :data}
+  2. Calls slingshot throw+ with the map
+  3. Provides a single extension point for cross-cutting concerns
+
+  Anomaly type taxonomy (namespaced keywords):
+  - :llm/rate-limited     {:backend :status :retry-after-ms}
+  - :llm/context-exceeded {:backend :tokens :limit}
+  - :llm/timeout          {:backend :duration-ms}
+  - :llm/unavailable      {:backend :error}
+  - :gate/failed          {:gate :errors}
+  - :gate/skipped         {:gate :reason}
+  - :executor/unavailable {:execution-mode :hint}
+  - :executor/timeout     {:environment-id :duration-ms}
+  - :dashboard/stop       {:reason}
+  - :pipeline/max-phases  {:max-phases :iteration}
+  - :pipeline/empty       {}
+  - :agent/execution-failed {:agent-id :task-id :error}
+  - :agent/validation-failed {:agent-id :errors}
+
+  Convergence with response/make-anomaly:
+  The response component's anomaly codes (:anomalies/fault, :anomalies/unavailable,
+  etc.) map to slingshot :type keywords. throw-anomaly! should accept an optional
+  :anomaly/category that bridges the two systems."
+
+ :spec/intent {:type :feature
+               :scope ["components/anomaly"
+                       "components/llm/src"
+                       "components/agent/src"
+                       "components/workflow/src"
+                       "components/gate/src"
+                       "components/dag-executor/src"
+                       "bases/cli/src"]}
+
+ :spec/constraints
+ ["throw-anomaly! is a function, not a macro"
+  "Canonical map shape: {:type :message :timestamp} + caller data"
+  "Anomaly types are namespaced keywords (component/error-kind)"
+  "Converge with response/make-anomaly anomaly codes"
+  "bb-compatible (slingshot verified)"
+  "PR DAG: anomaly component first, then migrate throw sites per component"
+  "catch Object as universal fallback in try+ blocks"]
+
+ :spec/acceptance-criteria
+ ["components/anomaly exists with throw-anomaly! and anomaly type registry"
+  "Zero ad-hoc (throw (ex-info ...)) in migrated components"
+  "All catch sites use slingshot key-value selectors for known types"
+  "Anomaly type taxonomy documented in anomaly component EDN"
+  "throw-anomaly! accepts :anomaly/category for response chain convergence"
+  "All existing tests pass"
+  "New tests for throw-anomaly! and each anomaly type"]
+
+ :workflow/type :canonical-sdlc}

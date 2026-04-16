@@ -60,7 +60,7 @@
    [ai.miniforge.cli.main.commands.evidence :as cmd-evidence]
    [ai.miniforge.cli.main.commands.artifact-cmds :as cmd-artifact]
    [ai.miniforge.cli.main.commands.etl :as cmd-etl]
-   [ai.miniforge.agent.tool-supervisor :as tool-supervisor]
+   [ai.miniforge.agent.interface :as agent]
    [ai.miniforge.mcp-context-server.interface :as mcp-context-server]
    [ai.miniforge.lsp-mcp-bridge.main :as lsp-bridge]
    [ai.miniforge.lsp-mcp-bridge.tasks :as lsp-tasks]
@@ -258,7 +258,7 @@
 
    Reads JSON from stdin, evaluates against policy, writes decision to stdout."
   [_m]
-  (System/exit (tool-supervisor/hook-eval-stdin!)))
+  (System/exit (agent/hook-eval-stdin!)))
 
 (defn context-server-cmd
   "Run the MCP context server (internal — spawned as subprocess by the agent).

@@ -1,0 +1,3 @@
+Rule ID,Message,Severity,File,Line,Column
+API-002,"Dynamic load via LoadLibrary/GetProcAddress: ole32.dll!none — cannot resolve target symbol",warning,src/com/ole_wrapper.cpp,67,4
+API-001,"Call to undocumented API: gdi32.dll!GdiDllInitialize",error,src/graphics/gdi_init.cpp,12,1
