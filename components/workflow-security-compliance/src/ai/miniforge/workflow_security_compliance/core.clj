@@ -200,23 +200,24 @@
    :summary {:total-excluded excluded-count
              :total-flagged flagged-count}})
 
+(defn- sarif-run-violations
+  "Return a seq of violations extracted from a single SARIF run at `run-idx`.
+   Indexed so each violation's id encodes its tool/run/result position."
+  [[run-idx run]]
+  (let [tool-name (get-in run ["tool" "driver" "name"] "unknown")
+        results  (get run "results" [])]
+    (map-indexed
+     (partial sarif-violation tool-name run-idx)
+     results)))
+
 ;------------------------------------------------------------------------------ Layer 1
 ;; Pipelines
 
 (defn parse-sarif-file
   [path]
   (let [content (-> path slurp (json/parse-string))
-        runs (get content "runs" [])]
-    (into []
-          (mapcat
-           (fn [[run-idx run]]
-             (let [tool-name (get-in run ["tool" "driver" "name"] "unknown")
-                   results (get run "results" [])]
-               (map-indexed
-                (fn [result-idx result]
-                  (sarif-violation tool-name run-idx result-idx result))
-                results)))
-           (map-indexed vector runs)))))
+        runs    (get content "runs" [])]
+    (into [] (mapcat sarif-run-violations) (map-indexed vector runs))))
 
 (defn parse-csv-file
   [path]

@@ -29,9 +29,8 @@
 (def GateConfig
   schema/GateConfig)
 
-(defn validate-config
-  [value]
-  (schema/validate-config value))
+(def validate-config
+  schema/validate-config)
 
 (defn create-classification-gate
   "Create a ClassificationGate instance.
@@ -39,7 +38,7 @@
   ([] (create-classification-gate {}))
   ([config-overrides]
    (let [resolved-config (merge (default-config) config-overrides)
-         validation (validate-config resolved-config)]
+         validation (schema/validate-config resolved-config)]
      (when-not (:valid? validation)
        (throw (ex-info (msg/t :schema/invalid-config)
                        {:errors (:errors validation)
