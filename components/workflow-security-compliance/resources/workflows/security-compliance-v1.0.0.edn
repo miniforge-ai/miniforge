@@ -1,0 +1,27 @@
+;; Security Compliance Workflow v1.0.0 (issue #552)
+;; ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+;;
+;; Mixed mechanical/semantic compliance pipeline:
+;;   parse SARIF/CSV → trace source (LLM) → verify docs → classify → exclusions
+;;
+;; Phases 2 & 3 are LLM-assisted (stubs in prototype).
+
+{:workflow/id      :security-compliance
+ :workflow/version "1.0.0"
+ :workflow/name    "Security Compliance Workflow"
+ :workflow/description
+ "Scan binary API violations, trace through wrappers, verify documentation
+  status, classify as true/false positive, and generate exclusion list.
+  Mixes mechanical ETL with agentic source analysis."
+
+ :workflow/pipeline
+ [{:phase :sec-parse-scan}
+  {:phase :sec-trace-source}
+  {:phase :sec-verify-docs}
+  {:phase :sec-classify}
+  {:phase :sec-generate-exclusions}
+  {:phase :done}]
+
+ :workflow/config
+ {:max-tokens     75000
+  :max-iterations 10}}

@@ -23,9 +23,8 @@
    This is the N2 §7 implementation. The Observe phase is the final
    phase of the standard SDLC workflow: plan → implement → verify →
    review → release → observe."
-  (:require [ai.miniforge.phase.registry :as registry]
-            [ai.miniforge.pr-lifecycle.monitor-config :as monitor-config]
-            [ai.miniforge.pr-lifecycle.monitor-loop :as monitor-loop]
+  (:require [ai.miniforge.phase.interface :as phase]
+            [ai.miniforge.pr-lifecycle.interface :as pr-lifecycle]
             [ai.miniforge.response.interface :as response]
             [ai.miniforge.schema.interface :as schema]
             [clojure.edn :as edn]
@@ -73,7 +72,7 @@
 
 (defn- load-monitor-defaults
   []
-  (monitor-config/monitor-defaults))
+  (pr-lifecycle/monitor-defaults))
 
 (defn- present-overrides
   [overrides]
@@ -84,7 +83,7 @@
   (:observe/phase-defaults (load-observe-phase-config)))
 
 ;; Register defaults on load
-(registry/register-phase-defaults! :observe default-config)
+(phase/register-phase-defaults! :observe default-config)
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Interceptor implementation
@@ -146,8 +145,8 @@
             monitor-config (resolve-monitor-config ctx logger generate-fn event-bus)
             self-author (:self-author monitor-config)
 
-            monitor (monitor-loop/create-monitor monitor-config)
-            evidence (monitor-loop/run-monitor-loop monitor self-author)
+            monitor (pr-lifecycle/create-pr-monitor monitor-config)
+            evidence (pr-lifecycle/run-pr-monitor-loop monitor self-author)
 
             result-data {:observe/status :completed
                          :observe/evidence evidence
@@ -189,9 +188,9 @@
 ;------------------------------------------------------------------------------ Layer 2
 ;; Registry method
 
-(defmethod registry/get-phase-interceptor :observe
+(defmethod phase/get-phase-interceptor-method :observe
   [config]
-  (let [merged (registry/merge-with-defaults config)]
+  (let [merged (phase/merge-with-defaults config)]
     {:name ::observe
      :config merged
      :enter (fn [ctx]
@@ -202,10 +201,10 @@
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
   ;; Get interceptor
-  (registry/get-phase-interceptor {:phase :observe})
+  (phase/get-phase-interceptor-method {:phase :observe})
 
   ;; Check defaults
-  (registry/phase-defaults :observe)
+  (phase/phase-defaults :observe)
 
   ;; Typical execution context keys the Observe phase reads:
   ;; :execution/dag-pr-infos — vector of PR info maps from Release phase

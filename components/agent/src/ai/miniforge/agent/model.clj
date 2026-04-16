@@ -68,21 +68,17 @@
      role           - Agent role keyword (:planner, :implementer, etc.)
      provided-client - The shared LLM client from workflow context (may be nil)"
   [role provided-client]
-  (let [model-id (default-model-for-role role)
+  (if (nil? provided-client)
+    nil
+    (let [model-id (default-model-for-role role)
         backend-for-model (requiring-resolve 'ai.miniforge.llm.interface/backend-for-model)
         client-backend (requiring-resolve 'ai.miniforge.llm.interface/client-backend)
         create-client (requiring-resolve 'ai.miniforge.llm.interface/create-client)
         needed-backend (backend-for-model model-id)
         current-backend (client-backend provided-client)]
-    (cond
-      (nil? provided-client)
-      nil
-
-      (= current-backend needed-backend)
-      (assoc-in provided-client [:config :model] model-id)
-
-      :else
-      (create-client {:backend needed-backend :model model-id}))))
+      (if (= current-backend needed-backend)
+        (assoc-in provided-client [:config :model] model-id)
+        (create-client {:backend needed-backend :model model-id})))))
 
 
 (comment

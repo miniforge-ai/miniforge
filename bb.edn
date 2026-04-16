@@ -110,6 +110,20 @@
    :task    (println "\n✅ ALL PRE-COMMIT CHECKS PASSED\n")}
 
   ;; ──────────────────────────────────────────────────────────────────────────
+  ;; Standards — policy pack compilation & self-review
+  ;; ──────────────────────────────────────────────────────────────────────────
+
+  standards:pack
+  {:doc  "Compile .standards/ MDC files into a policy pack EDN resource"
+   :requires ([standards])
+   :task (standards/pack)}
+
+  review
+  {:doc  "Self-review: run compliance scanner on this repo (--fix to auto-fix)"
+   :requires ([standards])
+   :task (standards/review *command-line-args*)}
+
+  ;; ──────────────────────────────────────────────────────────────────────────
   ;; Building
   ;; ──────────────────────────────────────────────────────────────────────────
 

@@ -37,6 +37,20 @@
    [ai.miniforge.phase.telemetry :as telemetry]))
 
 ;------------------------------------------------------------------------------ Layer 0
+;; Phase-result pass-throughs (loaded at runtime to avoid cross-component dep)
+
+(defn enter-context
+  "Build canonical phase result context. Delegates to phase.phase-result/enter-context."
+  [ctx phase-kw agent-kw gates budget start-time result]
+  ((requiring-resolve 'ai.miniforge.phase.phase-result/enter-context)
+   ctx phase-kw agent-kw gates budget start-time result))
+
+(defn exception-error
+  "Build error map from exception. Delegates to phase.phase-result/exception-error."
+  [ex]
+  ((requiring-resolve 'ai.miniforge.phase.phase-result/exception-error) ex))
+
+;------------------------------------------------------------------------------ Layer 0
 ;; Re-export registry functions
 
 (defn ensure-phase-implementations-loaded!
@@ -89,6 +103,15 @@
 (def merge-with-defaults
   "Merge user config with phase defaults."
   registry/merge-with-defaults)
+
+(def register-phase-defaults!
+  "Register default configuration for a phase type."
+  registry/register-phase-defaults!)
+
+(def get-phase-interceptor-method
+  "The raw multimethod for registering phase interceptor implementations.
+   Use defmethod on this for new phase types."
+  registry/get-phase-interceptor)
 
 (def extract-status
   "Extract a status keyword from a map by trying known status keys."

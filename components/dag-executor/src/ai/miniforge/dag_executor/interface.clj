@@ -440,6 +440,19 @@
   [exec environment-id command opts]
   (executor/execute! exec environment-id command opts))
 
+(def execute!
+  "Execute a command in an environment (alias for executor-execute!).
+   See executor-execute! for full documentation."
+  executor/execute!)
+
+(def persist-workspace!
+  "Persist workspace state from an execution environment."
+  executor/persist-workspace!)
+
+(def restore-workspace!
+  "Restore workspace state into an execution environment."
+  executor/restore-workspace!)
+
 (def with-environment
   "Execute a function within an acquired environment.
    Automatically acquires and releases the environment.

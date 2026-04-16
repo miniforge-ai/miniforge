@@ -1,0 +1,239 @@
+;; =============================================================================
+;; Spec: Standards Pass — Apply Always-Apply Rules to Miniforge Codebase
+;; =============================================================================
+;;
+;; Goal: Fix all known violations of the newly-added always-apply standards
+;; across the miniforge codebase. Three independent concerns → three PRs.
+;;
+;; Audit findings (2026-03-29):
+;;   - 20 map-access pattern violations (or (:k m) default) across 12 files
+;;   - 11 localization violations (raw strings) in web-dashboard views
+;;   -  2 code-quality violations in tui-views (nested if-let, long fn)
+;;
+;; PR plan (bottom-up, all independent):
+;;   PR A: Map access pattern  — pure style, no behavior change
+;;   PR B: Localization        — web-dashboard views + en-US.edn keys
+;;   PR C: Code quality        — tui-views nested conditional + long fn
+;;
+;; All three PRs can be reviewed and merged independently.
+
+{:spec/title "Standards pass: map access, localization, code quality"
+ :spec/description
+ "Fix all audit-identified violations of the always-apply engineering standards.
+  Three independent PRs: map access pattern, localization, code quality."
+
+ :spec/intent {:type  :refactor
+               :scope ["components/repo-index/src"
+                       "components/loop/src"
+                       "components/tui-engine/src"
+                       "components/llm/src"
+                       "components/agent/src"
+                       "components/dag-executor/src"
+                       "components/web-dashboard/src"
+                       "components/knowledge/src"
+                       "components/tui-views/src"]}
+
+ :spec/constraints
+ ["No behavior changes — all fixes are mechanical style corrections"
+  "Each PR must pass bb pre-commit (lint + tests) before opening"
+  "Do not change any test files in PR A or B — test files are not the target here"
+  "Do not introduce new raw strings while fixing existing ones"]
+
+ :spec/workflow-type :canonical-sdlc
+ :workflow/version "2.0.0"
+
+ :tasks
+
+ ;; ── Task A ──────────────────────────────────────────────────────────────────
+ [{:task/id    :map-access-pattern
+   :task/title "PR A: Replace (or (:k m) default) with (get m :k default)"
+   :task/phase :implement
+   :task/description
+   "Fix all 20 map-access pattern violations identified in the audit.
+    Rule: (get m k default) over (or (:key m) default).
+    Exception: dual-key coalesces like (or (:a m) (:b m)) are acceptable — leave them.
+
+    Files and specific fixes:
+
+    components/repo-index/src/ai/miniforge/repo_index/interface.clj
+      Line ~163: (or (:max-lines opts) 500) → (get opts :max-lines 500)
+
+    components/repo-index/src/ai/miniforge/repo_index/repo_map.clj
+      Line ~171: (or (:token-budget opts) default-token-budget) → (get opts :token-budget default-token-budget)
+
+    components/loop/src/ai/miniforge/loop/outer.clj
+      Line ~299: (or (:output result) result) → (get result :output result)
+
+    components/loop/src/ai/miniforge/loop/repair.clj
+      Line ~82: (or (:errors result) errors) → (get result :errors errors)
+
+    components/tui-engine/src/ai/miniforge/tui_engine/widget/tree.clj
+      Line ~36: (or (:fg node) fg) → (get node :fg fg)
+
+    components/llm/src/ai/miniforge/llm/protocols/impl/llm_client.clj
+      Line ~38: (or (:input-tokens usage) 0) → (get usage :input-tokens 0)
+               (or (:output-tokens usage) 0) → (get usage :output-tokens 0)
+
+    components/agent/src/ai/miniforge/agent/tester.clj
+      Line ~287: (or (:code input) input) → (get input :code input)
+
+    components/agent/src/ai/miniforge/agent/reviewer.clj
+      Line ~488: (or (:gates opts) default-gates) → (get opts :gates default-gates)
+
+    components/dag-executor/src/ai/miniforge/dag_executor/protocols/impl/docker.clj
+      Line ~489: (or (:image config) default-image) → (get config :image default-image)
+
+    components/dag-executor/src/ai/miniforge/dag_executor/protocols/impl/kubernetes.clj
+      Line ~359: (or (:namespace config) default-namespace) → (get config :namespace default-namespace)
+      Line ~360: (or (:image config) default-image) → (get config :image default-image)
+
+    components/dag-executor/src/ai/miniforge/dag_executor/protocols/impl/worktree.clj
+      Line ~223: (or (:workdir opts) worktree-path) → (get opts :workdir worktree-path)
+      Line ~261: (or (:base-path config) default-base-path) → (get config :base-path default-base-path)
+      Line ~262: (or (:max-concurrent config) default-max-concurrent) → (get config :max-concurrent default-max-concurrent)
+
+    components/dag-executor/src/ai/miniforge/dag_executor/executor.clj
+      Line ~175: (or (:image config) default-image) → (get config :image default-image)
+
+    components/web-dashboard/src/ai/miniforge/web_dashboard/server/control_plane.clj
+      Line ~87: (or (:heartbeat_interval_ms body) 30000) → (get body :heartbeat_interval_ms 30000)
+
+    components/web-dashboard/src/ai/miniforge/web_dashboard/server/auth.clj
+      Line ~50: (or (:username entry) username) → (get entry :username username)
+      Line ~54: (or (:display-name entry) uname) → (get entry :display-name uname)
+
+    components/knowledge/src/ai/miniforge/knowledge/learning.clj
+      Line ~60: (or (:confidence learning) 0.7) → (get learning :confidence 0.7)
+
+    components/tui-views/src/ai/miniforge/tui_views/update/events.clj
+      Line ~179: (or (:name spec) name) → (get spec :name name)
+
+    Acceptance:
+    - All 20 (or (:k m) literal-default) forms replaced
+    - bb pre-commit passes
+    - Open PR with title 'fix: replace (or (:k m) default) with (get m :k default)'"
+
+   :task/constraints
+   ["Read each file before editing — do not guess line numbers"
+    "Do not change (or (:a m) (:b m)) dual-key coalesces — they are not violations"
+    "Do not change (or (get m :k) fallback) forms — those are fine"]}
+
+  ;; ── Task B ──────────────────────────────────────────────────────────────────
+  {:task/id    :localization
+   :task/title "PR B: Replace raw string literals in web-dashboard views"
+   :task/phase :implement
+   :task/description
+   "Fix 11 localization violations in web-dashboard view files.
+    Rule: no raw string literals in view/template namespaces — use (msg/t :key).
+
+    Step 1: Add missing keys to en-US.edn
+    File: components/web-dashboard/resources/config/web-dashboard/messages/en-US.edn
+
+    Add under :web-dashboard/messages:
+      ;; shared UI actions
+      :action/filter              'Filter'
+      :action/delete              'Delete'
+      :action/close               'Close'
+      :action/done                'Done'
+
+      ;; generic status/error labels
+      :status/error               'Error'
+      :status/failed-label        'Failed'
+
+      ;; table headers
+      :table/status-header        'Status'
+
+    Step 2: Replace raw strings in view files
+
+    components/web-dashboard/src/ai/miniforge/web_dashboard/views/workflows.clj
+      'Filter'  → (msg/t :action/filter)
+      'Error'   → (msg/t :status/error)   (if present — verify context first)
+
+    components/web-dashboard/src/ai/miniforge/web_dashboard/views/archived.clj
+      'Failed'  → (msg/t :status/failed-label)
+      'Delete'  → (msg/t :action/delete)
+
+    components/web-dashboard/src/ai/miniforge/web_dashboard/views/fleet.clj
+      'Status'  → (msg/t :table/status-header)
+      'Filter'  → (msg/t :action/filter)
+      'Error'   → (msg/t :status/error)
+
+    components/web-dashboard/src/ai/miniforge/web_dashboard/views/dag.clj
+      'Close'   → (msg/t :action/close)
+      'Done'    → (msg/t :action/done)
+      'Filter'  → (msg/t :action/filter)
+
+    components/web-dashboard/src/ai/miniforge/web_dashboard/views/evidence.clj
+      'Filter'  → (msg/t :action/filter)
+
+    Each view file already requires [ai.miniforge.web-dashboard.messages :as msg] —
+    verify the require is present before using msg/t. If absent, add it.
+
+    Acceptance:
+    - grep for string literals in views/ files returns only code strings (CSS classes,
+      hiccup attribute values like 'innerHTML', script strings) — no user-visible copy
+    - bb pre-commit passes
+    - Open PR with title 'fix: localize raw string literals in web-dashboard views'"
+
+   :task/constraints
+   ["Read each view file before editing to verify the exact string and context"
+    "Do not localize CSS class names, hx-* attribute values, or JavaScript strings"
+    "Add all new keys to en-US.edn in the same commit as the view changes"]}
+
+  ;; ── Task C ──────────────────────────────────────────────────────────────────
+  {:task/id    :code-quality
+   :task/title "PR C: Fix nested conditional and long function in tui-views"
+   :task/phase :implement
+   :task/description
+   "Fix 2 code-quality violations in tui-views.
+
+    File: components/tui-views/src/ai/miniforge/tui_views/view/project/helpers.clj
+
+    Fix 1 — Nested if-let (~line 299):
+    Replace nested (if-let [started ...] (if-let [wf-date ...] ...)) with a flat
+    cond or some-> chain. The goal is at most one level of conditional nesting.
+
+    Suggested refactor:
+      (defn- workflow-started-date [wf]
+        (some-> wf :started event-ts ->instant))
+
+      ;; Then flatten:
+      (let [started-date (workflow-started-date wf)]
+        (cond
+          (nil? started-date) fallback-value
+          ... => result))
+
+    Fix 2 — Long function derive-recommendation (~line 474, ~73 lines):
+    Extract the large cond branches into named private helper functions.
+    Each branch should become a call to a descriptively-named fn.
+
+    Example approach:
+      (defn- stale-recommendation [wf] ...)
+      (defn- failing-ci-recommendation [wf] ...)
+      (defn- blocked-recommendation [wf] ...)
+
+      (defn derive-recommendation [wf]
+        (cond
+          (stale? wf)      (stale-recommendation wf)
+          (ci-failing? wf) (failing-ci-recommendation wf)
+          (blocked? wf)    (blocked-recommendation wf)
+          :else            default-recommendation))
+
+    Read the file first to understand the actual structure before refactoring.
+
+    Acceptance:
+    - No nested conditionals deeper than one level in the refactored code
+    - derive-recommendation body is < 20 lines (delegates to named fns)
+    - All extracted fns are at Layer 0 (pure helpers)
+    - bb pre-commit passes
+    - Open PR with title 'refactor: flatten nested conditional and extract pipeline stages in tui-views'"
+
+   :task/constraints
+   ["Read the full file before editing — do not guess at structure"
+    "Do not change the public API of any functions"
+    "Preserve all existing behavior exactly"]}]
+
+ :dependencies
+ {:map-access-pattern []
+  :localization       []
+  :code-quality       []}}

@@ -13,9 +13,7 @@
    Layer 2: Gate check/repair + registration"
   (:require
    [ai.miniforge.gate.registry :as registry]
-   [ai.miniforge.lsp-mcp-bridge.lsp.manager :as lsp-manager]
-   [ai.miniforge.lsp-mcp-bridge.lsp.client :as lsp-client]
-   [ai.miniforge.response.builder :as response]
+   [ai.miniforge.response.interface :as response]
    [clojure.edn :as edn]
    [clojure.java.io :as io]
    [clojure.string :as str]))
@@ -65,10 +63,12 @@
     (subs (str path) (inc idx))))
 
 (defn- get-or-create-lsp-manager
-  "Get LSP manager from context, or create one."
+  "Get LSP manager from context, or create one.
+   Uses requiring-resolve to avoid component-to-base dependency."
   [ctx]
   (or (get ctx :lsp-manager)
-      (lsp-manager/create-manager {} (or (get ctx :execution/worktree-path) "."))))
+      ((requiring-resolve 'ai.miniforge.lsp-mcp-bridge.lsp.manager/create-manager)
+       {} (or (get ctx :execution/worktree-path) "."))))
 
 (defn- format-single-file
   "Format a single file using LSP. Returns {:formatted? bool :path string}."
@@ -79,9 +79,11 @@
           ext       (file-extension file-path)]
       (if (.exists (io/file full-path))
         (do
-          (lsp-manager/start-server manager {:language ext})
+          ((requiring-resolve 'ai.miniforge.lsp-mcp-bridge.lsp.manager/start-server)
+           manager {:language ext})
           (when-let [server (get @(:servers manager) ext)]
-            (lsp-client/format-document server uri {}))
+            ((requiring-resolve 'ai.miniforge.lsp-mcp-bridge.lsp.client/format-document)
+             server uri {}))
           {:formatted? true :path file-path})
         {:formatted? false :path file-path}))
     (catch Exception _

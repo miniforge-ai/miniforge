@@ -30,7 +30,7 @@
   (:require
    [clojure.java.io :as io]
    [clojure.string :as str]
-   [ai.miniforge.control-plane.messages :as messages]))
+   [ai.miniforge.control-plane.interface :as messages]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Filesystem scanning

@@ -27,7 +27,7 @@
    [ai.miniforge.agent.prompts :as prompts]
    [ai.miniforge.agent.specialized :as specialized]
    [ai.miniforge.patterns.interface :as patterns]
-   [ai.miniforge.repo-index.messages :as messages]
+   [ai.miniforge.repo-index.interface :as messages]
    [ai.miniforge.response.interface :as response]
    [ai.miniforge.schema.interface :as schema]
    [ai.miniforge.logging.interface :as log]

@@ -1,0 +1,6 @@
+{:paths ["src" "resources"]
+ :deps {ai.miniforge/phase    {:local/root "../phase"}
+        ai.miniforge/response {:local/root "../response"}
+        cheshire/cheshire     {:mvn/version "5.12.0"}}
+ :aliases {:test {:extra-paths ["test"]
+                  :extra-deps  {}}}}

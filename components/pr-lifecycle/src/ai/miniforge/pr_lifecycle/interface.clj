@@ -43,6 +43,7 @@
    [ai.miniforge.pr-lifecycle.triage :as triage]
    [ai.miniforge.pr-lifecycle.merge :as merge]
    [ai.miniforge.pr-lifecycle.events :as events]
+   [ai.miniforge.pr-lifecycle.monitor-config :as mconfig]
    [ai.miniforge.pr-lifecycle.monitor-events :as mevents]
    [ai.miniforge.pr-lifecycle.monitor-loop :as monitor]
    [ai.miniforge.pr-lifecycle.monitor-budget :as mbudget]
@@ -618,6 +619,13 @@
 (def monitor-event-types
   "Valid PR monitor loop event types (:pr-monitor/*)."
   mevents/monitor-event-types)
+
+;------------------------------------------------------------------------------ Layer 6
+;; PR Monitor Config
+
+(def monitor-defaults
+  "Return the shared PR monitor defaults map."
+  mconfig/monitor-defaults)
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

@@ -28,7 +28,6 @@
             [ai.miniforge.phase.phase-result :as phase-result]
             [ai.miniforge.phase.knowledge-helpers :as kb-helpers]
             [ai.miniforge.agent.interface :as agent]
-            [ai.miniforge.agent.file-artifacts :as file-artifacts]
             [ai.miniforge.knowledge.interface :as knowledge]
             [ai.miniforge.response.interface :as response]))
 
@@ -67,7 +66,7 @@
    (let [worktree-path (or (get ctx :execution/worktree-path)
                            (get ctx :worktree-path))]
      (when worktree-path
-       (file-artifacts/collect-written-files (file-artifacts/empty-snapshot)
+       (agent/collect-written-files (agent/empty-snapshot)
                                             worktree-path)))))
 
 (defn- build-review-task

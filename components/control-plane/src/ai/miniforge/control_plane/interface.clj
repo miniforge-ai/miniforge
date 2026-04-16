@@ -30,11 +30,19 @@
    Layer 3: Heartbeat watchdog (background liveness monitoring)
    Layer 4: Orchestrator (adapter coordination, full lifecycle)"
   (:require
+   [ai.miniforge.control-plane.messages :as messages]
    [ai.miniforge.control-plane.state-machine :as sm]
    [ai.miniforge.control-plane.registry :as registry]
    [ai.miniforge.control-plane.decision-queue :as dq]
    [ai.miniforge.control-plane.heartbeat :as heartbeat]
    [ai.miniforge.control-plane.orchestrator :as orch]))
+
+;------------------------------------------------------------------------------ Layer 0
+;; Messages
+
+(def t
+  "Look up a control-plane message by key, with optional param substitution."
+  messages/t)
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; State machine

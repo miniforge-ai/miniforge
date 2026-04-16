@@ -19,7 +19,7 @@
 (ns ai.miniforge.workflow-financial-etl.events
   "ETL lifecycle event schemas and emission helpers."
   (:require
-   [ai.miniforge.logging.core :as logging-core]))
+   [ai.miniforge.logging.interface :as log]))
 
 (defn make-event-base
   [event-type workflow-id]
@@ -48,13 +48,13 @@
 (defn emit-etl-completed
   [logger workflow-id duration-ms summary]
   (let [event (etl-completed-event workflow-id duration-ms summary)]
-    (logging-core/log* logger :info :etl :etl/completed
-                       {:message (:message event)
-                        :data (dissoc event :message)})))
+    (log/info logger :etl :etl/completed
+             {:message (:message event)
+              :data (dissoc event :message)})))
 
 (defn emit-etl-failed
   [logger workflow-id failure-stage failure-reason & [error-details]]
   (let [event (etl-failed-event workflow-id failure-stage failure-reason error-details)]
-    (logging-core/log* logger :error :etl :etl/failed
-                       {:message (:message event)
-                        :data (dissoc event :message)})))
+    (log/error logger :etl :etl/failed
+              {:message (:message event)
+               :data (dissoc event :message)})))

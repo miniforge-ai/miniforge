@@ -40,6 +40,16 @@
 (def PlanTask    schema/PlanTask)
 (def Plan        schema/Plan)
 (def PlanSummary schema/PlanSummary)
+
+;------------------------------------------------------------------------------ Layer 0
+;; Factory re-exports
+
+(def ->violation factory/->violation)
+(def ->scan-result factory/->scan-result)
+(def ->plan-summary factory/->plan-summary)
+(def ->plan-task factory/->plan-task)
+(def ->plan factory/->plan)
+(def ->delta-report factory/->delta-report)
 (def DeltaReport schema/DeltaReport)
 
 ;------------------------------------------------------------------------------ Layer 1
