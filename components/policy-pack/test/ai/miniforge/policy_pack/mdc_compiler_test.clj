@@ -271,12 +271,12 @@
         (is (= :std/stratified-design (:rule/id rule)))
         (is (= "Stratified Design" (:rule/title rule)))
         (is (= "Engineering standard (001): Stratified Design" (:rule/description rule)))
-        (is (= :info (:rule/severity rule)))
+        (is (= :major (:rule/severity rule)))
         (is (= "001" (:rule/category rule)))
         (is (true? (:rule/always-inject? rule)))
         (is (= all-phases (get-in rule [:rule/applies-to :phases])))
         (is (= {:type :custom} (:rule/detection rule)))
-        (is (= {:action :audit :message "Standard: Stratified Design"}
+        (is (= {:action :warn :message "Standard: Stratified Design"}
                (:rule/enforcement rule)))
         (is (some? (:rule/agent-behavior rule)))
         (is (some? (:rule/knowledge-content rule)))))))
@@ -385,9 +385,9 @@
       (is (boolean? (:success? result))))))
 
 (deftest mdc->rule-constant-fields-test
-  (testing "severity is always :info for compiled standards"
+  (testing "non-alwaysApply severity is :minor"
     (let [rule (:rule (sut/mdc->rule "x.mdc" "---\ndewey: \"001\"\n---\nBody"))]
-      (is (= :info (:rule/severity rule)))))
+      (is (= :minor (:rule/severity rule)))))
 
   (testing "detection is always {:type :custom}"
     (let [rule (:rule (sut/mdc->rule "x.mdc" "---\ndewey: \"001\"\n---\nBody"))]

@@ -585,11 +585,11 @@
          {:rule/id               :std/stratified-design
           :rule/title            "Stratified Design"
           :rule/description      "Engineering standard (001): Stratified Design"
-          :rule/severity         :info
+          :rule/severity         :major
           :rule/category         "001"
           :rule/applies-to       {:phases #{:plan :implement :review :verify :release}}
           :rule/detection        {:type :custom}
-          :rule/enforcement      {:action :audit :message "Standard: Stratified Design"}
+          :rule/enforcement      {:action :warn :message "Standard: Stratified Design"}
           :rule/agent-behavior   "Before writing code, output a stratified plan."
           :rule/knowledge-content "# Stratified Design\n\nFull body text..."
           :rule/always-inject?   true}))))

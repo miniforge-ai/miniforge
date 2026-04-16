@@ -138,9 +138,9 @@
     {}))
 
 (defn build-enforcement
-  "Build :rule/enforcement from title."
-  [title]
-  {:action  :audit
+  "Build :rule/enforcement from title and alwaysApply flag."
+  [title always-apply]
+  {:action  (if always-apply :warn :audit)
    :message (str "Standard: " title)})
 
 (defn compile-rule
@@ -152,6 +152,7 @@
         description (derive-description dewey title)
         always-apply (get frontmatter "alwaysApply")
         globs       (get frontmatter "globs")
+        severity    (if always-apply :major :minor)
         trimmed-body (when body (str/trim body))
         knowledge   (when (and trimmed-body (not (str/blank? trimmed-body)))
                       trimmed-body)]
@@ -159,11 +160,11 @@
      {:rule/id                (rule-id-from-filepath filepath)
       :rule/title             title
       :rule/description       description
-      :rule/severity          :info
+      :rule/severity          severity
       :rule/category          dewey
       :rule/applies-to        (build-applies-to dewey globs)
       :rule/detection         {:type :custom}
-      :rule/enforcement       (build-enforcement title)}
+      :rule/enforcement       (build-enforcement title always-apply)}
      (build-always-inject always-apply)
      (when knowledge
        {:rule/knowledge-content knowledge}))))
@@ -438,11 +439,11 @@
 ;; ===========================================================================
 
 (deftest constant-fields-test
-  (testing "Severity is always :info for knowledge rules"
+  (testing "Non-alwaysApply severity is :minor"
     (let [rule (compile-rule {:filepath "test.mdc"
                               :frontmatter {"dewey" "001"}
                               :body "content"})]
-      (is (= :info (:rule/severity rule)))))
+      (is (= :minor (:rule/severity rule)))))
 
   (testing "Detection is always {:type :custom}"
     (let [rule (compile-rule {:filepath "test.mdc"
@@ -450,12 +451,21 @@
                               :body "content"})]
       (is (= {:type :custom} (:rule/detection rule)))))
 
-  (testing "Enforcement is always {:action :audit :message 'Standard: <title>'}"
+  (testing "Non-alwaysApply enforcement is {:action :audit}"
     (let [rule (compile-rule {:filepath "test.mdc"
                               :frontmatter {"dewey" "001"
                                             "description" "My Test Rule"}
                               :body "content"})]
       (is (= {:action :audit :message "Standard: My Test Rule"}
+             (:rule/enforcement rule)))))
+
+  (testing "alwaysApply enforcement is {:action :warn}"
+    (let [rule (compile-rule {:filepath "test.mdc"
+                              :frontmatter {"dewey" "001"
+                                            "description" "My Test Rule"
+                                            "alwaysApply" true}
+                              :body "content"})]
+      (is (= {:action :warn :message "Standard: My Test Rule"}
              (:rule/enforcement rule))))))
 
 ;; ===========================================================================
@@ -562,8 +572,8 @@
       (is (= "Engineering standard (001): Stratified Design — enforce one-way dependencies and clear data flow"
              (:rule/description rule))))
 
-    (testing ":rule/severity is :info"
-      (is (= :info (:rule/severity rule))))
+    (testing ":rule/severity is :major (alwaysApply: true)"
+      (is (= :major (:rule/severity rule))))
 
     (testing ":rule/category preserves dewey string"
       (is (= "001" (:rule/category rule))))
@@ -578,8 +588,8 @@
     (testing ":rule/detection is {:type :custom}"
       (is (= {:type :custom} (:rule/detection rule))))
 
-    (testing ":rule/enforcement is audit with standard message"
-      (is (= {:action  :audit
+    (testing ":rule/enforcement is warn with standard message (alwaysApply: true)"
+      (is (= {:action  :warn
               :message "Standard: Stratified Design — enforce one-way dependencies and clear data flow"}
              (:rule/enforcement rule))))
 
@@ -675,8 +685,8 @@
       (is (= #{:implement :verify}
              (get-in rule [:rule/applies-to :phases]))))
 
-    (testing ":rule/enforcement audit with title"
-      (is (= {:action :audit
+    (testing ":rule/enforcement warn with title (alwaysApply: true)"
+      (is (= {:action :warn
               :message "Standard: Testing standards — factory functions, same code quality as production, no duplication"}
              (:rule/enforcement rule))))))
 
