@@ -92,6 +92,7 @@ test infrastructure work. Merge behind normal review once the PR is accepted.
 ## Related Issues/PRs
 
 - `PR-552.md`
+- `PR #556` — `codex/recover-compliance-refactor-tests`
 - `work/polylith-compliance-remediation.spec.edn`
 - `work/storage-root-configuration.spec.edn`
 
@@ -111,5 +112,5 @@ test infrastructure work. Merge behind normal review once the PR is accepted.
 - [x] Recover the in-progress work into a durable commit
 - [x] Fix changed-brick test failures
 - [x] Add PR documentation to the repo
-- [ ] Push branch
-- [ ] Open PR
+- [x] Push branch
+- [x] Open PR
