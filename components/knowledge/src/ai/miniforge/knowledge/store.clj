@@ -327,31 +327,35 @@
 ;; Agent injection
 
 (def default-agent-manifests
-  "Default knowledge injection configuration per agent role."
+  "Default knowledge injection configuration per agent role.
+
+   Dewey prefix filtering has been removed from this map. Phase-scoped rule
+   injection (including always-inject standards rules) is now handled by
+   `ai.miniforge.phase.agent-behavior/load-and-filter-behaviors`, which reads
+   from compiled policy packs (miniforge-standards.pack.edn and built-ins).
+
+   This manifest drives dynamic Zettelkasten knowledge retrieval only —
+   user-created zettels that may not follow any Dewey classification."
   {:planner
    {:agent-role :planner
-    :dewey-prefixes ["000" "700"]           ; Foundations, Workflows
     :tags [:architecture :planning :workflow]
     :types [:rule :decision :hub]
     :max-zettels 20}
 
    :implementer
    {:agent-role :implementer
-    :dewey-prefixes ["200" "400"]           ; Languages, Testing
     :tags [:coding :clojure :testing]
     :types [:rule :learning :example]
     :max-zettels 15}
 
    :tester
    {:agent-role :tester
-    :dewey-prefixes ["400"]                 ; Testing
     :tags [:testing :coverage :assertions]
     :types [:rule :example :learning]
     :max-zettels 10}
 
    :reviewer
    {:agent-role :reviewer
-    :dewey-prefixes ["000" "200" "400"]     ; Foundations, Languages, Testing
     :tags [:code-review :quality]
     :types [:rule :learning]
     :max-zettels 15}})
