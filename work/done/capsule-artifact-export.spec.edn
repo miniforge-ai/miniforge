@@ -1,0 +1,42 @@
+{:spec/title "Export declared artifacts before capsule DESTROY"
+
+ :spec/description
+ "Per N11 §4.3 and §9.2, the executor must copy declared artifacts out of the
+  capsule before destroying it. Currently capsule cleanup (release-execution-
+  environment!) destroys the container without an explicit export phase.
+
+  Implementation:
+  1. In runner.clj, before calling release-execution-environment! in the finally
+     block, call a new `export-capsule-artifacts!` function that:
+     - Reads the artifact manifest from the execution context (if any)
+     - For each declared artifact, calls `copy-from!` on the executor to copy
+       it from the capsule to a local staging directory
+     - Verifies all :required? true artifacts were successfully copied
+     - Fails the workflow if a required artifact is missing
+  2. The artifact manifest should be built during the pipeline from phase results.
+     Each phase that produces artifacts (implement, verify, release) appends to
+     :execution/artifact-manifest on the context.
+  3. The copy-from! protocol method already exists on the TaskExecutor protocol.
+     The Docker implementation uses `docker cp`. Use it.
+  4. Store exported artifacts in a temp directory, then merge paths into the
+     workflow output for downstream consumers."
+
+ :spec/intent {:type :feature
+               :scope ["components/workflow/src/ai/miniforge/workflow/runner.clj"
+                       "components/dag-executor/src/ai/miniforge/dag_executor/protocols/impl/docker.clj"]}
+
+ :spec/constraints
+ ["Only applies when :execution/mode is :governed"
+  "Uses existing copy-from! protocol method — no new executor methods"
+  "Must not fail silently — log warnings for optional artifacts, throw for required"
+  "Cleanup must still happen even if export fails (export in try, cleanup in finally)"
+  "Existing tests must pass"]
+
+ :spec/acceptance-criteria
+ ["Declared artifacts are copied from capsule before container removal"
+  "Required artifacts that fail to export cause workflow failure"
+  "Optional artifacts that fail to export log a warning but don't fail"
+  "Local mode skips export (artifacts already on host filesystem)"
+  "Exported artifact paths recorded in :execution/output"]
+
+ :spec/workflow-type :canonical-sdlc}

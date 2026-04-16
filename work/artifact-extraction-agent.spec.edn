@@ -1,0 +1,127 @@
+;; =============================================================================
+;; Spec: Deterministic Artifact Extraction from Container/Worktree
+;; =============================================================================
+;;
+;; Problem:
+;;
+;;   The implement phase depends on the LLM calling a save-artifact MCP tool
+;;   to emit structured code artifacts. The LLM frequently fails to call the
+;;   tool, causing the implement phase to fail after ~11 minutes of code
+;;   generation. The code IS written to the container/worktree filesystem,
+;;   but the artifact session can't find it because the MCP tool was never
+;;   invoked. The file-artifact fallback exists but unreliably detects files
+;;   across worktree boundaries.
+;;
+;;   This is the #1 blocker for reliable autonomous pipeline execution,
+;;   documented in project_dogfood_findings_2026_03_25.md.
+;;
+;; Insight:
+;;
+;;   The container/worktree IS the artifact. The implementer agent's job is
+;;   pure code generation — write files, run tests, iterate. When it exits,
+;;   the filesystem delta is the deliverable. Artifact extraction should be
+;;   deterministic, not dependent on LLM tool-calling behavior.
+;;
+;; Solution:
+;;
+;;   Replace the MCP-dependent artifact capture with a post-implementation
+;;   extraction step:
+;;
+;;   1. Implementer agent writes code in container/worktree → exits
+;;   2. Extraction function diffs container against base (git diff)
+;;   3. Changed/added files are collected into a structured artifact
+;;   4. Artifact conforms to the existing artifact schema
+;;   5. Next phase receives the artifact through the normal handoff
+;;
+;;   The extraction step is deterministic — no LLM, no MCP, just filesystem
+;;   inspection. It replaces the fragile save-artifact path with a reliable
+;;   git-diff-based one.
+;;
+;; Relationship to specs:
+;;
+;;   - N11 (Task Capsule Isolation) — N11.CP.5 requires artifact export before
+;;     capsule destruction. This makes export deterministic.
+;;   - N2 (Workflows) — phase-to-phase handoff contract unchanged; inner
+;;     mechanism changes.
+;;   - capsule-artifact-export.spec.edn — the "how" of export changes from
+;;     MCP-tool-dependent to git-diff-deterministic.
+
+{:spec/title "Deterministic artifact extraction from container/worktree"
+
+ :spec/description
+ "Replace the MCP-dependent artifact capture in the implement phase with a
+  deterministic post-implementation extraction step. The container/worktree
+  filesystem delta IS the artifact.
+
+  CURRENT FLOW (fragile):
+    Implementer agent → (should call save-artifact MCP tool) → artifact session
+    Problem: LLM frequently doesn't call the tool → phase fails
+
+  NEW FLOW (deterministic):
+    Implementer agent → writes code in worktree → exits
+                                    │
+    extract-artifact (deterministic) │
+      1. git diff --name-status against base commit
+      2. Collect all changed/added files with content
+      3. Build structured artifact map conforming to existing schema
+      4. Return artifact to phase pipeline
+                                    │
+    Next phase receives artifact normally
+
+  IMPLEMENTATION:
+
+  1. Extract function (components/agent/src/.../artifact_extraction.clj):
+     - extract-worktree-artifact [worktree-path base-ref]
+       Returns {:code/files [{:path ... :content ... :status :added|:modified}]
+                :code/summary {:files-changed N :additions N :deletions N}}
+     - Uses git diff --name-status + file reads (no LLM, no MCP)
+     - Respects .gitignore (no build artifacts, node_modules, etc.)
+     - Filters by known source extensions (configurable)
+
+  2. Phase interceptor change (implement phase leave handler):
+     - After implementer agent exits, invoke extract-worktree-artifact
+     - If extraction finds changes → build artifact → proceed to verify
+     - If extraction finds NO changes → mark phase failed (no output)
+     - Remove dependency on MCP artifact file existence
+
+  3. Fallback removal:
+     - Remove file-artifact-fallback logic from artifact_session.clj
+     - Remove the ERROR log about 'artifact file not found -- MCP tool was
+       likely not called by the LLM'
+     - The MCP save-artifact tool can remain available but is no longer
+       required for phase success
+
+  4. Retry improvement:
+     - Currently retries re-run the full implement phase (~11 min each)
+     - With extraction, the artifact is always captured if code was written
+     - Retries only needed when NO code was written (actual failure)"
+
+ :spec/intent {:type :refactor
+               :scope ["components/agent/src"
+                       "components/phase/src"
+                       "components/workflow/src"]}
+
+ :spec/constraints
+ ["Extraction must be deterministic — no LLM calls, no MCP dependency"
+  "Output artifact must conform to existing artifact schema"
+  "Must handle both worktree and Docker container filesystems"
+  "Must respect .gitignore and configurable extension filters"
+  "Must not break existing phase-to-phase handoff contract"
+  "MCP save-artifact tool may remain available as optional enhancement"
+  "Extraction must complete in under 10 seconds for typical code changes"
+  "Must handle binary files gracefully (skip content, include path)"]
+
+ :spec/acceptance-criteria
+ ["extract-worktree-artifact produces a valid artifact from a worktree with changes"
+  "extract-worktree-artifact returns empty artifact (not nil) when no changes exist"
+  "Implement phase succeeds when LLM writes code but does NOT call save-artifact"
+  "Implement phase fails cleanly when LLM writes NO code (actual failure)"
+  "Artifact schema is identical whether produced by extraction or MCP tool"
+  "Extraction completes in under 10 seconds for 50-file changesets"
+  "Binary files are listed in artifact but content is not included"
+  ".gitignore patterns are respected (no node_modules, build outputs)"
+  "git diff against base ref correctly identifies added, modified, and deleted files"
+  "Existing tests continue to pass"
+  "End-to-end: bb miniforge run completes implement phase without MCP artifact"]
+
+ :spec/workflow-type :canonical-sdlc}

@@ -1,0 +1,53 @@
+{:spec/title "Refactor workflow runner.clj to standards compliance"
+
+ :spec/description
+ "runner.clj has accumulated technical debt from multiple agents and sessions.
+  Full refactor required to comply with miniforge engineering standards.
+
+  Issues:
+  - Nested conditionals instead of composed pipelines
+  - Hand-built maps instead of factory functions / anomaly constructors
+  - Raw strings instead of messages/t localization
+  - Magic numbers (max-phases, timeouts) instead of named constants
+  - Mixed concerns (output extraction, artifact export, timeout enforcement,
+    monitoring, promotion all in one 700+ line file)
+  - No schemas at boundaries
+  - Reaching into data structures for status instead of predicates
+
+  Approach:
+  - Extract to focused namespaces: context.clj (exists), execution.clj (exists),
+    monitoring.clj (exists), artifact-export.clj (new), timeout.clj (new)
+  - runner.clj becomes a thin pipeline composer (~200 lines)
+  - All constants to config/runner/defaults.edn
+  - All strings to messages/en-US.edn
+  - Factory functions for result maps
+  - Predicates for status checks
+  - Tests updated to match
+
+  NOTE: This should be decomposed into a DAG of component-level PRs,
+  not one giant PR."
+
+ :spec/intent {:type :refactor
+               :scope ["components/workflow/src/ai/miniforge/workflow/runner.clj"
+                       "components/workflow/src/ai/miniforge/workflow"]}
+
+ :spec/constraints
+ ["Follow stratified design — dependencies flow downward only"
+  "Configuration is data (.edn), not code"
+  "Localize all strings via messages/t"
+  "Factory functions over duplicate maps"
+  "Predicates (succeeded? failed?) over status keyword checks"
+  "No nested conditionals — compose pipelines"
+  "PR DAG — one PR per extracted namespace"
+  "Code changes require test changes"]
+
+ :spec/acceptance-criteria
+ ["runner.clj is under 250 lines"
+  "No raw strings — all localized"
+  "No magic numbers — all named constants in defaults.edn"
+  "No hand-built result maps — factory functions"
+  "No nested conditionals — pipeline composition"
+  "All existing tests pass"
+  "New tests for extracted functions"]
+
+ :workflow/type :canonical-sdlc}

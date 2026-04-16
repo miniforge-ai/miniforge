@@ -1,0 +1,56 @@
+{:spec/title "Configurable storage root — MINIFORGE_HOME for all state directories"
+
+ :spec/description
+ "All miniforge state (events, artifacts, cache, config, packs, tools, themes,
+  logs, decisions, workaround approvals) is hardcoded to ~/.miniforge/<subdir>
+  across ~20 call sites in 15+ components. This causes:
+
+  1. Tests that touch real user state (cleanup-stale-events! with {:ttl-ms 0}
+     deleted all event files, destroying resume checkpoints — PR #516 patch)
+  2. No way to run multiple miniforge instances with isolated state
+  3. No CI-friendly configuration (everything goes to ~/.miniforge)
+
+  Solution: a storage component (protocol + filesystem impl) that resolves
+  paths from a configurable root. Pattern from storage-proxy: protocol-based
+  with config-driven selection.
+
+  Protocol: StoragePaths — named path accessors (events-dir, artifacts-dir, etc.)
+  Impl: FilesystemStorage record backed by root dir
+  Root resolution: MINIFORGE_HOME env > config file > ~/.miniforge default
+  Test support: create-storage {:root temp-dir} for full isolation
+
+  All ~20 hardcoded (System/getProperty \"user.home\") \".miniforge\" sites
+  migrate to use the storage component's interface."
+
+ :spec/intent {:type :refactor
+               :scope ["components/storage"
+                       "components/event-stream/src"
+                       "components/artifact/src"
+                       "components/tool-registry/src"
+                       "components/self-healing/src"
+                       "components/tui-engine/src"
+                       "components/pr-lifecycle/src"
+                       "components/pr-sync/src"
+                       "components/web-dashboard/src"
+                       "components/workflow/src"
+                       "components/phase/src"
+                       "components/adapter-claude-code/src"
+                       "bases/cli/src"]}
+
+ :spec/constraints
+ ["Protocol + impl in components/storage (Polylith pattern)"
+  "Root resolution: MINIFORGE_HOME env > config > ~/.miniforge"
+  "Tests create isolated storage via {:root temp-dir}"
+  "Backward compatible — existing ~/.miniforge layout preserved"
+  "No functional changes — pure path resolution refactor"
+  "PR DAG — storage component first, then migrate callers in batches"]
+
+ :spec/acceptance-criteria
+ ["components/storage exists with protocol and filesystem impl"
+  "MINIFORGE_HOME env var overrides default root"
+  "Zero hardcoded ~/.miniforge paths remain in src/ (grep verification)"
+  "All existing tests pass"
+  "New tests verify path resolution, env override, and test isolation"
+  "bb test does not modify ~/.miniforge (full test isolation)"]
+
+ :workflow/type :canonical-sdlc}

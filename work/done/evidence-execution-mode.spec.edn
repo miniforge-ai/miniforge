@@ -1,0 +1,46 @@
+{:spec/title "Evidence bundle records execution mode and runtime class"
+
+ :spec/description
+ "Per N11 §9.1, each task capsule must produce an evidence record containing
+  :evidence/execution-mode #{:local :governed}. Currently no execution mode
+  is recorded in evidence bundles or workflow output.
+
+  Implementation:
+  1. In the `extract-output` function in runner.clj, add evidence fields to
+     the :execution/output map by reading from the execution context:
+     - :evidence/execution-mode from (:execution/mode ctx) — defaults to :local
+     - :evidence/runtime-class from the executor-type of (:execution/executor ctx)
+       — :docker, :worktree, or nil if no executor
+     - :evidence/task-started-at from (:execution/started-at ctx)
+     - :evidence/task-finished-at — capture current time at extract-output
+  2. In the `create-bundle-impl` function in evidence_bundle.clj (or collector.clj),
+     accept and merge these evidence fields from the workflow result into the
+     evidence bundle map.
+  3. For image-digest (SHOULD per N11 §11): in docker.clj acquire-environment!,
+     after create-container, run `docker inspect <container> --format '{{.Image}}'`
+     to capture the image SHA256. Store it in the environment metadata. Then in
+     extract-output, read it from context and include as :evidence/image-digest."
+
+ :spec/intent {:type :feature
+               :scope ["components/workflow/src/ai/miniforge/workflow/runner.clj"
+                       "components/evidence-bundle/src/ai/miniforge/evidence_bundle"
+                       "components/dag-executor/src/ai/miniforge/dag_executor/protocols/impl/docker.clj"]}
+
+ :spec/constraints
+ ["Evidence fields added to the workflow :execution/output map, not a new store"
+  ":evidence/execution-mode comes from (:execution/mode ctx), default :local"
+  ":evidence/runtime-class comes from (executor-type (:execution/executor ctx))"
+  ":evidence/image-digest is optional (SHOULD) — only for Docker executor"
+  "Use the governed? predicate from artifact-session when checking mode"
+  "Existing tests must pass"
+  "Do not add fields to context — read from existing keys at extract-output time"]
+
+ :spec/acceptance-criteria
+ [":evidence/execution-mode present in workflow :execution/output when pipeline completes"
+  ":evidence/runtime-class present when executor is available"
+  "Local mode records :local, governed records :governed"
+  ":evidence/task-started-at and :evidence/task-finished-at present in output"
+  "Evidence bundle includes execution-mode and runtime-class when created from workflow result"
+  "Image digest captured and recorded for Docker-based governed runs"]
+
+ :spec/workflow-type :canonical-sdlc}
