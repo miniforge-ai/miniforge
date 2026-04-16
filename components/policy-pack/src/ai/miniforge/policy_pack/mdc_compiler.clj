@@ -502,15 +502,20 @@
           agent-behavior  (extract-agent-behavior body)
 
           ;; ── Build rule map ──────────────────────────────────────────────
+          ;; alwaysApply rules are mandatory — :major severity, :warn action.
+          ;; Non-always rules are advisory — :minor severity, :audit action.
+          severity    (if always-apply :major :minor)
+          action      (if always-apply :warn :audit)
+
           rule (cond->
                  {:rule/id          rule-id
                   :rule/title       title
                   :rule/description description
-                  :rule/severity    :info
+                  :rule/severity    severity
                   :rule/category    dewey
                   :rule/applies-to  applies-to
                   :rule/detection   detection
-                  :rule/enforcement {:action  :audit
+                  :rule/enforcement {:action  action
                                     :message (str "Standard: " title)}}
 
                  always-apply
