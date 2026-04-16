@@ -431,6 +431,15 @@
    :task    (tasks/setup *command-line-args*)}
 
   ;; ──────────────────────────────────────────────────────────────────────────
+  ;; ETL (build-time data compilation)
+  ;; ──────────────────────────────────────────────────────────────────────────
+
+  standards:pack
+  {:doc     "Compile .standards/*.mdc → components/phase/resources/packs/miniforge-standards.pack.edn"
+   :requires ([etl])
+   :task    (etl/compile-standards-pack!)}
+
+  ;; ──────────────────────────────────────────────────────────────────────────
   ;; CLI Development
   ;; ──────────────────────────────────────────────────────────────────────────
 

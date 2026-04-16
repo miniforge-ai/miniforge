@@ -235,7 +235,12 @@
    Arguments:
    - knowledge-store - KnowledgeStore instance
    - options         - Optional configuration map with:
-     :rules-dir       - Path to rules directory (default: \".cursor/rules\")
+     :rules-dir       - Path to rules directory (default: \".cursor/rules\").
+                        .standards/ is no longer the default — .mdc files there
+                        are compiled to miniforge-standards.pack.edn via
+                        `bb standards:pack` and loaded by agent-behavior at
+                        runtime. Pass {:rules-dir \".standards\"} explicitly
+                        if you still want direct MDC loading into the store.
      :project-root    - Path to project root (default: \".\")
      :skip-rules?     - Skip loading rules (default: false)
      :skip-docs?      - Skip loading docs (default: false)
@@ -256,7 +261,7 @@
    (initialize-knowledge-store! knowledge-store {}))
 
   ([knowledge-store opts]
-   (let [rules-dir (get opts :rules-dir ".standards")
+   (let [rules-dir (get opts :rules-dir ".cursor/rules")
          project-root (get opts :project-root ".")
          skip-rules? (get opts :skip-rules? false)
          skip-docs? (get opts :skip-docs? false)
