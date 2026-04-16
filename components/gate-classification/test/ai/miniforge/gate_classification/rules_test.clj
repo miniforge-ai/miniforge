@@ -1,12 +1,10 @@
 (ns ai.miniforge.gate-classification.rules-test
   (:require [clojure.test :refer [deftest testing is]]
+            [ai.miniforge.gate-classification.interface :as iface]
             [ai.miniforge.gate-classification.rules :as rules]))
 
 (def test-config
-  {:confidence-threshold 0.5
-   :doc-status-threshold 0.7
-   :true-positive-threshold 0.8
-   :max-error-severity :error})
+  (iface/default-config))
 
 (defn- make-violation
   [category confidence & {:keys [severity doc-status rule-id]
