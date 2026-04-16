@@ -104,6 +104,39 @@
       :else
       ["bb" "miniforge"])))
 
+(def ^:private codex-artifact-table-pattern
+  #"^\[mcp_servers\.artifact(?:\..+)?\]\s*$")
+
+(def ^:private toml-table-pattern
+  #"^\[[^]]+\]\s*$")
+
+(defn- strip-codex-artifact-config
+  "Remove the full mcp_servers.artifact subtree from a Codex TOML config.
+
+   This strips both the root server block and any nested tables such as
+   [mcp_servers.artifact.tools.context_read], which newer Codex builds treat
+   as invalid if the parent server definition has already been removed."
+  [content]
+  (let [lines (str/split-lines content)]
+    (loop [remaining lines
+           cleaned []
+           skipping? false]
+      (if-let [line (first remaining)]
+        (let [trimmed (str/trim line)]
+          (cond
+            (re-matches codex-artifact-table-pattern trimmed)
+            (recur (rest remaining) cleaned true)
+
+            (and skipping? (re-matches toml-table-pattern trimmed))
+            (recur remaining cleaned false)
+
+            skipping?
+            (recur (rest remaining) cleaned true)
+
+            :else
+            (recur (rest remaining) (conj cleaned line) false)))
+        (str/join "\n" cleaned)))))
+
 (defn create-session!
   "Create a new artifact session with a temporary directory.
 
@@ -187,15 +220,12 @@
                    "args = " (json/generate-string args) "\n")]
     (.mkdirs dir)
     (if (.exists config-file)
-      (let [content (slurp config-file)]
-        (if (str/includes? content block-header)
-          ;; Replace existing block (up to next section or EOF)
-          (let [replaced (str/replace content
-                                      #"(?s)\[mcp_servers\.artifact\]\n(?:(?!\n\[).)*"
-                                      block)]
-            (spit config-file replaced))
-          ;; Append
-          (spit config-file (str content "\n" block) :append false)))
+      (let [content (slurp config-file)
+            preserved (-> content strip-codex-artifact-config str/trim)]
+        (spit config-file
+              (if (str/blank? preserved)
+                block
+                (str preserved "\n\n" block))))
       (spit config-file block))
     (str config-file)))
 
@@ -423,13 +453,10 @@
   [path]
   (let [f (io/file path)]
     (when (.exists f)
-      (let [content (slurp f)
-            cleaned (str/replace content
-                                 #"(?s)\n?\[mcp_servers\.artifact\]\n(?:(?!\n\[).)*"
-                                 "")]
-        (if (str/blank? (str/trim cleaned))
+      (let [cleaned (-> (slurp f) strip-codex-artifact-config str/trim)]
+        (if (str/blank? cleaned)
           (.delete f)
-          (spit f cleaned))))))
+          (spit f (str cleaned "\n")))))))
 
 (defn cleanup-cursor-mcp-config!
   "Remove artifact key from .cursor/mcp.json.
