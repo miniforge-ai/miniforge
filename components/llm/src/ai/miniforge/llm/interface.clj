@@ -360,6 +360,13 @@
   [selection]
   (selector/explain-selection selection))
 
+;------------------------------------------------------------------------------ Layer 5
+;; Capsule integration
+
+(def capsule-exec-fn
+  "Build a capsule-aware exec function for LLM clients running inside executors."
+  impl/capsule-exec-fn)
+
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
   ;; Create a client with claude CLI (default)

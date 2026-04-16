@@ -32,8 +32,7 @@
      :compliance-execute  reads plan, applies fixes, commits, creates PRs"
   (:require
    [ai.miniforge.compliance-scanner.interface :as compliance-scanner]
-   [ai.miniforge.phase.phase-result           :as phase-result]
-   [ai.miniforge.phase.registry               :as registry]))
+   [ai.miniforge.phase.interface              :as phase]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Helpers
@@ -84,10 +83,10 @@
    :budget {:tokens 5000 :iterations 1 :time-seconds 1800}})
 
 ;; Register defaults on load
-(registry/register-phase-defaults! :compliance-scan     default-scan-config)
-(registry/register-phase-defaults! :compliance-classify default-classify-config)
-(registry/register-phase-defaults! :compliance-plan     default-plan-config)
-(registry/register-phase-defaults! :compliance-execute  default-execute-config)
+(phase/register-phase-defaults! :compliance-scan     default-scan-config)
+(phase/register-phase-defaults! :compliance-classify default-classify-config)
+(phase/register-phase-defaults! :compliance-plan     default-plan-config)
+(phase/register-phase-defaults! :compliance-execute  default-execute-config)
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; :compliance-scan interceptor
@@ -102,7 +101,7 @@
         standards-path (resolve-standards-path ctx)
         rules          (resolve-rules ctx)
         scan-result    (compliance-scanner/scan repo-path standards-path {:rules rules})]
-    (phase-result/enter-context ctx :compliance-scan nil [] default-scan-config start-time
+    (phase/enter-context ctx :compliance-scan nil [] default-scan-config start-time
                                 {:status :success :output scan-result})))
 
 (defn leave-compliance-scan
@@ -131,7 +130,7 @@
   [ctx ex]
   (-> ctx
       (assoc-in [:phase :status] :failed)
-      (assoc-in [:phase :error] (phase-result/exception-error ex))))
+      (assoc-in [:phase :error] (phase/exception-error ex))))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; :compliance-classify interceptor
@@ -144,7 +143,7 @@
   (let [start-time  (System/currentTimeMillis)
         violations  (get-in ctx [:execution/phase-results :compliance-scan :result :output :violations] [])
         classified  (compliance-scanner/classify violations)]
-    (phase-result/enter-context ctx :compliance-classify nil [] default-classify-config start-time
+    (phase/enter-context ctx :compliance-classify nil [] default-classify-config start-time
                                 {:status :success :output {:classified-violations classified}})))
 
 (defn leave-compliance-classify
@@ -175,7 +174,7 @@
   [ctx ex]
   (-> ctx
       (assoc-in [:phase :status] :failed)
-      (assoc-in [:phase :error] (phase-result/exception-error ex))))
+      (assoc-in [:phase :error] (phase/exception-error ex))))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; :compliance-plan interceptor
@@ -193,7 +192,7 @@
         the-plan       (compliance-scanner/plan classified repo-path)]
     (compliance-scanner/write-work-spec! (:work-spec the-plan) repo-path)
     (compliance-scanner/write-delta-report! repo-path standards-path classified the-plan)
-    (phase-result/enter-context ctx :compliance-plan nil [] default-plan-config start-time
+    (phase/enter-context ctx :compliance-plan nil [] default-plan-config start-time
                                 {:status :success
                                  :output {:plan       the-plan
                                           :task-count (count (:dag-tasks the-plan))}})))
@@ -223,7 +222,7 @@
   [ctx ex]
   (-> ctx
       (assoc-in [:phase :status] :failed)
-      (assoc-in [:phase :error] (phase-result/exception-error ex))))
+      (assoc-in [:phase :error] (phase/exception-error ex))))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; :compliance-execute interceptor
@@ -237,7 +236,7 @@
         repo-path  (resolve-repo-path ctx)
         plan       (get-in ctx [:execution/phase-results :compliance-plan :result :output :plan])
         result     (compliance-scanner/execute! plan repo-path)]
-    (phase-result/enter-context ctx :compliance-execute nil [] default-execute-config start-time
+    (phase/enter-context ctx :compliance-execute nil [] default-execute-config start-time
                                 {:status :success :output result})))
 
 (defn leave-compliance-execute
@@ -269,41 +268,41 @@
   [ctx ex]
   (-> ctx
       (assoc-in [:phase :status] :failed)
-      (assoc-in [:phase :error] (phase-result/exception-error ex))))
+      (assoc-in [:phase :error] (phase/exception-error ex))))
 
 ;------------------------------------------------------------------------------ Layer 2
 ;; Registry methods
 
-(defmethod registry/get-phase-interceptor :compliance-scan
+(defmethod phase/get-phase-interceptor-method :compliance-scan
   [config]
-  (let [merged (registry/merge-with-defaults config)]
+  (let [merged (phase/merge-with-defaults config)]
     {:name   ::compliance-scan
      :config merged
      :enter  (fn [ctx] (enter-compliance-scan (assoc ctx :phase-config merged)))
      :leave  leave-compliance-scan
      :error  error-compliance-scan}))
 
-(defmethod registry/get-phase-interceptor :compliance-classify
+(defmethod phase/get-phase-interceptor-method :compliance-classify
   [config]
-  (let [merged (registry/merge-with-defaults config)]
+  (let [merged (phase/merge-with-defaults config)]
     {:name   ::compliance-classify
      :config merged
      :enter  (fn [ctx] (enter-compliance-classify (assoc ctx :phase-config merged)))
      :leave  leave-compliance-classify
      :error  error-compliance-classify}))
 
-(defmethod registry/get-phase-interceptor :compliance-plan
+(defmethod phase/get-phase-interceptor-method :compliance-plan
   [config]
-  (let [merged (registry/merge-with-defaults config)]
+  (let [merged (phase/merge-with-defaults config)]
     {:name   ::compliance-plan
      :config merged
      :enter  (fn [ctx] (enter-compliance-plan (assoc ctx :phase-config merged)))
      :leave  leave-compliance-plan
      :error  error-compliance-plan}))
 
-(defmethod registry/get-phase-interceptor :compliance-execute
+(defmethod phase/get-phase-interceptor-method :compliance-execute
   [config]
-  (let [merged (registry/merge-with-defaults config)]
+  (let [merged (phase/merge-with-defaults config)]
     {:name   ::compliance-execute
      :config merged
      :enter  (fn [ctx] (enter-compliance-execute (assoc ctx :phase-config merged)))
@@ -313,15 +312,15 @@
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
   ;; Check registered defaults
-  (registry/phase-defaults :compliance-scan)
-  (registry/phase-defaults :compliance-classify)
-  (registry/phase-defaults :compliance-plan)
-  (registry/phase-defaults :compliance-execute)
+  (phase/phase-defaults :compliance-scan)
+  (phase/phase-defaults :compliance-classify)
+  (phase/phase-defaults :compliance-plan)
+  (phase/phase-defaults :compliance-execute)
 
   ;; Get interceptors
-  (registry/get-phase-interceptor {:phase :compliance-scan})
-  (registry/get-phase-interceptor {:phase :compliance-classify})
-  (registry/get-phase-interceptor {:phase :compliance-plan})
-  (registry/get-phase-interceptor {:phase :compliance-execute})
+  (phase/get-phase-interceptor-method {:phase :compliance-scan})
+  (phase/get-phase-interceptor-method {:phase :compliance-classify})
+  (phase/get-phase-interceptor-method {:phase :compliance-plan})
+  (phase/get-phase-interceptor-method {:phase :compliance-execute})
 
   :leave-this-here)

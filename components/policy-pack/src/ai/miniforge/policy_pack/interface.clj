@@ -30,7 +30,8 @@
    [ai.miniforge.policy-pack.interface.mapping :as mapping]
    [ai.miniforge.policy-pack.interface.prompt-template :as prompt-template]
    [ai.miniforge.policy-pack.interface.taxonomy :as taxonomy]
-   [ai.miniforge.policy-pack.mdc-compiler :as mdc-compiler]))
+   [ai.miniforge.policy-pack.mdc-compiler :as mdc-compiler]
+   [ai.miniforge.policy-pack.software-factory :as software-factory]))
 
 ;------------------------------------------------------------------------------ Schema and registry API
 
@@ -132,3 +133,13 @@
   "Export the compiler's dewey-ranges as a first-class Taxonomy artifact.
    Delegates to mdc-compiler/export-canonical-taxonomy."
   mdc-compiler/export-canonical-taxonomy)
+
+;------------------------------------------------------------------------------ Software Factory
+
+(def evaluate-external-pr
+  "Evaluate an external PR diff against policy packs in read-only mode."
+  software-factory/evaluate-external-pr)
+
+(def parse-pr-diff
+  "Parse a unified diff into artifact-like inputs for external evaluation."
+  software-factory/parse-pr-diff)

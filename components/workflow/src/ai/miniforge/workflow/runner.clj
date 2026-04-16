@@ -27,11 +27,10 @@
    - context            — context management
    - execution          — phase execution
    - monitoring         — health monitoring"
-  (:require [ai.miniforge.dag-executor.executor :as dag-exec]
-            [ai.miniforge.llm.protocols.impl.llm-client :as llm-impl]
+  (:require [ai.miniforge.dag-executor.interface :as dag-exec]
+            [ai.miniforge.llm.interface :as llm-impl]
             [ai.miniforge.logging.interface :as log]
             [ai.miniforge.phase.interface :as phase]
-            [ai.miniforge.phase.registry :as registry]
             [ai.miniforge.response.interface :as response]
             [ai.miniforge.workflow.context :as ctx]
             [ai.miniforge.workflow.execution :as exec]
@@ -108,7 +107,7 @@
 (defn terminal-state?
   "Check if workflow is in terminal state."
   [context]
-  (or (registry/succeeded? context) (registry/failed? context)))
+  (or (phase/succeeded? context) (phase/failed? context)))
 
 ;------------------------------------------------------------------------------ Layer 1: Iteration helpers
 

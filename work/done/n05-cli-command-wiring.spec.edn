@@ -1,0 +1,68 @@
+;; =============================================================================
+;; Spec: N5 — CLI Command Wiring Audit and Completion
+;; =============================================================================
+;;
+;; Normative ref: specs/normative/N5-cli-tui-api.md
+;;
+;; Many components exist but lack CLI exposure. N5 specifies a full command
+;; taxonomy (miniforge <ns> <cmd>) that is only partially wired. No work spec
+;; previously existed to close this gap.
+
+{:spec/title "N5: Audit and wire all N5-specified CLI commands to components"
+
+ :spec/description
+ "Audit every CLI command specified in N5 against the actual CLI implementation
+  in bases/cli/. For each missing or partially wired command, connect it to the
+  existing component. Commands to verify/wire:
+
+  Workflow commands:
+  - miniforge workflow execute <spec>
+  - miniforge workflow status <id>
+  - miniforge workflow list
+  - miniforge workflow cancel <id>
+
+  Policy commands:
+  - miniforge policy list
+  - miniforge policy show <pack-id>
+  - miniforge policy install <path>
+
+  Evidence commands:
+  - miniforge evidence show <id>
+  - miniforge evidence export <id> <format>
+  - miniforge evidence list
+
+  Artifact commands:
+  - miniforge artifact provenance <id>
+  - miniforge artifact list
+
+  ETL commands:
+  - miniforge etl repo <url>
+
+  Fleet commands:
+  - miniforge fleet watch (TUI)
+  - miniforge fleet prs
+
+  Produce a wiring report as part of the PR showing: command, status before,
+  status after, component connected."
+
+ :spec/intent {:type :feature
+               :scope ["bases/cli/src"
+                       "components/workflow/src"
+                       "components/policy-pack/src"
+                       "components/evidence-bundle/src"
+                       "components/artifact/src"]}
+
+ :spec/constraints
+ ["Do not change existing working commands — only add missing wiring"
+  "Each command must validate args and print usage on invalid input"
+  "Commands must exit with appropriate exit codes (0 success, 1 error)"
+  "Output format should be human-readable by default, --json flag for machine output"]
+
+ :spec/acceptance-criteria
+ ["All N5-specified commands are callable from the CLI"
+  "miniforge help shows all available commands grouped by namespace"
+  "Each command connects to the correct component interface function"
+  "Invalid command arguments produce helpful error messages"
+  "Wiring report documents before/after status for each command"]
+
+ :spec/workflow-type :canonical-sdlc}

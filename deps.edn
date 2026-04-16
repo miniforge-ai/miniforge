@@ -108,6 +108,9 @@
                        "components/compliance-scanner/resources"
                        "components/workflow-compliance-scanner/src"
                        "components/workflow-compliance-scanner/resources"
+                       "components/workflow-security-compliance/src"
+                       "components/workflow-security-compliance/resources"
+                       "components/gate-classification/src"
                        "components/repo-index/src"
                        "components/repo-index/resources"
                        "components/context-pack/src"
@@ -151,6 +154,8 @@
                        "components/connector-jira/resources"
                        "components/connector-pipeline-output/src"
                        "components/connector-pipeline-output/resources"
+                       "components/connector-sarif/src"
+                       "components/connector-sarif/resources"
                        "components/connector-retry/src"
                        "components/cursor-store/src"
                        "components/data-quality/src"
@@ -223,6 +228,8 @@
                      ai.miniforge/spec-parser {:local/root "components/spec-parser"}
                      ai.miniforge/compliance-scanner {:local/root "components/compliance-scanner"}
                      ai.miniforge/workflow-compliance-scanner {:local/root "components/workflow-compliance-scanner"}
+                     ai.miniforge/workflow-security-compliance {:local/root "components/workflow-security-compliance"}
+                     ai.miniforge/gate-classification {:local/root "components/gate-classification"}
                      ai.miniforge/repo-index {:local/root "components/repo-index"}
                      ai.miniforge/context-pack {:local/root "components/context-pack"}
                      ai.miniforge/mcp-context-server {:local/root "bases/mcp-context-server"}
@@ -248,6 +255,7 @@
                      ai.miniforge.data-foundry/connector-http {:local/root "components/connector-http"}
                      ai.miniforge.data-foundry/connector-jira {:local/root "components/connector-jira"}
                      ai.miniforge.data-foundry/connector-pipeline-output {:local/root "components/connector-pipeline-output"}
+                     ai.miniforge.data-foundry/connector-sarif {:local/root "components/connector-sarif"}
                      ai.miniforge.data-foundry/connector-retry {:local/root "components/connector-retry"}
                      ai.miniforge.data-foundry/cursor-store {:local/root "components/cursor-store"}
                      ai.miniforge.data-foundry/data-quality {:local/root "components/data-quality"}
@@ -316,6 +324,8 @@
                        "components/spec-parser/test"
                        "components/compliance-scanner/test"
                        "components/workflow-compliance-scanner/test"
+                       "components/workflow-security-compliance/test"
+                       "components/gate-classification/test"
                        "components/repo-index/test"
                        "components/context-pack/test"
                        "bases/mcp-context-server/test"
@@ -341,6 +351,7 @@
                        "components/connector-http/test"
                        "components/connector-jira/test"
                        "components/connector-pipeline-output/test"
+                       "components/connector-sarif/test"
                        "components/connector-retry/test"
                        "components/cursor-store/test"
                        "components/data-quality/test"
@@ -404,6 +415,8 @@
                       ai.miniforge/spec-parser {:local/root "components/spec-parser"}
                       ai.miniforge/compliance-scanner {:local/root "components/compliance-scanner"}
                       ai.miniforge/workflow-compliance-scanner {:local/root "components/workflow-compliance-scanner"}
+                      ai.miniforge/workflow-security-compliance {:local/root "components/workflow-security-compliance"}
+                      ai.miniforge/gate-classification {:local/root "components/gate-classification"}
                       ai.miniforge/repo-index {:local/root "components/repo-index"}
                       ai.miniforge/context-pack {:local/root "components/context-pack"}
                       ai.miniforge/mcp-context-server {:local/root "bases/mcp-context-server"}

@@ -24,7 +24,8 @@
    Layer 0: Schema re-exports
    Layer 1: Index building and repo map
    Layer 2: File retrieval"
-  (:require [ai.miniforge.repo-index.schema :as schema]
+  (:require [ai.miniforge.repo-index.messages :as messages]
+            [ai.miniforge.repo-index.schema :as schema]
             [ai.miniforge.repo-index.factory :as factory]
             [ai.miniforge.repo-index.scanner :as scanner]
             [ai.miniforge.repo-index.repo-map :as repo-map]
@@ -32,6 +33,13 @@
             [ai.miniforge.repo-index.storage :as storage]
             [clojure.java.io :as io]
             [clojure.string :as str]))
+
+;------------------------------------------------------------------------------ Layer 0
+;; Messages
+
+(def t
+  "Look up a repo-index message by key, with optional param substitution."
+  messages/t)
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Schema re-exports

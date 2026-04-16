@@ -5,7 +5,7 @@
    [clojure.test :refer [deftest testing is]]
    [ai.miniforge.workflow.runner :as runner]
    [ai.miniforge.workflow.context :as ctx]
-   [ai.miniforge.dag-executor.executor :as dag-exec]
+   [ai.miniforge.dag-executor.interface :as dag-exec]
    [ai.miniforge.phase.interface]))
 
 ;; ---------------------------------------------------------------------------- extract-output

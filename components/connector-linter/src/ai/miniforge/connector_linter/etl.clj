@@ -13,7 +13,7 @@
    Layer 1: Format-specific record extraction
    Layer 2: Apply mapping spec to produce violations"
   (:require
-   [ai.miniforge.compliance-scanner.factory :as factory]
+   [ai.miniforge.compliance-scanner.interface :as factory]
    [cheshire.core :as json]
    [clojure.edn :as edn]
    [clojure.java.io :as io]
@@ -57,16 +57,17 @@
                    (if (keyword? c) (name c) (str c)))
         severity (map-severity severity-map
                                (extract-field record (get fields :severity)))]
-    (factory/->violation
-     (keyword (name linter-id) (or code "lint"))
-     "lint"
-     (str (name linter-id) "/" (or code "lint"))
-     (str file)
-     (or line 0)
-     (or message "")
-     nil
-     false
-     (str (name linter-id) ": " (or message "")))))
+    (assoc (factory/->violation
+            (keyword (name linter-id) (or code "lint"))
+            "lint"
+            (str (name linter-id) "/" (or code "lint"))
+            (str file)
+            (or line 0)
+            (or message "")
+            nil
+            false
+            (str (name linter-id) ": " (or message "")))
+           :rule/severity severity)))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Format-specific record extraction
