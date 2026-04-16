@@ -50,3 +50,41 @@
       (let [cfg (user/load-default-config)]
         (is (= :codex (get-in cfg [:llm :backend])))
         (is (= "claude-sonnet-4-6" (get-in cfg [:agents :default-models :execution])))))))
+
+(deftest repo-config-support-test
+  (testing "repo-config-path appends .miniforge/config.edn to the provided root"
+    (is (= (str "/tmp/repo" java.io.File/separator
+                ".miniforge" java.io.File/separator
+                "config.edn")
+           (user/repo-config-path "/tmp/repo"))))
+
+  (testing "load-repo-config reads repo-level policy-pack configuration"
+    (let [root (io/file (System/getProperty "java.io.tmpdir")
+                        (str "repo-config-test-" (random-uuid)))
+          config-file (io/file root ".miniforge" "config.edn")]
+      (try
+        (.mkdirs (.getParentFile config-file))
+        (spit config-file "{:policy-packs {:disabled-pack-ids [:repo/pack]}}")
+        (is (= {:policy-packs {:disabled-pack-ids [:repo/pack]}}
+               (config/load-repo-config (.getPath config-file))))
+        (finally
+          (doseq [f (reverse (file-seq root))]
+            (.delete ^java.io.File f))))))
+
+  (testing "load-merged-config-with-repo gives repo config precedence over user config"
+    (let [root (io/file (System/getProperty "java.io.tmpdir")
+                        (str "merged-config-test-" (random-uuid)))
+          user-file (io/file root "user-config.edn")
+          repo-file (io/file root ".miniforge" "config.edn")]
+      (try
+        (.mkdirs (.getParentFile repo-file))
+        (spit user-file "{:policy-packs {:disabled-pack-ids [:user/pack]}}")
+        (spit repo-file "{:policy-packs {:disabled-pack-ids [:repo/pack]}}")
+        (is (= [:repo/pack]
+               (get-in (config/load-merged-config-with-repo
+                        (.getPath user-file)
+                        (.getPath repo-file))
+                       [:policy-packs :disabled-pack-ids])))
+        (finally
+          (doseq [f (reverse (file-seq root))]
+            (.delete ^java.io.File f)))))))

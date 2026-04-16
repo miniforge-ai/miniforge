@@ -20,7 +20,7 @@
   "User configuration management for Miniforge.
 
    Provides loading, merging, and saving of user configuration.
-   Configuration precedence: user > env > defaults.
+   Configuration precedence: repo > user > env > defaults.
 
    Default configuration is loaded from resources/config/default-user-config.edn"
   (:require
@@ -88,6 +88,45 @@
   [path data]
   (fs/create-dirs (fs/parent path))
   (spit path (with-out-str (clojure.pprint/pprint data))))
+
+;------------------------------------------------------------------------------ Layer 0
+;; Repo-level configuration
+
+(def repo-config-dir-name
+  "Directory name for repo-level miniforge configuration."
+  ".miniforge")
+
+(defn repo-config-path
+  "Return the path to .miniforge/config.edn in the given working directory.
+
+   Uses the JVM's current working directory by default. Pass an explicit
+   root to override — useful in tests or when the CWD differs from the
+   repository root.
+
+   Arguments:
+   - working-dir - Optional root directory string (defaults to user.dir property)"
+  ([]
+   (repo-config-path (System/getProperty "user.dir")))
+  ([working-dir]
+   (str working-dir java.io.File/separator
+        repo-config-dir-name java.io.File/separator
+        "config.edn")))
+
+(defn load-repo-config
+  "Load repo-level configuration from .miniforge/config.edn.
+
+   Reads from the current working directory by default. Returns nil when
+   the file does not exist or cannot be parsed — never throws.
+
+   This layer lets individual repositories declare :policy-packs settings,
+   governance overrides, or other project-specific config without touching
+   the user's global ~/.miniforge/config.edn.
+
+   Arguments:
+   - path - Optional explicit path (defaults to (repo-config-path))"
+  ([] (load-repo-config (repo-config-path)))
+  ([path]
+   (read-edn-file path)))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Environment variable overrides
@@ -227,6 +266,28 @@
      (if user-config
        (merge-configs default-config user-config)
        (merge-configs default-config)))))
+
+(defn load-merged-config-with-repo
+  "Load and merge all configuration sources, including repo-level config.
+
+   Precedence (lowest to highest):
+   1. Defaults  — shipped classpath resource
+   2. User      — ~/.miniforge/config.edn
+   3. Repo      — .miniforge/config.edn in the current working directory
+   4. Env vars  — MINIFORGE_* overrides applied last
+
+   The repo layer lets per-project settings (e.g. :policy-packs overrides)
+   take priority over the user's global preferences without modifying the
+   global config file.
+
+   Arguments:
+   - user-path - Path to user config (defaults to ~/.miniforge/config.edn)
+   - repo-path - Path to repo config (defaults to .miniforge/config.edn in CWD)"
+  ([] (load-merged-config-with-repo default-user-config-path (repo-config-path)))
+  ([user-path repo-path]
+   (merge-configs default-config
+                  (load-user-config user-path)
+                  (load-repo-config repo-path))))
 
 ;------------------------------------------------------------------------------ Layer 3
 ;; Config saving and initialization

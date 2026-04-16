@@ -168,6 +168,21 @@
     (let [rules (sut/load-user-pack-rules)]
       (is (vector? rules)))))
 
+(deftest load-user-pack-rules-configured-pack-loading-test
+  (testing "delegates merged policy-pack config and disabled IDs to directory pack loading"
+    (with-redefs [ai.miniforge.phase.agent-behavior/load-policy-packs-config
+                  (fn [] {:disabled-pack-ids [:disabled/pack]
+                          :extra-search-paths ["/tmp/packs"]})
+                  ai.miniforge.phase.agent-behavior/load-dir-pack-rules
+                  (fn [policy-packs-config disabled-ids]
+                    (is (= {:disabled-pack-ids [:disabled/pack]
+                            :extra-search-paths ["/tmp/packs"]}
+                           policy-packs-config))
+                    (is (= #{:disabled/pack} disabled-ids))
+                    [{:rule/id :loaded/from-config}])]
+      (is (= [{:rule/id :loaded/from-config}]
+             (sut/load-user-pack-rules))))))
+
 ;; ============================================================================
 ;; Layer 2 — Full pipeline tests
 ;; ============================================================================
