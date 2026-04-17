@@ -7,9 +7,9 @@
 # N5 Delta — Supervisory Control Plane
 
 - **Spec ID:** `N5-delta-supervisory-control-plane-v1`
-- **Version:** `0.1.0-draft`
+- **Version:** `0.2.0-draft`
 - **Status:** Draft
-- **Date:** 2026-04-02
+- **Date:** 2026-04-17
 - **Amends:** N5 — Interface Standard: CLI/TUI/API
 - **Related:** N3 (event stream), N4 (policy packs), N6 (evidence), N8 (observability control), N9 (external PR
   integration), pr-monitor-loop-v1 (autonomous PR comment resolution)
@@ -206,6 +206,69 @@ new formalization for v1 but MUST be correlatable to v1 entities:
 - **PullRequest** — well-modeled in N9 and the pr-sync component
 - **PRTrain** — defined in N9 and the pr-train component
 - **WorkflowPhase** — defined in N2; tracked in events
+
+### 3.4 Materialization — the supervisory-state component
+
+The entities defined in §3.1 MUST be materialized by a dedicated component,
+`components/supervisory-state`, which is the canonical source of supervisory
+truth for all external consumers (TUI, native console, web dashboard, Rust
+control console).
+
+**Design invariants:**
+
+1. **Pure event-stream projection.** The component subscribes to the miniforge
+   event stream (N3) and updates an in-memory entity table on each relevant
+   fine-grained event. It MUST NOT peer with ephemeral in-process registries
+   (e.g., `control-plane/registry`, §3.3) — those are orchestration scratch
+   space, not a durable supervisory view.
+2. **Single emitter.** Whenever an entity is inserted or updated, the
+   component emits a `:supervisory/*-upserted` event per N3 §3.19. Those
+   snapshot events are the only surface external consumers use to read the
+   supervisory model.
+3. **Durable via the event stream.** The component does not maintain a
+   separate persistence store. On startup it replays the event stream:
+   `:supervisory/*-upserted` events take precedence as entity-state baselines;
+   fine-grained events newer than the most recent snapshot for a given entity
+   are applied on top. This satisfies §9 (durable startup and stale-read)
+   without a parallel database.
+4. **Coalesced bursts.** Updates within a short window (≤ 100 ms,
+   implementation-tunable) SHOULD be coalesced into a single emission per
+   entity to bound downstream traffic.
+5. **Attention derivation co-located.** Attention items (§5.1) MUST be
+   derived inside this component and emitted as `:supervisory/attention-derived`
+   (N3 §3.19). No other component MAY emit attention snapshots.
+6. **One source per entity family.** For each of WorkflowRun, AgentSession,
+   PrFleetEntry, PolicyEvaluation, AttentionItem the component MUST be the
+   sole emitter of the corresponding `:supervisory/*-upserted` event.
+   Other components MAY and SHOULD continue emitting their own fine-grained
+   lifecycle events, but MUST NOT produce snapshot events directly.
+
+**Interfaces consumed** (non-exhaustive — see accumulator-level mapping below):
+
+| Fine-grained event | Updates |
+|---|---|
+| `:workflow/started` | Inserts `WorkflowRun` with status `:running` |
+| `:workflow/phase-started` | Updates `:workflow-run/current-phase` |
+| `:workflow/phase-completed` | Advances `:workflow-run/updated-at` |
+| `:workflow/completed` / `:workflow/failed` / `:workflow/cancelled` | Sets terminal status |
+| `:control-plane/agent-registered` / `:agent-discovered` | Inserts `AgentSession` |
+| `:control-plane/agent-state-changed` / `:control-plane/status-changed` | Updates status |
+| `:control-plane/agent-heartbeat` | Advances `:agent/last-heartbeat` |
+| `:pr/created` / `:pr/merged` / `:pr/closed` / `:pr-monitor/*` | Upserts `PrFleetEntry` |
+| `:gate/passed` / `:gate/failed` | Emits new immutable `PolicyEvaluation` |
+
+**Consumer contract:** The Rust control console and any other external
+renderer subscribes to the event stream and deserializes
+`:supervisory/*-upserted` events directly into the entity shapes of §3.1 — it
+MUST NOT attempt to reconstruct entities from fine-grained events itself.
+
+**Relationship to `control-plane/registry`:** The registry remains the
+authoritative *orchestration* surface (heartbeats, decisions, state
+transitions driven by adapters). The supervisory-state component is a
+downstream *projection* — it observes the registry's emitted events and
+produces the durable, consumer-facing entity snapshots. The two serve
+different temporal scopes: registry is "right now, in-process"; supervisory
+state is "durable history + current view, restart-safe."
 
 ## 4. PR governance states
 

@@ -69,3 +69,6 @@ work/dogfood-session-*.edn
 work/*-local.spec.edn
 work/*-wip.edn
 .miniforge/
+
+# Claude Code local session state (worktrees, scheduled tasks, local settings)
+.claude/
