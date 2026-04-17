@@ -1,0 +1,80 @@
+;; =============================================================================
+;; Spec: Workflow dependency declarations
+;; =============================================================================
+;;
+;; Observed failure (gates workflow e60f987a, 2026-04-17):
+;;   Gates and remediation ran in parallel. Gates' release phase tried
+;;   to commit its changes; pre-commit ran `poly check`; poly check
+;;   reported the 13 existing structural errors (which the parallel
+;;   remediation was mid-way through fixing); commit rejected; gates
+;;   aborted.
+;;
+;; No coordination existed to say "gates must wait for remediation."
+;; The supervisor scheduled both because there was no declared dependency.
+
+{:spec/title "Workflow dependency declarations — supervisor sequencing + DAG dependencies"
+
+ :spec/description
+ "Allow specs to declare dependencies on other specs. Supervisor refuses
+  to schedule a spec until its declared deps have successfully landed.
+  Applies to both cross-spec (polylith-gates depends on polylith-remediation)
+  and intra-DAG dependencies (child workflows within one spec's DAG).
+
+  GROUP 1: Schema
+  Add :spec/depends-on to the spec schema:
+    :spec/depends-on [{:dep/spec 'work/polylith-compliance-remediation.spec.edn'
+                       :dep/requirement :merged-to-main}
+                      {:dep/spec :workflow/some-earlier-run
+                       :dep/requirement :succeeded}]
+  Requirement types:
+    :succeeded     — dep workflow has :status/succeeded
+    :merged-to-main — dep's PR has been merged (uses git tag / commit check)
+    :structural-clean — `poly check` passes (or equivalent external gate)
+
+  GROUP 2: Supervisor scheduling check
+  Before transitioning a spec from :pending to :running, the supervisor
+  checks each :spec/depends-on entry. If any is unsatisfied, the spec
+  stays in :pending with :spec/blocked-by reason. Supervisor re-evaluates
+  on every workflow state change or every :heartbeat-interval-ms.
+
+  GROUP 3: Clear blocked-on status in UI
+  `miniforge list` (or equivalent) shows blocked workflows with their
+  unsatisfied deps:
+    pending  polylith-workflow-gates-and-scope  blocked-by: polylith-compliance-remediation (:merged-to-main not yet satisfied)
+
+  GROUP 4: CLI override
+  `miniforge run --ignore-deps <spec>` bypasses the check for forced runs
+  (explicit opt-in, logs a warning). Useful when human knows deps are
+  satisfied but automation can't verify.
+
+  GROUP 5: DAG-internal dependencies
+  When a spec's plan phase emits a DAG of child workflows (see
+  spec-decomposition-into-dag-workflows.spec.edn), the plan declares
+  child-to-child :depends-on relationships. Same supervisor mechanism
+  enforces them. The schema and machinery are identical whether
+  dependencies are cross-spec or intra-DAG."
+
+ :spec/intent {:type :feature
+               :scope ["components/spec-parser/src"
+                       "components/workflow-runner/src"
+                       "components/orchestrator/src"
+                       "bases/cli/src/ai/miniforge/cli/main/commands/"
+                       "components/schema/src"]}
+
+ :spec/constraints
+ ["Dep satisfaction must be observable, not inferred — each requirement type has a concrete check"
+  ":merged-to-main requires a git remote call; cache results for a configurable window (default 60s)"
+  ":structural-clean needs a pluggable gate interface — don't hardcode poly check"
+  "Circular deps must be detected at schedule time, not runtime"
+  "Override flag must emit a warning event; never silent"
+  "Default behavior for specs without :spec/depends-on must be unchanged (schedule immediately)"]
+
+ :spec/acceptance-criteria
+ ["Two specs with :depends-on relationship: dependent waits for dependency to succeed before scheduling"
+  ":merged-to-main resolves by checking the current main branch commit against the declared PR"
+  "`miniforge list` shows blocked workflows with readable :blocked-by reason"
+  "Circular dep detection rejects at spec-load time with a helpful error"
+  "--ignore-deps override works, emits warning event, runs the spec"
+  "Existing specs without :depends-on still schedule and run unchanged"]
+
+ :spec/workflow-type :canonical-sdlc}

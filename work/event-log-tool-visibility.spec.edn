@@ -1,0 +1,81 @@
+;; =============================================================================
+;; Spec: Event log — tool-call visibility
+;; =============================================================================
+;;
+;; Today's dogfood post-mortem discovered a significant observability gap.
+;; The remediation run emitted 203 :agent/status events during implement,
+;; all with the generic payload:
+;;
+;;   {:event/type :agent/status
+;;    :status/type :tool-calling
+;;    :message "Agent calling tool"}
+;;
+;; No tool name, no args, no result, no duration. From the event log
+;; alone we can count tool calls but cannot diagnose what the agent was
+;; doing or why it stopped writing. The only deeper signal was reading
+;; the live process stdout — which was lost on restart.
+;;
+;; Self-improvement requires visibility. Miniforge cannot improve what it
+;; cannot see.
+
+{:spec/title "Event log — capture tool name / args / result on every agent tool call"
+
+ :spec/description
+ "Expand the event schema so every agent tool call emits a richer event
+  with enough context for post-mortem diagnosis without needing the
+  live stdout. Add phase-level heartbeat events and a derived event-gap
+  metric so watchdogs (and humans) can spot stalls.
+
+  GROUP 1: Tool-call event schema
+  Replace the single :agent/status :tool-calling event with two:
+    :agent/tool-call-started — fields: :tool/name, :tool/args-digest,
+        :tool/call-id, :agent/id
+    :tool/call-completed    — fields: :tool/call-id, :tool/result-digest,
+        :tool/duration-ms, :tool/success?, :tool/error (optional)
+  Args and result are digested (first 1 KB + sha256) to keep event size
+  bounded; full content goes to /artifacts if needed.
+
+  GROUP 2: Phase heartbeat events
+  Every N seconds (default 30s) during an active phase, emit
+  :workflow/phase-heartbeat with :phase/active-since, :phase/events-emitted,
+  :phase/last-event-at, :phase/gap-since-last-event-ms. Watchdog uses this
+  to sanity-check its own timer against wall clock.
+
+  GROUP 3: Post-mortem CLI
+  `miniforge events show <workflow-id>` renders a human-readable timeline:
+    16:47:13  implement  read  bases/mcp-context-server/deps.edn
+    16:47:15  implement  grep  'data-foundry' components/**
+    ...
+    16:48:51  implement  grep  'phase' components/**
+    16:48:51→16:59:52 — 11m0s event-stream gap (stalled)
+    16:59:52  implement  TERMINATED  :agent-stalled
+
+  GROUP 4: Rule-based alerts
+  Config-driven alerts: 'if phase-heartbeat gap > X', 'if no tool-call-
+  completed in Y seconds', 'if tool-call error rate > Z%'. Alerts route
+  to observability/event-sinks. Enables the watchdog spec to subscribe
+  rather than polling."
+
+ :spec/intent {:type :feature
+               :scope ["components/event-stream/src"
+                       "components/agent/src"
+                       "components/observer/src"
+                       "bases/cli/src/ai/miniforge/cli/main/commands/"
+                       "components/schema/src"]}
+
+ :spec/constraints
+ ["Event size must stay bounded — digest large args/results, link to artifacts"
+  "Heartbeat cadence configurable; default 30s to balance detail vs noise"
+  "Schema changes must be backward-compatible — consumers reading old events still work"
+  "Tool-call events must preserve causality: started → completed pairs"
+  "`miniforge events show` must work offline against the local event log"]
+
+ :spec/acceptance-criteria
+ ["Every agent tool call produces started+completed events with tool name and digests"
+  "Phase heartbeat fires every 30s with accurate gap metric"
+  "`miniforge events show <id>` renders a full phase timeline including gaps"
+  "Rule-based alert triggers :stream-stalled event when phase-heartbeat gap > threshold"
+  "A dogfood replay of today's hang shows exactly where the 11m gap started"
+  "Existing event consumers (dashboard, attention component) still work"]
+
+ :spec/workflow-type :canonical-sdlc}

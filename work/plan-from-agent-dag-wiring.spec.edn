@@ -1,0 +1,106 @@
+;; =============================================================================
+;; Spec: Wire `plan-from-agent` output into the DAG orchestrator
+;; =============================================================================
+;;
+;; **This is the biggest single fix of today's dogfood findings.**
+;;
+;; Investigation of why the polylith-compliance-remediation run collapsed
+;; into one monolithic implement phase (13 min stall, zero files written)
+;; revealed that the DAG decomposition scaffolding is fully built but the
+;; trigger never fires for LLM-generated plans.
+;;
+;; Code paths:
+;;   components/dag-executor/        — full DAG executor, wired
+;;   components/workflow/src/ai/miniforge/workflow/dag_orchestrator.clj
+;;     — sub-workflow spawner, wired
+;;   components/workflow/src/ai/miniforge/workflow/execution.clj
+;;     line 344 — (dag-applicable? phase-name phase-result ctx)
+;;                checks for (get-in phase-result [:result :output :plan/id])
+;;     line 414 — (try-dag-execution ...) invokes the orchestrator
+;;
+;; Plan paths in components/phase-software-factory/src/ai/miniforge/phase/plan.clj:
+;;   plan-from-spec-tasks  line 46+  returns plan wrapped with :plan/id ✓
+;;   plan-from-agent       line 86+  does NOT wrap output with :plan/id ✗
+;;
+;; When a spec doesn't pre-declare tasks (the common case — e.g., today's
+;; remediation spec), plan-from-agent fires, extract-plan-from-phase-result
+;; returns nil, dag-applicable? returns nil, and execution falls back to
+;; one-phase-does-everything. The agent then has to tackle the full spec
+;; in a single implement iteration, which today caused the 13-minute hang.
+;;
+;; Also referenced: specs/normative/N2-workflows.md §13 documents
+;; DAG-based multi-task execution as the intended model.
+
+{:spec/title "plan-from-agent must emit :plan/id so the DAG orchestrator activates"
+
+ :spec/description
+ "Make the LLM-generated plan path produce the same output shape as the
+  spec-task plan path so the DAG orchestrator can pick it up. Without
+  this, miniforge's entire parallel-workflow capability is unreachable
+  for any spec that doesn't pre-declare tasks.
+
+  GROUP 1: Fix plan-from-agent output shape
+  File: components/phase-software-factory/src/ai/miniforge/phase/plan.clj
+  In plan-from-agent (line 86) and enter-plan (the interceptor that calls
+  it), ensure the returned phase result has:
+    {:result {:output {:plan/id <uuid>
+                       :plan/tasks [...]
+                       :plan/edges [...]   ;; DAG edges, may be empty for
+                                            ;; linear plans
+                       ...}}}
+  Match the schema used by plan-from-spec-tasks. :plan/id is a fresh UUID
+  per plan. :plan/tasks is the decomposed task list. :plan/edges encodes
+  dependencies between tasks for the DAG orchestrator.
+
+  GROUP 2: Instruct the planner agent to emit tasks, not just a prose plan
+  The planner's system prompt currently elicits a descriptive plan. Update
+  the prompt so the LLM returns a structured task graph:
+    - Each task has: id, title, scope (files/bricks), acceptance criteria
+    - Dependencies between tasks where they exist (e.g., Group 2 requires
+      Group 1)
+  Use tool_use with a plan-producing tool rather than parsing free-form
+  text.
+
+  GROUP 3: Guardrail — validate DAG shape before acceptance
+  extract-plan-from-phase-result should validate the plan against a
+  malli schema. If the planner produces an invalid DAG (cycles, unknown
+  task refs, empty task list), the phase fails with a clear error rather
+  than silently falling back to monolithic execution.
+
+  GROUP 4: Tests covering the DAG activation path
+  Add an integration test: given a spec without pre-declared tasks,
+  plan-from-agent runs, returns a valid plan, dag-applicable? returns
+  non-nil, the orchestrator spawns N sub-workflows. Currently no test
+  exercises this end-to-end.
+
+  GROUP 5: Metric / event for DAG activation
+  Emit :workflow/dag-activated event when the orchestrator takes over,
+  and :workflow/dag-skipped {:reason ...} when it doesn't. Today we have
+  no visibility into which path fired — the diagnosis required grep-
+  reading the code. Make it observable from the event log."
+
+ :spec/intent
+ {:type :fix
+  :scope ["components/phase-software-factory/src/ai/miniforge/phase/plan.clj"
+          "components/workflow/src/ai/miniforge/workflow/execution.clj"
+          "components/workflow/src/ai/miniforge/workflow/dag_orchestrator.clj"
+          "components/agent/src"
+          "components/schema/src"]}
+
+ :spec/constraints
+ ["Preserve the plan-from-spec-tasks fast path — specs that pre-declare tasks must continue to work"
+  "Plan schema must be malli-validated; invalid plans fail-fast, not silently"
+  "Planner prompt changes must still produce human-readable output for review in the plan artifact"
+  "Do not change the DAG orchestrator — the fix is upstream of it"
+  "Event types :workflow/dag-activated and :workflow/dag-skipped must be added to the event schema, not overloaded onto existing events"]
+
+ :spec/acceptance-criteria
+ ["plan-from-agent returns a phase result with :plan/id in {:result :output}"
+  "Running a spec without pre-declared tasks (e.g., polylith-compliance-remediation) triggers the DAG orchestrator"
+  "`miniforge events show <workflow-id>` shows :workflow/dag-activated when decomposition fires"
+  "Invalid plans (cycles / empty task lists / unknown refs) fail with a clear error, not silent fallback"
+  "Re-running today's remediation spec produces N child workflows (one per error class group) running in parallel where dependencies allow"
+  "Existing plan-from-spec-tasks tests still pass"
+  "An integration test asserts dag-applicable? fires on an LLM-generated plan"]
+
+ :spec/workflow-type :canonical-sdlc}

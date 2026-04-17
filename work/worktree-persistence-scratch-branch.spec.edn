@@ -1,0 +1,81 @@
+;; =============================================================================
+;; Spec: Worktree persistence + scratch-branch safety
+;; =============================================================================
+;;
+;; Observed failure (gates workflow e60f987a, 2026-04-17):
+;;   :implement → :verify → :review (3/3 gates passed, 8 min of real work)
+;;   :release failed because pre-commit's poly check rejected the commit
+;;   Worktree at /tmp/mf-wt-gates was GC'd on next process-tree restart
+;;   All 8+ minutes of working code: permanently lost
+;;
+;; Two root causes:
+;; 1. Worktrees live under /tmp — tmpfs on macOS, volatile across reboots
+;; 2. Miniforge only "commits" in the release phase. A crash mid-phase
+;;    means uncommitted file edits vanish with the worktree.
+
+{:spec/title "Persist worktrees outside /tmp + scratch-branch commits on every write"
+
+ :spec/description
+ "Two independent-but-related fixes that together make miniforge resilient
+  to process-tree death mid-workflow.
+
+  GROUP 1: Move worktree root out of /tmp
+  Current code places worktrees under /tmp/miniforge-worktrees/. Move to
+  `~/.miniforge/worktrees/<workflow-id>/` by default. Configurable via
+  :workflow/worktree-root in user config. /tmp location remains available
+  as an explicit opt-in (useful for CI ephemeral runs).
+
+  GROUP 2: Scratch-branch commit on every file write
+  Each implementer file write in a worktree triggers a mirrored commit
+  on refs/miniforge/scratch/<workflow-id> in the *parent* repo (not the
+  worktree — avoids the known empty-tree bug). Commits are small, fast,
+  not pushed. Supervisor can recover in-flight work from the scratch ref
+  after a crash.
+
+  Commit message format:
+    scratch: <workflow-id> <phase> <file-path>
+
+  Scratch refs are auto-garbage-collected 7 days after workflow-run/finished.
+
+  GROUP 3: Recovery CLI
+  `miniforge recover <workflow-id>` lists all scratch commits for that
+  workflow, shows diff stats, and offers to:
+    (a) squash them into a recovery branch for manual review
+    (b) discard them (with confirmation)
+  Example:
+    $ miniforge recover 40a8f167-2b48-4324-a2ed-fcd18b7fa9b7
+    Found 14 scratch commits (2026-04-17 16:35:17 → 16:42:40)
+    Summary: 11 files written, 847 insertions, 23 deletions
+    Phases: implement (14 commits)
+    [1] Create recovery branch `recover/40a8f167` with squashed commits
+    [2] Show diff
+    [3] Discard
+
+  GROUP 4: Worktree lifecycle hooks
+  Extend the existing worktree-lifecycle component: on worktree-create
+  register the scratch-ref, on worktree-destroy preserve the scratch ref
+  until GC time."
+
+ :spec/intent {:type :refactor
+               :scope ["components/workflow-runner/src"
+                       "components/worktree-lifecycle/src"
+                       "components/implementer/src"
+                       "bases/cli/src/ai/miniforge/cli/main/commands/"
+                       "resources/config/default-user-config.edn"]}
+
+ :spec/constraints
+ ["Scratch commits must go to the PARENT repo directory — worktree commits produce empty trees (documented prior-art bug)"
+  "Scratch commits must not pollute `git log` on tracked branches — use refs/miniforge/scratch/* namespace"
+  "Scratch-commit overhead must stay under 200ms per file write to avoid slowing implementers"
+  "Worktree-root migration must handle existing /tmp worktrees gracefully (detect + warn, don't error)"
+  "Recovery CLI must require explicit confirmation before discarding work"]
+
+ :spec/acceptance-criteria
+ ["Default worktree-root is `~/.miniforge/worktrees/` — surviving across reboots"
+  "Every file write in a worktree produces a scratch commit on refs/miniforge/scratch/<workflow-id>"
+  "Scratch commits are visible via `git show refs/miniforge/scratch/<workflow-id>` and have correct trees (not empty)"
+  "`miniforge recover <workflow-id>` succeeds on today's gates workflow if re-simulated"
+  "7-day GC removes scratch refs for completed workflows"
+  "Existing test suite passes; new tests cover crash-recovery path"]
+
+ :spec/workflow-type :canonical-sdlc}
