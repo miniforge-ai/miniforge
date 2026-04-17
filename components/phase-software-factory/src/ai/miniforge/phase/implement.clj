@@ -250,10 +250,40 @@
         peer-advice (collect-peer-advice ctx)
         task (cond-> task
                peer-advice (assoc :task/peer-advice peer-advice))
-        result (try
-                 (agent/invoke implementer-agent task agent-ctx)
-                 (catch Exception e
-                   (response/failure e)))]
+        impl-result (try
+                      (agent/invoke implementer-agent task agent-ctx)
+                      (catch Exception e
+                        (response/failure e)))
+        ;; Curator post-processes the implementer's environment writes into a
+        ;; structured :code artifact. It fast-fails on empty diffs (previously
+        ;; a silent multi-retry failure mode). See components/agent/src/…/curator.clj.
+        ;; Only invoke when the implementer succeeded; on implementer error we
+        ;; propagate the original failure unchanged.
+        result (if (= :success (:status impl-result))
+                 (let [curator-result
+                       (try
+                         (agent/curate-implement-output
+                          {:implementer-result impl-result
+                           :env-id (get ctx :execution/environment-id)
+                           :worktree-path (resolve-worktree-path ctx)
+                           :executor (get ctx :execution/executor)
+                           :execute-fn (get ctx :execution/execute-fn)
+                           :pre-session-snapshot (get ctx :execution/pre-session-snapshot)
+                           :intent-scope (get-in ctx [:execution/input :intent :scope])
+                           :spec-description (get-in ctx [:execution/input :description])
+                           :llm-client (get ctx :llm-backend)
+                           :logger logger})
+                         (catch Exception e
+                           (response/failure e)))]
+                   (if (= :success (:status curator-result))
+                     ;; Merge curator output on top of implementer result so phase
+                     ;; metrics (tokens, duration) from the implementer are preserved.
+                     (-> impl-result
+                         (assoc :output (:output curator-result))
+                         (update :metrics merge (:metrics curator-result)))
+                     ;; Curator failure (e.g. empty diff) — surface as phase error.
+                     curator-result))
+                 impl-result)]
     (-> (phase-result/enter-context ctx :implement :implementer gates budget start-time result)
         (assoc-in [:phase :rules-manifest] rules-manifest))))
 

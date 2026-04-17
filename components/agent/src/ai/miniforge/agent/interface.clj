@@ -111,6 +111,7 @@
 (def create-tester specialized/create-tester)
 (def create-reviewer specialized/create-reviewer)
 (def create-releaser specialized/create-releaser)
+(def curate-implement-output specialized/curate-implement-output)
 (def Plan specialized/Plan)
 (def PlanTask specialized/PlanTask)
 (def CodeArtifact specialized/CodeArtifact)
