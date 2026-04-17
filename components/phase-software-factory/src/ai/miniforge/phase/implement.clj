@@ -276,22 +276,42 @@
             :logger logger})
           (catch Exception e
             (response/failure e)))
+        ;; The curator's verdict is the source of truth about whether the
+        ;; implementer produced useful work (the environment is the artifact).
+        ;; Its terminal :code (e.g. :curator/no-files-written) carries
+        ;; retry-or-terminate signal the phase runner depends on, so when the
+        ;; curator returned an error we propagate IT, not the implementer's
+        ;; symptom-level error. If the implementer also errored, that context
+        ;; is preserved in the event stream separately.
+        ;; Fix for 2026-04-17 dogfood: previously impl-result won on dual-error,
+        ;; dropping the curator's :code and leaving leave-implement's retry
+        ;; gate blind — phase retried 6×.
+        curator-terminal?
+        (= :curator/no-files-written
+           (get-in curator-result [:error :data :code]))
         result (cond
-                 ;; Curator found files — trust it and use its artifact, even if
-                 ;; the implementer reported error. Merge impl metrics through.
+                 ;; Curator found files — use its artifact, even if the
+                 ;; implementer reported error. Merge implementer metrics through.
                  (= :success (:status curator-result))
                  (-> impl-result
                      (assoc :status :success)
                      (assoc :output (:output curator-result))
                      (update :metrics merge (:metrics curator-result)))
-                 ;; Curator found nothing AND implementer reported success —
-                 ;; that's the empty-diff fast-fail path (silent "wrote nothing").
-                 (= :success (:status impl-result))
+                 ;; Curator said no-files (terminal). This wins over any
+                 ;; implementer error — the implementer's error is the symptom,
+                 ;; the empty diff is the root cause the phase runner needs.
+                 curator-terminal?
                  curator-result
-                 ;; Curator found nothing AND implementer reported error —
-                 ;; propagate the original implementer error (more specific).
+                 ;; Implementer errored for a non-curator reason (rate-limit,
+                 ;; exception, etc.). Propagate — the phase runner classifies
+                 ;; those via rate-limited? / existing branches.
+                 (not= :success (:status impl-result))
+                 impl-result
+                 ;; Implementer reported success but curator still returned
+                 ;; something non-success (shouldn't happen outside no-files;
+                 ;; defensive fallback).
                  :else
-                 impl-result)]
+                 curator-result)]
     (-> (phase-result/enter-context ctx :implement :implementer gates budget start-time result)
         (assoc-in [:phase :rules-manifest] rules-manifest))))
 
