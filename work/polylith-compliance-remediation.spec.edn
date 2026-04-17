@@ -1,76 +1,170 @@
 ;; =============================================================================
-;; Spec: Polylith Compliance Remediation
+;; Spec: Polylith Compliance Remediation (Pass 2)
 ;; =============================================================================
 ;;
-;; `poly check` reports 41 errors. Components bypass interfaces, circular
-;; dependencies exist, project deps are incomplete. Must fix.
+;; `poly check` still reports structural errors after the Error 101 pass that
+;; fixed all illegal namespace dependencies. Remaining errors are structural
+;; Polylith violations: missing interface definitions, multi-impl components
+;; without profiles, incomplete project configs, and a base-to-brick direct
+;; dependency.
 ;;
-;; Fix groups in dependency order:
+;; Current errors (verified 2026-04-16):
 ;;
-;; GROUP 1: Break circular dependency (Error 104)
-;;   gate > cli > workflow > gate
+;; ERROR 103 × 2 — Missing interface definitions
+;;   phase-deployment and phase-software-factory both implement the `phase`
+;;   interface but are missing ~28 pass-through function definitions each:
+;;   resolve-event-stream, emit-milestone-failed!, emit-agent-completed!,
+;;   get-phase-interceptor-method, extract-status, failed?, merge-with-defaults,
+;;   emit-phase-completed!, emit-milestone-started!, emit-agent-started!,
+;;   succeeded-or-done?, emit-phase-started!, already-done?,
+;;   emit-milestone-completed!, create-streaming-callback-or-noop, succeeded?,
+;;   create-streaming-callback, retrying?, register-phase-defaults!,
+;;   configured-phase-namespaces, reset-phase-loader!, build-pipeline,
+;;   ensure-phase-implementations-loaded!, enter-context, exception-error,
+;;   get-phase-interceptor, list-phases, phase-defaults, validate-pipeline.
 ;;
-;; GROUP 2: Fix 31 interface bypass violations (Error 101)
-;;   Components reaching into internal namespaces instead of .interface
+;; ERROR 106 × 6 — Multi-impl interfaces without profiles
+;;   `data-foundry` interface: implemented by 22 components in development,
+;;   3 in miniforge, 3 in miniforge-core.
+;;   `phase` interface: implemented by phase, phase-deployment,
+;;   phase-software-factory in development, miniforge, and miniforge-tui.
 ;;
-;; GROUP 3: Fix missing interface definitions (Error 103)
-;;   phase-deployment and phase-software-factory
+;; ERROR 107 × 3 — Missing components/bases in projects
+;;   miniforge: missing mcp-context-server base
+;;   miniforge-core: missing diagnosis, improvement, reliability components
+;;   miniforge-tui: missing compliance-scanner, connector-linter, context-pack,
+;;     dag-primitives, decision, diagnosis, improvement, reliability,
+;;     repo-index, semantic-analyzer + lsp-mcp-bridge and mcp-context-server bases
 ;;
-;; GROUP 4: Fix multi-implementation interfaces (Error 106/108)
-;;   data-foundry and phase multi-impl need profiles
+;; ERROR 108 × 1 — Multi-impl components in development without profiles
+;;   data-foundry and phase multi-impl components must move to profiles
 ;;
-;; GROUP 5: Fix project completeness (Error 107, 112)
+;; ERROR 112 × 1 — Base depending on brick directly
+;;   mcp-context-server base deps.edn has
+;;   `../../components/messages` as a direct path instead of going through
+;;   the component's interface dependency
 ;;
-;; GROUP 6: Clean up warnings (202, 207)
+;; WARNING 202 — Missing paths in development deps.edn
+;;   17 resource/test paths declared that don't exist on disk:
+;;   algorithms/resources, connector-sarif/resources, evaluation/resources,
+;;   event-stream/resources, fsm/resources, gate/resources, heuristic/resources,
+;;   improvement/resources, observer/resources, orchestrator/test,
+;;   policy/resources, pr-train/resources, repo-dag/resources,
+;;   self-healing/resources, spec-parser/resources, task-executor/resources,
+;;   task/resources
+;;
+;; WARNING 205 × 5 — Non-top namespaces in test fixtures
+;;   workflow-security-compliance fixtures, pipeline-config and pipeline-pack
+;;   test resources. Either rename or exclude from brick scanning.
+;;
+;; WARNING 207 × 3 — Unnecessary components in projects
+;;   Components declared in project deps.edn that aren't reachable from
+;;   any base in that project. 24 in miniforge, 14 in miniforge-core,
+;;   13 in miniforge-tui.
 
-{:spec/title "Polylith compliance remediation — fix all poly check errors"
+{:spec/title "Polylith compliance remediation (pass 2) — fix remaining poly check errors"
 
  :spec/description
- "Fix all 41 errors from `poly check`. Every component must depend only on
-  interfaces, circular dependencies must be broken, and project configs must
-  be complete.
+ "Fix all remaining `poly check` errors after the Error 101 interface-bypass
+  pass. Structural Polylith fixes only — no behavior changes.
 
-  GROUP 1: Break circular dependency (Error 104)
-  gate > cli > workflow > gate. Use requiring-resolve or extract shared
-  concern to break the cycle.
+  GROUP 1: Complete interface definitions (Error 103 — 2 sites)
+  phase-deployment and phase-software-factory both claim to implement the
+  `phase` interface but are missing ~28 functions each. For each missing
+  function, either:
+  (a) add a pass-through in the component's interface.clj that delegates
+      to the same impl as the canonical `phase` component, OR
+  (b) restructure so these components extend the phase interface instead
+      of claiming to fully implement it (Polylith extension pattern).
 
-  GROUP 2: Fix interface bypass violations (Error 101 — 31 sites)
-  For each: change require to .interface, add pass-through if missing.
-  Key components: workflow (5), gate (3), control-plane cluster (4),
-  phase-software-factory (2), semantic-analyzer (2), remaining singles.
+  Option (a) is simpler; option (b) is architecturally cleaner if most
+  functions genuinely belong to the canonical phase component.
 
-  GROUP 3: Fix missing interface definitions (Error 103 — 2 sites)
-  phase-deployment and phase-software-factory missing many phase interface fns.
+  GROUP 2: Resolve multi-impl interfaces (Error 106 × 6, Error 108 × 1)
 
-  GROUP 4: Fix multi-impl interfaces (Error 106/108 — 7 sites)
-  data-foundry and phase need Polylith profiles.
+  *** IMPORTANT: Components must NEVER overload the same interface name. ***
 
-  GROUP 5: Fix project completeness (Error 107, 112 — 4 sites)
-  Add missing components to project deps.edn. Fix mcp-context-server
-  base direct brick dependency.
+  The correct pattern (per ixi's tool-pubsub / adapter-pubsub and LLM
+  protocols): each component has a UNIQUE interface name. Runtime backend
+  selection happens via multimethod dispatch inside a canonical interface
+  component, or via adapter components that each expose their own distinct
+  interface.
 
-  GROUP 6: Clean up warnings (202, 207)
-  Missing resource paths, unnecessary components in projects."
+  Reference pattern from ixi:
+    components/tool-pubsub/.../interface.clj   — canonical interface
+    components/tool-pubsub/.../extensibility.clj — (defmulti publish! ...)
+    components/tool-pubsub-coreasync/          — interface name: :tool-pubsub-coreasync
+    components/adapter-pubsub-gcp/             — interface name: :adapter-pubsub
+
+  None of those components share an interface name. Swapping is done by
+  choosing which adapter is included, or by registering a backend method
+  against the canonical multimethod.
+
+  For `data-foundry` interface (22 components in dev):
+    - Give each component a unique interface name (e.g., :connector-auth,
+      :connector-retry, :connector-github — NOT :data-foundry)
+    - Promote one component to the canonical `:data-foundry` interface
+      that owns any shared multimethods for cross-backend dispatch
+    - Projects then include whichever concrete components they need, each
+      under its own interface name — no overload
+
+  For `phase` interface (3 components):
+    - `phase` stays canonical (:phase) and owns any dispatch multimethods
+    - `phase-software-factory` gets its own interface (e.g., :phase-software-factory)
+    - `phase-deployment` gets its own interface (e.g., :phase-deployment)
+    - Projects include whichever they need; no two components claim :phase
+
+  Do NOT use Polylith profiles to work around interface overload — profiles
+  are for bundling dev/test variants, not for swapping implementations of
+  the same interface name. The fix is to rename interfaces, not to profile
+  the conflict away.
+
+  GROUP 3: Complete project definitions (Error 107 × 3)
+  miniforge project: add mcp-context-server base
+  miniforge-core: add diagnosis, improvement, reliability components
+  miniforge-tui: add 10 missing components + 2 missing bases
+
+  Each project's deps.edn needs the missing entries. Verify the actual
+  runtime reachability — some may genuinely not be needed and the poly
+  check should be suppressed instead.
+
+  GROUP 4: Fix base-to-brick direct dep (Error 112)
+  bases/mcp-context-server/deps.edn has `../../components/messages` as
+  a direct path. Change to rely on the component's interface-level
+  dependency graph like other bases.
+
+  GROUP 5: Clean up warnings (202, 205, 207)
+  - Warning 202: Remove missing paths from development project deps.edn,
+    or create the missing directories if they should exist.
+  - Warning 205: Rename test fixture namespaces or configure poly to
+    exclude them from brick scanning.
+  - Warning 207: Remove unreachable components from project deps.edn
+    (24 + 14 + 13 entries total)."
 
  :spec/intent {:type :refactor
                :scope ["components/*/src"
                        "components/*/deps.edn"
                        "bases/*/deps.edn"
                        "projects/*/deps.edn"
+                       "development/deps.edn"
                        "workspace.edn"]}
 
  :spec/constraints
- ["Do not change component behavior — only dependency wiring"
+ ["Do not change component behavior — only structural wiring"
   "Interface pass-throughs must preserve existing function signatures"
   "Run poly check after each group to verify progress"
   "Run bb test after each group to verify no regressions"
-  "Each group should be a separate commit for reviewability"]
+  "Each group should be a separate commit for reviewability"
+  "Profiles must not break existing build:cli, build:kernel, or build:tui tasks"]
 
  :spec/acceptance-criteria
  ["poly check reports 0 errors"
-  "No circular dependencies in the component graph"
-  "All cross-component requires use .interface namespaces"
-  "All existing tests pass"
-  "Project deps.edn files are complete per poly check"]
+  "poly check warnings reduced to pre-existing items only (not ours)"
+  "bb build:cli, bb build:kernel, bb build:tui all succeed"
+  "bb test passes without regressions"
+  "No two components share an interface name anywhere in the workspace"
+  "data-foundry and phase multi-impls resolved via unique interface names + multimethod dispatch"
+  "Project deps.edn files declare only reachable components"
+  "mcp-context-server base no longer depends on messages via relative path"]
 
  :spec/workflow-type :canonical-sdlc}
