@@ -6,10 +6,14 @@
 
 # N3 — Event Stream & Observability Contract
 
-**Version:** 0.6.0-draft
-**Date:** 2026-03-08
+**Version:** 0.7.0-draft
+**Date:** 2026-04-17
 **Status:** Draft
 **Conformance:** MUST
+
+_v0.7.0 adds §3.19 supervisory snapshot event family
+(`:supervisory/*-upserted`) as the consumer-facing surface for canonical
+supervisory entities defined in N5-delta-supervisory-control-plane §3._
 
 ---
 
@@ -1592,6 +1596,163 @@ emit the following event types. All events use the `:data-foundry/` namespace pr
 
 All Data Foundry events MUST link to pipeline-run/id for correlation. Events that
 produce evidence bundles MUST include an `:evidence-bundle-id` field per N6.
+
+### 3.19 Supervisory Snapshot Events
+
+The supervisory-state component (N5-delta-supervisory-control-plane §3.4) emits
+entity-snapshot events whenever a canonical supervisory entity is inserted or
+updated. These events carry the **full entity** as specified in
+N5-delta-supervisory-control-plane §3 and serve as the single source of
+supervisory truth for external consumers (the Rust control console, native
+app, web dashboard).
+
+Consumers MAY rely on the invariant that any `:supervisory/*-upserted` event
+contains a complete and valid entity per the §3 schema. The supervisory-state
+component owns materialization; consumers never reconstruct entities from
+fine-grained events directly.
+
+Rules:
+
+- Each entity MUST be keyed by its canonical ID (`:workflow-run/id`,
+  `:agent/id`, `[:repo :number]` for PRs, `:policy-eval/id`,
+  `:attention/id`).
+- A `:supervisory/*-upserted` event SHOULD be emitted at most once per
+  state-change burst (coalesce bursts within ≤ 100 ms into a single emission).
+- `:attention/resolved? = true` SHALL be encoded as a standard upsert rather
+  than a separate deletion event; consumers observe the transition via the
+  `:attention/resolved?` field.
+- The supervisory-state component reads its own emitted events on startup to
+  rebuild its in-memory entity table (§3.4 of N5-delta-supervisory-control-plane).
+  Implementations MAY also write periodic full-snapshot events to bound
+  startup replay cost.
+
+#### supervisory/workflow-upserted
+
+```clojure
+{:event/type :supervisory/workflow-upserted
+ :event/id uuid
+ :event/timestamp inst
+ :event/version "1.0.0"
+ :event/sequence-number int
+ :workflow/id uuid
+
+ :supervisory/entity {:workflow-run/id          uuid
+                      :workflow-run/workflow-key string
+                      :workflow-run/intent       string
+                      :workflow-run/status       keyword    ; :queued :running :paused :blocked :completed :failed :cancelled
+                      :workflow-run/current-phase keyword
+                      :workflow-run/started-at   inst
+                      :workflow-run/updated-at   inst
+                      :workflow-run/trigger-source keyword  ; :mcp :cli :api :chain
+                      :workflow-run/correlation-id uuid}
+
+ :message "Workflow {workflow-key} upserted"}
+```
+
+#### supervisory/agent-upserted
+
+```clojure
+{:event/type :supervisory/agent-upserted
+ :event/id uuid
+ :event/timestamp inst
+ :event/version "1.0.0"
+ :event/sequence-number int
+
+ :supervisory/entity {:agent/id                   uuid
+                      :agent/vendor               keyword   ; :claude-code :codex :miniforge-tui ...
+                      :agent/external-id          string
+                      :agent/name                 string
+                      :agent/status               keyword   ; :idle :starting :executing :blocked :completed :failed :unreachable :unknown
+                      :agent/capabilities         [keyword]
+                      :agent/heartbeat-interval-ms int
+                      :agent/metadata             map
+                      :agent/tags                 [string]
+                      :agent/registered-at        inst
+                      :agent/last-heartbeat       inst
+                      :agent/task                 (maybe string)}
+
+ :message "Agent {name} upserted"}
+```
+
+#### supervisory/pr-upserted
+
+```clojure
+{:event/type :supervisory/pr-upserted
+ :event/id uuid
+ :event/timestamp inst
+ :event/version "1.0.0"
+ :event/sequence-number int
+
+ :supervisory/entity {:pr/repo                string
+                      :pr/number              int
+                      :pr/url                 string
+                      :pr/branch              string
+                      :pr/title               string
+                      :pr/status              keyword   ; :draft :open :reviewing :changes-requested :approved :merging :merged :closed :failed
+                      :pr/merge-order         int
+                      :pr/depends-on          [int]
+                      :pr/blocks              [int]
+                      :pr/ci-status           keyword   ; :pending :running :passed :failed :skipped
+                      :pr/author              (maybe string)
+                      :pr/behind-main         (maybe boolean)
+                      :pr/merged-at           (maybe inst)}
+
+ :message "PR {repo}#{number} upserted"}
+```
+
+#### supervisory/policy-evaluated
+
+```clojure
+{:event/type :supervisory/policy-evaluated
+ :event/id uuid
+ :event/timestamp inst
+ :event/version "1.0.0"
+ :event/sequence-number int
+
+ :supervisory/entity {:policy-eval/id            uuid
+                      :policy-eval/target-type   keyword    ; :pr :artifact :workflow-output
+                      :policy-eval/target-id     any        ; [repo number] for PRs, uuid otherwise
+                      :policy-eval/passed?       boolean
+                      :policy-eval/packs-applied [string]
+                      :policy-eval/violations    [{:violation/rule-id     keyword
+                                                   :violation/severity    keyword  ; :critical :high :medium :low :info
+                                                   :violation/category    keyword
+                                                   :violation/message     string
+                                                   :violation/location    (maybe string)
+                                                   :violation/remediable? boolean}]
+                      :policy-eval/evaluated-at  inst}
+
+ :message "Policy evaluation {id}: {passed?}"}
+```
+
+Unlike the other supervisory events, `:supervisory/policy-evaluated` is
+**immutable** — a re-evaluation produces a new entity with a new
+`:policy-eval/id`, never mutating a prior one (N5-delta-supervisory-control-plane §3.2).
+
+#### supervisory/attention-derived
+
+```clojure
+{:event/type :supervisory/attention-derived
+ :event/id uuid
+ :event/timestamp inst
+ :event/version "1.0.0"
+ :event/sequence-number int
+
+ :supervisory/entity {:attention/id          uuid
+                      :attention/severity    keyword   ; :critical :warning :info
+                      :attention/source-type keyword   ; :workflow :pr :train :policy :agent
+                      :attention/source-id   any
+                      :attention/summary     string
+                      :attention/derived-at  inst
+                      :attention/resolved?   boolean}
+
+ :message "Attention {severity}: {summary}"}
+```
+
+The supervisory-state component derives attention items from the other four
+entity tables per N5-delta-supervisory-control-plane §5.1 and emits an upsert
+whenever an attention condition changes (including resolution via
+`:attention/resolved? = true`).
 
 ---
 
