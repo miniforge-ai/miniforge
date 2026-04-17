@@ -40,22 +40,30 @@
   (UUID/fromString "6ba7b810-9dad-11d1-80b4-00c04fd430c8"))
 
 (defn- uuid-v5
-  "Derive a deterministic UUID v5 from a namespace and a byte string."
+  "Derive a deterministic UUID v5 from a namespace UUID and a string key.
+
+   Uses SHA-1 per RFC-4122 §4.3. The bit-math constants are encoded as
+   signed longs because Clojure parses `0xFFFFFFFFFFFF0FFF` (>Long.MAX_VALUE)
+   as BigInt, which breaks `bit-and`."
   [^UUID ns-uuid ^String key]
-  (let [md   (MessageDigest/getInstance "SHA-1")
-        _    (let [buf (ByteBuffer/wrap (byte-array 16))]
-               (.putLong buf (.getMostSignificantBits ns-uuid))
-               (.putLong buf (.getLeastSignificantBits ns-uuid))
-               (.update md (.array buf)))
-        _    (.update md (.getBytes key "UTF-8"))
-        hash (.digest md)
-        msb  (ByteBuffer/wrap hash 0 8)
-        lsb  (ByteBuffer/wrap hash 8 8)
-        hi   (bit-or (bit-and (.getLong msb) 0xFFFFFFFFFFFF0FFF)
-                     0x0000000000005000)                        ; version 5
-        lo   (bit-or (bit-and (.getLong lsb) 0x3FFFFFFFFFFFFFFF)
-                     (bit-shift-left 0x8 60))]                  ; RFC-4122 variant
-    (UUID. hi lo)))
+  (let [md (MessageDigest/getInstance "SHA-1")
+        ns-buf (ByteBuffer/wrap (byte-array 16))]
+    (.putLong ns-buf (.getMostSignificantBits ns-uuid))
+    (.putLong ns-buf (.getLeastSignificantBits ns-uuid))
+    (.update md (.array ns-buf))
+    (.update md (.getBytes key "UTF-8"))
+    (let [hash    (.digest md)
+          msb-raw (.getLong (ByteBuffer/wrap hash 0 8))
+          lsb-raw (.getLong (ByteBuffer/wrap hash 8 8))
+          ;; 0xFFFFFFFFFFFF0FFF as signed long = -61441.
+          ;; Clears the 4-bit version nibble (bits 48-51), then OR in 0x5000
+          ;; to set UUID version = 5 (SHA-1 name-based).
+          hi      (bit-or (bit-and msb-raw (unchecked-long -61441)) 0x5000)
+          ;; Clear the top two bits (variant field, 62-63), then set to 10
+          ;; (RFC-4122). Long/MIN_VALUE == 0x8000000000000000.
+          lo      (bit-or (bit-and lsb-raw 0x3FFFFFFFFFFFFFFF)
+                          Long/MIN_VALUE)]
+      (UUID. hi lo))))
 
 (defn- attention-id
   "Stable ID derived from source-type and source-id so the same logical
@@ -178,13 +186,14 @@
    pr-behind-main-rule
    policy-violation-rule])
 
-(defn derive
+(defn derive-items
   "Run all rules against the entity table and return a map `{id → item}`.
 
    Using a map keyed by attention/id guarantees deduplication: if two rules
    would produce the same logical signal (same source-type + source-id) the
    later rule's entry wins — in practice they produce identical items so
-   this is idempotent."
+   this is idempotent. Named `derive-items` rather than `derive` to avoid
+   shadowing `clojure.core/derive`."
   [table]
   (->> rules
        (mapcat #(% table))
@@ -192,11 +201,11 @@
        (into {})))
 
 (defn derive-seq
-  "Same as `derive` but returns a sorted sequence suitable for display.
+  "Same as `derive-items` but returns a sorted sequence suitable for display.
 
    Sort: severity rank (critical → warning → info), then summary ascending."
   [table]
   (let [rank {:critical 0 :warning 1 :info 2}]
-    (->> (derive table)
+    (->> (derive-items table)
          vals
          (sort-by (juxt #(rank (:attention/severity %)) :attention/summary)))))

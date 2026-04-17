@@ -28,9 +28,7 @@
    producer.
 
    All maps are open (additional keys pass through) per
-   N5-delta-1 §12.4."
-  (:require
-   [ai.miniforge.schema.interface :as schema-core]))
+   N5-delta-1 §12.4.")
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Enums — match the Rust enum variants in supervisory-entities
@@ -69,33 +67,43 @@
 ;; Registry extensions for supervisory v1
 
 (def registry
-  "Malli registry extending core registry with supervisory v1 keyword types."
-  (merge
-   schema-core/registry
-   {;; WorkflowRun
-    :workflow-run/id              :id/uuid
-    :workflow-run/status          (into [:enum] workflow-run-statuses)
-    :workflow-run/trigger-source  (into [:enum] trigger-sources)
+  "Malli registry for supervisory v1 keyword types.
 
-    ;; AgentSession (overlaps with :agent/id from core; supervisory expects UUID)
-    :agent/status                 (into [:enum] agent-statuses)
+   Inlines the few base keyword types the supervisory entities need
+   (`:id/uuid`, `:common/timestamp`, `:common/non-neg-int`) rather than
+   depending on `ai.miniforge.schema.core/registry`. That registry is
+   intentionally not on the schema component's public interface, and
+   duplicating 3 lines here keeps supervisory-state from reaching across
+   a Polylith boundary."
+  {;; Primitives
+   :id/uuid            uuid?
+   :common/timestamp   inst?
+   :common/non-neg-int [:int {:min 0}]
 
-    ;; PrFleetEntry
-    :pr/status                    (into [:enum] pr-statuses)
-    :pr/ci-status                 (into [:enum] ci-statuses)
+   ;; WorkflowRun
+   :workflow-run/id              :id/uuid
+   :workflow-run/status          (into [:enum] workflow-run-statuses)
+   :workflow-run/trigger-source  (into [:enum] trigger-sources)
 
-    ;; PolicyEvaluation
-    :policy-eval/id               :id/uuid
-    :policy-eval/target-type      (into [:enum] policy-target-types)
+   ;; AgentSession
+   :agent/status                 (into [:enum] agent-statuses)
 
-    ;; PolicyViolation
-    :violation/severity           (into [:enum] violation-severities)
-    :violation/category           (into [:enum] violation-categories)
+   ;; PrFleetEntry
+   :pr/status                    (into [:enum] pr-statuses)
+   :pr/ci-status                 (into [:enum] ci-statuses)
 
-    ;; AttentionItem
-    :attention/id                 :id/uuid
-    :attention/severity           (into [:enum] attention-severities)
-    :attention/source-type        (into [:enum] attention-source-types)}))
+   ;; PolicyEvaluation
+   :policy-eval/id               :id/uuid
+   :policy-eval/target-type      (into [:enum] policy-target-types)
+
+   ;; PolicyViolation
+   :violation/severity           (into [:enum] violation-severities)
+   :violation/category           (into [:enum] violation-categories)
+
+   ;; AttentionItem
+   :attention/id                 :id/uuid
+   :attention/severity           (into [:enum] attention-severities)
+   :attention/source-type        (into [:enum] attention-source-types)})
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Entity schemas — open maps, mirror N5-delta-1 §3.1
