@@ -45,7 +45,7 @@
 (deftest test-select-by-automatic
   (testing "Automatic selection for thinking-heavy"
     (let [selected (selector/select-by-automatic :thinking-heavy {})]
-      (is (some #{selected} [:opus-4.6 :gpt-5.4-pro :gpt-5.4]))))
+      (is (some #{selected} [:opus-4.7 :opus-4.6 :gpt-5.4-pro :gpt-5.4]))))
 
   (testing "Automatic selection for execution-focused"
     (let [selected (selector/select-by-automatic :execution-focused {})]

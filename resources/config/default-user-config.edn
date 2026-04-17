@@ -14,7 +14,7 @@
               :convergence-threshold 0.95}
   :agents {:default-models {:thinking   "gpt-5.4"
                             :execution  "claude-sonnet-4-6"
-                            :escalation "claude-opus-4-6"}}
+                            :escalation "claude-opus-4-7"}}
   :model-selection {:enabled true
                     :strategy :automatic
                     :cost-limit-per-task 0.10
