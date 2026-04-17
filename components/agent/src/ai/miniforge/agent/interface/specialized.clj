@@ -44,6 +44,9 @@
 ;; implementer's environment writes into a structured code artifact. Exposed
 ;; here so phases and interop code can reach it via the standard interface.
 (def curate-implement-output curator/curate-implement-output)
+(def CuratedArtifact curator/CuratedArtifact)
+(def CuratedFileEntry curator/FileEntry)
+(def validate-curated-artifact curator/validate-curated-artifact)
 
 (def Plan planner/Plan)
 (def PlanTask planner/PlanTask)

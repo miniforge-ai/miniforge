@@ -33,7 +33,7 @@
    never calls submit_code_artifact, producing no artifact at all). The
    curator runs after the implementer, is specialized for structured
    output, and fast-fails when no files were written — replacing silent
-    multi-retry failure with a single clear error.
+   multi-retry failure with a single clear terminal error.
 
    Two-layer design:
    - Layer 1 is deterministic (git-diff parsing, path heuristics). This
@@ -50,44 +50,81 @@
    [ai.miniforge.agent.file-artifacts :as file-artifacts]
    [ai.miniforge.agent.prompts :as prompts]
    [ai.miniforge.llm.interface :as llm]
-   [ai.miniforge.logging.interface :as log]
+   [ai.miniforge.repo-index.interface :as messages]
    [ai.miniforge.response.interface :as response]
+   [ai.miniforge.schema.interface :as schema]
    [clojure.edn :as edn]
-   [clojure.string :as str]))
+   [clojure.string :as str]
+   [malli.core :as m]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; System prompt (lazy — only loaded when LLM enrichment is invoked)
+;; Schemas — the artifact shape is the single source of truth. No map
+;; literals with these keys outside of build-curated-artifact.
+
+(def FileEntry
+  "A single file entry in the code artifact."
+  [:map
+   [:path [:string {:min 1}]]
+   [:content :string]
+   [:action [:enum :create :modify :delete]]])
+
+(def CuratedArtifact
+  "Schema for the curator's structured output. Consumed by verify,
+   review, release, and PR-doc generation phases."
+  [:map
+   [:code/id :uuid]
+   [:code/files [:vector FileEntry]]
+   [:code/summary [:string {:min 1}]]
+   [:code/tests-added? :boolean]
+   [:code/scope-deviations [:vector :string]]
+   [:code/breaking-change? :boolean]
+   [:code/rationale {:optional true} [:maybe :string]]
+   [:code/language {:optional true} [:maybe :string]]
+   [:code/curated-at inst?]
+   [:code/curator-source [:enum :deterministic :hybrid]]])
+
+(defn validate-curated-artifact
+  "Validate a CuratedArtifact, returning schema/valid or schema/invalid."
+  [artifact]
+  (if (m/validate CuratedArtifact artifact)
+    (schema/valid)
+    (schema/invalid (schema/explain CuratedArtifact artifact)
+                    {:errors (schema/explain CuratedArtifact artifact)})))
 
 (def curator-system-prompt
-  "System prompt for the curator agent. Loaded from resources/prompts/curator.edn."
+  "System prompt for the curator agent. Loaded from resources/prompts/curator.edn.
+   Lazy so deterministic-only mode works without the prompt resource."
   (delay
     (try
       (prompts/load-prompt :curator)
-      (catch Exception _
-        ;; Prompt resource absent → deterministic-only mode.
-        nil))))
+      (catch Exception _ nil))))
 
 ;------------------------------------------------------------------------------ Layer 1
-;; Deterministic helpers
+;; Deterministic helpers — pure, table-driven where possible
 
-(defn- test-file?
-  "Heuristic: does the path look like a test file?"
+(def ^:private test-path-patterns
+  "Regex set — any match flags a path as test-code for :code/tests-added?.
+   Kept as data so the detection is a single `some` over a table, not a
+   growing cond ladder."
+  [#"(^|/)test/"
+   #"(^|/)spec/"
+   #"_test\.[A-Za-z0-9]+$"
+   #"\.test\.[A-Za-z0-9]+$"
+   #"_spec\.[A-Za-z0-9]+$"])
+
+(defn- test-path?
+  "True when `path` matches any of the test-path patterns."
   [path]
-  (boolean
-   (or (re-find #"(^|/)test/" path)
-       (re-find #"_test\.[A-Za-z0-9]+$" path)
-       (re-find #"\.test\.[A-Za-z0-9]+$" path)
-       (re-find #"(^|/)spec/" path)
-       (re-find #"_spec\.[A-Za-z0-9]+$" path))))
+  (boolean (some #(re-find % path) test-path-patterns)))
 
 (defn- detect-tests-added
   "True when any file in the diff is a test file."
   [files]
-  (boolean (some (comp test-file? :path) files)))
+  (boolean (some (comp test-path? :path) files)))
 
 (defn- detect-scope-deviations
-  "Return paths in `files` that are not in `intent-scope`.
-   When `intent-scope` is nil/empty, returns []."
+  "Return paths in `files` that are not in `intent-scope`. When
+   `intent-scope` is nil/empty, returns []."
   [files intent-scope]
   (if (empty? intent-scope)
     []
@@ -99,7 +136,8 @@
            vec))))
 
 (defn- detect-language
-  "Infer the primary language from the most common file extension."
+  "Infer the primary language from the most common file extension.
+   Returns nil when no file has a recognizable extension."
   [files]
   (let [extensions (->> files
                         (keep #(second (re-find #"\.([A-Za-z0-9]+)$" (:path % ""))))
@@ -107,18 +145,25 @@
     (when (seq extensions)
       (key (apply max-key val extensions)))))
 
+(defn- action-counts
+  "Return a map of action → file count for the given files.
+   Canonical action-counting so callers don't scatter `filter #(= :X (:action %))`."
+  [files]
+  (-> {:create 0 :modify 0 :delete 0}
+      (merge (frequencies (map :action files)))))
+
 (defn- deterministic-summary
-  "Produce a summary string from file counts and actions."
+  "Produce a summary string from file counts and actions using the
+   :curator/deterministic-summary template in the messages catalog."
   [files]
   (let [n (count files)
-        actions (frequencies (map :action files))
-        by-action #(get actions % 0)]
-    (format "%d file%s changed (%d created, %d modified, %d deleted)"
-            n
-            (if (= 1 n) "" "s")
-            (by-action :create)
-            (by-action :modify)
-            (by-action :delete))))
+        counts (action-counts files)]
+    (messages/t :curator/deterministic-summary
+                {:total n
+                 :s (if (= 1 n) "" "s")
+                 :created (:create counts)
+                 :modified (:modify counts)
+                 :deleted (:delete counts)})))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Diff collection — resolves files from multiple possible sources
@@ -147,12 +192,11 @@
 
 (defn collect-files
   "Resolve the file diff from available sources, in priority order:
-   1. implementer-result has :output :code/files already (fast path)
+   1. implementer-result has :code/files already (fast path)
    2. fresh collection via executor (capsule mode)
    3. fresh collection via local git status (non-capsule)
 
-   Returns a vector (possibly empty) of file entries:
-     [{:path string :content string :action :create|:modify|:delete} ...]"
+   Returns a vector (possibly empty) of file entries."
   [input]
   (vec (or (files-from-result (:implementer-result input))
            (files-via-executor input)
@@ -163,32 +207,34 @@
 ;; Optional LLM enrichment
 
 (defn- build-llm-prompt
-  "Build the curator user prompt from the diff + spec context."
+  "Build the curator user prompt by assembling message-catalog templates.
+   No raw prompt strings in this namespace — all text lives in the
+   repo-index message catalog (see resources/config/repo-index/messages/en-US.edn)."
   [files intent-scope spec-description]
-  (str "The implementer agent just wrote files to a working directory. "
-       "Produce a structured curator report.\n\n"
-       "## Spec description\n\n"
-       (or spec-description "(not provided)") "\n\n"
-       "## Declared scope\n\n"
-       (if (seq intent-scope)
-         (str/join "\n" (map #(str "- " %) intent-scope))
-         "(not specified)")
-       "\n\n## Files changed (" (count files) ")\n\n"
-       (str/join "\n"
-                 (for [f (take 50 files)]
-                   (str "- [" (name (:action f :modify)) "] " (:path f)
-                        " (" (count (:content f "")) " chars)")))
-       (when (> (count files) 50)
-         (str "\n... (" (- (count files) 50) " more files omitted) ..."))
-       "\n\n## Output\n\n"
-       "Return a Clojure EDN map with these keys:\n"
-       "  :summary           1-2 sentence natural-language description of what changed\n"
-       "  :breaking-change?  boolean — is this likely a breaking API change?\n"
-       "  :rationale         1 short paragraph on whether the changes match the spec\n\n"
-       "Example:\n"
-       "  {:summary \"Added retry-budget state machine; diagnoses before retry.\"\n"
-       "   :breaking-change? false\n"
-       "   :rationale \"Implements M1 of the Superpowers plan; no public API changes.\"}\n"))
+  (let [total (count files)
+        shown (take 50 files)
+        overflow (- total 50)
+        section (fn [header body] (str "\n\n## " header "\n\n" body))
+        files-list (str/join "\n"
+                             (for [f shown]
+                               (str "- [" (name (:action f :modify)) "] " (:path f)
+                                    " (" (count (:content f "")) " chars)")))]
+    (str (messages/t :prompt/curator-intro)
+         (section (messages/t :prompt/curator-spec-header)
+                  (or spec-description (messages/t :prompt/curator-spec-unknown)))
+         (section (messages/t :prompt/curator-scope-header)
+                  (if (seq intent-scope)
+                    (str/join "\n" (map #(str "- " %) intent-scope))
+                    (messages/t :prompt/curator-scope-unknown)))
+         (section (str (messages/t :prompt/curator-files-header) " (" total ")")
+                  (cond-> files-list
+                    (pos? overflow)
+                    (str "\n" (messages/t :prompt/curator-files-overflow
+                                          {:count overflow}))))
+         (section (messages/t :prompt/curator-output-header)
+                  (str (messages/t :prompt/curator-output-instruction)
+                       "\n\n"
+                       (messages/t :prompt/curator-output-example))))))
 
 (defn- parse-llm-response
   "Extract the curator's EDN report from a free-form LLM response.
@@ -197,44 +243,89 @@
   (when (string? content)
     (try
       (let [trimmed (str/trim content)
-            candidate (or (when-let [m (re-find
-                                        #"(?s)\{[^{}]*:summary[^{}]*\}"
-                                        trimmed)]
-                            m)
+            candidate (or (re-find #"(?s)\{[^{}]*:summary[^{}]*\}" trimmed)
                           trimmed)
             parsed (edn/read-string candidate)]
         (when (map? parsed) parsed))
       (catch Exception _ nil))))
 
-(defn- enrich-via-llm
-  "Call the LLM backend for a curator report. Returns a map of enrichment
-   fields on success, nil on any failure (deterministic path handles fallback).
+(defn- try-llm-chat
+  "Call the LLM backend; return parsed EDN response or nil on any failure.
+   Isolates the try/catch so the caller has a linear happy-path shape."
+  [llm-client system-prompt user-prompt]
+  (try
+    (let [result (llm/chat llm-client user-prompt
+                           {:system system-prompt
+                            :temperature 0.1
+                            :max-tokens 800})]
+      (when (llm/success? result)
+        (parse-llm-response (llm/get-content result))))
+    (catch Exception _ nil)))
 
-   Accepts an already-resolved llm-client to keep this function
-   dependency-light and easy to test."
-  [llm-client logger files intent-scope spec-description]
+(defn- llm-enrichment-fields
+  "Project a parsed LLM response onto the :llm/... namespace used by the
+   artifact constructor. Driven by a small key-map so additions don't
+   grow the conditional tree."
+  [parsed]
+  (when (map? parsed)
+    {:llm/summary   (:summary parsed)
+     :llm/breaking? (boolean (:breaking-change? parsed))
+     :llm/rationale (:rationale parsed)}))
+
+(defn- enrich-via-llm
+  "Call the LLM backend for a curator report. Returns enrichment fields
+   on success, nil otherwise. Deterministic path is the single fallback."
+  [llm-client files intent-scope spec-description]
   (when (and llm-client (seq files))
-    (try
-      (let [user-prompt (build-llm-prompt files intent-scope spec-description)
-            sys-prompt (or @curator-system-prompt
-                           "You are a code curator. Produce concise structured reports.")
-            result (llm/chat llm-client user-prompt
-                             {:system sys-prompt
-                              :temperature 0.1
-                              :max-tokens 800})]
-        (when (llm/success? result)
-          (when-let [parsed (parse-llm-response (llm/get-content result))]
-            {:llm/summary (:summary parsed)
-             :llm/breaking? (boolean (:breaking-change? parsed))
-             :llm/rationale (:rationale parsed)})))
-      (catch Exception e
-        (when logger
-          (log/warn logger :curator :curator/llm-enrichment-failed
-                    {:data {:error (ex-message e)}}))
-        nil))))
+    (let [sys-prompt (or @curator-system-prompt
+                         (messages/t :prompt/curator-system-fallback))
+          user-prompt (build-llm-prompt files intent-scope spec-description)]
+      (llm-enrichment-fields (try-llm-chat llm-client sys-prompt user-prompt)))))
 
 ;------------------------------------------------------------------------------ Layer 3
+;; Artifact construction — single source of truth for CuratedArtifact shape
+
+(defn- build-curated-artifact
+  "Produce a validated CuratedArtifact from already-computed fields.
+   This is the ONLY place the artifact map literal lives — downstream
+   code that needs these keys consumes the output of this function."
+  [{:keys [files summary tests-added? deviations language enrichment source]}]
+  {:code/id (random-uuid)
+   :code/files files
+   :code/summary summary
+   :code/tests-added? tests-added?
+   :code/scope-deviations deviations
+   :code/breaking-change? (boolean (:llm/breaking? enrichment))
+   :code/rationale (:llm/rationale enrichment)
+   :code/language language
+   :code/curated-at (java.util.Date.)
+   :code/curator-source source})
+
+(defn- artifact-metrics
+  "Standard metrics payload derived from the same action-counts table."
+  [files deviations tests-added? source]
+  (let [counts (action-counts files)]
+    {:files-total (count files)
+     :files-created (:create counts)
+     :files-modified (:modify counts)
+     :files-deleted (:delete counts)
+     :scope-deviations (count deviations)
+     :tests-added? tests-added?
+     :curator-source source}))
+
+;------------------------------------------------------------------------------ Layer 4
 ;; Public API
+
+(defn- empty-diff-error
+  "Build the terminal 'no files written' error. The :code keyword is the
+   stable contract the phase runner branches on to stop retrying."
+  [input]
+  (response/error
+   (messages/t :error/curator-no-files-written)
+   {:data {:code :curator/no-files-written
+           :worktree-path (:worktree-path input)
+           :env-id (:env-id input)
+           :intent-scope (:intent-scope input)}}))
 
 (defn curate-implement-output
   "Take an implementer's result + environment state → structured code artifact.
@@ -255,44 +346,28 @@
    Output:
      response/success with :output being a CuratedArtifact, or
      response/error when the implementer wrote no files."
-  [{:keys [intent-scope spec-description llm-client logger] :as input}]
+  [{:keys [intent-scope spec-description llm-client] :as input}]
   (let [files (collect-files input)]
     (if (empty? files)
-      (response/error
-       "Curator: implementer wrote no files to the environment"
-       ;; :code is a stable keyword the phase runner uses to decide
-       ;; terminal-vs-retry: empty-diff should not be retried blindly.
-       {:data {:code :curator/no-files-written
-               :worktree-path (:worktree-path input)
-               :env-id (:env-id input)
-               :intent-scope intent-scope}})
+      (empty-diff-error input)
       (let [tests-added? (detect-tests-added files)
             deviations (detect-scope-deviations files intent-scope)
             language (detect-language files)
-            enrichment (enrich-via-llm llm-client logger files
-                                       intent-scope spec-description)
+            enrichment (enrich-via-llm llm-client files intent-scope spec-description)
             source (if enrichment :hybrid :deterministic)
             summary (or (not-empty (:llm/summary enrichment))
                         (deterministic-summary files))
-            artifact {:code/id (random-uuid)
-                      :code/files files
-                      :code/summary summary
-                      :code/tests-added? tests-added?
-                      :code/scope-deviations deviations
-                      :code/breaking-change? (boolean (:llm/breaking? enrichment))
-                      :code/rationale (:llm/rationale enrichment)
-                      :code/language language
-                      :code/curated-at (java.util.Date.)
-                      :code/curator-source source}]
+            artifact (build-curated-artifact
+                      {:files files
+                       :summary summary
+                       :tests-added? tests-added?
+                       :deviations deviations
+                       :language language
+                       :enrichment enrichment
+                       :source source})]
         (response/success
          artifact
-         {:metrics {:files-total (count files)
-                    :files-created (count (filter #(= :create (:action %)) files))
-                    :files-modified (count (filter #(= :modify (:action %)) files))
-                    :files-deleted (count (filter #(= :delete (:action %)) files))
-                    :scope-deviations (count deviations)
-                    :tests-added? tests-added?
-                    :curator-source source}})))))
+         {:metrics (artifact-metrics files deviations tests-added? source)})))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

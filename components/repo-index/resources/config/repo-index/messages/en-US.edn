@@ -45,4 +45,31 @@
   :repo-map/table-separator       "|------|------|------:|-----:|"
 
   ;; Scanner
-  :scanner/omitted-lines          "... [{count} lines omitted] ..."}}
+  :scanner/omitted-lines          "... [{count} lines omitted] ..."
+
+  ;; Curator agent — system and user prompt sections
+  :prompt/curator-system-fallback
+  "You are a code curator. Produce concise structured reports."
+
+  :prompt/curator-intro
+  "The implementer agent just wrote files to a working directory. Produce a structured curator report."
+
+  :prompt/curator-spec-header       "Spec description"
+  :prompt/curator-spec-unknown      "(not provided)"
+  :prompt/curator-scope-header      "Declared scope"
+  :prompt/curator-scope-unknown     "(not specified)"
+  :prompt/curator-files-header      "Files changed"
+  :prompt/curator-files-overflow    "... ({count} more files omitted) ..."
+  :prompt/curator-output-header     "Output"
+  :prompt/curator-output-instruction
+  "Return a Clojure EDN map with these keys:\n  :summary           1-2 sentence natural-language description of what changed\n  :breaking-change?  boolean — is this likely a breaking API change?\n  :rationale         1 short paragraph on whether the changes match the spec"
+  :prompt/curator-output-example
+  "Example:\n  {:summary \"Added retry-budget state machine; diagnoses before retry.\"\n   :breaking-change? false\n   :rationale \"Implements M1 of the Superpowers plan; no public API changes.\"}"
+
+  ;; Curator errors
+  :error/curator-no-files-written
+  "Curator: implementer wrote no files to the environment"
+
+  ;; Curator summaries (deterministic fallback)
+  :curator/deterministic-summary
+  "{total} file{s} changed ({created} created, {modified} modified, {deleted} deleted)"}}
