@@ -250,10 +250,48 @@
         peer-advice (collect-peer-advice ctx)
         task (cond-> task
                peer-advice (assoc :task/peer-advice peer-advice))
-        result (try
-                 (agent/invoke implementer-agent task agent-ctx)
-                 (catch Exception e
-                   (response/failure e)))]
+        impl-result (try
+                      (agent/invoke implementer-agent task agent-ctx)
+                      (catch Exception e
+                        (response/failure e)))
+        ;; Curator post-processes the implementer's environment writes into a
+        ;; structured :code artifact. The environment is the artifact, so we
+        ;; invoke the curator regardless of the implementer's self-reported
+        ;; status — a "failure" due to unparseable LLM output may still have
+        ;; produced files on disk (observed in the 2026-04-16 dogfood). When
+        ;; the implementer truly wrote nothing, the curator fast-fails with a
+        ;; clear "no files" error instead of silently retrying.
+        curator-result
+        (try
+          (agent/curate-implement-output
+           {:implementer-result impl-result
+            :env-id (get ctx :execution/environment-id)
+            :worktree-path (resolve-worktree-path ctx)
+            :executor (get ctx :execution/executor)
+            :execute-fn (get ctx :execution/execute-fn)
+            :pre-session-snapshot (get ctx :execution/pre-session-snapshot)
+            :intent-scope (get-in ctx [:execution/input :intent :scope])
+            :spec-description (get-in ctx [:execution/input :description])
+            :llm-client (get ctx :llm-backend)
+            :logger logger})
+          (catch Exception e
+            (response/failure e)))
+        result (cond
+                 ;; Curator found files — trust it and use its artifact, even if
+                 ;; the implementer reported error. Merge impl metrics through.
+                 (= :success (:status curator-result))
+                 (-> impl-result
+                     (assoc :status :success)
+                     (assoc :output (:output curator-result))
+                     (update :metrics merge (:metrics curator-result)))
+                 ;; Curator found nothing AND implementer reported success —
+                 ;; that's the empty-diff fast-fail path (silent "wrote nothing").
+                 (= :success (:status impl-result))
+                 curator-result
+                 ;; Curator found nothing AND implementer reported error —
+                 ;; propagate the original implementer error (more specific).
+                 :else
+                 impl-result)]
     (-> (phase-result/enter-context ctx :implement :implementer gates budget start-time result)
         (assoc-in [:phase :rules-manifest] rules-manifest))))
 
@@ -301,6 +339,14 @@
         agent-status (:status result)
         rate-limited? (and (= :error agent-status) (rate-limit-in-result? result))
         gate-failed? (= :failed (:phase/status (get-in ctx [:phase])))
+        ;; Curator's empty-diff verdict: the implementer wrote no files to the
+        ;; environment. Retrying with the same prompt won't change that — the
+        ;; next attempt would just burn another 10+ minutes producing nothing.
+        ;; This is the hotfix that makes M0a's signal actually stop the burn.
+        ;; TODO: M1 subsumes this into a proper FSM where terminal error codes
+        ;; are a first-class concept.
+        curator-empty-diff? (= :curator/no-files-written
+                               (get-in result [:error :data :code]))
         iterations (get-in ctx [:phase :iterations] 1)
         max-iterations (get-in ctx [:phase :budget :iterations]
                                (get-in default-config [:budget :iterations]))
@@ -313,6 +359,8 @@
                        (= :already-implemented agent-status) :already-implemented
                        ;; Rate limit: fail immediately, don't burn retry budget
                        rate-limited? :failed
+                       ;; Curator said no files — terminal, no retry.
+                       curator-empty-diff? :failed
                        :else (registry/determine-phase-status
                                effective-status iterations max-iterations))
         metrics (get result :metrics {:tokens 0 :duration-ms duration-ms})

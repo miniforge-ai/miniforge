@@ -19,6 +19,7 @@
 (ns ai.miniforge.agent.interface.specialized
   "Specialized agent constructors, schemas, and helper utilities."
   (:require
+   [ai.miniforge.agent.curator :as curator]
    [ai.miniforge.agent.implementer :as implementer]
    [ai.miniforge.agent.planner :as planner]
    [ai.miniforge.agent.releaser :as releaser]
@@ -38,6 +39,14 @@
 (def create-tester tester/create-tester)
 (def create-reviewer reviewer/create-reviewer)
 (def create-releaser releaser/create-releaser)
+
+;; Curator is a pure function (not an Agent record) — it post-processes the
+;; implementer's environment writes into a structured code artifact. Exposed
+;; here so phases and interop code can reach it via the standard interface.
+(def curate-implement-output curator/curate-implement-output)
+(def CuratedArtifact curator/CuratedArtifact)
+(def CuratedFileEntry curator/FileEntry)
+(def validate-curated-artifact curator/validate-curated-artifact)
 
 (def Plan planner/Plan)
 (def PlanTask planner/PlanTask)
