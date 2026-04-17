@@ -215,6 +215,7 @@ Output execution logs and status reports."})
                 "claude-sonnet-4-6" {:input 3.0 :output 15.0}
                 "claude-opus-4" {:input 15.0 :output 75.0}
                 "claude-opus-4-6" {:input 5.0 :output 25.0}
+                "claude-opus-4-7" {:input 5.0 :output 25.0}
                 "claude-haiku" {:input 0.25 :output 1.25}}
         {:keys [input output]} (get prices model {:input 3.0 :output 15.0})]
     (+ (* input-tokens (/ input 1000000))
@@ -476,6 +477,7 @@ Output execution logs and status reports."})
     (let [result (protocol/invoke agent task exec-context)]
       (record-backend-health! exec-context true)
       (assoc result :self-healing/workaround-applied true))
+    #_{:clj-kondo/ignore [:unresolved-symbol :unused-binding]}
     (catch Object _
       (let [retry-e (:throwable &throw-context)]
         (record-backend-health! exec-context false)

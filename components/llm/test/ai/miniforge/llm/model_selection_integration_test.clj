@@ -48,7 +48,7 @@
       (is (= :thinking-heavy (:task-type selection)))
 
       ;; Should select a flagship model for planning
-      (is (some #{(:model selection)} [:opus-4.6 :gpt-5.4-pro :gpt-5.4]))
+      (is (some #{(:model selection)} [:opus-4.7 :opus-4.6 :gpt-5.4-pro :gpt-5.4]))
 
       ;; Verify model profile
       (let [model (registry/get-model (:model selection))]
@@ -131,8 +131,8 @@
       ;; Should select a model with large context window
       (let [model (registry/get-model (:model selection))]
         (is (>= (get-in model [:capabilities :context-window]) 500000))
-        ;; Current large-context tier includes Google and OpenAI 1M+ models.
-        (is (some #{(:provider model)} [:google :openai]))))))
+        ;; Current large-context tier includes Anthropic (Opus 4.7 1M), Google and OpenAI 1M+ models.
+        (is (some #{(:provider model)} [:anthropic :google :openai]))))))
 
 (deftest test-cost-optimized-strategy
   (testing "Cost-optimized strategy prefers cheaper models"
@@ -256,7 +256,7 @@
 
       ;; Large context should use a provider with 1M+ context models
       (let [large-context (second selections)]
-        (is (#{:google :openai} (:provider large-context))))
+        (is (#{:anthropic :google :openai} (:provider large-context))))
 
       ;; Privacy should use local (Meta, Alibaba, DeepSeek, etc.)
       (let [privacy (nth selections 2)]
@@ -307,13 +307,13 @@
       (is (:model high-selection))
       (is (:model low-selection)))))
 
-(deftest test-all-18-models-accessible
-  (testing "All 18 models in registry can be selected"
+(deftest test-all-19-models-accessible
+  (testing "All 19 models in registry can be selected"
     (let [;; Get all model keys
           all-models (keys registry/model-registry)]
 
-      ;; Should have exactly 18 models
-      (is (= 18 (count all-models)))
+      ;; Should have exactly 19 models
+      (is (= 19 (count all-models)))
 
       ;; All should be queryable
       (doseq [model-key all-models]

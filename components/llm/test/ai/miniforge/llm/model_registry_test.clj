@@ -167,14 +167,14 @@
 
 (deftest test-get-primary-recommendation
   (testing "Get primary recommendation"
-    (is (= :opus-4.6 (registry/get-primary-recommendation :thinking-heavy)))
+    (is (= :opus-4.7 (registry/get-primary-recommendation :thinking-heavy)))
     (is (= :sonnet-4.6 (registry/get-primary-recommendation :execution-focused)))
     (is (= :haiku-4.5 (registry/get-primary-recommendation :simple-validation)))
-    (is (= :gemini-2.5-pro (registry/get-primary-recommendation :large-context)))))
+    (is (= :opus-4.7 (registry/get-primary-recommendation :large-context)))))
 
 (deftest test-model-registry-completeness
-  (testing "All 18 models are present"
-    (is (= 18 (count registry/model-registry))))
+  (testing "All 19 models are present"
+    (is (= 19 (count registry/model-registry))))
 
   (testing "All models have required fields"
     (doseq [[model-key model-data] registry/model-registry]

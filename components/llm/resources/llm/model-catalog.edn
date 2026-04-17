@@ -1,5 +1,37 @@
 {:models
- {:opus-4.6
+ {:opus-4.7
+  {:model-id "claude-opus-4-7"
+   :provider :anthropic
+   :backend :claude
+   :family :claude
+   :tier :flagship
+   :capabilities
+   {:reasoning :exceptional
+    :code-generation :excellent
+    :speed :slow
+    :cost :expensive
+    :context-window 1000000
+    :output-tokens 16000
+    :streaming true}
+   :best-for
+   ["Complex reasoning and planning"
+    "Architecture decisions"
+    "Novel problem solving"
+    "Spec analysis and interpretation"
+    "Multi-step logical deduction"
+    "Design trade-off evaluation"
+    "Meta-reasoning about workflows"
+    "Large-context analysis (1M tokens)"]
+   :use-cases
+   #{:workflow-planning
+     :architecture-design
+     :spec-interpretation
+     :complex-debugging
+     :research-synthesis
+     :strategic-decisions
+     :large-context}}
+
+  :opus-4.6
   {:model-id "claude-opus-4-6"
    :provider :anthropic
    :backend :claude
@@ -483,7 +515,7 @@
 
  :task-type-recommendations
  {:thinking-heavy
-  {:tier-1 [:opus-4.6 :gpt-5.4-pro :gpt-5.4]
+  {:tier-1 [:opus-4.7 :opus-4.6 :gpt-5.4-pro :gpt-5.4]
    :tier-2 [:sonnet-4.6 :gpt-5.3-codex :gemini-2.5-pro]
    :tier-3-local [:llama-3.3-70b :glm-4-plus]
    :rationale "Exceptional reasoning needed for architecture decisions"}
@@ -501,7 +533,7 @@
    :rationale "Speed and cost efficiency for simple tasks"}
 
   :large-context
-  {:tier-1 [:gemini-2.5-pro :gpt-5.4 :gemini-2.5-flash]
+  {:tier-1 [:opus-4.7 :gemini-2.5-pro :gpt-5.4 :gemini-2.5-flash]
    :tier-2 [:opus-4.6 :sonnet-4.6 :llama-3.3-70b]
    :rationale "Need 1M+ token context windows"}
 
