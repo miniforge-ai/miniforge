@@ -1,0 +1,84 @@
+;; =============================================================================
+;; Spec: Agent stream watchdog + session resume
+;; =============================================================================
+;;
+;; Observed failure mode (remediation run 2026-04-17, workflow b86fdfba):
+;;   :implement phase started at 16:46:47
+;;   86 read-tool calls fired in 98 seconds (steady ~1/sec cadence)
+;;   Last tool call at 16:48:51
+;;   THEN 11 MINUTES of total event silence
+;;   Curator finally terminated at 16:59:52 with "no files written"
+;;   Terminal event: :rate-limited? false, :iterations 1, :phase/tokens 0
+;;
+;; Cause (per user): Anthropic was silently rate-limiting / slow today.
+;; The backend HTTP stream stalled without returning a usable error. The
+;; agent was blocked waiting on its next response for 11 minutes. Miniforge
+;; had no detector for this — it kept the phase alive until some much-longer
+;; timeout fired and the curator grabbed the failure flag.
+;;
+;; We can't shim between the agent and its LLM. We CAN detect at the event
+;; boundary: every tool call emits a status event. A gap in that stream
+;; beyond a threshold IS the signal.
+
+{:spec/title "Agent stream watchdog + session-resume for hang recovery"
+
+ :spec/description
+ "Detect agent-stream hangs via event-emission gap, kill the agent, and
+  resume on the same backend (via session-resume) or fail over to another
+  backend. Integrate with the existing self-healing/backend-auto-switch
+  machinery.
+
+  GROUP 1: Per-phase event-gap watchdog
+  A background timer runs during each agent-driven phase. Every time the
+  agent emits any event (tool-calling, chunk, status, etc.), the timer
+  resets. If the timer exceeds :agent/stream-gap-threshold-ms (default
+  90000 = 90s, configurable per backend), send a kill signal to the agent
+  subprocess and emit :agent/stream-stalled event with the gap duration.
+
+  GROUP 2: Session ID persistence
+  When a Claude Code or Codex agent starts, capture its session ID from
+  the initial handshake (both backends expose this). Persist as part of
+  the phase state in /events and in the workflow run table. This is the
+  payload for resume.
+
+  GROUP 3: Resume-on-kill
+  After a watchdog-kill, consult self-healing policy. If this is the first
+  hang for this phase and the backend is still healthy, restart the agent
+  with backend's `--resume <session-id>` equivalent. The resumed session
+  preserves context and tool-call history; the agent picks up where it
+  stopped. If resume also hangs (second watchdog fire), escalate to
+  backend-auto-switch: mark the current backend unhealthy and retry on
+  the next backend in :allowed-failover-backends.
+
+  GROUP 4: Emit richer terminal events
+  Current terminal event on hang shows :rate-limited? false, :iterations 1,
+  :phase/tokens 0 — misleading because all three are true but don't surface
+  the real cause. Add :phase/termination-reason (one of :agent-stalled,
+  :curator-rejected, :tool-error, :normal). On watchdog kills,
+  termination-reason is :agent-stalled with the gap duration embedded."
+
+ :spec/intent {:type :refactor
+               :scope ["components/agent/src"
+                       "components/workflow-runner/src"
+                       "components/self-healing/src"
+                       "components/event-stream/src"
+                       "resources/config/default-user-config.edn"]}
+
+ :spec/constraints
+ ["Watchdog must not block event emission — run on a separate scheduler"
+  "Default gap threshold 90s; per-backend override in config"
+  "Session IDs must be persisted synchronously before the first tool call, otherwise resume is impossible"
+  "Failover must respect :allowed-failover-backends config — no silent backend switches"
+  "All watchdog actions MUST emit events; no silent retries"
+  "Tests must include a simulated-hang backend that ignores messages for >90s"]
+
+ :spec/acceptance-criteria
+ ["A synthetic backend that stops responding triggers a watchdog kill within 90s of the last event"
+  "Kill emits :agent/stream-stalled with accurate gap duration"
+  "Session ID is persisted per phase and visible in the event log"
+  "Resume path restarts the agent with the correct session ID"
+  "Second hang on the same phase triggers backend failover per self-healing config"
+  "Terminal :workflow/phase-completed on hang carries :phase/termination-reason :agent-stalled"
+  "Existing passing workflows do not regress (watchdog is observe-only when no hang)"]
+
+ :spec/workflow-type :canonical-sdlc}
