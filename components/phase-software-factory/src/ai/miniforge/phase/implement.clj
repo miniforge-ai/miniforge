@@ -339,6 +339,14 @@
         agent-status (:status result)
         rate-limited? (and (= :error agent-status) (rate-limit-in-result? result))
         gate-failed? (= :failed (:phase/status (get-in ctx [:phase])))
+        ;; Curator's empty-diff verdict: the implementer wrote no files to the
+        ;; environment. Retrying with the same prompt won't change that — the
+        ;; next attempt would just burn another 10+ minutes producing nothing.
+        ;; This is the hotfix that makes M0a's signal actually stop the burn.
+        ;; TODO: M1 subsumes this into a proper FSM where terminal error codes
+        ;; are a first-class concept.
+        curator-empty-diff? (= :curator/no-files-written
+                               (get-in result [:error :data :code]))
         iterations (get-in ctx [:phase :iterations] 1)
         max-iterations (get-in ctx [:phase :budget :iterations]
                                (get-in default-config [:budget :iterations]))
@@ -351,6 +359,8 @@
                        (= :already-implemented agent-status) :already-implemented
                        ;; Rate limit: fail immediately, don't burn retry budget
                        rate-limited? :failed
+                       ;; Curator said no files — terminal, no retry.
+                       curator-empty-diff? :failed
                        :else (registry/determine-phase-status
                                effective-status iterations max-iterations))
         metrics (get result :metrics {:tokens 0 :duration-ms duration-ms})

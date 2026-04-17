@@ -174,7 +174,11 @@
           "expected :error :message to be a string")
       (is (re-find #"no files" error-msg))
       (is (= "/tmp/nothing" (get-in result [:error :data :worktree-path]))
-          "error data should carry the worktree-path for debugging"))))
+          "error data should carry the worktree-path for debugging")
+      (is (= :curator/no-files-written (get-in result [:error :data :code]))
+          "error data must carry a stable :code the phase runner branches on;
+           this is the terminal signal that makes the implement phase fail
+           instead of retrying blindly"))))
 
 (deftest curate-errors-when-implementer-result-has-no-output
   (testing "missing :output map → empty diff → error"

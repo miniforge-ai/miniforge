@@ -260,7 +260,10 @@
     (if (empty? files)
       (response/error
        "Curator: implementer wrote no files to the environment"
-       {:data {:worktree-path (:worktree-path input)
+       ;; :code is a stable keyword the phase runner uses to decide
+       ;; terminal-vs-retry: empty-diff should not be retried blindly.
+       {:data {:code :curator/no-files-written
+               :worktree-path (:worktree-path input)
                :env-id (:env-id input)
                :intent-scope intent-scope}})
       (let [tests-added? (detect-tests-added files)
