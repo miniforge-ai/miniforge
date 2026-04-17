@@ -316,18 +316,51 @@
         (assoc-in [:phase :rules-manifest] rules-manifest))))
 
 (def ^:private rate-limit-pattern
-  "Lightweight rate limit detection for the phase level.
-   Avoids a dependency on workflow/dag-resilience."
-  #"(?i)you've hit your limit|rate.?limit|429|quota.?exceeded|resets \d+[ap]m")
+  "Lightweight rate limit / infra-transient detection for the phase level.
+   Avoids a dependency on workflow/dag-resilience.
+
+   Widened 2026-04-17 after a dogfood failure where the LLM backend
+   returned near-empty content in ~4s (quota-exhausted-adjacent infra
+   failure) that the prior narrow regex missed. Added: HTTP 503, 'too
+   many requests', 'overloaded', 'try again', 'capacity', 'throttled',
+   and a broader apostrophe class for 'you've'."
+  #"(?i)you['\u2019]ve hit your (usage |)limit|rate.?limit|429|503|quota.?exceeded|resets? \d+[ap]m|too many requests|overloaded|try again (?:later|in)|at capacity|throttled")
+
+(def ^:private suspicious-short-duration-ms
+  "Threshold below which an implement phase is too fast to have done real
+   work. A legitimate implementer LLM call takes minutes; anything under
+   30s that ALSO failed to produce files is almost always an infra
+   failure (auth, quota, transient backend error) rather than a real
+   task failure. Routing these through the rate-limit branch lets the
+   workflow pause and resume rather than terminating permanently."
+  30000)
+
+(defn- suspicious-short-termination?
+  "Heuristic: implement phase completed in <30s AND produced no files.
+   Observed 2026-04-17 dogfood pattern — LLM stream returned immediately
+   with empty content; agent-status :error but no rate-limit keywords in
+   the error message. Almost certainly an infra failure that masqueraded
+   as a task failure."
+  [result]
+  (let [duration (get-in result [:metrics :duration-ms] 0)
+        error-code (get-in result [:error :data :code])
+        no-files? (= :curator/no-files-written error-code)]
+    (and no-files?
+         (pos? duration)
+         (< duration suspicious-short-duration-ms))))
 
 (defn- rate-limit-in-result?
-  "Check if an agent result contains rate limit indicators.
-   Scans both error message and output text."
+  "Check if an agent result indicates an infrastructure failure that
+   should pause/resume rather than terminate. Two signals:
+     1. Known rate-limit / quota / transient-backend keywords in error text.
+     2. Suspiciously short termination with no files produced (observed
+        symptom of LLM-backend failure that returned empty content fast)."
   [result]
-  (some (fn [text]
-          (and (string? text) (re-find rate-limit-pattern text)))
-        [(get-in result [:error :message])
-         (when (string? (:output result)) (:output result))]))
+  (or (some (fn [text]
+              (and (string? text) (re-find rate-limit-pattern text)))
+            [(get-in result [:error :message])
+             (when (string? (:output result)) (:output result))])
+      (suspicious-short-termination? result)))
 
 (defn- extract-error-message
   "Extract the most relevant error message from an agent result."

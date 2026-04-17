@@ -257,6 +257,77 @@
       (is @capsule-called "Should have called execute-fn")
       (is (= 1 (count result))))))
 
+;------------------------------------------------------------------------------ Rate-limit classifier (2026-04-17 widening)
+;; Tests for `rate-limit-in-result?` — it's private so we access via #'.
+
+(defn- rate-limit? [result]
+  (#'implement/rate-limit-in-result? result))
+
+(deftest rate-limit-classifier-detects-classic-keywords-test
+  (testing "classic patterns from the narrow regex still match"
+    (doseq [msg ["You've hit your limit"
+                 "Rate-limit exceeded"
+                 "Got HTTP 429 from backend"
+                 "Quota exceeded"
+                 "Your quota resets 2pm EST"]]
+      (is (rate-limit? {:error {:message msg}})
+          (str "should classify as rate-limit: " msg)))))
+
+(deftest rate-limit-classifier-detects-widened-patterns-test
+  (testing "patterns added 2026-04-17 after dogfood observation"
+    (doseq [msg ["HTTP 503 Service Unavailable"
+                 "Too Many Requests"
+                 "Model is overloaded, please try again later"
+                 "Backend at capacity"
+                 "Request was throttled"
+                 "You\u2019ve hit your usage limit"       ; curly apostrophe
+                 "Please try again in 30 seconds"]]
+      (is (rate-limit? {:error {:message msg}})
+          (str "should classify as rate-limit: " msg)))))
+
+(deftest rate-limit-classifier-ignores-unrelated-errors-test
+  (testing "ordinary task errors do NOT match rate-limit patterns"
+    (doseq [msg ["Syntax error at line 5"
+                 "File not found: src/foo.clj"
+                 "Test failed: expected 1 got 2"
+                 nil]]
+      (is (not (rate-limit? {:error {:message msg}}))
+          (str "should NOT classify as rate-limit: " (pr-str msg))))))
+
+(deftest rate-limit-classifier-flags-suspicious-short-termination-test
+  (testing "curator no-files + <30s duration = infra failure (observed 2026-04-17)"
+    ;; The motivating case: LLM backend returned empty content in ~4s; the
+    ;; curator fast-failed with :curator/no-files-written. Classifier should
+    ;; now route this through rate-limit handling (pause/resume), not terminate.
+    (is (rate-limit?
+         {:status :error
+          :error {:message "Curator: implementer wrote no files to the environment"
+                  :data {:code :curator/no-files-written}}
+          :metrics {:duration-ms 4567}}))))
+
+(deftest rate-limit-classifier-does-not-flag-legitimate-curator-failures-test
+  (testing "curator no-files after a full-length attempt is a real task failure"
+    ;; If the implementer ran for the full ~11 min and still wrote nothing,
+    ;; that's a real task problem (prompt, scope, tooling) — not an infra hiccup.
+    ;; Should NOT be classified as rate-limit; should fall through to terminal.
+    (is (not (rate-limit?
+              {:status :error
+               :error {:message "Curator: implementer wrote no files to the environment"
+                       :data {:code :curator/no-files-written}}
+               :metrics {:duration-ms 660000}})))))  ; 11 min
+
+(deftest rate-limit-classifier-does-not-flag-short-but-successful-test
+  (testing "fast completion WITHOUT the curator no-files signal is not infra-suspect"
+    (is (not (rate-limit? {:status :success
+                           :metrics {:duration-ms 1000}})))))
+
+(deftest rate-limit-classifier-zero-duration-does-not-flag-test
+  (testing "missing/zero duration does not satisfy the short-termination heuristic"
+    (is (not (rate-limit?
+              {:status :error
+               :error {:message "x" :data {:code :curator/no-files-written}}
+               :metrics {:duration-ms 0}})))))
+
 ;------------------------------------------------------------------------------ Rich Comment
 
 (comment
