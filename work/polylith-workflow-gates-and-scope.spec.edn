@@ -1,0 +1,95 @@
+;; =============================================================================
+;; Spec: Polylith workflow gates & change-derived scope
+;; =============================================================================
+;;
+;; After the new Polylith standards landed (dewey 311 + 312), a repo-wide
+;; review identified three requirements where miniforge is non-compliant or
+;; incomplete:
+;;
+;; - Req 6 (Validation is a workflow gate): `.github/workflows/ci.yml` runs
+;;   lint + tests but has NO `poly check` step. `bb pre-commit` also does not
+;;   run poly check. Structural invariants aren't enforced before downstream
+;;   work proceeds.
+;;
+;; - Req 7/8 (Testing reflects composition / CI scope is change-derived):
+;;   CI runs `bb test:all` (full suite) on every PR. `tasks/release.clj` has
+;;   stable-tag infrastructure (`bb stable`, `bb cut!`) but CI does not use
+;;   the tag to scope tests to changed-and-affected bricks/projects.
+;;
+;; - Req 2 (Bases are boundary adapters): `bases/lsp-mcp-bridge` is 2.4k LoC —
+;;   plausible but not verified. Needs a manual read-through to confirm it
+;;   delegates to component interfaces and does not host domain logic.
+;;
+;; This spec is separate from polylith-compliance-remediation.spec.edn
+;; (which fixes the 13 `poly check` errors). The two can run in parallel —
+;; they touch different files.
+
+{:spec/title "Polylith workflow gates & change-derived scope"
+
+ :spec/description
+ "Bring miniforge into compliance with Polylith requirements 2, 6, 7, 8.
+
+  GROUP 1: Add `poly check` as a workflow gate (Req 6)
+  - Add a `poly check` step to `.github/workflows/ci.yml`, BEFORE lint and
+    test. Failure MUST fail the job. Placement: as its own job named
+    `structure` that `lint` and `test` `needs:`.
+  - Add `bb poly:check` task to bb.edn if not already present.
+  - Update `bb pre-commit` to run `bb poly:check` as a gate, matching the
+    CI behavior. Fast-fail before the longer lint/test steps.
+  - Update documentation: any engineering-standards reference in
+    `docs/development-guidelines.md` or similar should point to the new
+    gate behavior.
+
+  GROUP 2: Derive test scope from changed-and-affected projects (Req 7/8)
+  - Use `poly test` with `:since:stable` to scope CI to affected bricks.
+  - CI workflow changes:
+      * PR jobs run `poly test :since:stable` (affected only).
+      * main-branch jobs run `bb test:all` (full suite) as today.
+  - Keep `bb stable` semantics: stable tags are set only when a full pass
+    succeeds on main.
+  - If `:since:stable` has no tag to compare to (first run after a new
+    clone), fall back to full-suite — don't fail the job.
+  - Document the model in `docs/development-guidelines.md` so contributors
+    know when the full suite runs.
+
+  GROUP 3: Audit `bases/lsp-mcp-bridge` for domain-logic bloat (Req 2)
+  - Read every .clj under `bases/lsp-mcp-bridge/src/`.
+  - For each namespace, categorize its functions as:
+      * boundary/adapter (LSP protocol wiring, transport, entrypoint)
+      * delegation (pass-through to component interfaces)
+      * domain logic (reusable business rules — VIOLATION if present)
+  - If domain logic is found, propose extraction to an existing component
+    or a new component (per the Polylith Tool MDC's canonical workflow).
+  - Produce a short report (as a comment in the PR) with the findings.
+    If no bloat is found, state that explicitly and close the group.
+  - Do NOT refactor in this spec unless the extraction is trivial
+    (under ~50 LoC, single concern). Bigger extractions should be filed
+    as follow-up specs."
+
+ :spec/intent
+ {:type :refactor
+  :scope [".github/workflows/ci.yml"
+          ".github/workflows/release.yml"
+          "bb.edn"
+          "tasks/"
+          "docs/development-guidelines.md"
+          "bases/lsp-mcp-bridge/src"]}
+
+ :spec/constraints
+ ["Group 1 and Group 2 must each be a separate commit for reviewability"
+  "CI changes must not break existing main-branch flows"
+  "poly check must be fast (< 30s) — if it regresses, investigate before landing"
+  "Group 3 must NOT refactor large chunks of lsp-mcp-bridge — it's an audit, not a rewrite"
+  "All changes must follow the Polylith Tool MDC's canonical workflow (preflight reasoning, validation, impact report)"
+  "Localize all user-facing strings (msg/t + en-US.edn) if any are introduced"]
+
+ :spec/acceptance-criteria
+ ["`.github/workflows/ci.yml` runs `bb poly:check` (or equivalent) before lint/test and fails the build on poly errors"
+  "`bb pre-commit` includes a poly check step that fast-fails"
+  "CI on PR branches runs affected-only test scope against the latest stable tag; main runs the full suite"
+  "When no stable tag exists, the affected-only path falls back to full suite with a warning, not a failure"
+  "`bases/lsp-mcp-bridge` audit is documented in the PR description with findings per namespace"
+  "Any domain-logic violations found in the audit are filed as follow-up specs (not silently fixed in-band)"
+  "`bb test` and `bb build:cli` still pass end-to-end"]
+
+ :spec/workflow-type :canonical-sdlc}
