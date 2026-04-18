@@ -368,7 +368,14 @@
                                       "                  :satisfied-by \"path/to/file.clj\"\n"
                                       "                  :proof \"specific function/test that satisfies it\"}]}\n```\n"
                                       (format-existing-files existing-files)))
-                               "\n\nOutput your plan as a Clojure map following the format in your system prompt. "
+                               "\n\n## REQUIRED Output\n\n"
+                               "Your FINAL assistant message MUST be the plan. Either:\n"
+                               "  (a) call the artifact submission MCP tool with your plan map, OR\n"
+                               "  (b) end your turn with the plan EDN wrapped in a ```clojure code fence.\n\n"
+                               "Narration-only responses (e.g. \"Based on my exploration...\" with no EDN) "
+                               "are rejected by the runtime with :anomalies.agent/invoke-failed and cost "
+                               "a full turn's tokens. If the last thing you would say is prose, STOP and "
+                               "replace it with the plan EDN instead.\n\n"
                                "Use (random-uuid) for all IDs - just write #uuid \"<any-uuid>\" placeholders that I'll fill in.")]
           (if llm-client
             ;; Use the real LLM with artifact session for MCP tool support

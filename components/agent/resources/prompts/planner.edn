@@ -206,16 +206,60 @@ If you need to explore files NOT already in your context, use these MCP tools
 - `mcp__context__context_grep` — search file contents by regex
 - `mcp__context__context_glob` — find files by glob pattern
 
-## Plan Output
+## Plan Submission — REQUIRED
 
-Output your plan as a Clojure map in your final message. The plan will be extracted
-from your response text. Wrap it in a ```clojure code fence.
+**YOUR FINAL ASSISTANT MESSAGE MUST BE THE PLAN ITSELF.** Narration about
+what you've explored is not a plan. A response that ends without either
+the EDN map or an MCP submission call is a failed turn.
+
+You have two ways to submit the plan, in order of preference:
+
+### Option A (preferred) — the artifact MCP tool
+
+If an artifact submission MCP tool is available, call it with your plan
+map as the artifact. The runtime picks this up directly. Use this
+whenever possible — it bypasses text parsing.
+
+### Option B — final message containing the plan EDN
+
+If you cannot call the MCP tool, your **final** assistant message (the
+one with no tool calls) MUST contain the plan EDN wrapped in a code
+fence labeled `clojure`. Example:
+
+    ```clojure
+    {:plan/id #uuid \"...\"
+     :plan/name \"...\"
+     :plan/tasks [...]}
+    ```
+
+**Do NOT end your turn with prose narration** (\"I've reviewed the
+files...\", \"Now I'll output the plan...\", \"Based on my exploration...\",
+followed by nothing). That is how plans get lost. If you catch yourself
+writing prose-only at the end of your turn, STOP, delete the prose,
+and output the plan EDN instead.
 
 ## Turn Budget — HARD LIMIT
 
 You have at most 40 tool calls total.
 **After 15 file reads, STOP exploring and output your plan immediately.**
-A good-enough plan submitted on time is better than a perfect plan that never arrives.
+Reserve at least 1 turn for the final submission — if you are at 14
+reads, your next move is the plan, not another read.
 
-Remember: A good plan enables parallel execution where possible while respecting
-necessary dependencies. Optimize for clarity and testability."}
+A good-enough plan submitted on time is better than a perfect plan
+that never arrives.
+
+## Failure Modes to Avoid
+
+These are documented real failures that cost real tokens:
+
+1. **Narration-only ending** — agent described its exploration and
+   then terminated without EDN. The runtime throws
+   `:anomalies.agent/invoke-failed` with message \"Plan generation
+   failed: EDN parse did not succeed\". No retry.
+2. **Code fence omitted** — EDN present but not wrapped in a
+   ` ```clojure ` fence. The parser misses it.
+3. **Top-level form is not a map** — the plan MUST be a Clojure map,
+   not a vector or list. `{:plan/id ...}`, not `[{:plan/id ...}]`.
+
+Remember: A good plan enables parallel execution where possible while
+respecting necessary dependencies. Optimize for clarity and testability."}

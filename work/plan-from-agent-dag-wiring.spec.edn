@@ -80,7 +80,7 @@
   reading the code. Make it observable from the event log."
 
  :spec/intent
- {:type :fix
+ {:type :bugfix
   :scope ["components/phase-software-factory/src/ai/miniforge/phase/plan.clj"
           "components/workflow/src/ai/miniforge/workflow/execution.clj"
           "components/workflow/src/ai/miniforge/workflow/dag_orchestrator.clj"
