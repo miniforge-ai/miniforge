@@ -3,10 +3,10 @@
   {ai.miniforge.agent.artifact-session/with-artifact-session
    hooks.artifact-session/with-artifact-session
 
-   ;; Slingshot's `try+` introduces an implicit `&throw-context` binding in
-   ;; catch clauses (and tolerates `_` as the exception binding). The hook
-   ;; rewrites the form into a plain `try` with both bindings made explicit
-   ;; so clj-kondo recognises them.
-   slingshot.slingshot/try+ hooks.slingshot/try+}}
+   ;; Slingshot's `try+` introduces an implicit `&throw-context` binding
+   ;; and supports three selector shapes (class, vector, predicate).
+   ;; Hook vendored from clj-kondo/configs — see header of
+   ;; hooks/slingshot/try_plus.clj for sync instructions.
+   slingshot.slingshot/try+ hooks.slingshot.try-plus/try+}}
 
  :linters {:underscore-in-namespace {:level :off}}}
