@@ -378,18 +378,22 @@
   "Keys-only/trimmed summary of a failure result's :error map so the event
    carries enough to diagnose without leaking large payloads (stack traces,
    token arrays). Returns nil when the result isn't a failure or carries no
-   diagnosable error fields."
+   diagnosable error fields.
+
+   Reads the canonical response-shape error field (:message) and emits the
+   canonical event-schema field (:error/message). Any producer using a
+   non-canonical shape MUST convert at its boundary — this fn is inside
+   the workflow runtime and does not coerce."
   [result]
   (when (failed? result)
     (let [err (:error result)
-          msg (or (:message err) (:error/message err))
+          msg (:message err)
           data-keys (some-> err :data keys sort)
           summary (cond-> {}
-                    msg                              (assoc :error/message
-                                                            (subs (str msg) 0 (min 500 (count (str msg)))))
-                    (keyword? (:error/category err)) (assoc :error/category (:error/category err))
-                    (keyword? (:anomaly err))        (assoc :anomaly (:anomaly err))
-                    (seq data-keys)                  (assoc :error/data-keys (vec data-keys)))]
+                    msg                       (assoc :error/message
+                                                     (subs (str msg) 0 (min 500 (count (str msg)))))
+                    (keyword? (:anomaly err)) (assoc :anomaly (:anomaly err))
+                    (seq data-keys)           (assoc :error/data-keys (vec data-keys)))]
       (not-empty summary))))
 
 (defn dag-skip-diagnostic

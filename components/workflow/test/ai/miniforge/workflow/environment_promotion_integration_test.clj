@@ -91,12 +91,34 @@
    :metrics {:tokens 200 :duration-ms 1000}
    :errors []})
 
+(defn mock-curator
+  "Default curator stub for tests that don't care about file-diff semantics.
+
+   The real curator (agent/curate-implement-output) inspects the worktree
+   to detect written files. In unit tests the worktree is a bare temp dir
+   (not a git repo) and there's no pre-session-snapshot, so curator
+   collect-files returns [], and the implementer phase fails with
+   :curator/no-files-written. That's correct production behavior but
+   irrelevant to these environment-promotion tests. Mock the curator so
+   implement phase can complete and expose the environment-id plumbing."
+  [_input]
+  (response/success
+    {:code/files [{:path "src/feature.clj" :action :create}]
+     :code/summary "test fixture wrote feature.clj"}
+    {:metrics {:tokens 0 :duration-ms 0}}))
+
 (defn make-workflow
-  "Build a minimal workflow config with the given phase sequence."
+  "Build a minimal workflow config with the given phase sequence.
+
+   Gates are disabled because these tests target environment-promotion
+   plumbing, not gate semantics. With gates on, the :implement phase's
+   default [:syntax :format :lint] gates run against whatever file the
+   mock curator reports — which has no real content — and cascade into
+   phase failure for reasons unrelated to environment-id flow."
   [& phases]
   {:workflow/id :env-promotion-test
    :workflow/version "1.0.0"
-   :workflow/pipeline (mapv (fn [p] {:phase p}) phases)})
+   :workflow/pipeline (mapv (fn [p] {:phase p :gates []}) phases)})
 
 (defn base-input []
   {:task "Add a new feature"
@@ -122,6 +144,7 @@
                         (io/make-parents file)
                         (spit file "(ns feature)\n(defn new-feature [] :implemented)"))
                       (response/success nil {:tokens 1000 :duration-ms 2000}))
+                    agent/curate-implement-output mock-curator
                     dag-exec/release-environment!
                     (fn [_ _env-id]
                       (reset! release-env-called? true)
@@ -211,7 +234,8 @@
       (with-redefs [agent/create-implementer (fn [_] {:type :mock-implementer})
                     agent/invoke
                     (fn [_ _ _]
-                      (response/success nil {:tokens 500 :duration-ms 1000}))]
+                      (response/success nil {:tokens 500 :duration-ms 1000}))
+                    agent/curate-implement-output mock-curator]
         (let [result (runner/run-pipeline
                       workflow
                       (base-input)
