@@ -28,6 +28,7 @@
    [ai.miniforge.cli.workflow-runner.context :as context]
    [ai.miniforge.cli.workflow-runner.dashboard :as dashboard]
    [ai.miniforge.event-stream.interface :as es]
+   [ai.miniforge.supervisory-state.interface :as supervisory]
    [ai.miniforge.response.interface :as response]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -193,6 +194,7 @@
 
             ;; Set up execution infrastructure
             event-stream (es/create-event-stream)
+            _supervisor (supervisory/attach! event-stream)
             new-workflow-id (random-uuid)
             control-state (es/create-control-state)
             command-poller-cleanup (dashboard/start-command-poller! new-workflow-id control-state)

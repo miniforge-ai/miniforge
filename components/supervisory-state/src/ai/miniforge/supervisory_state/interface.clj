@@ -41,9 +41,10 @@
 ;------------------------------------------------------------------------------ Layer 1
 ;; Lifecycle
 
-(def create core/create)
-(def start! core/start!)
-(def stop!  core/stop!)
+(def create  core/create)
+(def start!  core/start!)
+(def stop!   core/stop!)
+(def attach! core/attach!)
 
 ;------------------------------------------------------------------------------ Layer 2
 ;; Query API (reads only; consumers should prefer subscribing to
@@ -55,3 +56,21 @@
 (def prs           core/prs)
 (def policy-evals  core/policy-evals)
 (def attention     core/attention)
+
+(comment
+  (require '[ai.miniforge.event-stream.interface :as es])
+
+  ;; Attach a supervisor to a throwaway stream and watch the tables
+  ;; populate as fine-grained events publish.
+  (def stream (es/create-event-stream {:sinks []}))
+  (def supervisor (attach! stream))
+
+  (let [wf (random-uuid)]
+    (es/publish! stream (es/workflow-started stream wf))
+    (es/publish! stream (es/workflow-completed stream wf :success)))
+
+  (workflows supervisor)
+  (attention supervisor)
+
+  (stop! supervisor)
+  :rcf)

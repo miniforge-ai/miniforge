@@ -122,6 +122,15 @@
       (swap! component assoc :subscribed? false))
     component))
 
+(defn attach!
+  "Convenience: create a component bound to `stream` and start it in one step.
+
+   Composition of [[create]] + [[start!]] — kept here in `core` so
+   `interface.clj` stays a pure pass-through surface per the Polylith
+   `interface.clj` contract."
+  [stream]
+  (start! (create stream)))
+
 ;------------------------------------------------------------------------------ Layer 4
 ;; Query API
 

@@ -22,6 +22,7 @@
    [cheshire.core :as json]
    [org.httpkit.server :as http]
    [ai.miniforge.event-stream.interface :as es]
+   [ai.miniforge.supervisory-state.interface :as supervisory]
    [ai.miniforge.cli.web.response :as response]))
 
 (def streams (atom {}))
@@ -29,6 +30,7 @@
 (defn get-or-create-stream [workflow-id]
   (or (get @streams workflow-id)
       (let [stream (es/create-event-stream)]
+        (supervisory/attach! stream)
         (swap! streams assoc workflow-id stream)
         stream)))
 
