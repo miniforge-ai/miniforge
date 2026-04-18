@@ -123,6 +123,16 @@
    :requires ([standards])
    :task (standards/review *command-line-args*)}
 
+  work:queue
+  {:doc  "Render the prioritized work-spec queue (stdout + work/QUEUE.md)"
+   :requires ([work])
+   :task (work/queue)}
+
+  work:theme
+  {:doc  "Render a single theme's specs (usage: bb work:theme <theme-id>)"
+   :requires ([work])
+   :task (work/theme *command-line-args*)}
+
   ;; ──────────────────────────────────────────────────────────────────────────
   ;; Building
   ;; ──────────────────────────────────────────────────────────────────────────

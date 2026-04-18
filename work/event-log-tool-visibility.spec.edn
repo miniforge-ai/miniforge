@@ -78,4 +78,12 @@
   "A dogfood replay of today's hang shows exactly where the 11m gap started"
   "Existing event consumers (dashboard, attention component) still work"]
 
+ :spec/priority
+ {:tier :blocker
+  :axes #{:observation :dogfood-enabler}
+  :theme :dogfood-resilience
+  :rationale "Prerequisite for the watchdog + for every post-mortem. Today's 203 opaque :tool-calling pings cost us 13 min of debugging. Every Tier-1 spec below benefits from landing it first."
+  :blocks ["agent-stream-watchdog-and-resume.spec.edn"]
+  :blocked-by []}
+
  :spec/workflow-type :canonical-sdlc}
