@@ -366,20 +366,31 @@
     (string? output) :string
     :else :other))
 
+(def ^:private failure-statuses
+  #{:error :failed :failure})
+
+(defn- failed?
+  "True when a result map carries a failure status."
+  [result]
+  (contains? failure-statuses (:status result)))
+
 (defn- summarize-error
-  "Keys-only/trimmed summary of an error map so the event carries enough
-   to diagnose without leaking large payloads (stack traces, token arrays).
-   Returns nil when err is not a usable map."
-  [err]
-  (when (map? err)
-    (let [msg (or (:message err) (:error/message err))
-          data-keys (when (map? (:data err)) (sort (keys (:data err))))]
-      (cond-> {}
-        msg                              (assoc :error/message
-                                                (subs (str msg) 0 (min 500 (count (str msg)))))
-        (keyword? (:error/category err)) (assoc :error/category (:error/category err))
-        (keyword? (:anomaly err))        (assoc :anomaly (:anomaly err))
-        (seq data-keys)                  (assoc :error/data-keys (vec data-keys))))))
+  "Keys-only/trimmed summary of a failure result's :error map so the event
+   carries enough to diagnose without leaking large payloads (stack traces,
+   token arrays). Returns nil when the result isn't a failure or carries no
+   diagnosable error fields."
+  [result]
+  (when (failed? result)
+    (let [err (:error result)
+          msg (or (:message err) (:error/message err))
+          data-keys (some-> err :data keys sort)
+          summary (cond-> {}
+                    msg                              (assoc :error/message
+                                                            (subs (str msg) 0 (min 500 (count (str msg)))))
+                    (keyword? (:error/category err)) (assoc :error/category (:error/category err))
+                    (keyword? (:anomaly err))        (assoc :anomaly (:anomaly err))
+                    (seq data-keys)                  (assoc :error/data-keys (vec data-keys)))]
+      (not-empty summary))))
 
 (defn dag-skip-diagnostic
   "Produce a structured snapshot of phase-result for :no-plan-id / :no-tasks
@@ -395,27 +406,25 @@
       :output/has-plan-id? bool (only if :map)
       :plan/task-count   int (only when reason is :no-tasks)
       :result/error      {:error/message ... :anomaly ... :error/data-keys ...}
-                         (only when :result/status is :error / :failed / :failure)}"
+                         (only when :result is a failure per summarize-error)}"
   [phase-result reason]
-  (let [phase-keys (when (map? phase-result) (sort (keys phase-result)))
-        result     (:result phase-result)
-        result-keys (when (map? result) (sort (keys result)))
-        result-status (when (map? result) (:status result))
-        output (when (map? result) (:output result))
-        output-type (classify-output output)
-        output-keys (when (= :map output-type) (sort (keys output)))
-        has-plan-id? (when (= :map output-type)
-                       (boolean (:plan/id output)))
-        plan (extract-plan-from-phase-result phase-result)
-        error-summary (when (contains? #{:error :failed :failure} result-status)
-                        (summarize-error (:error result)))]
+  (let [phase-keys    (some-> phase-result keys sort)
+        result        (:result phase-result)
+        result-keys   (some-> result keys sort)
+        result-status (:status result)
+        output        (:output result)
+        output-type   (classify-output output)
+        output-keys   (when (= :map output-type) (sort (keys output)))
+        has-plan-id?  (when (= :map output-type) (boolean (:plan/id output)))
+        plan          (extract-plan-from-phase-result phase-result)
+        error-summary (summarize-error result)]
     (cond-> {:phase-result/keys (vec phase-keys)
              :result/keys       (vec result-keys)
              :result/status     result-status
              :output/type       output-type}
       (seq output-keys)       (assoc :output/keys (vec output-keys))
       (some? has-plan-id?)    (assoc :output/has-plan-id? has-plan-id?)
-      (seq error-summary)     (assoc :result/error error-summary)
+      error-summary           (assoc :result/error error-summary)
       (= :no-tasks reason)    (assoc :plan/task-count
                                      (count (:plan/tasks plan))))))
 
