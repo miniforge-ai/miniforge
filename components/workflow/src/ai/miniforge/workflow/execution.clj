@@ -355,6 +355,50 @@
               (empty? (:plan/tasks plan)) :no-tasks
               :else nil))))
 
+(defn- classify-output
+  "Describe the shape of the :output value without leaking its contents.
+   Returns a keyword suitable for event payload."
+  [output]
+  (cond
+    (nil? output) :nil
+    (map? output) :map
+    (sequential? output) :sequential
+    (string? output) :string
+    :else :other))
+
+(defn dag-skip-diagnostic
+  "Produce a structured snapshot of phase-result for :no-plan-id / :no-tasks
+   skips. Keys-only (no values) so the event stays bounded and we don't leak
+   full plan content into the log.
+
+   Returned shape:
+     {:phase-result/keys [...]
+      :result/keys       [...]
+      :result/status     <value or nil>
+      :output/type       :nil | :map | :sequential | :string | :other
+      :output/keys       [...] (only if :map)
+      :output/has-plan-id? bool (only if :map)
+      :plan/task-count   int (only when reason is :no-tasks)}"
+  [phase-result reason]
+  (let [phase-keys (when (map? phase-result) (sort (keys phase-result)))
+        result     (:result phase-result)
+        result-keys (when (map? result) (sort (keys result)))
+        result-status (when (map? result) (:status result))
+        output (when (map? result) (:output result))
+        output-type (classify-output output)
+        output-keys (when (= :map output-type) (sort (keys output)))
+        has-plan-id? (when (= :map output-type)
+                       (boolean (:plan/id output)))
+        plan (extract-plan-from-phase-result phase-result)]
+    (cond-> {:phase-result/keys (vec phase-keys)
+             :result/keys       (vec result-keys)
+             :result/status     result-status
+             :output/type       output-type}
+      (seq output-keys)       (assoc :output/keys (vec output-keys))
+      (some? has-plan-id?)    (assoc :output/has-plan-id? has-plan-id?)
+      (= :no-tasks reason)    (assoc :plan/task-count
+                                     (count (:plan/tasks plan))))))
+
 (defn dag-applicable?
   "Check whether DAG execution should be attempted for this phase result.
    Returns the plan map if applicable, nil otherwise."
@@ -468,8 +512,12 @@
     (if skip-reason
       (do
         (when (= :plan phase-name)
-          (emit-dag-considered! ctx :skipped skip-reason
-                                {:phase/name phase-name}))
+          (let [base  {:phase/name phase-name}
+                extra (if (contains? #{:no-plan-id :no-tasks} skip-reason)
+                        (assoc base :dag/diagnostic
+                               (dag-skip-diagnostic phase-result skip-reason))
+                        base)]
+            (emit-dag-considered! ctx :skipped skip-reason extra)))
         nil)
       (let [plan (extract-plan-from-phase-result phase-result)
             ctx-with-resume (assoc ctx :pre-completed-ids
