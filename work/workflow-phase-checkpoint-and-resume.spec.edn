@@ -140,4 +140,12 @@
   "Documented in specs/normative/N2-workflows.md and user-facing docs"
   "E2E test: run a spec, kill mid-implement, resume, verify implement re-runs but plan does not"]
 
+ :spec/priority
+ {:tier :blocker
+  :axes #{:dogfood-enabler :token-conservation}
+  :theme :dogfood-resilience
+  :rationale "Biggest token-conservation lever. Every rate-limit or restart currently burns the full plan phase (~5 min of LLM work per run) because nothing persists across invocations."
+  :blocks []
+  :blocked-by ["worktree-persistence-scratch-branch.spec.edn"]}
+
  :spec/workflow-type :canonical-sdlc}

@@ -81,4 +81,12 @@
   "Terminal :workflow/phase-completed on hang carries :phase/termination-reason :agent-stalled"
   "Existing passing workflows do not regress (watchdog is observe-only when no hang)"]
 
+ :spec/priority
+ {:tier :blocker
+  :axes #{:dogfood-enabler :token-conservation}
+  :theme :dogfood-resilience
+  :rationale "Without this, a provider stall costs us the full phase budget (observed 11-minute silent hangs on 2026-04-17). Kills hung agents fast + retries via session-resume = minutes saved per interrupt."
+  :blocks []
+  :blocked-by ["event-log-tool-visibility.spec.edn"]}
+
  :spec/workflow-type :canonical-sdlc}

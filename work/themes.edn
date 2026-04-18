@@ -1,0 +1,118 @@
+;; =============================================================================
+;; Work-spec theme catalog
+;; =============================================================================
+;;
+;; Themes group work specs into coherent epics. Each work/*.spec.edn MUST
+;; declare :spec/priority :theme pointing at one of the ids below.
+;;
+;; A theme is routing + grouping, not authority. The authoritative "what
+;; this theme is trying to achieve" lives in :theme/informative-spec.
+;; Anchoring contracts live in :theme/normative-refs.
+;;
+;; See .standards/foundations/work-spec-authoring.mdc (Dewey 021) for the
+;; full authoring contract enforced at review time.
+
+{:dogfood-resilience
+ {:theme/id :dogfood-resilience
+  :theme/title "Dogfood resilience"
+  :theme/description
+  "Make miniforge capable of running miniforge without paying for
+   completed work twice. Provider rate limits, network outages, process
+   restarts, and LLM-provider regressions MUST NOT cost the user tokens
+   for phases that already succeeded."
+  :theme/informative-spec "specs/informative/I-DOGFOOD-RESILIENCE.md"
+  :theme/normative-refs
+  [{:doc "specs/normative/N2-delta-phase-checkpoint-and-resume.md"
+    :relation :primary}
+   {:doc "specs/normative/N2-workflows.md" :section "§1.1 #5"
+    :relation :supporting}
+   {:doc "specs/normative/N3-event-stream.md" :section "§3.17"
+    :relation :supporting}]
+  :theme/completion-criteria
+  ["checkpoint + resume works end-to-end — a killed run resumes with no re-run of successful phases"
+   "watchdog detects a stalled LLM stream within 90s and recovers via backend session-resume"
+   "worktree contents survive process death via scratch-ref; `miniforge recover <id>` restores them"
+   "specs declaring :spec/depends-on block until their deps land"
+   "event log carries tool names + args + results at trace level, not just 'tool-calling' pings"]
+  :theme/status :in-flight
+  :theme/owner :christopher
+  :theme/started #inst "2026-04-17"}
+
+ :context-quality
+ {:theme/id :context-quality
+  :theme/title "Context quality"
+  :theme/description
+  "Agent context today is text-only (file-level BM25 + repo maps).
+   Move to structural, symbol-level, dependency-neighborhood context so
+   each attempt carries more signal per token and retry rates drop."
+  :theme/informative-spec nil
+  :theme/normative-refs
+  [{:doc "specs/normative/N1-architecture.md" :section "§2.27–§2.30"
+    :relation :primary}]
+  :theme/completion-criteria
+  ["For a Clojure task targeting a well-connected var, context-pack emits a dependency-neighborhood section naming real callers + callees + protocol implementors"
+   "For a non-Clojure task, context-pack emits a tree-sitter symbol-neighborhood"
+   "Dogfood A/B: measured token-delta and convergence-rate advantage vs BM25 baseline before enabling by default"]
+  :theme/status :planned
+  :theme/owner :christopher}
+
+ :polylith-compliance
+ {:theme/id :polylith-compliance
+  :theme/title "Polylith compliance"
+  :theme/description
+  "`poly check` currently reports 13 structural errors + 9 warnings.
+   Pre-commit's structural gate rejects commits because of them, which
+   blocks every dogfood run's release phase. Get to a clean workspace
+   and keep it clean by wiring the gate into CI and workflow-dep
+   ordering."
+  :theme/informative-spec nil
+  :theme/normative-refs
+  [{:doc "specs/normative/N1-architecture.md" :section "§4 Polylith conventions"
+    :relation :primary}
+   {:doc ".standards/frameworks/polylith.mdc" :relation :primary}
+   {:doc ".standards/frameworks/polylith-composition.mdc" :relation :supporting}
+   {:doc ".standards/frameworks/polylith-tool.mdc" :relation :supporting}]
+  :theme/completion-criteria
+  ["`poly check` reports 0 errors + 0 actionable warnings on main"
+   "CI workflow runs `poly check` as a gate before test/build"
+   "No two components share an interface name"]
+  :theme/status :in-flight
+  :theme/owner :christopher}
+
+ :dag-orchestration
+ {:theme/id :dag-orchestration
+  :theme/title "DAG orchestration"
+  :theme/description
+  "Miniforge's DAG executor exists and is wired but never fires for
+   LLM-generated plans because `plan-from-agent` output doesn't reach
+   the DAG check with a :plan/id. Unlocking this turns every non-trivial
+   spec from a monolithic implement phase into parallel child workflows
+   — the single biggest leverage point for dogfood efficiency."
+  :theme/informative-spec "specs/informative/I-DAG-ORCHESTRATION.md"
+  :theme/normative-refs
+  [{:doc "specs/normative/N2-workflows.md" :section "§13"
+    :relation :primary}]
+  :theme/completion-criteria
+  ["`:workflow/dag-activated` event emitted on any spec without pre-declared tasks"
+   "A spec with ≥2 decomposable tasks runs as parallel child workflows, not one implement phase"]
+  :theme/status :in-flight
+  :theme/owner :christopher}
+
+ :reliability-taxonomy
+ {:theme/id :reliability-taxonomy
+  :theme/title "Reliability taxonomy"
+  :theme/description
+  "A canonical failure taxonomy + reliability event schema + SLI/SLO
+   engine. Foundation for self-healing decisions and for distinguishing
+   agent-caused failures from infrastructure-caused failures."
+  :theme/informative-spec nil
+  :theme/normative-refs
+  [{:doc "specs/gap-analysis-reliability-nines.md" :relation :primary}
+   {:doc "specs/normative/N1-architecture.md" :section "§5.3.3"
+    :relation :primary}]
+  :theme/completion-criteria
+  ["Canonical failure classes defined and adopted across agents"
+   "Reliability events flow through the event stream with stable schema"
+   "Self-healing chooses recovery actions keyed on failure class"]
+  :theme/status :planned
+  :theme/owner :christopher}}

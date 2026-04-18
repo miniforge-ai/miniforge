@@ -78,4 +78,12 @@
   "7-day GC removes scratch refs for completed workflows"
   "Existing test suite passes; new tests cover crash-recovery path"]
 
+ :spec/priority
+ {:tier :blocker
+  :axes #{:dogfood-enabler}
+  :theme :dogfood-resilience
+  :rationale "Work that lives only in the worktree is lost on process death. Without scratch-ref mirroring, the checkpoint+resume spec resumes into an empty workspace. Has to land first."
+  :blocks ["workflow-phase-checkpoint-and-resume.spec.edn"]
+  :blocked-by []}
+
  :spec/workflow-type :canonical-sdlc}

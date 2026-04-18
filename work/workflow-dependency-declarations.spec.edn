@@ -77,4 +77,12 @@
   "--ignore-deps override works, emits warning event, runs the spec"
   "Existing specs without :depends-on still schedule and run unchanged"]
 
+ :spec/priority
+ {:tier :high
+  :axes #{:dogfood-enabler}
+  :theme :dogfood-resilience
+  :rationale "Prevents cross-spec races like gates-vs-remediation (2026-04-17). Uses the same supervisor machinery DAG orchestration needs for intra-spec dependencies, so lands cheaply after DAG."
+  :blocks []
+  :blocked-by ["plan-from-agent-dag-wiring.spec.edn"]}
+
  :spec/workflow-type :canonical-sdlc}

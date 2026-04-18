@@ -103,4 +103,12 @@
   "Existing plan-from-spec-tasks tests still pass"
   "An integration test asserts dag-applicable? fires on an LLM-generated plan"]
 
+ :spec/priority
+ {:tier :blocker
+  :axes #{:dogfood-enabler :token-conservation :observation}
+  :theme :dag-orchestration
+  :rationale "Unblocks DAG decomposition. Every non-trivial spec currently runs as a monolithic implement phase; fixing this turns each into parallel child workflows, the single biggest leverage point for dogfood efficiency."
+  :blocks []
+  :blocked-by []}
+
  :spec/workflow-type :canonical-sdlc}
