@@ -31,6 +31,7 @@
         ai.miniforge/operator {:local/root "../../components/operator"}
         ai.miniforge/orchestrator {:local/root "../../components/orchestrator"}
         ai.miniforge/event-stream {:local/root "../../components/event-stream"}
+        ai.miniforge/supervisory-state {:local/root "../../components/supervisory-state"}
         ai.miniforge/self-healing {:local/root "../../components/self-healing"}
 ai.miniforge/messages {:local/root "../../components/messages"}
         ai.miniforge/patterns {:local/root "../../components/patterns"}

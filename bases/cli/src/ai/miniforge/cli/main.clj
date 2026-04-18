@@ -33,9 +33,11 @@
    - doctor   : System health check
    - version  : Version information
 
-   Note: This is designed to run in Babashka. Components that require
-   JVM-only libraries (malli, etc.) are not directly required here.
-   Instead, we use lightweight implementations suitable for CLI."
+   Note: This is designed to run in Babashka. Malli is bundled with
+   Babashka, so schema validation is available here; what we avoid in
+   this ns are requires that pull in components with truly BB-hostile
+   transitive deps (e.g. native JNI), preferring lightweight dispatch
+   to fuller JVM code paths when the CLI only needs thin orchestration."
   (:require
    [babashka.cli :as cli]
    [babashka.fs :as fs]
