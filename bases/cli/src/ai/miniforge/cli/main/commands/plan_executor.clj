@@ -23,6 +23,7 @@
    [ai.miniforge.cli.workflow-runner.context :as context]
    [ai.miniforge.cli.workflow-runner.dashboard :as dashboard]
    [ai.miniforge.event-stream.interface :as es]
+   [ai.miniforge.supervisory-state.interface :as supervisory]
    [ai.miniforge.phase.interface :as phase])
   (:import
    [java.util UUID]))
@@ -103,6 +104,7 @@
         quiet (:quiet opts false)
         workflow (build-execution-workflow plan-id)
         event-stream (es/create-event-stream)
+        _supervisor (supervisory/attach! event-stream)
         workflow-id (random-uuid)
         control-state (es/create-control-state)
         command-poller-cleanup (dashboard/start-command-poller! workflow-id control-state)

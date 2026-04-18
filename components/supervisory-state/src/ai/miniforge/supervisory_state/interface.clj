@@ -45,6 +45,24 @@
 (def start! core/start!)
 (def stop!  core/stop!)
 
+(defn attach!
+  "Convenience: create a supervisory-state component bound to `stream`,
+   start it, and return the handle.
+
+   Typical use at a `(es/create-event-stream)` call site:
+
+   ```clojure
+   (let [stream     (es/create-event-stream)
+         supervisor (ss/attach! stream)]
+     …)
+   ```
+
+   The returned handle can be passed to [[stop!]] when the host no longer
+   needs the supervisor; if it is dropped without an explicit stop, the
+   subscription is collected with the stream when the stream is GC'd."
+  [stream]
+  (start! (create stream)))
+
 ;------------------------------------------------------------------------------ Layer 2
 ;; Query API (reads only; consumers should prefer subscribing to
 ;; `:supervisory/*-upserted` events on the event stream)
