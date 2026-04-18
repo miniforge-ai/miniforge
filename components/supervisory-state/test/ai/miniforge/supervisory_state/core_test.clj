@@ -67,6 +67,15 @@
     (is (false? (:subscribed? @comp)))
     (is (not (contains? (:subscribers @stream) core/subscriber-id)))))
 
+(deftest attach!-is-create-plus-start!
+  (let [stream (no-sink-stream)
+        comp   (iface/attach! stream)]
+    (is (true? (:subscribed? @comp))
+        "attach! returns a component that is already subscribed")
+    (is (contains? (:subscribers @stream) core/subscriber-id)
+        "attach! registers the stream subscription identically to create+start!")
+    (iface/stop! comp)))
+
 ;------------------------------------------------------------------------------ Emission
 
 (deftest live-workflow-events-produce-supervisory-snapshots

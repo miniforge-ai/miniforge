@@ -41,27 +41,10 @@
 ;------------------------------------------------------------------------------ Layer 1
 ;; Lifecycle
 
-(def create core/create)
-(def start! core/start!)
-(def stop!  core/stop!)
-
-(defn attach!
-  "Convenience: create a supervisory-state component bound to `stream`,
-   start it, and return the handle.
-
-   Typical use at a `(es/create-event-stream)` call site:
-
-   ```clojure
-   (let [stream     (es/create-event-stream)
-         supervisor (ss/attach! stream)]
-     …)
-   ```
-
-   The returned handle can be passed to [[stop!]] when the host no longer
-   needs the supervisor; if it is dropped without an explicit stop, the
-   subscription is collected with the stream when the stream is GC'd."
-  [stream]
-  (start! (create stream)))
+(def create  core/create)
+(def start!  core/start!)
+(def stop!   core/stop!)
+(def attach! core/attach!)
 
 ;------------------------------------------------------------------------------ Layer 2
 ;; Query API (reads only; consumers should prefer subscribing to
@@ -73,3 +56,21 @@
 (def prs           core/prs)
 (def policy-evals  core/policy-evals)
 (def attention     core/attention)
+
+(comment
+  (require '[ai.miniforge.event-stream.interface :as es])
+
+  ;; Attach a supervisor to a throwaway stream and watch the tables
+  ;; populate as fine-grained events publish.
+  (def stream (es/create-event-stream {:sinks []}))
+  (def supervisor (attach! stream))
+
+  (let [wf (random-uuid)]
+    (es/publish! stream (es/workflow-started stream wf))
+    (es/publish! stream (es/workflow-completed stream wf :success)))
+
+  (workflows supervisor)
+  (attention supervisor)
+
+  (stop! supervisor)
+  :rcf)
