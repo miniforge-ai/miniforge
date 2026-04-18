@@ -21,7 +21,8 @@
 
    These functions implement the logic for the FunctionalAgent record."
   (:require
-   [ai.miniforge.logging.interface :as log]))
+   [ai.miniforge.logging.interface :as log]
+   [ai.miniforge.response.interface :as response]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Helper functions for cycle-agent
@@ -84,13 +85,12 @@
                           :status (:status result)}})
         result)
       (catch Exception e
-        (log/error logger :agent :agent/invoke-failed
-                   {:message (ex-message e)
-                    :data {:role role
-                           :duration-ms (- (System/currentTimeMillis) start-time)}})
-        {:status :error
-         :error (ex-message e)
-         :metrics {:duration-ms (- (System/currentTimeMillis) start-time)}}))))
+        (let [duration-ms (- (System/currentTimeMillis) start-time)]
+          (log/error logger :agent :agent/invoke-failed
+                     {:message (ex-message e)
+                      :data {:role role :duration-ms duration-ms}})
+          (response/error e {:data (assoc (ex-data e) :role role)
+                             :duration-ms duration-ms}))))))
 
 (defn validate-impl
   "Implementation of validate protocol method for FunctionalAgent."
