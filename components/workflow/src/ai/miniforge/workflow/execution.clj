@@ -366,6 +366,36 @@
     (string? output) :string
     :else :other))
 
+(def ^:private failure-statuses
+  #{:error :failed :failure})
+
+(defn- failed?
+  "True when a result map carries a failure status."
+  [result]
+  (contains? failure-statuses (:status result)))
+
+(defn- summarize-error
+  "Keys-only/trimmed summary of a failure result's :error map so the event
+   carries enough to diagnose without leaking large payloads (stack traces,
+   token arrays). Returns nil when the result isn't a failure or carries no
+   diagnosable error fields.
+
+   Reads the canonical response-shape error field (:message) and emits the
+   canonical event-schema field (:error/message). Any producer using a
+   non-canonical shape MUST convert at its boundary — this fn is inside
+   the workflow runtime and does not coerce."
+  [result]
+  (when (failed? result)
+    (let [err (:error result)
+          msg (:message err)
+          data-keys (some-> err :data keys sort)
+          summary (cond-> {}
+                    msg                       (assoc :error/message
+                                                     (subs (str msg) 0 (min 500 (count (str msg)))))
+                    (keyword? (:anomaly err)) (assoc :anomaly (:anomaly err))
+                    (seq data-keys)           (assoc :error/data-keys (vec data-keys)))]
+      (not-empty summary))))
+
 (defn dag-skip-diagnostic
   "Produce a structured snapshot of phase-result for :no-plan-id / :no-tasks
    skips. Keys-only (no values) so the event stays bounded and we don't leak
@@ -378,24 +408,27 @@
       :output/type       :nil | :map | :sequential | :string | :other
       :output/keys       [...] (only if :map)
       :output/has-plan-id? bool (only if :map)
-      :plan/task-count   int (only when reason is :no-tasks)}"
+      :plan/task-count   int (only when reason is :no-tasks)
+      :result/error      {:error/message ... :anomaly ... :error/data-keys ...}
+                         (only when :result is a failure per summarize-error)}"
   [phase-result reason]
-  (let [phase-keys (when (map? phase-result) (sort (keys phase-result)))
-        result     (:result phase-result)
-        result-keys (when (map? result) (sort (keys result)))
-        result-status (when (map? result) (:status result))
-        output (when (map? result) (:output result))
-        output-type (classify-output output)
-        output-keys (when (= :map output-type) (sort (keys output)))
-        has-plan-id? (when (= :map output-type)
-                       (boolean (:plan/id output)))
-        plan (extract-plan-from-phase-result phase-result)]
+  (let [phase-keys    (some-> phase-result keys sort)
+        result        (:result phase-result)
+        result-keys   (some-> result keys sort)
+        result-status (:status result)
+        output        (:output result)
+        output-type   (classify-output output)
+        output-keys   (when (= :map output-type) (sort (keys output)))
+        has-plan-id?  (when (= :map output-type) (boolean (:plan/id output)))
+        plan          (extract-plan-from-phase-result phase-result)
+        error-summary (summarize-error result)]
     (cond-> {:phase-result/keys (vec phase-keys)
              :result/keys       (vec result-keys)
              :result/status     result-status
              :output/type       output-type}
       (seq output-keys)       (assoc :output/keys (vec output-keys))
       (some? has-plan-id?)    (assoc :output/has-plan-id? has-plan-id?)
+      error-summary           (assoc :result/error error-summary)
       (= :no-tasks reason)    (assoc :plan/task-count
                                      (count (:plan/tasks plan))))))
 

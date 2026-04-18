@@ -67,16 +67,35 @@
       (:cost-usd metrics) (assoc :cost-usd (:cost-usd metrics))
       (:workflow/pr-info context) (assoc :pr-info (:workflow/pr-info context)))))
 
+(def ^:private inner-failure-statuses
+  #{:error :failed :failure})
+
+(defn- inner-result-failed?
+  "True when the phase's inner agent result carries a failure status.
+
+   The phase wrapper can set :status :completed on the outer phase map
+   (meaning the interceptor ran without crashing) while the inner
+   :result still carries :status :error / :failed / :failure from an
+   agent that failed. An inner failure MUST propagate to the phase
+   outcome; otherwise events report :success over an :error result
+   and downstream observers (like the DAG orchestrator) see ambiguity."
+  [result]
+  (boolean
+    (or (contains? inner-failure-statuses (get-in result [:result :status]))
+        (false? (get-in result [:result :success?])))))
+
 (defn- build-phase-event-data
   "Build event data map for a phase completion event."
   [result]
-  (let [succeeded? (get result :success? (phase/succeeded-or-done? result))
+  (let [succeeded? (and (get result :success? (phase/succeeded-or-done? result))
+                        (not (inner-result-failed? result)))
         outcome    (if succeeded? :success :failure)
         duration-ms (get result :duration-ms
                       (get-in result [:phase/metrics :duration-ms]
                         (get-in result [:metrics :duration-ms])))
         error-info (when-not succeeded?
                      (or (:error result)
+                         (get-in result [:result :error])
                          (when-let [msg (get-in result [:phase/gate-errors])]
                            {:message (messages/t :status/gate-failed) :details msg})
                          (when-let [msg (:message result)]

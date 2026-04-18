@@ -1,0 +1,143 @@
+;; =============================================================================
+;; Spec: Workflow phase checkpoint + resume (first-class product feature)
+;; =============================================================================
+;;
+;; Real-world users will hit provider rate limits, network outages, and
+;; shipping bugs across Claude / Codex / Ollama / others constantly. A
+;; workflow that has run plan → implement → verify → review over 20+ minutes
+;; of paid LLM work MUST be resumable without re-running the successful
+;; phases. Burning tokens on successful work twice is a productivity AND
+;; cost-of-product failure.
+;;
+;; Related but distinct:
+;; - work/agent-stream-watchdog-and-resume.spec.edn — SESSION-level resume
+;;   (restart the LLM stream mid-phase via backend --resume). Complementary
+;;   to this spec, not a substitute.
+;; - work/worktree-persistence-scratch-branch.spec.edn — persists worktree
+;;   content across process death. Enables workspace recovery; this spec
+;;   handles workflow-state recovery.
+;;
+;; `bb miniforge run --resume <id>` already exists in the CLI surface but
+;; the machinery isn't wired. Phase results aren't persisted to a checkpoint
+;; store today, so there's nothing to resume from.
+
+{:spec/title "Workflow phase checkpoint + resume"
+
+ :spec/description
+ "Make workflows resumable at phase granularity. After each successful
+  phase :leave, persist the phase result + environment metadata to a
+  checkpoint store. A user-facing `miniforge resume <workflow-id>`
+  command restores that state and continues from the next un-checkpointed
+  phase — paying no LLM cost for phases that already succeeded.
+
+  GROUP 1: Per-phase checkpoint write
+  File: ~/.miniforge/checkpoints/<workflow-id>/<phase>.edn
+  Written by an interceptor that wraps :leave — after :leave returns
+  successfully, serialize :execution/phase-results[phase] + any phase
+  metadata needed to resume (artifact references, rules manifest). Writes
+  are atomic (tmp file + rename). Failure to write a checkpoint logs a
+  warning and emits :workflow/checkpoint-write-failed but does NOT fail
+  the phase.
+
+  Also written: ~/.miniforge/checkpoints/<workflow-id>/manifest.edn with
+    - :workflow/id
+    - :workflow/spec-path
+    - :workflow/spec-hash (sha256 of the spec file content at start time)
+    - :workflow/started-at
+    - :workflow/phases-completed [list of phase keys in order]
+    - :workflow/last-checkpoint-at
+    - :workflow/backend (claude, codex, etc. — helpful for resume)
+
+  GROUP 2: `miniforge resume <workflow-id>` command
+  Reads the manifest + phase checkpoints. Reconstructs the execution
+  context:
+    - :execution/phase-results (merged from checkpoint .edn files)
+    - :execution/phase-index (first phase not in phases-completed)
+    - :execution/id (the original workflow id — same id continues)
+  Runs from that phase-index onward. Emits :workflow/resumed event with
+  {:from-phase X :skipping-phases [a b c]}.
+
+  Default behavior: auto-detect the last successful phase, continue from
+  the next one.
+
+  GROUP 3: Integrity check — refuse resume on spec drift
+  Before restoring, recompute the spec file's sha256 and compare to
+  :workflow/spec-hash in the manifest. If different, error out with a
+  clear message + --force flag to override:
+    error: spec has changed since workflow <id> was started
+           expected hash abc123, got xyz789
+           pass --force to resume anyway (may produce incorrect results)
+
+  GROUP 4: `--from-phase <phase>` explicit override
+  For the diagnostic/iteration case — force resume to start from a
+  specific phase, discarding later checkpoints. Useful when a bug is
+  discovered in one phase's logic but earlier phases are still valid.
+  Implemented by truncating :workflow/phases-completed and deleting
+  checkpoint files for the truncated phases.
+
+  GROUP 5: `miniforge list --resumable` command
+  Enumerate ~/.miniforge/checkpoints/*/manifest.edn. Render:
+
+    WORKFLOW ID                            STARTED               LAST PHASE   STATUS     SPEC
+    40a8f167-2b48-4324-a2ed-fcd18b7fa9b7   2026-04-17 09:31:50   plan         failed     polylith-compliance-remediation
+    bed4de2e-ad4d-405b-b7a8-beaa92bb84ce   2026-04-17 23:44:14   plan         failed     plan-from-agent-dag-wiring
+
+  Output should make it obvious which is the most recent failure and
+  what phase it died in.
+
+  GROUP 6: Checkpoint GC
+  Default retention: 30 days. Checkpoints older than 30 days are auto-
+  purged by a `miniforge gc` task (invoked on CLI startup with a rate
+  limit — at most once per 24 hours).
+
+  Pinned workflows (marked in manifest with :pinned? true) are never
+  GC'd. `miniforge resume <id> --pin` sets this flag for long-running
+  investigations.
+
+  GROUP 7: Replay across workflows — `miniforge replay <old-id>
+  --into <spec> --phase implement`
+  NICE-TO-HAVE (may land separately). Reuse an old workflow's plan (or
+  any phase's output) with a new spec or retry. Example use case: plan
+  phase produced a good plan, implement failed, spec was edited to be
+  more specific — replay-into-new-workflow keeps the good plan.
+
+  GROUP 8: Integration with worktree persistence (spec
+  worktree-persistence-scratch-branch)
+  If the worktree is gone on resume:
+    - If the scratch branch exists, recreate the worktree from it and
+      continue.
+    - If no scratch branch, error with a helpful message (user needs to
+      retrigger the failed phase, not resume)."
+
+ :spec/intent
+ {:type :feature
+  :scope ["components/workflow/src"
+          "components/workflow-runner/src"
+          "components/event-stream/src"
+          "bases/cli/src/ai/miniforge/cli/main/commands"
+          "bases/cli/resources/config/cli"
+          "resources/config/default-user-config.edn"
+          "specs/normative/N2-workflows.md"]}
+
+ :spec/constraints
+ ["Checkpoints MUST survive process death — synchronous flush or journal"
+  "Checkpoint write MUST NOT fail the phase on I/O error — log + emit event and proceed"
+  "Resume MUST verify spec integrity by default; opt-out via --force with a warning"
+  "Same workflow-id continues on resume — no new id, no new event-log directory"
+  "Resumed runs MUST emit :workflow/resumed with {:from-phase X :skipping [a b c]}"
+  "Localize all user-facing strings (msg/t + en-US.edn)"
+  "The checkpoint format is a normative part of the product — schema lives in components/schema"]
+
+ :spec/acceptance-criteria
+ ["After any successful phase :leave, a checkpoint .edn exists at ~/.miniforge/checkpoints/<id>/<phase>.edn"
+  "Manifest file reflects :workflow/phases-completed accurately after each phase"
+  "`miniforge resume <id>` continues from the next un-checkpointed phase — no LLM call for already-completed phases"
+  "A spec edit between initial run and resume produces a hash-mismatch error by default; --force bypasses"
+  "`--from-phase <phase>` truncates later checkpoints and resumes from there"
+  "`miniforge list --resumable` shows all resumable workflows with their status"
+  "GC purges checkpoints older than 30 days but preserves :pinned? entries"
+  "Resume works for workflows that were killed mid-phase (not just cleanly finished phases) — the dead phase re-runs; earlier successful phases don't"
+  "Documented in specs/normative/N2-workflows.md and user-facing docs"
+  "E2E test: run a spec, kill mid-implement, resume, verify implement re-runs but plan does not"]
+
+ :spec/workflow-type :canonical-sdlc}
