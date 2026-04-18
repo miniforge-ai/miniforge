@@ -24,6 +24,7 @@
   (:require [ai.miniforge.gate.interface :as gate]
             [ai.miniforge.phase.interface :as phase]
             [ai.miniforge.response.interface :as response]
+            [ai.miniforge.schema.interface :as schema]
             [ai.miniforge.workflow.dag-orchestrator :as dag-orch]))
 
 ;------------------------------------------------------------------------------ Layer 0: Atomic operations
@@ -341,6 +342,19 @@
             (inc i)))
         (map-indexed vector pipeline)))
 
+(defn dag-skip-reason
+  "Return the reason DAG execution should be skipped, or nil if it should proceed.
+   Reasons are keywords — :not-plan-phase, :disabled, :no-plan-id, :no-tasks."
+  [phase-name phase-result ctx]
+  (cond
+    (not= :plan phase-name) :not-plan-phase
+    (:disable-dag-execution ctx) :disabled
+    :else (let [plan (extract-plan-from-phase-result phase-result)]
+            (cond
+              (nil? plan) :no-plan-id
+              (empty? (:plan/tasks plan)) :no-tasks
+              :else nil))))
+
 (defn dag-applicable?
   "Check whether DAG execution should be attempted for this phase result.
    Returns the plan map if applicable, nil otherwise."
@@ -348,6 +362,34 @@
   (when (and (= :plan phase-name)
              (not (:disable-dag-execution ctx)))
     (extract-plan-from-phase-result phase-result)))
+
+(defn- resolve-event-stream
+  "Find the event stream from context, matching phase/telemetry's lookup."
+  [ctx]
+  (or (:event-stream ctx)
+      (:execution/event-stream ctx)
+      (get-in ctx [:execution/opts :event-stream])))
+
+(defn- resolve-workflow-id
+  [ctx]
+  (or (:execution/id ctx) (:workflow/id ctx) (:workflow-id ctx)))
+
+(defn- emit-dag-considered!
+  "Emit a :workflow/dag-considered event describing whether DAG fired and why.
+   Swallows errors — observability must not break execution."
+  [ctx outcome reason extra]
+  (when-let [stream (resolve-event-stream ctx)]
+    (try
+      (let [publish! (requiring-resolve 'ai.miniforge.event-stream.interface/publish!)
+            event (merge
+                    {:event/type :workflow/dag-considered
+                     :event/timestamp (str (java.time.Instant/now))
+                     :workflow/id (resolve-workflow-id ctx)
+                     :dag/outcome outcome
+                     :dag/reason reason}
+                    extra)]
+        (publish! stream event))
+      (catch Exception _ nil))))
 
 (defn- merge-sub-worktree-changes!
   "Copy changed files from DAG sub-worktrees into the parent worktree.
@@ -416,16 +458,29 @@
 
    The DAG executor is the universal executor — it handles both parallel
    and sequential plans. Returns updated context with DAG results and
-   skipped-to index, or nil if DAG execution is not applicable."
+   skipped-to index, or nil if DAG execution is not applicable.
+
+   Always emits :workflow/dag-considered so the event log captures whether
+   DAG fired and — when skipped — exactly why."
   [ctx phase-name phase-result pipeline
    transition-to-completed-fn transition-to-failed-fn]
-  (when-let [plan (dag-applicable? phase-name phase-result ctx)]
-    (let [ctx-with-resume (assoc ctx :pre-completed-ids
-                                 (get-in ctx [:execution/opts :pre-completed-dag-tasks] #{}))
-          dag-result (dag-orch/execute-plan-as-dag plan ctx-with-resume)]
-      (if (:success? dag-result)
-        (apply-dag-success ctx dag-result pipeline transition-to-completed-fn)
-        (apply-dag-failure ctx dag-result transition-to-failed-fn)))))
+  (let [skip-reason (dag-skip-reason phase-name phase-result ctx)]
+    (if skip-reason
+      (do
+        (when (= :plan phase-name)
+          (emit-dag-considered! ctx :skipped skip-reason
+                                {:phase/name phase-name}))
+        nil)
+      (let [plan (extract-plan-from-phase-result phase-result)
+            ctx-with-resume (assoc ctx :pre-completed-ids
+                                   (get-in ctx [:execution/opts :pre-completed-dag-tasks] #{}))
+            _ (emit-dag-considered! ctx :activated :plan-has-tasks
+                                    {:plan/id (:plan/id plan)
+                                     :plan/task-count (count (:plan/tasks plan))})
+            dag-result (dag-orch/execute-plan-as-dag plan ctx-with-resume)]
+        (if (schema/succeeded? dag-result)
+          (apply-dag-success ctx dag-result pipeline transition-to-completed-fn)
+          (apply-dag-failure ctx dag-result transition-to-failed-fn))))))
 
 ;------------------------------------------------------------------------------ Layer 2: Phase step execution
 
