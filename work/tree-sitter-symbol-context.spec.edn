@@ -1,0 +1,150 @@
+;; =============================================================================
+;; Spec: Language-agnostic symbol extraction via tree-sitter, wired into
+;;        repo-index + context-pack
+;; =============================================================================
+;;
+;; Reopens Phase 2 of the archived 'Repository Intelligence & Context
+;; Assembly' plan (work/archive/done/repo-context-implementation-plan.md).
+;; Phase 1 (file-level index, BM25, repo maps) shipped. Phase 2
+;; (tree-sitter symbols) was archived unimplemented — the agent context
+;; pipeline has stayed text-based ever since.
+;;
+;; Tree-sitter IS already in the codebase, narrowly, at
+;; components/policy-pack/src/ai/miniforge/policy_pack/ast.clj — a CLI
+;; wrapper around `tree-sitter query` for policy-rule structural matching.
+;; It is NOT wired into repo-index or context-pack, so agents today see
+;; text neighborhoods, not symbol neighborhoods.
+;;
+;; This spec:
+;;   1. Promotes the policy-pack AST wrapper into a shared component
+;;      (tree-sitter-bridge) so both policy-pack and repo-index consume
+;;      the same substrate.
+;;   2. Adds symbol extraction to repo-index covering the languages
+;;      miniforge OSS targets: Clojure, TypeScript, Python, Go, Rust,
+;;      Swift (miniforge-fleet extends for others).
+;;   3. Wires symbol neighborhoods into context-pack so agents receive
+;;      a signature-first dependency view, not just matching text blobs.
+;;
+;; Relationship to work/clj-xref-context-neighborhoods.spec.edn: clj-xref
+;; is the Clojure-specific superset (protocols, multimethods, arity-
+;; aware calls) that pure tree-sitter can't express. This spec is
+;; language-agnostic symbol tables. Both should ship — clj-xref is a
+;; fast additive win; tree-sitter is the structural base we need for the
+;; non-Clojure codebases miniforge targets.
+
+{:spec/title "Tree-sitter symbol extraction for repo-index + context-pack"
+
+ :spec/description
+ "Lift the existing policy-pack tree-sitter wrapper into a shared brick.
+  Use it to build a per-repo symbol table. Give context-pack the ability
+  to return symbol-level neighborhoods instead of text-only hits.
+
+  GROUP 1: Promote the tree-sitter wrapper into a shared component
+  Create components/tree-sitter-bridge. Move components/policy-pack/
+  src/.../ast.clj's CLI wrapper logic into it. Update policy-pack to
+  consume tree-sitter-bridge via its interface. No behavior change in
+  policy-pack; just a dependency relocation.
+
+  GROUP 2: Grammar install + health check
+  The tree-sitter CLI needs language grammars installed on PATH. Add:
+    - `bb tree-sitter:install-grammars` — install the grammars for the
+      OSS target set (clojure, typescript, tsx, python, go, rust, swift).
+    - `tree-sitter-bridge/grammars-available?` — report the installed
+      grammars; context pipeline falls back to lexical for any language
+      whose grammar is missing.
+
+  GROUP 3: Symbol extraction in repo-index
+  Add components/repo-index/src/.../symbols.clj:
+    - `extract-symbols [file-record]` — shell to tree-sitter query, parse
+      output into a vector of symbol entries:
+      {:symbol/kind (:fn :method :class :var :macro :protocol :interface
+                    :trait :impl :type :const ...)
+       :symbol/name string
+       :symbol/fqname string   ;; module/namespace-qualified
+       :symbol/file string
+       :symbol/line-start int
+       :symbol/line-end int
+       :symbol/signature string  ;; short — first N chars of the def line
+       :symbol/container fqname-or-nil
+       :symbol/visibility (:public :private :internal)
+       :symbol/language keyword}
+    - Incremental rebuild — only re-parse files whose blob-sha changed
+      in the git tree.
+    - Schema in components/schema/ for the symbol record.
+
+  GROUP 4: repo.symbol tool
+  Register a new tool in tool-registry: `repo.symbol`.
+    - Input: symbol-id OR (file-path + line)
+    - Output: signature + docstring by default; body opt-in
+    - Budget: body content counts against the snippet budget
+    - Agent prompt update: prefer repo.symbol over repo.open for
+      structural questions.
+
+  GROUP 5: Symbol neighborhoods in context-pack
+  For a task whose target is a symbol, populate
+  :context-pack/symbol-neighborhood with:
+    - Target symbols' signatures + bodies
+    - Same-file neighbors (definitions before/after)
+    - Cross-file imports / references discovered via tree-sitter query
+      patterns (language-specific — Clojure `:require`, TS `import`,
+      Python `from ... import`, etc.)
+  For Clojure tasks, the clj-xref neighborhood (other spec) supplements
+  this with call-graph / protocol info.
+
+  GROUP 6: Dogfood A/B + measurement
+  Same as clj-xref spec — run dogfood specs with text-only vs symbol
+  neighborhoods, compare convergence + token usage. Enable by default
+  only after measurable win.
+
+  NON-GOALS
+  - LSP — use clojure-lsp / rust-analyzer etc. for editor UX.
+  - Full cross-reference DB — that's what clj-xref does for Clojure; for
+    other languages, we rely on tree-sitter's more limited cross-file
+    inference and accept that some 'who-calls' queries are imprecise.
+  - Writing new tree-sitter grammars — we use upstream grammars only.
+
+  RISKS
+  - Tree-sitter CLI availability varies by developer machine. Fallback
+    to lexical is load-bearing — must be tested.
+  - Incremental update edge cases (renamed files, merged commits). The
+    original plan flagged this. Mitigate by rebuilding the symbol index
+    as part of `bb repo-index:rebuild` and tying it to release tags.
+  - Grammar version drift. Pin grammar versions in the install task.
+
+  See work/archive/done/repo-context-implementation-plan.md §Phase 2 for
+  the original thinking — symbol-id scheme, symbol-key cross-commit
+  identity, container hierarchy. Port what still applies."
+
+ :spec/intent
+ {:type :feature
+  :scope ["components/tree-sitter-bridge/"         ;; new
+          "components/policy-pack/src"             ;; migrate consumer
+          "components/repo-index/src"
+          "components/context-pack/src"
+          "components/tool-registry/src"
+          "components/schema/src"
+          "tasks/"
+          "resources/config/default-user-config.edn"
+          "docs/development-guidelines.md"
+          "specs/normative/N1-architecture.md"]}
+
+ :spec/constraints
+ ["tree-sitter CLI MUST be optional at runtime — missing grammars fall back to lexical context without errors"
+  "policy-pack behavior MUST NOT change during the wrapper relocation (pure refactor)"
+  "Symbol extraction MUST be incremental — no full re-parse on every query"
+  "Symbol records MUST be schema-validated via components/schema"
+  "Feature-flag the symbol neighborhoods in context-pack; default off for the first release"
+  "Localize all user-facing strings (msg/t + en-US.edn)"
+  "Grammar versions MUST be pinned in the install task for reproducibility"]
+
+ :spec/acceptance-criteria
+ ["components/tree-sitter-bridge exists with a clean interface; policy-pack now consumes it"
+  "`bb tree-sitter:install-grammars` installs the OSS target grammars idempotently"
+  "repo-index includes a symbol table; `bb repo-index:dump` shows per-file symbols"
+  "repo.symbol tool is registered and returns signatures + docstrings"
+  "A test spec that modifies a TypeScript function produces a context pack whose :symbol-neighborhood names the function's same-file neighbors and imported modules"
+  "Missing grammars fall back to lexical context without error events"
+  "`bb test` passes across affected bricks"
+  "Documented in docs/development-guidelines.md + normative spec updates in N1 §2.27"]
+
+ :spec/workflow-type :canonical-sdlc}

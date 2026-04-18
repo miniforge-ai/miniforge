@@ -1,0 +1,128 @@
+;; =============================================================================
+;; Spec: Clojure dependency-neighborhood context via clj-xref
+;; =============================================================================
+;;
+;; Today miniforge's agent context pipeline (repo-index → context-pack) is
+;; text-based: BM25 lexical search over file contents + token-budgeted repo
+;; maps. For an implement agent asked to change `process-payment`, the
+;; context it gets is files that mention the string "process-payment"
+;; somewhere. That's coarse — it includes irrelevant files that happen to
+;; use the same word, and it misses callers in files that use it via a
+;; namespace alias.
+;;
+;; clj-xref (https://github.com/danlentz/clj-xref) is a clj-kondo-based
+;; cross-reference database with a public API designed explicitly for
+;; feeding LLMs precise dependency neighborhoods:
+;;
+;;   who-calls, calls-who, who-references, who-implements, who-dispatches,
+;;   ns-deps, ns-dependents, call-graph, unused-vars, apropos
+;;
+;; Built on clj-kondo static analysis. Returns plain maps/vectors. No
+;; editor UX — library for programmatic + batch + REPL use.
+;;
+;; This spec adds a thin integration: context-pack gains an optional
+;; "Clojure dependency neighborhood" section populated via clj-xref when
+;; the task's target file is Clojure. The file-level BM25 path stays as
+;; the fallback and the default for non-Clojure files.
+;;
+;; See also: work/tree-sitter-symbol-context.spec.edn — the broader
+;; language-agnostic symbol extraction that complements this. clj-xref is
+;; the Clojure-specific superset (protocols, multimethods, arities) that
+;; generic tree-sitter symbol tables can't easily express.
+
+{:spec/title "Clojure dependency-neighborhood context via clj-xref"
+
+ :spec/description
+ "Integrate clj-xref as an optional Clojure-specific context provider in
+  context-pack. When an agent's task targets a Clojure file, the context
+  pack includes the dependency neighborhood of the target var(s) —
+  callers, callees, protocol implementations, multimethod dispatch — in
+  addition to (or in place of) the file-level lexical results. For non-
+  Clojure tasks and Clojure tasks without a clear target var, behavior is
+  unchanged.
+
+  GROUP 1: Add clj-xref as a dep + thin wrapper
+  Add com.github.danlentz/clj-xref as a dep in a new shared component
+  (e.g. components/clj-xref-bridge or folded into repo-index as an
+  optional namespace). Wrap only the queries we use initially:
+    - who-calls         → 'who touches this var'
+    - calls-who         → 'what does this var touch'
+    - who-implements    → 'who implements this protocol'
+    - who-dispatches    → 'what dispatch values exist for this multimethod'
+  Use in-memory analysis (xref/analyze [paths]) rather than a persisted
+  .edn file — keeps the build footprint small and avoids the incremental
+  staleness caveat.
+
+  GROUP 2: Target-var extraction from the task
+  context-pack needs to know which var(s) are the subject of the task.
+  Sources, in priority order:
+    - explicit :task/target-vars if the planner provides them
+    - parse from :task/description / spec description via regex + a
+      validate-against-known-vars step
+    - fall back to file-level context (no var → no neighborhood)
+  Produce a vector of fully-qualified symbols that clj-xref can query.
+
+  GROUP 3: Neighborhood assembly in context-pack
+  Add a new section to the pack for Clojure tasks:
+    :context-pack/dependency-neighborhood
+      :target-vars       [fq-sym ...]
+      :callers           [{:from :to :file :line :arity} ...]  (who-calls)
+      :callees           [{:from :to :file :line :arity} ...]  (calls-who)
+      :implementors      [...]                                  (who-implements)
+      :dispatch-values   [...]                                  (who-dispatches)
+      :depth             1         ;; initially, not transitive
+  Budget this section under the existing phase budget. If including the
+  full neighborhood would blow the budget, trim by distance (direct
+  callers before transitive) and emit a warning event.
+
+  GROUP 4: Opt-out flag + feature-flag rollout
+  Add :context-pack/enable-clj-xref-neighborhood to user config, default
+  false for the first release. Agents can be A/B'd:
+    - baseline (text-only BM25)
+    - with neighborhood
+  Dogfood a dozen spec runs each, compare plan/implement convergence
+  rates and token usage. Enable by default only after measurable win.
+
+  GROUP 5: Events + observability
+  Emit :context-pack/neighborhood-emitted with:
+    {:target-vars N
+     :callers-count N
+     :callees-count N
+     :implementors-count N
+     :tokens-used N
+     :trimmed? bool}
+  Feed into the compliance-scanner or a dashboard widget for measuring
+  whether neighborhoods improve or degrade agent outcomes.
+
+  NON-GOALS
+  - Persisted xref DB — in-memory only for v1.
+  - Editor integration — use clojure-lsp for that.
+  - Transitive call graphs beyond depth 1 — may add later based on
+    measurement.
+  - Non-Clojure languages — handled by the tree-sitter symbol spec."
+
+ :spec/intent
+ {:type :feature
+  :scope ["components/context-pack/src"
+          "components/repo-index/src"
+          "components/schema/src"
+          "resources/config/default-user-config.edn"
+          "docs/development-guidelines.md"]}
+
+ :spec/constraints
+ ["In-memory analysis only — do NOT persist an xref DB in v1"
+  "Non-Clojure tasks MUST see unchanged behavior"
+  "Neighborhood inclusion MUST respect the phase token budget"
+  "Events MUST carry counts + trimmed? flag so outcomes are measurable"
+  "Integration MUST be feature-flagged and default off for the first release"
+  "Localize all user-facing strings (msg/t + en-US.edn)"]
+
+ :spec/acceptance-criteria
+ ["A test spec that modifies a well-connected Clojure fn produces a context pack whose :context-pack/dependency-neighborhood includes that fn's real callers and callees"
+  "A test spec that modifies a Python or Rust file produces a context pack with NO neighborhood section"
+  "Budget overflow trims by distance + emits :context-pack/neighborhood-trimmed event"
+  ":context-pack/enable-clj-xref-neighborhood in user config toggles the feature"
+  "Dogfood A/B: 12 runs baseline vs 12 with neighborhood — measured token-delta and convergence-rate logged to dashboard"
+  "`bb test` passes across affected bricks"]
+
+ :spec/workflow-type :canonical-sdlc}
