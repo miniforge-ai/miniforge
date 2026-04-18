@@ -117,6 +117,39 @@
       (is (= :nil (:output/type d)))
       (is (some #{:status :error} (:result/keys d))))))
 
+(deftest diagnostic-surfaces-result-error-on-error-status
+  (testing "error status attaches :result/error with message and data-keys"
+    (let [err {:message "planner MCP artifact not found"
+               :data {:phase :plan
+                      :llm-content-length 4200}}
+          pr  {:name :plan :result {:status :error :error err}}
+          d   (exec/dag-skip-diagnostic pr :no-plan-id)
+          re  (:result/error d)]
+      (is (some? re) ":result/error should be present on :status :error")
+      (is (= "planner MCP artifact not found" (:error/message re)))
+      (is (= [:llm-content-length :phase] (:error/data-keys re))))))
+
+(deftest diagnostic-surfaces-anomaly-keyword
+  (testing "anomaly keyword on error is preserved (trimmed to known category)"
+    (let [err {:message "something" :anomaly :anomalies.agent/invoke-failed}
+          pr  {:name :plan :result {:status :error :error err}}
+          d   (exec/dag-skip-diagnostic pr :no-plan-id)]
+      (is (= :anomalies.agent/invoke-failed (:anomaly (:result/error d)))))))
+
+(deftest diagnostic-truncates-long-error-message
+  (testing "error message > 500 chars is truncated (don't bloat the event)"
+    (let [long-msg (apply str (repeat 1000 "x"))
+          err {:message long-msg}
+          pr  {:name :plan :result {:status :error :error err}}
+          d   (exec/dag-skip-diagnostic pr :no-plan-id)]
+      (is (= 500 (count (:error/message (:result/error d))))))))
+
+(deftest diagnostic-no-result-error-when-success
+  (testing "when result status isn't error/failed/failure, no :result/error key"
+    (let [pr {:name :plan :result {:status :success :output {:some/key 1}}}
+          d  (exec/dag-skip-diagnostic pr :no-plan-id)]
+      (is (nil? (:result/error d))))))
+
 (deftest diagnostic-no-tasks-includes-task-count
   (testing ":no-tasks skip includes :plan/task-count"
     (let [plan {:plan/id (random-uuid) :plan/tasks []}
