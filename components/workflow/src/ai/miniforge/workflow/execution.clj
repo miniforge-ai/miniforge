@@ -24,6 +24,7 @@
   (:require [ai.miniforge.gate.interface :as gate]
             [ai.miniforge.phase.interface :as phase]
             [ai.miniforge.response.interface :as response]
+            [ai.miniforge.schema.interface :as schema]
             [ai.miniforge.workflow.dag-orchestrator :as dag-orch]))
 
 ;------------------------------------------------------------------------------ Layer 0: Atomic operations
@@ -477,7 +478,7 @@
                                     {:plan/id (:plan/id plan)
                                      :plan/task-count (count (:plan/tasks plan))})
             dag-result (dag-orch/execute-plan-as-dag plan ctx-with-resume)]
-        (if (:success? dag-result)
+        (if (schema/succeeded? dag-result)
           (apply-dag-success ctx dag-result pipeline transition-to-completed-fn)
           (apply-dag-failure ctx dag-result transition-to-failed-fn))))))
 
