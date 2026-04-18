@@ -1,6 +1,7 @@
 {:paths ["test" "integration" "e2e"]
 
  :deps {ai.miniforge/cli {:local/root "../../bases/cli"}
+        ai.miniforge/mcp-context-server {:local/root "../../bases/mcp-context-server"}
         ;; Workflow and all its transitive dependencies
         ai.miniforge/workflow {:local/root "../../components/workflow"}
         ai.miniforge/workflow-chain-software-factory {:local/root "../../components/workflow-chain-software-factory"}
@@ -49,6 +50,7 @@
         ai.miniforge/reporting {:local/root "../../components/reporting"}
         ;; Event streaming and observability
         ai.miniforge/event-stream {:local/root "../../components/event-stream"}
+        ai.miniforge/supervisory-state {:local/root "../../components/supervisory-state"}
         ;; Self-healing: workaround detection, backend health tracking
         ai.miniforge/self-healing {:local/root "../../components/self-healing"}
         ;; TUI framework and views
