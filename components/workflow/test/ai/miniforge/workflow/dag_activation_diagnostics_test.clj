@@ -84,3 +84,55 @@
     (is (nil? (exec/dag-applicable? :plan
                                     (phase-result-with-plan valid-plan)
                                     {:disable-dag-execution true})))))
+
+;;----------------------------------------------------------------------------
+;; dag-skip-diagnostic — keys-only snapshot of what the plan phase returned
+
+(deftest diagnostic-success-output-missing-plan-id
+  (testing "planner succeeded but :output lacks :plan/id (the observed case)"
+    (let [pr {:name :plan :result {:status :success :output {:some/other-key 1}}}
+          d  (exec/dag-skip-diagnostic pr :no-plan-id)]
+      (is (= :success (:result/status d)))
+      (is (= :map (:output/type d)))
+      (is (= [:some/other-key] (:output/keys d)))
+      (is (false? (:output/has-plan-id? d)))
+      (is (nil? (:plan/task-count d))
+          ":no-plan-id reason should not include :plan/task-count"))))
+
+(deftest diagnostic-output-is-nil
+  (testing "planner succeeded but :output is nil"
+    (let [pr {:name :plan :result {:status :success :output nil}}
+          d  (exec/dag-skip-diagnostic pr :no-plan-id)]
+      (is (= :nil (:output/type d)))
+      (is (nil? (:output/keys d))
+          "no :output/keys when output is not a map")
+      (is (nil? (:output/has-plan-id? d))
+          "no :output/has-plan-id? when output is not a map"))))
+
+(deftest diagnostic-result-is-failure
+  (testing "planner failed — :result has no :output at all"
+    (let [pr {:name :plan :result {:status :failure :error {:message "boom"}}}
+          d  (exec/dag-skip-diagnostic pr :no-plan-id)]
+      (is (= :failure (:result/status d)))
+      (is (= :nil (:output/type d)))
+      (is (some #{:status :error} (:result/keys d))))))
+
+(deftest diagnostic-no-tasks-includes-task-count
+  (testing ":no-tasks skip includes :plan/task-count"
+    (let [plan {:plan/id (random-uuid) :plan/tasks []}
+          pr   (phase-result-with-plan plan)
+          d    (exec/dag-skip-diagnostic pr :no-tasks)]
+      (is (= 0 (:plan/task-count d)))
+      (is (true? (:output/has-plan-id? d))))))
+
+(deftest diagnostic-bounded-no-leakage
+  (testing "diagnostic doesn't leak full plan content — only keys"
+    (let [large-plan {:plan/id (random-uuid)
+                      :plan/tasks (vec (repeat 100 {:task/id (random-uuid)
+                                                    :task/description "big string"}))}
+          pr  (phase-result-with-plan large-plan)
+          d   (exec/dag-skip-diagnostic pr :no-tasks)]
+      (is (= 100 (:plan/task-count d)))
+      ;; Values should not appear anywhere in the diagnostic except task-count.
+      (is (not (re-find #"big string" (pr-str d)))
+          "diagnostic leaked plan content"))))
