@@ -482,6 +482,7 @@
                  "components/self-healing/src"
                  "components/event-stream/src"
                  "components/event-stream/resources"
+                 "components/supervisory-state/src"
                  "components/dag-primitives/src"
                  "components/dag-executor/src"
                  "components/dag-executor/resources"
