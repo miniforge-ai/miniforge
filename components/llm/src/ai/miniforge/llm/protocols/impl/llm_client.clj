@@ -165,10 +165,23 @@
               "agent_message"
               {:delta (str (:text item) "\n") :done? false}
 
+              ;; MCP tool invocation — emit a tool-use signal so the
+              ;; callback can publish :agent/tool-call with the real name
               "mcp_tool_call"
-              {:delta "" :done? false}
+              {:delta "" :done? false :tool-use true
+               :tool-name (or (get-in item [:tool :name])
+                              (:tool_name item)
+                              (:name item))
+               :tool-call-id (:id item)}
 
-              ;; reasoning, tool_call, etc. — ignore content
+              ;; Native tool call (pre-MCP) — same treatment
+              "tool_call"
+              {:delta "" :done? false :tool-use true
+               :tool-name (or (:name item) (:tool_name item))
+               :tool-call-id (:id item)}
+
+              ;; reasoning — ignored for content but could be surfaced
+              ;; later as :agent/reasoning events if useful
               nil))
 
           ;; Turn completed carries usage

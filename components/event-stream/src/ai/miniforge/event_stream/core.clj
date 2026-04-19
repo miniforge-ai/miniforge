@@ -201,6 +201,30 @@
       (assoc :agent/id agent-id
              :status/type status-type)))
 
+(defn agent-tool-call
+  "Publish a :agent/tool-call event carrying the tool name(s) the agent
+   just invoked, per N3 §3.x. Replaces the generic :agent/status
+   :tool-calling emission for consumers that want structured tool data.
+
+   Fields:
+     :tool/name            — single tool name when one tool fired in the block
+     :tool/names           — vector of names when a single assistant block
+                             included multiple tool_use items
+     :tool/call-id         — provider-supplied id (Claude tool_use.id /
+                             codex item id) when available
+     :tool/args-preview    — truncated/digested args for diagnosis (bounded
+                             to keep events small)"
+  [stream workflow-id agent-id
+   {:keys [tool-name tool-names tool-call-id tool-args-preview]}]
+  (cond-> (create-envelope stream :agent/tool-call workflow-id
+                           (str "Agent called tool"
+                                (when tool-name (str ": " tool-name))))
+    true                (assoc :agent/id agent-id)
+    tool-name           (assoc :tool/name tool-name)
+    (seq tool-names)    (assoc :tool/names (vec tool-names))
+    tool-call-id        (assoc :tool/call-id tool-call-id)
+    tool-args-preview   (assoc :tool/args-preview tool-args-preview)))
+
 (defn workflow-completed [stream workflow-id status & [duration-ms opts]]
   (-> (create-envelope stream :workflow/completed workflow-id
                        (str "Workflow " (name status)))
