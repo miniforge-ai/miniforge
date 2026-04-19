@@ -67,6 +67,11 @@
    Loaded from EDN resource for configurability."
   (delay (prompts/load-prompt :planner)))
 
+(def ^:private planner-prompt-data
+  "Full prompt data map for the planner agent.
+   Exposes knobs like :prompt/max-turns that gate backend-CLI loop length."
+  (delay (prompts/load-prompt-data :planner)))
+
 ;------------------------------------------------------------------------------ Layer 1
 ;; Planner functions
 
@@ -316,7 +321,13 @@
   "Session body for the planner: build mcp-opts with model hint, call LLM."
   [session llm-client user-prompt config context on-chunk]
   (let [budget-usd (budget/resolve-cost-budget-usd :planner config context)
-        mcp-opts (assoc (artifact-session/session->mcp-opts session budget-usd 40)
+        ;; Turn cap: read from prompt EDN (:prompt/max-turns) with a safe
+        ;; fallback. 80 was observed empirically as the smallest value that
+        ;; doesn't cut Opus off mid-exploration on event-log-tool-visibility-
+        ;; sized specs (2026-04-18 dogfood). OPSV-converged target — see
+        ;; work/n07-opsv-agent-budgets.spec.edn.
+        max-turns (get @planner-prompt-data :prompt/max-turns 80)
+        mcp-opts (assoc (artifact-session/session->mcp-opts session budget-usd max-turns)
                         :model (model/default-model-for-role :planner))]
     (if on-chunk
       (llm/chat-stream llm-client user-prompt on-chunk
