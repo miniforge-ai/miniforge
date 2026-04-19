@@ -1,0 +1,116 @@
+;; =============================================================================
+;; Spec: Phase :exit curator interceptor slot + per-phase curators
+;; =============================================================================
+;;
+;; Motivation (2026-04-19 dogfood iteration 5, workflow 59b62101):
+;;   - Plan phase ran 4 min, emitted 85 chars of narration ("Let me check
+;;     a few specific files..."), never produced a plan EDN.
+;;   - phase-completed fired with :outcome :failure correctly (PR #574's
+;;     inner-result propagation), BUT the workflow still handed
+;;     control to :implement.
+;;   - Implement ran for 11 min with ZERO tool calls before the curator
+;;     detected no-files-written and failed the phase.
+;;   - Total: ~15 min of dead time because the malformed plan artifact
+;;     was allowed to flow downstream.
+;;
+;; Only :implement has a curator today (components/agent/.../curator.clj,
+;; invoked inline from enter-implement). Every other phase accepts
+;; whatever its :leave produces and transitions.
+;;
+;; This spec formalizes curation as a first-class phase lifecycle slot:
+;; :exit runs after :leave, before transition, and may reject the phase
+;; result with a structured error. Per-phase curators know their artifact
+;; schema (plan EDN, code diff, verify results, review output, release
+;; metadata) and can fail faster than the downstream phase would.
+
+{:spec/title "Phase :exit curator interceptor — reject malformed artifacts at the phase boundary"
+
+ :spec/description
+ "Add :exit as a fourth phase-interceptor lifecycle slot (joining
+  :enter, :leave, :error). Wire per-phase curators that validate the
+  phase artifact shape and reject early when it's malformed.
+
+  GROUP 1 (this PR): :exit slot + plan curator
+  - components/workflow/.../execution.clj gains execute-exit, called
+    from execute-phase-lifecycle after execute-leave.
+  - components/phase-software-factory/.../plan.clj gains curate-plan
+    and wires it in its registry method. Rejects when:
+      :curator/plan-status-not-success  — inner result status != :success
+      :curator/plan-missing-id          — :output present but no :plan/id
+      :curator/plan-no-tasks            — has :plan/id, empty :plan/tasks
+  - The existing :already-satisfied path is a curator pass-through.
+  - Rejected phases set [:phase :status] :failed with a structured
+    :phase :error carrying :curator + :code + (when available)
+    :llm-content-preview for post-mortem.
+  - runner_events.clj already surfaces :phase :error to the
+    phase-completed event (PR #574), so curator rejections appear in
+    `mf events show` with real error detail.
+
+  GROUP 2 (follow-up): implement curator moves to :exit slot
+  Today the implement curator is called inline from enter-implement
+  and its output feeds leave-implement's branch decisions (e.g.,
+  :curator/no-files-written sets :phase/status :failed). Moving to
+  :exit requires refactoring that coupling. Behavior-preserving
+  refactor, not blocking.
+
+  GROUP 3 (follow-up): verify / review / release curators
+  - verify/curate-verify     — asserts :passed? boolean, coherent
+                               test-count / fail-count, gate list.
+  - review/curate-review     — asserts gate decisions explicit,
+                               findings structured.
+  - release/curate-release   — asserts PR metadata when non-dry-run,
+                               commit sha present, branch name valid.
+  Each lives in its phase's src file next to its :leave function.
+
+  GROUP 4 (follow-up): curator-rejected telemetry
+  Add a :phase/curator-rejected event that fires distinctly from
+  :phase/phase-completed so consumers can filter. For GROUP 1 we rely
+  on :phase/error visibility (already in the pack-completed event);
+  dedicated event is a nice-to-have.
+
+  NON-GOALS
+  - Curator agents that use an LLM to validate (OPSV + other specs).
+    These curators are deterministic predicates over the phase artifact
+    shape.
+  - Changing how :error handler interacts with curator rejections. If
+    the curator rejects, :error interceptor runs normally. No retry
+    loop is introduced here.
+  - Removing :agent/curate-implement-output. Stays in place; GROUP 2
+    moves its invocation point without changing what it does."
+
+ :spec/intent
+ {:type :feature
+  :scope ["components/workflow/src"
+          "components/phase-software-factory/src"
+          "components/phase/src"
+          "components/event-stream/src"
+          "specs/normative/N2-workflows.md"]}
+
+ :spec/constraints
+ ["Curator is (fn [ctx] ctx'); MUST be synchronous and must not perform I/O beyond local data inspection"
+  "Curator rejections MUST set [:phase :status] :failed and [:phase :error] with :curator + :code for downstream tooling to dispatch on"
+  ":exit slot runs after :leave; leave-produced side effects must be complete before curator runs"
+  ":already-satisfied phase results MUST pass through the plan curator (no false rejection when planner evidence-bundles pre-completed work)"
+  "Existing :implement phase curator stays where it is this PR — don't break the leave-implement feedback loop it participates in"
+  "Per-phase curators MUST NOT require an LLM — deterministic schema-level checks only"]
+
+ :spec/acceptance-criteria
+ [":exit slot is optional — interceptors without :exit run unchanged"
+  "plan curator rejects a phase with {:status :error :output nil} with :curator/plan-status-not-success"
+  "plan curator rejects a phase with {:output {:some-other-key 1}} with :curator/plan-missing-id"
+  "plan curator rejects a phase with {:output {:plan/id uuid :plan/tasks []}} with :curator/plan-no-tasks"
+  "plan curator accepts a phase with {:output {:plan/id uuid :plan/tasks [{...}]}} unchanged"
+  "plan curator accepts :already-satisfied phases unchanged"
+  "After a curator rejection, `mf events show <wf-id>` shows the :phase/error with :curator :plan :code <kw>"
+  "No regression: existing :implement phase curator still fires inline and still sets :curator/no-files-written correctly"
+  "Integration: a dogfood run where plan emits narration-only output fails at the plan phase boundary, NOT 15 min later at curator-empty-diff"]
+
+ :spec/priority
+ {:tier :high
+  :axes #{:correctness :token-conservation :observation}
+  :theme :dogfood-resilience
+  :rationale "Fail-fast at the phase boundary. Iteration 5 lost 15 min of dogfood time to an implement phase running against a malformed plan artifact. Per-phase curators catch this at the producing phase's boundary instead of letting it flow downstream."
+  :blocks []
+  :blocked-by []}
+
+ :spec/workflow-type :canonical-sdlc}
