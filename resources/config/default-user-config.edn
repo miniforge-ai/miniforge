@@ -4,7 +4,11 @@
         :model "gpt-5.2-codex"
         :timeout-ms 300000
         :line-timeout-ms 60000
-        :max-tokens 4000}
+        ;; Per-response output cap. 4000 truncated planner output to 0 chars on
+        ;; exploration-heavy specs (workflow e4b88416, 2026-04-18). 32000 is a
+        ;; heuristic unblocker; OPSV (N7) replaces this with a converged policy
+        ;; — see work/n07-opsv-agent-budgets.spec.edn.
+        :max-tokens 32000}
   :workflow {:max-iterations 50
              :max-tokens 150000
              :failure-strategy :retry}

@@ -35,6 +35,18 @@ Miniforge's DAG executor exists and is wired but never fires for
 |---|---|---|---|---|
 | blocker | ● | dag-orchestration | `plan-from-agent-dag-wiring.spec.edn` — plan-from-agent must emit :plan/id so the DAG orchestrator activates | observation+tokenconservation+dogfoodenabler |
 
+## Theme — Operational Policy Synthesis (OPSV) (`operational-policy-synthesis`, status: planned)
+
+Discover scaling + budget signals via governed experiments, synthesize
+   operational policies, verify against acceptance criteria, and emit
+   them as auditable artifacts. Any numeric knob whose optimal value we
+   currently guess — agent max-tokens, tool-call caps, timeouts, K8s
+   container CPU/memory, I/O bandwidth — is an OPSV target.
+
+| tier | r | theme | spec | axes |
+|---|---|---|---|---|
+| high | ○ | operational-policy-synthesis | `n07-opsv-agent-budgets.spec.edn` — OPSV: converge agent max-tokens + phase-iteration budgets | observation+tokenconservation+dogfoodenabler |
+
 ## Theme — unassigned (`unassigned`, status: planned)
 
 (no theme description)

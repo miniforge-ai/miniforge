@@ -504,8 +504,10 @@
                        (loop/lint-gate)
                        (loop/policy-gate :security {:policies [:no-secrets]})]
         gates (get opts :gates default-gates)
+        ;; :max-tokens bumped so structured review output isn't truncated.
+        ;; OPSV convergence target — see work/n07-opsv-agent-budgets.spec.edn.
         review-config (->> (merge {:temperature 0.1
-                                   :max-tokens 4000}
+                                   :max-tokens 16000}
                                   (:config opts))
                            (model/apply-default-model :reviewer))
         config {:strict (get opts :strict false)}]

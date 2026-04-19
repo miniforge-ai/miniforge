@@ -338,8 +338,13 @@
   [& [opts]]
   (let [logger (or (:logger opts)
                    (log/create-logger {:min-level :info :output (fn [_])}))
+        ;; :max-tokens caps output-tokens-per-response. Exploration-heavy
+        ;; planning (~70 tool calls) with small budgets truncates the final
+        ;; plan EDN to nothing. 32000 is a heuristic unblocker; OPSV (N7)
+        ;; replaces this with a converged policy per role × phase — see
+        ;; work/n07-opsv-agent-budgets.spec.edn.
         config (->> (merge {:temperature 0.3
-                            :max-tokens 4000}
+                            :max-tokens 32000}
                            (:config opts))
                     (model/apply-default-model :planner)
                     (budget/apply-default-budget :planner))]

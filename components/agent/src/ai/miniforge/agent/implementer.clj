@@ -531,8 +531,10 @@
   [& [opts]]
   (let [logger (or (:logger opts)
                    (log/create-logger {:min-level :info :output (fn [_])}))
+        ;; :max-tokens bumped for structured artifact output + file-diff emission.
+        ;; OPSV convergence target — see work/n07-opsv-agent-budgets.spec.edn.
         config (->> (merge {:temperature 0.2
-                            :max-tokens 8000}
+                            :max-tokens 32000}
                            (:config opts))
                     (model/apply-default-model :implementer)
                     (budget/apply-default-budget :implementer))]
