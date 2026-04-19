@@ -32,8 +32,12 @@
       (is (= :codex (get-in cfg [:llm :backend])))
       (is (= "gpt-5.2-codex" (get-in cfg [:llm :model]))))
 
-    (testing "default agent models use GPT for thinking, Claude for execution"
-      (is (= "gpt-5.4" (get-in cfg [:agents :default-models :thinking])))
+    (testing "default agent models: Opus 4.6 for thinking, Sonnet for execution"
+      ;; Non-Claude CLI backends (codex, cursor-agent, gh-copilot) don't yet
+      ;; ship structured plans through their stream parsers (see
+      ;; work/multi-backend-cli-parity.spec.edn). Planner/architect default
+      ;; to claude-opus-4-6 until that lands.
+      (is (= "claude-opus-4-6" (get-in cfg [:agents :default-models :thinking])))
       (is (= "claude-sonnet-4-6" (get-in cfg [:agents :default-models :execution]))))
 
     (testing "default self-healing enables claude and codex failover"
