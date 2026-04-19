@@ -26,15 +26,44 @@
 ;; Convenience callbacks
 
 (defn create-streaming-callback
+  "Callback invoked by the LLM client for each parsed stream event.
+
+   Expected parsed-event keys:
+     :delta       — text content produced in this block
+     :done?       — terminal block
+     :tool-use    — boolean, true when this block invoked one or more tools
+     :tool-name   — single tool name when available (Claude / codex)
+     :tool-names  — vector of tool names (Claude multi-tool blocks)
+     :tool-call-id — provider-supplied id when available
+     :tool-args-preview — bounded args digest when the parser can safely
+                          expose it
+     :heartbeat   — keepalive, ignored for diagnostic emission
+
+   For tool-use events emits BOTH:
+     :agent/tool-call  — structured, carries :tool/name / :tool/names /
+                          :tool/call-id / :tool/args-preview
+     :agent/status     — legacy generic 'Agent calling tool' status-type
+                          :tool-calling, preserved so existing consumers
+                          (dashboard, TUI, tests) keep working during the
+                          migration."
   [stream-atom workflow-id agent-id & [opts]]
   (let [{:keys [print? quiet?]} opts]
-    (fn [{:keys [delta done? tool-use heartbeat]}]
+    (fn [{:keys [delta done? tool-use heartbeat
+                 tool-name tool-names tool-call-id tool-args-preview]}]
       (cond
         tool-use
         (when stream-atom
-          (stream/publish! stream-atom
-                           (events/agent-status stream-atom workflow-id agent-id
-                                                :tool-calling "Agent calling tool")))
+          (stream/publish!
+            stream-atom
+            (events/agent-tool-call stream-atom workflow-id agent-id
+                                    {:tool-name tool-name
+                                     :tool-names tool-names
+                                     :tool-call-id tool-call-id
+                                     :tool-args-preview tool-args-preview}))
+          (stream/publish!
+            stream-atom
+            (events/agent-status stream-atom workflow-id agent-id
+                                 :tool-calling "Agent calling tool")))
 
         heartbeat
         nil

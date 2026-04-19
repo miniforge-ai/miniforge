@@ -54,6 +54,7 @@
 (def phase-completed events/phase-completed)
 (def agent-chunk events/agent-chunk)
 (def agent-status events/agent-status)
+(def agent-tool-call events/agent-tool-call)
 (def workflow-completed events/workflow-completed)
 (def workflow-failed events/workflow-failed)
 (def llm-request events/llm-request)

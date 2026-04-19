@@ -419,18 +419,159 @@
                   (println (colorize :yellow (messages/t :observability/cleanup-not-available)))))
     (println (colorize :red (messages/t :observability/unknown-subcommand {:subcommand subcommand})))))
 
+;;------------------------------------------------------------------------------ Layer 2.5: Workflow timeline (show)
+
+(defn- workflow-events-dir
+  "Path to the per-workflow event directory for a given workflow id."
+  [workflow-id]
+  (io/file (app-config/events-dir) (str workflow-id)))
+
+(defn- strip-transit-prefix
+  "Transit-json keys arrive as '~:foo/bar'. Strip the prefix so our code
+   can use keyword accessors. Recursive walk over maps + vectors."
+  [x]
+  (cond
+    (map? x)
+    (reduce-kv (fn [acc k v]
+                 (let [k' (if (and (string? k) (.startsWith ^String k "~:"))
+                            (keyword (subs k 2))
+                            k)]
+                   (assoc acc k' (strip-transit-prefix v))))
+               {}
+               x)
+
+    (vector? x)
+    (mapv strip-transit-prefix x)
+
+    (and (string? x) (.startsWith ^String x "~:"))
+    (keyword (subs x 2))
+
+    (and (string? x) (.startsWith ^String x "~t"))
+    (subs x 2)
+
+    (and (string? x) (.startsWith ^String x "~u"))
+    (subs x 2)
+
+    :else x))
+
+(defn- read-workflow-events
+  "Read + parse every .json event file under the workflow directory, sorted
+   by filename (which is timestamp-prefixed)."
+  [dir]
+  (when (.exists ^java.io.File dir)
+    (let [json-parse (requiring-resolve 'cheshire.core/parse-string)]
+      (->> (.listFiles ^java.io.File dir)
+           (filter #(.endsWith (.getName ^java.io.File %) ".json"))
+           (sort-by #(.getName ^java.io.File %))
+           (keep (fn [f]
+                   (try
+                     (let [raw (json-parse (slurp f) false)]
+                       (strip-transit-prefix raw))
+                     (catch Exception _e nil))))))))
+
+(defn- ts-short
+  "Render the :event/timestamp field (may be a plain string after transit
+   stripping) as HH:MM:SS."
+  [ts]
+  (let [s (str ts)]
+    (cond
+      (re-find #"\d\d:\d\d:\d\d" s)
+      (first (re-find #"(\d\d:\d\d:\d\d)" s))
+      :else
+      (subs s 0 (min 8 (count s))))))
+
+(defn- summarize-event
+  "One-line summary for a single event. Emphasizes tool names, phase
+   outcomes, DAG decisions."
+  [ev]
+  (let [t (:event/type ev)
+        phase (:workflow/phase ev)
+        tool (:tool/name ev)
+        tool-names (:tool/names ev)
+        dag-outcome (:dag/outcome ev)
+        dag-reason (:dag/reason ev)
+        outcome (:phase/outcome ev)
+        duration (:phase/duration-ms ev)
+        err (or (:phase/error ev)
+                (get-in ev [:dag/diagnostic :result/error :error/message]))]
+    (cond
+      (= :workflow/phase-started t)
+      (str "→ " (some-> phase name) " started")
+
+      (= :workflow/phase-completed t)
+      (str "✓ " (some-> phase name) " " (some-> outcome name)
+           (when duration (format " (%.1fs)" (/ duration 1000.0)))
+           (when err (str " — " (subs (str err) 0 (min 160 (count (str err)))))))
+
+      (= :agent/tool-call t)
+      (str "  • tool " (or tool
+                           (when (seq tool-names) (str/join "," (map str tool-names)))
+                           "(unnamed)"))
+
+      (= :agent/status t)
+      (str "  · " (or (:status/type ev) "status") " — " (:message ev ""))
+
+      (= :agent/chunk t)
+      (str "  … chunk "
+           (if (:chunk/done? ev) "done" "streaming"))
+
+      (= :workflow/dag-considered t)
+      (str "⇒ DAG " (some-> dag-outcome name)
+           (when dag-reason (str " — " (name dag-reason))))
+
+      (= :workflow/started t) "▶ workflow started"
+      (= :workflow/completed t) (str "■ workflow completed — " (some-> (:workflow/status ev) name))
+      (= :workflow/failed t) (str "✗ workflow failed — " (:workflow/failure-reason ev ""))
+
+      :else (str (some-> t name)))))
+
+(defn show-events
+  "Render a human-readable timeline for a specific workflow.
+
+   Output per line: HH:MM:SS  summary. Filters are available via opts.
+
+   Opts:
+     :filter     — keyword event-type to include (default: show all)
+     :no-chunks  — drop :agent/chunk events (default: true; too noisy)
+     :no-status  — drop :agent/status events (default: false)"
+  [{:keys [workflow-id filter no-chunks no-status]
+    :or {no-chunks true no-status false}}]
+  (if-not workflow-id
+    (do (println (colorize :red "error: workflow-id is required"))
+        (println "usage: mf events show <workflow-id>"))
+    (let [dir (workflow-events-dir workflow-id)
+          events (read-workflow-events dir)]
+      (if (empty? events)
+        (println (colorize :yellow (str "No events found for workflow " workflow-id
+                                        " (looked in " (.getPath dir) ")")))
+        (let [kept (cond->> events
+                     filter     (clojure.core/filter #(= filter (:event/type %)))
+                     no-chunks  (remove #(= :agent/chunk (:event/type %)))
+                     no-status  (remove #(= :agent/status (:event/type %))))]
+          (println (colorize :cyan (str "Timeline for workflow " workflow-id
+                                        " — " (count kept) " event(s)")))
+          (println (colorize :gray (apply str (repeat 80 "─"))))
+          (doseq [ev kept]
+            (println (colorize :gray (ts-short (:event/timestamp ev)))
+                     (summarize-event ev))))))))
+
 (defn events-command
   "Handle 'mf events' command.
 
    Subcommands:
      tail [workflow-id] [options]  - Tail events (default)
      list                          - List available event files
-     cat <file>                    - Display event file"
-  [{:keys [subcommand workflow-id file lines follow filter all] :or {subcommand "tail" lines 20 follow true}}]
+     cat <file>                    - Display event file
+     show <workflow-id>            - Render a human-readable timeline for a workflow"
+  [{:keys [subcommand workflow-id file lines follow filter all no-chunks no-status]
+    :or {subcommand "tail" lines 20 follow true}}]
   (case subcommand
     "tail" (tail-events {:workflow-id workflow-id :all all :file file :lines lines :follow follow :filter filter})
     "list" (list-files-command find-event-stream-files "event files")
     "cat" (cat-file-command file)
+    "show" (show-events {:workflow-id workflow-id :filter filter
+                         :no-chunks (if (nil? no-chunks) true no-chunks)
+                         :no-status no-status})
     (println (colorize :red (messages/t :observability/unknown-subcommand {:subcommand subcommand})))))
 
 ;;------------------------------------------------------------------------------ Public API

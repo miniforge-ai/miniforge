@@ -29,6 +29,7 @@
 (def phase-completed core/phase-completed)
 (def agent-chunk core/agent-chunk)
 (def agent-status core/agent-status)
+(def agent-tool-call core/agent-tool-call)
 (def workflow-completed core/workflow-completed)
 (def workflow-failed core/workflow-failed)
 (def llm-request core/llm-request)
