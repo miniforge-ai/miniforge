@@ -25,9 +25,14 @@
 ;; Canonical role model policy
 
 (def ^:private default-agent-models
-  "Fallback model defaults when user config does not specify agent defaults."
-  {:thinking "gpt-5.4"
-   :execution "gpt-5.2-codex"})
+  "Fallback model defaults when user config does not specify agent defaults.
+
+   Thinking defaults to Claude because non-Claude CLI backends (codex,
+   cursor-agent, gh-copilot, etc.) don't yet ship structured plans back
+   through their stream parsers. Tracked in
+   work/multi-backend-cli-parity.spec.edn."
+  {:thinking "claude-opus-4-6"
+   :execution "claude-sonnet-4-6"})
 
 
 (def ^:private thinking-roles

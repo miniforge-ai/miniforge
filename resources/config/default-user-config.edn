@@ -16,7 +16,14 @@
  :meta-loop {:enabled true
               :max-convergence-iterations 10
               :convergence-threshold 0.95}
-  :agents {:default-models {:thinking   "gpt-5.4"
+  ;; Planner/architect default to Opus 4.6 (opusplan, 200K context). Codex
+  ;; and other non-Claude CLI backends don't yet ship structured plans back
+  ;; through their stream parsers (agentic-by-default; see
+  ;; work/multi-backend-cli-parity.spec.edn). Claude is the only backend
+  ;; whose :default-model-for-role :planner produces a plan artifact today.
+  ;; Override per-role in your user config if your chosen backend supports
+  ;; the same contract.
+  :agents {:default-models {:thinking   "claude-opus-4-6"
                             :execution  "claude-sonnet-4-6"
                             :escalation "claude-opus-4-7"}}
   :model-selection {:enabled true

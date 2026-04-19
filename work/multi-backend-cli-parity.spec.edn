@@ -1,0 +1,177 @@
+;; =============================================================================
+;; Spec: Multi-backend CLI parity — codex, cursor, copilot, open-codex
+;; =============================================================================
+;;
+;; Motivation (2026-04-18):
+;;
+;; Dogfood run 4fc8a169 failed for the third time with :llm-content-length 0
+;; after 74 tool calls. Root cause traced through the LLM client:
+;;
+;;   components/llm/src/.../protocols/impl/llm_client.clj:171-172
+;;     ;; reasoning, tool_call, etc. — ignore content
+;;     nil
+;;
+;; Codex's CLI ('codex exec --full-auto') is agentic-by-default. It emits
+;; reasoning + tool_call items, completes the task, and returns. The
+;; planner's code expects a Claude-shape final text block containing the
+;; plan EDN. Codex never produces one. The stream parser throws away
+;; tool_call and reasoning content, so we end up with an empty delta
+;; buffer and throw :anomalies.agent/invoke-failed with
+;; :llm-content-length 0.
+;;
+;; Meanwhile 'codex-args' passes no MCP configuration to the CLI at all,
+;; so even if we wanted Codex to call an MCP submit-artifact tool, it
+;; couldn't — Codex doesn't know the tool exists.
+;;
+;; This isn't just a Codex issue. Miniforge is agent-CLI-agnostic by
+;; design. cursor-agent, 'gh copilot', open-codex, amp, etc. all have
+;; their own CLI invocation conventions, stream formats, and tool-use
+;; loops. Each one needs the same treatment claude gets:
+;;
+;;   - args builder passes MCP config + tool allowlist
+;;   - stream parser extracts structured output from that backend's
+;;     native event shape
+;;   - session-resume semantics mapped to the backend's equivalent
+;;   - error classification (rate-limit, timeout, context-overflow,
+;;     provider-error) mapped to canonical anomaly keywords
+;;
+;; Today only claude is first-class. Parity is foundational for OSS
+;; adoption — users pick their agent CLI, not ours.
+
+{:spec/title "Multi-backend CLI parity — make codex / cursor-agent / copilot / open-codex first-class planners and implementers"
+
+ :spec/description
+ "Bring non-Claude CLI backends up to the same feature bar Claude has:
+  MCP tool registration, structured-artifact output extraction,
+  session-resume, anomaly classification, and streaming delta support.
+  Today Claude is the only backend whose default-model-for-role
+  :planner produces a usable plan artifact; everything else registered
+  in model-catalog.edn is a dead end.
+
+  This spec is a parent — per-backend slices land as follow-up work
+  specs under the same :multi-backend-parity theme. The parent defines
+  the shared contract all backends must meet.
+
+  GROUP 1: Define the backend conformance contract
+  A new protocol (or a schema over `components/llm/.../backends`
+  config) specifying what every backend must provide:
+    - :args-fn — takes {:prompt :system :max-tokens :mcp-config
+                        :mcp-allowed-tools :model :resume :streaming?
+                        :budget-usd :max-turns :supervision}
+                 returns CLI arg vector. MUST handle mcp-config and
+                 mcp-allowed-tools (today codex-args ignores both).
+    - :stream-parser — line-by-line parse function. MUST emit
+                       {:delta string :done? bool :usage map} for text,
+                       {:tool-call ...} for tool invocations,
+                       {:artifact ...} for structured artifact
+                       submissions. Tool-call and artifact entries
+                       count toward the response content, not the
+                       throwaway pile.
+    - :artifact-extractor — optional fn to lift structured output
+                            from native format (e.g., Codex's
+                            item.completed entries → plan EDN).
+    - :session-resume-arg — how to resume (claude uses --resume,
+                            codex's equivalent TBD per backend).
+    - :error-mapper — translates native error strings to canonical
+                      anomaly keywords.
+
+  GROUP 2: Fix codex — the observed regression
+  - codex-args takes and applies mcp-config + mcp-allowed-tools
+    (passed via Codex's --mcp-config equivalent or via a sidecar
+    config file Codex reads)
+  - parse-codex-stream-line: extract agent_message AND reasoning_text
+    when no agent_message is produced (heuristic: plan EDN embedded in
+    the final reasoning step)
+  - Add :artifact-extractor for Codex that pulls EDN out of item.completed
+    entries tagged as artifact-submit (once MCP is wired)
+  - Session-resume via codex's resume mechanism (`codex session resume
+    <id>` per Codex docs)
+  - Regression test: run today's event-log-tool-visibility fixture spec
+    with :backend :codex → plan phase produces non-empty :output with
+    :plan/id
+
+  GROUP 3: Fix / register cursor-agent
+  - cursor-agent is Cursor's CLI (renamed from cursor-cli a while back).
+    Today the backends map has :cursor with :cmd 'cursor-cli' — update
+    to 'cursor-agent' + verify args-fn + stream-parser.
+  - Wire MCP config (cursor-agent supports MCP via their own config
+    mechanism — document path)
+  - Regression test: same fixture, :backend :cursor
+
+  GROUP 4: Add gh-copilot + open-codex + amp backends
+  - Research each CLI's invocation model, stream format, MCP support
+  - Write :args-fn + :stream-parser for each
+  - Regression test per backend
+
+  GROUP 5: Conformance test suite
+  A new component `components/backend-conformance` (or test-only code in
+  llm/test) that takes a backend id + a small fixture spec and runs:
+    - plan-via-backend → assert non-empty plan EDN with :plan/id
+    - implement-via-backend → assert at least one file write
+    - resume-via-backend → kill mid-phase, resume, assert continuity
+    - error-classification → feed synthetic rate-limit / timeout /
+      parse-failure responses, assert correct anomaly keyword
+  CI runs this suite on every backend whose CLI is available in the
+  environment (optional / skippable when CLIs aren't installed).
+
+  GROUP 6: User config surfaces + documentation
+  - docs/development-guidelines.md section: 'Choosing a backend',
+    listing supported backends + their feature parity status
+  - CLI message on startup: warn when the configured :llm :backend has
+    known parity gaps (e.g., 'codex backend does not yet support
+    structured plan output; planner will fall back to <claude model> —
+    see multi-backend-cli-parity.spec.edn')
+  - Per-role backend override so users can split
+    (planner=claude-opus-4-6, implementer=codex, reviewer=sonnet)
+    without touching global :backend.
+
+  NON-GOALS
+  - HTTP API backends (Anthropic API, OpenAI API, Gemini API) — those
+    are a separate conformance surface; this spec is about CLI
+    backends.
+  - Fleet-mode remote backends — scope limited to local CLI execution.
+  - Writing new backend CLIs ourselves — we only conform to what ships
+    upstream.
+  - Per-backend prompt tuning beyond what's needed to satisfy the
+    contract."
+
+ :spec/intent
+ {:type :feature
+  :scope ["components/llm/src"
+          "components/llm/test"
+          "components/agent/src"
+          "components/agent/test"
+          "components/config/src"
+          "resources/config/default-user-config.edn"
+          "docs/development-guidelines.md"
+          "specs/normative/N1-architecture.md"]}
+
+ :spec/constraints
+ ["Conformance contract MUST be defined before per-backend implementations start — otherwise each backend drifts into bespoke shape"
+  "Stream parsers MUST preserve tool-call and reasoning content when no agent_message block is emitted (heuristic: parse EDN from final reasoning if present) — not throw it away like codex does today"
+  "MCP tool registration MUST flow through args-fn consistently; each backend's CLI-specific invocation path is an implementation detail"
+  "Session-resume semantics MUST be documented per backend; parity gaps MUST be surfaced in the config-validation warning"
+  "Conformance test suite MUST be skippable when a backend CLI is unavailable (OSS contributors without all CLIs installed)"
+  "Non-Claude backends that fail conformance at ship MUST still be usable for non-planning tasks (implement-only, review-only) with a warning"
+  "Localize all user-facing strings (msg/t + en-US.edn)"]
+
+ :spec/acceptance-criteria
+ ["Backend conformance contract defined as a schema or protocol with required fields"
+  "codex backend: 'bb miniforge run <fixture>.spec.edn' with :backend :codex produces plan phase :output with :plan/id, non-zero content length"
+  "cursor-agent backend: same fixture runs end-to-end with :backend :cursor"
+  "gh-copilot backend: same fixture runs end-to-end"
+  "open-codex backend: same fixture runs end-to-end"
+  "conformance test suite runs one fixture per supported backend in CI (or clearly skips when CLI unavailable)"
+  "Per-role :llm/backend override works — user can set planner=claude, implementer=codex independently"
+  "CLI startup warns when configured backend has parity gaps, naming the specific gap"
+  "docs/development-guidelines.md documents backend selection + parity matrix"]
+
+ :spec/priority
+ {:tier :blocker
+  :axes #{:correctness :scale :dogfood-enabler}
+  :theme :multi-backend-parity
+  :rationale "Dogfood is blocked on Claude by default — non-Claude backends can't produce usable plans. For OSS, this is a correctness blocker: the product promises agent-CLI-agnosticism but delivers Claude-only. Parity closes both the dogfood loop and the OSS adoption surface."
+  :blocks []
+  :blocked-by []}
+
+ :spec/workflow-type :canonical-sdlc}

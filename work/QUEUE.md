@@ -15,11 +15,26 @@ Make miniforge capable of running miniforge without paying for
 
 | tier | r | theme | spec | axes |
 |---|---|---|---|---|
-| blocker | ● | dogfood-resilience | `event-log-tool-visibility.spec.edn` — Event log — capture tool name / args / result on every agent tool call | observation+dogfoodenabler |
+| blocker | ● | dogfood-resilience | `agent-stream-watchdog-and-resume.spec.edn` — Agent stream watchdog + session-resume for hang recovery | tokenconservation+dogfoodenabler |
 | blocker | ● | dogfood-resilience | `worktree-persistence-scratch-branch.spec.edn` — Persist worktrees outside /tmp + scratch-branch commits on every write | dogfoodenabler |
 | high | ○ | dogfood-resilience | `workflow-dependency-declarations.spec.edn` — Workflow dependency declarations — supervisor sequencing + DAG dependencies | dogfoodenabler |
-| blocker | ○ | dogfood-resilience | `agent-stream-watchdog-and-resume.spec.edn` — Agent stream watchdog + session-resume for hang recovery | tokenconservation+dogfoodenabler |
 | blocker | ○ | dogfood-resilience | `workflow-phase-checkpoint-and-resume.spec.edn` — Workflow phase checkpoint + resume | tokenconservation+dogfoodenabler |
+
+## Theme — Multi-backend CLI parity (`multi-backend-parity`, status: planned)
+
+Miniforge is an agent-CLI-agnostic platform. Every supported CLI
+   (claude, codex, cursor-agent, gh copilot, open-codex, amp, …) MUST
+   conform to the same planner/implementer/reviewer contract: structured
+   output via MCP artifact submission, session resume, stream parser
+   coverage, error classification. Today only claude is a first-class
+   citizen; codex is registered but its stream parser ignores
+   reasoning + tool-call items, and its args builder passes no MCP
+   config. Parity is foundational for OSS adoption — users pick their
+   agent CLI, not ours.
+
+| tier | r | theme | spec | axes |
+|---|---|---|---|---|
+| blocker | ● | multi-backend-parity | `multi-backend-cli-parity.spec.edn` — Multi-backend CLI parity — make codex / cursor-agent / copilot / open-codex first-class planners and implementers | correctness+scale+dogfoodenabler |
 
 ## Theme — DAG orchestration (`dag-orchestration`, status: in-flight)
 

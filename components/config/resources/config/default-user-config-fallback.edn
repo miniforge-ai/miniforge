@@ -14,7 +14,10 @@
   :meta-loop {:enabled true
               :max-convergence-iterations 10
               :convergence-threshold 0.95}
-  :agents {:default-models {:thinking   "gpt-5.4"
+  ;; Keep in sync with resources/config/default-user-config.edn.
+  ;; See work/multi-backend-cli-parity.spec.edn for why thinking defaults
+  ;; to Claude today rather than gpt-5.4.
+  :agents {:default-models {:thinking   "claude-opus-4-6"
                             :execution  "claude-sonnet-4-6"
                             :escalation "claude-opus-4-7"}}
   :model-selection {:enabled true

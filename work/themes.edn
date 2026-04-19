@@ -135,4 +135,30 @@
    "At least one policy is actuated to production config via OPSV (not hand-tuned)"
    "Verification evidence bundle shows pass/fail per acceptance criterion"]
   :theme/status :planned
+  :theme/owner :christopher}
+
+ :multi-backend-parity
+ {:theme/id :multi-backend-parity
+  :theme/title "Multi-backend CLI parity"
+  :theme/description
+  "Miniforge is an agent-CLI-agnostic platform. Every supported CLI
+   (claude, codex, cursor-agent, gh copilot, open-codex, amp, …) MUST
+   conform to the same planner/implementer/reviewer contract: structured
+   output via MCP artifact submission, session resume, stream parser
+   coverage, error classification. Today only claude is a first-class
+   citizen; codex is registered but its stream parser ignores
+   reasoning + tool-call items, and its args builder passes no MCP
+   config. Parity is foundational for OSS adoption — users pick their
+   agent CLI, not ours."
+  :theme/informative-spec nil
+  :theme/normative-refs
+  [{:doc "specs/normative/N1-architecture.md" :section "§2 capsule agent-agnosticism"
+    :relation :primary}]
+  :theme/completion-criteria
+  ["claude, codex, cursor-agent, gh-copilot, open-codex all run the same fixture spec end-to-end with equivalent outputs"
+   "Each backend's args builder passes MCP config + tool allowlist"
+   "Each backend's stream parser extracts structured output (plan EDN, code artifacts) from the backend's native output shape"
+   "A conformance test suite replays one fixture spec per backend and asserts equivalent phase outcomes"
+   "Backend selection is first-class in user config and session-resume works across all supported backends"]
+  :theme/status :planned
   :theme/owner :christopher}}
