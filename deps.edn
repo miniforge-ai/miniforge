@@ -176,7 +176,12 @@
                        "components/pipeline-pack/resources"
                        "components/pipeline-pack-store/src"
                        "components/pipeline-runner/src"
-                       "components/pipeline-runner/resources"]
+                       "components/pipeline-runner/resources"
+                       ;; bb-utils (shared Babashka utilities)
+                       "components/bb-paths/src"
+                       "components/bb-out/src"
+                       "components/bb-proc/src"
+                       "components/bb-test-runner/src"]
          :extra-deps {ai.miniforge/schema {:local/root "components/schema"}
                       ai.miniforge/config {:local/root "components/config"}
                       ai.miniforge/lsp-mcp-bridge {:local/root "bases/lsp-mcp-bridge"}
@@ -270,7 +275,12 @@
                      ai.miniforge.data-foundry/pipeline-pack {:local/root "components/pipeline-pack"}
                      ai.miniforge.data-foundry/pipeline-pack-store {:local/root "components/pipeline-pack-store"}
                      ai.miniforge.data-foundry/pipeline-runner {:local/root "components/pipeline-runner"}
-                     ai.miniforge/connector-linter {:local/root "components/connector-linter"}}}
+                     ai.miniforge/connector-linter {:local/root "components/connector-linter"}
+                     ;; bb-utils (shared Babashka utilities)
+                     ai.miniforge/bb-paths       {:local/root "components/bb-paths"}
+                     ai.miniforge/bb-out         {:local/root "components/bb-out"}
+                     ai.miniforge/bb-proc        {:local/root "components/bb-proc"}
+                     ai.miniforge/bb-test-runner {:local/root "components/bb-test-runner"}}}
 
   :test {:extra-paths ["development/test"
                        "components/schema/test"
@@ -370,7 +380,12 @@
                        "components/pipeline-pack-store/test"
                        "components/pipeline-runner/test"
                        "components/connector-linter/test"
-                       "bases/lsp-mcp-bridge/test"]
+                       "bases/lsp-mcp-bridge/test"
+                       ;; bb-utils (shared Babashka utilities)
+                       "components/bb-paths/test"
+                       "components/bb-out/test"
+                       "components/bb-proc/test"
+                       "components/bb-test-runner/test"]
          :extra-deps {ai.miniforge/schema {:local/root "components/schema"}
                       ai.miniforge/config {:local/root "components/config"}
                       ai.miniforge/algorithms {:local/root "components/algorithms"}
@@ -433,7 +448,12 @@
                       ai.miniforge/phase-deployment {:local/root "components/phase-deployment"}
                       ai.miniforge/workflow-deployment {:local/root "components/workflow-deployment"}
                       ai.miniforge/workflow-chain-deployment {:local/root "components/workflow-chain-deployment"}
-                      ai.miniforge/lsp-mcp-bridge {:local/root "bases/lsp-mcp-bridge"}}}
+                      ai.miniforge/lsp-mcp-bridge {:local/root "bases/lsp-mcp-bridge"}
+                      ;; bb-utils (shared Babashka utilities)
+                      ai.miniforge/bb-paths       {:local/root "components/bb-paths"}
+                      ai.miniforge/bb-out         {:local/root "components/bb-out"}
+                      ai.miniforge/bb-proc        {:local/root "components/bb-proc"}
+                      ai.miniforge/bb-test-runner {:local/root "components/bb-test-runner"}}}
 
   :conformance {:extra-paths ["development/test"
                               "tests/conformance"

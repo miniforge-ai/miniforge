@@ -9,4 +9,6 @@
  :projects {"development"    {:alias "dev"}
             "miniforge-core" {:alias "core"}
             "miniforge"      {:alias "cli"}
-            "miniforge-tui"  {:alias "tui"}}}
+            "miniforge-tui"  {:alias "tui"}
+            ;; bb-utils (shared Babashka utilities)
+            "bb-utils"       {:alias "bb-utils"}}}
