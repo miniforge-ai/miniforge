@@ -1,0 +1,135 @@
+;; =============================================================================
+;; Spec: N7 OPSV applied to agent resource budgets
+;; =============================================================================
+;;
+;; Normative anchor: specs/normative/N7-Operational-Policy-Synthesis.md
+;;
+;; Motivation (2026-04-18 dogfood finding, workflow e4b88416):
+;;   :llm-content-length 0
+;;   :llm-content-preview ""
+;; Planner max-tokens=4000 was too low; 72 tool calls during exploration
+;; truncated the final plan EDN to 0 chars. The fix shipped as a
+;; heuristic bump to 32000. That's a guess. We don't know the optimal
+;; value and the optimum differs per role × phase × spec size × model.
+;;
+;; The OPSV framework (N7) was designed for exactly this: numeric knobs
+;; where the optimal value is empirically discoverable via governed
+;; experiments. Originally aimed at K8s scaling and I/O bandwidth; agent
+;; budgets are the same shape of problem.
+;;
+;; This spec is the first OPSV USE CASE. It applies the DISCOVER →
+;; CONVERGE → VERIFY → ACTUATE loop to agent budgets, producing a
+;; converged policy that lands in default-user-config.edn.
+;;
+;; Scope is bounded: agent :max-tokens and phase :iterations budgets
+;; only. Cost/token dollar caps stay manual for now.
+
+{:spec/title "OPSV: converge agent max-tokens + phase-iteration budgets"
+
+ :spec/description
+ "Apply the N7 OPSV workflow to agent resource budgets. Replace the
+  hand-tuned values in default-user-config.edn + per-agent overrides
+  with a converged policy derived from governed experiments.
+
+  GROUP 1: DISCOVER — signal candidates
+  Tag the following as OPSV signals in the event log (N3 §3.13):
+    - :phase/llm-content-length — per terminal planner/implementer/
+      reviewer response, before parsing
+    - :phase/tool-call-count   — per phase, from the tool-call events
+      PR #571/#574 introduced
+    - :phase/max-tokens-config — the :max-tokens that was in effect
+    - :phase/truncation-detected? — true when :llm-content-length
+      approaches :max-tokens (heuristic: > 0.95 × cap) OR
+      :parse-result nil with :llm-content-length == 0
+    - :phase/retry-count      — times the phase re-ran within a single
+      workflow run (once the watchdog + retry machinery lands)
+  Existing event schema gains these fields as optional.
+
+  GROUP 2: Experiment pack for agent budgets
+  Define `resources/opsv/agent-budgets-experiment.edn` describing the
+  experiment:
+    - Fixture set: N historical specs covering small/medium/large
+      exploration shapes. Start with 5 — today's 6 Tier-1 dogfood
+      specs provide good variety.
+    - Controlled variable: {:role :phase :max-tokens} tuples
+    - Sweep: planner [8K 16K 32K 64K], implementer [8K 16K 32K],
+      reviewer [4K 8K 16K]
+    - Trial count: 3 per cell (run spec 3x at each cell)
+    - Observable: truncation-detected? + plan/implement phase outcome
+      + tokens-used + wall-clock + cost-usd
+    - Abort: truncation-detected? = true on ≥2 of 3 trials at a cell
+      (that cell is unsafe, move on)
+
+  GROUP 3: CONVERGE — optimization target
+  Objective per (role, phase):
+    argmin_cap (cost-usd + 10 × truncation-rate)
+    subject to: wall-clock-p95 ≤ target-for-phase
+                truncation-detected-rate ≤ 0.01
+  Start with the smallest cap that satisfies the truncation constraint,
+  not the largest — empirically we're currently configured too LOW,
+  but the long tail of oversized caps burns budget unnecessarily.
+
+  GROUP 4: VERIFY — acceptance criteria
+  For the converged policy (candidate max-tokens per role × phase):
+    - Replay all 5 fixture specs with the candidate policy
+    - Assert: 0 truncations across all trials
+    - Assert: plan phase produces non-empty :output with :plan/id
+    - Assert: implement phase produces files OR reports :curator/no-files-written (no silent empty-output)
+    - Emit verification artifact per N6 §2.8
+
+  GROUP 5: ACTUATE — policy application
+  Write the converged values to:
+    - resources/config/default-user-config.edn :llm :max-tokens
+    - Per-agent overrides removed (planner/implementer/reviewer.clj
+      hardcoded values) in favor of role-defaults in
+      agent/core.clj :default-role-configs
+  Gated by APPLY_ALLOWED (per N7 §2.4). Dry-run emits a policy diff.
+
+  GROUP 6: Integrate with `miniforge run`
+  Every production workflow run emits the DISCOVER signals automatically
+  once this spec lands — no opt-in needed. The signals flow to the
+  event stream, and any future OPSV convergence job reads them as
+  historical evidence in addition to the controlled experiment data.
+
+  Non-goals:
+    - Dollar-cost budget caps (separate concern, manual for now)
+    - LLM max-iterations tuning (separate OPSV use case)
+    - Per-backend budget convergence (Claude vs Codex vs local — can
+      layer on once single-backend converges)"
+
+ :spec/intent
+ {:type :feature
+  :scope ["components/agent/src"
+          "components/event-stream/src"
+          "components/workflow/src"
+          "components/phase/src"
+          "resources/config/default-user-config.edn"
+          "components/config/resources/config/default-user-config-fallback.edn"
+          "resources/opsv/"]}
+
+ :spec/constraints
+ ["MUST emit DISCOVER signals on every workflow run (not opt-in) so historical data accumulates passively"
+  "MUST respect N7 §2.4 APPLY_ALLOWED gate — actuation is not automatic"
+  "Experiment fixtures MUST be reproducible: pinned model versions, pinned spec hashes"
+  "The converged policy MUST be version-pinned in the config with provenance (experiment run id)"
+  "VERIFY MUST run on a frozen fixture set — adding fixtures mid-experiment invalidates the run"
+  "Localize all user-facing strings (msg/t + en-US.edn)"]
+
+ :spec/acceptance-criteria
+ ["DISCOVER phase produces :phase/llm-content-length + :phase/tool-call-count + :phase/max-tokens-config + :phase/truncation-detected? on every plan/implement/review phase"
+  "`miniforge opsv discover agent-budgets` enumerates candidate signals + their current values"
+  "`miniforge opsv converge agent-budgets --fixtures <ids>` runs the controlled experiment end-to-end"
+  "`miniforge opsv verify agent-budgets --policy <candidate>` replays the fixture set and emits the verification evidence bundle"
+  "`miniforge opsv actuate agent-budgets --policy <candidate>` (with APPLY_ALLOWED=true) writes the converged policy to default-user-config.edn with provenance"
+  "Converged policy for at least the planner role lands in config and replaces the hand-tuned 32000 from the unblocker PR"
+  "Experiment run is reproducible: same fixture hashes + same model version → same converged policy within ±10%"]
+
+ :spec/priority
+ {:tier :high
+  :axes #{:token-conservation :dogfood-enabler :observation}
+  :theme :operational-policy-synthesis
+  :rationale "First OPSV use case. Closes the guess-at-budget loop that produced 4000-as-default and the empty-response failure. Every numeric-budget spec after this one benefits from the same framework."
+  :blocks []
+  :blocked-by ["n07-opsv-workflow.spec.edn" "n07-opsv-converge-verify-actuate.spec.edn"]}
+
+ :spec/workflow-type :canonical-sdlc}

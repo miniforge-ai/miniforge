@@ -115,4 +115,24 @@
    "Reliability events flow through the event stream with stable schema"
    "Self-healing chooses recovery actions keyed on failure class"]
   :theme/status :planned
+  :theme/owner :christopher}
+
+ :operational-policy-synthesis
+ {:theme/id :operational-policy-synthesis
+  :theme/title "Operational Policy Synthesis (OPSV)"
+  :theme/description
+  "Discover scaling + budget signals via governed experiments, synthesize
+   operational policies, verify against acceptance criteria, and emit
+   them as auditable artifacts. Any numeric knob whose optimal value we
+   currently guess — agent max-tokens, tool-call caps, timeouts, K8s
+   container CPU/memory, I/O bandwidth — is an OPSV target."
+  :theme/informative-spec nil
+  :theme/normative-refs
+  [{:doc "specs/normative/N7-Operational-Policy-Synthesis.md"
+    :relation :primary}]
+  :theme/completion-criteria
+  ["OPSV workflow (DISCOVER → CONVERGE → VERIFY → ACTUATE) runs end-to-end on at least one real budget parameter"
+   "At least one policy is actuated to production config via OPSV (not hand-tuned)"
+   "Verification evidence bundle shows pass/fail per acceptance criterion"]
+  :theme/status :planned
   :theme/owner :christopher}}

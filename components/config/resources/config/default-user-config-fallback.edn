@@ -4,7 +4,9 @@
         :model "gpt-5.2-codex"
         :timeout-ms 300000
         :line-timeout-ms 60000
-        :max-tokens 4000}
+        ;; Keep in sync with resources/config/default-user-config.edn.
+        ;; OPSV convergence target — see work/n07-opsv-agent-budgets.spec.edn.
+        :max-tokens 32000}
   :workflow {:max-iterations 50
              :max-tokens 150000
              :failure-strategy :retry}
