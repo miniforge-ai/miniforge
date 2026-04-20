@@ -10,7 +10,7 @@
   (:require [ai.miniforge.data-foundry.connector-http.etag :as etag]
             [ai.miniforge.data-foundry.connector-http.pagination :as page]
             [ai.miniforge.schema.interface :as schema]
-            [clojure.data.json :as json]
+            [cheshire.core :as json]
             [hato.client :as hc]))
 
 ;;------------------------------------------------------------------------------ Layer 0
@@ -36,7 +36,7 @@
   "Build a schema/success from a 2xx response. Caches the ETag for the URL."
   [url resp]
   (etag/store-etag! url (etag/extract-etag (:headers resp)))
-  (schema/success :body (json/read-str (:body resp) :key-fn keyword)
+  (schema/success :body (json/parse-string (:body resp) keyword)
                   {:headers (:headers resp)}))
 
 (defn not-modified-response
