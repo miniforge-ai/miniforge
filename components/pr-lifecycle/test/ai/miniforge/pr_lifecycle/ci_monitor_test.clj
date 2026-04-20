@@ -27,7 +27,8 @@
    [clojure.test :refer [deftest testing is are]]
    [ai.miniforge.pr-lifecycle.ci-monitor :as ci]
    [ai.miniforge.pr-lifecycle.events :as events]
-   [ai.miniforge.dag-executor.interface :as dag]))
+   [ai.miniforge.dag-executor.interface :as dag]
+   [ai.miniforge.response.interface :as response]))
 
 ;------------------------------------------------------------------------------ Status Types
 
@@ -52,7 +53,7 @@
                   {:name "lint" :state "COMPLETED" :conclusion "SUCCESS"}
                   {:name "build" :state "COMPLETED" :conclusion "SUCCESS"}]
           result (ci/compute-ci-status checks)]
-      (is (= :success (:status result)))
+      (is (response/success? result))
       (is (= 3 (count (:passed result))))
       (is (empty? (:failed result)))
       (is (empty? (:pending result)))
@@ -78,7 +79,7 @@
     (let [checks [{:name "tests" :state "IN_PROGRESS" :conclusion nil}
                   {:name "lint" :state "COMPLETED" :conclusion "SUCCESS"}]
           result (ci/compute-ci-status checks)]
-      (is (= :success (:status result))
+      (is (response/success? result)
           "IN_PROGRESS maps to :in_progress (underscore), not :in-progress (hyphen), so it falls to :unknown"))))
 
 (deftest compute-ci-status-failure-takes-precedence-over-pending-test
@@ -127,7 +128,7 @@
     (let [checks [{:name "optional" :state "COMPLETED" :conclusion "SKIPPED"}
                   {:name "tests" :state "COMPLETED" :conclusion "SUCCESS"}]
           result (ci/compute-ci-status checks)]
-      (is (= :success (:status result))
+      (is (response/success? result)
           "Success should take precedence over neutral"))))
 
 (deftest compute-ci-status-waiting-test
@@ -272,7 +273,7 @@
                       (random-uuid) (random-uuid) (random-uuid)
                       42 "/tmp/repo")
             result (ci/poll-ci-status monitor nil)]
-        (is (= :success (:status result)))
+        (is (response/success? result))
         (is (= 2 (count (:passed (:checks result)))))
         (is (empty? (:failed (:checks result))))))))
 
@@ -363,7 +364,7 @@
                       42 "/tmp/repo")]
         (is (= :pending (:status @monitor)))
         (ci/poll-ci-status monitor nil)
-        (is (= :success (:status @monitor)))))))
+        (is (response/success? @monitor))))))
 
 ;------------------------------------------------------------------------------ Status Change Detection
 
@@ -483,7 +484,7 @@
                           ;; Third call succeeds with passing checks
                           (dag/ok {:checks [{:name "tests" :state "COMPLETED" :conclusion "SUCCESS"}]}))))]
         (let [result (ci/run-ci-monitor monitor nil)]
-          (is (= :success (:status result))
+          (is (response/success? result)
               "Monitor should eventually reach success after retries")
           (is (>= @call-count 3)
               "Should have polled at least 3 times (2 failures + 1 success)"))))))
@@ -562,7 +563,7 @@
                     (fn [_path _pr]
                       (dag/ok {:checks [{:name "tests" :state "COMPLETED" :conclusion "SUCCESS"}]}))]
         (let [result (ci/run-ci-monitor monitor nil)]
-          (is (= :success (:status result)))
+          (is (response/success? result))
           (is (false? (:running? @monitor))))))))
 
 (deftest run-ci-monitor-failure-completes-immediately-test
@@ -598,7 +599,7 @@
                           :on-poll (fn [r] (swap! poll-results conj r)))
         (is (>= (count @poll-results) 3)
             "on-poll should be called for each poll cycle")
-        (is (= :success (:status (last @poll-results)))
+        (is (response/success? (last @poll-results))
             "Last poll result should be the terminal one")))))
 
 (deftest run-ci-monitor-on-complete-callback-test
@@ -614,7 +615,7 @@
         (ci/run-ci-monitor monitor nil
                           :on-complete (fn [r] (reset! complete-result r)))
         (is (some? @complete-result))
-        (is (= :success (:status @complete-result)))))))
+        (is (response/success? @complete-result))))))
 
 ;------------------------------------------------------------------------------ run-ci-monitor: Event Bus Integration
 

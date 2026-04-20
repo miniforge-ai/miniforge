@@ -208,7 +208,7 @@
       (simulate-pr-creation! controller mock-pr-info)
       (simulate-ci-result! controller mock-ci-success)
 
-      (is (= :success (:status mock-ci-success))
+      (is (response/success? mock-ci-success)
           "CI should report success")
       (is (every? #(= "success" (:conclusion %))
                   (:checks mock-ci-success))
@@ -410,5 +410,5 @@
 
       ;; After fix, second CI check passes
       (simulate-ci-result! controller mock-ci-success)
-      (is (= :success (:status mock-ci-success))
+      (is (response/success? mock-ci-success)
           "CI should pass after fix"))))
