@@ -20,7 +20,8 @@
   (:require
    [clojure.test :refer [deftest testing is]]
    [ai.miniforge.event-stream.interface :as es]
-   [ai.miniforge.event-stream.approval :as approval]))
+   [ai.miniforge.event-stream.approval :as approval]
+   [ai.miniforge.response.interface :as response]))
 
 ;; ============================================================================
 ;; Quorum approval tests
@@ -221,4 +222,4 @@
           result (es/execute-control-action-with-approval!
                   stream action
                   (fn [_] {:paused true}))]
-      (is (= :success (:status result))))))
+      (is (response/success? result)))))
