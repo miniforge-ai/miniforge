@@ -84,6 +84,11 @@
 (def cp-decision-resolved core/cp-decision-resolved)
 
 ;------------------------------------------------------------------------------ Layer 2
+;; PR scoring event constructors (N5-delta-2 §4.1)
+
+(def pr-scored core/pr-scored)
+
+;------------------------------------------------------------------------------ Layer 2
 ;; Reliability metric event constructors (N3 §3.17)
 
 (def sli-computed core/sli-computed)

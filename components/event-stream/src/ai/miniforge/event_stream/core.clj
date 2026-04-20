@@ -586,6 +586,38 @@
              :cp/resolution resolution)))
 
 ;------------------------------------------------------------------------------ Layer 6
+;; PR scoring events (N5-delta-2 §4.1)
+
+(defn pr-scored
+  "Emit when the pr-scoring component has computed readiness, risk, and
+   policy scores for a PR, per N5-delta-2 §4.1. Produces the only event
+   carrying the four `:pr/readiness`, `:pr/risk`, `:pr/policy`, and
+   `:pr/recommendation` fields for downstream consumption by
+   `supervisory-state`.
+
+   Args:
+     stream      — event-stream atom
+     repo        — \"owner/repo\" string
+     number      — PR number (long)
+     scores      — map with keys :readiness, :risk, :policy,
+                   :recommendation (any subset MAY be present; consumers
+                   render absent fields as \"not yet scored\", §5.4)
+     opts        — optional map; :workflow/id scopes the event to a
+                   run, otherwise nil (PR scoring is not inherently
+                   workflow-scoped)"
+  [stream repo number {:keys [readiness risk policy recommendation]}
+   & [{:workflow/keys [id] :as _opts}]]
+  (-> (create-envelope stream :pr/scored id
+                       (str "PR " repo "#" number " scored"))
+      (assoc :pr/repo repo
+             :pr/number number)
+      (cond->
+        readiness      (assoc :pr/readiness readiness)
+        risk           (assoc :pr/risk risk)
+        policy         (assoc :pr/policy policy)
+        recommendation (assoc :pr/recommendation recommendation))))
+
+;------------------------------------------------------------------------------ Layer 6
 ;; Reliability metric events (N3 §3.17, N1 §5.5)
 
 (defn sli-computed
