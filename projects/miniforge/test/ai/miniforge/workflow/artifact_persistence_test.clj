@@ -318,28 +318,35 @@
           "Verify should throw when no execution environment is available"))))
 
 (deftest test-workflow-empty-artifact-handling
-  (testing "Workflow handles empty implement artifact via environment model"
-    ;; In the environment model, the release phase discovers files from git status
-    ;; rather than from the artifact's :code/files. An empty artifact doesn't cause
-    ;; a release failure if the worktree has any dirty files (e.g. .miniforge/index).
-    ;; The release executor mock returns success since it receives the worktree state.
-    (let [result-ctx (execute-phase-pipeline
-                      {:implement-agent-fn
-                       (fn [_agent _task _ctx]
-                         ;; Implementer returns empty artifact (no code/files)
-                         (response/success mock-empty-artifact {:tokens 50 :duration-ms 300}))
+  (testing "Release phase accepts an empty :code/files artifact when the curator confirms files exist in the environment"
+    ;; Regression target: the release phase discovers files from git state,
+    ;; not from the artifact's :code/files. An implement result with empty
+    ;; :code/files MUST still reach the release executor as long as the
+    ;; curator has confirmed the environment has the work.
+    ;;
+    ;; The curator is stubbed here because it reads the real worktree — its
+    ;; behavior is covered by its own tests. This test isolates the release
+    ;; phase's tolerance of an empty :code/files on a successful implement.
+    (with-redefs [agent/curate-implement-output
+                  (fn [_opts]
+                    (response/success mock-empty-artifact
+                                      {:tokens 0 :duration-ms 0}))]
+      (let [result-ctx (execute-phase-pipeline
+                        {:implement-agent-fn
+                         (fn [_agent _task _ctx]
+                           (response/success mock-empty-artifact
+                                             {:tokens 50 :duration-ms 300}))
 
-                       :release-opts
-                       {:executor
-                        (fn [_workflow-state _exec-context _opts]
-                          {:success? true
-                           :artifacts []
-                           :metrics {:files-written 0}})}})]
-      ;; The release phase should complete (the executor mock returns success)
-      (is (= :completed (get-in result-ctx [:phase :status]))
-          "Release phase should complete when executor returns success")
-      (is (= :success (get-in result-ctx [:phase :result :status]))
-          "Release result should be success"))))
+                         :release-opts
+                         {:executor
+                          (fn [_workflow-state _exec-context _opts]
+                            {:success? true
+                             :artifacts []
+                             :metrics {:files-written 0}})}})]
+        (is (= :completed (get-in result-ctx [:phase :status]))
+            "Release phase should complete when executor returns success")
+        (is (= :success (get-in result-ctx [:phase :result :status]))
+            "Release result should be success")))))
 
 (deftest test-artifact-content-verification
   (testing "Files written to disk have correct content"

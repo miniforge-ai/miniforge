@@ -204,7 +204,7 @@
   (testing "Returns manifest for known roles"
     (let [manifest (k/get-agent-manifest :planner)]
       (is (= :planner (:agent-role manifest)))
-      (is (vector? (:dewey-prefixes manifest)))
+      (is (vector? (:tags manifest)))
       (is (vector? (:types manifest)))))
 
   (testing "Returns default manifest for unknown roles"
