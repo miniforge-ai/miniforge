@@ -321,7 +321,7 @@
 
     (-> (phase-result/enter-context ctx :release :releaser gates budget start-time result)
         ;; Store PR info at top level for easy access
-        (cond-> (= :success (:status result))
+        (cond-> (phase-result/succeeded? result)
           (assoc-in [:workflow/pr-info] (get-in (:output result) [:workflow/pr-info]))))))))
 
 (defn leave-release
@@ -333,7 +333,7 @@
         end-time (System/currentTimeMillis)
         duration-ms (if start-time (- end-time start-time) 0)
         result (get-in ctx [:phase :result])
-        release-data (when (= :success (:status result)) (:output result))
+        release-data (when (phase-result/succeeded? result) (:output result))
         release-metrics (get release-data :release/metrics {})
         metrics (merge {:tokens 0 :duration-ms duration-ms} release-metrics)
         agent-status (:status result)

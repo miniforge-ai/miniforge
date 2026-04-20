@@ -292,7 +292,7 @@
         result (cond
                  ;; Curator found files — use its artifact, even if the
                  ;; implementer reported error. Merge implementer metrics through.
-                 (= :success (:status curator-result))
+                 (phase-result/succeeded? curator-result)
                  (-> impl-result
                      (assoc :status :success)
                      (assoc :output (:output curator-result))
@@ -305,7 +305,7 @@
                  ;; Implementer errored for a non-curator reason (rate-limit,
                  ;; exception, etc.). Propagate — the phase runner classifies
                  ;; those via rate-limited? / existing branches.
-                 (not= :success (:status impl-result))
+                 (not (phase-result/succeeded? impl-result))
                  impl-result
                  ;; Implementer reported success but curator still returned
                  ;; something non-success (shouldn't happen outside no-files;
