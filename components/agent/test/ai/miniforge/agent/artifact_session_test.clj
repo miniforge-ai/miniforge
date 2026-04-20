@@ -130,6 +130,59 @@
         (finally
           (session/cleanup-session! s))))))
 
+;------------------------------------------------------------------------------ Layer 2.1
+;; Worktree artifact tests — container-promotion submission path
+
+(defn- make-worktree-with-plan [plan-edn-str]
+  (let [wt (io/file (System/getProperty "java.io.tmpdir")
+                    (str "mf-wt-test-" (random-uuid)))
+        _  (.mkdirs (io/file wt ".miniforge"))]
+    (when plan-edn-str
+      (spit (io/file wt ".miniforge" "plan.edn") plan-edn-str))
+    (.getPath wt)))
+
+(deftest read-worktree-artifact-reads-plan-edn-test
+  (testing "reads .miniforge/<role>.edn from the worktree"
+    (let [wt (make-worktree-with-plan
+              (pr-str {:plan/id "550e8400-e29b-41d4-a716-446655440000"
+                       :plan/name "t"
+                       :plan/tasks []}))]
+      (try
+        (let [result (session/read-worktree-artifact wt :plan)]
+          (is (map? result))
+          (is (= "t" (:plan/name result)))
+          (is (instance? java.util.UUID (:plan/id result))
+              "UUID strings should be parsed through parse-uuid-strings"))
+        (finally
+          (io/delete-file (io/file wt ".miniforge" "plan.edn") true)
+          (io/delete-file (io/file wt ".miniforge") true)
+          (io/delete-file (io/file wt) true))))))
+
+(deftest read-worktree-artifact-missing-file-test
+  (testing "returns nil when .miniforge/<role>.edn is absent"
+    (let [wt (make-worktree-with-plan nil)]
+      (try
+        (is (nil? (session/read-worktree-artifact wt :plan)))
+        (finally
+          (io/delete-file (io/file wt ".miniforge") true)
+          (io/delete-file (io/file wt) true))))))
+
+(deftest read-worktree-artifact-nil-args-test
+  (testing "returns nil for nil workdir or nil role (no throw)"
+    (is (nil? (session/read-worktree-artifact nil :plan)))
+    (is (nil? (session/read-worktree-artifact "/tmp" nil)))
+    (is (nil? (session/read-worktree-artifact nil nil)))))
+
+(deftest read-worktree-artifact-invalid-edn-test
+  (testing "returns nil for unparseable file (no throw)"
+    (let [wt (make-worktree-with-plan "{{{ not edn")]
+      (try
+        (is (nil? (session/read-worktree-artifact wt :plan)))
+        (finally
+          (io/delete-file (io/file wt ".miniforge" "plan.edn") true)
+          (io/delete-file (io/file wt ".miniforge") true)
+          (io/delete-file (io/file wt) true))))))
+
 ;------------------------------------------------------------------------------ Layer 2.5
 ;; UUID/instant parsing tests (via read-artifact round-trip)
 

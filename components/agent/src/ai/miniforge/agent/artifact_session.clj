@@ -432,6 +432,35 @@
 
     :else m))
 
+(defn read-worktree-artifact
+  "Read a role artifact from <workdir>/.miniforge/<role>.edn if present.
+
+   Container-promotion pattern: an agent submits its phase artifact by
+   writing a file into the worktree, and the runtime reads that file
+   after the LLM invocation. This lives alongside the MCP-based
+   artifact path (`read-artifact`) — the caller decides precedence.
+
+   Arguments:
+   - workdir — absolute path to the worktree (may be nil)
+   - role    — keyword or string naming the artifact (e.g. :plan → plan.edn)
+
+   Returns: parsed artifact map with UUID types, or nil (missing,
+   unreadable, or parse failure — all logged to stderr, never thrown)."
+  [workdir role]
+  (when (and workdir role)
+    (let [filename (str (name role) ".edn")
+          f (io/file workdir ".miniforge" filename)]
+      (when (.exists f)
+        (try
+          (-> (slurp f)
+              edn/read-string
+              parse-uuid-strings)
+          (catch Exception e
+            (binding [*out* *err*]
+              (println "WARN: failed to parse worktree artifact at"
+                       (.getPath f) "—" (ex-message e)))
+            nil))))))
+
 (defn read-artifact
   "Read the artifact EDN file from a session directory.
 
@@ -676,12 +705,26 @@
 
 (defn- run-session
   "Execute body-fn with session, read artifacts, and clean up.
-   Shared lifecycle for both host and capsule sessions."
+   Shared lifecycle for both host and capsule sessions.
+
+   `:worktree-artifacts` is a map from role keyword to parsed artifact,
+   read from <workdir>/.miniforge/<role>.edn. Container-promotion pattern —
+   agents write their artifact into the worktree and the runtime picks it
+   up here. Empty when no worktree is available (e.g. capsule mode) or no
+   files were written."
   [session body-fn read-artifact-fn cleanup-fn mode]
   (try
-    (let [result (body-fn session)]
+    (let [result (body-fn session)
+          workdir (:workdir session)
+          worktree-artifacts (when (and (= :host mode) workdir)
+                               (into {}
+                                     (keep (fn [role]
+                                             (when-let [a (read-worktree-artifact workdir role)]
+                                               [role a])))
+                                     [:plan :implement :verify :review :release]))]
       {:llm-result result
        :artifact (read-artifact-fn session)
+       :worktree-artifacts worktree-artifacts
        :context-misses (when (= :host mode) (read-context-misses session))
        :pre-session-snapshot (:pre-session-snapshot session)
        :session-mode mode})
