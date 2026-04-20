@@ -22,7 +22,8 @@
    [clojure.test :as test :refer [deftest testing is]]
    [ai.miniforge.agent.core :as core]
    [ai.miniforge.agent.tester :as tester]
-   [ai.miniforge.logging.interface :as log]))
+   [ai.miniforge.logging.interface :as log]
+   [ai.miniforge.response.interface :as response]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Test fixtures
@@ -231,7 +232,7 @@
                                       :content "(ns example-test (:require [clojure.test :refer :all]))\n(deftest t (is true))"}]
                         :test/type :unit}
           result (core/repair agent bad-artifact {:test/id ["required"]} {})]
-      (is (= :success (:status result)))
+      (is (response/success? result))
       (is (uuid? (get-in result [:output :test/id])))))
 
   (testing "repairs non-test file paths"
@@ -241,7 +242,7 @@
                                       :content "(ns not-test)"}]
                         :test/type :unit}
           result (core/repair agent bad-artifact {:files ["naming"]} {})]
-      (is (= :success (:status result)))
+      (is (response/success? result))
       ;; Path should be fixed to include _test
       (let [repaired-path (get-in result [:output :test/files 0 :path])]
         (is (re-find #"_test" repaired-path)))))
@@ -253,7 +254,7 @@
                                       :content "(ns example-test)\n(is true)\n(is false)\n(is (= 1 1))"}]
                         :test/type :unit}
           result (core/repair agent bad-artifact {} {})]
-      (is (= :success (:status result)))
+      (is (response/success? result))
       (is (pos? (get-in result [:output :test/assertions-count]))))))
 
 ;------------------------------------------------------------------------------ Layer 6

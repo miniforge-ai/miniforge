@@ -274,7 +274,7 @@
           ;; Simulate what a phase does with the response
           phase-result (response/success parsed {:tokens 1000 :duration-ms 5000})]
 
-      (is (= :success (:status phase-result))
+      (is (response/success? phase-result)
           "Phase should successfully process agent response")
       (is (= parsed (:output phase-result))
           "Phase should extract parsed artifact")
@@ -289,7 +289,7 @@
           failure-response (response/failure (ex-info "Test error" {}))]
 
       ;; Test success response structure
-      (is (= :success (:status success-response))
+      (is (response/success? success-response)
           "Success response should have :success status")
       (is (= artifact (:output success-response))
           "Success response should contain artifact")

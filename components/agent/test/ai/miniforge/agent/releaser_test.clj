@@ -22,7 +22,8 @@
    [clojure.test :as test :refer [deftest testing is]]
    [ai.miniforge.agent.core :as core]
    [ai.miniforge.agent.releaser :as releaser]
-   [ai.miniforge.logging.interface :as log]))
+   [ai.miniforge.logging.interface :as log]
+   [ai.miniforge.response.interface :as response]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Test fixtures
@@ -135,7 +136,7 @@
           bad-artifact (assoc valid-release-artifact
                               :release/branch-name "feature/bad branch")
           result (core/repair agent bad-artifact {:branch-name ["spaces"]} {})]
-      (is (= :success (:status result)))
+      (is (response/success? result))
       (is (not (re-find #" " (get-in result [:output :release/branch-name]))))))
 
   (testing "truncates long PR title"
@@ -143,14 +144,14 @@
           long-title (apply str (repeat 80 "x"))
           bad-artifact (assoc valid-release-artifact :release/pr-title long-title)
           result (core/repair agent bad-artifact {:pr-title ["too long"]} {})]
-      (is (= :success (:status result)))
+      (is (response/success? result))
       (is (<= (count (get-in result [:output :release/pr-title])) 70))))
 
   (testing "adds missing ID"
     (let [agent (releaser/create-releaser)
           bad-artifact (dissoc valid-release-artifact :release/id)
           result (core/repair agent bad-artifact {:release/id ["required"]} {})]
-      (is (= :success (:status result)))
+      (is (response/success? result))
       (is (uuid? (get-in result [:output :release/id]))))))
 
 ;------------------------------------------------------------------------------ Layer 6

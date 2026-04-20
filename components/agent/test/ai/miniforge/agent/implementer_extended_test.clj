@@ -21,6 +21,7 @@
    language detection, artifact repair edge cases, formatting, and prior-attempts."
   (:require
    [ai.miniforge.agent.implementer :as impl]
+   [ai.miniforge.response.interface :as response]
    [clojure.string :as str]
    [clojure.test :refer [deftest testing is]]))
 
@@ -214,14 +215,14 @@
   (testing "adds UUID when :code/id is missing"
     (let [artifact {:code/files [{:path "a.clj" :content "(ns a)" :action :create}]}
           result (impl/repair-code-artifact artifact {:code/id "missing"} {})]
-      (is (= :success (:status result)))
+      (is (response/success? result))
       (is (uuid? (get-in result [:output :code/id]))))))
 
 (deftest repair-adds-missing-files-vector-test
   (testing "adds empty files vector when nil"
     (let [artifact {:code/id (random-uuid) :code/files nil}
           result (impl/repair-code-artifact artifact {} {})]
-      (is (= :success (:status result)))
+      (is (response/success? result))
       (is (vector? (get-in result [:output :code/files]))))))
 
 (deftest repair-fills-empty-create-content-test
@@ -229,7 +230,7 @@
     (let [artifact {:code/id (random-uuid)
                     :code/files [{:path "a.clj" :content "" :action :create}]}
           result (impl/repair-code-artifact artifact {:files "empty"} {})]
-      (is (= :success (:status result)))
+      (is (response/success? result))
       (is (seq (get-in result [:output :code/files 0 :content]))))))
 
 (deftest repair-deduplicates-files-test
@@ -239,7 +240,7 @@
                                  {:path "b.clj" :content "(ns b)" :action :create}
                                  {:path "a.clj" :content "(ns a-v2)" :action :modify}]}
           result (impl/repair-code-artifact artifact {} {})]
-      (is (= :success (:status result)))
+      (is (response/success? result))
       (let [files (get-in result [:output :code/files])
             paths (map :path files)]
         (is (= (count (distinct paths)) (count paths)))))))
@@ -250,7 +251,7 @@
                     :code/files [{:path "a.clj" :content "(ns a)" :action :create}
                                  {:path nil :content "orphan" :action :create}]}
           result (impl/repair-code-artifact artifact {} {})]
-      (is (= :success (:status result)))
+      (is (response/success? result))
       (is (= 1 (count (get-in result [:output :code/files])))))))
 
 (deftest repair-adds-default-action-test
@@ -258,7 +259,7 @@
     (let [artifact {:code/id (random-uuid)
                     :code/files [{:path "a.clj" :content "(ns a)"}]}
           result (impl/repair-code-artifact artifact {} {})]
-      (is (= :success (:status result)))
+      (is (response/success? result))
       (is (= :create (get-in result [:output :code/files 0 :action]))))))
 
 (deftest repair-adds-empty-content-when-nil-test
@@ -266,7 +267,7 @@
     (let [artifact {:code/id (random-uuid)
                     :code/files [{:path "a.clj" :content nil :action :delete}]}
           result (impl/repair-code-artifact artifact {} {})]
-      (is (= :success (:status result)))
+      (is (response/success? result))
       (is (= "" (get-in result [:output :code/files 0 :content]))))))
 
 (deftest repair-records-repairs-made-test

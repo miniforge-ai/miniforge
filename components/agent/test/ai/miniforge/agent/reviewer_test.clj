@@ -22,7 +22,8 @@
    [clojure.test :refer [deftest testing is]]
    [ai.miniforge.agent.reviewer :as reviewer]
    [ai.miniforge.agent.core :as core]
-   [ai.miniforge.loop.interface :as loop]))
+   [ai.miniforge.loop.interface :as loop]
+   [ai.miniforge.response.interface :as response]))
 
 ;------------------------------------------------------------------------------ Test fixtures
 
@@ -87,7 +88,7 @@
           reviewer (reviewer/create-reviewer {:gates gates})
           result (core/invoke reviewer {} sample-artifact)]
 
-      (is (= :success (:status result))
+      (is (response/success? result)
           "Invocation should succeed")
 
       (let [review (:artifact result)]
@@ -117,7 +118,7 @@
           reviewer (reviewer/create-reviewer {:gates gates})
           result (core/invoke reviewer {} sample-artifact)]
 
-      (is (= :success (:status result))
+      (is (response/success? result)
           "Invocation should succeed")
 
       (let [review (:artifact result)]
@@ -277,7 +278,7 @@
                                                            :action :create}]}}
           result (core/invoke reviewer {} valid-artifact)]
 
-      (is (= :success (:status result)))
+      (is (response/success? result))
       ;; Note: actual gate behavior depends on loop implementation
       (is (some? (:artifact result))
           "Should return review artifact")))
@@ -289,7 +290,7 @@
           reviewer (reviewer/create-reviewer {:gates gates})
           result (core/invoke reviewer {} sample-artifact)]
 
-      (is (= :success (:status result)))
+      (is (response/success? result))
       (is (= 3 (get-in result [:artifact :review/gates-total]))
           "Should run all 3 gates"))))
 
@@ -313,7 +314,7 @@
           reviewer (reviewer/create-reviewer {:gates [error-gate]})
           result (core/invoke reviewer {} sample-artifact)]
 
-      (is (= :success (:status result))
+      (is (response/success? result)
           "Should succeed even when gate throws")
 
       (let [review (:artifact result)]

@@ -22,6 +22,7 @@
    tested via injected stub clients, never a real LLM backend."
   (:require
    [ai.miniforge.agent.curator :as sut]
+   [ai.miniforge.response.interface :as response]
    [clojure.test :refer [deftest is testing]]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -65,7 +66,7 @@
                    :worktree-path "/tmp/ignored"
                    :intent-scope [(:path src-file) (:path test-file)]
                    :spec-description "Add retry-budget state machine"})]
-      (is (= :success (:status result)))
+      (is (response/success? result))
       (let [art (:output result)]
         (is (uuid? (:code/id art)))
         (is (= 2 (count (:code/files art))))
@@ -90,7 +91,7 @@
                    :intent-scope [(:path src-file)]
                    :spec-description "Add retry-budget"})
           art (:output result)]
-      (is (= :success (:status result)))
+      (is (response/success? result))
       (is (= ["docs/unrelated.md"] (:code/scope-deviations art))
           "path not in scope should appear in deviations"))))
 
@@ -102,7 +103,7 @@
                      :worktree-path "/tmp/ignored"
                      :intent-scope scope})
             art (:output result)]
-        (is (= :success (:status result)))
+        (is (response/success? result))
         (is (= [] (:code/scope-deviations art))
             (str "scope=" (pr-str scope)))))))
 
