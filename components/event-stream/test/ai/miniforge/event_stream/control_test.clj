@@ -182,7 +182,7 @@
           result (es/execute-control-action!
                   stream action
                   (fn [_act] {:paused true}))]
-      (is (= :success (:status result)))
+      (is (response/success? result))
       (is (= {:paused true} (:output result)))
       ;; Should have emitted requested + executed events
       (let [action-events (filter #(#{:control-action/requested :control-action/executed}

@@ -28,7 +28,8 @@
    - All-success input yields :success"
   (:require
    [clojure.test :refer [deftest testing is]]
-   [ai.miniforge.pr-lifecycle.ci-monitor :as ci]))
+   [ai.miniforge.pr-lifecycle.ci-monitor :as ci]
+   [ai.miniforge.response.interface :as response]))
 
 ;------------------------------------------------------------------------------ Helpers
 
@@ -112,7 +113,7 @@
     (doseq [n (range 1 20)]
       (let [checks (vec (repeat n {:name "test" :state "COMPLETED" :conclusion "SUCCESS"}))
             result (ci/compute-ci-status checks)]
-        (is (= :success (:status result))
+        (is (response/success? result)
             (str n " SUCCESS checks should yield :success"))))))
 
 ;------------------------------------------------------------------------------ Property: Empty yields :unknown

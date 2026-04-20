@@ -27,7 +27,8 @@
    [ai.miniforge.agent.file-artifacts :as file-artifacts]
    [ai.miniforge.agent.implementer :as implementer]
    [ai.miniforge.llm.interface :as llm]
-   [ai.miniforge.logging.interface :as log]))
+   [ai.miniforge.logging.interface :as log]
+   [ai.miniforge.response.interface :as response]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Test fixtures
@@ -144,7 +145,7 @@
                    (@#'implementer/invoke-with-llm
                     nil "prompt" "system" {} {} nil logger []))
           fallback-log (find-log-entry entries :implementer/file-artifact-fallback)]
-      (is (= :success (:status result)))
+      (is (response/success? result))
       (is (= [{:path "src/generated.clj"
                :content "(ns generated)"
                :action :create}]
@@ -320,7 +321,7 @@
                                       :content "(ns test)"
                                       :action :create}]}
           result (core/repair agent bad-artifact {:code/id ["required"]} {})]
-      (is (= :success (:status result)))
+      (is (response/success? result))
       (is (uuid? (get-in result [:output :code/id])))))
 
   (testing "adds content to empty :create files"
@@ -330,7 +331,7 @@
                                       :content ""
                                       :action :create}]}
           result (core/repair agent bad-artifact {:files ["empty content"]} {})]
-      (is (= :success (:status result)))
+      (is (response/success? result))
       (is (seq (get-in result [:output :code/files 0 :content]))))))
 
 ;------------------------------------------------------------------------------ Layer 6
