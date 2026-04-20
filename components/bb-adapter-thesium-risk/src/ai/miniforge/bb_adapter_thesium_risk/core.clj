@@ -23,9 +23,9 @@
    Layer 1: orchestration steps — produce-snapshot!, run-etl!, upload-pair!.
    Layer 2: top-level compositions — daily!, weekly!."
   (:require [ai.miniforge.bb-data-plane-http.interface :as dp]
+            [ai.miniforge.bb-etl-runner.interface :as etl]
             [ai.miniforge.bb-out.interface :as out]
             [ai.miniforge.bb-paths.interface :as paths]
-            [ai.miniforge.bb-proc.interface :as proc]
             [ai.miniforge.bb-r2.interface :as r2]
             [babashka.fs :as fs]
             [cheshire.core :as json]
@@ -43,7 +43,11 @@
                   :base-url-env  "THESIUM_DATA_PLANE_BASE_URL"
                   :state-dir-env "THESIUM_DATA_PLANE_STATE_DIR"}
    :miniforge-dir      "../miniforge"
-   :research-lens-dir  "packs/research-lens"
+   :research-lens      {:pack-dir "packs/research-lens"
+                        :cli-ns   "ai.thesium.etl.cli"
+                        :pipeline "pipelines/research-lens-etl.edn"
+                        :env      "envs/gha.edn"
+                        :label    "research-lens"}
    :daily-output       "dist/daily"
    :weekly-output      "dist/weekly"
    :snapshot-filename  "dashboard_snapshot.json"
@@ -124,41 +128,32 @@
         (out/section "Stopping data plane")
         (dp/destroy! handle)))))
 
+(defn- pack-etl-opts
+  "Translate the adapter's pack config into the generic runner's opts.
+   Thesium-specific conventions (pack-dir layout, output filename) stay
+   here; the invocation mechanics live in bb-etl-runner."
+  [{:keys [root miniforge-dir] :as cfg} pack-cfg output-dir out-file]
+  (let [pack-dir (under-root root (:pack-dir pack-cfg))]
+    {:miniforge-dir (under-root root miniforge-dir)
+     :pack-src      (str pack-dir "/src")
+     :cli-ns        (:cli-ns pack-cfg)
+     :pipeline      (str pack-dir "/" (:pipeline pack-cfg))
+     :env           (str pack-dir "/" (:env pack-cfg))
+     :output        out-file
+     :log           (str (under-root root output-dir) "/etl.log")
+     :label         (:label pack-cfg)}))
+
 (defn run-etl!
-  "Run the research-lens ETL via a sibling miniforge checkout. Returns
-   `{:success? bool :catalog path-or-nil}`. Skipped (not fatal) when
-   the miniforge dir is missing."
-  [{:keys [root miniforge-dir research-lens-dir] :as cfg} output-dir]
-  (out/section "Running research-lens ETL")
-  (let [mf-abs (under-root root miniforge-dir)]
-    (if-not (fs/exists? mf-abs)
-      (do (out/warn (str "miniforge not found at " mf-abs ", skipping"))
-          {:success? false :catalog nil :error "miniforge not found"})
-      (let [pack-dir     (under-root root research-lens-dir)
-            pack-src     (str pack-dir "/src")
-            pipeline-def (str pack-dir "/pipelines/research-lens-etl.edn")
-            env-file     (str pack-dir "/envs/gha.edn")
-            out-file     (catalog-file cfg output-dir)
-            deps-override (str "{:deps {local/pack {:local/root \"" pack-src "\"}}}")
-            ;; The CLI lives in the consuming repo (Thesium), not in
-            ;; miniforge — miniforge provides the pipeline-runner,
-            ;; connector-*, and schema primitives, while product-
-            ;; specific glue (env conventions, ${VAR} interpolation,
-            ;; transform registration) lives with the pack. The
-            ;; :local/root above puts the pack's src on the classpath
-            ;; so `ai.thesium.etl.cli` is resolvable here.
-            result (proc/sh {:dir mf-abs
-                             :out (str (under-root root output-dir) "/etl.log")
-                             :err :inherit}
-                            "clojure" "-Sdeps" deps-override
-                            "-M:dev" "-m" "ai.thesium.etl.cli"
-                            "run" pipeline-def "--env" env-file
-                            "--output" out-file)]
-        (if (and (zero? (:exit result)) (fs/exists? out-file))
-          (do (out/ok "research catalog produced")
-              {:success? true :catalog out-file})
-          (do (out/warn "research catalog not produced")
-              {:success? false :catalog nil :error "ETL failed"}))))))
+  "Run the research-lens ETL via `bb-etl-runner`. Returns
+   `{:success? bool :catalog path-or-nil}`. Thesium-risk currently runs
+   one ETL; additional product ETLs would be added by composing more
+   `etl/run!` calls (one pack per result key)."
+  [{:keys [research-lens] :as cfg} output-dir]
+  (let [out-file (catalog-file cfg output-dir)
+        result   (etl/run! (pack-etl-opts cfg research-lens output-dir out-file))]
+    {:success? (:success? result)
+     :catalog  (:output result)
+     :error    (:error result)}))
 
 (defn upload-pair!
   "Upload `src` to canonical + archive keys on R2. Canonical failure

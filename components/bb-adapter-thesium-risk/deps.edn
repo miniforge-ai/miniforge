@@ -4,6 +4,7 @@
          ai.miniforge/bb-out            {:local/root "../bb-out"}
          ai.miniforge/bb-paths          {:local/root "../bb-paths"}
          ai.miniforge/bb-proc           {:local/root "../bb-proc"}
+         ai.miniforge/bb-etl-runner     {:local/root "../bb-etl-runner"}
          ai.miniforge/bb-r2             {:local/root "../bb-r2"}
          ai.miniforge/bb-data-plane-http {:local/root "../bb-data-plane-http"}}
  :aliases
