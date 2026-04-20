@@ -53,27 +53,14 @@
       (is (some #(= "/tmp/mcp.json" %) args)))))
 
 (deftest claude-args-allowed-tools-test
-  (testing "legacy string allowlist joins with commas"
-    (let [args ((private-fn 'claude-args) {:prompt "p" :mcp-allowed-tools ["tool1" "tool2"]})]
-      (is (some #(= "--allowedTools" %) args))
-      (is (some #(= "tool1,tool2" %) args))))
-
-  (testing "generic {:mcp/server :mcp/tool} keyword maps format as mcp__<server>__<tool>"
+  (testing "mcp-allowed-tools format as mcp__<server>__<tool>, joined with commas"
     (let [args ((private-fn 'claude-args)
                 {:prompt "p"
                  :mcp-allowed-tools
                  [{:mcp/server :context :mcp/tool :context_read}
                   {:mcp/server :context :mcp/tool :context_grep}]})]
       (is (some #(= "--allowedTools" %) args))
-      (is (some #(= "mcp__context__context_read,mcp__context__context_grep" %) args))))
-
-  (testing "mixed strings + maps are supported during migration"
-    (let [args ((private-fn 'claude-args)
-                {:prompt "p"
-                 :mcp-allowed-tools
-                 ["Write"
-                  {:mcp/server :context :mcp/tool :context_read}]})]
-      (is (some #(= "Write,mcp__context__context_read" %) args)))))
+      (is (some #(= "mcp__context__context_read,mcp__context__context_grep" %) args)))))
 
 (deftest claude-mcp-allowlist-string-test
   (testing "keyword server + tool → mcp__<server>__<tool>"
@@ -86,18 +73,6 @@
            (impl/claude-mcp-allowlist-string
              [{:mcp/server :ctx :mcp/tool :a}
               {:mcp/server :ctx :mcp/tool :b}]))))
-
-  (testing "string entries pass through"
-    (is (= "Write,Edit"
-           (impl/claude-mcp-allowlist-string ["Write" "Edit"]))))
-
-  (testing "bare keyword entries → (name kw)"
-    (is (= "Write,Edit"
-           (impl/claude-mcp-allowlist-string [:Write :Edit]))))
-
-  (testing "throws on malformed entry"
-    (is (thrown? clojure.lang.ExceptionInfo
-          (impl/claude-mcp-allowlist-string [{:not-mcp "wrong"}]))))
 
   (testing "empty vector produces empty string"
     (is (= "" (impl/claude-mcp-allowlist-string [])))))
