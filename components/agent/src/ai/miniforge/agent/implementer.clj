@@ -25,6 +25,7 @@
    [ai.miniforge.agent.file-artifacts :as file-artifacts]
    [ai.miniforge.agent.model :as model]
    [ai.miniforge.agent.prompts :as prompts]
+   [ai.miniforge.agent.role-config :as role-config]
    [ai.miniforge.agent.specialized :as specialized]
    [ai.miniforge.patterns.interface :as patterns]
    [ai.miniforge.repo-index.interface :as messages]
@@ -531,10 +532,7 @@
   [& [opts]]
   (let [logger (or (:logger opts)
                    (log/create-logger {:min-level :info :output (fn [_])}))
-        ;; :max-tokens bumped for structured artifact output + file-diff emission.
-        ;; OPSV convergence target — see work/n07-opsv-agent-budgets.spec.edn.
-        config (->> (merge {:temperature 0.2
-                            :max-tokens 32000}
+        config (->> (merge (role-config/agent-llm-default :implementer)
                            (:config opts))
                     (model/apply-default-model :implementer)
                     (budget/apply-default-budget :implementer))]
