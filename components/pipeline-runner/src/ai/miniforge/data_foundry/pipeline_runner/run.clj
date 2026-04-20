@@ -19,6 +19,16 @@
   (merge {:stage/id id :stage/name name :status status :retry-count 0}
          extras))
 
+(defn- timestamps
+  "Build the {:started-at :completed-at} window for a just-completed stage.
+   started-at defaults to now (transform/validate stages); pass a value
+   from context to honor an existing window (ingest stage)."
+  ([] (timestamps nil))
+  ([started-at]
+   (let [now (Instant/now)]
+     {:started-at   (or started-at now)
+      :completed-at now})))
+
 (def ^:private auth-keys
   "Keys that belong to auth config, extracted from stage config."
   #{:auth/method :auth/credential-id :auth/credential-scope
@@ -94,11 +104,10 @@
                                      cursor (assoc :extract/cursor cursor)))]
           (conn/close connector handle)
           (stage-result id name :completed
-                        {:started-at (get context :started-at (Instant/now))
-                         :completed-at (Instant/now)
-                         :schema-name schema
-                         :records (:records result)
-                         :cursor (:extract/cursor result)}))
+                        (merge (timestamps (get context :started-at))
+                               {:schema-name schema
+                                :records (:records result)
+                                :cursor (:extract/cursor result)})))
         (catch Exception e
           (stage-result id name :failed {:error-message (.getMessage e)}))))))
 
@@ -134,15 +143,11 @@
       (try
         (let [result-records (transform-fn input-records config)]
           (stage-result id name :completed
-                        {:started-at (Instant/now)
-                         :completed-at (Instant/now)
-                         :records result-records}))
+                        (assoc (timestamps) :records result-records)))
         (catch Exception e
           (stage-result id name :failed {:error-message (.getMessage e)})))
       (stage-result id name :completed
-                    {:started-at (Instant/now)
-                     :completed-at (Instant/now)
-                     :records input-records}))))
+                    (assoc (timestamps) :records input-records)))))
 
 (defn- execute-validate-stage
   "Execute a validate stage using data-quality rules.
@@ -154,10 +159,9 @@
           passed     (dq/filter-passed evaluation)
           report     (dq/generate-report (:pack/id quality-pack) evaluation)]
       (stage-result id name :completed
-                    {:started-at (Instant/now)
-                     :completed-at (Instant/now)
-                     :records passed
-                     :quality-report report}))
+                    (merge (timestamps)
+                           {:records passed
+                            :quality-report report})))
     (execute-transform-stage {:stage/id id :stage/name name :stage/config config} context input-records)))
 
 ;;------------------------------------------------------------------------------ DAG scheduling helpers
