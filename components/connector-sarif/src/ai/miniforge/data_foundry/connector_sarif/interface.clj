@@ -21,7 +21,8 @@
    A SourceConnector that extracts violations from SARIF v2.1.0 JSON
    and CSV scan output files."
   (:require [ai.miniforge.data-foundry.connector-sarif.core :as core]
-            [ai.miniforge.data-foundry.connector-sarif.schema :as schema]))
+            [ai.miniforge.data-foundry.connector-sarif.schema :as schema]
+            [ai.miniforge.data-foundry.connector.interface :as conn]))
 
 (defn create-sarif-connector
   "Create a new SarifConnector instance."
@@ -35,7 +36,7 @@
    :connector/version      "0.1.0"
    :connector/capabilities #{:cap/batch}
    :connector/auth-methods #{:none}
-   :connector/retry-policy {:retry/strategy :none :retry/max-attempts 1}
+   :connector/retry-policy (conn/retry-policy :none)
    :connector/maintainer   "data-foundry"})
 
 ;; Schema exports
