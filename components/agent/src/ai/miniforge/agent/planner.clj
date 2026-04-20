@@ -435,23 +435,31 @@
                   ;; don't block the migration window.
                   worktree-plan (get worktree-artifacts :plan)]
               (log/info logger :planner :planner/llm-called
-                        {:data {:success (llm/success? llm-response)
-                                :tokens tokens
-                                :streaming? (boolean on-chunk)
-                                :plan-source (cond worktree-plan :worktree
-                                                   artifact      :mcp-artifact
-                                                   :else         :final-message)}})
+                        {:data (cond-> {:success (llm/success? llm-response)
+                                        :tokens tokens
+                                        :streaming? (boolean on-chunk)
+                                        :plan-source (cond worktree-plan :worktree
+                                                           artifact      :mcp-artifact
+                                                           :else         :final-message)}
+                                 (:stop-reason llm-response)
+                                 (assoc :stop-reason (:stop-reason llm-response))
+                                 (:num-turns llm-response)
+                                 (assoc :num-turns (:num-turns llm-response)))})
               (if (llm/success? llm-response)
                 (let [content (llm/get-content llm-response)
+                      stop-reason (:stop-reason llm-response)
+                      num-turns   (:num-turns llm-response)
                       plan (or worktree-plan
                                artifact
                                (parse-plan-response content)
                                (response/throw-anomaly! :anomalies.agent/invoke-failed
                                                        "Plan generation failed: EDN parse did not succeed"
-                                                       {:phase :plan
-                                                        :parse-result nil
-                                                        :llm-content-length (count content)
-                                                        :llm-content-preview (subs content 0 (min 500 (count content)))}))
+                                                       (cond-> {:phase :plan
+                                                                :parse-result nil
+                                                                :llm-content-length (count content)
+                                                                :llm-content-preview (subs content 0 (min 500 (count content)))}
+                                                         stop-reason (assoc :stop-reason stop-reason)
+                                                         num-turns   (assoc :num-turns num-turns))))
                       plan-final (finalize-plan plan)]
                   ;; Check for already-satisfied response
                   (if (= :already-satisfied (:plan/status plan-final))
@@ -474,9 +482,11 @@
                                                (:reason validation))))))
                     (response/success plan-final
                                       {:tokens tokens
-                                       :metrics {:tasks-created (count (:plan/tasks plan-final))
-                                                 :complexity (:plan/estimated-complexity plan-final)
-                                                 :tokens tokens}})))
+                                       :metrics (cond-> {:tasks-created (count (:plan/tasks plan-final))
+                                                         :complexity (:plan/estimated-complexity plan-final)
+                                                         :tokens tokens}
+                                                  stop-reason (assoc :stop-reason stop-reason)
+                                                  num-turns   (assoc :num-turns num-turns))})))
                 ;; LLM call failed — no silent fallback
                 (let [error-msg (or (:message (llm/get-error llm-response))
                                     "LLM call failed")]
