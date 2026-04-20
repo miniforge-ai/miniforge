@@ -58,12 +58,12 @@
       (is (some #(= "--allowedTools" %) args))
       (is (some #(= "tool1,tool2" %) args))))
 
-  (testing "generic {:mcp/server :mcp/tool} maps format as mcp__<server>__<tool>"
+  (testing "generic {:mcp/server :mcp/tool} keyword maps format as mcp__<server>__<tool>"
     (let [args ((private-fn 'claude-args)
                 {:prompt "p"
                  :mcp-allowed-tools
-                 [{:mcp/server "context" :mcp/tool "context_read"}
-                  {:mcp/server "context" :mcp/tool "context_grep"}]})]
+                 [{:mcp/server :context :mcp/tool :context_read}
+                  {:mcp/server :context :mcp/tool :context_grep}]})]
       (is (some #(= "--allowedTools" %) args))
       (is (some #(= "mcp__context__context_read,mcp__context__context_grep" %) args))))
 
@@ -72,24 +72,28 @@
                 {:prompt "p"
                  :mcp-allowed-tools
                  ["Write"
-                  {:mcp/server "context" :mcp/tool "context_read"}]})]
+                  {:mcp/server :context :mcp/tool :context_read}]})]
       (is (some #(= "Write,mcp__context__context_read" %) args)))))
 
 (deftest claude-mcp-allowlist-string-test
-  (testing "map → mcp__<server>__<tool>"
+  (testing "keyword server + tool → mcp__<server>__<tool>"
     (is (= "mcp__context__context_read"
            (impl/claude-mcp-allowlist-string
-             [{:mcp/server "context" :mcp/tool "context_read"}]))))
+             [{:mcp/server :context :mcp/tool :context_read}]))))
 
   (testing "multiple entries joined with commas"
     (is (= "mcp__ctx__a,mcp__ctx__b"
            (impl/claude-mcp-allowlist-string
-             [{:mcp/server "ctx" :mcp/tool "a"}
-              {:mcp/server "ctx" :mcp/tool "b"}]))))
+             [{:mcp/server :ctx :mcp/tool :a}
+              {:mcp/server :ctx :mcp/tool :b}]))))
 
   (testing "string entries pass through"
     (is (= "Write,Edit"
            (impl/claude-mcp-allowlist-string ["Write" "Edit"]))))
+
+  (testing "bare keyword entries → (name kw)"
+    (is (= "Write,Edit"
+           (impl/claude-mcp-allowlist-string [:Write :Edit]))))
 
   (testing "throws on malformed entry"
     (is (thrown? clojure.lang.ExceptionInfo

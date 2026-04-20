@@ -273,9 +273,15 @@
     ;; Do NOT put backend-specific strings here.
     (is (vector? session/mcp-tools))
     (is (every? map? session/mcp-tools))
-    (is (every? #(and (:mcp/server %) (:mcp/tool %)) session/mcp-tools))
-    (is (every? #(= "context" (:mcp/server %)) session/mcp-tools))
-    (is (= #{"context_read" "context_grep" "context_glob"}
+    (is (every? #(and (:mcp/server %) (:mcp/tool %)) session/mcp-tools)))
+
+  (testing "server and tool are keywords — adapters (name kw) for the wire"
+    (is (every? #(keyword? (:mcp/server %)) session/mcp-tools))
+    (is (every? #(keyword? (:mcp/tool %)) session/mcp-tools)))
+
+  (testing "contains the expected context-server tools"
+    (is (every? #(= :context (:mcp/server %)) session/mcp-tools))
+    (is (= #{:context_read :context_grep :context_glob}
            (into #{} (map :mcp/tool) session/mcp-tools))))
 
   (testing "never contains backend-specific wire strings (regression guard)"

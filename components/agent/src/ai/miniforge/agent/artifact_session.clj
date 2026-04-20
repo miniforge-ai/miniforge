@@ -308,6 +308,11 @@
    expects. Keep this agent-CLI-agnostic — the structured form, not a
    backend-specific string, is the source of truth.
 
+   Keywords, not strings: adapters use `(name kw)` when they need the
+   wire string, or dispatch on the value directly with `case` /
+   multimethods. The keyword is the domain identity; the string is
+   the wire encoding.
+
    Example wire formats per backend:
      claude  → --allowedTools \"mcp__context__context_read,...\"
                  (mcp__<server>__<tool> fully-qualified form)
@@ -320,10 +325,10 @@
    required prefix — every MCP call came back denied with
      \"Claude requested permissions to use mcp__context__context_read,
       but you haven't granted it yet.\"
-   The fix: keep the generic form here; transform in the adapter."
-  [{:mcp/server "context" :mcp/tool "context_read"}
-   {:mcp/server "context" :mcp/tool "context_grep"}
-   {:mcp/server "context" :mcp/tool "context_glob"}])
+   The fix: keep the generic keyword form here; transform in the adapter."
+  [{:mcp/server :context :mcp/tool :context_read}
+   {:mcp/server :context :mcp/tool :context_grep}
+   {:mcp/server :context :mcp/tool :context_glob}])
 
 (defn write-mcp-config!
   "Write session config files for all supported CLI backends.

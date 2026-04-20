@@ -231,19 +231,22 @@
   "Claude CLI's --allowedTools wire format.
 
    Accepts the generic shape `mcp-allowed-tools` carries:
-   a vector of `{:mcp/server <string> :mcp/tool <string>}` maps.
-   Claude CLI expects each allowlist entry in the form
-   `mcp__<server>__<tool>`, joined with commas.
+   a vector of `{:mcp/server <kw> :mcp/tool <kw>}` maps. Claude CLI
+   expects each allowlist entry in the form `mcp__<server>__<tool>`,
+   joined with commas. `(name kw)` gives the wire string.
 
-   Legacy strings pass through unchanged so ad-hoc allowlists (e.g.
-   raw native-tool names) still work during the migration window."
+   Other accepted forms (migration-safe):
+   - plain strings pass through unchanged (e.g. native tool names
+     like \"Write\" from ad-hoc allowlists)
+   - plain keywords → `(name kw)` (one-word tools without a server)"
   [mcp-allowed-tools]
   (->> mcp-allowed-tools
        (mapv (fn [t]
                (cond
-                 (string? t) t
+                 (string? t)  t
+                 (keyword? t) (name t)
                  (and (map? t) (:mcp/server t) (:mcp/tool t))
-                 (str "mcp__" (:mcp/server t) "__" (:mcp/tool t))
+                 (str "mcp__" (name (:mcp/server t)) "__" (name (:mcp/tool t)))
                  :else
                  (throw (ex-info "Unrecognised mcp-allowed-tools entry"
                                  {:entry t})))))
