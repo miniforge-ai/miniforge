@@ -392,6 +392,19 @@
      (success test-artifact {:tokens 100 :duration-ms 500})"
   builder/success)
 
+(def success?
+  "True for response maps produced by `success` (have :status :success).
+
+   Use on single result maps; for response chains, use `succeeded?`."
+  builder/success?)
+
+(def error?
+  "True for response maps produced by `error` or `failure`.
+
+   Matches :status :error, :status :failed, or :success false.
+   Use on single result maps; for response chains, use `failed?`."
+  builder/error?)
+
 (def error
   "Create a canonical error response.
 

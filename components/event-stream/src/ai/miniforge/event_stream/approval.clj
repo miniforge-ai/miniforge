@@ -33,16 +33,16 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Response predicates for builder responses
+;; Local aliases that delegate to response/success? and response/error?
+;; so call sites in this namespace stay terse.
 
-(defn succeeded?
+(def succeeded?
   "Check if a builder response (from response/success) succeeded."
-  [r]
-  (= :success (:status r)))
+  response/success?)
 
-(defn failed?
+(def failed?
   "Check if a builder response (from response/failure) failed."
-  [r]
-  (false? (:success r)))
+  response/error?)
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Approval request creation

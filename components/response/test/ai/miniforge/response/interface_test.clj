@@ -433,6 +433,42 @@
       (is (pos? (count (get-in resp [:error :message])))))))
 
 ;; ============================================================================
+;; Result map predicates (success?/error?)
+;; ============================================================================
+
+(deftest success?-test
+  (testing "true for builder success outputs"
+    (is (true? (r/success? (r/success {:foo 1}))))
+    (is (true? (r/success? (r/success {} {:tokens 10})))))
+
+  (testing "false for error/failure builder outputs"
+    (is (false? (r/success? (r/error "boom"))))
+    (is (false? (r/success? (r/failure "boom")))))
+
+  (testing "false for nil and arbitrary maps"
+    (is (false? (r/success? nil)))
+    (is (false? (r/success? {})))
+    (is (false? (r/success? {:status :pending})))))
+
+(deftest error?-test
+  (testing "true for error builder output (:status :error)"
+    (is (true? (r/error? (r/error "boom")))))
+
+  (testing "true for failure builder output (:success false)"
+    (is (true? (r/error? (r/failure "boom")))))
+
+  (testing "true for legacy :status :failed shape"
+    (is (true? (r/error? {:status :failed :error {:message "x"}}))))
+
+  (testing "false for success builder output"
+    (is (false? (r/error? (r/success {:foo 1})))))
+
+  (testing "false for nil and arbitrary maps"
+    (is (false? (r/error? nil)))
+    (is (false? (r/error? {})))
+    (is (false? (r/error? {:status :pending})))))
+
+;; ============================================================================
 ;; Boundary translator tests
 ;; ============================================================================
 

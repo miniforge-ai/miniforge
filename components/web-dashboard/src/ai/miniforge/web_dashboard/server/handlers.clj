@@ -39,6 +39,12 @@
   [^Throwable e]
   ((requiring-resolve 'ai.miniforge.response.interface/from-exception) e))
 
+(defn response-success?
+  "Check if a response builder result represents success.
+   Wraps response/success? via requiring-resolve to keep the soft dep."
+  [response]
+  ((requiring-resolve 'ai.miniforge.response.interface/success?) response))
+
 (defn anomaly-http-response
   "Translate an anomaly map to a Ring HTTP response.
    Body is JSON-encoded for wire transport."
@@ -655,7 +661,7 @@
                                 (:signer data)
                                 (keyword (:decision data))
                                 {:reason (:reason data)})]
-          (if (= :success (:status result))
+          (if (response-success? result)
             (do
               (update-fn mgr (:output result))
               (responses/json-response
