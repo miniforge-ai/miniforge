@@ -150,6 +150,86 @@
     (is (= :merged (:pr/status pr)))
     (is (some? (:pr/merged-at pr)))))
 
+;------------------------------------------------------------------------------ :pr/scored
+
+(def ^:private sample-readiness
+  {:readiness/score     0.82
+   :readiness/threshold 0.80
+   :readiness/ready?    true
+   :readiness/factors   [{:factor :ci-passed :weight 0.3 :score 1.0 :contribution 0.3}]})
+
+(def ^:private sample-risk
+  {:risk/score   0.35
+   :risk/level   :medium
+   :risk/factors [{:factor :change-size :weight 0.4 :value 420 :score 0.4}]})
+
+(def ^:private sample-policy
+  {:policy/overall       :pass
+   :policy/packs-applied ["core"]
+   :policy/summary       {:critical 0 :major 0 :minor 0 :info 0 :total 0}
+   :policy/violations    []})
+
+(deftest pr-scored-merges-into-existing-pr
+  (let [table (-> schema/empty-table
+                  (acc/apply-event (ev :pr/created
+                                       {:pr/repo "acme/widget"
+                                        :pr/number 42
+                                        :pr/title "Add thing"}))
+                  (acc/apply-event (ev :pr/scored
+                                       {:pr/repo "acme/widget"
+                                        :pr/number 42
+                                        :pr/readiness sample-readiness
+                                        :pr/risk sample-risk
+                                        :pr/policy sample-policy
+                                        :pr/recommendation :approve})))
+        pr    (get-in table [:prs ["acme/widget" 42]])]
+    (is (= "Add thing" (:pr/title pr)) "existing fields preserved")
+    (is (= sample-readiness (:pr/readiness pr)))
+    (is (= sample-risk (:pr/risk pr)))
+    (is (= sample-policy (:pr/policy pr)))
+    (is (= :approve (:pr/recommendation pr)))))
+
+(deftest pr-scored-before-pr-created-stubs-minimal-entry
+  (let [table (acc/apply-event schema/empty-table
+                               (ev :pr/scored
+                                   {:pr/repo "acme/widget"
+                                    :pr/number 42
+                                    :pr/readiness sample-readiness
+                                    :pr/recommendation :review}))
+        pr    (get-in table [:prs ["acme/widget" 42]])]
+    (is (some? pr) "stub created when :pr/scored arrives before :pr/created")
+    (is (= sample-readiness (:pr/readiness pr)))
+    (is (= :review (:pr/recommendation pr)))
+    (is (= "acme/widget" (:pr/repo pr)))
+    (is (= 42 (:pr/number pr)))))
+
+(deftest pr-scored-partial-does-not-clobber-previous-scores
+  (let [table (-> schema/empty-table
+                  (acc/apply-event (ev :pr/created
+                                       {:pr/repo "acme/widget"
+                                        :pr/number 42}))
+                  (acc/apply-event (ev :pr/scored
+                                       {:pr/repo "acme/widget"
+                                        :pr/number 42
+                                        :pr/readiness sample-readiness
+                                        :pr/risk sample-risk
+                                        :pr/policy sample-policy
+                                        :pr/recommendation :merge}))
+                  ;; A second :pr/scored event with ONLY recommendation and
+                  ;; risk; readiness + policy should be retained.
+                  (acc/apply-event (ev :pr/scored
+                                       {:pr/repo "acme/widget"
+                                        :pr/number 42
+                                        :pr/risk {:risk/score 0.7
+                                                  :risk/level :high
+                                                  :risk/factors []}
+                                        :pr/recommendation :escalate})))
+        pr    (get-in table [:prs ["acme/widget" 42]])]
+    (is (= :high (:risk/level (:pr/risk pr))) "risk updated")
+    (is (= :escalate (:pr/recommendation pr)) "recommendation updated")
+    (is (= sample-readiness (:pr/readiness pr)) "readiness preserved across partial re-score")
+    (is (= sample-policy (:pr/policy pr)) "policy preserved across partial re-score")))
+
 ;------------------------------------------------------------------------------ PolicyEvaluation
 
 (deftest gate-passed-creates-evaluation

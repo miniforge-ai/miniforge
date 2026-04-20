@@ -63,6 +63,21 @@
 (def policy-target-types
   [:pr :artifact :workflow-output])
 
+(def risk-levels
+  "Pre-computed risk tier from pr-train.risk/assess-risk, per N5-delta-2 §2.2."
+  [:low :medium :high :critical])
+
+(def policy-overall-states
+  "Aggregate policy-evaluation summary per N5-delta-2 §2.3. `:waived` reflects
+   that a Waiver record covers every violation; `:unknown` is the initial
+   state before policy has run."
+  [:pass :fail :waived :unknown])
+
+(def pr-recommendations
+  "Single-keyword action suggestion per N5-delta-2 §2.4. Consumers render
+   the keyword verbatim."
+  [:merge :approve :review :remediate :decompose :wait :escalate])
+
 ;------------------------------------------------------------------------------ Layer 0a
 ;; Registry extensions for supervisory v1
 
@@ -103,7 +118,12 @@
    ;; AttentionItem
    :attention/id                 :id/uuid
    :attention/severity           (into [:enum] attention-severities)
-   :attention/source-type        (into [:enum] attention-source-types)})
+   :attention/source-type        (into [:enum] attention-source-types)
+
+   ;; PR scoring (N5-delta-2 §2)
+   :risk/level                   (into [:enum] risk-levels)
+   :policy/overall               (into [:enum] policy-overall-states)
+   :pr/recommendation            (into [:enum] pr-recommendations)})
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Entity schemas — open maps, mirror N5-delta-1 §3.1
@@ -143,8 +163,80 @@
    [:agent/last-heartbeat :common/timestamp]
    [:agent/task {:optional true} [:maybe string?]]])
 
+;; Per-PR scoring sub-entities (N5-delta-2 §2). All three are OPTIONAL on
+;; PrFleetEntry: absent = "not yet scored", per §5.4 — distinct from a
+;; score of zero.
+
+(def ReadinessFactor
+  "One factor breakdown row from pr-train.readiness/explain-readiness
+   per N5-delta-2 §2.1."
+  [:map
+   [:factor keyword?]
+   [:weight number?]
+   [:score number?]
+   [:contribution number?]
+   [:explanation {:optional true} [:maybe string?]]])
+
+(def PrReadiness
+  "Merge-readiness score block per N5-delta-2 §2.1."
+  [:map {:registry registry}
+   [:readiness/score number?]
+   [:readiness/threshold number?]
+   [:readiness/ready? boolean?]
+   [:readiness/factors [:vector ReadinessFactor]]])
+
+(def RiskFactor
+  "One factor breakdown row from pr-train.risk/assess-risk per N5-delta-2 §2.2."
+  [:map
+   [:factor keyword?]
+   [:weight number?]
+   [:value {:optional true} any?]
+   [:score number?]
+   [:explanation {:optional true} [:maybe string?]]])
+
+(def PrRisk
+  "Risk-assessment score block per N5-delta-2 §2.2."
+  [:map {:registry registry}
+   [:risk/score number?]
+   [:risk/level :risk/level]
+   [:risk/factors [:vector RiskFactor]]])
+
+(def PolicyViolationSummary
+  "Per-violation display row on PrPolicy per N5-delta-2 §2.3. Distinct
+   from the authoritative PolicyViolation entity (§3.1 N5-delta-1) —
+   this is a display-facing projection."
+  [:map
+   [:rule-id keyword?]
+   [:severity :violation/severity]
+   [:message string?]
+   [:path {:optional true} string?]
+   [:waived? {:optional true} boolean?]])
+
+(def PolicyCounts
+  "Violation-severity histogram per N5-delta-2 §2.3."
+  [:map
+   [:critical :common/non-neg-int]
+   [:major    :common/non-neg-int]
+   [:minor    :common/non-neg-int]
+   [:info     :common/non-neg-int]
+   [:total    :common/non-neg-int]])
+
+(def PrPolicy
+  "Aggregated external-PR policy result per N5-delta-2 §2.3."
+  [:map {:registry registry}
+   [:policy/overall :policy/overall]
+   [:policy/packs-applied [:vector string?]]
+   [:policy/summary PolicyCounts]
+   [:policy/violations [:vector PolicyViolationSummary]]
+   [:policy/artifacts-checked {:optional true} [:maybe :common/non-neg-int]]])
+
 (def PrFleetEntry
-  "A pull request observable in the supervisory PR fleet view (N5/N9)."
+  "A pull request observable in the supervisory PR fleet view (N5/N9).
+
+   The four `:pr/readiness`, `:pr/risk`, `:pr/policy`, `:pr/recommendation`
+   fields are OPTIONAL pre-computed scores produced by the pr-scoring
+   component per N5-delta-2. Absent = \"not yet scored\" (§5.4),
+   distinct from a zero score. Consumers MUST NOT recompute."
   [:map {:registry registry}
    [:pr/repo [:string {:min 1}]]
    [:pr/number :common/non-neg-int]
@@ -161,7 +253,11 @@
    [:pr/deletions {:optional true} [:maybe :common/non-neg-int]]
    [:pr/changed-files-count {:optional true} [:maybe :common/non-neg-int]]
    [:pr/behind-main {:optional true} [:maybe boolean?]]
-   [:pr/merged-at {:optional true} [:maybe :common/timestamp]]])
+   [:pr/merged-at {:optional true} [:maybe :common/timestamp]]
+   [:pr/readiness {:optional true} [:maybe PrReadiness]]
+   [:pr/risk {:optional true} [:maybe PrRisk]]
+   [:pr/policy {:optional true} [:maybe PrPolicy]]
+   [:pr/recommendation {:optional true} [:maybe :pr/recommendation]]])
 
 (def PolicyViolation
   "A single rule failure within a PolicyEvaluation per N5-delta-1 §3.1."

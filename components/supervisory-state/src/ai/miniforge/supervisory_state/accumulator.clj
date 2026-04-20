@@ -241,6 +241,38 @@
       (get-in table [:prs k])
       (assoc-in [:prs k :pr/status] :closed))))
 
+(defn pr-scored
+  "Merge pre-computed readiness/risk/policy/recommendation fields from a
+   `:pr/scored` event into the PR entity per N5-delta-2 §3.2. Only
+   fields present on the event are written — absent fields preserve the
+   previous value (or remain absent if never seen), so a partial re-score
+   does not clobber a fuller score.
+
+   If the PR entity does not yet exist, a minimal stub is created so the
+   scored fields are not lost if `:pr/scored` is observed before
+   `:pr/created`. The stub uses producer-canonical empties for required
+   keys; a later `:pr/created` or `:supervisory/pr-upserted` will overwrite
+   them while the scored keys are preserved via `merge`."
+  [table {:pr/keys [repo number readiness risk policy recommendation] :as event}]
+  (let [k       (pr-key event)
+        stub    {:pr/repo       (or repo "")
+                 :pr/number     (or number 0)
+                 :pr/url        ""
+                 :pr/branch     ""
+                 :pr/title      ""
+                 :pr/status     :open
+                 :pr/merge-order 0
+                 :pr/depends-on []
+                 :pr/blocks     []
+                 :pr/ci-status  :pending}
+        existing (get-in table [:prs k] stub)
+        scored   (cond-> existing
+                   readiness      (assoc :pr/readiness readiness)
+                   risk           (assoc :pr/risk risk)
+                   policy         (assoc :pr/policy policy)
+                   recommendation (assoc :pr/recommendation recommendation))]
+    (assoc-in table [:prs k] scored)))
+
 ;------------------------------------------------------------------------------ Layer 1
 ;; PolicyEvaluation handlers
 
@@ -327,6 +359,7 @@
    :pr/created                             pr-created
    :pr/merged                              pr-merged
    :pr/closed                              pr-closed
+   :pr/scored                              pr-scored
    :gate/passed                            gate-passed
    :gate/failed                            gate-failed
    ;; Snapshot events (used during replay)

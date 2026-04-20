@@ -102,6 +102,9 @@
 (def cp-decision-created events/cp-decision-created)
 (def cp-decision-resolved events/cp-decision-resolved)
 
+;; PR scoring (N5-delta-2 §4.1)
+(def pr-scored events/pr-scored)
+
 ;------------------------------------------------------------------------------ Layer 2
 ;; Listener, control, approval, and callback APIs
 
