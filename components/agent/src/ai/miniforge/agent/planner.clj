@@ -317,6 +317,33 @@
 ;------------------------------------------------------------------------------ Layer 2
 ;; Public API
 
+(def ^:private planner-disallowed-tools
+  "Native Claude Code tools the planner MUST NOT call.
+
+   Rationale (iteration 5 + 6 dogfood evidence): the planner had access
+   to Read/Bash/Grep/Glob/Agent and used them exclusively — 140+ tool
+   calls across two iterations, zero plan artifacts produced. The MCP
+   context cache (context_read/context_grep/context_glob) — which the
+   explore phase pre-populates with the scoped files the planner
+   actually needs — was consulted once in 140 tool calls.
+
+   Forcing the MCP path achieves two things:
+     1. The planner works off a curated, pre-loaded file set instead
+        of flailing through the whole filesystem. Fewer noisy reads,
+        faster convergence.
+     2. Cache-miss events land in the session :context-misses file,
+        so we learn what the planner actually wanted that the explore
+        phase didn't provide. Signal the context-quality theme needs.
+
+   Write stays allowed — that's the container-promotion submission
+   path (.miniforge/plan.edn, landed in GROUP 1). WebSearch/WebFetch
+   are NOT in this list because disallowing them without a cached MCP
+   replacement would regress capability; they ship with GROUP 2B /
+   2c of the planner-convergence spec.
+
+   Matches the role-scoped disallow-list pattern tester.clj uses."
+  ["Read" "Bash" "Grep" "Glob" "Agent" "LS"])
+
 (defn- invoke-planner-session
   "Session body for the planner: build mcp-opts with model hint, call LLM."
   [session llm-client user-prompt config context on-chunk]
@@ -328,7 +355,8 @@
         ;; work/n07-opsv-agent-budgets.spec.edn.
         max-turns (get @planner-prompt-data :prompt/max-turns 80)
         mcp-opts (assoc (artifact-session/session->mcp-opts session budget-usd max-turns)
-                        :model (model/default-model-for-role :planner))]
+                        :model (model/default-model-for-role :planner)
+                        :disallowed-tools planner-disallowed-tools)]
     (if on-chunk
       (llm/chat-stream llm-client user-prompt on-chunk
                        (merge {:system @planner-system-prompt} mcp-opts))
