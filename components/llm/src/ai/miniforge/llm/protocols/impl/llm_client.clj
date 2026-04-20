@@ -101,11 +101,27 @@
                                    (when (= "tool_use" (:type block))
                                      (:name block)))
                                  content-blocks)
-                text (str/join text-blocks)]
-            (if (seq tool-names)
-              {:delta (or text "") :done? false :tool-use true :tool-names tool-names}
-              (when-not (str/blank? text)
-                {:delta text :done? false})))
+                text (str/join text-blocks)
+                ;; Claude surfaces stop_reason on each assistant message.
+                ;; Values: "end_turn" | "max_tokens" | "stop_sequence" |
+                ;; "tool_use" | "max_turns" (Claude Code adds the last).
+                ;; The accumulator tracks the LATEST — that's the reason
+                ;; the overall turn ended.
+                stop-reason (get-in data [:message :stop_reason])]
+            (cond
+              (seq tool-names)
+              (cond-> {:delta (or text "") :done? false
+                       :tool-use true :tool-names tool-names}
+                stop-reason (assoc :stop-reason stop-reason))
+
+              (not (str/blank? text))
+              (cond-> {:delta text :done? false}
+                stop-reason (assoc :stop-reason stop-reason))
+
+              ;; No text + no tool calls — still carry stop-reason if
+              ;; present so "empty turn" shows a reason.
+              stop-reason
+              {:delta "" :done? false :stop-reason stop-reason}))
 
           ;; Legacy format support
           "stream_event"
@@ -118,7 +134,12 @@
                      :usage {:input-tokens (:input_tokens usage)
                              :output-tokens (:output_tokens usage)}
                      :cost-usd (:total_cost_usd data)}
-              (:session_id data) (assoc :session-id (:session_id data))))
+              (:session_id data) (assoc :session-id (:session_id data))
+              (:num_turns data)  (assoc :num-turns (:num_turns data))
+              ;; Claude Code surfaces a top-level stop_reason on the
+              ;; final result event too — prefer it over the per-message
+              ;; stop_reason when both are present.
+              (:stop_reason data) (assoc :stop-reason (:stop_reason data))))
 
           ;; Tool use events — capture tool name for diagnostics
           "tool_use"
@@ -591,7 +612,7 @@
                  :content (:content result)}))
     result))
 
-(defn stream-with-parser [stream-parser on-chunk accumulated-content accumulated-usage accumulated-cost accumulated-tools accumulated-session-id]
+(defn stream-with-parser [stream-parser on-chunk accumulated-content accumulated-usage accumulated-cost accumulated-tools accumulated-session-id accumulated-stop-reason accumulated-turns]
   (fn [line]
     (when-let [parsed (stream-parser line)]
       (when-let [usage (:usage parsed)]
@@ -600,6 +621,10 @@
         (reset! accumulated-cost cost))
       (when-let [session-id (:session-id parsed)]
         (reset! accumulated-session-id session-id))
+      (when-let [sr (:stop-reason parsed)]
+        (reset! accumulated-stop-reason sr))
+      (when-let [nt (:num-turns parsed)]
+        (reset! accumulated-turns nt))
       (if (or (:tool-use parsed) (:heartbeat parsed))
         ;; Tool-use and heartbeat events: track tool names and fire on-chunk
         (do
@@ -624,22 +649,27 @@
       (log/debug logger :system :agent/streaming-complete
                  {:data {:response-length content-length}}))))
 
-(defn streaming-success-response [content exit-code usage cost-usd]
+(defn streaming-success-response [content exit-code usage cost-usd stop-reason num-turns]
   (if (rate-limited? content)
     (llm-error :anomalies.agent/rate-limited "rate_limit"
                (str "Claude CLI rate limited: " (str/trim content))
-               {:exit-code exit-code :stdout content})
+               {:exit-code exit-code :stdout content
+                :stop-reason stop-reason :num-turns num-turns})
     (cond-> (llm-success content {:exit-code exit-code :usage usage})
-      cost-usd (assoc :cost-usd cost-usd))))
+      cost-usd    (assoc :cost-usd cost-usd)
+      stop-reason (assoc :stop-reason stop-reason)
+      num-turns   (assoc :num-turns num-turns))))
 
-(defn streaming-error-response [content exit-code err-result timeout-info]
+(defn streaming-error-response [content exit-code err-result timeout-info stop-reason num-turns]
   (let [error-message (or err-result
                           (when (str/blank? content) "Process failed with no output")
                           "Process failed")
         category (if timeout-info :anomalies/timeout :anomalies.agent/llm-error)
         error-type (if timeout-info "adaptive_timeout" "cli_error")]
     (llm-error category error-type (str/trim error-message)
-               {:exit-code exit-code :stderr err-result :stdout content :timeout timeout-info})))
+               (cond-> {:exit-code exit-code :stderr err-result :stdout content :timeout timeout-info}
+                 stop-reason (assoc :stop-reason stop-reason)
+                 num-turns   (assoc :num-turns num-turns)))))
 
 (defn handle-streaming [client request on-chunk backend-config progress-monitor]
   (let [{:keys [logger config]} client
@@ -654,21 +684,29 @@
         accumulated-usage (atom nil)
         accumulated-cost (atom nil)
         accumulated-tools (atom [])
-        accumulated-session-id (atom nil)]
+        accumulated-session-id (atom nil)
+        accumulated-stop-reason (atom nil)
+        accumulated-turns (atom nil)]
     (when logger
       (log/debug logger :system :agent/streaming-prompt-sent
                  {:data {:backend backend
                          :prompt-length (count prompt)}}))
     (let [result (stream-fn
                   full-cmd
-                  (stream-with-parser stream-parser on-chunk accumulated-content accumulated-usage accumulated-cost accumulated-tools accumulated-session-id)
+                  (stream-with-parser stream-parser on-chunk
+                                      accumulated-content accumulated-usage
+                                      accumulated-cost accumulated-tools
+                                      accumulated-session-id
+                                      accumulated-stop-reason accumulated-turns)
                   {:progress-monitor progress-monitor
                    :workdir (:workdir request)})
           exit-code (:exit result)
           timeout-info (:timeout result)
           final-content @accumulated-content
           tools @accumulated-tools
-          session-id @accumulated-session-id]
+          session-id @accumulated-session-id
+          stop-reason @accumulated-stop-reason
+          num-turns @accumulated-turns]
       (on-chunk {:delta ""
                  :done? true
                  :content final-content
@@ -677,11 +715,18 @@
       (when (and logger (seq tools))
         (log/info logger :system :agent/tools-called
                   {:data {:tools tools :count (count tools)}}))
+      (when (and logger stop-reason)
+        (log/info logger :system :agent/stop-reason
+                  {:data {:stop-reason stop-reason :num-turns num-turns
+                          :content-length (count final-content)}}))
       (if (zero? exit-code)
-        (cond-> (streaming-success-response final-content exit-code @accumulated-usage @accumulated-cost)
+        (cond-> (streaming-success-response final-content exit-code
+                                            @accumulated-usage @accumulated-cost
+                                            stop-reason num-turns)
           (seq tools) (assoc :tools-called tools)
           session-id   (assoc :session-id session-id))
-        (cond-> (streaming-error-response final-content exit-code (:err result) timeout-info)
+        (cond-> (streaming-error-response final-content exit-code (:err result)
+                                          timeout-info stop-reason num-turns)
           session-id (assoc :session-id session-id))))))
 
 (defn complete-stream-impl [client request on-chunk]

@@ -157,7 +157,53 @@
     (let [line (json/generate-string {:type "result" :result {}})
           parsed (impl/parse-claude-stream-line line)]
       (is (true? (:done? parsed)))
-      (is (nil? (get-in parsed [:usage :input-tokens]))))))
+      (is (nil? (get-in parsed [:usage :input-tokens])))))
+
+  (testing "result event captures num_turns and top-level stop_reason"
+    (let [line (json/generate-string
+                 {:type "result"
+                  :num_turns 42
+                  :stop_reason "max_turns"
+                  :result {:usage {:input_tokens 1 :output_tokens 2}}})
+          parsed (impl/parse-claude-stream-line line)]
+      (is (= 42 (:num-turns parsed)))
+      (is (= "max_turns" (:stop-reason parsed))))))
+
+(deftest parse-claude-stream-assistant-stop-reason-test
+  (testing "assistant message with text carries stop_reason"
+    (let [line (json/generate-string
+                 {:type "assistant"
+                  :message {:content [{:type "text" :text "hello"}]
+                            :stop_reason "end_turn"}})
+          parsed (impl/parse-claude-stream-line line)]
+      (is (= "hello" (:delta parsed)))
+      (is (= "end_turn" (:stop-reason parsed)))))
+
+  (testing "assistant message with tool_use carries stop_reason"
+    (let [line (json/generate-string
+                 {:type "assistant"
+                  :message {:content [{:type "tool_use" :name "Read"}]
+                            :stop_reason "tool_use"}})
+          parsed (impl/parse-claude-stream-line line)]
+      (is (true? (:tool-use parsed)))
+      (is (= ["Read"] (:tool-names parsed)))
+      (is (= "tool_use" (:stop-reason parsed)))))
+
+  (testing "assistant message with empty text + no tools + stop_reason still surfaces"
+    (let [line (json/generate-string
+                 {:type "assistant"
+                  :message {:content [] :stop_reason "max_tokens"}})
+          parsed (impl/parse-claude-stream-line line)]
+      (is (= "" (:delta parsed)))
+      (is (= "max_tokens" (:stop-reason parsed)))))
+
+  (testing "assistant message without stop_reason has no :stop-reason key"
+    (let [line (json/generate-string
+                 {:type "assistant"
+                  :message {:content [{:type "text" :text "partial"}]}})
+          parsed (impl/parse-claude-stream-line line)]
+      (is (= "partial" (:delta parsed)))
+      (is (nil? (:stop-reason parsed))))))
 
 (deftest parse-codex-stream-line-test
   (testing "agent_message item extracts text delta"
@@ -246,6 +292,8 @@
           chunks (atom [])
           tools (atom [])
           session-id (atom nil)
+          stop-reason (atom nil)
+          turns (atom nil)
           handler (impl/stream-with-parser
                     #'impl/parse-claude-stream-line
                     (fn [chunk] (swap! chunks conj chunk))
@@ -253,7 +301,9 @@
                     usage
                     cost
                     tools
-                    session-id)]
+                    session-id
+                    stop-reason
+                    turns)]
       ;; Feed an assistant event
       (handler (json/generate-string
                  {:type "assistant"
@@ -268,6 +318,41 @@
                   :total_cost_usd 0.0045}))
       (is (= {:input-tokens 100 :output-tokens 50} @usage))
       (is (= 0.0045 @cost)))))
+
+(deftest stream-parser-accumulates-stop-reason-and-turns-test
+  (testing "latest stop_reason wins, num_turns captured from result event"
+    (let [content (atom "")
+          usage (atom nil)
+          cost (atom nil)
+          chunks (atom [])
+          tools (atom [])
+          session-id (atom nil)
+          stop-reason (atom nil)
+          turns (atom nil)
+          handler (impl/stream-with-parser
+                    #'impl/parse-claude-stream-line
+                    (fn [chunk] (swap! chunks conj chunk))
+                    content usage cost tools session-id stop-reason turns)]
+      ;; First assistant message with tool_use (not the final stop)
+      (handler (json/generate-string
+                 {:type "assistant"
+                  :message {:content [{:type "tool_use" :name "Grep"}]
+                            :stop_reason "tool_use"}}))
+      (is (= "tool_use" @stop-reason))
+      ;; Final assistant message — end_turn should overwrite tool_use
+      (handler (json/generate-string
+                 {:type "assistant"
+                  :message {:content [{:type "text" :text "done"}]
+                            :stop_reason "end_turn"}}))
+      (is (= "end_turn" @stop-reason))
+      ;; Result event — top-level stop_reason + num_turns take precedence
+      (handler (json/generate-string
+                 {:type "result"
+                  :num_turns 7
+                  :stop_reason "end_turn"
+                  :usage {:input_tokens 100 :output_tokens 50}}))
+      (is (= "end_turn" @stop-reason))
+      (is (= 7 @turns)))))
 
 ;------------------------------------------------------------------------------ Layer 3
 ;; Rate limit detection tests
@@ -300,13 +385,20 @@
 (deftest rate-limited-streaming-success-response-test
   (testing "rate limit content in streaming-success-response returns error"
     (let [resp (impl/streaming-success-response
-                 "You've hit your limit · resets 7pm (America/Los_Angeles)" 0 nil nil)]
+                 "You've hit your limit · resets 7pm (America/Los_Angeles)" 0 nil nil nil nil)]
       (is (not (:success resp)))
       (is (some? (:error resp)))))
 
   (testing "normal content in streaming-success-response returns success"
-    (let [resp (impl/streaming-success-response "(defn foo [] 42)" 0 nil nil)]
-      (is (:success resp)))))
+    (let [resp (impl/streaming-success-response "(defn foo [] 42)" 0 nil nil nil nil)]
+      (is (:success resp))))
+
+  (testing "stop-reason and num-turns flow through to success response"
+    (let [resp (impl/streaming-success-response "ok" 0 {:input-tokens 1 :output-tokens 2}
+                                                 nil "max_turns" 80)]
+      (is (:success resp))
+      (is (= "max_turns" (:stop-reason resp)))
+      (is (= 80 (:num-turns resp))))))
 
 ;------------------------------------------------------------------------------ Layer 4
 ;; Claude backend args-fn budget tests (PR #288)
