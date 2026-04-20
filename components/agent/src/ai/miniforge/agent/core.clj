@@ -27,6 +27,7 @@
    [ai.miniforge.agent.model :as model]
    [ai.miniforge.agent.protocol :as protocol]
    [ai.miniforge.agent.memory :as memory]
+   [ai.miniforge.agent.role-config :as role-config]
    [ai.miniforge.agent.task-classifier :as classifier]
    [ai.miniforge.llm.interface :as llm]
    [ai.miniforge.response.interface :as response]
@@ -42,59 +43,21 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Role configurations and defaults
 
+(defn- assemble-role-config
+  "Compose a role's full config: static defaults from EDN + dynamically
+   selected model. Pulled out as a named fn to keep `default-role-configs`
+   reading as data, not as a calculation."
+  [role]
+  (assoc (role-config/role-default role)
+         :model (model/default-model-for-role role)))
+
 (def default-role-configs
   "Default configurations for each agent role.
-   Temperature ranges: 0.0 (deterministic) to 1.0 (creative)
-   Tokens: appropriate context window for task type."
-  {:planner     {:model (model/default-model-for-role :planner)
-                 :temperature 0.7
-                 :max-tokens 16000
-                 :budget {:tokens 100000 :cost-usd 5.0}}
 
-   :architect   {:model (model/default-model-for-role :architect)
-                 :temperature 0.5
-                 :max-tokens 16000
-                 :budget {:tokens 80000 :cost-usd 4.0}}
-
-   :implementer {:model (model/default-model-for-role :implementer)
-                 :temperature 0.3
-                 :max-tokens 16000
-                 :budget {:tokens 100000 :cost-usd 5.0}}
-
-   :tester      {:model (model/default-model-for-role :tester)
-                 :temperature 0.2
-                 :max-tokens 8000
-                 :budget {:tokens 40000 :cost-usd 2.0}}
-
-   :reviewer    {:model (model/default-model-for-role :reviewer)
-                 :temperature 0.4
-                 :max-tokens 12000
-                 :budget {:tokens 60000 :cost-usd 3.0}}
-
-   :sre         {:model (model/default-model-for-role :sre)
-                 :temperature 0.2
-                 :max-tokens 8000
-                 :budget {:tokens 40000 :cost-usd 2.0}}
-
-   :security    {:model (model/default-model-for-role :security)
-                 :temperature 0.1
-                 :max-tokens 8000
-                 :budget {:tokens 40000 :cost-usd 2.0}}
-
-   :release     {:model (model/default-model-for-role :release)
-                 :temperature 0.1
-                 :max-tokens 4000
-                 :budget {:tokens 20000 :cost-usd 1.0}}
-
-   :historian   {:model (model/default-model-for-role :historian)
-                 :temperature 0.3
-                 :max-tokens 8000
-                 :budget {:tokens 30000 :cost-usd 1.5}}
-
-   :operator    {:model (model/default-model-for-role :operator)
-                 :temperature 0.1
-                 :max-tokens 4000
-                 :budget {:tokens 20000 :cost-usd 1.0}}})
+   Static fields (temperature, max-tokens, budget) live in
+   resources/config/agent/role-defaults.edn. The :model is selected
+   dynamically by `model/default-model-for-role` and merged in here."
+  (into {} (map (juxt identity assemble-role-config) (role-config/roles))))
 
 (def role-capabilities
   "Default capabilities for each agent role."
