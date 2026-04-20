@@ -301,8 +301,21 @@
     path))
 
 (def mcp-tool-names
-  "MCP tool names exposed by the context server."
-  ["context_read" "context_grep" "context_glob"])
+  "MCP tool names exposed by the context server.
+
+   Claude CLI's --allowedTools expects the full
+   `mcp__<server-name>__<tool-name>` form — the server name comes
+   from the `mcpServers` key in mcp-config.json (here, `context`).
+   Passing the bare tool names (e.g. `context_read`) gets every
+   MCP call answered with
+     \"Claude requested permissions to use mcp__context__context_read,
+      but you haven't granted it yet.\"
+   which the model then narrates around for the rest of its turn
+   budget. Iterations 5–10 of the planner-convergence dogfood all
+   failed on this. Stay in the prefixed form."
+  ["mcp__context__context_read"
+   "mcp__context__context_grep"
+   "mcp__context__context_glob"])
 
 (defn write-mcp-config!
   "Write session config files for all supported CLI backends.

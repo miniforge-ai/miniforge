@@ -267,15 +267,25 @@
 ;; mcp-tool-names tests
 
 (deftest mcp-tool-names-test
-  (testing "contains expected tool names"
-    (is (some #{"context_read"} session/mcp-tool-names))
-    (is (some #{"context_grep"} session/mcp-tool-names))
-    (is (some #{"context_glob"} session/mcp-tool-names)))
+  (testing "uses the full mcp__<server>__<tool> form required by Claude CLI --allowedTools"
+    (is (some #{"mcp__context__context_read"} session/mcp-tool-names))
+    (is (some #{"mcp__context__context_grep"} session/mcp-tool-names))
+    (is (some #{"mcp__context__context_glob"} session/mcp-tool-names)))
 
-  (testing "all names are non-empty strings"
-    (doseq [name session/mcp-tool-names]
-      (is (string? name))
-      (is (pos? (count name))))))
+  (testing "does NOT contain bare tool names (regression guard)"
+    ;; Bare names get every MCP call answered with
+    ;; "Claude requested permissions to use mcp__context__context_read,
+    ;;  but you haven't granted it yet." — documented cause of iters
+    ;; 5-10 planner-convergence dogfood failures.
+    (is (nil? (some #{"context_read"} session/mcp-tool-names)))
+    (is (nil? (some #{"context_grep"} session/mcp-tool-names)))
+    (is (nil? (some #{"context_glob"} session/mcp-tool-names))))
+
+  (testing "every entry is a non-empty string starting with mcp__"
+    (doseq [n session/mcp-tool-names]
+      (is (string? n))
+      (is (pos? (count n)))
+      (is (.startsWith ^String n "mcp__")))))
 
 ;------------------------------------------------------------------------------ Layer 3
 ;; write-claude-settings! tests

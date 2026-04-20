@@ -90,7 +90,7 @@
           (is (= (:mcp-config-path s) (:mcp-config-path result)))
           (is (= (:artifact-path s) (:artifact-path result)))
           (is (vector? (:mcp-allowed-tools result)))
-          (is (every? #(str/starts-with? % "context_") (:mcp-allowed-tools result))))
+          (is (every? #(str/starts-with? % "mcp__context__") (:mcp-allowed-tools result))))
         (finally
           (session/cleanup-session! s))))))
 

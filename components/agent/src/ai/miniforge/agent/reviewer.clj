@@ -23,6 +23,7 @@
   (:require
    [ai.miniforge.agent.model :as model]
    [ai.miniforge.agent.prompts :as prompts]
+   [ai.miniforge.agent.role-config :as role-config]
    [ai.miniforge.agent.specialized :as specialized]
    [ai.miniforge.schema.interface :as schema]
    [ai.miniforge.logging.interface :as log]
@@ -504,10 +505,7 @@
                        (loop/lint-gate)
                        (loop/policy-gate :security {:policies [:no-secrets]})]
         gates (get opts :gates default-gates)
-        ;; :max-tokens bumped so structured review output isn't truncated.
-        ;; OPSV convergence target — see work/n07-opsv-agent-budgets.spec.edn.
-        review-config (->> (merge {:temperature 0.1
-                                   :max-tokens 16000}
+        review-config (->> (merge (role-config/agent-llm-default :reviewer)
                                   (:config opts))
                            (model/apply-default-model :reviewer))
         config {:strict (get opts :strict false)}]

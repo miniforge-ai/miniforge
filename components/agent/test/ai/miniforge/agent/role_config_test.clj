@@ -58,3 +58,36 @@
   (testing "roles returns the set of declared roles"
     (is (= (set (keys role-config/role-defaults))
            (role-config/roles)))))
+
+;------------------------------------------------------------------------------ Layer 1
+;; agent-llm-defaults (per-LLM-call config consumed by create-{role} factories)
+
+(deftest agent-llm-defaults-loaded-test
+  (testing "EDN config loads and contains every specialized role"
+    (is (map? role-config/agent-llm-defaults))
+    (doseq [role [:planner :implementer :releaser :tester :reviewer]]
+      (is (contains? role-config/agent-llm-defaults role)
+          (str "missing role: " role)))))
+
+(deftest agent-llm-defaults-shape-test
+  (testing "every entry carries :temperature and :max-tokens"
+    (doseq [[role defaults] role-config/agent-llm-defaults]
+      (is (number? (:temperature defaults)) (str role " :temperature"))
+      (is (<= 0.0 (:temperature defaults) 1.0) (str role " temperature in [0,1]"))
+      (is (pos-int? (:max-tokens defaults)) (str role " :max-tokens")))))
+
+(deftest agent-llm-default-lookup-test
+  (testing "agent-llm-default returns the same map as direct lookup"
+    (is (= (get role-config/agent-llm-defaults :planner)
+           (role-config/agent-llm-default :planner)))))
+
+(deftest agent-llm-default-unknown-test
+  (testing "unknown role throws ex-info with known-roles in data"
+    (try
+      (role-config/agent-llm-default :nope)
+      (is false "Should have thrown")
+      (catch clojure.lang.ExceptionInfo e
+        (let [data (ex-data e)]
+          (is (= :nope (:role data)))
+          (is (= "agent-llm-default" (:kind data)))
+          (is (contains? (:known-roles data) :planner)))))))

@@ -1,0 +1,24 @@
+;; Per-LLM-call config defaults applied by each create-{role} factory fn
+;; (planner.clj, implementer.clj, releaser.clj, tester.clj, reviewer.clj).
+;;
+;; These are intentionally distinct from role-defaults.edn:
+;; - role-defaults.edn supplies system-wide defaults for the
+;;   make-base-agent code path (default-role-configs in core.clj).
+;; - This file supplies the operative LLM-call config each specialized
+;;   create-{role} factory uses when constructing its agent.
+;;
+;; OPSV (N7) will converge these two sets — see
+;; work/n07-opsv-agent-budgets.spec.edn. Until then, the values stay split.
+;;
+;; Notes:
+;; - :max-tokens caps output-tokens-per-response. Exploration-heavy planning
+;;   (~70 tool calls) with small budgets truncates the final plan EDN to
+;;   nothing — 32000 is a heuristic unblocker.
+;; - reviewer/implementer max-tokens are bumped so structured output isn't
+;;   truncated.
+
+{:planner     {:temperature 0.3 :max-tokens 32000}
+ :implementer {:temperature 0.2 :max-tokens 32000}
+ :releaser    {:temperature 0.3 :max-tokens 2000}
+ :tester      {:temperature 0.2 :max-tokens 6000}
+ :reviewer    {:temperature 0.1 :max-tokens 16000}}
