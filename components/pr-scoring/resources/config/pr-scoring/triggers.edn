@@ -1,0 +1,20 @@
+;; Fine-grained event types whose arrival SHOULD re-score the affected PR.
+;;
+;; Per N5-delta-2 §3.1, the pr-scoring component subscribes to these event
+;; types and invokes its scorer-fn on each one. Adding an event here
+;; makes it a scoring trigger; removing an event stops scoring from
+;; reacting to it.
+;;
+;; Override at component construction time via the `:trigger-event-types`
+;; option to `ai.miniforge.pr-scoring.interface/create` or `/attach!`.
+#{:pr/created
+  :pr/opened
+  :pr/ci-passed
+  :pr/ci-failed
+  :pr/review-approved
+  :pr/review-changes-requested
+  :pr/fix-pushed
+  :pr/merged
+  :pr/closed
+  :pr/conflict
+  :pr/rebase-needed}

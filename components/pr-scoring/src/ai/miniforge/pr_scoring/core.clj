@@ -54,6 +54,8 @@
    fine-grained `:pr/scored` event, and `supervisory-state` coalesces
    scored fields into its next upsert emission."
   (:require
+   [clojure.edn :as edn]
+   [clojure.java.io :as io]
    [ai.miniforge.event-stream.interface :as es]
    [ai.miniforge.event-stream.interface.events :as events]))
 
@@ -63,23 +65,27 @@
 (def ^:private subscriber-id ::pr-scoring)
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Trigger events
+;; Trigger events — loaded from data
 
-(def trigger-event-types
-  "PR-mutating event types whose arrival SHOULD re-score the affected PR.
-   Any event of these kinds is forwarded to the scorer-fn; a nil return
-   signals \"skip this PR for now\" and suppresses emission."
-  #{:pr/created
-    :pr/opened
-    :pr/ci-passed
-    :pr/ci-failed
-    :pr/review-approved
-    :pr/review-changes-requested
-    :pr/fix-pushed
-    :pr/merged
-    :pr/closed
-    :pr/conflict
-    :pr/rebase-needed})
+(def trigger-config-resource
+  "Classpath location of the default trigger-event-types EDN set."
+  "config/pr-scoring/triggers.edn")
+
+(defn load-default-triggers
+  "Read the default trigger-event-types set from the resource at
+   [[trigger-config-resource]]. Callers MAY override at component
+   construction time via the `:trigger-event-types` option to [[create]]
+   — the config is data, not compiled-in logic."
+  []
+  (if-let [r (io/resource trigger-config-resource)]
+    (edn/read-string (slurp r))
+    (throw (ex-info "pr-scoring: missing trigger-event-types config resource"
+                    {:resource trigger-config-resource}))))
+
+(def default-trigger-event-types
+  "Memoized default trigger set loaded from [[trigger-config-resource]].
+   Delayed so classpath scan happens on first use, not namespace load."
+  (delay (load-default-triggers)))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Default scorer (no-op)
@@ -108,11 +114,11 @@
 
 (defn- handle-event!
   "Entry point for every event the stream delivers. No-op unless the
-   event is one of [[trigger-event-types]]. A scorer-fn that throws is
-   suppressed silently (for the scaffold) — a follow-up PR wires proper
-   structured logging once the real scoring integration lands."
-  [scorer-fn stream event]
-  (when (contains? trigger-event-types (:event/type event))
+   event type is in `triggers`. A scorer-fn that throws is suppressed
+   silently (for the scaffold) — a follow-up PR wires proper structured
+   logging once the real scoring integration lands."
+  [triggers scorer-fn stream event]
+  (when (contains? triggers (:event/type event))
     (try
       (emit-scored! stream scorer-fn event)
       (catch Throwable _t nil))))
@@ -125,21 +131,26 @@
    not subscribe yet — call `start!` to begin consuming events.
 
    Options:
-     :scorer-fn  — 1-ary fn (event → score-map or nil); defaults to
-                   [[default-scorer-fn]] which emits nothing"
+     :scorer-fn           — 1-ary fn (event → score-map or nil); defaults
+                            to [[default-scorer-fn]] which emits nothing
+     :trigger-event-types — set of event-type keywords that trigger
+                            scoring; defaults to the EDN set at
+                            [[trigger-config-resource]]"
   ([stream] (create stream {}))
-  ([stream {:keys [scorer-fn] :or {scorer-fn default-scorer-fn}}]
+  ([stream {:keys [scorer-fn trigger-event-types]
+            :or   {scorer-fn default-scorer-fn}}]
    (atom {:stream stream
           :scorer-fn scorer-fn
+          :triggers (or trigger-event-types @default-trigger-event-types)
           :subscribed? false})))
 
 (defn start!
   "Subscribe to the stream. Idempotent — repeat calls are no-ops."
   [component]
-  (let [{:keys [stream scorer-fn subscribed?]} @component]
+  (let [{:keys [stream scorer-fn triggers subscribed?]} @component]
     (when-not subscribed?
       (es/subscribe! stream subscriber-id
-                     (fn [event] (handle-event! scorer-fn stream event)))
+                     (fn [event] (handle-event! triggers scorer-fn stream event)))
       (swap! component assoc :subscribed? true))
     component))
 

@@ -126,6 +126,28 @@
     (is (= 0 @calls) "workflow/started does not trigger scoring")
     (is (empty? (scored-events @captured)))))
 
+(deftest default-trigger-set-is-loaded-from-edn
+  (testing "triggers come from the EDN resource, not a compiled-in literal"
+    (let [triggers @scoring/default-trigger-event-types]
+      (is (set? triggers))
+      (is (contains? triggers :pr/created))
+      (is (contains? triggers :pr/merged))
+      (is (not (contains? triggers :workflow/started))
+          "workflow events are not PR scoring triggers"))))
+
+(deftest trigger-override-narrows-dispatch
+  (testing "A caller-supplied :trigger-event-types restricts scoring to just those events"
+    (let [calls (atom [])
+          [s captured] (captured-stream)
+          _ (scoring/attach! s {:scorer-fn (fn [ev] (swap! calls conj (:event/type ev)) sample-scores)
+                                :trigger-event-types #{:pr/merged}})]
+      (es/publish! s (pr-created-event s "acme/widget" 42))  ; NOT in override set
+      (es/publish! s (assoc (pr-created-event s "acme/widget" 43)
+                            :event/type :pr/merged))
+      (is (= [:pr/merged] @calls)
+          "only :pr/merged events invoked the scorer")
+      (is (= 1 (count (scored-events @captured)))))))
+
 (deftest scorer-fn-exceptions-are-swallowed
   (let [[s captured] (captured-stream)
         _ (scoring/attach! s {:scorer-fn (fn [_] (throw (ex-info "boom" {})))})]

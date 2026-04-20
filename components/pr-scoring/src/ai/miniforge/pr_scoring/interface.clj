@@ -47,5 +47,7 @@
 ;------------------------------------------------------------------------------ Layer 2
 ;; Extension points
 
-(def default-scorer-fn   core/default-scorer-fn)
-(def trigger-event-types core/trigger-event-types)
+(def default-scorer-fn           core/default-scorer-fn)
+(def load-default-triggers       core/load-default-triggers)
+(def default-trigger-event-types core/default-trigger-event-types)
+(def trigger-config-resource     core/trigger-config-resource)
