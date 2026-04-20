@@ -1,0 +1,19 @@
+;; Per-role static defaults for agent execution.
+;;
+;; Loaded by ai.miniforge.agent.role-config; merged with the role's
+;; default model in core.clj/default-role-configs.
+;;
+;; Temperature ranges: 0.0 (deterministic) → 1.0 (creative)
+;; Tokens: appropriate context window for the role's task type.
+;; Budget caps an entire agent run, not a single LLM call.
+
+{:planner     {:temperature 0.7 :max-tokens 16000 :budget {:tokens 100000 :cost-usd 5.0}}
+ :architect   {:temperature 0.5 :max-tokens 16000 :budget {:tokens 80000  :cost-usd 4.0}}
+ :implementer {:temperature 0.3 :max-tokens 16000 :budget {:tokens 100000 :cost-usd 5.0}}
+ :tester      {:temperature 0.2 :max-tokens 8000  :budget {:tokens 40000  :cost-usd 2.0}}
+ :reviewer    {:temperature 0.4 :max-tokens 12000 :budget {:tokens 60000  :cost-usd 3.0}}
+ :sre         {:temperature 0.2 :max-tokens 8000  :budget {:tokens 40000  :cost-usd 2.0}}
+ :security    {:temperature 0.1 :max-tokens 8000  :budget {:tokens 40000  :cost-usd 2.0}}
+ :release     {:temperature 0.1 :max-tokens 4000  :budget {:tokens 20000  :cost-usd 1.0}}
+ :historian   {:temperature 0.3 :max-tokens 8000  :budget {:tokens 30000  :cost-usd 1.5}}
+ :operator    {:temperature 0.1 :max-tokens 4000  :budget {:tokens 20000  :cost-usd 1.0}}}
