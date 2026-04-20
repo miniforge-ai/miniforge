@@ -25,6 +25,7 @@
    [ai.miniforge.agent.budget :as budget]
    [ai.miniforge.agent.model :as model]
    [ai.miniforge.agent.prompts :as prompts]
+   [ai.miniforge.agent.role-config :as role-config]
    [ai.miniforge.agent.specialized :as specialized]
    [ai.miniforge.schema.interface :as schema]
    [ai.miniforge.logging.interface :as log]
@@ -221,8 +222,7 @@
   [& [opts]]
   (let [logger (or (:logger opts)
                    (log/create-logger {:min-level :info :output (fn [_])}))
-        config (->> (merge {:temperature 0.3
-                            :max-tokens 2000}
+        config (->> (merge (role-config/agent-llm-default :releaser)
                            (:config opts))
                     (model/apply-default-model :releaser)
                     (budget/apply-default-budget :releaser))]
