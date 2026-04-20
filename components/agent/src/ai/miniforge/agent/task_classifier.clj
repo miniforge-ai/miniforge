@@ -92,6 +92,15 @@
    :formatter-agent :simple-validation
    :linter-agent :simple-validation})
 
+;------------------------------------------------------------------------------ Layer 0.5
+;; Heuristic constants
+
+(def ^:const default-tokens-per-file
+  "Heuristic estimate of tokens per source file when only :file-count is
+   available. Used by extract-context-size as a coarse proxy for true
+   token counts; refine to a real tokenizer count if precision matters."
+  500)
+
 ;------------------------------------------------------------------------------ Layer 1
 ;; Feature extraction
 
@@ -117,7 +126,7 @@
   (cond
     context-tokens context-tokens
     estimated-loc estimated-loc
-    file-count (* file-count 500) ; Estimate 500 tokens per file
+    file-count (* file-count default-tokens-per-file)
     :else 0))
 
 (defn extract-privacy-requirements

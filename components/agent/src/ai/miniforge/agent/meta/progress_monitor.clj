@@ -23,6 +23,27 @@
   (:require [ai.miniforge.agent.meta-protocol :as mp]
             [ai.miniforge.llm.interface :as llm]))
 
+;------------------------------------------------------------------------------ Layer 0
+;; Default monitoring intervals
+;;
+;; All values are milliseconds. Operationally tuned: kept as named
+;; constants here (vs an EDN file) since callers can override via the
+;; create-progress-monitor-agent options map and there are only three
+;; numbers to track.
+
+(def ^:const default-check-interval-ms
+  "How often the meta-agent runs its health check."
+  30000)                                ; 30 seconds
+
+(def ^:const default-stagnation-threshold-ms
+  "Time without streaming activity or file writes that triggers a
+   stagnation halt."
+  120000)                               ; 2 minutes
+
+(def ^:const default-max-total-ms
+  "Hard upper bound on a single workflow run before forced halt."
+  600000)                               ; 10 minutes
+
 (defrecord ProgressMonitorMetaAgent [monitor-state config]
   mp/MetaAgent
 
@@ -73,24 +94,24 @@
     (reset! monitor-state
             (llm/create-progress-monitor
              (or (:monitor-options config)
-                 {:stagnation-threshold-ms 120000  ; 2 minutes
-                  :max-total-ms 600000})))))       ; 10 minutes
+                 {:stagnation-threshold-ms default-stagnation-threshold-ms
+                  :max-total-ms            default-max-total-ms})))))
 
 (defn create-progress-monitor-agent
   "Create a Progress Monitor meta-agent.
 
    Options:
-   - :check-interval-ms (default: 30000) - How often to check
-   - :priority (default: :high) - Check priority
-   - :stagnation-threshold-ms (default: 120000) - Stagnation timeout
-   - :max-total-ms (default: 600000) - Hard timeout limit"
+   - :check-interval-ms        (default: default-check-interval-ms)        - How often to check
+   - :priority                 (default: :high)                             - Check priority
+   - :stagnation-threshold-ms  (default: default-stagnation-threshold-ms)   - Stagnation timeout
+   - :max-total-ms             (default: default-max-total-ms)              - Hard timeout limit"
   ([]
    (create-progress-monitor-agent {}))
   ([{:keys [check-interval-ms priority stagnation-threshold-ms max-total-ms]
-     :or {check-interval-ms 30000
-          priority :high
-          stagnation-threshold-ms 120000
-          max-total-ms 600000}}]
+     :or {check-interval-ms       default-check-interval-ms
+          priority                :high
+          stagnation-threshold-ms default-stagnation-threshold-ms
+          max-total-ms            default-max-total-ms}}]
    (let [monitor-options {:stagnation-threshold-ms stagnation-threshold-ms
                           :max-total-ms max-total-ms}
          config (mp/create-meta-config

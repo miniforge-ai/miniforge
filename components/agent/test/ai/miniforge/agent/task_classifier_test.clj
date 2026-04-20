@@ -185,7 +185,8 @@
     (is (= 10000 (classifier/extract-context-size {:estimated-loc 10000}))))
 
   (testing "Extract from file-count"
-    (is (= 5000 (classifier/extract-context-size {:file-count 10}))))
+    (is (= (* 10 classifier/default-tokens-per-file)
+           (classifier/extract-context-size {:file-count 10}))))
 
   (testing "Default to 0"
     (is (= 0 (classifier/extract-context-size {})))))
