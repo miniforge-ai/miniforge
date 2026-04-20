@@ -181,7 +181,9 @@
                        "components/bb-paths/src"
                        "components/bb-out/src"
                        "components/bb-proc/src"
-                       "components/bb-test-runner/src"]
+                       "components/bb-test-runner/src"
+                       "components/bb-config/src"
+                       "components/bb-generate-icon/src"]
          :extra-deps {ai.miniforge/schema {:local/root "components/schema"}
                       ai.miniforge/config {:local/root "components/config"}
                       ai.miniforge/lsp-mcp-bridge {:local/root "bases/lsp-mcp-bridge"}
@@ -277,10 +279,12 @@
                      ai.miniforge.data-foundry/pipeline-runner {:local/root "components/pipeline-runner"}
                      ai.miniforge/connector-linter {:local/root "components/connector-linter"}
                      ;; bb-utils (shared Babashka utilities)
-                     ai.miniforge/bb-paths       {:local/root "components/bb-paths"}
-                     ai.miniforge/bb-out         {:local/root "components/bb-out"}
-                     ai.miniforge/bb-proc        {:local/root "components/bb-proc"}
-                     ai.miniforge/bb-test-runner {:local/root "components/bb-test-runner"}}}
+                     ai.miniforge/bb-paths         {:local/root "components/bb-paths"}
+                     ai.miniforge/bb-out           {:local/root "components/bb-out"}
+                     ai.miniforge/bb-proc          {:local/root "components/bb-proc"}
+                     ai.miniforge/bb-test-runner   {:local/root "components/bb-test-runner"}
+                     ai.miniforge/bb-config        {:local/root "components/bb-config"}
+                     ai.miniforge/bb-generate-icon {:local/root "components/bb-generate-icon"}}}
 
   :test {:extra-paths ["development/test"
                        "components/schema/test"
@@ -385,7 +389,9 @@
                        "components/bb-paths/test"
                        "components/bb-out/test"
                        "components/bb-proc/test"
-                       "components/bb-test-runner/test"]
+                       "components/bb-test-runner/test"
+                       "components/bb-config/test"
+                       "components/bb-generate-icon/test"]
          :extra-deps {ai.miniforge/schema {:local/root "components/schema"}
                       ai.miniforge/config {:local/root "components/config"}
                       ai.miniforge/algorithms {:local/root "components/algorithms"}
@@ -450,10 +456,12 @@
                       ai.miniforge/workflow-chain-deployment {:local/root "components/workflow-chain-deployment"}
                       ai.miniforge/lsp-mcp-bridge {:local/root "bases/lsp-mcp-bridge"}
                       ;; bb-utils (shared Babashka utilities)
-                      ai.miniforge/bb-paths       {:local/root "components/bb-paths"}
-                      ai.miniforge/bb-out         {:local/root "components/bb-out"}
-                      ai.miniforge/bb-proc        {:local/root "components/bb-proc"}
-                      ai.miniforge/bb-test-runner {:local/root "components/bb-test-runner"}}}
+                      ai.miniforge/bb-paths         {:local/root "components/bb-paths"}
+                      ai.miniforge/bb-out           {:local/root "components/bb-out"}
+                      ai.miniforge/bb-proc          {:local/root "components/bb-proc"}
+                      ai.miniforge/bb-test-runner   {:local/root "components/bb-test-runner"}
+                      ai.miniforge/bb-config        {:local/root "components/bb-config"}
+                      ai.miniforge/bb-generate-icon {:local/root "components/bb-generate-icon"}}}
 
   :conformance {:extra-paths ["development/test"
                               "tests/conformance"
