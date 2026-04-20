@@ -78,11 +78,11 @@
    For :knowledge-safety, a :mismatch is a hard failure.
    For other configs, :mismatch is a warning."
   [config-key content]
-  (if-let [manifest (load-digest-manifest)]
-    (if-let [expected (get manifest config-key)]
-      (let [actual (sha256-hex content)]
-        (if (= expected actual)
-          :ok
-          :mismatch))
-      :no-entry)
-    :no-manifest))
+  (let [manifest (load-digest-manifest)
+        expected (when manifest (get manifest config-key))
+        actual   (when expected (sha256-hex content))]
+    (cond
+      (nil? manifest)     :no-manifest
+      (nil? expected)     :no-entry
+      (= expected actual) :ok
+      :else               :mismatch)))
