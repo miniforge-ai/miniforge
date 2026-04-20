@@ -23,6 +23,9 @@
    [clojure.string :as str]
    [ai.miniforge.agent.core :as core]
    [ai.miniforge.agent.planner :as planner]
+   [ai.miniforge.agent.artifact-session :as artifact-session]
+   [ai.miniforge.agent.model :as model]
+   [ai.miniforge.llm.interface :as llm]
    [ai.miniforge.logging.interface :as log]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -256,6 +259,93 @@
     (let [agent (planner/create-planner)]
       (is (thrown-with-msg? clojure.lang.ExceptionInfo #"No LLM backend"
             (core/cycle-agent agent {} "Create a REST API endpoint"))))))
+
+;------------------------------------------------------------------------------ Layer 6
+;; Tool-disallow-list — role-scoped restriction so the planner cannot
+;; bypass the context MCP by using native filesystem tools.
+
+(deftest planner-disallowed-tools-contents-test
+  (testing "planner-disallowed-tools names the native file/shell tools"
+    (let [dt @#'planner/planner-disallowed-tools]
+      (is (vector? dt))
+      (is (every? string? dt))
+      (doseq [t ["Read" "Bash" "Grep" "Glob" "Agent" "LS"]]
+        (is (some #{t} dt)
+            (str "expected " t " in disallowed-tools")))))
+
+  (testing "planner-disallowed-tools does NOT include Write"
+    ;; Write is the container-promotion submission path — .miniforge/plan.edn.
+    (is (nil? (some #{"Write"} @#'planner/planner-disallowed-tools))))
+
+  (testing "planner-disallowed-tools does NOT include the MCP context tools"
+    ;; Those are the replacement for the native tools. Disallowing them
+    ;; would leave the planner with no way to read files at all.
+    (doseq [t ["mcp__context__context_read"
+               "mcp__context__context_grep"
+               "mcp__context__context_glob"]]
+      (is (nil? (some #{t} @#'planner/planner-disallowed-tools))
+          (str "MCP context tool " t " must NOT be disallowed"))))
+
+  (testing "planner-disallowed-tools does NOT (yet) include WebSearch/WebFetch"
+    ;; Disabling these without a cached-MCP replacement regresses
+    ;; capability — see work/planner-convergence-and-artifact-submission
+    ;; GROUP 2B. They ship with the web-cache MCP base, not here.
+    (doseq [t ["WebSearch" "WebFetch"]]
+      (is (nil? (some #{t} @#'planner/planner-disallowed-tools))
+          (str t " should not be disallowed until GROUP 2B ships")))))
+
+(deftest planner-passes-disallowed-tools-to-llm-test
+  (testing ":disallowed-tools reaches the LLM client via mcp-opts"
+    (let [captured (atom nil)
+          fake-llm-client {:type :fake}
+          fake-plan {:plan/id (random-uuid)
+                     :plan/name "stub"
+                     :plan/tasks [{:task/id (random-uuid)
+                                   :task/description "t"
+                                   :task/type :implement
+                                   :task/acceptance-criteria ["ok"]
+                                   :task/estimated-effort :small}]}]
+      (with-redefs [llm/success? (constantly true)
+                    llm/get-content (constantly (str "```clojure\n"
+                                                     (pr-str fake-plan)
+                                                     "\n```"))
+                    llm/chat (fn [_client _prompt opts]
+                               (reset! captured opts)
+                               {:status :success})
+                    llm/chat-stream (fn [_client _prompt _on-chunk opts]
+                                      (reset! captured opts)
+                                      {:status :success})
+                    model/resolve-llm-client-for-role
+                    (fn [_role provided] provided)
+                    artifact-session/with-session
+                    (fn [_context body-fn]
+                      ;; Minimal session stub — just enough for body-fn to
+                      ;; produce mcp-opts and call the (redefd) llm fns.
+                      (let [result (body-fn {:dir "/tmp/fake-session"
+                                             :workdir "/tmp/fake-workdir"
+                                             :mcp-config-path "/tmp/fake-session/mcp-config.json"
+                                             :mcp-allowed-tools []
+                                             :supervision {}
+                                             :pre-session-snapshot {}})]
+                        {:llm-result result
+                         :artifact nil
+                         :worktree-artifacts {}
+                         :context-misses nil
+                         :pre-session-snapshot {}
+                         :session-mode :host}))]
+        (let [agent (planner/create-planner {:llm-backend fake-llm-client})]
+          (try
+            (core/invoke agent {:llm-backend fake-llm-client
+                                :title "t"
+                                :description "t"
+                                :intent "t"}
+                         "build a thing")
+            (catch Exception _))
+          (is (some? @captured) "LLM client should have been called")
+          (is (vector? (:disallowed-tools @captured)))
+          (is (= @#'planner/planner-disallowed-tools
+                 (:disallowed-tools @captured))
+              ":disallowed-tools opt must equal the planner's role-scoped list"))))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

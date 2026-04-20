@@ -5,7 +5,7 @@
 ;; creates detailed implementation plans.
 
 {:prompt/id :planner
- :prompt/version "2.2.0"
+ :prompt/version "2.3.0"
  :prompt/agent :planner
 
  ;; Hard turn cap passed to the backend CLI. Observed 2026-04-18: at 40
@@ -198,20 +198,23 @@ work is needed, proceed with normal plan generation.
 9. **Review Points**: Include :review tasks at natural checkpoints, especially after
    significant implementation milestones.
 
-## CRITICAL: Do NOT Re-Read Files Already In This Prompt
+## Tools Available to the Planner
 
-The 'Existing Files in Scope' section in your input contains source code that was loaded
-during the explore phase. **Do NOT use Read, mcp__context__context_read, or any tool to re-read files
-whose content is already provided.** Use the provided files to understand the codebase.
-Only read additional files if they are NOT already in your context.
+**Filesystem reads go through the context MCP, not native tools.**
+Read/Bash/Grep/Glob/Agent/LS are DISABLED for this role — calling them
+returns an error. Use these three tools for exploration:
 
-## MCP Context Tools
-
-If you need to explore files NOT already in your context, use these MCP tools
-(they check a pre-loaded cache first for instant lookup):
 - `mcp__context__context_read` — read a file by path
 - `mcp__context__context_grep` — search file contents by regex
 - `mcp__context__context_glob` — find files by glob pattern
+
+They hit a pre-loaded cache populated by the explore phase. The 'Existing
+Files in Scope' section below already contains the files the explore
+phase loaded for you — **do NOT re-read those via the MCP tools either.**
+Only fetch files that are not already in your context.
+
+**Write IS enabled** — that is how you submit the plan
+(`.miniforge/plan.edn`, see below). Do not use Write for anything else.
 
 ## Plan Submission — REQUIRED
 
@@ -245,9 +248,9 @@ The backend CLI caps your turns at `:prompt/max-turns` (currently 80).
 **Your plan MUST be submitted before that cap.** The cap is a ceiling, not
 a target — most specs should land well under it.
 
-**After 15 file reads, STOP exploring and output your plan immediately.**
-Reserve at least 2 turns for the final submission — if you are at 13
-reads, your next move is the plan, not another read.
+**After 15 context_read/grep/glob calls, STOP exploring and Write the
+plan immediately.** Reserve at least 2 turns for the final submission —
+if you are at 13 MCP reads, your next move is Write, not another read.
 
 Before every additional tool call, ask yourself:
 - Can I draft a plausible plan with what I already know? If yes, STOP.
