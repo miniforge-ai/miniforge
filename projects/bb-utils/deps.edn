@@ -1,0 +1,24 @@
+;; Aggregator for the shared Babashka task helpers. Consumed by each
+;; miniforge umbrella product (thesium-risk, thesium-career, ...) as a
+;; single :local/root (during bootstrap) or submodule path (post-PR 1).
+;;
+;; Keeping the four helpers as Polylith components rather than a single
+;; namespace lets individual products pin or vendor only what they need
+;; if the shared version drifts later — though the expectation is every
+;; umbrella product tracks the same SHA.
+
+{:paths ["test" "resources"]
+
+ :deps {ai.miniforge/bb-paths        {:local/root "../../components/bb-paths"}
+        ai.miniforge/bb-out          {:local/root "../../components/bb-out"}
+        ai.miniforge/bb-proc         {:local/root "../../components/bb-proc"}
+        ai.miniforge/bb-test-runner  {:local/root "../../components/bb-test-runner"}}
+
+ :aliases
+ {:test {:extra-paths ["../../components/bb-paths/test"
+                       "../../components/bb-out/test"
+                       "../../components/bb-proc/test"
+                       "../../components/bb-test-runner/test"]
+         :extra-deps {io.github.cognitect-labs/test-runner
+                      {:git/tag "v0.5.1" :git/sha "dfb30dd"}}
+         :main-opts ["-m" "cognitect.test-runner"]}}}
