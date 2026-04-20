@@ -181,7 +181,7 @@
   "Check if a phase result indicates success (supports both :success? and :status patterns)."
   [result]
   (or (:success? result)
-      (= :success (:status result))))
+      (response/success? result)))
 
 ;; Logging helpers
 

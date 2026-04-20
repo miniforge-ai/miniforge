@@ -54,6 +54,14 @@
        artifact (assoc :artifact artifact)
        (not artifact) (assoc :artifact output)))))
 
+(defn success?
+  "True for response maps produced by `success` (have :status :success).
+
+   Use this on single result maps. For response *chains* (have :succeeded? key),
+   use `succeeded?` instead."
+  [response]
+  (= :success (:status response)))
+
 ;------------------------------------------------------------------------------ Layer 1
 ;; Error responses
 
@@ -115,6 +123,21 @@
               :error (error-details message data)
               :metrics merged-metrics}
        output (assoc :output output)))))
+
+(defn error?
+  "True for response maps representing failure.
+
+   Matches:
+   - `:status :error`  (output of `error`)
+   - `:status :failed` (legacy/phase shape)
+   - `:success false`  (output of `failure`)
+
+   Use this on single result maps. For response *chains*, use `failed?`."
+  [response]
+  (let [status (:status response)]
+    (or (= :error status)
+        (= :failed status)
+        (false? (:success response)))))
 
 (defn failure
   "Create a canonical failure response (alias for error with :success false).
