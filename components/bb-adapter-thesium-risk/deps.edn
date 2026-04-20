@@ -1,0 +1,12 @@
+{:paths ["src" "resources"]
+ :deps  {babashka/fs                    {:mvn/version "0.5.22"}
+         cheshire/cheshire              {:mvn/version "5.13.0"}
+         ai.miniforge/bb-out            {:local/root "../bb-out"}
+         ai.miniforge/bb-paths          {:local/root "../bb-paths"}
+         ai.miniforge/bb-proc           {:local/root "../bb-proc"}
+         ai.miniforge/bb-r2             {:local/root "../bb-r2"}
+         ai.miniforge/bb-data-plane-http {:local/root "../bb-data-plane-http"}}
+ :aliases
+ {:test {:extra-paths ["test"]
+         :extra-deps {io.github.cognitect-labs/test-runner
+                      {:git/tag "v0.5.1" :git/sha "dfb30dd"}}}}}
