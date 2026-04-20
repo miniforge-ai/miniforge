@@ -6,7 +6,8 @@
    Exposes Malli and JSON Schema definitions for the output contract so
    consumers can validate manifests and configure pipelines correctly."
   (:require [ai.miniforge.data-foundry.connector-pipeline-output.core :as core]
-            [ai.miniforge.data-foundry.connector-pipeline-output.schema :as schema]))
+            [ai.miniforge.data-foundry.connector-pipeline-output.schema :as schema]
+            [ai.miniforge.data-foundry.connector.interface :as conn]))
 
 (defn create-pipeline-output-connector
   "Create a new PipelineOutputConnector instance."
@@ -20,7 +21,7 @@
    :connector/version      "0.1.0"
    :connector/capabilities #{:cap/batch}
    :connector/auth-methods #{:none}
-   :connector/retry-policy {:retry/strategy :none :retry/max-attempts 1}
+   :connector/retry-policy (conn/retry-policy :none)
    :connector/maintainer   "data-foundry"})
 
 ;; -- Public Contract Schemas (Malli) --

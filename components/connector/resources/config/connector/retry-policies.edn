@@ -1,0 +1,14 @@
+;; Connector retry policy presets.
+;;
+;; Connector registrations reference these by key
+;; (see connector/retry-policy in the interface).
+;;
+;; Adding a preset here is preferred over inlining a one-off policy in a
+;; connector's metadata — keeps policies discoverable and consistent.
+
+{:default {:retry/strategy      :exponential-backoff
+           :retry/max-attempts  3
+           :retry/base-delay-ms 1000}
+
+ :none    {:retry/strategy     :none
+           :retry/max-attempts 1}}

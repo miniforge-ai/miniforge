@@ -6,8 +6,8 @@
             [ai.miniforge.data-foundry.connector-http.pagination :as page]
             [ai.miniforge.data-foundry.connector-http.messages :as msg]
             [ai.miniforge.schema.interface :as schema]
-            [hato.client :as hc]
-            [clojure.data.json :as json])
+            [cheshire.core :as json]
+            [hato.client :as hc])
   (:import [java.util UUID]))
 
 ;; -- Handle state --
@@ -53,7 +53,7 @@
         status (:status resp)]
     (cond
       (<= 200 status 299)
-      (schema/success :body (json/read-str (:body resp) :key-fn keyword))
+      (schema/success :body (json/parse-string (:body resp) keyword))
 
       (= 429 status)
       (schema/failure :body (msg/t :http/rate-limited)

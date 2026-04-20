@@ -18,6 +18,50 @@
     (is (contains? conn/connector-capabilities :cap/pagination))))
 
 ;; ---------------------------------------------------------------------------
+;; retry-policy presets
+;; ---------------------------------------------------------------------------
+
+(deftest retry-policy-default-test
+  (testing ":default preset is exponential-backoff with 3 attempts"
+    (let [policy (conn/retry-policy :default)]
+      (is (= :exponential-backoff (:retry/strategy policy)))
+      (is (= 3 (:retry/max-attempts policy)))
+      (is (pos? (:retry/base-delay-ms policy))))))
+
+(deftest retry-policy-none-test
+  (testing ":none preset disables retries"
+    (let [policy (conn/retry-policy :none)]
+      (is (= :none (:retry/strategy policy)))
+      (is (= 1 (:retry/max-attempts policy))))))
+
+(deftest retry-policy-unknown-test
+  (testing "unknown preset throws ex-info with known-keys context"
+    (try
+      (conn/retry-policy :nope)
+      (is false "Should have thrown")
+      (catch clojure.lang.ExceptionInfo e
+        (let [data (ex-data e)]
+          (is (= :nope (:policy-key data)))
+          (is (contains? (:known-keys data) :default))
+          (is (contains? (:known-keys data) :none)))))))
+
+(deftest retry-policy-presets-pass-validation-test
+  (testing "Each preset, when used in a connector registration, validates clean"
+    (let [base {:connector/id (java.util.UUID/randomUUID)
+                :connector/name "Preset Test"
+                :connector/type :source
+                :connector/version "1.0.0"
+                :connector/capabilities #{:cap/batch}
+                :connector/auth-methods #{:none}
+                :connector/maintainer "test-team"}]
+      (doseq [preset-key (keys conn/retry-policies)]
+        (let [connector (assoc base
+                               :connector/retry-policy (conn/retry-policy preset-key))
+              result (conn/validate-connector connector)]
+          (is (:success? result)
+              (str "preset " preset-key " should validate")))))))
+
+;; ---------------------------------------------------------------------------
 ;; validate-connector
 ;; ---------------------------------------------------------------------------
 

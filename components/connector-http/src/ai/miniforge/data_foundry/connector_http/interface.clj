@@ -1,6 +1,7 @@
 (ns ai.miniforge.data-foundry.connector-http.interface
   "Public API for the HTTP connector component."
-  (:require [ai.miniforge.data-foundry.connector-http.core :as core]))
+  (:require [ai.miniforge.data-foundry.connector-http.core :as core]
+            [ai.miniforge.data-foundry.connector.interface :as conn]))
 
 (defn create-http-connector
   "Create a new HttpConnector instance."
@@ -14,7 +15,5 @@
    :connector/version      "0.1.0"
    :connector/capabilities #{:cap/discovery :cap/incremental :cap/pagination :cap/rate-limiting}
    :connector/auth-methods #{:api-key :basic :none}
-   :connector/retry-policy {:retry/strategy :exponential-backoff
-                            :retry/max-attempts 3
-                            :retry/base-delay-ms 1000}
+   :connector/retry-policy (conn/retry-policy :default)
    :connector/maintainer   "data-foundry"})
