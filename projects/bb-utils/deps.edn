@@ -15,7 +15,8 @@
         ai.miniforge/bb-test-runner    {:local/root "../../components/bb-test-runner"}
         ai.miniforge/bb-config         {:local/root "../../components/bb-config"}
         ai.miniforge/bb-generate-icon  {:local/root "../../components/bb-generate-icon"}
-        ai.miniforge/bb-r2             {:local/root "../../components/bb-r2"}}
+        ai.miniforge/bb-r2             {:local/root "../../components/bb-r2"}
+        ai.miniforge/bb-data-plane-http {:local/root "../../components/bb-data-plane-http"}}
 
  :aliases
  {:test {:extra-paths ["../../components/bb-paths/test"
@@ -24,7 +25,8 @@
                        "../../components/bb-test-runner/test"
                        "../../components/bb-config/test"
                        "../../components/bb-generate-icon/test"
-                       "../../components/bb-r2/test"]
+                       "../../components/bb-r2/test"
+                       "../../components/bb-data-plane-http/test"]
          :extra-deps {io.github.cognitect-labs/test-runner
                       {:git/tag "v0.5.1" :git/sha "dfb30dd"}}
          :main-opts ["-m" "cognitect.test-runner"]}}}
