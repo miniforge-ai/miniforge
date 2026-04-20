@@ -140,11 +140,18 @@
             env-file     (str pack-dir "/envs/gha.edn")
             out-file     (catalog-file cfg output-dir)
             deps-override (str "{:deps {local/pack {:local/root \"" pack-src "\"}}}")
+            ;; The CLI lives in the consuming repo (Thesium), not in
+            ;; miniforge — miniforge provides the pipeline-runner,
+            ;; connector-*, and schema primitives, while product-
+            ;; specific glue (env conventions, ${VAR} interpolation,
+            ;; transform registration) lives with the pack. The
+            ;; :local/root above puts the pack's src on the classpath
+            ;; so `ai.thesium.etl.cli` is resolvable here.
             result (proc/sh {:dir mf-abs
                              :out (str (under-root root output-dir) "/etl.log")
                              :err :inherit}
                             "clojure" "-Sdeps" deps-override
-                            "-M:dev" "-m" "ai.miniforge.data-foundry.pipeline-cli.core"
+                            "-M:dev" "-m" "ai.thesium.etl.cli"
                             "run" pipeline-def "--env" env-file
                             "--output" out-file)]
         (if (and (zero? (:exit result)) (fs/exists? out-file))
