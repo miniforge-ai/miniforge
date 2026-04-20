@@ -227,6 +227,19 @@
 ;------------------------------------------------------------------------------ Backend configurations
 ;; Named argument builders — extracted from the backends config map for clarity.
 
+(defn claude-mcp-allowlist-string
+  "Claude CLI's --allowedTools wire format.
+
+   `mcp-allowed-tools` is a vector of `{:mcp/server :mcp/tool}` keyword
+   maps. Each entry becomes `mcp__<server>__<tool>`; all joined with
+   commas. A malformed entry throws via `(name nil)` at the call site
+   — the canonical shape is the only accepted shape."
+  [mcp-allowed-tools]
+  (->> mcp-allowed-tools
+       (mapv (fn [{:mcp/keys [server tool]}]
+               (str "mcp__" (name server) "__" (name tool))))
+       (str/join ",")))
+
 (defn- claude-args
   "Build CLI arguments for the Claude backend."
   [{:keys [prompt system max-tokens streaming? mcp-config mcp-allowed-tools
@@ -237,7 +250,7 @@
       streaming?                   (conj "--output-format" "stream-json")
       streaming?                   (conj "--verbose")
       mcp-config                   (into ["--mcp-config" mcp-config])
-      (seq mcp-allowed-tools)      (into ["--allowedTools" (str/join "," mcp-allowed-tools)])
+      (seq mcp-allowed-tools)      (into ["--allowedTools" (claude-mcp-allowlist-string mcp-allowed-tools)])
       (seq disallowed-tools)       (into ["--disallowedTools" (str/join "," disallowed-tools)])
       (:settings-path supervision) (into ["--settings" (:settings-path supervision)])
       system                       (into ["--system-prompt" system])

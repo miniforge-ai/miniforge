@@ -264,18 +264,32 @@
         (is (vector? result))))))
 
 ;------------------------------------------------------------------------------ Layer 2
-;; mcp-tool-names tests
+;; mcp-tools tests
 
-(deftest mcp-tool-names-test
-  (testing "contains expected tool names"
-    (is (some #{"context_read"} session/mcp-tool-names))
-    (is (some #{"context_grep"} session/mcp-tool-names))
-    (is (some #{"context_glob"} session/mcp-tool-names)))
+(deftest mcp-tools-test
+  (testing "carries generic, agent-CLI-agnostic server/tool data"
+    ;; Structured form is the canonical representation. Each backend
+    ;; adapter (claude/codex/cursor/…) maps it to its own wire format.
+    ;; Do NOT put backend-specific strings here.
+    (is (vector? session/mcp-tools))
+    (is (every? map? session/mcp-tools))
+    (is (every? #(and (:mcp/server %) (:mcp/tool %)) session/mcp-tools)))
 
-  (testing "all names are non-empty strings"
-    (doseq [name session/mcp-tool-names]
-      (is (string? name))
-      (is (pos? (count name))))))
+  (testing "server and tool are keywords — adapters (name kw) for the wire"
+    (is (every? #(keyword? (:mcp/server %)) session/mcp-tools))
+    (is (every? #(keyword? (:mcp/tool %)) session/mcp-tools)))
+
+  (testing "contains the expected context-server tools"
+    (is (every? #(= :context (:mcp/server %)) session/mcp-tools))
+    (is (= #{:context_read :context_grep :context_glob}
+           (into #{} (map :mcp/tool) session/mcp-tools))))
+
+  (testing "never contains backend-specific wire strings (regression guard)"
+    ;; Claude's `mcp__<server>__<tool>` form belongs in the Claude
+    ;; adapter, not here. Guard against drift that previously cost us
+    ;; six dogfood iterations.
+    (doseq [t session/mcp-tools]
+      (is (not (string? t)) "mcp-tools entries should be maps, not strings"))))
 
 ;------------------------------------------------------------------------------ Layer 3
 ;; write-claude-settings! tests

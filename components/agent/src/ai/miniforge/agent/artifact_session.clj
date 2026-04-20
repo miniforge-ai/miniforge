@@ -300,9 +300,35 @@
     (spit path (json/generate-string settings {:pretty true}))
     path))
 
-(def mcp-tool-names
-  "MCP tool names exposed by the context server."
-  ["context_read" "context_grep" "context_glob"])
+(def mcp-tools
+  "MCP tools exposed by the context server, as generic server/tool data.
+
+   Each backend adapter (claude, codex, cursor-agent, …) is responsible
+   for translating this into the allowlist / approval shape its CLI
+   expects. Keep this agent-CLI-agnostic — the structured form, not a
+   backend-specific string, is the source of truth.
+
+   Keywords, not strings: adapters use `(name kw)` when they need the
+   wire string, or dispatch on the value directly with `case` /
+   multimethods. The keyword is the domain identity; the string is
+   the wire encoding.
+
+   Example wire formats per backend:
+     claude  → --allowedTools \"mcp__context__context_read,...\"
+                 (mcp__<server>__<tool> fully-qualified form)
+     cursor  → --approve-mcps  (blanket approve; no names needed)
+     codex   → (currently unused; codex uses its own MCP config)
+
+   Iterations 5-10 of the planner-convergence dogfood lost ~30 minutes
+   of tokens to a bug where bare names (e.g. `context_read`) were
+   passed straight through to Claude's --allowedTools without the
+   required prefix — every MCP call came back denied with
+     \"Claude requested permissions to use mcp__context__context_read,
+      but you haven't granted it yet.\"
+   The fix: keep the generic keyword form here; transform in the adapter."
+  [{:mcp/server :context :mcp/tool :context_read}
+   {:mcp/server :context :mcp/tool :context_grep}
+   {:mcp/server :context :mcp/tool :context_glob}])
 
 (defn write-mcp-config!
   "Write session config files for all supported CLI backends.
@@ -332,7 +358,7 @@
         [hook-cmd & hook-args] (resolve-miniforge-command)
         hook-eval-cmd (str/join " " (concat [hook-cmd] hook-args ["hook-eval"]))]
     (assoc session
-           :mcp-allowed-tools mcp-tool-names
+           :mcp-allowed-tools mcp-tools
            :mcp-cleanup-files [codex-path cursor-path]
            :supervision {:hook-eval-cmd hook-eval-cmd
                          :settings-path settings-path
@@ -593,7 +619,7 @@
     (exec! executor env-id (str "cat > " session-dir "/claude-settings.json << 'SETTINGSEOF'\n" settings "\nSETTINGSEOF")
            {:workdir (:workdir session)})
     (assoc session
-           :mcp-allowed-tools mcp-tool-names
+           :mcp-allowed-tools mcp-tools
            :supervision {:hook-eval-cmd hook-cmd
                          :settings-path (str session-dir "/claude-settings.json")
                          :policy :workspace-write})))
