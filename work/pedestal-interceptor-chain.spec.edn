@@ -1,0 +1,122 @@
+;; =============================================================================
+;; Spec: Pedestal-style interceptor chain for phase lifecycle
+;; =============================================================================
+;;
+;; Context:
+;;   PR #585 added an :exit lifecycle slot to phases as a band-aid for
+;;   curator placement. That shape (:enter, :leave, :exit, :error as
+;;   flat keys on the interceptor map) cannot express ordered,
+;;   composable interceptor stacks — which is what we actually need
+;;   for curators, telemetry wrappers, rate limiters, and future
+;;   policy-pack-injected interceptors.
+;;
+;;   This spec replaces the flat shape with a Pedestal-style
+;;   interceptor chain: each phase registers a vector of named
+;;   interceptors with :enter / :leave / :error fns. The runtime
+;;   folds :enter forward across the vector, then :leave in reverse.
+;;   Ordering is stable and explicit, composition is the default
+;;   case, and curators are just interceptors appended after the
+;;   main phase logic.
+;;
+;; Why this, not :exit:
+;;   :exit works for exactly one curator per phase. The moment we want
+;;   (curator + telemetry wrapper + rate-limit guard + policy-injected
+;;   pre-flight check) on a phase, flat slots break down. Pedestal's
+;;   chain model has been production-grade for a decade; adopting its
+;;   shape here costs us little and buys the composition property for
+;;   everything downstream (OPSV policy injection, N10 governed
+;;   execution, supervisory interceptors).
+
+{:spec/title "Pedestal-style interceptor chain for phase lifecycle"
+
+ :spec/description
+ "Replace the flat :enter/:leave/:exit/:error interceptor shape
+  introduced in PR #585 with a Pedestal-style interceptor chain. A
+  phase registers a vector of named interceptors; the runtime folds
+  :enter forward across the vector, then :leave in reverse (matching
+  Pedestal's contract). :error is per-interceptor and bubbles up the
+  chain in reverse until handled.
+
+  GROUP 1 — Core shape change (this PR)
+  - components/workflow/.../execution.clj
+    - Replace execute-enter / execute-leave / execute-exit with
+      execute-chain-forward + execute-chain-reverse helpers.
+    - execute-phase-lifecycle folds :enter forward over the chain,
+      applies gate validation on the main interceptor's output,
+      then folds :leave in reverse.
+    - Backward-compat: a legacy flat interceptor (no :interceptors
+      key) is lifted to a single-element chain with :enter/:leave/
+      :error inherited from the top-level keys. Existing phase
+      registrations keep working.
+  - components/phase/src/ai/miniforge/phase/registry.clj (and
+    any registry consumer) accepts both shapes without branching at
+    the call site.
+  - Remove the :exit slot entirely. Curators that lived in :exit
+    become the last :leave in the chain.
+
+  GROUP 2 — Migrate existing phases to the chain shape
+  - plan.clj: [{:name ::plan-main :enter :leave :error}
+               {:name ::plan-curator :leave curate-plan}]
+  - implement.clj: move the inline curator call from enter-implement
+    into a ::implement-curator interceptor whose :leave runs
+    curate-implement-output. Preserve the feedback loop into
+    leave-implement's retry decisions by having the curator write to
+    [:phase :curator-result] and leave-implement read it.
+  - verify / review / release: single-element chains today; ready
+    for curator interceptors from the adjacent curator spec.
+
+  GROUP 3 — Policy-pack-injected interceptors (follow-up)
+  - Policy packs register interceptors by phase id. At phase
+    construction time, the registry concats packed interceptors
+    into the chain at a declared position (::before-curator,
+    ::after-main, etc.). This is how OPSV (N7) and N10 governed
+    execution attach without every phase coding them in manually.
+
+  NON-GOALS
+  - Changing phase semantics. Every existing test must still pass.
+  - Introducing a full Pedestal dependency. We adopt the shape, not
+    the library.
+  - Async interceptor support. Chain is synchronous; an async
+    variant is a separate spec if ever needed.
+  - Changing what curate-plan / curate-implement-output check.
+    Their validation logic stays identical; only invocation site
+    moves."
+
+ :spec/intent
+ {:type :refactor
+  :scope ["components/workflow/src"
+          "components/workflow/test"
+          "components/phase/src"
+          "components/phase-software-factory/src"
+          "components/phase-software-factory/test"
+          "specs/normative/N2-workflows.md"]}
+
+ :spec/constraints
+ ["Chain is synchronous; no async/defer semantics in Group 1"
+  "Legacy flat interceptor shape MUST continue to work during the migration window (Group 1 lands before Group 2)"
+  "Interceptor execution order MUST be deterministic — :enter in registered order, :leave in reverse"
+  ":error on an interceptor catches exceptions from that interceptor's :enter only; uncaught errors bubble and run :leave in reverse from the failing point (Pedestal contract)"
+  "Gate validation runs after the main phase interceptor's :enter completes, BEFORE the chain's :leave fold — same observable point as today"
+  "Curators MUST remain deterministic (no LLM, no I/O) — same rule as the adjacent phase-exit-curator spec"
+  "No new public surface on the phase interface beyond the :interceptors key"]
+
+ :spec/acceptance-criteria
+ ["A phase registered with :interceptors [{:name ... :enter :leave}...] executes all :enter fns in order then all :leave fns in reverse"
+  "A phase registered with legacy flat {:enter :leave :error} keys (no :interceptors vector) still executes correctly"
+  "Throwing in the N-th interceptor's :enter runs :leave for interceptors 0..N-1 in reverse before surfacing the error"
+  "Gate validation still fires between the main interceptor's :enter and the chain's :leave fold"
+  "Existing phase_exit_slot_test assertions port cleanly to the chain shape — curator-as-last-leave preserves observable behavior"
+  "plan-curator as the second interceptor in the plan chain rejects malformed plans at the same observable boundary as the :exit slot did"
+  "Policy-pack-injected interceptors (stubbed test) can be appended to a phase's chain without modifying phase code"
+  "`poly test` green on workflow + phase-software-factory after the migration"
+  "No reference to :exit remains in components/workflow or components/phase-software-factory after GROUP 2 lands"]
+
+ :spec/priority
+ {:tier :high
+  :axes #{:correctness :dogfood-enabler}
+  :theme :dogfood-resilience
+  :rationale "Flat :exit is a band-aid. A proper chain is the substrate for every future curator, OPSV policy interceptor, and supervisory pre-flight. Landing it now means every follow-up theme (curators, policy packs, governed execution) plugs in without re-opening phase registration code."
+  :blocks ["phase-exit-curator-interceptor.spec.edn"]
+  :blocked-by []}
+
+ :spec/workflow-type :canonical-sdlc}

@@ -15,9 +15,12 @@ Make miniforge capable of running miniforge without paying for
 
 | tier | r | theme | spec | axes |
 |---|---|---|---|---|
-| blocker | ● | dogfood-resilience | `agent-stream-watchdog-and-resume.spec.edn` — Agent stream watchdog + session-resume for hang recovery | tokenconservation+dogfoodenabler |
+| blocker | ● | dogfood-resilience | `event-log-tool-visibility.spec.edn` — Event log — capture tool name / args / result on every agent tool call | observation+dogfoodenabler |
+| blocker | ● | dogfood-resilience | `planner-convergence-and-artifact-submission.spec.edn` — Planner convergence — container-promoted plan artifact + forced context-MCP usage | correctness+observation+tokenconservation+dogfoodenabler |
 | blocker | ● | dogfood-resilience | `worktree-persistence-scratch-branch.spec.edn` — Persist worktrees outside /tmp + scratch-branch commits on every write | dogfoodenabler |
+| high | ● | dogfood-resilience | `pedestal-interceptor-chain.spec.edn` — Pedestal-style interceptor chain for phase lifecycle | correctness+dogfoodenabler |
 | high | ○ | dogfood-resilience | `workflow-dependency-declarations.spec.edn` — Workflow dependency declarations — supervisor sequencing + DAG dependencies | dogfoodenabler |
+| blocker | ○ | dogfood-resilience | `agent-stream-watchdog-and-resume.spec.edn` — Agent stream watchdog + session-resume for hang recovery | tokenconservation+dogfoodenabler |
 | blocker | ○ | dogfood-resilience | `workflow-phase-checkpoint-and-resume.spec.edn` — Workflow phase checkpoint + resume | tokenconservation+dogfoodenabler |
 
 ## Theme — Multi-backend CLI parity (`multi-backend-parity`, status: planned)
