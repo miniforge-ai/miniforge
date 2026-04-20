@@ -187,37 +187,78 @@
            :blocker/message "PR is in draft"
            :blocker/source "author"})))
 
+(def factor-weights
+  "Per-factor weights for the readiness score. Must sum to 1.0."
+  {:deps-merged  0.25
+   :ci-passed    0.25
+   :approved     0.20
+   :gates-passed 0.15
+   :behind-main  0.15})
+
+(def review-score-by-status
+  "PR status → review-score in [0.0, 1.0]."
+  {:merged            1.0
+   :merge-ready       1.0
+   :approved          1.0
+   :reviewing         0.5
+   :changes-requested 0.25
+   :open              0.3
+   :draft             0.0
+   :closed            0.0})
+
+(def ^:const default-factor-score
+  "Score used for factors that aren't yet derived from real signals
+   (e.g. :deps-merged, :gates-passed in naive mode without train context)."
+  1.0)
+
+(def ^:const ci-passing-score 1.0)
+(def ^:const ci-failing-score 0.0)
+(def ^:const ci-pending-score 0.5)
+
+(defn- ci-status-score
+  "Map CI status booleans to a [0.0, 1.0] score."
+  [ci-ok? ci-fail?]
+  (cond
+    ci-ok?   ci-passing-score
+    ci-fail? ci-failing-score
+    :else    ci-pending-score))
+
+(defn- behind-status-score
+  "Map behind-main flag to a [0.0, 1.0] score."
+  [behind?]
+  (if behind? 0.0 default-factor-score))
+
+(defn- factor
+  "Build one {:factor :weight :score} entry from the weights table."
+  [factor-key score]
+  {:factor factor-key
+   :weight (get factor-weights factor-key)
+   :score  score})
+
+(defn- weighted-sum
+  "Sum each factor's :weight × :score."
+  [factors]
+  (reduce + 0.0 (map (fn [{:keys [weight score]}] (* weight score)) factors)))
+
 (defn readiness-factors
   "Compute weighted readiness factors and score.
-   Weights: deps=0.25 ci=0.25 approved=0.20 gates=0.15 behind-main=0.15.
    Deps and gates default to 1.0 in naive derivation (no train context).
    Returns {:weighted float :factors [...]
             :ci-score float :review-score float :behind-score float}."
   [status ci-ok? ci-fail? behind?]
-  (let [ci-score     (if ci-ok? 1.0 (if ci-fail? 0.0 0.5))
-        review-score (case status
-                       (:merged :merge-ready :approved) 1.0
-                       :reviewing 0.5
-                       :changes-requested 0.25
-                       :open 0.3
-                       :draft 0.0
-                       :closed 0.0
-                       0.0)
-        behind-score (if behind? 0.0 1.0)
-        weighted     (+ (* 0.25 1.0)
-                       (* 0.25 ci-score)
-                       (* 0.20 review-score)
-                       (* 0.15 1.0)
-                       (* 0.15 behind-score))]
-    {:weighted     weighted
+  (let [ci-score     (ci-status-score ci-ok? ci-fail?)
+        review-score (get review-score-by-status status 0.0)
+        behind-score (behind-status-score behind?)
+        factors      [(factor :deps-merged  default-factor-score)
+                      (factor :ci-passed    ci-score)
+                      (factor :approved     review-score)
+                      (factor :gates-passed default-factor-score)
+                      (factor :behind-main  behind-score)]]
+    {:weighted     (weighted-sum factors)
      :ci-score     ci-score
      :review-score review-score
      :behind-score behind-score
-     :factors      [{:factor :deps-merged  :weight 0.25 :score 1.0}
-                    {:factor :ci-passed    :weight 0.25 :score ci-score}
-                    {:factor :approved     :weight 0.20 :score review-score}
-                    {:factor :gates-passed :weight 0.15 :score 1.0}
-                    {:factor :behind-main  :weight 0.15 :score behind-score}]}))
+     :factors      factors}))
 
 (defn derive-readiness
   "Derive N9 readiness state from provider signals.
