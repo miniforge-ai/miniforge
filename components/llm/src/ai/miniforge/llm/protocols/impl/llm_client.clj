@@ -227,6 +227,28 @@
 ;------------------------------------------------------------------------------ Backend configurations
 ;; Named argument builders — extracted from the backends config map for clarity.
 
+(defn claude-mcp-allowlist-string
+  "Claude CLI's --allowedTools wire format.
+
+   Accepts the generic shape `mcp-allowed-tools` carries:
+   a vector of `{:mcp/server <string> :mcp/tool <string>}` maps.
+   Claude CLI expects each allowlist entry in the form
+   `mcp__<server>__<tool>`, joined with commas.
+
+   Legacy strings pass through unchanged so ad-hoc allowlists (e.g.
+   raw native-tool names) still work during the migration window."
+  [mcp-allowed-tools]
+  (->> mcp-allowed-tools
+       (mapv (fn [t]
+               (cond
+                 (string? t) t
+                 (and (map? t) (:mcp/server t) (:mcp/tool t))
+                 (str "mcp__" (:mcp/server t) "__" (:mcp/tool t))
+                 :else
+                 (throw (ex-info "Unrecognised mcp-allowed-tools entry"
+                                 {:entry t})))))
+       (str/join ",")))
+
 (defn- claude-args
   "Build CLI arguments for the Claude backend."
   [{:keys [prompt system max-tokens streaming? mcp-config mcp-allowed-tools
@@ -237,7 +259,7 @@
       streaming?                   (conj "--output-format" "stream-json")
       streaming?                   (conj "--verbose")
       mcp-config                   (into ["--mcp-config" mcp-config])
-      (seq mcp-allowed-tools)      (into ["--allowedTools" (str/join "," mcp-allowed-tools)])
+      (seq mcp-allowed-tools)      (into ["--allowedTools" (claude-mcp-allowlist-string mcp-allowed-tools)])
       (seq disallowed-tools)       (into ["--disallowedTools" (str/join "," disallowed-tools)])
       (:settings-path supervision) (into ["--settings" (:settings-path supervision)])
       system                       (into ["--system-prompt" system])

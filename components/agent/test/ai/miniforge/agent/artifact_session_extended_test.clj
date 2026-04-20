@@ -264,28 +264,26 @@
         (is (vector? result))))))
 
 ;------------------------------------------------------------------------------ Layer 2
-;; mcp-tool-names tests
+;; mcp-tools tests
 
-(deftest mcp-tool-names-test
-  (testing "uses the full mcp__<server>__<tool> form required by Claude CLI --allowedTools"
-    (is (some #{"mcp__context__context_read"} session/mcp-tool-names))
-    (is (some #{"mcp__context__context_grep"} session/mcp-tool-names))
-    (is (some #{"mcp__context__context_glob"} session/mcp-tool-names)))
+(deftest mcp-tools-test
+  (testing "carries generic, agent-CLI-agnostic server/tool data"
+    ;; Structured form is the canonical representation. Each backend
+    ;; adapter (claude/codex/cursor/…) maps it to its own wire format.
+    ;; Do NOT put backend-specific strings here.
+    (is (vector? session/mcp-tools))
+    (is (every? map? session/mcp-tools))
+    (is (every? #(and (:mcp/server %) (:mcp/tool %)) session/mcp-tools))
+    (is (every? #(= "context" (:mcp/server %)) session/mcp-tools))
+    (is (= #{"context_read" "context_grep" "context_glob"}
+           (into #{} (map :mcp/tool) session/mcp-tools))))
 
-  (testing "does NOT contain bare tool names (regression guard)"
-    ;; Bare names get every MCP call answered with
-    ;; "Claude requested permissions to use mcp__context__context_read,
-    ;;  but you haven't granted it yet." — documented cause of iters
-    ;; 5-10 planner-convergence dogfood failures.
-    (is (nil? (some #{"context_read"} session/mcp-tool-names)))
-    (is (nil? (some #{"context_grep"} session/mcp-tool-names)))
-    (is (nil? (some #{"context_glob"} session/mcp-tool-names))))
-
-  (testing "every entry is a non-empty string starting with mcp__"
-    (doseq [n session/mcp-tool-names]
-      (is (string? n))
-      (is (pos? (count n)))
-      (is (.startsWith ^String n "mcp__")))))
+  (testing "never contains backend-specific wire strings (regression guard)"
+    ;; Claude's `mcp__<server>__<tool>` form belongs in the Claude
+    ;; adapter, not here. Guard against drift that previously cost us
+    ;; six dogfood iterations.
+    (doseq [t session/mcp-tools]
+      (is (not (string? t)) "mcp-tools entries should be maps, not strings"))))
 
 ;------------------------------------------------------------------------------ Layer 3
 ;; write-claude-settings! tests

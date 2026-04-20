@@ -53,10 +53,50 @@
       (is (some #(= "/tmp/mcp.json" %) args)))))
 
 (deftest claude-args-allowed-tools-test
-  (testing "mcp-allowed-tools joins with commas"
+  (testing "legacy string allowlist joins with commas"
     (let [args ((private-fn 'claude-args) {:prompt "p" :mcp-allowed-tools ["tool1" "tool2"]})]
       (is (some #(= "--allowedTools" %) args))
-      (is (some #(= "tool1,tool2" %) args)))))
+      (is (some #(= "tool1,tool2" %) args))))
+
+  (testing "generic {:mcp/server :mcp/tool} maps format as mcp__<server>__<tool>"
+    (let [args ((private-fn 'claude-args)
+                {:prompt "p"
+                 :mcp-allowed-tools
+                 [{:mcp/server "context" :mcp/tool "context_read"}
+                  {:mcp/server "context" :mcp/tool "context_grep"}]})]
+      (is (some #(= "--allowedTools" %) args))
+      (is (some #(= "mcp__context__context_read,mcp__context__context_grep" %) args))))
+
+  (testing "mixed strings + maps are supported during migration"
+    (let [args ((private-fn 'claude-args)
+                {:prompt "p"
+                 :mcp-allowed-tools
+                 ["Write"
+                  {:mcp/server "context" :mcp/tool "context_read"}]})]
+      (is (some #(= "Write,mcp__context__context_read" %) args)))))
+
+(deftest claude-mcp-allowlist-string-test
+  (testing "map → mcp__<server>__<tool>"
+    (is (= "mcp__context__context_read"
+           (impl/claude-mcp-allowlist-string
+             [{:mcp/server "context" :mcp/tool "context_read"}]))))
+
+  (testing "multiple entries joined with commas"
+    (is (= "mcp__ctx__a,mcp__ctx__b"
+           (impl/claude-mcp-allowlist-string
+             [{:mcp/server "ctx" :mcp/tool "a"}
+              {:mcp/server "ctx" :mcp/tool "b"}]))))
+
+  (testing "string entries pass through"
+    (is (= "Write,Edit"
+           (impl/claude-mcp-allowlist-string ["Write" "Edit"]))))
+
+  (testing "throws on malformed entry"
+    (is (thrown? clojure.lang.ExceptionInfo
+          (impl/claude-mcp-allowlist-string [{:not-mcp "wrong"}]))))
+
+  (testing "empty vector produces empty string"
+    (is (= "" (impl/claude-mcp-allowlist-string [])))))
 
 (deftest claude-args-disallowed-tools-test
   (testing "disallowed-tools adds --disallowedTools"
