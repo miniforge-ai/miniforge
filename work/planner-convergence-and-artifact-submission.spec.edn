@@ -1,0 +1,193 @@
+;; =============================================================================
+;; Spec: Planner convergence — container-promoted plan artifact + context-MCP
+;;       enforcement + stop-reason visibility
+;; =============================================================================
+;;
+;; Iteration 5 evidence (workflow 59b62101, 2026-04-19, 4:11 elapsed):
+;;   - 84 planner tool calls: Read×47, Bash×21, Grep×11, Glob×3, Agent×2
+;;   - ZERO mcp__context__context_{read,grep,glob} calls — model ignored
+;;     the pre-loaded cache from the explore phase and used Claude Code's
+;;     native filesystem tools directly.
+;;   - ONE assistant text block: 85 chars at seq 136, mid-chain:
+;;     "Let me check a few specific files for precise file paths and
+;;      current implementations."
+;;     Followed by ~37 more tool calls. Never produced plan EDN.
+;;   - Final error: :llm-content-length 85, "Plan generation failed:
+;;     EDN parse did not succeed". The runtime does not capture
+;;     stop_reason — we can't tell end_turn vs max_turns vs stop_sequence.
+;;
+;; What's actually happening:
+;;   The planner has access to native Read/Bash/Grep/Glob/Agent tools,
+;;   so it uses them. It ignores the context MCP cache and ignores the
+;;   prompt's "after 15 reads STOP" guidance. It emits exactly one
+;;   assistant text block per run — early, as an exploration-intent
+;;   narration — then turn-cap terminates it mid tool chain.
+;;
+;; Prior art to respect:
+;;   - A `submit_artifact` MCP tool was previously considered and REMOVED
+;;     because agents did not reliably call it. Do not re-introduce it.
+;;   - Implementer already uses container promotion via
+;;     file-artifacts/collect-written-files — the worktree delta IS the
+;;     artifact. Same pattern applies to the planner: write plan.edn
+;;     into the worktree, runtime reads it after the LLM terminates.
+
+{:spec/title "Planner convergence — container-promoted plan artifact + forced context-MCP usage"
+
+ :spec/description
+ "Three interventions that make the planner converge. The artifact
+  submission path becomes container promotion (same model implementer
+  already uses). Context reads are forced through the MCP cache by
+  disallowing native filesystem tools. Observability gaps that kept us
+  guessing across five iterations are closed. Ordered by leverage.
+
+  GROUP 1 — Plan artifact as a worktree file (container promotion)
+  The planner writes `.miniforge/plan.edn` into the session worktree
+  using the Write tool. Runtime reads that file after the LLM
+  terminates via the same `file-artifacts/collect-written-files`
+  path the implementer uses. No submit_artifact MCP tool. No
+  text-parsing heuristics. The container (worktree delta) IS the
+  artifact; its presence and shape ARE the submission.
+
+  - components/agent/.../planner.clj: after invocation, look for
+    `<workdir>/.miniforge/plan.edn`. If present, parse and return.
+    If absent, fall through to the existing final-message EDN parser
+    (staged removal, see GROUP 4).
+  - components/agent/resources/prompts/planner.edn: replace the
+    'Option A / Option B' submission section with a single
+    directive: `Write .miniforge/plan.edn with the plan EDN as your
+    final act.` No ambiguity. One submission path.
+  - Plan shape validation (curate-plan, PR #585) still fires — it
+    already reads from :phase :result :output regardless of source.
+
+  GROUP 2 — Disallow native filesystem tools for the planner
+  The planner has no reason to call Bash. Read/Grep/Glob on the
+  filesystem bypass the explore-phase context cache entirely —
+  defeating the whole purpose of the cache. Force the convergence.
+
+  - components/agent/.../planner.clj passes
+    :disallowed-tools [\"Read\" \"Grep\" \"Glob\" \"Bash\"
+                       \"Agent\" \"WebSearch\" \"WebFetch\" \"LS\"]
+    to the LLM client. This is identical in form to tester.clj's
+    existing disallow-list — role-scoped tool allowlists are already
+    the precedent.
+  - Write stays allowed (required for GROUP 1).
+  - context_read / context_grep / context_glob MCP tools remain
+    allowed — these become the only way for the planner to inspect
+    source that was not already pre-loaded.
+  - Planner prompt is updated to stop referencing native tools; the
+    MCP context_* tools become the documented exploration path.
+
+  GROUP 2B — Cached web surface (required to disable WebSearch/WebFetch)
+  Disabling WebSearch/WebFetch without a replacement takes away a
+  legitimate capability (fetching docs, looking up APIs, reading
+  specifications). Mirror the context-MCP pattern: an MCP server
+  that provides cached web read + search with the same cache-first
+  semantics as the context file cache.
+
+  - bases/mcp-context-server (or a new bases/mcp-web-cache) gains
+    `web_fetch` + `web_search` tools. Reads go through a content-
+    addressed on-disk cache (sha256 of URL + params -> response).
+    Cache hits are free. Cache misses hit the real network and
+    populate the cache.
+  - The cache is session-scoped by default, with a knob to promote
+    entries into a long-lived workspace cache for reuse across
+    runs — critical for dogfood cost control (repeated planner
+    runs should not re-fetch the same docs N times).
+  - Planner + every other role that currently has WebSearch/WebFetch
+    (implementer, reviewer) picks up the cached MCP tools in its
+    allowlist and gets WebSearch/WebFetch disallowed the same way.
+  - This MUST land alongside GROUP 2 — disabling the native web
+    tools without the cached replacement regresses capability.
+
+  GROUP 3 — stop_reason + final-message capture (diagnostic)
+  Claude Code stream-json surfaces stop_reason on its terminal event
+  (end_turn, max_turns, stop_sequence, tool_use). Codex surfaces a
+  finish reason on turn.completed. We drop both.
+
+  - components/llm/.../llm_client.clj captures the terminal stop
+    reason + the raw final assistant message block.
+  - Runtime records them on :phase :result :meta
+    {:stop-reason :max_turns :final-message-preview \"...\"
+     :turn-count N :tool-call-count M}.
+  - runner_events.clj includes them in phase-completed on failure.
+    `mf events show <wf-id>` displays 'stop_reason max_turns' so the
+    next post-mortem does not require guessing.
+  - Diagnostic only — no behavior change. Lands with GROUP 1/2 for
+    observability of their effect.
+
+  GROUP 3B — Web cache promotion + invalidation (follow-up)
+  Session-cache of web fetches becomes long-lived once we have a
+  working session-scoped version. Document here; implement in its
+  own spec.
+
+  GROUP 4 — Remove final-message EDN parser (follow-up)
+  Once GROUP 1 lands and one dogfood iteration confirms plan.edn
+  submissions work, delete the text-parsing fallback. One submission
+  path in prod, not two. This is a separate spec — ship GROUP 1-3
+  first, confirm, then remove the fallback.
+
+  NON-GOALS
+  - Re-introducing a submit_artifact MCP tool. Already tried;
+    agents did not reliably call it. Container promotion is the
+    replacement, not a parallel path.
+  - Disabling WebSearch/WebFetch without a cached MCP replacement.
+    That would regress capability. The replacement lands in the
+    same PR as the disable (GROUP 2 + GROUP 2B ship together).
+  - Adding a forced-finalize re-prompt (\"you ran out of budget,
+    emit the plan now\"). That is a band-aid over the real bug
+    (agents over-exploring). GROUP 2 removes the exploration
+    affordances that cause the over-exploration; a re-prompt
+    would paper over the symptom rather than eliminate the cause.
+  - Changing the LLM backend default, turn cap, or max-tokens.
+    These were tuned across iterations 1-4. The bug is tool
+    access + submission shape, not budget size.
+  - Applying this pattern to implementer / verifier / reviewer /
+    releaser. Implementer already does container promotion.
+    Verifier/reviewer/releaser get their own specs when we see
+    their convergence problems — do not pre-generalize."
+
+ :spec/intent
+ {:type :feature
+  :scope ["components/agent/src"
+          "components/agent/resources/prompts/planner.edn"
+          "components/llm/src"
+          "components/event-stream/src"
+          "components/workflow-runner/src"
+          "bases/mcp-context-server/src"
+          "bases/mcp-context-server/resources"]}
+
+ :spec/constraints
+ ["Plan artifact path is `.miniforge/plan.edn` within the session worktree — stable, discoverable, colocated with other phase artifacts"
+  "File-based artifact read uses existing file-artifacts/collect-written-files path — no new snapshot mechanism"
+  "Planner disallow-list includes Read/Grep/Glob/Bash/Agent/WebSearch/WebFetch/LS; Write remains allowed for artifact emission"
+  "Role-scoped disallow-list — other agent roles keep their existing tool access (implementer needs Read/Grep, tester disallows Read, etc.)"
+  "stop_reason capture MUST be per-backend; claude + codex covered here, cursor-agent/copilot/open-codex parity deferred to multi-backend-cli-parity spec"
+  "No LLM-based self-supervision, no re-prompting, no heuristic retry. Deterministic tool allow/disallow + deterministic file read only."
+  "Final-message EDN fallback stays in place through GROUP 3; removal is GROUP 4 / follow-up spec"
+  "Pre-commit + poly check green before merge"]
+
+ :spec/acceptance-criteria
+ ["A planner run that writes `.miniforge/plan.edn` to the worktree yields the plan from that file — final-message parser is not invoked"
+  "A planner run that does NOT write `.miniforge/plan.edn` still falls back to final-message parsing (backward compat through GROUP 3)"
+  "Planner LLM invocation is launched with :disallowed-tools including \"Read\" \"Bash\" \"Grep\" \"Glob\" \"Agent\""
+  "A dogfood run shows ZERO Read/Bash/Grep/Glob/Agent/WebSearch/WebFetch tool-call events on the planner; only context_read/context_grep/context_glob + web_fetch/web_search + Write"
+  "web_fetch MCP tool returns cached content on second fetch of the same URL within a session (content-addressed hit) — no network call on the second read"
+  "web_search MCP tool returns cached results on an identical query within a session"
+  ":phase :result :meta carries :stop-reason, :final-message-preview, :turn-count, :tool-call-count after every planner invocation (success or failure)"
+  "phase-completed event on failure carries :stop-reason; `mf events show <wf-id>` displays it"
+  "Planner prompt no longer references 'Option A/Option B' — a single Write .miniforge/plan.edn directive"
+  "Unit test: parse-plan-from-worktree reads a plan.edn file and returns it; curate-plan validates it identically to final-message plans"
+  "Unit test: planner disallow-tools list is asserted in create-planner / invoke-planner-session"
+  "Integration test: a stubbed planner session that writes plan.edn yields that plan; one that only emits text yields the final-message path"
+  "Iteration 6 dogfood run against an unblocked queue spec produces a successful plan OR fails with a clearly-typed diagnostic (stop_reason surfaced, file absent, shape invalid) — no more 'mystery 85 char failure'"]
+
+ :spec/priority
+ {:tier :blocker
+  :axes #{:dogfood-enabler :token-conservation :observation :correctness}
+  :theme :dogfood-resilience
+  :rationale "Every dogfood run currently risks 4+ minutes and real tokens on a planner that wanders through native filesystem tools and terminates without an artifact. Container promotion is already the model for implementer; extending it to planner + removing the native-tool escape hatches is the single largest convergence lever we have."
+  :blocks ["pedestal-interceptor-chain.spec.edn"
+           "n07-opsv-agent-budgets.spec.edn"]
+  :blocked-by []}
+
+ :spec/workflow-type :canonical-sdlc}
