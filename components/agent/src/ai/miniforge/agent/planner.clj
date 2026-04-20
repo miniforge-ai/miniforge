@@ -395,18 +395,28 @@
                                "Use (random-uuid) for all IDs - just write #uuid \"<any-uuid>\" placeholders that I'll fill in.")]
           (if llm-client
             ;; Use the real LLM with artifact session for MCP tool support
-            (let [{:keys [llm-result artifact]}
+            (let [{:keys [llm-result artifact worktree-artifacts]}
                   (artifact-session/with-session context
                     #(invoke-planner-session % llm-client user-prompt config context on-chunk))
                   llm-response llm-result
-                  tokens (get llm-response :tokens 0)]
+                  tokens (get llm-response :tokens 0)
+                  ;; Container promotion: prefer the plan the agent wrote into
+                  ;; the worktree at .miniforge/plan.edn — that is how the
+                  ;; implementer already submits, now the planner too.
+                  ;; Fallbacks preserved so backend-specific regressions
+                  ;; don't block the migration window.
+                  worktree-plan (get worktree-artifacts :plan)]
               (log/info logger :planner :planner/llm-called
                         {:data {:success (llm/success? llm-response)
                                 :tokens tokens
-                                :streaming? (boolean on-chunk)}})
+                                :streaming? (boolean on-chunk)
+                                :plan-source (cond worktree-plan :worktree
+                                                   artifact      :mcp-artifact
+                                                   :else         :final-message)}})
               (if (llm/success? llm-response)
                 (let [content (llm/get-content llm-response)
-                      plan (or artifact
+                      plan (or worktree-plan
+                               artifact
                                (parse-plan-response content)
                                (response/throw-anomaly! :anomalies.agent/invoke-failed
                                                        "Plan generation failed: EDN parse did not succeed"
