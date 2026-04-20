@@ -1,6 +1,7 @@
 (ns ai.miniforge.data-foundry.connector-github.interface
   "Public API for the GitHub REST API connector component."
-  (:require [ai.miniforge.data-foundry.connector-github.core :as core]))
+  (:require [ai.miniforge.data-foundry.connector-github.core :as core]
+            [ai.miniforge.data-foundry.connector.interface :as conn]))
 
 (defn create-github-connector
   "Create a new GitHubConnector instance."
@@ -14,7 +15,5 @@
    :connector/version      "0.1.0"
    :connector/capabilities #{:cap/discovery :cap/incremental :cap/pagination :cap/rate-limiting}
    :connector/auth-methods #{:api-key :oauth2}
-   :connector/retry-policy {:retry/strategy       :exponential-backoff
-                            :retry/max-attempts   3
-                            :retry/base-delay-ms  1000}
+   :connector/retry-policy (conn/retry-policy :default)
    :connector/maintainer   "data-foundry"})

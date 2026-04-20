@@ -1,9 +1,10 @@
 (ns ai.miniforge.data-foundry.connector.interface
   (:require [ai.miniforge.data-foundry.connector.core :as core]
-            [ai.miniforge.data-foundry.connector.state :as state]
             [ai.miniforge.data-foundry.connector.cursor :as cursor]
             [ai.miniforge.data-foundry.connector.protocol :as protocol]
-            [ai.miniforge.data-foundry.connector.result :as result]))
+            [ai.miniforge.data-foundry.connector.result :as result]
+            [ai.miniforge.data-foundry.connector.retry :as retry]
+            [ai.miniforge.data-foundry.connector.state :as state]))
 
 ;; -- Connector Protocol --
 (def Connector protocol/Connector)
@@ -44,6 +45,17 @@
 ;; -- Connector Types --
 (def connector-types core/connector-types)
 (def connector-capabilities core/connector-capabilities)
+
+;; -- Retry Policy Presets --
+(def retry-policies
+  "Map of preset-key → retry-policy-map (loaded from EDN)."
+  retry/retry-policies)
+
+(defn retry-policy
+  "Return the retry policy preset for `policy-key` (e.g. `:default`, `:none`).
+   Throws when the key is unknown."
+  [policy-key]
+  (retry/retry-policy policy-key))
 
 ;; -- Registration --
 (defn create-connector
