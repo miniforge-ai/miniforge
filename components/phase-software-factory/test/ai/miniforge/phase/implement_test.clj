@@ -61,6 +61,24 @@
    :execution/phase-results {:plan {:result {:status :success
                                             :output mock-plan-result}}}})
 
+(defn mock-curator-success
+  "Mock for agent/curate-implement-output that returns success.
+
+   The real curator inspects the executor environment for written files;
+   tests that don't actually write files need to bypass that inspection."
+  [{:keys [implementer-result]}]
+  (response/success (:output implementer-result)
+                    {:metrics (:metrics implementer-result)}))
+
+(defn mock-curator-error
+  "Mock for agent/curate-implement-output that returns the same error
+   the implementer produced — used by tests verifying exception/error
+   propagation without coupling to the curator's no-files verdict."
+  [{:keys [implementer-result]}]
+  (let [err (:error implementer-result)]
+    (response/error (or (:message err) "Implementation failed")
+                    {:data (or (:data err) {})})))
+
 ;------------------------------------------------------------------------------ Layer 0: Defaults Tests
 
 (deftest default-config-test
@@ -99,7 +117,8 @@
   (testing "leave-implement stores environment-id in result, not serialized :code/files"
     (with-redefs [agent/create-implementer (fn [_] {:type :mock-implementer})
                   agent/invoke (fn [_ _ _]
-                                (response/success nil {:tokens 800 :duration-ms 1500}))]
+                                (response/success nil {:tokens 800 :duration-ms 1500}))
+                  agent/curate-implement-output mock-curator-success]
       (let [env-id (random-uuid)
             ctx (-> (create-base-context)
                     (assoc :execution/environment-id env-id))
@@ -139,7 +158,8 @@
   (testing "implement phase treats nil agent output as success — code is in the environment"
     (with-redefs [agent/create-implementer (fn [_] {:type :mock-implementer})
                   agent/invoke (fn [_ _ _]
-                                (response/success nil {:tokens 200 :duration-ms 500}))]
+                                (response/success nil {:tokens 200 :duration-ms 500}))
+                  agent/curate-implement-output mock-curator-success]
       (let [ctx (create-base-context)
             ctx-with-config (assoc ctx :phase-config {:phase :implement})
             interceptor (registry/get-phase-interceptor {:phase :implement})
@@ -156,19 +176,22 @@
     (with-redefs [agent/create-implementer (fn [_] {:type :mock-implementer})
                   agent/invoke (fn [_ _ _]
                                 (throw (ex-info "Implementation failed"
-                                               {:reason :llm-timeout})))]
+                                               {:reason :llm-timeout})))
+                  agent/curate-implement-output mock-curator-error]
       (let [ctx (create-base-context)
             ctx-with-config (assoc ctx :phase-config {:phase :implement})
             interceptor (registry/get-phase-interceptor {:phase :implement})
             result ((:enter interceptor) ctx-with-config)]
         
+        ;; impl-result wins because curator's mock doesn't set :curator/no-files-written
+        ;; terminal code, so the cond falls through to (not (succeeded? impl-result)).
         (is (= false (get-in result [:phase :result :success]))
-            "Result should indicate failure")
-        
+            "Result should indicate failure (response/failure shape from caught exception)")
+
         (is (some? (get-in result [:phase :result :error]))
             "Error should be captured in result")
-        
-        (is (= "Implementation failed" 
+
+        (is (= "Implementation failed"
                (get-in result [:phase :result :error :message]))
             "Error message should be preserved")))))
 
@@ -179,7 +202,8 @@
     (with-redefs [agent/create-implementer (fn [_] {:type :mock-implementer})
                   agent/invoke (fn [_ _ _]
                                 (response/success mock-code-artifact
-                                                {:tokens 1500 :duration-ms 3000}))]
+                                                {:tokens 1500 :duration-ms 3000}))
+                  agent/curate-implement-output mock-curator-success]
       (let [ctx (create-base-context)
             ctx-with-config (assoc ctx :phase-config {:phase :implement})
             interceptor (registry/get-phase-interceptor {:phase :implement})

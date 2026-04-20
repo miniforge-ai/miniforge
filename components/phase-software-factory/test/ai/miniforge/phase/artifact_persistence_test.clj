@@ -87,6 +87,21 @@
     (assoc-in updated-ctx [:execution/phase-results phase-name]
               (:phase updated-ctx))))
 
+(defn mock-curator-success
+  "Curator mock that returns success, mirroring the implementer's output/metrics.
+   Used when tests don't need the curator's no-files-written behavior."
+  [{:keys [implementer-result]}]
+  (response/success (:output implementer-result)
+                    {:metrics (:metrics implementer-result)}))
+
+(defn mock-curator-error
+  "Curator mock that returns the same error the implementer produced.
+   Used by tests verifying retry/budget logic on agent errors."
+  [{:keys [implementer-result]}]
+  (let [err (:error implementer-result)]
+    (response/error (or (:message err) "Mock curator error")
+                    {:data (or (:data err) {})})))
+
 ;------------------------------------------------------------------------------ Tests
 
 (deftest test-verify-fails-without-environment
@@ -133,7 +148,8 @@
                                          file (io/file worktree-path "src/feature.clj")]
                                      (io/make-parents file)
                                      (spit file "(ns feature)\n(defn new-feature [] :implemented)"))
-                                   (response/success nil {:tokens 1000 :duration-ms 2000}))]
+                                   (response/success nil {:tokens 1000 :duration-ms 2000}))
+                    agent/curate-implement-output mock-curator-success]
         (let [ctx (-> (create-base-context)
                       (assoc :execution/environment-id env-id))
               ctx-entered (execute-phase-enter :implement ctx)
@@ -158,7 +174,11 @@
     (with-redefs [agent/create-implementer (fn [_] {:type :mock-implementer})
                   agent/invoke (fn [_ _ _]
                                  ;; Simulate agent returning error status
-                                 (response/error "LLM timeout" {:tokens 0 :duration-ms 5000}))]
+                                 (response/error "LLM timeout" {:tokens 0 :duration-ms 5000}))
+                  ;; Curator mirrors implementer's error WITHOUT the
+                  ;; :curator/no-files-written terminal code, so the retry
+                  ;; budget logic governs status — not the curator's verdict.
+                  agent/curate-implement-output mock-curator-error]
       (let [ctx (create-base-context)
             ctx-entered (execute-phase-enter :implement ctx)
             ctx-left (execute-phase-leave :implement ctx-entered)]
@@ -171,7 +191,8 @@
   (testing "leave-implement fails when agent returns :error and budget exhausted"
     (with-redefs [agent/create-implementer (fn [_] {:type :mock-implementer})
                   agent/invoke (fn [_ _ _]
-                                 (response/error "LLM timeout" {:tokens 0 :duration-ms 5000}))]
+                                 (response/error "LLM timeout" {:tokens 0 :duration-ms 5000}))
+                  agent/curate-implement-output mock-curator-error]
       (let [ctx (-> (create-base-context)
                     (assoc-in [:phase :iterations] 8)) ;; At max budget (iterations=8)
             ctx-entered (execute-phase-enter :implement ctx)
