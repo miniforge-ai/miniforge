@@ -184,7 +184,8 @@
                        "components/bb-test-runner/src"
                        "components/bb-config/src"
                        "components/bb-generate-icon/src"
-                       "components/bb-r2/src"]
+                       "components/bb-r2/src"
+                       "components/bb-data-plane-http/src"]
          :extra-deps {ai.miniforge/schema {:local/root "components/schema"}
                       ai.miniforge/config {:local/root "components/config"}
                       ai.miniforge/lsp-mcp-bridge {:local/root "bases/lsp-mcp-bridge"}
@@ -286,7 +287,8 @@
                      ai.miniforge/bb-test-runner   {:local/root "components/bb-test-runner"}
                      ai.miniforge/bb-config        {:local/root "components/bb-config"}
                      ai.miniforge/bb-generate-icon {:local/root "components/bb-generate-icon"}
-                     ai.miniforge/bb-r2            {:local/root "components/bb-r2"}}}
+                     ai.miniforge/bb-r2            {:local/root "components/bb-r2"}
+                     ai.miniforge/bb-data-plane-http {:local/root "components/bb-data-plane-http"}}}
 
   :test {:extra-paths ["development/test"
                        "components/schema/test"
@@ -394,7 +396,8 @@
                        "components/bb-test-runner/test"
                        "components/bb-config/test"
                        "components/bb-generate-icon/test"
-                       "components/bb-r2/test"]
+                       "components/bb-r2/test"
+                       "components/bb-data-plane-http/test"]
          :extra-deps {ai.miniforge/schema {:local/root "components/schema"}
                       ai.miniforge/config {:local/root "components/config"}
                       ai.miniforge/algorithms {:local/root "components/algorithms"}
@@ -465,7 +468,8 @@
                       ai.miniforge/bb-test-runner   {:local/root "components/bb-test-runner"}
                       ai.miniforge/bb-config        {:local/root "components/bb-config"}
                       ai.miniforge/bb-generate-icon {:local/root "components/bb-generate-icon"}
-                      ai.miniforge/bb-r2            {:local/root "components/bb-r2"}}}
+                      ai.miniforge/bb-r2            {:local/root "components/bb-r2"}
+                      ai.miniforge/bb-data-plane-http {:local/root "components/bb-data-plane-http"}}}
 
   :conformance {:extra-paths ["development/test"
                               "tests/conformance"
