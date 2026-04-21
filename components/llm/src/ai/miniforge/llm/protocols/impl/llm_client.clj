@@ -546,7 +546,11 @@
         ;; and the 60s cap tripped on ordinary thinking time). The
         ;; progress-monitor's stagnation-threshold (120s) is separately
         ;; the upper bound on activity silence.
-        line-timeout-ms 180000]
+        line-timeout-ms 180000
+        dump-path (System/getenv "MF_STREAM_DUMP")
+        dump-writer (when dump-path
+                      (java.io.PrintWriter.
+                        (java.io.FileWriter. dump-path true)))]
     (loop []
       (if-let [t (pm/check-timeout monitor)]
         ;; Progress-monitor timeout (stagnation or total-max)
@@ -554,6 +558,7 @@
         (if-let [line (read-line-with-timeout out-reader line-timeout-ms)]
           (do (swap! out-lines conj line)
               (pm/record-chunk! monitor line)
+              (when dump-writer (.println dump-writer line) (.flush dump-writer))
               (on-line line)
               (recur))
           ;; Line-timeout: reader produced nothing for line-timeout-ms.
@@ -566,6 +571,7 @@
                    :message (str "No stream output for " line-timeout-ms "ms")
                    :elapsed-ms line-timeout-ms
                    :stats {:lines-read (count @out-lines)}}))))
+    (when dump-writer (.close dump-writer))
     {:lines @out-lines
      :timeout @timeout-reason}))
 
