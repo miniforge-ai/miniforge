@@ -1,0 +1,175 @@
+;; =============================================================================
+;; Spec: Tech registry fills out install instructions; doctor gates mf run
+;; =============================================================================
+;;
+;; Iter 22 of the planner-convergence dogfood (workflow 380b23b3) surfaced
+;; that the implementer writes a new Polylith component, `verify` passes,
+;; then release fails at `git commit` because the host pre-commit hook
+;; runs tests that can't find the new (unregistered) component. The deeper
+;; issue isn't the implementer's oversight — it's that miniforge tooling
+;; like `poly`, `clj-kondo`, etc. are assumed present without ever being
+;; checked, and repo-specific validation gates diverge between phases.
+;;
+;; Existing infrastructure already covers most of this, and the delta is
+;; small:
+;;
+;;   - `bases/cli/resources/config/cli/tech-fingerprints.edn` declares
+;;     each tech (extensions, markers, linter `:command` + `:check-cmd`).
+;;   - `bases/cli/.../repo_analyzer.clj` scans a repo + writes
+;;     `.miniforge/config.edn` with detected techs + selected packs.
+;;   - `mf init` runs the analyzer.
+;;   - `mf doctor` exists (currently checks auth / config file).
+;;
+;; What's missing: install instructions per tool/platform, version pins,
+;; a required-vs-optional flag per tool, and `mf doctor` consuming the
+;; declared tech list to block `mf run` when required tools aren't
+;; installed.
+
+{:spec/title "Tech-registry-driven runtime bootstrap — repo-scoped, print-don't-install"
+
+ :spec/description
+ "Fill out the existing tech registry with install metadata and pin
+  versions; teach `mf doctor` to run against the declared tech stacks
+  from `.miniforge/config.edn` and block `mf run` when any REQUIRED
+  tool for a declared stack is missing or version-mismatched.
+
+  Print-don't-install is the v1 UX — output a clean, copy-pasteable
+  install command per missing tool, per detected OS. Interactive
+  auto-install waits for a follow-up spec once the detection + gating
+  path is solid.
+
+  GROUP 1 — Extend the tech-fingerprint schema
+  Each `:tech/linter` entry gets a richer `:tech/tools` vector,
+  where each tool carries:
+    {:tool/name :poly
+     :tool/required? true                   ;; hard-blocks when missing
+     :tool/check-cmd [\"poly\" \"version\"]
+     :tool/version-predicate :tech-version/poly-0-2-26-plus
+     :tool/install
+       {:macos/brew   \"polyfy/polylith/poly\"
+        :linux/apt    nil                   ;; no apt package; source-build
+        :source       \"https://github.com/polyfy/polylith#install\"}}
+  `:tech/linter` stays for back-compat; the richer `:tech/tools` is
+  additive. We start by filling in clojure, polylith, rust, node,
+  python; others fill in over time.
+
+  GROUP 1B — Version-predicate component
+  Version-check logic lives in a dedicated component so users can
+  add their own predicates without forking the CLI base.
+    components/tech-version-predicates/
+    ├── deps.edn
+    ├── resources/
+    └── src/ai/miniforge/tech_version_predicates/
+        ├── interface.clj    (register!, registered, validate)
+        ├── core.clj         (built-in predicates)
+        └── registry.clj     (keyword → predicate map)
+  Each predicate is `(fn [^String version-string] -> boolean)`.
+  Built-ins ship for the common cases (semver-min, exact-version,
+  substring-match); users register their own via
+  `(tech-version-predicates/register! :tech-version/my-thing pred)`
+  from consumer code. The registry is an atom keyed by the
+  namespaced keyword that appears in `:tool/version-predicate`.
+
+  Docstring in interface.clj covers: how to register a new
+  predicate, the function contract, how to reference it from
+  `tech-fingerprints.edn`. README for the component mirrors the
+  docstring so `poly doc` / Polylith bricks-listing discovers it.
+
+  GROUP 2 — Doctor reads the declared stacks + checks tools
+  - `.miniforge/config.edn` already carries `:detected-techs` (the
+    output of `repo-analyzer/detect`). Doctor uses it as the
+    source of truth.
+  - For each declared tech, collect its `:tech/tools` vector from
+    the registry, run each `:tool/check-cmd`, parse the output
+    for a version string.
+  - Produce a structured report:
+      {:missing [{:tech :polylith :tool :poly
+                  :install {:macos/brew \"polyfy/polylith/poly\"
+                            :source \"...\"}}]
+       :version-mismatch [...]
+       :ok [...]}
+  - `mf doctor` formats the report for humans with platform-
+    specific install commands.
+
+  GROUP 3 — `mf run` calls doctor at start
+  - New helper `doctor/check!` returns `{:ok? :missing :mismatched}`.
+    `mf run` invokes it before any workflow setup.
+  - If any `:tool/required?` tool is missing for a DECLARED stack,
+    `mf run` fails fast with the structured install-instruction
+    output and a non-zero exit. No workflow starts.
+  - Optional tools (recommended, not required) warn but don't block.
+  - An override flag (`--skip-tool-check`) exists for power users
+    who know what they're doing; defaults off.
+
+  GROUP 4 — Starting set of tools with install metadata
+  Fill in :tech/tools for the techs we actually exercise today:
+    :clojure   → clj-kondo (optional), clojure CLI (required)
+    :polylith  → poly (required)
+    :rust      → cargo (required), rustc (required), clippy (optional)
+    :node      → node (required), npm (required)
+    :python    → python3 (required), ruff (optional)
+    :bash      → shellcheck (optional)
+    :markdown  → markdownlint (optional)
+  Others get stubbed with :tech/tools [] for now — adding them
+  later is a small additive change.
+
+  NON-GOALS
+  - Auto-install. A tool-installing binary has to earn trust
+    (privilege escalation, package-manager choice, rollback). Ships
+    later as `mf setup --install-missing` behind an explicit flag.
+  - Forcing miniforge's own tools (poly, clj-kondo) as distribution
+    dependencies. Brew-installing Clojure tooling on a user who only
+    runs miniforge in Rust repos is wrong. Tech-stack scoping keeps
+    the dependency list honest.
+  - Spec-level `:spec/requires-tools`. The tech registry is the
+    right home; a per-spec additional-tools layer is YAGNI until a
+    spec actually needs one.
+  - Checking tools that aren't on a declared stack. A Rust repo
+    doesn't care that `poly` is missing.
+  - Host git-hook execution. Separate concern — can land after
+    this spec if still relevant post-tech-gating."
+
+ :spec/intent
+ {:type :feature
+  :scope ["bases/cli/resources/config/cli/tech-fingerprints.edn"
+          "bases/cli/src/ai/miniforge/cli/repo_analyzer.clj"
+          "bases/cli/src/ai/miniforge/cli/main/commands/init.clj"
+          "bases/cli/src/ai/miniforge/cli/main.clj"
+          "bases/cli/src/ai/miniforge/cli/doctor.clj"
+          "components/tech-version-predicates/src"
+          "components/tech-version-predicates/test"
+          "components/tech-version-predicates/resources"]}
+
+ :spec/constraints
+ ["Schema changes to tech-fingerprints.edn MUST be additive — existing :tech/linter consumers keep working"
+  "Tool version parsing MUST handle the 'missing' case (tool not on PATH) without throwing — return a structured :not-found result"
+  "Detection is per-declared-stack; a tool in the registry but NOT in any declared stack MUST NOT be checked"
+  "`mf run --skip-tool-check` MUST exist as an escape hatch for users who know what they're doing"
+  "`mf doctor` MUST work offline — no network calls for version lookups, tool manifests, etc."
+  "Install-command output MUST match the detected OS — don't print `brew install …` to a Linux user"
+  "Missing REQUIRED tools block `mf run`; missing OPTIONAL tools warn but proceed"
+  "Version predicates live in one component (`tech-version-predicates`) so they can be registered/discovered/documented in one place — no scattered version logic per fingerprint entry"
+  "A fingerprint referencing an unregistered `:tool/version-predicate` MUST fail loudly at registry-load time, not silently at check time"]
+
+ :spec/acceptance-criteria
+ ["Running `mf doctor` in this repo without poly installed produces a structured 'missing' report naming poly + its brew install command"
+  "Running `mf run <spec>` with a required tool missing exits non-zero with an install-commands summary and starts no workflow"
+  "Running `mf run <spec>` with only OPTIONAL tools missing prints warnings and proceeds"
+  "Running `mf doctor` in a pure Rust repo does NOT report poly as missing"
+  "Adding a new tech to tech-fingerprints.edn with `:tech/tools [...]` filled in takes effect without any code change"
+  "Version-mismatch (installed < required minimum) is reported distinctly from 'missing'"
+  "`mf doctor` output in CI-friendly mode (`--format json`) is a stable, parseable shape"
+  "`tech-version-predicates/register!` accepts a keyword + predicate fn and makes it available for fingerprint references without a restart"
+  "Referencing an unregistered predicate in `tech-fingerprints.edn` fails at analyzer-load time with a clear message naming the predicate + tech"
+  "The tech-version-predicates component has a README (or interface docstring) explaining how to add a new predicate, with at least one worked example"
+  "Iter N dogfood of this spec converges — the workflow fails fast at `mf run` when poly isn't installed, not 10 minutes later at release"]
+
+ :spec/priority
+ {:tier :high
+  :axes #{:dogfood-enabler :correctness :ux}
+  :theme :dogfood-resilience
+  :rationale "Iter 22 receipt: implementer wrote 10 files, phases progressed, release failed on the host hook because poly scaffolding conventions weren't observed (deps.edn unwired). Gating `mf run` on declared-stack tool presence makes that class of failure fail at the front door with actionable output instead of 20 minutes into the run. Small delta — existing tech-fingerprints.edn + repo-analyzer + init command already carry most of the shape; this spec fills in install metadata + wires doctor to consume it."
+  :blocks []
+  :blocked-by []}
+
+ :spec/workflow-type :canonical-sdlc}
