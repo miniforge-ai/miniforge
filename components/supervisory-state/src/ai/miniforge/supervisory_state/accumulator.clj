@@ -274,6 +274,87 @@
     (assoc-in table [:prs k] scored)))
 
 ;------------------------------------------------------------------------------ Layer 1
+;; TaskNode handlers (N5-δ3 §2.3, §3.3)
+
+(def status->kanban-column
+  "Maps :task/status keywords to the closed six-column Kanban set per
+   N5-δ3 §2.3. Unknown statuses fall back to :blocked so they surface
+   visibly rather than silently dropping into :done."
+  {:pending         :blocked   ; conservative — producer emits :ready when deps clear
+   :ready           :ready
+   :running         :active
+   :ci-running      :active
+   :review-pending  :in-review
+   :ready-to-merge  :merging
+   :merging         :merging
+   :merged          :done
+   :completed       :done
+   :failed          :done
+   :skipped         :done
+   :cancelled       :done})
+
+(defn- task-kanban-column
+  "Derive the Kanban column from a task status per N5-δ3 §2.3. Unknown
+   statuses default to :blocked."
+  [status]
+  (get status->kanban-column status :blocked))
+
+(defn- task-merge-state
+  "Merge a status transition into the task entry at `existing`. Keeps
+   timestamps monotonic: :started-at captured on first entry to an active
+   column, :completed-at captured on first entry to :done. `:elapsed-ms`
+   is recomputed from `:started-at` on every update."
+  [existing new-status ^java.util.Date now-inst]
+  (let [column        (task-kanban-column new-status)
+        started-at    (or (:task/started-at existing)
+                          (when (= column :active) now-inst))
+        completed-at  (or (:task/completed-at existing)
+                          (when (= column :done) now-inst))
+        elapsed-ms    (when started-at
+                        (- (.getTime ^java.util.Date (or completed-at now-inst))
+                           (.getTime ^java.util.Date started-at)))]
+    (cond-> (assoc existing
+                   :task/status       new-status
+                   :task/kanban-column column)
+      started-at   (assoc :task/started-at started-at)
+      completed-at (assoc :task/completed-at completed-at)
+      elapsed-ms   (assoc :task/elapsed-ms elapsed-ms))))
+
+(defn task-state-changed
+  "Handler for `:task/state-changed` (N3 §3 dag lifecycle). Produces or
+   updates a TaskNode entry keyed by `:task/id`. Description / deps /
+   type are populated opportunistically from `:task/context` when the
+   DAG scheduler includes them; otherwise left absent and filled by
+   later events.
+
+   Per N5-δ3 §3.3: dependency resolution is the scheduler's concern —
+   the accumulator trusts the `:task/to-state` it receives rather than
+   recomputing blocked-vs-ready locally. `:pending` stays in `:blocked`
+   until the scheduler emits `:ready`."
+  [table {:task/keys [id to-state context] workflow-id :workflow/id :as event}]
+  (let [task-id      id
+        wf-id        workflow-id
+        status       (or to-state :pending)
+        now-inst     (event-instant event)
+        existing     (get-in table [:tasks task-id]
+                             {:task/id              task-id
+                              :task/workflow-run-id wf-id
+                              :task/description     ""})
+        ;; Context fields from the scheduler are optional; merge any we see.
+        ctx-fields   (cond-> {}
+                       (:description context)     (assoc :task/description     (:description context))
+                       (:type context)            (assoc :task/type            (:type context))
+                       (:component context)       (assoc :task/component       (:component context))
+                       (:dependencies context)    (assoc :task/dependencies    (vec (:dependencies context)))
+                       (:dependents context)      (assoc :task/dependents      (vec (:dependents context)))
+                       (:exclusive-files? context) (assoc :task/exclusive-files? (:exclusive-files? context))
+                       (:stratum? context)        (assoc :task/stratum?        (:stratum? context)))
+        merged       (-> (merge existing ctx-fields)
+                         (task-merge-state status now-inst))]
+    (cond-> table
+      task-id (assoc-in [:tasks task-id] merged))))
+
+;------------------------------------------------------------------------------ Layer 1
 ;; PolicyEvaluation handlers
 
 (defn- normalize-violation
@@ -341,6 +422,12 @@
     (cond-> table
       entity (assoc-in [:attention (:attention/id entity)] entity))))
 
+(defn supervisory-task-node-upserted
+  [table event]
+  (let [entity (:supervisory/entity event)]
+    (cond-> table
+      entity (assoc-in [:tasks (:task/id entity)] entity))))
+
 ;------------------------------------------------------------------------------ Layer 3
 ;; Dispatch table — events not listed are no-ops at the entity-state level
 
@@ -360,12 +447,14 @@
    :pr/merged                              pr-merged
    :pr/closed                              pr-closed
    :pr/scored                              pr-scored
+   :task/state-changed                     task-state-changed
    :gate/passed                            gate-passed
    :gate/failed                            gate-failed
    ;; Snapshot events (used during replay)
    :supervisory/workflow-upserted          supervisory-workflow-upserted
    :supervisory/agent-upserted             supervisory-agent-upserted
    :supervisory/pr-upserted                supervisory-pr-upserted
+   :supervisory/task-node-upserted         supervisory-task-node-upserted
    :supervisory/policy-evaluated           supervisory-policy-evaluated
    :supervisory/attention-derived          supervisory-attention-derived})
 

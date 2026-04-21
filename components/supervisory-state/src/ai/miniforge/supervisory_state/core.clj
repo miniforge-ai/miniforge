@@ -96,7 +96,8 @@
                :supervisory/agent-upserted
                :supervisory/pr-upserted
                :supervisory/policy-evaluated
-               :supervisory/attention-derived}
+               :supervisory/attention-derived
+               :supervisory/task-node-upserted}
              (:event/type event))
     (swap! component tick event)))
 

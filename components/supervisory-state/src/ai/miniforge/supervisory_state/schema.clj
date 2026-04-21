@@ -78,6 +78,11 @@
    the keyword verbatim."
   [:merge :approve :review :remediate :decompose :wait :escalate])
 
+(def task-kanban-columns
+  "Closed six-column set for the DAG Kanban view (N5 §3.2.5 / N5-δ3 §2.3).
+   This is a display contract: adding a column breaks consumers."
+  [:blocked :ready :active :in-review :merging :done])
+
 ;------------------------------------------------------------------------------ Layer 0a
 ;; Registry extensions for supervisory v1
 
@@ -123,7 +128,14 @@
    ;; PR scoring (N5-delta-2 §2)
    :risk/level                   (into [:enum] risk-levels)
    :policy/overall               (into [:enum] policy-overall-states)
-   :pr/recommendation            (into [:enum] pr-recommendations)})
+   :pr/recommendation            (into [:enum] pr-recommendations)
+
+   ;; TaskNode (N5-delta-3 §2.3). `:task/status` is intentionally OPEN
+   ;; — the DAG state-profile system lets workflow families add statuses
+   ;; without a spec bump. `:task/kanban-column` is closed: it is the
+   ;; display contract for §3.2.5.
+   :task/id                      :id/uuid
+   :task/kanban-column           (into [:enum] task-kanban-columns)})
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Entity schemas — open maps, mirror N5-delta-1 §3.1
@@ -294,6 +306,30 @@
    [:attention/derived-at :common/timestamp]
    [:attention/resolved? boolean?]])
 
+(def TaskNode
+  "A single DAG task observable in the Kanban view (N5 §3.2.5 / N5-δ3 §2.3).
+
+   `:task/status` is an OPEN keyword — workflow families may add their own
+   statuses via the DAG state-profile system. `:task/kanban-column` is the
+   closed display contract derived from status + dependency resolution per
+   N5-δ3 §2.3's status→column table; unknown statuses fall back to
+   `:blocked` so they surface visibly."
+  [:map {:registry registry}
+   [:task/id :task/id]
+   [:task/workflow-run-id :id/uuid]
+   [:task/description string?]
+   [:task/type {:optional true} [:maybe keyword?]]
+   [:task/component {:optional true} [:maybe string?]]
+   [:task/status keyword?]
+   [:task/kanban-column :task/kanban-column]
+   [:task/dependencies {:optional true} [:vector :id/uuid]]
+   [:task/dependents   {:optional true} [:vector :id/uuid]]
+   [:task/started-at   {:optional true} [:maybe :common/timestamp]]
+   [:task/completed-at {:optional true} [:maybe :common/timestamp]]
+   [:task/elapsed-ms   {:optional true} [:maybe :common/non-neg-int]]
+   [:task/exclusive-files? {:optional true} boolean?]
+   [:task/stratum?         {:optional true} boolean?]])
+
 ;------------------------------------------------------------------------------ Layer 2
 ;; Component-internal entity table
 
@@ -304,7 +340,8 @@
    [:agents        [:map-of :id/uuid AgentSession]]
    [:prs           [:map-of [:tuple string? :common/non-neg-int] PrFleetEntry]]
    [:policy-evals  [:map-of :id/uuid PolicyEvaluation]]
-   [:attention     [:map-of :id/uuid AttentionItem]]])
+   [:attention     [:map-of :id/uuid AttentionItem]]
+   [:tasks         [:map-of :id/uuid TaskNode]]])
 
 (def empty-table
   "Initial empty entity table."
@@ -312,4 +349,5 @@
    :agents {}
    :prs {}
    :policy-evals {}
-   :attention {}})
+   :attention {}
+   :tasks {}})
