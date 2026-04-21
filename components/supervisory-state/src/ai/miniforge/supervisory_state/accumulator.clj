@@ -28,6 +28,8 @@
    This namespace knows nothing about emission, persistence, or threading.
    It is a pure function from an event-stream prefix to an EntityTable."
   (:require
+   [clojure.edn :as edn]
+   [clojure.java.io :as io]
    [clojure.string :as str]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -276,28 +278,34 @@
 ;------------------------------------------------------------------------------ Layer 1
 ;; TaskNode handlers (N5-δ3 §2.3, §3.3)
 
-(def status->kanban-column
-  "Maps :task/status keywords to the closed six-column Kanban set per
-   N5-δ3 §2.3. Unknown statuses fall back to :blocked so they surface
-   visibly rather than silently dropping into :done."
-  {:pending         :blocked   ; conservative — producer emits :ready when deps clear
-   :ready           :ready
-   :running         :active
-   :ci-running      :active
-   :review-pending  :in-review
-   :ready-to-merge  :merging
-   :merging         :merging
-   :merged          :done
-   :completed       :done
-   :failed          :done
-   :skipped         :done
-   :cancelled       :done})
+(def task-kanban-mapping-resource
+  "Classpath location of the EDN mapping from :task/status to the closed
+   six-column Kanban set. Config is data — editing the EDN lets operators
+   adjust the status→column projection without code changes."
+  "config/supervisory-state/task-kanban-mapping.edn")
+
+(defn load-task-kanban-mapping
+  "Read the status→column map from [[task-kanban-mapping-resource]].
+   Throws if the resource is missing — the file ships with the component,
+   so its absence indicates a packaging bug worth failing fast on."
+  []
+  (if-let [r (io/resource task-kanban-mapping-resource)]
+    (edn/read-string (slurp r))
+    (throw (ex-info "supervisory-state: task-kanban mapping resource missing"
+                    {:resource task-kanban-mapping-resource}))))
+
+(def ^{:doc "Memoized status→column map loaded lazily from
+  [[task-kanban-mapping-resource]]. Tests that need to exercise a
+  different mapping `with-redefs` this var."}
+  status->kanban-column
+  (delay (load-task-kanban-mapping)))
 
 (defn- task-kanban-column
   "Derive the Kanban column from a task status per N5-δ3 §2.3. Unknown
-   statuses default to :blocked."
+   statuses default to :blocked so new state-profile values surface
+   visibly rather than silently landing in :done."
   [status]
-  (get status->kanban-column status :blocked))
+  (get @status->kanban-column status :blocked))
 
 (defn- task-merge-state
   "Merge a status transition into the task entry at `existing`. Keeps

@@ -1,0 +1,23 @@
+;; Maps :task/status keywords to the closed six-column Kanban column set
+;; per N5-δ3 §2.3 (DAG Kanban display contract).
+;;
+;; Any status not present here falls back to :blocked at lookup time — new
+;; state-profile statuses surface visibly rather than silently landing in
+;; :done.
+;;
+;; `:pending` maps to :blocked rather than :ready because the DAG
+;; scheduler is the authority on dependency resolution — it emits
+;; `:ready` when deps clear, so supervisory-state does not need to
+;; recompute blocked-vs-ready locally.
+{:pending         :blocked
+ :ready           :ready
+ :running         :active
+ :ci-running      :active
+ :review-pending  :in-review
+ :ready-to-merge  :merging
+ :merging         :merging
+ :merged          :done
+ :completed       :done
+ :failed          :done
+ :skipped         :done
+ :cancelled       :done}

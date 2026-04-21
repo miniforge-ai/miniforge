@@ -275,6 +275,14 @@
           (str "status " status " should map to column " column
                ", got " (:task/kanban-column task))))))
 
+(deftest task-kanban-mapping-is-loaded-from-edn-not-compiled-in
+  (testing "status→column mapping is data, not a compiled-in literal"
+    (let [m (acc/load-task-kanban-mapping)]
+      (is (map? m))
+      (is (= :blocked (get m :pending)))
+      (is (= :active  (get m :running)))
+      (is (= :done    (get m :completed))))))
+
 (deftest task-unknown-status-falls-back-to-blocked
   (let [tid   (random-uuid)
         table (acc/apply-event schema/empty-table
