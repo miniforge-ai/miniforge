@@ -533,7 +533,13 @@
 (defn process-stream-lines [out-reader monitor on-line]
   (let [out-lines (atom [])
         timeout-reason (atom nil)
-        line-timeout-ms 60000]
+        ;; 180s — Opus 4.6 can be silent for 60-90s while reasoning
+        ;; between tool-call batches (observed iter 14: 20 tool calls,
+        ;; 0 text chunks, stream went quiet after the 20th tool result
+        ;; and the 60s cap tripped on ordinary thinking time). The
+        ;; progress-monitor's stagnation-threshold (120s) is separately
+        ;; the upper bound on activity silence.
+        line-timeout-ms 180000]
     (loop []
       (if-let [t (pm/check-timeout monitor)]
         ;; Progress-monitor timeout (stagnation or total-max)
