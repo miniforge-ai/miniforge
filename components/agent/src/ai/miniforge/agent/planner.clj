@@ -482,10 +482,21 @@
                                                          :tokens tokens}
                                                   stop-reason (assoc :stop-reason stop-reason)
                                                   num-turns   (assoc :num-turns num-turns))})))
-                ;; LLM call failed — no silent fallback
-                (let [error-msg (or (:message (llm/get-error llm-response))
-                                    "LLM call failed")]
-                  (response/error error-msg))))
+                ;; LLM call failed — preserve the full llm-error shape
+                ;; into :data so the phase-completed event carries
+                ;; :type (e.g. "cli_error" / "adaptive_timeout"),
+                ;; :stderr / :stdout / :timeout / :exit-code for
+                ;; post-mortem. Iters 11-12 lost this context and
+                ;; produced undiagnosable \"Unknown error\" / bare
+                ;; \"Process timed out\" phase errors.
+                (let [llm-err (llm/get-error llm-response)
+                      error-msg (or (:message llm-err) "LLM call failed")
+                      stop-reason (:stop-reason llm-response)
+                      num-turns   (:num-turns llm-response)]
+                  (response/error error-msg
+                                  {:data (cond-> (or llm-err {})
+                                           stop-reason (assoc :stop-reason stop-reason)
+                                           num-turns   (assoc :num-turns num-turns))}))))
                ;; No LLM client — hard failure
             (response/throw-anomaly! :anomalies.agent/llm-error
                                     "No LLM backend provided for planner agent"
