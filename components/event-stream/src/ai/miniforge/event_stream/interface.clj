@@ -41,6 +41,7 @@
 (def cancelled? control-state/cancelled?)
 
 (def create-event-stream stream/create-event-stream)
+(def create-envelope stream/create-envelope)
 (def publish! stream/publish!)
 (def subscribe! stream/subscribe!)
 (def unsubscribe! stream/unsubscribe!)
