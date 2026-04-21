@@ -17,182 +17,102 @@
 ;; limitations under the License.
 
 (ns ai.miniforge.cli.main.commands.resume
-  "Resume a workflow from its last checkpoint using event files."
+  "CLI adapter for workflow resume.
+
+   Domain logic lives in the `workflow-resume` component — this
+   namespace is the thin CLI shell: parses args, wires runtime
+   (event-stream, supervisory, LLM client), prints progress, invokes
+   `run-pipeline` on the trimmed workflow.
+
+   Exposed both as `mf resume <id>` (first-class subcommand) and
+   — for backward compatibility — via the `--resume <id>` flag on
+   `mf run`."
   (:require
-   [babashka.fs :as fs]
-   [clojure.edn :as edn]
    [clojure.string :as str]
    [ai.miniforge.cli.app-config :as app-config]
    [ai.miniforge.cli.main.display :as display]
+   [ai.miniforge.cli.messages :as messages]
    [ai.miniforge.cli.workflow-selection-config :as selection-config]
    [ai.miniforge.cli.workflow-runner.context :as context]
    [ai.miniforge.cli.workflow-runner.dashboard :as dashboard]
    [ai.miniforge.event-stream.interface :as es]
    [ai.miniforge.supervisory-state.interface :as supervisory]
-   [ai.miniforge.response.interface :as response]))
+   [ai.miniforge.workflow-resume.interface :as wr]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Event file parsing
+;; Events dir (module-level for test redef-ability)
 
 (def events-dir
   (app-config/events-dir))
 
-(defn read-event-file
-  "Read all events from a workflow event file (one EDN map per line)."
-  [workflow-id]
-  (let [path (str events-dir "/" workflow-id ".edn")]
-    (when-not (fs/exists? path)
-      (response/throw-anomaly! :anomalies/not-found
-                              (str "Event file not found: " path)
-                              {:workflow-id workflow-id :path path}))
-    (->> (slurp path)
-         str/split-lines
-         (remove str/blank?)
-         (mapv #(edn/read-string %)))))
-
 ;------------------------------------------------------------------------------ Layer 1
-;; Context reconstruction
+;; Thin delegations kept for compatibility with existing callers/tests
 
-(defn extract-completed-dag-tasks
-  "Extract task IDs that completed successfully from :dag/task-completed events."
-  [events]
-  (->> events
-       (filter #(= :dag/task-completed (:event/type %)))
-       (map :dag/task-id)
-       set))
-
-(defn extract-dag-pause-info
-  "Find last :dag/paused event and extract completed task IDs and reason."
-  [events]
-  (when-let [pause-event (->> events
-                               (filter #(= :dag/paused (:event/type %)))
-                               last)]
-    {:completed-task-ids (set (:dag/completed-task-ids pause-event))
-     :pause-reason (:dag/pause-reason pause-event)}))
-
-(defn extract-completed-phases
-  "Extract phase names that completed successfully from events."
-  [events]
-  (->> events
-       (filter #(= :workflow/phase-completed (:event/type %)))
-       (filter #(= :success (:phase/outcome %)))
-       (mapv :workflow/phase)))
-
-(defn extract-phase-results
-  "Build :execution/phase-results from phase-completed events."
-  [events]
-  (->> events
-       (filter #(= :workflow/phase-completed (:event/type %)))
-       (reduce (fn [acc evt]
-                 (assoc acc (:workflow/phase evt)
-                        {:outcome (:phase/outcome evt)
-                         :duration-ms (:phase/duration-ms evt)
-                         :timestamp (:event/timestamp evt)}))
-               {})))
-
-(defn find-workflow-spec
-  "Extract workflow spec from workflow-started event."
-  [events]
-  (->> events
-       (filter #(= :workflow/started (:event/type %)))
-       first
-       :workflow/spec))
-
-(defn reconstruct-context
-  "Reconstruct execution context from event history."
+(defn read-event-file
+  "Read events for a workflow. Thin wrapper — the actual replay lives
+   in `event-stream/reader`. Prefer calling the component directly in
+   new code."
   [workflow-id]
-  (let [events (read-event-file workflow-id)
-        by-type (group-by :event/type events)
-        completed-phases (extract-completed-phases events)
-        phase-results (extract-phase-results events)
-        workflow-spec (find-workflow-spec events)
-        started-event (first (get by-type :workflow/started))
-        completed? (boolean (seq (get by-type :workflow/completed)))
-        failed? (boolean (seq (get by-type :workflow/failed)))
-        completed-dag-tasks (extract-completed-dag-tasks events)
-        dag-pause-info (extract-dag-pause-info events)]
-    {:phase-results phase-results
-     :completed-phases completed-phases
-     :workflow-spec workflow-spec
-     :workflow-id (or (:workflow/id started-event) workflow-id)
-     :completed? completed?
-     :failed? failed?
-     :event-count (count events)
-     :completed-dag-tasks (or (not-empty completed-dag-tasks)
-                              (:completed-task-ids dag-pause-info)
-                              #{})
-     :dag-paused? (boolean dag-pause-info)
-     :dag-pause-reason (:pause-reason dag-pause-info)}))
-
-;------------------------------------------------------------------------------ Layer 2
-;; Public API
+  (es/read-workflow-events-by-id events-dir workflow-id))
 
 (defn resolve-resume-workflow
-  "Resolve the workflow identity for a resumed run.
-
-   Uses the recorded workflow spec when present. Otherwise falls back to the
-   app-owned default selection profile."
+  "Resolve workflow identity for a resumed run, using the CLI's
+   default selection profile as fallback. Thin wrapper over the
+   component's `resolve-workflow-identity`."
   [reconstructed]
-  (let [workflow-spec (:workflow-spec reconstructed)
-        workflow-type (or (some-> workflow-spec :name keyword)
-                          (selection-config/resolve-selection-profile :default))
-        workflow-version (get workflow-spec :version "latest")]
-    (when-not workflow-type
-      (response/throw-anomaly! :anomalies/not-found
-                              "Could not resolve a default workflow for resume"
-                              {:operation :resume-workflow
-                               :selection-profile :default}))
-    {:workflow-type workflow-type
-     :workflow-version workflow-version}))
+  (wr/resolve-workflow-identity
+    reconstructed
+    #(selection-config/resolve-selection-profile :default)))
+
+;------------------------------------------------------------------------------ Layer 2
+;; Public API — invoked by both `mf resume <id>` and `mf run --resume`
 
 (defn resume-workflow
   "Resume a workflow from its last checkpoint.
 
-   Reads event files to reconstruct state, determines resume point,
-   and re-runs the pipeline with a trimmed pipeline (completed phases removed)."
+   Reconstructs context via the workflow-resume component, trims the
+   pipeline to remaining phases, and re-runs via workflow/interface."
   [workflow-id opts]
   (let [quiet (:quiet opts false)
         _ (when-not quiet
-            (display/print-info (str "Resuming workflow: " workflow-id)))
-        reconstructed (reconstruct-context (str workflow-id))]
+            (display/print-info (messages/t :resume/resuming
+                                            {:workflow-id workflow-id})))
+        reconstructed (wr/reconstruct-context events-dir (str workflow-id))]
 
     (if (:completed? reconstructed)
-      (do (display/print-info "Workflow already completed successfully.") nil)
+      (do (display/print-info (messages/t :resume/already-completed)) nil)
 
       (let [completed-phases (:completed-phases reconstructed)
             _ (when-not quiet
-                (display/print-info (str "Completed phases: "
-                                         (if (seq completed-phases)
-                                           (str/join ", " (map name completed-phases))
-                                           "none")))
-                (display/print-info (str "Events found: " (:event-count reconstructed))))
+                (display/print-info
+                  (messages/t :resume/completed-phases
+                              {:phases (if (seq completed-phases)
+                                         (str/join ", " (map name completed-phases))
+                                         (messages/t :resume/completed-phases-none))}))
+                (display/print-info
+                  (messages/t :resume/events-found
+                              {:count (:event-count reconstructed)})))
 
-            ;; Resolve workflow interface
+            ;; Resolve workflow interface lazily — avoids pulling the
+            ;; workflow component onto the cold-start path.
             load-workflow (requiring-resolve 'ai.miniforge.workflow.interface/load-workflow)
             run-pipeline (requiring-resolve 'ai.miniforge.workflow.interface/run-pipeline)
 
-            ;; Determine workflow identity from event spec or app-owned default profile
-            {:keys [workflow-type workflow-version]}
-            (resolve-resume-workflow reconstructed)
-
-            ;; Load the workflow definition
+            {:keys [workflow-type workflow-version]} (resolve-resume-workflow reconstructed)
             {:keys [workflow]} (load-workflow workflow-type workflow-version {})
-            pipeline (get workflow :workflow/pipeline [])
 
-            ;; Trim pipeline: remove phases that already completed
-            completed-set (set completed-phases)
-            remaining-pipeline (vec (remove #(completed-set (:phase %)) pipeline))
+            ;; Pipeline trimming — delegated to the component
+            resume-workflow (wr/trim-pipeline workflow completed-phases)
+            remaining-pipeline (:workflow/pipeline resume-workflow)
             _ (when-not quiet
                 (if (seq remaining-pipeline)
-                  (display/print-info (str "Resuming from phase: "
-                                           (name (:phase (first remaining-pipeline)))
-                                           " (" (count remaining-pipeline) " phases remaining)"))
-                  (display/print-info "All phases already completed.")))
+                  (display/print-info
+                    (messages/t :resume/resuming-from-phase
+                                {:phase (name (:phase (first remaining-pipeline)))
+                                 :count (count remaining-pipeline)}))
+                  (display/print-info (messages/t :resume/all-phases-completed))))
 
-            ;; Build a trimmed workflow with only remaining phases
-            resume-workflow (assoc workflow :workflow/pipeline remaining-pipeline)
-
-            ;; Set up execution infrastructure
+            ;; Runtime wiring (CLI concern — stays here)
             event-stream (es/create-event-stream)
             _supervisor (supervisory/attach! event-stream)
             new-workflow-id (random-uuid)
@@ -201,7 +121,8 @@
             llm-client (context/create-llm-client workflow nil quiet)]
 
         (when-not quiet
-          (display/print-info (str "New workflow ID: " new-workflow-id)))
+          (display/print-info (messages/t :resume/new-workflow-id
+                                          {:workflow-id new-workflow-id})))
 
         (try
           (let [result (run-pipeline resume-workflow
@@ -214,14 +135,17 @@
                                       :on-phase-start (fn [_ctx interceptor]
                                                         (when-not quiet
                                                           (display/print-info
-                                                           (str "Phase: " (get-in interceptor [:config :phase])))))
+                                                            (messages/t :resume/phase-starting
+                                                                        {:phase (get-in interceptor [:config :phase])}))))
                                       :on-phase-complete (fn [_ctx _interceptor _result] nil)})]
             (when-not quiet
-              (display/print-info (str "Resumed workflow completed with status: "
-                                       (:execution/status result))))
+              (display/print-info
+                (messages/t :resume/completed-status
+                            {:status (:execution/status result)})))
             result)
           (catch Exception e
-            (display/print-error (str "Resume failed: " (ex-message e)))
+            (display/print-error (messages/t :resume/failed
+                                             {:error (ex-message e)}))
             (throw e))
           (finally
             (when command-poller-cleanup (command-poller-cleanup))))))))

@@ -51,6 +51,7 @@
         ;; Event streaming and observability
         ai.miniforge/event-stream {:local/root "../../components/event-stream"}
         ai.miniforge/supervisory-state {:local/root "../../components/supervisory-state"}
+        ai.miniforge/workflow-resume {:local/root "../../components/workflow-resume"}
         ;; Self-healing: workaround detection, backend health tracking
         ai.miniforge/self-healing {:local/root "../../components/self-healing"}
         ;; TUI framework and views
