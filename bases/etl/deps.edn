@@ -1,0 +1,4 @@
+{:paths ["src" "resources"]
+ :deps {cheshire/cheshire {:mvn/version "5.13.0"}
+        org.babashka/cli  {:mvn/version "0.8.60"}}
+ :aliases {:test {:extra-paths ["test"]}}}

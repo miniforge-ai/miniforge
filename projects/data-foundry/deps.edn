@@ -1,0 +1,39 @@
+;; Data Foundry project. Bundles the `etl` base with every brick the
+;; ETL runner needs: pipeline-runner, pipeline-config, schema, and the
+;; nine concrete source/sink connectors. Built against the JVM because
+;; several connectors (hato HTTP, Apache POI Excel, EDGAR XML parsing)
+;; are not Babashka-safe.
+;;
+;; Invocation: `clojure -M -m ai.miniforge.etl.main {run|list|validate} …`.
+;; The miniforge CLI's `etl run|list|validate` subcommands shell out
+;; through the top-level `:dev` alias today; once we ship a standalone
+;; data-foundry uberjar the `:uberjar` alias below is ready to go.
+
+{:paths []
+
+ :deps {ai.miniforge/etl                       {:local/root "../../bases/etl"}
+        ai.miniforge/pipeline-runner           {:local/root "../../components/pipeline-runner"}
+        ai.miniforge/pipeline-config           {:local/root "../../components/pipeline-config"}
+        ai.miniforge/pipeline                  {:local/root "../../components/pipeline"}
+        ai.miniforge/connector                 {:local/root "../../components/connector"}
+        ai.miniforge/connector-auth            {:local/root "../../components/connector-auth"}
+        ai.miniforge/connector-edgar           {:local/root "../../components/connector-edgar"}
+        ai.miniforge/connector-excel           {:local/root "../../components/connector-excel"}
+        ai.miniforge/connector-file            {:local/root "../../components/connector-file"}
+        ai.miniforge/connector-github          {:local/root "../../components/connector-github"}
+        ai.miniforge/connector-gitlab          {:local/root "../../components/connector-gitlab"}
+        ai.miniforge/connector-http            {:local/root "../../components/connector-http"}
+        ai.miniforge/connector-jira            {:local/root "../../components/connector-jira"}
+        ai.miniforge/connector-pipeline-output {:local/root "../../components/connector-pipeline-output"}
+        ai.miniforge/connector-sarif           {:local/root "../../components/connector-sarif"}
+        ai.miniforge/config                    {:local/root "../../components/config"}
+        ai.miniforge/dag-executor              {:local/root "../../components/dag-executor"}
+        ai.miniforge/dag-primitives            {:local/root "../../components/dag-primitives"}
+        ai.miniforge/data-quality              {:local/root "../../components/data-quality"}
+        ai.miniforge/logging                   {:local/root "../../components/logging"}
+        ai.miniforge/messages                  {:local/root "../../components/messages"}
+        ai.miniforge/response                  {:local/root "../../components/response"}
+        ai.miniforge/schema                    {:local/root "../../components/schema"}}
+
+ :aliases
+ {:uberjar {:main ai.miniforge.etl.main}}}

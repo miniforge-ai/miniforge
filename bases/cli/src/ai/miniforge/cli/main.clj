@@ -271,7 +271,10 @@
 (defn artifact-provenance-cmd [m] (cmd-artifact/artifact-provenance-cmd (get-opts m)))
 
 ;; ETL commands (N5)
-(defn etl-repo-cmd [m] (cmd-etl/etl-repo-cmd (get-opts m)))
+(defn etl-repo-cmd     [m] (cmd-etl/etl-repo-cmd     (get-opts m)))
+(defn etl-run-cmd      [m] (cmd-etl/etl-run-cmd      (get-opts m)))
+(defn etl-list-cmd     [m] (cmd-etl/etl-list-cmd     (get-opts m)))
+(defn etl-validate-cmd [m] (cmd-etl/etl-validate-cmd (get-opts m)))
 
 (defn hook-eval-cmd
   "Evaluate a tool-use request from a Claude PreToolUse hook.
@@ -545,8 +548,11 @@
    {:cmds ["artifact" "provenance"] :fn artifact-provenance-cmd :args->opts [:id]}
 
    ;; ETL commands (N5)
-   {:cmds ["etl"]        :fn help-cmd}
-   {:cmds ["etl" "repo"] :fn etl-repo-cmd :args->opts [:url]}])
+   {:cmds ["etl"]             :fn help-cmd}
+   {:cmds ["etl" "repo"]      :fn etl-repo-cmd     :args->opts [:url]}
+   {:cmds ["etl" "run"]       :fn etl-run-cmd      :args->opts [:pack]}
+   {:cmds ["etl" "list"]      :fn etl-list-cmd     :args->opts [:paths]}
+   {:cmds ["etl" "validate"]  :fn etl-validate-cmd :args->opts [:pack]}])
 
 (defn- handle-unknown-command
   "Print help for an unrecognized CLI command."
