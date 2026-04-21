@@ -7,7 +7,7 @@
 ;; if the shared version drifts later — though the expectation is every
 ;; umbrella product tracks the same SHA.
 
-{:paths ["test" "resources"]
+{:paths []
 
  :deps {ai.miniforge/bb-paths          {:local/root "../../components/bb-paths"}
         ai.miniforge/bb-out            {:local/root "../../components/bb-out"}

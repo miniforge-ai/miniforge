@@ -95,8 +95,8 @@
 (defn- initial-context
   [output-dir]
   {:execution/id (random-uuid)
-   :execution/input {:scan-paths ["test/fixtures/sample-scan.sarif"
-                                  "test/fixtures/sample-scan.csv"]
+   :execution/input {:scan-paths ["test/ai/miniforge/workflow_security_compliance/fixture_files/sample-scan.sarif"
+                                  "test/ai/miniforge/workflow_security_compliance/fixture_files/sample-scan.csv"]
                      :output-dir output-dir}
    :execution/metrics {:duration-ms 0}
    :execution/phase-results {}})

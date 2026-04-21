@@ -27,7 +27,7 @@
 
 (deftest load-pipeline-from-file-path-test
   (testing "loads pipeline EDN from absolute file path"
-    (let [f (io/file "test/resources/pipelines/financial-filings-etl.edn")]
+    (let [f (io/file "test-resources/pipelines/financial-filings-etl.edn")]
       (when (.exists f)
         (let [result (pc/load-pipeline (.getAbsolutePath f))]
           (is (:success? result))

@@ -2,5 +2,5 @@
  :deps {ai.miniforge/schema {:local/root "../schema"}
         ai.miniforge.data-foundry/metric-registry {:local/root "../metric-registry"}
         ai.miniforge.data-foundry/pipeline-config {:local/root "../pipeline-config"}}
- :aliases {:test {:extra-paths ["test"]
+ :aliases {:test {:extra-paths ["test" "test-resources"]
                   :extra-deps {}}}}
