@@ -90,10 +90,9 @@
           (is (= (:mcp-config-path s) (:mcp-config-path result)))
           (is (= (:artifact-path s) (:artifact-path result)))
           (is (vector? (:mcp-allowed-tools result)))
-          ;; Generic server/tool data — backend adapters translate.
-          (is (every? map? (:mcp-allowed-tools result)))
-          (is (every? #(and (:mcp/server %) (:mcp/tool %))
-                      (:mcp-allowed-tools result))))
+          ;; Mixed-shape: MCP entries are {:mcp/server :mcp/tool} maps;
+          ;; native entries are bare keywords. Adapters translate.
+          (is (every? #(or (map? %) (keyword? %)) (:mcp-allowed-tools result))))
         (finally
           (session/cleanup-session! s))))))
 

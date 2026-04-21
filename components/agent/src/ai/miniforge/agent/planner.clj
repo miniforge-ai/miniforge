@@ -355,9 +355,18 @@
         ;; sized specs (2026-04-18 dogfood). OPSV-converged target — see
         ;; work/n07-opsv-agent-budgets.spec.edn.
         max-turns (get @planner-prompt-data :prompt/max-turns 80)
-        mcp-opts (assoc (artifact-session/session->mcp-opts session budget-usd max-turns)
-                        :model (model/default-model-for-role :planner)
-                        :disallowed-tools planner-disallowed-tools)]
+        ;; Thread the session workdir into the LLM request so the Claude
+        ;; subprocess is spawned inside the task worktree. Without this,
+        ;; Write(".miniforge/plan.edn") resolves to the miniforge repo
+        ;; root — observed iter 17, where Claude Code then refused to
+        ;; overwrite a stale plan.edn left over from an earlier run:
+        ;;   <tool_use_error>File has not been read yet. Read it first
+        ;;    before writing to it.</tool_use_error>
+        ;; The implementer threads :workdir the same way.
+        mcp-opts (cond-> (artifact-session/session->mcp-opts session budget-usd max-turns)
+                   true (assoc :model (model/default-model-for-role :planner)
+                               :disallowed-tools planner-disallowed-tools)
+                   (:workdir session) (assoc :workdir (:workdir session)))]
     (if on-chunk
       (llm/chat-stream llm-client user-prompt on-chunk
                        (merge {:system @planner-system-prompt} mcp-opts))
@@ -440,8 +449,16 @@
                                  (assoc :stop-reason (:stop-reason llm-response))
                                  (:num-turns llm-response)
                                  (assoc :num-turns (:num-turns llm-response)))})
-              (if (llm/success? llm-response)
-                (let [content (llm/get-content llm-response)
+              ;; Container-promotion preempts CLI error classification:
+              ;; if the agent wrote a valid plan.edn into the worktree,
+              ;; that IS the submission and we honor it regardless of
+              ;; whether Claude CLI emitted a clean result event
+              ;; afterwards. Iter 18 hit a stream-idle timeout AFTER a
+              ;; successful Write — the plan existed, but the old
+              ;; success-branch-only logic ignored it because the LLM
+              ;; response was classified as failure.
+              (if (or worktree-plan (llm/success? llm-response))
+                (let [content (or (llm/get-content llm-response) "")
                       stop-reason (:stop-reason llm-response)
                       num-turns   (:num-turns llm-response)
                       plan (or worktree-plan
@@ -482,10 +499,21 @@
                                                          :tokens tokens}
                                                   stop-reason (assoc :stop-reason stop-reason)
                                                   num-turns   (assoc :num-turns num-turns))})))
-                ;; LLM call failed — no silent fallback
-                (let [error-msg (or (:message (llm/get-error llm-response))
-                                    "LLM call failed")]
-                  (response/error error-msg))))
+                ;; LLM call failed — preserve the full llm-error shape
+                ;; into :data so the phase-completed event carries
+                ;; :type (e.g. "cli_error" / "adaptive_timeout"),
+                ;; :stderr / :stdout / :timeout / :exit-code for
+                ;; post-mortem. Iters 11-12 lost this context and
+                ;; produced undiagnosable \"Unknown error\" / bare
+                ;; \"Process timed out\" phase errors.
+                (let [llm-err (llm/get-error llm-response)
+                      error-msg (or (:message llm-err) "LLM call failed")
+                      stop-reason (:stop-reason llm-response)
+                      num-turns   (:num-turns llm-response)]
+                  (response/error error-msg
+                                  {:data (cond-> (or llm-err {})
+                                           stop-reason (assoc :stop-reason stop-reason)
+                                           num-turns   (assoc :num-turns num-turns))}))))
                ;; No LLM client — hard failure
             (response/throw-anomaly! :anomalies.agent/llm-error
                                     "No LLM backend provided for planner agent"

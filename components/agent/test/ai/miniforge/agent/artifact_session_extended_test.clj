@@ -267,29 +267,38 @@
 ;; mcp-tools tests
 
 (deftest mcp-tools-test
-  (testing "carries generic, agent-CLI-agnostic server/tool data"
+  (testing "carries generic, agent-CLI-agnostic tool data"
     ;; Structured form is the canonical representation. Each backend
     ;; adapter (claude/codex/cursor/…) maps it to its own wire format.
     ;; Do NOT put backend-specific strings here.
     (is (vector? session/mcp-tools))
-    (is (every? map? session/mcp-tools))
-    (is (every? #(and (:mcp/server %) (:mcp/tool %)) session/mcp-tools)))
+    (is (every? #(or (map? %) (keyword? %)) session/mcp-tools)
+        "entries are either keyword maps (MCP) or bare keywords (native)"))
 
-  (testing "server and tool are keywords — adapters (name kw) for the wire"
-    (is (every? #(keyword? (:mcp/server %)) session/mcp-tools))
-    (is (every? #(keyword? (:mcp/tool %)) session/mcp-tools)))
+  (testing "MCP entries use keyword :mcp/server + :mcp/tool"
+    (let [mcp-entries (filter map? session/mcp-tools)]
+      (is (every? #(keyword? (:mcp/server %)) mcp-entries))
+      (is (every? #(keyword? (:mcp/tool %)) mcp-entries))))
 
-  (testing "contains the expected context-server tools"
-    (is (every? #(= :context (:mcp/server %)) session/mcp-tools))
-    (is (= #{:context_read :context_grep :context_glob}
-           (into #{} (map :mcp/tool) session/mcp-tools))))
+  (testing "context-server MCP tools are present"
+    (let [mcp-entries (filter map? session/mcp-tools)]
+      (is (every? #(= :context (:mcp/server %)) mcp-entries))
+      (is (= #{:context_read :context_grep :context_glob}
+             (into #{} (map :mcp/tool) mcp-entries)))))
+
+  (testing "native Write is auto-approved — plan.edn submission path"
+    ;; Iter 15 dogfood regression — Write wasn't in --allowedTools,
+    ;; Claude CLI silently denied the planner's plan.edn Write, model
+    ;; narrated 'let me try Edit' and stalled. Keep Write.
+    (is (some #{:Write} session/mcp-tools)
+        "Write must stay auto-approved for container-promotion submissions"))
 
   (testing "never contains backend-specific wire strings (regression guard)"
     ;; Claude's `mcp__<server>__<tool>` form belongs in the Claude
-    ;; adapter, not here. Guard against drift that previously cost us
-    ;; six dogfood iterations.
+    ;; adapter, not here. Native tools go through (name kw).
     (doseq [t session/mcp-tools]
-      (is (not (string? t)) "mcp-tools entries should be maps, not strings"))))
+      (is (not (string? t))
+          "mcp-tools entries should be maps or keywords, not strings"))))
 
 ;------------------------------------------------------------------------------ Layer 3
 ;; write-claude-settings! tests

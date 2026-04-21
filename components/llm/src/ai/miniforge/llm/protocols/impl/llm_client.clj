@@ -230,14 +230,21 @@
 (defn claude-mcp-allowlist-string
   "Claude CLI's --allowedTools wire format.
 
-   `mcp-allowed-tools` is a vector of `{:mcp/server :mcp/tool}` keyword
-   maps. Each entry becomes `mcp__<server>__<tool>`; all joined with
-   commas. A malformed entry throws via `(name nil)` at the call site
-   — the canonical shape is the only accepted shape."
+   Accepts two entry shapes:
+   - `{:mcp/server :mcp/tool}` keyword map → `mcp__<server>__<tool>`
+     (MCP tool; server name comes from the mcp-config.json key)
+   - Keyword by itself → `(name kw)` (native Claude Code tool,
+     e.g. `:Write`)
+
+   Entries are joined with commas. A malformed entry throws via
+   `(name nil)` at the call site."
   [mcp-allowed-tools]
   (->> mcp-allowed-tools
-       (mapv (fn [{:mcp/keys [server tool]}]
-               (str "mcp__" (name server) "__" (name tool))))
+       (mapv (fn [t]
+               (if (keyword? t)
+                 (name t)
+                 (let [{:mcp/keys [server tool]} t]
+                   (str "mcp__" (name server) "__" (name tool))))))
        (str/join ",")))
 
 (defn- claude-args
@@ -533,15 +540,38 @@
 (defn process-stream-lines [out-reader monitor on-line]
   (let [out-lines (atom [])
         timeout-reason (atom nil)
-        line-timeout-ms 60000]
+        ;; 180s — Opus 4.6 can be silent for 60-90s while reasoning
+        ;; between tool-call batches (observed iter 14: 20 tool calls,
+        ;; 0 text chunks, stream went quiet after the 20th tool result
+        ;; and the 60s cap tripped on ordinary thinking time). The
+        ;; progress-monitor's stagnation-threshold (120s) is separately
+        ;; the upper bound on activity silence.
+        line-timeout-ms 180000
+        dump-path (System/getenv "MF_STREAM_DUMP")
+        dump-writer (when dump-path
+                      (java.io.PrintWriter.
+                        (java.io.FileWriter. dump-path true)))]
     (loop []
-      (if-let [timeout-check (pm/check-timeout monitor)]
-        (reset! timeout-reason timeout-check)
-        (when-let [line (read-line-with-timeout out-reader line-timeout-ms)]
-          (swap! out-lines conj line)
-          (pm/record-chunk! monitor line)
-          (on-line line)
-          (recur))))
+      (if-let [t (pm/check-timeout monitor)]
+        ;; Progress-monitor timeout (stagnation or total-max)
+        (reset! timeout-reason t)
+        (if-let [line (read-line-with-timeout out-reader line-timeout-ms)]
+          (do (swap! out-lines conj line)
+              (pm/record-chunk! monitor line)
+              (when dump-writer (.println dump-writer line) (.flush dump-writer))
+              (on-line line)
+              (recur))
+          ;; Line-timeout: reader produced nothing for line-timeout-ms.
+          ;; Treat as stream-idle — a stalled stream, not clean EOF.
+          ;; Set an explicit reason so the caller reports it instead of
+          ;; waiting on `deref process` for the full 10 min and then
+          ;; reporting a bare "Process timed out" with no context.
+          (reset! timeout-reason
+                  {:type :stream-idle
+                   :message (str "No stream output for " line-timeout-ms "ms")
+                   :elapsed-ms line-timeout-ms
+                   :stats {:lines-read (count @out-lines)}}))))
+    (when dump-writer (.close dump-writer))
     {:lines @out-lines
      :timeout @timeout-reason}))
 
@@ -564,6 +594,15 @@
          out-reader (java.io.BufferedReader.
                      (java.io.InputStreamReader. (:out process)))
          {:keys [lines timeout]} (process-stream-lines out-reader monitor on-line)
+         ;; Stream ended with a timeout reason (stream-idle,
+         ;; stagnation, or total-max) — the subprocess is hung or
+         ;; silent. Kill it so `deref` returns immediately instead of
+         ;; waiting 10 min for a process that will not exit.
+         _ (when timeout
+             (try
+               (when-let [^Process jp (:proc process)]
+                 (.destroyForcibly jp))
+               (catch Exception _ nil)))
          result (deref process 600000 {:exit -1 :err "Process timed out"})]
      (if timeout
        (timeout-result lines timeout)

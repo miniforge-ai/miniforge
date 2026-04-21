@@ -301,34 +301,37 @@
     path))
 
 (def mcp-tools
-  "MCP tools exposed by the context server, as generic server/tool data.
+  "Tools the inner agent is auto-approved to call, as generic data.
 
-   Each backend adapter (claude, codex, cursor-agent, …) is responsible
-   for translating this into the allowlist / approval shape its CLI
-   expects. Keep this agent-CLI-agnostic — the structured form, not a
-   backend-specific string, is the source of truth.
+   Each backend adapter (claude, codex, cursor-agent, …) translates
+   this into the allowlist / approval shape its CLI expects. Keep
+   agent-CLI-agnostic — the structured form is the source of truth.
 
-   Keywords, not strings: adapters use `(name kw)` when they need the
-   wire string, or dispatch on the value directly with `case` /
-   multimethods. The keyword is the domain identity; the string is
-   the wire encoding.
+   Two entry shapes:
+   - `{:mcp/server :mcp/tool}` — a tool exposed by an MCP server
+   - plain keyword — a native tool from the agent CLI (e.g. `:Write`,
+     needed for plan.edn / code container-promotion writes)
 
    Example wire formats per backend:
-     claude  → --allowedTools \"mcp__context__context_read,...\"
-                 (mcp__<server>__<tool> fully-qualified form)
+     claude  → --allowedTools \"mcp__context__context_read,Write,...\"
      cursor  → --approve-mcps  (blanket approve; no names needed)
      codex   → (currently unused; codex uses its own MCP config)
 
-   Iterations 5-10 of the planner-convergence dogfood lost ~30 minutes
-   of tokens to a bug where bare names (e.g. `context_read`) were
-   passed straight through to Claude's --allowedTools without the
-   required prefix — every MCP call came back denied with
-     \"Claude requested permissions to use mcp__context__context_read,
-      but you haven't granted it yet.\"
-   The fix: keep the generic keyword form here; transform in the adapter."
+   Iter-10 failure — bare names like `context_read` were passed to
+   --allowedTools without the `mcp__<server>__` prefix, so every MCP
+   call got permission-denied. Iter-15 follow-on — `Write` wasn't in
+   the allowlist at all, so the planner's `.miniforge/plan.edn`
+   Write was silently denied (model then narrated 'let me try Edit'
+   and stalled). Both fix back to keeping the structured form honest
+   and adapters translating at the CLI boundary."
   [{:mcp/server :context :mcp/tool :context_read}
    {:mcp/server :context :mcp/tool :context_grep}
-   {:mcp/server :context :mcp/tool :context_glob}])
+   {:mcp/server :context :mcp/tool :context_glob}
+   ;; Native tool: container-promotion submission path. Planner
+   ;; writes .miniforge/plan.edn; implementer writes source/tests;
+   ;; releaser writes PR-body drafts. Roles that shouldn't Write
+   ;; filter via :disallowed-tools separately.
+   :Write])
 
 (defn write-mcp-config!
   "Write session config files for all supported CLI backends.

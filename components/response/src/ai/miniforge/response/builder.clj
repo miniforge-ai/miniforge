@@ -65,6 +65,29 @@
 ;------------------------------------------------------------------------------ Layer 1
 ;; Error responses
 
+(defn- format-stack-frame
+  "Render one StackTraceElement as ClassName.methodName (File:line)."
+  [^StackTraceElement e]
+  (str (.getClassName e) "." (.getMethodName e)
+       " (" (.getFileName e) ":" (.getLineNumber e) ")"))
+
+(defn- stack-preview
+  "Render the top N frames of a stack trace as short strings. Returns
+   nil when the exception has no stack (e.g. doto-constructed Throwable)."
+  [^Throwable ex n]
+  (when-let [st (seq (.getStackTrace ex))]
+    (mapv format-stack-frame (take n st))))
+
+(defn- exception->data
+  "Exception → :data map with :exception/class and (when available)
+   :exception/stack-preview. Kept short so failures like NPE — which
+   carry no getMessage or ex-data — still name the exception class
+   and top frames in the phase-completed event."
+  [^Throwable ex]
+  (let [preview (stack-preview ex 8)]
+    (cond-> {:exception/class (.getName (class ex))}
+      preview (assoc :exception/stack-preview preview))))
+
 (defn error-details
   "Create canonical error details map.
 
@@ -81,21 +104,28 @@
   ([message]
    (error-details message nil))
   ([message data]
-   (let [raw-msg (if (instance? Exception message)
+   (let [exception? (instance? Exception message)
+         raw-msg (if exception?
                    (.getMessage ^Exception message)
                    (str message))
          ;; Ensure message is never nil or empty — downstream (or msg fallback)
          ;; treats "" as truthy, masking useful defaults
          msg (if (or (nil? raw-msg) (clojure.string/blank? raw-msg))
-               (if (instance? Exception message)
+               (if exception?
                  (str (class message))
                  "Unknown error")
                raw-msg)
-         err-data (if (instance? Exception message)
-                   (or data (ex-data message) {})
-                   (or data {}))]
+         ;; For Exception messages, attach class + optional stack preview
+         ;; so failures like NPE (no getMessage, no ex-data) don't come
+         ;; through as {:message "Unknown error" :data {}} — that empty
+         ;; shape is what made iter-11 planner failure un-diagnosable.
+         exception-data (when exception?
+                          (exception->data message))
+         err-data (merge (when exception? exception-data)
+                         (when exception? (ex-data message))
+                         data)]
      {:message msg
-      :data err-data})))
+      :data (or err-data {})})))
 
 (defn error
   "Create a canonical error response.

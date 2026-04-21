@@ -53,14 +53,28 @@
       (is (some #(= "/tmp/mcp.json" %) args)))))
 
 (deftest claude-args-allowed-tools-test
-  (testing "mcp-allowed-tools format as mcp__<server>__<tool>, joined with commas"
+  (testing "mcp maps format as mcp__<server>__<tool>, joined with commas"
     (let [args ((private-fn 'claude-args)
                 {:prompt "p"
                  :mcp-allowed-tools
                  [{:mcp/server :context :mcp/tool :context_read}
                   {:mcp/server :context :mcp/tool :context_grep}]})]
       (is (some #(= "--allowedTools" %) args))
-      (is (some #(= "mcp__context__context_read,mcp__context__context_grep" %) args)))))
+      (is (some #(= "mcp__context__context_read,mcp__context__context_grep" %) args))))
+
+  (testing "bare keywords format as the native tool name"
+    (let [args ((private-fn 'claude-args)
+                {:prompt "p"
+                 :mcp-allowed-tools [:Write :Edit]})]
+      (is (some #(= "Write,Edit" %) args))))
+
+  (testing "mixed maps + keywords format correctly"
+    (let [args ((private-fn 'claude-args)
+                {:prompt "p"
+                 :mcp-allowed-tools
+                 [{:mcp/server :context :mcp/tool :context_read}
+                  :Write]})]
+      (is (some #(= "mcp__context__context_read,Write" %) args)))))
 
 (deftest claude-mcp-allowlist-string-test
   (testing "keyword server + tool → mcp__<server>__<tool>"
@@ -68,11 +82,22 @@
            (impl/claude-mcp-allowlist-string
              [{:mcp/server :context :mcp/tool :context_read}]))))
 
-  (testing "multiple entries joined with commas"
+  (testing "bare keyword → (name kw) — native tools"
+    (is (= "Write" (impl/claude-mcp-allowlist-string [:Write])))
+    (is (= "Write,Edit" (impl/claude-mcp-allowlist-string [:Write :Edit]))))
+
+  (testing "multiple mcp entries joined with commas"
     (is (= "mcp__ctx__a,mcp__ctx__b"
            (impl/claude-mcp-allowlist-string
              [{:mcp/server :ctx :mcp/tool :a}
               {:mcp/server :ctx :mcp/tool :b}]))))
+
+  (testing "mixed mcp maps + native keywords"
+    (is (= "mcp__ctx__read,Write,mcp__ctx__grep"
+           (impl/claude-mcp-allowlist-string
+             [{:mcp/server :ctx :mcp/tool :read}
+              :Write
+              {:mcp/server :ctx :mcp/tool :grep}]))))
 
   (testing "empty vector produces empty string"
     (is (= "" (impl/claude-mcp-allowlist-string [])))))
