@@ -17,10 +17,9 @@
 ;; limitations under the License.
 
 (ns ai.miniforge.cli.main.commands.resume
-  "Resume a workflow from its last checkpoint using event files."
+  "Resume a workflow from its last checkpoint by replaying the per-event
+   transit-JSON files written by the event-stream file sink."
   (:require
-   [babashka.fs :as fs]
-   [clojure.edn :as edn]
    [clojure.string :as str]
    [ai.miniforge.cli.app-config :as app-config]
    [ai.miniforge.cli.main.display :as display]
@@ -32,23 +31,35 @@
    [ai.miniforge.response.interface :as response]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Event file parsing
+;; Event replay
 
 (def events-dir
   (app-config/events-dir))
 
 (defn read-event-file
-  "Read all events from a workflow event file (one EDN map per line)."
+  "Read all events for a workflow from the on-disk file sink.
+
+   Events live at `{events-dir}/{workflow-id}/{timestamp}-{uuid}.json`
+   — one transit-JSON file per event, sortable by filename. Delegates
+   to `event-stream/read-workflow-events-by-id`, which also strips
+   the transit `~:` / `~u` / `~t` prefixes so callers can use keyword
+   accessors.
+
+   Throws `:anomalies/not-found` if no events directory exists for
+   the workflow (or the directory is empty).
+
+   Previously looked for a single `{workflow-id}.edn` file that was
+   never written — resume was silently broken. Observed iter-20
+   onwards: plan phase cost ~3 min / real tokens; resume couldn't
+   short-circuit that after an implement failure. Fixed here."
   [workflow-id]
-  (let [path (str events-dir "/" workflow-id ".edn")]
-    (when-not (fs/exists? path)
+  (let [events (es/read-workflow-events-by-id events-dir workflow-id)]
+    (when-not (seq events)
       (response/throw-anomaly! :anomalies/not-found
-                              (str "Event file not found: " path)
-                              {:workflow-id workflow-id :path path}))
-    (->> (slurp path)
-         str/split-lines
-         (remove str/blank?)
-         (mapv #(edn/read-string %)))))
+                              (str "No events found for workflow: " workflow-id)
+                              {:workflow-id workflow-id
+                               :path (str events-dir "/" workflow-id)}))
+    events))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Context reconstruction

@@ -27,7 +27,8 @@
    [ai.miniforge.event-stream.interface.control-state :as control-state]
    [ai.miniforge.event-stream.interface.events :as events]
    [ai.miniforge.event-stream.interface.listeners :as listeners]
-   [ai.miniforge.event-stream.interface.stream :as stream]))
+   [ai.miniforge.event-stream.interface.stream :as stream]
+   [ai.miniforge.event-stream.reader :as reader]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Stream lifecycle and control state
@@ -155,3 +156,10 @@
 (def observer-signal-failed events/observer-signal-failed)
 (def knowledge-synthesis-failed events/knowledge-synthesis-failed)
 (def knowledge-promotion-failed events/knowledge-promotion-failed)
+
+;------------------------------------------------------------------------------ Layer 4
+;; Event-stream reader — replay events from the file-sink layout
+
+(def strip-transit-prefix reader/strip-transit-prefix)
+(def read-workflow-events reader/read-workflow-events)
+(def read-workflow-events-by-id reader/read-workflow-events-by-id)
