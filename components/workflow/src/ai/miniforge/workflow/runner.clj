@@ -374,8 +374,8 @@
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
-  (require '[ai.miniforge.phase.plan])
-  (require '[ai.miniforge.phase.implement])
+  (require '[ai.miniforge.phase-software-factory.plan])
+  (require '[ai.miniforge.phase-software-factory.implement])
 
   (def simple-workflow
     {:workflow/id :simple-test

@@ -1,10 +1,10 @@
 {:phase/namespaces
- [ai.miniforge.phase.explore
-  ai.miniforge.phase.plan
-  ai.miniforge.phase.implement
-  ai.miniforge.phase.verify
-  ai.miniforge.phase.review
-  ai.miniforge.phase.release
+ [ai.miniforge.phase-software-factory.explore
+  ai.miniforge.phase-software-factory.plan
+  ai.miniforge.phase-software-factory.implement
+  ai.miniforge.phase-software-factory.verify
+  ai.miniforge.phase-software-factory.review
+  ai.miniforge.phase-software-factory.release
   ;; Observe phase lives in workflow component but must be registered here
   ;; because uberjar packaging collapses duplicate config/phase/namespaces.edn
   ;; resources — only one file survives. See loader.clj getResources().

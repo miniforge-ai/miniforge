@@ -1,8 +1,8 @@
 {:paths ["src" "resources"]
- :deps {ai.miniforge.data-foundry/connector     {:local/root "../connector"}
-        ai.miniforge.data-foundry/data-quality  {:local/root "../data-quality"}
-        ai.miniforge.data-foundry/dataset       {:local/root "../dataset"}
-        ai.miniforge.data-foundry/pipeline      {:local/root "../pipeline"}
+ :deps {ai.miniforge/connector     {:local/root "../connector"}
+        ai.miniforge/data-quality  {:local/root "../data-quality"}
+        ai.miniforge/dataset       {:local/root "../dataset"}
+        ai.miniforge/pipeline      {:local/root "../pipeline"}
         ai.miniforge/dag-executor     {:local/root "../dag-executor"}
         ai.miniforge/event-stream     {:local/root "../event-stream"}
         ai.miniforge/schema           {:local/root "../schema"}}

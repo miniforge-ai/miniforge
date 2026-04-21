@@ -1,7 +1,9 @@
 {:paths ["src" "resources"]
- :deps {ai.miniforge.data-foundry/connector      {:local/root "../connector"}
-        ai.miniforge.data-foundry/connector-auth  {:local/root "../connector-auth"}
-        ai.miniforge.data-foundry/connector-retry {:local/root "../connector-retry"}
+ :deps {ai.miniforge/connector       {:local/root "../connector"}
+        ai.miniforge/connector-auth  {:local/root "../connector-auth"}
+        ai.miniforge/connector-http  {:local/root "../connector-http"}
+        ai.miniforge/connector-retry {:local/root "../connector-retry"}
+        cheshire/cheshire               {:mvn/version "5.13.0"}
         hato/hato                       {:mvn/version "1.0.0"}}
  :aliases {:test {:extra-paths ["test"]
                   :extra-deps {}}}}

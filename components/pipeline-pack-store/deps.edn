@@ -1,7 +1,7 @@
 {:paths ["src" "resources"]
  :deps {ai.miniforge/schema {:local/root "../schema"}
-        ai.miniforge.data-foundry/pipeline-pack {:local/root "../pipeline-pack"}
-        ai.miniforge.data-foundry/metric-registry {:local/root "../metric-registry"}
+        ai.miniforge/pipeline-pack {:local/root "../pipeline-pack"}
+        ai.miniforge/metric-registry {:local/root "../metric-registry"}
         datalevin/datalevin {:mvn/version "0.9.16"}}
  :aliases {:test {:extra-paths ["test"]
                   :extra-deps {}}}}

@@ -30,7 +30,7 @@
    :rule/category :safety
    :rule/applies-to {:phases #{:provision}}
    :rule/detection {:type :custom
-                    :check-fn 'ai.miniforge.phase.deploy.policy/check-resource-count}
+                    :check-fn 'ai.miniforge.phase-deployment.policy/check-resource-count}
    :rule/enforcement {:action :warn
                       :message "Large infrastructure change detected. Verify scope is intentional."}}
 
@@ -55,7 +55,7 @@
    :rule/category :cost
    :rule/applies-to {:phases #{:provision}}
    :rule/detection {:type :custom
-                    :check-fn 'ai.miniforge.phase.deploy.policy/check-gke-node-limit}
+                    :check-fn 'ai.miniforge.phase-deployment.policy/check-gke-node-limit}
    :rule/enforcement {:action :warn
                       :message "GKE node pool exceeds recommended size. Verify cost impact."}}
 

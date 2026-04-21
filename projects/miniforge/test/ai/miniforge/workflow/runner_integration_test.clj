@@ -22,11 +22,11 @@
    [clojure.test :refer [deftest is testing]]
    [ai.miniforge.workflow.runner :as runner]
    ;; Require phase implementations
-   [ai.miniforge.phase.plan]
-   [ai.miniforge.phase.implement]
-   [ai.miniforge.phase.verify]
-   [ai.miniforge.phase.review]
-   [ai.miniforge.phase.release]
+   [ai.miniforge.phase-software-factory.plan]
+   [ai.miniforge.phase-software-factory.implement]
+   [ai.miniforge.phase-software-factory.verify]
+   [ai.miniforge.phase-software-factory.review]
+   [ai.miniforge.phase-software-factory.release]
    ;; Require gate implementations
    [ai.miniforge.gate.syntax]
    [ai.miniforge.gate.lint]
@@ -36,7 +36,7 @@
 (defn with-mocked-test-runner
   "Run body-fn with run-tests! mocked to prevent recursive bb test."
   [body-fn]
-  (let [run-var (resolve 'ai.miniforge.phase.verify/run-tests!)]
+  (let [run-var (resolve 'ai.miniforge.phase-software-factory.verify/run-tests!)]
     (with-redefs-fn
       {run-var (fn [& _args] {:passed? true :test-count 1 :fail-count 0 :error-count 0})}
       body-fn)))

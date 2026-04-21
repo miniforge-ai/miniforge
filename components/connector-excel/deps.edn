@@ -1,7 +1,7 @@
 {:paths ["src" "resources"]
- :deps {ai.miniforge.data-foundry/connector      {:local/root "../connector"}
-        ai.miniforge.data-foundry/connector-auth  {:local/root "../connector-auth"}
-        ai.miniforge.data-foundry/connector-retry {:local/root "../connector-retry"}
+ :deps {ai.miniforge/connector      {:local/root "../connector"}
+        ai.miniforge/connector-auth  {:local/root "../connector-auth"}
+        ai.miniforge/connector-retry {:local/root "../connector-retry"}
         hato/hato                       {:mvn/version "1.0.0"}
         dk.ative/docjure                {:mvn/version "1.19.0"}}
  :aliases {:test {:extra-paths ["test"]

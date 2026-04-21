@@ -25,7 +25,7 @@
 ;; Test constants
 
 (def ^:private fixtures-dir
-  "test/fixtures")
+  "test/ai/miniforge/workflow_security_compliance/fixture_files")
 
 (def sarif-violation-count
   5)
