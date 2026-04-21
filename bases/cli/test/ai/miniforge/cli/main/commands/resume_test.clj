@@ -49,7 +49,7 @@
                   (fn [_profile] nil)]
       (is (thrown-with-msg?
            clojure.lang.ExceptionInfo
-           #"Could not resolve a default workflow for resume"
+           #"Could not resolve a workflow type for resume"
            (sut/resolve-resume-workflow {}))))))
 
 ;------------------------------------------------------------------------------ Layer 1
@@ -93,11 +93,11 @@
               (is (= :plan (:workflow/phase (second events))))
               (is (= :success (:phase/outcome (second events)))))))))))
 
-(deftest read-event-file-missing-workflow-raises-not-found-test
+(deftest read-event-file-missing-workflow-returns-nil-test
+  ;; The CLI wrapper now returns nil for missing workflows; the
+  ;; user-facing :anomalies/not-found comes from the workflow-resume
+  ;; component's `reconstruct-context` when callers use that path.
   (with-temp-events-dir
     (fn [base-dir]
       (with-redefs [sut/events-dir (.getPath base-dir)]
-        (is (thrown-with-msg?
-             clojure.lang.ExceptionInfo
-             #"No events found for workflow:"
-             (sut/read-event-file (str (random-uuid)))))))))
+        (is (nil? (sut/read-event-file (str (random-uuid)))))))))

@@ -50,6 +50,7 @@
    [ai.miniforge.cli.observability :as observability]
    [ai.miniforge.cli.main.display :as display]
    [ai.miniforge.cli.main.commands.run :as cmd-run]
+   [ai.miniforge.cli.main.commands.resume :as cmd-resume]
    [ai.miniforge.cli.main.commands.monitoring :as cmd-monitoring]
    [ai.miniforge.cli.main.commands.fleet :as cmd-fleet]
    [ai.miniforge.cli.main.commands.pr :as cmd-pr]
@@ -214,6 +215,20 @@
 
 ;; Delegated commands
 (defn run-cmd [m] (cmd-run/run-cmd (get-opts m)))
+
+(defn resume-cmd
+  "First-class `mf resume <workflow-id>` subcommand. The `<workflow-id>`
+   can be passed positionally, or via `--workflow-id`/`-w` / the legacy
+   `--resume`/`-r` flag (kept so existing docs keep working)."
+  [m]
+  (let [opts (get-opts m)
+        args (:args m)
+        wf-id (or (:workflow-id opts)
+                  (:resume opts)
+                  (first args))]
+    (if (str/blank? (str wf-id))
+      (display/print-error "resume requires a workflow id. Usage: miniforge resume <workflow-id>")
+      (cmd-resume/resume-workflow wf-id opts))))
 (defn scan-cmd [m] (cmd-scan/scan-cmd (get-opts m)))
 (defn init-cmd [m] (cmd-init/init-cmd (get-opts m)))
 (defn worktree-cmd [m] (cmd-worktree/worktree-cmd m))
@@ -376,6 +391,14 @@
            :resume          {:alias :r}
            :backend         {:coerce :keyword :alias :b}
            :execution-mode  {:coerce :keyword :alias :m}}}
+
+   ;; Resume — first-class subcommand. Reuses `run --resume`'s
+   ;; underlying logic through the workflow-resume component.
+   {:cmds ["resume"]
+    :fn resume-cmd
+    :args->opts [:workflow-id]
+    :spec {:workflow-id {:alias :w}
+           :quiet       {:coerce :boolean :alias :q}}}
 
    ;; Status command
    {:cmds ["status"]
