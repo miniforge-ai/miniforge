@@ -35,9 +35,9 @@
 ;; Env + pipeline assembly
 
 (defn- load-inputs
-  "Load and sanity-check the pipeline EDN and env EDN. Returns
-   `{:success? true :pipeline <edn> :env-config <edn>}` on success,
-   or the first schema/failure encountered."
+  "Load pipeline + env EDNs. On success, returns
+   `(schema/success :inputs {:pipeline <edn> :env-config <edn>})`;
+   otherwise propagates the first `schema/failure` encountered."
   [pipeline-path env-path]
   (let [pipeline (pc/load-pipeline pipeline-path)]
     (if (schema/failed? pipeline)
@@ -45,9 +45,8 @@
       (let [env (pc/load-env-config env-path)]
         (if (schema/failed? env)
           env
-          {:success?   true
-           :pipeline   (:pipeline pipeline)
-           :env-config (:env-config env)})))))
+          (schema/success :inputs {:pipeline   (:pipeline pipeline)
+                                   :env-config (:env-config env)}))))))
 
 (defn- unsupported-types
   "Connector types referenced by the env that the registry can't
@@ -55,6 +54,31 @@
   [env-conn-types]
   (let [supported (set (registry/supported-types))]
     (->> (vals env-conn-types) distinct (remove supported) vec)))
+
+(defn- unsupported-types-failure
+  "Produce a `schema/failure` describing the unsupported connector
+   types, listing what the runner does support for operator guidance."
+  [unknown]
+  (schema/failure
+    :pipeline-run
+    (str "Env references connector types not supported by this runner: "
+         (pr-str unknown)
+         ". Supported: " (pr-str (registry/supported-types)))))
+
+(defn- instantiate+resolve
+  "Given the loaded inputs, instantiate live connectors from the env's
+   connector-type declarations and resolve the pipeline EDN against the
+   env's stage overrides. Returns `{:resolved ... :connectors ...}`."
+  [{:keys [pipeline env-config]}]
+  (let [env-conn-types (pc/extract-connector-types env-config)
+        registry       (registry/build-registry)
+        instantiated   (pc/instantiate-connectors registry env-conn-types)
+        stage-configs  (pc/extract-stage-configs env-config)
+        res-ctx        (pc/create-resolution-context
+                         {:connector-refs (:connector-refs instantiated)
+                          :stage-configs  stage-configs})]
+    {:resolved   (pc/resolve-pipeline pipeline res-ctx)
+     :connectors (:connectors instantiated)}))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Public entry
@@ -71,25 +95,14 @@
    (run-pack pipeline-path env-path {}))
   ([pipeline-path env-path context]
    (let [loaded (load-inputs pipeline-path env-path)]
-     (if-not (:success? loaded)
+     (if (schema/failed? loaded)
        loaded
-       (let [{:keys [pipeline env-config]} loaded
-             env-conn-types                (pc/extract-connector-types env-config)
-             unknown                       (unsupported-types env-conn-types)]
+       (let [inputs  (:inputs loaded)
+             unknown (unsupported-types (pc/extract-connector-types (:env-config inputs)))]
          (if (seq unknown)
-           (schema/failure
-             :pipeline-run
-             (str "Env references connector types not supported by this runner: "
-                  (pr-str unknown)
-                  ". Supported: " (pr-str (registry/supported-types))))
-           (let [reg            (registry/build-registry)
-                 instantiated   (pc/instantiate-connectors reg env-conn-types)
-                 stage-configs  (pc/extract-stage-configs env-config)
-                 res-ctx        (pc/create-resolution-context
-                                  {:connector-refs (:connector-refs instantiated)
-                                   :stage-configs  stage-configs})
-                 resolved       (pc/resolve-pipeline pipeline res-ctx)]
-             (pr-run/execute-pipeline resolved (:connectors instantiated) context))))))))
+           (unsupported-types-failure unknown)
+           (let [{:keys [resolved connectors]} (instantiate+resolve inputs)]
+             (pr-run/execute-pipeline resolved connectors context))))))))
 
 ;------------------------------------------------------------------------------ Layer 2
 ;; Pack-level helpers (pipeline discovery + validation)
@@ -105,18 +118,10 @@
    executing it. Surfaces any loader, env, or resolver failure."
   [pipeline-path env-path]
   (let [loaded (load-inputs pipeline-path env-path)]
-    (if-not (:success? loaded)
+    (if (schema/failed? loaded)
       loaded
-      (let [{:keys [pipeline env-config]} loaded
-            env-conn-types                (pc/extract-connector-types env-config)
-            unknown                       (unsupported-types env-conn-types)]
+      (let [inputs  (:inputs loaded)
+            unknown (unsupported-types (pc/extract-connector-types (:env-config inputs)))]
         (if (seq unknown)
-          (schema/failure :pipeline-run (str "Unsupported connector types: " (pr-str unknown)))
-          (let [reg           (registry/build-registry)
-                instantiated  (pc/instantiate-connectors reg env-conn-types)
-                stage-configs (pc/extract-stage-configs env-config)
-                res-ctx       (pc/create-resolution-context
-                                {:connector-refs (:connector-refs instantiated)
-                                 :stage-configs  stage-configs})
-                resolved      (pc/resolve-pipeline pipeline res-ctx)]
-            (schema/success :pipeline resolved)))))))
+          (unsupported-types-failure unknown)
+          (schema/success :pipeline (:resolved (instantiate+resolve inputs))))))))

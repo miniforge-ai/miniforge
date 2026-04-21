@@ -78,6 +78,45 @@
         (when (= 1 (count ednfiles))
           (str (first ednfiles)))))))
 
+(defn- resolve-pipeline-path
+  "Resolve `pack-or-pipeline` into `[pack-dir pipeline-path]` as absolute
+   paths. `pack-dir` is nil when the caller passed a pipeline EDN
+   directly (no envs/ lookup possible)."
+  [pack-or-pipeline]
+  (let [f (fs/file pack-or-pipeline)]
+    (cond
+      (fs/directory? f)
+      (if-let [p (single-file-under f "pipelines")]
+        [(str (fs/absolutize f)) (str (fs/absolutize p))]
+        (throw (ex-info (str "Could not find a single pipelines/*.edn under " f) {})))
+
+      (and (fs/regular-file? f) (str/ends-with? (str f) ".edn"))
+      [nil (str (fs/absolutize f))]
+
+      :else
+      (throw (ex-info (str "Not a pack directory or pipeline EDN: " pack-or-pipeline) {})))))
+
+(defn- resolve-env-path
+  "Resolve `--env`, which may be a `.edn` path or a bare env name that
+   maps to `<pack-dir>/envs/<name>.edn`. Returns an absolute path or
+   throws on an unresolvable input."
+  [env pack-dir]
+  (cond
+    (nil? env)
+    (throw (ex-info "missing --env <env.edn|name>" {}))
+
+    (str/ends-with? env ".edn")
+    (str (fs/absolutize env))
+
+    pack-dir
+    (let [candidate (fs/file pack-dir "envs" (str env ".edn"))]
+      (if (fs/regular-file? candidate)
+        (str (fs/absolutize candidate))
+        (throw (ex-info (str "env not found: " candidate) {}))))
+
+    :else
+    (throw (ex-info (str "--env was a name but pipeline was given directly; pass a .edn path instead: " env) {}))))
+
 (defn- resolve-pack-paths
   "Given the positional arg to `etl run` / `etl validate` and the `--env`
    flag, return `[pipeline-path env-path]` as absolute file paths, or
@@ -88,59 +127,46 @@
    - `env` may be a path or a bare env name that resolves to
      `<pack>/envs/<name>.edn` when pack-or-pipeline is a directory."
   [pack-or-pipeline env]
-  (let [f (fs/file pack-or-pipeline)
-        [pack-dir pipeline-path]
-        (cond
-          (fs/directory? f)
-          (if-let [p (single-file-under f "pipelines")]
-            [(str f) p]
-            (throw (ex-info (str "Could not find a single pipelines/*.edn under " f) {})))
-
-          (and (fs/regular-file? f) (str/ends-with? (str f) ".edn"))
-          [nil (str f)]
-
-          :else
-          (throw (ex-info (str "Not a pack directory or pipeline EDN: " pack-or-pipeline) {})))
-        env-path
-        (cond
-          (nil? env)
-          (throw (ex-info "missing --env <env.edn|name>" {}))
-
-          (str/ends-with? env ".edn")
-          (str (fs/absolutize env))
-
-          pack-dir
-          (let [candidate (fs/file pack-dir "envs" (str env ".edn"))]
-            (if (fs/regular-file? candidate)
-              (str candidate)
-              (throw (ex-info (str "env not found: " candidate) {}))))
-
-          :else
-          (throw (ex-info (str "--env was a name but pipeline was given directly; pass a .edn path instead: " env) {})))]
+  (let [[pack-dir pipeline-path] (resolve-pipeline-path pack-or-pipeline)
+        env-path                 (resolve-env-path env pack-dir)]
     [pipeline-path env-path]))
 
 ;------------------------------------------------------------------------------ Layer 2
 ;; JVM shell-out (run / list / validate)
 
-(defn- miniforge-checkout?
-  "The JVM entry ships only as a :dev-alias local/root today, so the
-   command has to run from inside a miniforge checkout until we publish
-   the etl base as an installable artifact."
-  []
-  (and (fs/exists? "deps.edn")
-       (fs/exists? "bases/etl/deps.edn")))
+(defn- find-miniforge-root
+  "Walk up from `start` until a directory containing both `workspace.edn`
+   and `bases/etl/deps.edn` is found. Returns the absolute path or nil
+   if no such ancestor exists (i.e., not inside a miniforge checkout
+   that ships the etl base)."
+  ([] (find-miniforge-root (fs/file (System/getProperty "user.dir"))))
+  ([start]
+   (loop [dir (fs/absolutize start)]
+     (cond
+       (nil? dir)
+       nil
+
+       (and (fs/exists? (fs/file dir "workspace.edn"))
+            (fs/exists? (fs/file dir "bases/etl/deps.edn")))
+       (str dir)
+
+       :else
+       (recur (fs/parent dir))))))
 
 (defn- shell-etl!
-  "Shell out to the JVM etl entry point. `args` are the post-`-m` args:
-   the subcommand name and its flags. Streams stdout/stderr to the
-   user's terminal. Returns the subprocess exit code."
+  "Shell out to the JVM etl entry point from the miniforge root. `args`
+   are the post-`-m` args: the subcommand name and its flags. Streams
+   stdout/stderr to the user's terminal. Returns the subprocess exit
+   code."
   [args]
-  (if-not (miniforge-checkout?)
-    (do (display/print-error "mf etl run/list/validate currently requires running from a miniforge checkout (the etl base is dev-alias-only).")
-        1)
+  (if-let [root (find-miniforge-root)]
     (let [argv (into ["clojure" "-M:dev" "-m" "ai.miniforge.etl.main"] args)
-          {:keys [exit]} (deref (process/process argv {:out :inherit :err :inherit}))]
-      exit)))
+          {:keys [exit]} (deref (process/process argv {:dir  root
+                                                       :out  :inherit
+                                                       :err  :inherit}))]
+      exit)
+    (do (display/print-error "mf etl run/list/validate currently requires running from inside a miniforge checkout (walks up looking for workspace.edn + bases/etl/deps.edn). The etl base is dev-alias-only until we publish an installable artifact.")
+        1)))
 
 ;------------------------------------------------------------------------------ Layer 3
 ;; Fallback analysis (etl repo)

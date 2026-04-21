@@ -24,8 +24,9 @@
    [clojure.test :refer [deftest is testing]]))
 
 (defn- repo-root
-  "Locate the miniforge repo root by walking up from the test file until
-   a deps.edn is found. Lets the tests run no matter the cwd."
+  "Locate the miniforge repo root by walking up from the test's cwd
+   until a directory containing `workspace.edn` is found (the unique
+   polylith-workspace marker). Lets the tests run no matter the cwd."
   []
   (loop [dir (io/file ".")]
     (cond
