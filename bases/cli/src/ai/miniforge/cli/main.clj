@@ -227,7 +227,7 @@
                   (:resume opts)
                   (first args))]
     (if (str/blank? (str wf-id))
-      (display/print-error "resume requires a workflow id. Usage: miniforge resume <workflow-id>")
+      (display/print-error (messages/t :resume/missing-workflow-id))
       (cmd-resume/resume-workflow wf-id opts))))
 (defn scan-cmd [m] (cmd-scan/scan-cmd (get-opts m)))
 (defn init-cmd [m] (cmd-init/init-cmd (get-opts m)))

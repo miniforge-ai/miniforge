@@ -26,10 +26,18 @@
    needs in order to pick up where the original run left off.
 
    Zero I/O beyond the event-stream reader. Zero display. Zero runtime
-   wiring. Adapters (CLI, HTTP API, dashboard) compose those on top."
+   wiring. Adapters (CLI, HTTP API, dashboard) compose those on top.
+
+   Validation boundary: public API fns (`reconstruct-context`,
+   `trim-pipeline`, `resolve-workflow-identity`) validate their inputs
+   via `schema/validate!` before the pure core runs. Events read from
+   disk are filtered with `schema/valid-event?` — events without a
+   keyword `:event/type` are dropped at the boundary, so everything
+   the extractors see is well-shaped."
   (:require
    [ai.miniforge.event-stream.interface :as es]
-   [ai.miniforge.response.interface :as response]))
+   [ai.miniforge.response.interface :as response]
+   [ai.miniforge.workflow-resume.schema :as schema]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Pure extractors over an event sequence
@@ -98,20 +106,27 @@
      :workflow-id          — canonical id (either from event or the arg)
      :completed?           — true if :workflow/completed emitted
      :failed?              — true if :workflow/failed emitted
-     :event-count          — int
+     :event-count          — int (count of events that passed shape validation)
      :completed-dag-tasks  — set of DAG task IDs that succeeded
      :dag-paused?          — boolean
      :dag-pause-reason     — keyword or nil
 
-   Throws `:anomalies/not-found` if no events exist for the workflow —
-   adapters translate that to a user-facing error."
+   Throws `:anomalies/not-found` if no valid events exist for the
+   workflow — adapters translate that to a user-facing error. Events
+   that fail shape validation (missing or non-keyword `:event/type`)
+   are silently dropped at the boundary."
   [events-dir workflow-id]
-  (let [events (es/read-workflow-events-by-id events-dir workflow-id)
+  (schema/validate! schema/ReconstructContextInput
+                    {:events-dir events-dir :workflow-id workflow-id}
+                    {:message "Invalid reconstruct-context input"})
+  (let [raw-events (es/read-workflow-events-by-id events-dir workflow-id)
+        events (vec (filter schema/valid-event? raw-events))
         _ (when-not (seq events)
             (response/throw-anomaly! :anomalies/not-found
                                     (str "No events found for workflow: " workflow-id)
                                     {:workflow-id workflow-id
-                                     :events-dir (str events-dir)}))
+                                     :events-dir (str events-dir)
+                                     :raw-event-count (count raw-events)}))
         by-type (group-by :event/type events)
         completed-phases (extract-completed-phases events)
         phase-results (extract-phase-results events)
@@ -144,6 +159,9 @@
    collection of completed phase keywords; returns the workflow with
    its pipeline reduced to only the remaining phases."
   [workflow completed-phases]
+  (schema/validate! schema/TrimPipelineInput
+                    {:workflow workflow :completed-phases completed-phases}
+                    {:message "Invalid trim-pipeline input"})
   (let [completed-set (set completed-phases)
         remaining (vec (remove #(completed-set (:phase %))
                                (get workflow :workflow/pipeline [])))]
@@ -163,6 +181,9 @@
    - `reconstructed` — context map from `reconstruct-context`
    - `fallback-fn`   — 0-arity; returns a type keyword or nil"
   [reconstructed fallback-fn]
+  (schema/validate! schema/ResolveWorkflowIdentityInput
+                    {:reconstructed reconstructed :fallback-fn fallback-fn}
+                    {:message "Invalid resolve-workflow-identity input"})
   (let [workflow-spec (:workflow-spec reconstructed)
         workflow-type (or (some-> workflow-spec :name keyword)
                           (fallback-fn))

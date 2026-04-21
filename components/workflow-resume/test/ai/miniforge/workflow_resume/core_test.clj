@@ -212,3 +212,64 @@
     (is (= core/reconstruct-context wr/reconstruct-context))
     (is (= core/trim-pipeline wr/trim-pipeline))
     (is (= core/resolve-workflow-identity wr/resolve-workflow-identity))))
+
+;------------------------------------------------------------------------------ Layer 4
+;; Validation — schemas enforce data shape at the component boundary
+
+(deftest reconstruct-context-validates-workflow-id-test
+  (with-temp-events-dir
+    (fn [base-dir]
+      (testing "nil workflow-id is rejected before disk access"
+        (is (thrown-with-msg?
+             clojure.lang.ExceptionInfo
+             #"Invalid reconstruct-context input"
+             (core/reconstruct-context base-dir nil))))
+
+      (testing "non-string/non-uuid workflow-id is rejected"
+        (is (thrown-with-msg?
+             clojure.lang.ExceptionInfo
+             #"Invalid reconstruct-context input"
+             (core/reconstruct-context base-dir 42)))))))
+
+(deftest reconstruct-context-filters-malformed-events-test
+  (with-temp-events-dir
+    (fn [base-dir]
+      (let [wf-id (str (random-uuid))
+            wf-dir (doto (io/file base-dir wf-id) .mkdirs)]
+        ;; Valid event
+        (write-event! wf-dir "20260421T000001Z-a.json"
+                      {"~:event/type" "~:workflow/phase-completed"
+                       "~:workflow/phase" "~:plan"
+                       "~:phase/outcome" "~:success"})
+        ;; Parseable JSON but missing :event/type — gets filtered
+        (write-event! wf-dir "20260421T000002Z-b.json"
+                      {"legacy" "no event/type here"})
+        ;; Parseable but :event/type is a string — gets filtered
+        (write-event! wf-dir "20260421T000003Z-c.json"
+                      {"~:event/type" "workflow/phase-completed"})
+        (testing "malformed-shape events dropped; :event-count reflects valid only"
+          (let [ctx (core/reconstruct-context base-dir wf-id)]
+            (is (= 1 (:event-count ctx)))
+            (is (= [:plan] (:completed-phases ctx)))))))))
+
+(deftest trim-pipeline-validates-workflow-shape-test
+  (testing "workflow without :workflow/pipeline is rejected"
+    (is (thrown-with-msg?
+         clojure.lang.ExceptionInfo
+         #"Invalid trim-pipeline input"
+         (core/trim-pipeline {:wrong-shape true} []))))
+
+  (testing "pipeline entries without :phase keyword are rejected"
+    (is (thrown-with-msg?
+         clojure.lang.ExceptionInfo
+         #"Invalid trim-pipeline input"
+         (core/trim-pipeline {:workflow/pipeline [{:no-phase "here"}]} [])))))
+
+(deftest resolve-workflow-identity-validates-fallback-fn-test
+  (testing "non-function fallback is rejected"
+    (is (thrown-with-msg?
+         clojure.lang.ExceptionInfo
+         #"Invalid resolve-workflow-identity input"
+         (core/resolve-workflow-identity
+           {:workflow-spec {:name "x"}}
+           "not a function")))))

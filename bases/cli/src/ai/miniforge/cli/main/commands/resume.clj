@@ -31,6 +31,7 @@
    [clojure.string :as str]
    [ai.miniforge.cli.app-config :as app-config]
    [ai.miniforge.cli.main.display :as display]
+   [ai.miniforge.cli.messages :as messages]
    [ai.miniforge.cli.workflow-selection-config :as selection-config]
    [ai.miniforge.cli.workflow-runner.context :as context]
    [ai.miniforge.cli.workflow-runner.dashboard :as dashboard]
@@ -74,19 +75,23 @@
   [workflow-id opts]
   (let [quiet (:quiet opts false)
         _ (when-not quiet
-            (display/print-info (str "Resuming workflow: " workflow-id)))
+            (display/print-info (messages/t :resume/resuming
+                                            {:workflow-id workflow-id})))
         reconstructed (wr/reconstruct-context events-dir (str workflow-id))]
 
     (if (:completed? reconstructed)
-      (do (display/print-info "Workflow already completed successfully.") nil)
+      (do (display/print-info (messages/t :resume/already-completed)) nil)
 
       (let [completed-phases (:completed-phases reconstructed)
             _ (when-not quiet
-                (display/print-info (str "Completed phases: "
-                                         (if (seq completed-phases)
-                                           (str/join ", " (map name completed-phases))
-                                           "none")))
-                (display/print-info (str "Events found: " (:event-count reconstructed))))
+                (display/print-info
+                  (messages/t :resume/completed-phases
+                              {:phases (if (seq completed-phases)
+                                         (str/join ", " (map name completed-phases))
+                                         (messages/t :resume/completed-phases-none))}))
+                (display/print-info
+                  (messages/t :resume/events-found
+                              {:count (:event-count reconstructed)})))
 
             ;; Resolve workflow interface lazily — avoids pulling the
             ;; workflow component onto the cold-start path.
@@ -101,10 +106,11 @@
             remaining-pipeline (:workflow/pipeline resume-workflow)
             _ (when-not quiet
                 (if (seq remaining-pipeline)
-                  (display/print-info (str "Resuming from phase: "
-                                           (name (:phase (first remaining-pipeline)))
-                                           " (" (count remaining-pipeline) " phases remaining)"))
-                  (display/print-info "All phases already completed.")))
+                  (display/print-info
+                    (messages/t :resume/resuming-from-phase
+                                {:phase (name (:phase (first remaining-pipeline)))
+                                 :count (count remaining-pipeline)}))
+                  (display/print-info (messages/t :resume/all-phases-completed))))
 
             ;; Runtime wiring (CLI concern — stays here)
             event-stream (es/create-event-stream)
@@ -115,7 +121,8 @@
             llm-client (context/create-llm-client workflow nil quiet)]
 
         (when-not quiet
-          (display/print-info (str "New workflow ID: " new-workflow-id)))
+          (display/print-info (messages/t :resume/new-workflow-id
+                                          {:workflow-id new-workflow-id})))
 
         (try
           (let [result (run-pipeline resume-workflow
@@ -128,14 +135,17 @@
                                       :on-phase-start (fn [_ctx interceptor]
                                                         (when-not quiet
                                                           (display/print-info
-                                                           (str "Phase: " (get-in interceptor [:config :phase])))))
+                                                            (messages/t :resume/phase-starting
+                                                                        {:phase (get-in interceptor [:config :phase])}))))
                                       :on-phase-complete (fn [_ctx _interceptor _result] nil)})]
             (when-not quiet
-              (display/print-info (str "Resumed workflow completed with status: "
-                                       (:execution/status result))))
+              (display/print-info
+                (messages/t :resume/completed-status
+                            {:status (:execution/status result)})))
             result)
           (catch Exception e
-            (display/print-error (str "Resume failed: " (ex-message e)))
+            (display/print-error (messages/t :resume/failed
+                                             {:error (ex-message e)}))
             (throw e))
           (finally
             (when command-poller-cleanup (command-poller-cleanup))))))))
