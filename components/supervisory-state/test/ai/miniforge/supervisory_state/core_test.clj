@@ -113,20 +113,22 @@
         (is (= (inc before) after)
             "only the synthetic event should be added; no re-emission loop")))))
 
-;------------------------------------------------------------------------------ Replay
+;------------------------------------------------------------------------------ Live view build-up
 
-(deftest startup-replay-reconstructs-table-from-history
+(deftest live-events-build-the-view-incrementally
+  ;; Covers the production attach order: component attaches first, then
+  ;; events flow. Replaces the former startup-replay test after YAGNI-
+  ;; removing `replay` (no production caller ever populated the stream
+  ;; before the component subscribed).
   (let [stream (no-sink-stream)
-        wf-id  (random-uuid)]
-    ;; Events exist in the stream before the component starts.
+        wf-id  (random-uuid)
+        comp   (iface/start! (iface/create stream))]
     (es/publish! stream (workflow-started wf-id))
     (es/publish! stream (workflow-completed wf-id))
-    (let [comp (iface/create stream)]
-      (iface/start! comp)
-      (let [runs (iface/workflows comp)]
-        (is (= 1 (count runs)))
-        (is (= :completed (:workflow-run/status (first runs)))
-            "replay must apply all historic events, ending in :completed")))))
+    (let [runs (iface/workflows comp)]
+      (is (= 1 (count runs)))
+      (is (= :completed (:workflow-run/status (first runs)))
+          "live subscription must see all events, ending in :completed"))))
 
 ;------------------------------------------------------------------------------ TaskNode (N5-δ3 §3.3)
 

@@ -25,6 +25,7 @@
 ;; Event stream lifecycle and queries
 
 (def create-event-stream core/create-event-stream)
+(def create-envelope core/create-envelope)
 (def publish! core/publish!)
 (def subscribe! core/subscribe!)
 (def unsubscribe! core/unsubscribe!)

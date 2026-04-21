@@ -17,20 +17,23 @@
 ;; limitations under the License.
 
 (ns ai.miniforge.supervisory-state.core
-  "Supervisory-state component lifecycle and runtime.
+  "Supervisory-state — materialized view of the event log with change
+   notifications.
 
-   The component owns an atom of form:
+   The component maintains an in-memory entity table derived from events
+   flowing through the event stream. When the table changes, the emitter
+   publishes `:supervisory/*-upserted` events on the same stream so that
+   downstream consumers (dashboard, TUI, file sink) can subscribe to
+   canonical entity snapshots instead of folding source events themselves.
 
-     {:table <EntityTable>     ; canonical entity snapshot
-      :last-seq long            ; highest sequence number observed
-      :subscriber-id keyword    ; event-stream subscription handle
-      :stream <event-stream>}   ; back-reference to the stream we emit into
+   The runtime atom is not a store — it's a view cache. No persistence
+   across process restarts; the view is rebuilt by normal live event
+   flow after attach.
 
-   On `start!` it first replays the stream's in-memory event log to rebuild
-   the entity table (N5-delta-1 §3.4), then subscribes live. Each live event
-   is passed through the accumulator; if the entity table changes, the
-   emitter publishes one `:supervisory/*-upserted` event per changed entity
-   back into the same stream."
+   Shape:
+     {:table       <EntityTable>  — current view
+      :stream      <event-stream> — the stream we subscribe to + emit into
+      :subscribed? boolean        — idempotent-start latch}"
   (:require
    [ai.miniforge.event-stream.interface :as es]
    [ai.miniforge.supervisory-state.accumulator :as accumulator]
@@ -66,19 +69,6 @@
     (assoc state :table next-table)))
 
 ;------------------------------------------------------------------------------ Layer 2
-;; Startup replay
-
-(defn- replay
-  "Walk the stream's in-memory event log and fold it through the accumulator.
-   Returns a fresh entity table. Attention is derived once at the end rather
-   than on every step, to avoid emitting thousands of intermediate items
-   during replay."
-  [stream]
-  (let [events (es/get-events stream)]
-    (-> (accumulator/apply-events schema/empty-table events)
-        with-attention)))
-
-;------------------------------------------------------------------------------ Layer 3
 ;; Lifecycle
 
 (defn create
@@ -102,13 +92,15 @@
     (swap! component tick event)))
 
 (defn start!
-  "Replay the stream's history into the entity table, then subscribe live.
-   Idempotent — subsequent calls are no-ops."
+  "Subscribe to the stream. Idempotent — subsequent calls are no-ops.
+
+   The materialized view starts empty and accumulates as events flow
+   live. No startup replay of the in-memory event log (YAGNI — no
+   production caller attached to a pre-populated stream)."
   [component]
   (let [{:keys [stream subscribed?]} @component]
     (when-not subscribed?
-      (let [initial (replay stream)]
-        (swap! component assoc :table initial :subscribed? true))
+      (swap! component assoc :subscribed? true)
       (es/subscribe! stream subscriber-id
                      (fn [event] (handle-event! component event))))
     component))
