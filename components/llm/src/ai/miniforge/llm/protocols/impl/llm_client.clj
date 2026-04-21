@@ -535,13 +535,24 @@
         timeout-reason (atom nil)
         line-timeout-ms 60000]
     (loop []
-      (if-let [timeout-check (pm/check-timeout monitor)]
-        (reset! timeout-reason timeout-check)
-        (when-let [line (read-line-with-timeout out-reader line-timeout-ms)]
-          (swap! out-lines conj line)
-          (pm/record-chunk! monitor line)
-          (on-line line)
-          (recur))))
+      (if-let [t (pm/check-timeout monitor)]
+        ;; Progress-monitor timeout (stagnation or total-max)
+        (reset! timeout-reason t)
+        (if-let [line (read-line-with-timeout out-reader line-timeout-ms)]
+          (do (swap! out-lines conj line)
+              (pm/record-chunk! monitor line)
+              (on-line line)
+              (recur))
+          ;; Line-timeout: reader produced nothing for line-timeout-ms.
+          ;; Treat as stream-idle — a stalled stream, not clean EOF.
+          ;; Set an explicit reason so the caller reports it instead of
+          ;; waiting on `deref process` for the full 10 min and then
+          ;; reporting a bare "Process timed out" with no context.
+          (reset! timeout-reason
+                  {:type :stream-idle
+                   :message (str "No stream output for " line-timeout-ms "ms")
+                   :elapsed-ms line-timeout-ms
+                   :stats {:lines-read (count @out-lines)}}))))
     {:lines @out-lines
      :timeout @timeout-reason}))
 
@@ -564,6 +575,15 @@
          out-reader (java.io.BufferedReader.
                      (java.io.InputStreamReader. (:out process)))
          {:keys [lines timeout]} (process-stream-lines out-reader monitor on-line)
+         ;; Stream ended with a timeout reason (stream-idle,
+         ;; stagnation, or total-max) — the subprocess is hung or
+         ;; silent. Kill it so `deref` returns immediately instead of
+         ;; waiting 10 min for a process that will not exit.
+         _ (when timeout
+             (try
+               (when-let [^Process jp (:proc process)]
+                 (.destroyForcibly jp))
+               (catch Exception _ nil)))
          result (deref process 600000 {:exit -1 :err "Process timed out"})]
      (if timeout
        (timeout-result lines timeout)
