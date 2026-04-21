@@ -159,6 +159,23 @@
     (catch Exception _e
       nil)))
 
+(defn- normalize-codex-finish-reason
+  "Normalize a Codex finish_reason string to the canonical stop-reason strings
+   used across all backends.
+
+   Codex → canonical mapping:
+   - \"stop\"      → \"end_turn\"     (normal completion)
+   - \"max_turns\" → \"max_turns\"    (turn budget exhausted)
+   - \"length\"    → \"max_tokens\"   (token budget exhausted)
+   - anything else → passed through unchanged"
+  [finish-reason]
+  (when finish-reason
+    (case finish-reason
+      "stop"      "end_turn"
+      "max_turns" "max_turns"
+      "length"    "max_tokens"
+      finish-reason)))
+
 (defn parse-codex-stream-line
   "Parse a line from Codex CLI streaming output.
 
@@ -166,8 +183,12 @@
    - thread.started: session began
    - turn.started: turn began
    - item.completed: reasoning, agent_message, mcp_tool_call, etc.
-   - turn.completed: carries usage data
+   - turn.completed: carries usage data and optional finish_reason
    - turn.failed / error: failure events
+
+   Diagnostic fields returned on turn.completed:
+   - :stop-reason   — normalized finish_reason (\"end_turn\", \"max_turns\", etc.)
+   - :increment-turns — true, signalling the accumulator to bump its turn counter
 
    Arguments:
      line - String line from stream
@@ -205,12 +226,17 @@
               ;; later as :agent/reasoning events if useful
               nil))
 
-          ;; Turn completed carries usage
+          ;; Turn completed carries usage and optional finish_reason.
+          ;; :increment-turns signals the stream-with-parser accumulator
+          ;; to bump its turn counter (Codex equivalent of num_turns).
           "turn.completed"
-          (let [usage (:usage data)]
-            {:delta "" :done? true
-             :usage {:input-tokens (:input_tokens usage)
-                     :output-tokens (:output_tokens usage)}})
+          (let [usage (:usage data)
+                stop-reason (normalize-codex-finish-reason (:finish_reason data))]
+            (cond-> {:delta "" :done? true
+                     :increment-turns true
+                     :usage {:input-tokens (:input_tokens usage)
+                             :output-tokens (:output_tokens usage)}}
+              stop-reason (assoc :stop-reason stop-reason)))
 
           ;; Turn failed
           "turn.failed"
@@ -675,8 +701,13 @@
         (reset! accumulated-session-id session-id))
       (when-let [sr (:stop-reason parsed)]
         (reset! accumulated-stop-reason sr))
+      ;; Claude surfaces num_turns as an absolute count on the result event.
       (when-let [nt (:num-turns parsed)]
         (reset! accumulated-turns nt))
+      ;; Codex signals each completed turn via :increment-turns rather than
+      ;; emitting an absolute count — bump the accumulator on each one.
+      (when (:increment-turns parsed)
+        (swap! accumulated-turns (fnil inc 0)))
       (if (or (:tool-use parsed) (:heartbeat parsed))
         ;; Tool-use and heartbeat events: track tool names and fire on-chunk
         (do
@@ -701,27 +732,54 @@
       (log/debug logger :system :agent/streaming-complete
                  {:data {:response-length content-length}}))))
 
-(defn streaming-success-response [content exit-code usage cost-usd stop-reason num-turns]
+(defn- message-preview
+  "Return the last up-to-500 characters of content for post-mortem diagnostics.
+   Returns nil when content is blank."
+  [content]
+  (when (seq content)
+    (subs content (max 0 (- (count content) 500)))))
+
+(defn streaming-success-response
+  "Build a streaming success response with diagnostic metadata.
+
+   Diagnostic fields added to the response map:
+   - :stop-reason          — why the model stopped (\"end_turn\", \"max_turns\", etc.)
+   - :num-turns            — number of conversation turns consumed
+   - :tool-call-count      — total number of tool invocations during the run
+   - :final-message-preview — last 500 chars of accumulated content (post-mortem aid)"
+  [content exit-code usage cost-usd stop-reason num-turns tool-call-count final-message-preview]
   (if (rate-limited? content)
     (llm-error :anomalies.agent/rate-limited "rate_limit"
                (str "Claude CLI rate limited: " (str/trim content))
                {:exit-code exit-code :stdout content
                 :stop-reason stop-reason :num-turns num-turns})
     (cond-> (llm-success content {:exit-code exit-code :usage usage})
-      cost-usd    (assoc :cost-usd cost-usd)
-      stop-reason (assoc :stop-reason stop-reason)
-      num-turns   (assoc :num-turns num-turns))))
+      cost-usd                    (assoc :cost-usd cost-usd)
+      stop-reason                 (assoc :stop-reason stop-reason)
+      num-turns                   (assoc :num-turns num-turns)
+      (some? tool-call-count)     (assoc :tool-call-count tool-call-count)
+      (seq final-message-preview) (assoc :final-message-preview final-message-preview))))
 
-(defn streaming-error-response [content exit-code err-result timeout-info stop-reason num-turns]
+(defn streaming-error-response
+  "Build a streaming error response with diagnostic metadata.
+
+   Diagnostic fields added to the response map (alongside :success/:error/:anomaly):
+   - :stop-reason          — last observed stop reason before failure
+   - :num-turns            — number of conversation turns consumed
+   - :tool-call-count      — total number of tool invocations during the run
+   - :final-message-preview — last 500 chars of accumulated content (post-mortem aid)"
+  [content exit-code err-result timeout-info stop-reason num-turns tool-call-count final-message-preview]
   (let [error-message (or err-result
                           (when (str/blank? content) "Process failed with no output")
                           "Process failed")
         category (if timeout-info :anomalies/timeout :anomalies.agent/llm-error)
         error-type (if timeout-info "adaptive_timeout" "cli_error")]
-    (llm-error category error-type (str/trim error-message)
-               (cond-> {:exit-code exit-code :stderr err-result :stdout content :timeout timeout-info}
-                 stop-reason (assoc :stop-reason stop-reason)
-                 num-turns   (assoc :num-turns num-turns)))))
+    (cond-> (llm-error category error-type (str/trim error-message)
+                       {:exit-code exit-code :stderr err-result :stdout content :timeout timeout-info})
+      stop-reason                 (assoc :stop-reason stop-reason)
+      num-turns                   (assoc :num-turns num-turns)
+      (some? tool-call-count)     (assoc :tool-call-count tool-call-count)
+      (seq final-message-preview) (assoc :final-message-preview final-message-preview))))
 
 (defn handle-streaming [client request on-chunk backend-config progress-monitor]
   (let [{:keys [logger config]} client
@@ -758,7 +816,9 @@
           tools @accumulated-tools
           session-id @accumulated-session-id
           stop-reason @accumulated-stop-reason
-          num-turns @accumulated-turns]
+          num-turns @accumulated-turns
+          tool-call-count (count tools)
+          final-message-preview (message-preview final-content)]
       (on-chunk {:delta ""
                  :done? true
                  :content final-content
@@ -774,11 +834,13 @@
       (if (zero? exit-code)
         (cond-> (streaming-success-response final-content exit-code
                                             @accumulated-usage @accumulated-cost
-                                            stop-reason num-turns)
+                                            stop-reason num-turns
+                                            tool-call-count final-message-preview)
           (seq tools) (assoc :tools-called tools)
-          session-id   (assoc :session-id session-id))
+          session-id  (assoc :session-id session-id))
         (cond-> (streaming-error-response final-content exit-code (:err result)
-                                          timeout-info stop-reason num-turns)
+                                          timeout-info stop-reason num-turns
+                                          tool-call-count final-message-preview)
           session-id (assoc :session-id session-id))))))
 
 (defn complete-stream-impl [client request on-chunk]
