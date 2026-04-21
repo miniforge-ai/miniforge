@@ -33,13 +33,13 @@
    [babashka.fs :as fs]
    ;; Required for defmethod side effects (register phase handlers)
    #_{:clj-kondo/ignore [:unused-namespace]}
-   [ai.miniforge.phase.plan]
+   [ai.miniforge.phase-software-factory.plan]
    #_{:clj-kondo/ignore [:unused-namespace]}
-   [ai.miniforge.phase.implement]
+   [ai.miniforge.phase-software-factory.implement]
    #_{:clj-kondo/ignore [:unused-namespace]}
-   [ai.miniforge.phase.verify]
+   [ai.miniforge.phase-software-factory.verify]
    #_{:clj-kondo/ignore [:unused-namespace]}
-   [ai.miniforge.phase.release]
+   [ai.miniforge.phase-software-factory.release]
    [ai.miniforge.agent.interface :as agent]
    [ai.miniforge.dag-executor.executor :as dag-exec]
    [ai.miniforge.response.interface :as response]
@@ -133,7 +133,7 @@
     (let [env-id      (random-uuid)
           release-called? (atom false)
           release-env-called? (atom false)
-          run-var     (resolve 'ai.miniforge.phase.verify/run-tests!)
+          run-var     (resolve 'ai.miniforge.phase-software-factory.verify/run-tests!)
           workflow    (make-workflow :implement :verify :done)]
       (with-redefs [agent/create-implementer (fn [_] {:type :mock-implementer})
                     agent/invoke

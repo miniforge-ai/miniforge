@@ -32,23 +32,23 @@
       :leave   (fn [ctx] -> ctx)    ; Post-processing
       :error   (fn [ctx ex] -> ctx) ; Error handling/repair}"
   (:require
+   [ai.miniforge.phase.agent-behavior :as agent-behavior]
+   [ai.miniforge.phase.file-context :as file-context]
    [ai.miniforge.phase.loader :as loader]
+   [ai.miniforge.phase.phase-result :as phase-result]
    [ai.miniforge.phase.registry :as registry]
    [ai.miniforge.phase.telemetry :as telemetry]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Phase-result pass-throughs (loaded at runtime to avoid cross-component dep)
+;; Phase-result pass-throughs
 
-(defn enter-context
-  "Build canonical phase result context. Delegates to phase.phase-result/enter-context."
-  [ctx phase-kw agent-kw gates budget start-time result]
-  ((requiring-resolve 'ai.miniforge.phase.phase-result/enter-context)
-   ctx phase-kw agent-kw gates budget start-time result))
+(def enter-context
+  "Build canonical phase result context."
+  phase-result/enter-context)
 
-(defn exception-error
-  "Build error map from exception. Delegates to phase.phase-result/exception-error."
-  [ex]
-  ((requiring-resolve 'ai.miniforge.phase.phase-result/exception-error) ex))
+(def exception-error
+  "Build error map from exception."
+  phase-result/exception-error)
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Re-export registry functions
@@ -181,6 +181,40 @@
   "Emit a :phase/milestone-failed event when a milestone checkpoint fails.
    Called automatically from emit-phase-completed! on non-:success outcome."
   telemetry/emit-milestone-failed!)
+
+(def determine-phase-status
+  "Resolve the outcome status for a phase from its result and gate outputs."
+  registry/determine-phase-status)
+
+(def load-files-in-scope
+  "Load file contents for a phase's configured in-scope paths."
+  file-context/load-files-in-scope)
+
+(def load-and-filter-behaviors
+  "Load and filter rule-pack agent-behavior entries applicable to a phase."
+  agent-behavior/load-and-filter-behaviors)
+
+(def success
+  "Build a successful environment-model phase result."
+  phase-result/success)
+
+(def error
+  "Build an error environment-model phase result."
+  phase-result/error)
+
+(def skipped
+  "Build a skipped-phase result for phases that short-circuit."
+  phase-result/skipped)
+
+(def test-metrics
+  "Build a standard test-phase metrics map."
+  phase-result/test-metrics)
+
+(def result-succeeded?
+  "True when a phase result map has :status :success.
+   Distinct from `succeeded?` which inspects multiple status keys across
+   execution/step/chain shapes."
+  phase-result/succeeded?)
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Pipeline construction

@@ -36,7 +36,7 @@
 (defn with-mocked-test-runner
   "Run body-fn with run-tests! mocked to prevent subprocess spawning."
   [body-fn]
-  (let [run-var (resolve 'ai.miniforge.phase.verify/run-tests!)]
+  (let [run-var (resolve 'ai.miniforge.phase-software-factory.verify/run-tests!)]
     (with-redefs-fn
       {run-var (fn [& _args] {:passed? true :test-count 1 :fail-count 0 :error-count 0})}
       body-fn)))

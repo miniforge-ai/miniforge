@@ -31,9 +31,9 @@
 (deftest configured-phase-namespaces-test
   (testing "phase implementation namespaces are discovered from composed resources"
     (let [phase-namespaces (set (loader/configured-phase-namespaces))]
-      (is (contains? phase-namespaces 'ai.miniforge.phase.explore))
-      (is (contains? phase-namespaces 'ai.miniforge.phase.plan))
-      (is (contains? phase-namespaces 'ai.miniforge.phase.release)))))
+      (is (contains? phase-namespaces 'ai.miniforge.phase-software-factory.explore))
+      (is (contains? phase-namespaces 'ai.miniforge.phase-software-factory.plan))
+      (is (contains? phase-namespaces 'ai.miniforge.phase-software-factory.release)))))
 
 (deftest ensure-phase-implementations-loaded-test
   (testing "loading configured phase implementations registers their phase defaults"
