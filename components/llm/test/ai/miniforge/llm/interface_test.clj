@@ -256,6 +256,47 @@
           parsed (impl/parse-codex-stream-line line)]
       (is (nil? parsed)))))
 
+(deftest parse-codex-stream-line-finish-reason-test
+  (testing "turn.completed always sets :increment-turns true"
+    (let [line (json/generate-string {:type "turn.completed"
+                                      :usage {:input_tokens 10 :output_tokens 5}})
+          parsed (impl/parse-codex-stream-line line)]
+      (is (true? (:increment-turns parsed)))))
+
+  (testing "finish_reason 'stop' normalizes to 'end_turn'"
+    (let [line (json/generate-string {:type "turn.completed"
+                                      :finish_reason "stop"
+                                      :usage {:input_tokens 10 :output_tokens 5}})
+          parsed (impl/parse-codex-stream-line line)]
+      (is (= "end_turn" (:stop-reason parsed)))))
+
+  (testing "finish_reason 'max_turns' passes through unchanged"
+    (let [line (json/generate-string {:type "turn.completed"
+                                      :finish_reason "max_turns"
+                                      :usage {:input_tokens 10 :output_tokens 5}})
+          parsed (impl/parse-codex-stream-line line)]
+      (is (= "max_turns" (:stop-reason parsed)))))
+
+  (testing "finish_reason 'length' normalizes to 'max_tokens'"
+    (let [line (json/generate-string {:type "turn.completed"
+                                      :finish_reason "length"
+                                      :usage {:input_tokens 10 :output_tokens 5}})
+          parsed (impl/parse-codex-stream-line line)]
+      (is (= "max_tokens" (:stop-reason parsed)))))
+
+  (testing "unknown finish_reason passes through as-is"
+    (let [line (json/generate-string {:type "turn.completed"
+                                      :finish_reason "something_new"
+                                      :usage {:input_tokens 10 :output_tokens 5}})
+          parsed (impl/parse-codex-stream-line line)]
+      (is (= "something_new" (:stop-reason parsed)))))
+
+  (testing "absent finish_reason produces no :stop-reason key"
+    (let [line (json/generate-string {:type "turn.completed"
+                                      :usage {:input_tokens 10 :output_tokens 5}})
+          parsed (impl/parse-codex-stream-line line)]
+      (is (nil? (:stop-reason parsed))))))
+
 (deftest parse-cli-output-includes-metrics-test
   (testing "success response includes :tokens and :usage keys"
     (let [resp (impl/parse-cli-output "hello world" 0)]
@@ -354,6 +395,51 @@
       (is (= "end_turn" @stop-reason))
       (is (= 7 @turns)))))
 
+(deftest stream-parser-codex-increment-turns-test
+  (testing "turn.completed events increment the turns accumulator"
+    (let [content (atom "")
+          usage (atom nil)
+          cost (atom nil)
+          chunks (atom [])
+          tools (atom [])
+          session-id (atom nil)
+          stop-reason (atom nil)
+          turns (atom nil)
+          handler (impl/stream-with-parser
+                    #'impl/parse-codex-stream-line
+                    (fn [chunk] (swap! chunks conj chunk))
+                    content usage cost tools session-id stop-reason turns)]
+      ;; First turn.completed — turns goes from nil to 1
+      (handler (json/generate-string
+                 {:type "turn.completed"
+                  :usage {:input_tokens 100 :output_tokens 20}}))
+      (is (= 1 @turns))
+      ;; Second turn.completed — turns increments to 2
+      (handler (json/generate-string
+                 {:type "turn.completed"
+                  :usage {:input_tokens 200 :output_tokens 40}}))
+      (is (= 2 @turns))))
+
+  (testing "turn.completed with finish_reason sets stop-reason accumulator"
+    (let [content (atom "")
+          usage (atom nil)
+          cost (atom nil)
+          chunks (atom [])
+          tools (atom [])
+          session-id (atom nil)
+          stop-reason (atom nil)
+          turns (atom nil)
+          handler (impl/stream-with-parser
+                    #'impl/parse-codex-stream-line
+                    (fn [chunk] (swap! chunks conj chunk))
+                    content usage cost tools session-id stop-reason turns)]
+      (handler (json/generate-string
+                 {:type "turn.completed"
+                  :finish_reason "stop"
+                  :usage {:input_tokens 50 :output_tokens 10}}))
+      (is (= "end_turn" @stop-reason))
+      (is (= 1 @turns)))))
+
 ;------------------------------------------------------------------------------ Layer 3
 ;; Rate limit detection tests
 
@@ -385,22 +471,91 @@
 (deftest rate-limited-streaming-success-response-test
   (testing "rate limit content in streaming-success-response returns error"
     (let [resp (impl/streaming-success-response
-                 "You've hit your limit · resets 7pm (America/Los_Angeles)" 0 nil nil nil nil)]
+                 "You've hit your limit · resets 7pm (America/Los_Angeles)" 0 nil nil nil nil nil nil)]
       (is (not (:success resp)))
       (is (some? (:error resp)))))
 
   (testing "normal content in streaming-success-response returns success"
-    (let [resp (impl/streaming-success-response "(defn foo [] 42)" 0 nil nil nil nil)]
+    (let [resp (impl/streaming-success-response "(defn foo [] 42)" 0 nil nil nil nil nil nil)]
       (is (:success resp))))
 
   (testing "stop-reason and num-turns flow through to success response"
     (let [resp (impl/streaming-success-response "ok" 0 {:input-tokens 1 :output-tokens 2}
-                                                 nil "max_turns" 80)]
+                                                 nil "max_turns" 80 nil nil)]
       (is (:success resp))
       (is (= "max_turns" (:stop-reason resp)))
       (is (= 80 (:num-turns resp))))))
 
 ;------------------------------------------------------------------------------ Layer 4
+;; Diagnostic metadata tests — tool-call-count and final-message-preview
+
+(deftest streaming-success-response-diagnostic-test
+  (testing "tool-call-count is included when provided"
+    (let [resp (impl/streaming-success-response "hello" 0 nil nil nil nil 3 nil)]
+      (is (:success resp))
+      (is (= 3 (:tool-call-count resp)))))
+
+  (testing "tool-call-count of 0 is still surfaced"
+    (let [resp (impl/streaming-success-response "hello" 0 nil nil nil nil 0 nil)]
+      (is (:success resp))
+      (is (= 0 (:tool-call-count resp)))))
+
+  (testing "final-message-preview is included for non-empty content"
+    (let [resp (impl/streaming-success-response "hello" 0 nil nil nil nil nil "hello")]
+      (is (:success resp))
+      (is (= "hello" (:final-message-preview resp)))))
+
+  (testing "final-message-preview is absent when nil"
+    (let [resp (impl/streaming-success-response "hello" 0 nil nil nil nil nil nil)]
+      (is (:success resp))
+      (is (nil? (:final-message-preview resp)))))
+
+  (testing "all diagnostic fields coexist with existing fields"
+    (let [resp (impl/streaming-success-response
+                 "done" 0 {:input-tokens 10 :output-tokens 5}
+                 0.002 "end_turn" 3 7 "preview text")]
+      (is (:success resp))
+      (is (= "done" (:content resp)))
+      (is (= "end_turn" (:stop-reason resp)))
+      (is (= 3 (:num-turns resp)))
+      (is (= 7 (:tool-call-count resp)))
+      (is (= "preview text" (:final-message-preview resp)))
+      (is (= 0.002 (:cost-usd resp))))))
+
+(deftest streaming-error-response-diagnostic-test
+  (testing "tool-call-count is surfaced on error responses"
+    (let [resp (impl/streaming-error-response "" -1 "process died" nil nil nil 5 nil)]
+      (is (not (:success resp)))
+      (is (= 5 (:tool-call-count resp)))))
+
+  (testing "final-message-preview is surfaced on error responses"
+    (let [resp (impl/streaming-error-response "partial output" -1 "process died" nil nil nil nil "partial output")]
+      (is (not (:success resp)))
+      (is (= "partial output" (:final-message-preview resp)))))
+
+  (testing "stop-reason and num-turns appear on error response top level"
+    (let [resp (impl/streaming-error-response "" -1 "timed out"
+                                              {:type :stream-idle :message "idle" :elapsed-ms 1000}
+                                              "max_turns" 12 3 "last bit")]
+      (is (not (:success resp)))
+      (is (= "max_turns" (:stop-reason resp)))
+      (is (= 12 (:num-turns resp)))
+      (is (= 3 (:tool-call-count resp)))
+      (is (= "last bit" (:final-message-preview resp))))))
+
+(deftest message-preview-via-streaming-success-test
+  (testing "short content is returned in full as preview"
+    (let [short-content "short response"
+          resp (impl/streaming-success-response short-content 0 nil nil nil nil 0 short-content)]
+      (is (= short-content (:final-message-preview resp)))))
+
+  (testing "long content preview contains only last 500 chars"
+    (let [long-content (str/join (repeat 600 "x"))
+          preview (subs long-content 100)  ; last 500 of 600
+          resp (impl/streaming-success-response long-content 0 nil nil nil nil 0 preview)]
+      (is (= 500 (count (:final-message-preview resp)))))))
+
+;------------------------------------------------------------------------------ Layer 5
 ;; Claude backend args-fn budget tests (PR #288)
 
 (deftest claude-args-fn-budget-usd-test
