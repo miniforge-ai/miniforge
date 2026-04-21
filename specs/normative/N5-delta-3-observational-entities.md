@@ -4,10 +4,10 @@
   Copyright 2025-2026 Christopher Lester. Licensed under Apache 2.0.
 -->
 
-# N5 Delta 3 — Observational Entities for Evidence, Artifact, Task, Decision, Pack Views
+# N5 Delta 3 — Evidence, Artifact, Task, Decision, and Pack Entities + Pack Management
 
-- **Spec ID:** `N5-delta-observational-entities-v1`
-- **Version:** `0.1.0-draft`
+- **Spec ID:** `N5-delta-evidence-artifact-task-decision-pack-v1`
+- **Version:** `0.2.0-draft`
 - **Status:** Draft
 - **Date:** 2026-04-21
 - **Amends:** N5 — Interface Standard: CLI/TUI/API (§3.2.3 Evidence Viewer, §3.2.4 Artifact Browser,
@@ -23,24 +23,27 @@ that materializes them for external renderers. That coverage gets the TUI's four
 Workflows, Agents, PR Fleet, Attention — and their existing drill-downs.
 
 N5 §3.2 specifies **seven additional TUI views** that the current entity set cannot back. N5-delta-2
-(PR scoring) closed two (§3.2.8 / §3.2.9). This delta closes the remaining five observational views
-by introducing five new canonical entities and their associated events. Interactive views (§3.2.12
-Run Launcher) and governance-action views (Waiver UX) are out of scope here — they require input
-affordances and are deferred to a later delta.
+(PR scoring) closed two (§3.2.8 / §3.2.9). This delta closes five of the remaining views by adding
+five canonical entities, their associated events, and the **pack-management actions** that operate
+on `PackManifest`. The Run Launcher (§3.2.12) and Waiver UX remain out of scope — those require
+larger input-form patterns and are deferred to a later delta.
 
 ### 1.1 What this delta adds
 
-| Entity            | Backs N5 §                | Kind                          |
-|-------------------|---------------------------|-------------------------------|
-| `EvidenceBundle`  | §3.2.3 Evidence Viewer    | Summary + drill-down record   |
-| `ArtifactMetadata`| §3.2.4 Artifact Browser   | Metadata only (content on demand) |
-| `TaskNode`        | §3.2.5 DAG Kanban         | Projected DAG node state      |
-| `DecisionCard`    | §3.2.7 Decision Queue     | Pending/resolved agent request|
-| `PackManifest`    | §3.2.11 Pack Browser      | Installed/available pack      |
+| Entity / Capability | Backs N5 §               | Kind                          |
+|---------------------|--------------------------|-------------------------------|
+| `EvidenceBundle`    | §3.2.3 Evidence Viewer   | Full bundle per N6 (open map) |
+| `ArtifactMetadata`  | §3.2.4 Artifact Browser  | Metadata only (content on demand) |
+| `TaskNode`          | §3.2.5 DAG Kanban        | Projected DAG node state      |
+| `DecisionCard`      | §3.2.7 Decision Queue    | Pending/resolved agent request|
+| `PackManifest`      | §3.2.11 Pack Browser     | Installed + available pack    |
+| Pack CRUD + compile | §3.2.11 Pack Browser     | Install / update / uninstall / trust-promote / compile-from-doc |
 
-All five are added to N5-delta-1 §3.1 as required v1-renderable entities. Existing consumers
-continue to work under the open-schema rule (additional top-level collections on
-`SupervisoryState` pass through unknown-collection-agnostic readers).
+All five entities are added to N5-delta-1 §3.1 as required v1-renderable entities. Pack-management
+actions are specified here because they operate on `PackManifest` and share its event envelope;
+they are the one intentionally interactive surface in this delta. Existing consumers continue to
+work under the open-schema rule (additional top-level collections on `SupervisoryState` pass
+through unknown-collection-agnostic readers).
 
 ### 1.2 What this delta does NOT change
 
@@ -48,11 +51,17 @@ continue to work under the open-schema rule (additional top-level collections on
   `:supervisory/*-upserted` events for all five new entities. Fine-grained sources keep emitting
   their own lifecycle events (e.g. `:task/state-changed`, `:control-plane/decision-created`);
   this delta only specifies how `supervisory-state` rolls them up.
-- **Bundle storage semantics** — evidence bundles and artifact content continue to live in their
-  respective stores (N6 evidence bundle / artifact store). This delta adds snapshot events that
-  carry display-facing shapes; drill-down to full content uses the existing store APIs.
+- **Artifact storage semantics** — artifact content continues to live in the artifact store.
+  This delta adds the metadata snapshot; drill-down to full content uses the existing store API.
 - **N4 pack trust semantics** — the `:pack/trust-level` field carried here mirrors the current
-  knowledge-promotion record. This delta does not change how trust is computed.
+  knowledge-promotion record. This delta does not change how trust is computed, only how
+  promotion events surface to `supervisory-state`.
+- **Open-map convention** — per the project-wide schema posture, all entities in §2 are open
+  maps. Consumers care about the fields they care about; unknown keys pass through untouched.
+  Where this delta names enums (e.g. `:pack/trust-level`), the named values are a normative
+  *known set* — producers MAY emit additional values and consumers MUST preserve them for
+  round-trip. Closed enumerations are explicitly called out where they exist (§2.3 Kanban
+  columns).
 
 ## 2. Entity shapes
 
@@ -61,46 +70,35 @@ additional fields; consumers MUST preserve unknowns for round-trip.
 
 ### 2.1 `EvidenceBundle`
 
-Projection of the N6 evidence bundle for `supervisory-state`. The full bundle stays in the
-evidence store; this record is the display surface for N5 §3.2.3. The bundle contains every
-required N6 §2 section in summarized form — consumers can drill into the store for full plan
-transcripts, reviewer notes, etc.
+Full N6 evidence bundle carried verbatim on the supervisory projection. Consumers (TUI,
+native console) render whichever fields they need; additional N6 fields the store assembles
+(or that future bundle versions add) pass through unmodified per the open-map rule.
+
+Required top-level keys — MUST be present on every bundle:
 
 ```clojure
-[:map {:registry registry}
+[:map {:registry registry, :closed false}
  [:evidence/id :id/uuid]
  [:evidence/workflow-run-id :id/uuid]
- [:evidence/intent
-   [:map
-    [:intent/type keyword?]                      ; matches N6 §2.1
-    [:intent/description string?]
-    [:intent/business-reason {:optional true} [:maybe string?]]
-    [:intent/constraints {:optional true} [:vector string?]]]]
- [:evidence/phase-summaries
-   [:vector [:map
-             [:phase keyword?]                   ; :plan | :implement | :verify | :review
-             [:phase/agent string?]
-             [:phase/status keyword?]            ; :success | :failed | :skipped
-             [:phase/duration-ms :common/non-neg-int]
-             [:phase/inner-loop-iterations {:optional true} :common/non-neg-int]
-             [:phase/artifact-ids {:optional true} [:vector :id/uuid]]]]]
- [:evidence/semantic-validation
-   [:map
-    [:passed? boolean?]
-    [:declared-intent {:optional true} string?]
-    [:actual-behavior {:optional true} string?]]]
- [:evidence/policy-summary
-   [:map
-    [:packs-applied [:vector string?]]
-    [:overall-passed? boolean?]
-    [:violation-count :common/non-neg-int]]]
- [:evidence/outcome
-   [:map
-    [:outcome/success boolean?]
-    [:outcome/summary string?]
-    [:outcome/workflow-status keyword?]]]         ; :completed | :failed | :cancelled
- [:evidence/derived-at :common/timestamp]]
+ [:evidence/intent            :map]  ; N6 §2.1 — full intent record
+ [:evidence/plan              :map]  ; N6 §2.2 — plan-phase evidence (inputs, decisions, artifacts)
+ [:evidence/implement         :map]  ; N6 §2.3 — implement-phase evidence
+ [:evidence/verify            :map]  ; N6 §2.4 — verify-phase evidence incl. inner-loop iterations
+ [:evidence/review            :map]  ; N6 §2.5 — review-phase evidence
+ [:evidence/semantic-validation :map] ; N6 §2.6 — declared vs. actual behaviour
+ [:evidence/policy-checks     [:vector :map]] ; per-pack evaluation records
+ [:evidence/outcome           :map]  ; N6 §2.7 — final outcome summary
+ [:evidence/derived-at        :common/timestamp]]
 ```
+
+The inner shapes are deliberately left as `:map` with `:closed false` semantics: the full
+schema is whatever `components/evidence-bundle/schema.clj` produces today, and bundle producers
+MAY add further sub-keys (per-tool traces, reviewer transcripts, extended provenance) without
+needing a spec bump. Consumers MUST preserve unknown keys on serialization round-trips.
+
+Where a consumer renders a summary (e.g. a Kanban card footer), it SHOULD read the subset it
+needs directly from the bundle rather than requesting a different event shape. This keeps the
+producer contract single-event and avoids a supervisory-summary/supervisory-full split.
 
 ### 2.2 `ArtifactMetadata`
 
@@ -138,14 +136,14 @@ MAY re-derive from `:task/status` + dependency resolution — but `supervisory-s
 it pre-computed so consumers are consistent.
 
 ```clojure
-[:map {:registry registry}
+[:map {:registry registry, :closed false}
  [:task/id :id/uuid]
  [:task/workflow-run-id :id/uuid]
  [:task/description string?]
- [:task/type {:optional true} [:maybe keyword?]]   ; :implement :test :review …
+ [:task/type {:optional true} [:maybe keyword?]]
  [:task/component {:optional true} [:maybe string?]]
- [:task/status :task/status]                       ; enum below
- [:task/kanban-column :task/kanban-column]         ; derived; enum below
+ [:task/status keyword?]                           ; open; known set below
+ [:task/kanban-column :task/kanban-column]         ; closed enum — display contract
  [:task/dependencies {:optional true} [:vector :id/uuid]]
  [:task/dependents {:optional true} [:vector :id/uuid]]
  [:task/started-at {:optional true} [:maybe :common/timestamp]]
@@ -155,13 +153,25 @@ it pre-computed so consumers are consistent.
  [:task/stratum? {:optional true} boolean?]]
 ```
 
-Enums:
+`:task/status` is an **open** keyword — the DAG state-profile system
+(`components/dag-executor/resources/config/dag-executor/state-profiles/*.edn`) lets each
+workflow family declare its own status vocabulary, and new profiles can add statuses without
+requiring a spec revision. Known values at time of writing:
 
-- `:task/status` ∈ { `:pending`, `:ready`, `:running`, `:ci-running`, `:review-pending`,
-  `:ready-to-merge`, `:merging`, `:merged`, `:completed`, `:failed`, `:skipped`, `:cancelled` }
-- `:task/kanban-column` ∈ { `:blocked`, `:ready`, `:active`, `:in-review`, `:merging`, `:done` }
+- `:pending`, `:ready`, `:running`, `:completed`, `:failed`, `:skipped`, `:cancelled` (kernel
+  profile — universal)
+- `:ci-running`, `:review-pending`, `:ready-to-merge`, `:merging`, `:merged` (software-factory
+  profile)
 
-Derivation from status to Kanban column (N5 §3.2.5):
+Producers MAY emit additional keywords; consumers MUST preserve them and MUST fall back to the
+`:blocked` Kanban column when the mapping below has no entry (see below).
+
+`:task/kanban-column` is **closed** — the six columns are the display contract for N5 §3.2.5
+and changes to the set would break consumers. Column values: `:blocked`, `:ready`, `:active`,
+`:in-review`, `:merging`, `:done`.
+
+Status → column mapping (the producer SHOULD emit the column pre-derived; consumers that need
+to derive locally MUST use this table exactly):
 
 | Status                         | Kanban column |
 |--------------------------------|---------------|
@@ -171,6 +181,7 @@ Derivation from status to Kanban column (N5 §3.2.5):
 | `:review-pending`              | `:in-review`  |
 | `:ready-to-merge` / `:merging` | `:merging`    |
 | `:merged` / `:completed` / `:failed` / `:skipped` / `:cancelled` | `:done` |
+| any other status               | `:blocked` (safe default — unknown state MUST surface visibly) |
 
 ### 2.4 `DecisionCard`
 
@@ -197,19 +208,19 @@ introduce a new queue — it specifies how the queue state reaches `supervisory-
 
 ### 2.5 `PackManifest`
 
-Display projection of an installed pack (N4 §2.2) plus its current local trust state. Applies to
-policy packs, workflow packs, and knowledge packs.
+Projection of a pack (N4 §2.2) visible to this node — either installed locally or available in a
+registry the node knows about. Applies to policy packs, workflow packs, and knowledge packs.
 
 ```clojure
-[:map {:registry registry}
+[:map {:registry registry, :closed false}
  [:pack/id keyword?]                               ; :miniforge/core
  [:pack/version string?]                           ; semver
  [:pack/title string?]
- [:pack/type :pack/type]                           ; :policy | :workflow | :knowledge
+ [:pack/type keyword?]                             ; known: :policy | :workflow | :knowledge
  [:pack/description {:optional true} [:maybe string?]]
  [:pack/author {:optional true} [:maybe string?]]
  [:pack/license {:optional true} [:maybe string?]]
- [:pack/trust-level :pack/trust-level]             ; :untrusted | :tainted | :trusted
+ [:pack/trust-level keyword?]                      ; known: :untrusted | :tainted | :trusted
  [:pack/installed? boolean?]
  [:pack/update-available? {:optional true} boolean?]
  [:pack/source {:optional true} [:maybe string?]]  ; registry URL or local path
@@ -220,6 +231,48 @@ policy packs, workflow packs, and knowledge packs.
  [:pack/target-types {:optional true} [:vector keyword?]]
  [:pack/installed-at {:optional true} [:maybe :common/timestamp]]]
 ```
+
+Supervisory-state carries both installed and registry-available packs. The `installed?` flag
+lets the Pack Browser distinguish discovery ("what could I install?") from inventory ("what's
+already here?"). Fleet mode (N5-δ1 §3.3) aggregates per-node PackManifests into a fleet-wide
+view — the same entity shape scales from single-node to fleet.
+
+### 2.6 Pack-management intents
+
+Pack-management affordances (§3.5, §4.6, §5.6) operate on `PackManifest` entries and carry
+enough context to round-trip through evidence. Intent payloads on the wire:
+
+```clojure
+;; :pack/install
+{:pack-install/pack-id         keyword
+ :pack-install/version         string                 ; semver or ":latest"
+ :pack-install/source          string                 ; registry URL or file path
+ :pack-install/requested-trust keyword                ; :untrusted (default) | :trusted
+ :pack-install/capabilities    [string]               ; capabilities the installer grants}
+
+;; :pack/update
+{:pack-update/pack-id   keyword
+ :pack-update/to-version string}
+
+;; :pack/uninstall
+{:pack-uninstall/pack-id keyword}
+
+;; :pack/trust-promote  (delegates to the existing knowledge-promotion record)
+{:pack-trust/pack-id    keyword
+ :pack-trust/to-level   keyword                       ; :trusted | :tainted | :untrusted
+ :pack-trust/justification string                     ; required for :trusted promotions}
+
+;; :pack/compile-from-doc — turn a Markdown (or other) document into a policy pack per N4
+{:pack-compile/source-path     string                 ; path to source document(s)
+ :pack-compile/pack-id         keyword                ; output pack id
+ :pack-compile/pack-version    string
+ :pack-compile/target-types    [keyword]              ; :terraform, :kubernetes, …
+ :pack-compile/install?        boolean                ; install immediately after compile
+ :pack-compile/requested-trust keyword}
+```
+
+All five intent shapes are open maps; additional provenance keys MAY be attached (e.g.
+`:pack-install/installer-agent-id` for audit).
 
 ## 3. Producer contract
 
@@ -267,13 +320,43 @@ keeps all TUI consumers on a single source of truth.
 
 ### 3.5 PackManifest producer
 
-- **Consumes:** an install/update/promote signal from the pack loader (`:pack/installed`,
-  `:pack/updated`, `:pack/trust-promoted`, `:pack/uninstalled` — to be exposed by
-  `components/knowledge` as a prerequisite; current state is protocol-calls-only).
-- **Behavior:** One entry per installed pack; trust level reflects the current local decision
-  (promoted via evidence per N4 / knowledge-promotion). Not-installed packs (available in a
-  registry) MAY be projected with `:pack/installed? = false` for discovery display.
+- **Consumes:** lifecycle signals from the pack loader + registry client (`:pack/installed`,
+  `:pack/updated`, `:pack/uninstalled`, `:pack/trust-promoted`, `:pack/compiled`, and a
+  registry-refresh signal for available packs — to be exposed by `components/knowledge` and
+  `components/pack-registry` as prerequisites; current state is protocol-calls-only).
+- **Behavior:** One entry per (pack-id, version) pair visible to the node. Installed packs
+  carry the locally-computed trust level; registry-available packs carry
+  `:pack/installed? = false` and inherit the registry's published trust hint (which is
+  advisory — the installer resolves the local trust on install per N4).
 - **Emits:** `:supervisory/pack-manifest-upserted` per §4.5.
+
+### 3.6 Pack-management producer (new operational component)
+
+Pack CRUD and doc-compilation are executed by a dedicated component, `components/pack-ops`
+(new), which:
+
+1. Accepts intent events (§2.6 shapes) published by the TUI / CLI / API.
+2. Dispatches to the appropriate handler: pack-loader (`install`/`update`/`uninstall`),
+   knowledge-promotion (`trust-promote`), or the doc-to-policy compiler (`compile-from-doc`).
+3. Emits an outcome event for each intent: `:pack/install-completed`, `:pack/install-failed`,
+   `:pack/update-completed`, etc. (see §4.6). Every outcome MUST carry the originating
+   intent id so requesters can correlate.
+4. Produces or refreshes `PackManifest` rows as side effects. These surface in the next
+   `:supervisory/pack-manifest-upserted` emission (no direct snapshot emission from
+   `pack-ops` — invariant 6 still holds).
+5. Writes audit evidence per N6 for each operation: who requested, when, which pack, trust
+   promotion justification (if any), and compiler inputs+outputs for `compile-from-doc`.
+
+**Authorization:** intent handlers MUST check the requester's capability grants (per N5-δ1 §7
+intervention vocabulary). `:trusted`-level trust promotions and installs of packs that request
+capabilities beyond the requester's own grant MUST be rejected with an outcome event of
+`:pack/*-failed` and a reason code.
+
+**Doc-compilation contract:** `compile-from-doc` accepts a directory of prose documents
+(Markdown by default), extracts rule-like assertions per N4 §4 compilation contract, and emits
+a compiled pack under `:pack-compile/pack-id`. Compilation MUST be deterministic — the same
+inputs MUST produce the same pack hash — and MUST preserve a provenance link from the output
+pack to the source documents.
 
 ### 3.6 Shared contract
 
@@ -333,6 +416,34 @@ shape from §2.
  :supervisory/entity {… §2.5 shape …}}
 ```
 
+### 4.6 Pack-management intent + outcome events
+
+Intents are published by the TUI / CLI / API; outcomes are published by `components/pack-ops`.
+Both follow the N3 §2.1 envelope.
+
+| Event type                        | Direction | Payload shape    |
+|-----------------------------------|-----------|------------------|
+| `:pack/install-requested`         | → ops     | §2.6 `:pack/install`         |
+| `:pack/install-completed`         | ← ops     | `{:pack/id, :pack/version, :intent-id, :installed-at}` |
+| `:pack/install-failed`            | ← ops     | `{:pack/id, :intent-id, :reason, :reason-code}`        |
+| `:pack/update-requested`          | → ops     | §2.6 `:pack/update`          |
+| `:pack/update-completed`          | ← ops     | `{:pack/id, :pack/version, :intent-id}`                |
+| `:pack/update-failed`             | ← ops     | `{:pack/id, :intent-id, :reason, :reason-code}`        |
+| `:pack/uninstall-requested`       | → ops     | §2.6 `:pack/uninstall`       |
+| `:pack/uninstall-completed`       | ← ops     | `{:pack/id, :intent-id}`                               |
+| `:pack/uninstall-failed`          | ← ops     | `{:pack/id, :intent-id, :reason, :reason-code}`        |
+| `:pack/trust-promote-requested`   | → ops     | §2.6 `:pack/trust-promote`   |
+| `:pack/trust-promote-completed`   | ← ops     | `{:pack/id, :to-level, :intent-id}`                    |
+| `:pack/trust-promote-failed`      | ← ops     | `{:pack/id, :intent-id, :reason, :reason-code}`        |
+| `:pack/compile-requested`         | → ops     | §2.6 `:pack/compile-from-doc`|
+| `:pack/compile-completed`         | ← ops     | `{:pack/id, :pack/version, :pack-hash, :intent-id, :source-hash}` |
+| `:pack/compile-failed`            | ← ops     | `{:intent-id, :reason, :reason-code}`                  |
+
+Every intent event MUST carry a client-generated `:intent/id` (uuid) so the requesting UI can
+correlate the matching `*-completed` / `*-failed` outcome. `:reason-code` is a keyword (e.g.
+`:unauthorized`, `:network-error`, `:compile-error`, `:conflict`); `:reason` is a free-form
+operator-facing string.
+
 ## 5. TUI rendering — normative surfaces
 
 ### 5.1 Evidence Viewer (N5 §3.2.3)
@@ -368,8 +479,49 @@ when `:decision/deadline` is set. Resolved decisions MAY be shown in a collapsed
 
 Columns: id, version, type, trust-level, installed?, update-available?. Trust level MUST map to
 the palette: `:trusted → status_ok`, `:tainted → status_warning`, `:untrusted → status_failed`.
-Install / update / remove affordances are out of scope for this delta (they belong with the Run
-Launcher / Pack Management UX in a future delta).
+Installed and available packs MAY be shown in the same list (with a visual distinction) or in
+two tabs — consumer's choice; both presentations are compatible with the shape in §2.5.
+
+### 5.6 Pack-management actions
+
+The Pack Browser MUST expose the following actions on a selected pack row. Each action publishes
+the matching `:pack/*-requested` event from §4.6 and renders the lifecycle state machine below
+as transient UI feedback (progress spinner / toast on completion / error banner on failure).
+
+| Action              | Intent event                    | Enabled when                               |
+|---------------------|---------------------------------|--------------------------------------------|
+| Install             | `:pack/install-requested`       | `installed? = false`                       |
+| Update              | `:pack/update-requested`        | `installed? = true AND update-available? = true` |
+| Uninstall           | `:pack/uninstall-requested`     | `installed? = true`                        |
+| Promote trust       | `:pack/trust-promote-requested` | `installed? = true`                        |
+| Compile from doc    | `:pack/compile-requested`       | always available (input is user-supplied path) |
+
+**State machine per pending intent:**
+
+1. User action → renderer publishes `*-requested` with fresh `:intent/id` and shows a pending
+   indicator on the affected row keyed by that intent id.
+2. On `*-completed` with matching `intent-id`, clear the pending indicator. The follow-up
+   `:supervisory/pack-manifest-upserted` updates the row's `installed?` / version / trust.
+3. On `*-failed` with matching `intent-id`, clear the pending indicator and surface a banner
+   carrying the outcome's `:reason` string. The row's prior state is preserved.
+4. If neither outcome arrives within an implementation-defined timeout (SHOULD be ≥ 30 s for
+   install/compile, ≥ 5 s for uninstall), the renderer SHOULD surface a "still waiting…"
+   indicator rather than clearing — the operator can navigate away; the next state refresh
+   reconciles.
+
+**Confirmation prompts:**
+
+- Uninstall MUST require confirmation (prevents accidental removal of an in-use pack).
+- Trust promotion to `:trusted` MUST require the operator to type or paste the
+  `:pack-trust/justification` string before the intent is published.
+- Install of a pack whose `:pack/capabilities-requested` is non-empty MUST render the requested
+  capabilities and require explicit consent before the intent is published. Per §3.6, the
+  installer component still rechecks authorization; the UI confirmation is an ergonomic layer,
+  not the security boundary.
+
+**Compile-from-doc UX:** source path input, output pack id + version fields, target-type
+multi-select. On success, the resulting `PackManifest` entry appears in the browser (typically
+`installed? = false` unless `install?` was checked in the intent).
 
 ## 6. Rust consumer contract
 
@@ -401,13 +553,15 @@ authoritative per §3.3, and consumer-side derivation would diverge on Kanban po
 
 ## 8. Acceptance criteria
 
-For each entity independently, the delta is satisfied when:
+For each entity independently (§8.1), and for pack management as a whole (§8.2), the delta is
+satisfied when the boxes below are checked.
+
+### 8.1 Per entity
 
 - [ ] The Clojure schema exists in `components/supervisory-state/schema.clj` matching §2
 - [ ] The `supervisory-state` accumulator handles the relevant fine-grained events and the
       corresponding `:supervisory/*-upserted` event is emitted
-- [ ] `components/pr-scoring`'s single-emitter invariant analogue holds: no other component
-      emits the snapshot events defined in §4
+- [ ] Invariant 6 holds: no other component emits the snapshot events defined in §4.1–§4.5
 - [ ] The Rust `supervisory-entities` crate gains the mirror struct with serde round-trip
       tests (absent-field and full-field cases)
 - [ ] The `SupervisoryState` gains its new collection + apply helper, and `StateManager`
@@ -416,4 +570,20 @@ For each entity independently, the delta is satisfied when:
 - [ ] Empty-state rendering works for mixed fleets where the producer has not yet emitted
       a snapshot
 
-The delta is fully satisfied when all five entities meet the per-entity checklist.
+The per-entity block is fully satisfied when all five entities meet the checklist.
+
+### 8.2 Pack management
+
+- [ ] `components/pack-ops` exists and handles the five intent types from §2.6
+- [ ] Intent → outcome round-trip works for install, update, uninstall, trust-promote,
+      compile-from-doc — each correlating via `:intent/id`
+- [ ] Authorization rules in §3.6 reject unauthorized promotions and capability-exceeding
+      installs with `:pack/*-failed` + `:reason-code :unauthorized`
+- [ ] Doc compilation is deterministic: same inputs produce the same pack hash
+- [ ] Doc compilation writes N6 evidence linking the compiled pack back to its source docs
+- [ ] Pack Browser UX enforces the confirmation requirements from §5.6 (uninstall prompt,
+      trust-promote justification, capability grant consent)
+- [ ] Pending-intent UI reconciles on `*-completed` / `*-failed` / timeout per §5.6 state
+      machine
+
+The delta is fully satisfied when §8.1 and §8.2 are both met.
