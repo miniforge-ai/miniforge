@@ -83,6 +83,22 @@
    This is a display contract: adding a column breaks consumers."
   [:blocked :ready :active :in-review :merging :done])
 
+(def decision-types
+  "Known decision request shapes per N5-δ3 §2.4. Open — producer may emit
+   additional types (control-plane can extend without a spec bump)."
+  [:approval :choice :input :confirmation :unknown])
+
+(def decision-priorities
+  "Known priority tiers per N5-δ3 §2.4. Open by convention."
+  [:critical :high :medium :low])
+
+(def decision-statuses
+  "Lifecycle status of a DecisionCard per N5-δ3 §2.4. `:expired` is
+   reserved for the future `:control-plane/decision-expired` event or
+   a deadline-vs-wall-clock derivation; today's producers emit only
+   `:pending` (on create) and `:resolved` (on resolve)."
+  [:pending :resolved :expired])
+
 ;------------------------------------------------------------------------------ Layer 0a
 ;; Registry extensions for supervisory v1
 
@@ -135,7 +151,15 @@
    ;; without a spec bump. `:task/kanban-column` is closed: it is the
    ;; display contract for §3.2.5.
    :task/id                      :id/uuid
-   :task/kanban-column           (into [:enum] task-kanban-columns)})
+   :task/kanban-column           (into [:enum] task-kanban-columns)
+
+   ;; DecisionCard (N5-delta-3 §2.4). Open maps on the entity — these
+   ;; registry entries document known values for display, not closed
+   ;; enums the producer must emit. Consumers MUST preserve unknowns.
+   :decision/id                  :id/uuid
+   :decision/type                (into [:enum] decision-types)
+   :decision/priority            (into [:enum] decision-priorities)
+   :decision/status              (into [:enum] decision-statuses)})
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Entity schemas — open maps, mirror N5-delta-1 §3.1
@@ -330,6 +354,32 @@
    [:task/exclusive-files? {:optional true} boolean?]
    [:task/stratum?         {:optional true} boolean?]])
 
+(def DecisionCard
+  "A pending or resolved decision request from an agent per N5-δ3 §2.4.
+
+   Today's `:control-plane/decision-created` / `-resolved` events carry a
+   thin payload (id, agent-id, summary, optional priority; resolution on
+   resolve). Richer fields — `:decision/type`, `:decision/context`,
+   `:decision/options`, `:decision/deadline`, `:decision/comment` — are
+   part of the entity shape so future control-plane extensions can
+   surface them; supervisory-state populates only what arrives on the
+   wire, per the open-map rule."
+  [:map {:registry registry}
+   [:decision/id :decision/id]
+   [:decision/agent-id :id/uuid]
+   [:decision/workflow-run-id {:optional true} [:maybe :id/uuid]]
+   [:decision/type {:optional true} [:maybe :decision/type]]
+   [:decision/priority {:optional true} [:maybe :decision/priority]]
+   [:decision/status :decision/status]
+   [:decision/summary string?]
+   [:decision/context  {:optional true} [:maybe string?]]
+   [:decision/options  {:optional true} [:vector string?]]
+   [:decision/deadline {:optional true} [:maybe :common/timestamp]]
+   [:decision/created-at :common/timestamp]
+   [:decision/resolution {:optional true} [:maybe string?]]
+   [:decision/comment    {:optional true} [:maybe string?]]
+   [:decision/resolved-at {:optional true} [:maybe :common/timestamp]]])
+
 ;------------------------------------------------------------------------------ Layer 2
 ;; Component-internal entity table
 
@@ -341,7 +391,8 @@
    [:prs           [:map-of [:tuple string? :common/non-neg-int] PrFleetEntry]]
    [:policy-evals  [:map-of :id/uuid PolicyEvaluation]]
    [:attention     [:map-of :id/uuid AttentionItem]]
-   [:tasks         [:map-of :id/uuid TaskNode]]])
+   [:tasks         [:map-of :id/uuid TaskNode]]
+   [:decisions     [:map-of :id/uuid DecisionCard]]])
 
 (def empty-table
   "Initial empty entity table."
@@ -350,4 +401,5 @@
    :prs {}
    :policy-evals {}
    :attention {}
-   :tasks {}})
+   :tasks {}
+   :decisions {}})

@@ -89,6 +89,15 @@
                                " → " (name (or (:task/kanban-column task-entity) :blocked))))
       (assoc :supervisory/entity task-entity)))
 
+(defn decision-upserted
+  [stream decision-entity]
+  (-> (es/create-envelope stream
+                          :supervisory/decision-upserted
+                          (:decision/workflow-run-id decision-entity)
+                          (str "Decision " (:decision/id decision-entity)
+                               " → " (name (or (:decision/status decision-entity) :pending))))
+      (assoc :supervisory/entity decision-entity)))
+
 ;------------------------------------------------------------------------------ Layer 1
 ;; Diff + emit — publish one event per entity that changed
 
@@ -117,4 +126,5 @@
     (emit-diff! stream policy-evaluated   (:policy-evals old-table) (:policy-evals new-table))
     (emit-diff! stream attention-derived  (:attention    old-table) (:attention    new-table))
     (emit-diff! stream task-node-upserted (:tasks         old-table) (:tasks        new-table))
+    (emit-diff! stream decision-upserted  (:decisions     old-table) (:decisions    new-table))
     (- (count (es/get-events stream)) before)))
