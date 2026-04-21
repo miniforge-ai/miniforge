@@ -7,8 +7,70 @@
  :tag-patterns {:stable "stable/*"
                 :release "v[0-9]*"}
  :projects {"development"    {:alias "dev"}
-            "miniforge-core" {:alias "core"}
-            "miniforge"      {:alias "cli"}
-            "miniforge-tui"  {:alias "tui"}
-            ;; bb-utils (shared Babashka utilities)
-            "bb-utils"       {:alias "bb-utils"}}}
+            "miniforge-core" {:alias "core"
+                              ;; Runtime-loaded via phase/namespaces.edn resource discovery
+                              ;; (see components/phase/src/ai/miniforge/phase/loader.clj) and
+                              ;; workflow chain registration, so static analysis doesn't see
+                              ;; the dependency.
+                              :necessary ["adapter-claude-code"
+                                          "connector" "connector-auth" "connector-retry"
+                                          "evidence-bundle"
+                                          "observer" "orchestrator"
+                                          "policy"
+                                          "pr-sync"
+                                          "repo-dag"
+                                          "reporting"
+                                          "task-executor"
+                                          "tool-registry"
+                                          "workflow-compliance-scanner"]}
+            "miniforge"      {:alias "cli"
+                              ;; Same pattern: workflow-*/phase-deployment are bundled so the
+                              ;; CLI has every phase/workflow interceptor on the classpath at
+                              ;; runtime; the phase loader picks them up from resource config.
+                              :necessary ["adapter-claude-code"
+                                          "connector" "connector-auth" "connector-retry"
+                                          "evaluation"
+                                          "evidence-bundle"
+                                          "failure-classifier"
+                                          "observer" "orchestrator"
+                                          "phase-deployment"
+                                          "policy"
+                                          "repo-dag"
+                                          "reporting"
+                                          "task-executor"
+                                          "tool-registry"
+                                          "training-capture"
+                                          "tui-views"
+                                          "web-dashboard"
+                                          "workflow-chain-deployment"
+                                          "workflow-chain-software-factory"
+                                          "workflow-compliance-scanner"
+                                          "workflow-deployment"
+                                          "workflow-financial-etl"
+                                          "workflow-software-factory"]}
+            "miniforge-tui"  {:alias "tui"
+                              ;; miniforge-tui is being replaced by miniforge-console; the
+                              ;; bundled components below are still present so downstream
+                              ;; users on the tui project build today keep working.
+                              :necessary ["evidence-bundle"
+                                          "observer" "orchestrator"
+                                          "phase"
+                                          "policy"
+                                          "repo-dag"
+                                          "reporting"
+                                          "task-executor"
+                                          "tool-registry"
+                                          "tui-views"
+                                          "workflow-chain-software-factory"
+                                          "workflow-financial-etl"
+                                          "workflow-software-factory"]}
+            ;; bb-utils is an aggregator — it deliberately bundles every shared Babashka
+            ;; helper so downstream miniforge products can pull the set as a single
+            ;; :local/root. None of the bb-* components are "unnecessary" here.
+            "bb-utils"       {:alias "bb-utils"
+                              :necessary ["bb-config"
+                                          "bb-data-plane-http"
+                                          "bb-etl-runner"
+                                          "bb-generate-icon"
+                                          "bb-r2"
+                                          "bb-test-runner"]}}}

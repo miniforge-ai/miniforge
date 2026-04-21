@@ -55,7 +55,19 @@
         ;; Spec parsing
         ai.miniforge/spec-parser {:local/root "../../components/spec-parser"}
         ai.miniforge/messages {:local/root "../../components/messages"}
-        ai.miniforge/patterns {:local/root "../../components/patterns"}}
+        ai.miniforge/patterns {:local/root "../../components/patterns"}
+        ai.miniforge/compliance-scanner {:local/root "../../components/compliance-scanner"}
+        ai.miniforge/connector-linter {:local/root "../../components/connector-linter"}
+        ai.miniforge/context-pack {:local/root "../../components/context-pack"}
+        ai.miniforge/dag-primitives {:local/root "../../components/dag-primitives"}
+        ai.miniforge/decision {:local/root "../../components/decision"}
+        ai.miniforge/diagnosis {:local/root "../../components/diagnosis"}
+        ai.miniforge/improvement {:local/root "../../components/improvement"}
+        ai.miniforge/reliability {:local/root "../../components/reliability"}
+        ai.miniforge/repo-index {:local/root "../../components/repo-index"}
+        ai.miniforge/semantic-analyzer {:local/root "../../components/semantic-analyzer"}
+        ai.miniforge/lsp-mcp-bridge {:local/root "../../bases/lsp-mcp-bridge"}
+        ai.miniforge/mcp-context-server {:local/root "../../bases/mcp-context-server"}}
 
  :aliases
  {:uberjar
