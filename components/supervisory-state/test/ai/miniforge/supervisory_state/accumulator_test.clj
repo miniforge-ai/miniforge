@@ -230,6 +230,130 @@
     (is (= sample-readiness (:pr/readiness pr)) "readiness preserved across partial re-score")
     (is (= sample-policy (:pr/policy pr)) "policy preserved across partial re-score")))
 
+;------------------------------------------------------------------------------ TaskNode (N5-δ3 §2.3)
+
+(defn- task-event
+  "Build a `:task/state-changed` event for tests."
+  [task-id wf-id to-state & [context]]
+  (ev :task/state-changed
+      (cond-> {:task/id       task-id
+               :workflow/id   wf-id
+               :task/to-state to-state}
+        context (assoc :task/context context))))
+
+(deftest task-state-changed-creates-entry-with-kanban-column
+  (let [tid (random-uuid)
+        wf  (random-uuid)
+        table (acc/apply-event schema/empty-table
+                               (task-event tid wf :pending))
+        task  (get-in table [:tasks tid])]
+    (is (some? task))
+    (is (= tid (:task/id task)))
+    (is (= wf (:task/workflow-run-id task)))
+    (is (= :pending (:task/status task)))
+    (is (= :blocked (:task/kanban-column task))
+        ":pending must map to :blocked column (conservative default)")))
+
+(deftest task-kanban-column-derives-from-each-known-status
+  (doseq [[status column] {:pending         :blocked
+                           :ready           :ready
+                           :running         :active
+                           :ci-running      :active
+                           :review-pending  :in-review
+                           :ready-to-merge  :merging
+                           :merging         :merging
+                           :merged          :done
+                           :completed       :done
+                           :failed          :done
+                           :skipped         :done
+                           :cancelled       :done}]
+    (let [tid   (random-uuid)
+          table (acc/apply-event schema/empty-table
+                                 (task-event tid (random-uuid) status))
+          task  (get-in table [:tasks tid])]
+      (is (= column (:task/kanban-column task))
+          (str "status " status " should map to column " column
+               ", got " (:task/kanban-column task))))))
+
+(deftest task-kanban-mapping-is-loaded-from-edn-not-compiled-in
+  (testing "status→column mapping is data, not a compiled-in literal"
+    (let [m (acc/load-task-kanban-mapping)]
+      (is (map? m))
+      (is (= :blocked (get m :pending)))
+      (is (= :active  (get m :running)))
+      (is (= :done    (get m :completed))))))
+
+(deftest task-unknown-status-falls-back-to-blocked
+  (let [tid   (random-uuid)
+        table (acc/apply-event schema/empty-table
+                               (task-event tid (random-uuid) :some-new-profile-status))
+        task  (get-in table [:tasks tid])]
+    (is (= :some-new-profile-status (:task/status task))
+        "producer's status keyword is preserved verbatim")
+    (is (= :blocked (:task/kanban-column task))
+        "unknown status must fall back to :blocked so it surfaces visibly")))
+
+(deftest task-context-fields-populate-opportunistically
+  (let [tid   (random-uuid)
+        deps  [(random-uuid) (random-uuid)]
+        table (acc/apply-event schema/empty-table
+                               (task-event tid (random-uuid) :running
+                                           {:description "Implement widget"
+                                            :type :implement
+                                            :component "widget"
+                                            :dependencies deps}))
+        task  (get-in table [:tasks tid])]
+    (is (= "Implement widget" (:task/description task)))
+    (is (= :implement (:task/type task)))
+    (is (= "widget" (:task/component task)))
+    (is (= deps (:task/dependencies task)))))
+
+(deftest task-started-at-captured-on-entry-to-active-column
+  (let [tid   (random-uuid)
+        table (-> schema/empty-table
+                  (acc/apply-event (task-event tid (random-uuid) :pending))
+                  (acc/apply-event (task-event tid (random-uuid) :running)))
+        task  (get-in table [:tasks tid])]
+    (is (some? (:task/started-at task))
+        ":task/started-at should be set when task first enters :active column")
+    (is (nil? (:task/completed-at task)))))
+
+(deftest task-completed-at-and-elapsed-ms-on-terminal
+  (let [tid   (random-uuid)
+        table (-> schema/empty-table
+                  (acc/apply-event (task-event tid (random-uuid) :running))
+                  (acc/apply-event (task-event tid (random-uuid) :completed)))
+        task  (get-in table [:tasks tid])]
+    (is (some? (:task/completed-at task)))
+    (is (some? (:task/elapsed-ms task)))
+    (is (>= (:task/elapsed-ms task) 0))))
+
+(deftest task-state-changed-preserves-context-across-transitions
+  (let [tid   (random-uuid)
+        table (-> schema/empty-table
+                  (acc/apply-event (task-event tid (random-uuid) :pending
+                                               {:description "do the thing"
+                                                :type :implement}))
+                  ;; Second event with no context — description must be preserved.
+                  (acc/apply-event (task-event tid (random-uuid) :running)))
+        task  (get-in table [:tasks tid])]
+    (is (= "do the thing" (:task/description task)))
+    (is (= :implement (:task/type task)))
+    (is (= :running (:task/status task)))))
+
+(deftest supervisory-task-node-upserted-applies-baseline
+  (let [tid   (random-uuid)
+        entity {:task/id              tid
+                :task/workflow-run-id (random-uuid)
+                :task/description     "pre-scored task"
+                :task/status          :running
+                :task/kanban-column   :active}
+        table (acc/apply-event schema/empty-table
+                               (ev :supervisory/task-node-upserted
+                                   {:supervisory/entity entity}))]
+    (is (= entity (get-in table [:tasks tid]))
+        "snapshot replay trusts the carried entity verbatim")))
+
 ;------------------------------------------------------------------------------ PolicyEvaluation
 
 (deftest gate-passed-creates-evaluation

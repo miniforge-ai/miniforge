@@ -127,3 +127,53 @@
         (is (= 1 (count runs)))
         (is (= :completed (:workflow-run/status (first runs)))
             "replay must apply all historic events, ending in :completed")))))
+
+;------------------------------------------------------------------------------ TaskNode (N5-δ3 §3.3)
+
+(defn- task-state-changed [tid wf-id to-state & [context]]
+  (cond-> {:event/type :task/state-changed
+           :event/id (random-uuid)
+           :event/timestamp (java.util.Date.)
+           :event/version "1.0.0"
+           :event/sequence-number 0
+           :workflow/id wf-id
+           :task/id tid
+           :task/to-state to-state
+           :message (str "Task " tid " → " (name to-state))}
+    context (assoc :task/context context)))
+
+(deftest task-state-changed-produces-supervisory-task-node-upserted
+  (let [stream (no-sink-stream)
+        comp   (iface/create stream)
+        tid    (random-uuid)
+        wf-id  (random-uuid)]
+    (iface/start! comp)
+    (es/publish! stream (task-state-changed tid wf-id :running
+                                            {:description "Implement X" :type :implement}))
+    (let [snaps (->> (supervisory-events stream)
+                     (filter #(= :supervisory/task-node-upserted (:event/type %))))]
+      (is (= 1 (count snaps)))
+      (let [entity (:supervisory/entity (first snaps))]
+        (is (= tid (:task/id entity)))
+        (is (= wf-id (:task/workflow-run-id entity)))
+        (is (= :running (:task/status entity)))
+        (is (= :active (:task/kanban-column entity)))
+        (is (= "Implement X" (:task/description entity)))))))
+
+(deftest task-transitions-emit-one-snapshot-per-change
+  (let [stream (no-sink-stream)
+        comp   (iface/create stream)
+        tid    (random-uuid)
+        wf-id  (random-uuid)]
+    (iface/start! comp)
+    (doseq [state [:pending :ready :running :completed]]
+      (es/publish! stream (task-state-changed tid wf-id state)))
+    (let [snaps (->> (supervisory-events stream)
+                     (filter #(= :supervisory/task-node-upserted (:event/type %))))
+          final (last snaps)]
+      ;; One snapshot per distinct status transition (diff-based emit).
+      (is (= 4 (count snaps)) "four transitions → four snapshots")
+      (is (= :completed (:task/status (:supervisory/entity final))))
+      (is (= :done (:task/kanban-column (:supervisory/entity final))))
+      (is (some? (:task/completed-at (:supervisory/entity final))))
+      (is (some? (:task/elapsed-ms (:supervisory/entity final)))))))
