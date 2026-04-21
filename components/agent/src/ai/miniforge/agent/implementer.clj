@@ -508,16 +508,41 @@
                 {:data {:file-count (count (:code/files file-artifact))
                         :tools-called (get response :tools-called [])}}))
     (log/info logger :implementer :implementer/llm-called
-              {:data {:success (llm/success? response)
-                      :tokens tokens
-                      :streaming? (boolean on-chunk)
-                      :file-artifact-fallback? (= :file-fallback artifact-source)
-                      :tools-called (get response :tools-called [])}})
-    (if (llm/success? response)
+              {:data (cond-> {:success (llm/success? response)
+                              :tokens tokens
+                              :streaming? (boolean on-chunk)
+                              :artifact-source (or artifact-source :none)
+                              :tools-called (get response :tools-called [])}
+                       (:stop-reason response)
+                       (assoc :stop-reason (:stop-reason response))
+                       (:num-turns response)
+                       (assoc :num-turns (:num-turns response)))})
+    ;; Container-promotion precedence: if the agent wrote files into
+    ;; the worktree (file-artifact via collect-written-files) or
+    ;; submitted via the MCP artifact path, honor that even when the
+    ;; CLI itself terminated with a timeout/error. Iter-20 of the
+    ;; planner-convergence dogfood showed Claude stalling AFTER a
+    ;; successful stream of edits; the old path discarded a real
+    ;; artifact because the LLM response was classified as failure.
+    ;; Mirrors the planner fix in `(or worktree-plan (llm/success? …))`.
+    (if (or effective-artifact (llm/success? response))
       (process-llm-response response effective-artifact artifact-source
                             context logger tokens cost-usd)
-      (response/error (or (:message (llm/get-error response))
-                          (messages/t :error/llm-failed))))))
+      ;; LLM call failed, no artifact — preserve the full llm-error
+      ;; shape into :data so the phase-completed event carries
+      ;; :type (e.g. "cli_error" / "adaptive_timeout"), :stderr /
+      ;; :stdout / :timeout / :exit-code for post-mortem. Iters
+      ;; 11-12 of planner-convergence lost this context and produced
+      ;; undiagnosable "Unknown error" phase errors; same trap here.
+      (let [llm-err (llm/get-error response)
+            error-msg (or (:message llm-err)
+                          (messages/t :error/llm-failed))
+            stop-reason (:stop-reason response)
+            num-turns   (:num-turns response)]
+        (response/error error-msg
+                        {:data (cond-> (or llm-err {})
+                                 stop-reason (assoc :stop-reason stop-reason)
+                                 num-turns   (assoc :num-turns num-turns))})))))
 
 ;------------------------------------------------------------------------------ Layer 2
 ;; Public API

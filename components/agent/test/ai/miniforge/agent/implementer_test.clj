@@ -153,7 +153,85 @@
       (is (= "Collected from working tree"
              (get-in result [:output :code/summary])))
       (is (= :warn (:log/level fallback-log)))
-      (is (= 1 (get-in fallback-log [:data :file-count]))))))
+      (is (= 1 (get-in fallback-log [:data :file-count])))))
+
+  (testing "file artifact wins when LLM call failed (CLI timeout with files on disk)"
+    ;; Iter 20 parity: Claude stalled after successful writes. The file-
+    ;; artifact container-promotion must preempt the CLI-error branch
+    ;; just like the planner's worktree-plan precedence.
+    (let [[logger _] (log/collecting-logger {:min-level :trace})
+          fallback-artifact {:code/files [{:path "src/partial.clj"
+                                           :content "(ns partial)"
+                                           :action :create}]
+                             :code/summary "written before stall"
+                             :code/language "clojure"
+                             :code/tests-needed? true}
+          error-response {:success false
+                          :error {:type "adaptive_timeout"
+                                  :message "Adaptive timeout: stream-idle"
+                                  :timeout {:type :stream-idle :elapsed-ms 180000}}
+                          :anomaly {}}
+          result (with-redefs [artifact-session/create-session!
+                               (fn [& _] (session-map))
+                               artifact-session/write-mcp-config!
+                               identity
+                               artifact-session/read-artifact
+                               (constantly nil)
+                               artifact-session/read-context-misses
+                               (constantly nil)
+                               artifact-session/cleanup-session!
+                               (constantly nil)
+                               budget/resolve-cost-budget-usd
+                               (fn [& _] 1.0)
+                               llm/chat
+                               (fn [& _] error-response)
+                               file-artifacts/collect-written-files
+                               (fn [_ _] fallback-artifact)]
+                   (@#'implementer/invoke-with-llm
+                    nil "prompt" "system" {} {} nil logger []))]
+      (is (response/success? result)
+          "file artifact container-promotion honors the work even on CLI error")
+      (is (= [{:path "src/partial.clj"
+               :content "(ns partial)"
+               :action :create}]
+             (get-in result [:output :code/files])))))
+
+  (testing "LLM error preserves :type + timeout shape in :data for diagnostics"
+    ;; Iter 20 parity: the planner error path forwards llm-error as
+    ;; :data. Same here so mf events show names the real failure
+    ;; class instead of a bare message.
+    (let [[logger _] (log/collecting-logger {:min-level :trace})
+          error-response {:success false
+                          :error {:type "adaptive_timeout"
+                                  :message "Adaptive timeout: stream-idle"
+                                  :timeout {:type :stream-idle :elapsed-ms 180000}
+                                  :exit-code -1}
+                          :stop-reason "max_turns"
+                          :num-turns 10}
+          result (with-redefs [artifact-session/create-session!
+                               (fn [& _] (session-map))
+                               artifact-session/write-mcp-config!
+                               identity
+                               artifact-session/read-artifact
+                               (constantly nil)
+                               artifact-session/read-context-misses
+                               (constantly nil)
+                               artifact-session/cleanup-session!
+                               (constantly nil)
+                               budget/resolve-cost-budget-usd
+                               (fn [& _] 1.0)
+                               llm/chat
+                               (fn [& _] error-response)
+                               file-artifacts/collect-written-files
+                               (fn [_ _] nil)]
+                   (@#'implementer/invoke-with-llm
+                    nil "prompt" "system" {} {} nil logger []))]
+      (is (response/error? result))
+      (is (= "Adaptive timeout: stream-idle" (get-in result [:error :message])))
+      (is (= "adaptive_timeout" (get-in result [:error :data :type])))
+      (is (= :stream-idle (get-in result [:error :data :timeout :type])))
+      (is (= "max_turns" (get-in result [:error :data :stop-reason])))
+      (is (= 10 (get-in result [:error :data :num-turns]))))))
 
 ;------------------------------------------------------------------------------ Layer 3
 ;; Validation tests
