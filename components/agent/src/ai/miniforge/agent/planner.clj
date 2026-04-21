@@ -355,9 +355,18 @@
         ;; sized specs (2026-04-18 dogfood). OPSV-converged target — see
         ;; work/n07-opsv-agent-budgets.spec.edn.
         max-turns (get @planner-prompt-data :prompt/max-turns 80)
-        mcp-opts (assoc (artifact-session/session->mcp-opts session budget-usd max-turns)
-                        :model (model/default-model-for-role :planner)
-                        :disallowed-tools planner-disallowed-tools)]
+        ;; Thread the session workdir into the LLM request so the Claude
+        ;; subprocess is spawned inside the task worktree. Without this,
+        ;; Write(".miniforge/plan.edn") resolves to the miniforge repo
+        ;; root — observed iter 17, where Claude Code then refused to
+        ;; overwrite a stale plan.edn left over from an earlier run:
+        ;;   <tool_use_error>File has not been read yet. Read it first
+        ;;    before writing to it.</tool_use_error>
+        ;; The implementer threads :workdir the same way.
+        mcp-opts (cond-> (artifact-session/session->mcp-opts session budget-usd max-turns)
+                   true (assoc :model (model/default-model-for-role :planner)
+                               :disallowed-tools planner-disallowed-tools)
+                   (:workdir session) (assoc :workdir (:workdir session)))]
     (if on-chunk
       (llm/chat-stream llm-client user-prompt on-chunk
                        (merge {:system @planner-system-prompt} mcp-opts))
