@@ -187,6 +187,7 @@
                        "components/bb-generate-icon/src"
                        "components/bb-r2/src"
                        "components/bb-data-plane-http/src"
+                       "components/bb-etl-runner/src"
                        "components/bb-adapter-thesium-risk/src"]
          :extra-deps {ai.miniforge/schema {:local/root "components/schema"}
                       ai.miniforge/config {:local/root "components/config"}
@@ -292,6 +293,7 @@
                      ai.miniforge/bb-generate-icon {:local/root "components/bb-generate-icon"}
                      ai.miniforge/bb-r2            {:local/root "components/bb-r2"}
                      ai.miniforge/bb-data-plane-http {:local/root "components/bb-data-plane-http"}
+                     ai.miniforge/bb-etl-runner    {:local/root "components/bb-etl-runner"}
                      ai.miniforge/bb-adapter-thesium-risk {:local/root "components/bb-adapter-thesium-risk"}}}
 
   :test {:extra-paths ["development/test"
@@ -403,6 +405,7 @@
                        "components/bb-generate-icon/test"
                        "components/bb-r2/test"
                        "components/bb-data-plane-http/test"
+                       "components/bb-etl-runner/test"
                        "components/bb-adapter-thesium-risk/test"]
          :extra-deps {ai.miniforge/schema {:local/root "components/schema"}
                       ai.miniforge/config {:local/root "components/config"}
@@ -477,6 +480,7 @@
                       ai.miniforge/bb-generate-icon {:local/root "components/bb-generate-icon"}
                       ai.miniforge/bb-r2            {:local/root "components/bb-r2"}
                       ai.miniforge/bb-data-plane-http {:local/root "components/bb-data-plane-http"}
+                      ai.miniforge/bb-etl-runner    {:local/root "components/bb-etl-runner"}
                       ai.miniforge/bb-adapter-thesium-risk {:local/root "components/bb-adapter-thesium-risk"}}}
 
   :conformance {:extra-paths ["development/test"
