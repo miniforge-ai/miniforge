@@ -449,8 +449,16 @@
                                  (assoc :stop-reason (:stop-reason llm-response))
                                  (:num-turns llm-response)
                                  (assoc :num-turns (:num-turns llm-response)))})
-              (if (llm/success? llm-response)
-                (let [content (llm/get-content llm-response)
+              ;; Container-promotion preempts CLI error classification:
+              ;; if the agent wrote a valid plan.edn into the worktree,
+              ;; that IS the submission and we honor it regardless of
+              ;; whether Claude CLI emitted a clean result event
+              ;; afterwards. Iter 18 hit a stream-idle timeout AFTER a
+              ;; successful Write — the plan existed, but the old
+              ;; success-branch-only logic ignored it because the LLM
+              ;; response was classified as failure.
+              (if (or worktree-plan (llm/success? llm-response))
+                (let [content (or (llm/get-content llm-response) "")
                       stop-reason (:stop-reason llm-response)
                       num-turns   (:num-turns llm-response)
                       plan (or worktree-plan
