@@ -230,14 +230,21 @@
 (defn claude-mcp-allowlist-string
   "Claude CLI's --allowedTools wire format.
 
-   `mcp-allowed-tools` is a vector of `{:mcp/server :mcp/tool}` keyword
-   maps. Each entry becomes `mcp__<server>__<tool>`; all joined with
-   commas. A malformed entry throws via `(name nil)` at the call site
-   — the canonical shape is the only accepted shape."
+   Accepts two entry shapes:
+   - `{:mcp/server :mcp/tool}` keyword map → `mcp__<server>__<tool>`
+     (MCP tool; server name comes from the mcp-config.json key)
+   - Keyword by itself → `(name kw)` (native Claude Code tool,
+     e.g. `:Write`)
+
+   Entries are joined with commas. A malformed entry throws via
+   `(name nil)` at the call site."
   [mcp-allowed-tools]
   (->> mcp-allowed-tools
-       (mapv (fn [{:mcp/keys [server tool]}]
-               (str "mcp__" (name server) "__" (name tool))))
+       (mapv (fn [t]
+               (if (keyword? t)
+                 (name t)
+                 (let [{:mcp/keys [server tool]} t]
+                   (str "mcp__" (name server) "__" (name tool))))))
        (str/join ",")))
 
 (defn- claude-args
