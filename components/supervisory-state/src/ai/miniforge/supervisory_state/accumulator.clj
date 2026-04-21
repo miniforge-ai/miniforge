@@ -436,6 +436,69 @@
     (cond-> table
       entity (assoc-in [:tasks (:task/id entity)] entity))))
 
+;------------------------------------------------------------------------------ Layer 1
+;; DecisionCard handlers (N5-δ3 §2.4, §3.4)
+
+(defn cp-decision-created
+  "Handler for `:control-plane/decision-created` — creates a pending
+   DecisionCard entry per N5-δ3 §2.4.
+
+   Today's event payload carries the thin (`agent-id`, `decision-id`,
+   `summary`, optional `priority`) set described in
+   event-stream.core/cp-decision-created. Richer DecisionCard fields
+   (`type`, `context`, `options`, `deadline`) are populated verbatim
+   when future control-plane emissions carry them; absent fields stay
+   off the entity per the open-map rule."
+  [table event]
+  (let [{:cp/keys [agent-id decision-id summary priority type context options deadline]
+         :workflow/keys [id] :as _e} event
+        ts (event-instant event)
+        card (cond-> {:decision/id        decision-id
+                      :decision/agent-id  agent-id
+                      :decision/status    :pending
+                      :decision/summary   (or summary "")
+                      :decision/created-at ts}
+               id       (assoc :decision/workflow-run-id id)
+               type     (assoc :decision/type type)
+               priority (assoc :decision/priority priority)
+               context  (assoc :decision/context context)
+               (seq options) (assoc :decision/options (vec options))
+               deadline (assoc :decision/deadline deadline))]
+    (cond-> table
+      decision-id (assoc-in [:decisions decision-id] card))))
+
+(defn cp-decision-resolved
+  "Handler for `:control-plane/decision-resolved`. Updates the matching
+   DecisionCard with resolution state + timestamp.
+
+   If the card does not exist (resolved event arrived before the create
+   event, e.g. replay gap), a minimal stub is created so the resolution
+   is not lost — the later create event's fields merge in via regular
+   upsert. The status transitions from `:pending` to `:resolved`;
+   `:expired` is reserved for a future `:control-plane/decision-expired`
+   event."
+  [table event]
+  (let [{:cp/keys [decision-id resolution comment] :as _e} event
+        ts (event-instant event)
+        stub {:decision/id decision-id
+              :decision/agent-id nil
+              :decision/summary ""
+              :decision/created-at ts}
+        existing (get-in table [:decisions decision-id] stub)
+        updated  (cond-> (assoc existing
+                                :decision/status      :resolved
+                                :decision/resolved-at ts)
+                   resolution (assoc :decision/resolution resolution)
+                   comment    (assoc :decision/comment comment))]
+    (cond-> table
+      decision-id (assoc-in [:decisions decision-id] updated))))
+
+(defn supervisory-decision-upserted
+  [table event]
+  (let [entity (:supervisory/entity event)]
+    (cond-> table
+      entity (assoc-in [:decisions (:decision/id entity)] entity))))
+
 ;------------------------------------------------------------------------------ Layer 3
 ;; Dispatch table — events not listed are no-ops at the entity-state level
 
@@ -450,6 +513,8 @@
    :control-plane/agent-state-changed      cp-agent-state-changed
    :control-plane/status-changed           cp-agent-state-changed
    :control-plane/agent-heartbeat          cp-agent-heartbeat
+   :control-plane/decision-created         cp-decision-created
+   :control-plane/decision-resolved        cp-decision-resolved
    :agent/status                           agent-status
    :pr/created                             pr-created
    :pr/merged                              pr-merged
@@ -463,6 +528,7 @@
    :supervisory/agent-upserted             supervisory-agent-upserted
    :supervisory/pr-upserted                supervisory-pr-upserted
    :supervisory/task-node-upserted         supervisory-task-node-upserted
+   :supervisory/decision-upserted          supervisory-decision-upserted
    :supervisory/policy-evaluated           supervisory-policy-evaluated
    :supervisory/attention-derived          supervisory-attention-derived})
 

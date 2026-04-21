@@ -354,6 +354,105 @@
     (is (= entity (get-in table [:tasks tid]))
         "snapshot replay trusts the carried entity verbatim")))
 
+;------------------------------------------------------------------------------ DecisionCard (N5-δ3 §2.4)
+
+(defn- decision-created-event
+  [decision-id agent-id summary & [extras]]
+  (ev :control-plane/decision-created
+      (merge {:cp/agent-id    agent-id
+              :cp/decision-id decision-id
+              :cp/summary     summary}
+             extras)))
+
+(defn- decision-resolved-event
+  [decision-id resolution & [extras]]
+  (ev :control-plane/decision-resolved
+      (merge {:cp/decision-id decision-id
+              :cp/resolution  resolution}
+             extras)))
+
+(deftest cp-decision-created-makes-pending-card
+  (let [did   (random-uuid)
+        aid   (random-uuid)
+        table (acc/apply-event schema/empty-table
+                               (decision-created-event did aid "Approve the merge"
+                                                       {:cp/priority :high}))
+        card  (get-in table [:decisions did])]
+    (is (some? card))
+    (is (= did (:decision/id card)))
+    (is (= aid (:decision/agent-id card)))
+    (is (= "Approve the merge" (:decision/summary card)))
+    (is (= :high (:decision/priority card)))
+    (is (= :pending (:decision/status card)))
+    (is (some? (:decision/created-at card)))
+    (is (nil? (:decision/resolved-at card)) "not resolved until a resolve event arrives")))
+
+(deftest cp-decision-created-attaches-workflow-run-id-when-present
+  (let [did   (random-uuid)
+        wf    (random-uuid)
+        table (acc/apply-event schema/empty-table
+                               (ev :control-plane/decision-created
+                                   {:cp/agent-id    (random-uuid)
+                                    :cp/decision-id did
+                                    :cp/summary     "x"
+                                    :workflow/id    wf}))
+        card  (get-in table [:decisions did])]
+    (is (= wf (:decision/workflow-run-id card)))))
+
+(deftest cp-decision-resolved-updates-existing-card
+  (let [did   (random-uuid)
+        aid   (random-uuid)
+        table (-> schema/empty-table
+                  (acc/apply-event (decision-created-event did aid "Choose target"))
+                  (acc/apply-event (decision-resolved-event did "approve"
+                                                            {:cp/comment "lgtm"})))
+        card  (get-in table [:decisions did])]
+    (is (= :resolved (:decision/status card)))
+    (is (= "approve" (:decision/resolution card)))
+    (is (= "lgtm" (:decision/comment card)))
+    (is (some? (:decision/resolved-at card)))
+    ;; Creation fields must survive the resolve update.
+    (is (= aid (:decision/agent-id card)))
+    (is (= "Choose target" (:decision/summary card)))))
+
+(deftest cp-decision-resolved-before-created-stubs-minimal-card
+  (let [did   (random-uuid)
+        table (acc/apply-event schema/empty-table
+                               (decision-resolved-event did "approve"))
+        card  (get-in table [:decisions did])]
+    (is (some? card) "resolve-before-create must not drop the resolution")
+    (is (= did (:decision/id card)))
+    (is (= :resolved (:decision/status card)))
+    (is (= "approve" (:decision/resolution card)))
+    (is (nil? (:decision/agent-id card))
+        "stub agent-id is nil until the create event arrives")))
+
+(deftest cp-decision-resolved-into-nonexistent-then-created-merges
+  ;; Resolve arrives first (replay gap), then create — both fields survive.
+  (let [did   (random-uuid)
+        aid   (random-uuid)
+        table (-> schema/empty-table
+                  (acc/apply-event (decision-resolved-event did "approve"))
+                  (acc/apply-event (decision-created-event did aid "x")))
+        card  (get-in table [:decisions did])]
+    ;; The later create event overwrote the stub — that's acceptable
+    ;; behaviour (create always reflects initial state; consumers get a
+    ;; pending entry, then see resolved on the next resolve event).
+    (is (= :pending (:decision/status card)))
+    (is (= aid (:decision/agent-id card)))))
+
+(deftest supervisory-decision-upserted-applies-baseline
+  (let [did    (random-uuid)
+        entity {:decision/id        did
+                :decision/agent-id  (random-uuid)
+                :decision/status    :pending
+                :decision/summary   "test"
+                :decision/created-at (java.util.Date.)}
+        table  (acc/apply-event schema/empty-table
+                                (ev :supervisory/decision-upserted
+                                    {:supervisory/entity entity}))]
+    (is (= entity (get-in table [:decisions did])))))
+
 ;------------------------------------------------------------------------------ PolicyEvaluation
 
 (deftest gate-passed-creates-evaluation

@@ -87,7 +87,8 @@
                :supervisory/pr-upserted
                :supervisory/policy-evaluated
                :supervisory/attention-derived
-               :supervisory/task-node-upserted}
+               :supervisory/task-node-upserted
+               :supervisory/decision-upserted}
              (:event/type event))
     (swap! component tick event)))
 

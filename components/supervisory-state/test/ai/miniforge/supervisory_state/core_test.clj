@@ -179,3 +179,45 @@
       (is (= :done (:task/kanban-column (:supervisory/entity final))))
       (is (some? (:task/completed-at (:supervisory/entity final))))
       (is (some? (:task/elapsed-ms (:supervisory/entity final)))))))
+
+;------------------------------------------------------------------------------ DecisionCard (N5-δ3 §3.4)
+
+(defn- cp-decision-created-event [decision-id agent-id summary]
+  {:event/type :control-plane/decision-created
+   :event/id (random-uuid)
+   :event/timestamp (java.util.Date.)
+   :event/version "1.0.0"
+   :event/sequence-number 0
+   :workflow/id (random-uuid)
+   :cp/agent-id agent-id
+   :cp/decision-id decision-id
+   :cp/summary summary
+   :message (str "Decision needed from " agent-id ": " summary)})
+
+(defn- cp-decision-resolved-event [decision-id resolution]
+  {:event/type :control-plane/decision-resolved
+   :event/id (random-uuid)
+   :event/timestamp (java.util.Date.)
+   :event/version "1.0.0"
+   :event/sequence-number 0
+   :workflow/id (random-uuid)
+   :cp/decision-id decision-id
+   :cp/resolution resolution
+   :message (str "Decision " decision-id " resolved: " resolution)})
+
+(deftest decision-created-then-resolved-produces-two-snapshots
+  (let [stream (no-sink-stream)
+        comp   (iface/create stream)
+        did    (random-uuid)
+        aid    (random-uuid)]
+    (iface/start! comp)
+    (es/publish! stream (cp-decision-created-event  did aid "Approve the merge"))
+    (es/publish! stream (cp-decision-resolved-event did "approve"))
+    (let [snaps (->> (supervisory-events stream)
+                     (filter #(= :supervisory/decision-upserted (:event/type %))))
+          final (last snaps)]
+      (is (= 2 (count snaps)) "pending + resolved = two snapshots")
+      (is (= :resolved (:decision/status (:supervisory/entity final))))
+      (is (= "approve"   (:decision/resolution (:supervisory/entity final))))
+      (is (= aid         (:decision/agent-id (:supervisory/entity final)))
+          "resolve event must preserve the agent-id from the create event"))))
