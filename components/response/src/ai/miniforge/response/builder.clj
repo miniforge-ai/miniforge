@@ -65,6 +65,29 @@
 ;------------------------------------------------------------------------------ Layer 1
 ;; Error responses
 
+(defn- format-stack-frame
+  "Render one StackTraceElement as ClassName.methodName (File:line)."
+  [^StackTraceElement e]
+  (str (.getClassName e) "." (.getMethodName e)
+       " (" (.getFileName e) ":" (.getLineNumber e) ")"))
+
+(defn- stack-preview
+  "Render the top N frames of a stack trace as short strings. Returns
+   nil when the exception has no stack (e.g. doto-constructed Throwable)."
+  [^Throwable ex n]
+  (when-let [st (seq (.getStackTrace ex))]
+    (mapv format-stack-frame (take n st))))
+
+(defn- exception->data
+  "Exception → :data map with :exception/class and (when available)
+   :exception/stack-preview. Kept short so failures like NPE — which
+   carry no getMessage or ex-data — still name the exception class
+   and top frames in the phase-completed event."
+  [^Throwable ex]
+  (let [preview (stack-preview ex 8)]
+    (cond-> {:exception/class (.getName (class ex))}
+      preview (assoc :exception/stack-preview preview))))
+
 (defn error-details
   "Create canonical error details map.
 
@@ -97,16 +120,7 @@
          ;; through as {:message "Unknown error" :data {}} — that empty
          ;; shape is what made iter-11 planner failure un-diagnosable.
          exception-data (when exception?
-                          (let [st (seq (.getStackTrace ^Exception message))]
-                            (cond-> {:exception/class (.getName (class message))}
-                              st (assoc :exception/stack-preview
-                                        (->> st
-                                             (take 8)
-                                             (mapv (fn [^StackTraceElement e]
-                                                     (str (.getClassName e) "."
-                                                          (.getMethodName e)
-                                                          " (" (.getFileName e)
-                                                          ":" (.getLineNumber e) ")"))))))))
+                          (exception->data message))
          err-data (merge (when exception? exception-data)
                          (when exception? (ex-data message))
                          data)]
