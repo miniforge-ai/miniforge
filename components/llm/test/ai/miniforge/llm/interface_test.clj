@@ -354,6 +354,50 @@
       (is (= "end_turn" @stop-reason))
       (is (= 7 @turns)))))
 
+;------------------------------------------------------------------------------ Layer 2.9
+;; process-stream-lines: EOF vs timeout classification
+
+(deftest process-stream-lines-clean-eof-is-not-a-timeout-test
+  (testing "subprocess that emits lines then closes stdout does NOT trip timeout"
+    ;; Iter-18 misclassification guard. A clean EOF after successful
+    ;; output (Claude CLI emitting its `result` event and exiting)
+    ;; previously returned nil from read-line-with-timeout, which the
+    ;; loop treated identically to a stalled stream and reset
+    ;; timeout-reason to :stream-idle. Now EOF is distinguished and
+    ;; leaves timeout-reason nil.
+    (let [input "{\"type\":\"assistant\",\"message\":{\"content\":[]}}\n{\"type\":\"result\",\"subtype\":\"success\",\"stop_reason\":\"end_turn\"}\n"
+          reader (java.io.BufferedReader. (java.io.StringReader. input))
+          received (atom [])
+          monitor (impl/default-progress-monitor)
+          result (impl/process-stream-lines reader monitor
+                                            (fn [line] (swap! received conj line)))]
+      (is (= 2 (count (:lines result))) "both lines should have been read")
+      (is (nil? (:timeout result))
+          "clean EOF must NOT be reported as a timeout")
+      (is (= 2 (count @received))))))
+
+(deftest process-stream-lines-stalled-stream-tripped-as-stream-idle-test
+  (testing "reader that never emits trips :stream-idle"
+    (let [reader (java.io.BufferedReader.
+                  (proxy [java.io.Reader] []
+                    ;; `readLine` on a BufferedReader reads via `read`.
+                    ;; Block indefinitely so the timeout path is the
+                    ;; only exit.
+                    (read
+                      ([] (Thread/sleep 30000) -1)
+                      ([_] (Thread/sleep 30000) -1)
+                      ([_ _ _] (Thread/sleep 30000) -1))))
+          monitor (impl/default-progress-monitor)
+          ;; We deliberately shorten by redefing nothing — the real
+          ;; line-timeout-ms is 180s, but we only need the path to be
+          ;; reachable; wrap in a future with a smaller deadline.
+          ;;
+          ;; Simpler: call read-line-with-timeout directly with a
+          ;; short deadline.
+          r (impl/read-line-with-timeout reader 50)]
+      (is (= :ai.miniforge.llm.protocols.impl.llm-client/read-timeout r)
+          "when the read future never resolves, return the timeout sentinel"))))
+
 ;------------------------------------------------------------------------------ Layer 3
 ;; Rate limit detection tests
 

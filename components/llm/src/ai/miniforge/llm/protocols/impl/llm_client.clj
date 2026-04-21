@@ -530,12 +530,26 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
-(defn read-line-with-timeout [reader timeout-ms]
-  (let [read-future (future (.readLine reader))]
-    (try
-      (deref read-future timeout-ms nil)
-      (catch java.util.concurrent.TimeoutException _
-        nil))))
+(def ^:private read-timeout-sentinel ::read-timeout)
+
+(defn read-line-with-timeout
+  "Read a line from the reader with a millisecond deadline.
+
+   Returns:
+   - the line string on success
+   - `nil` on clean EOF (subprocess closed its stdout)
+   - `::read-timeout` when the deadline fires before a line arrived
+
+   Differentiating EOF from timeout is load-bearing: a clean EOF
+   means the subprocess finished and we should NOT classify the
+   phase as a stream-idle timeout. Previously both conditions
+   returned nil, causing iter-18 plan-phase to be reported as
+   :stream-idle despite a clean `result` + `stop_reason end_turn`
+   in the stream."
+  [reader timeout-ms]
+  (let [read-future (future (.readLine reader))
+        v (deref read-future timeout-ms read-timeout-sentinel)]
+    v))
 
 (defn process-stream-lines [out-reader monitor on-line]
   (let [out-lines (atom [])
@@ -555,22 +569,29 @@
       (if-let [t (pm/check-timeout monitor)]
         ;; Progress-monitor timeout (stagnation or total-max)
         (reset! timeout-reason t)
-        (if-let [line (read-line-with-timeout out-reader line-timeout-ms)]
-          (do (swap! out-lines conj line)
-              (pm/record-chunk! monitor line)
-              (when dump-writer (.println dump-writer line) (.flush dump-writer))
-              (on-line line)
-              (recur))
-          ;; Line-timeout: reader produced nothing for line-timeout-ms.
-          ;; Treat as stream-idle — a stalled stream, not clean EOF.
-          ;; Set an explicit reason so the caller reports it instead of
-          ;; waiting on `deref process` for the full 10 min and then
-          ;; reporting a bare "Process timed out" with no context.
-          (reset! timeout-reason
-                  {:type :stream-idle
-                   :message (str "No stream output for " line-timeout-ms "ms")
-                   :elapsed-ms line-timeout-ms
-                   :stats {:lines-read (count @out-lines)}}))))
+        (let [line (read-line-with-timeout out-reader line-timeout-ms)]
+          (cond
+            ;; Real line received — record and keep reading
+            (string? line)
+            (do (swap! out-lines conj line)
+                (pm/record-chunk! monitor line)
+                (when dump-writer (.println dump-writer line) (.flush dump-writer))
+                (on-line line)
+                (recur))
+
+            ;; Line-timeout: reader produced nothing for line-timeout-ms.
+            ;; Stream-idle — subprocess alive but silent too long.
+            (= line read-timeout-sentinel)
+            (reset! timeout-reason
+                    {:type :stream-idle
+                     :message (str "No stream output for " line-timeout-ms "ms")
+                     :elapsed-ms line-timeout-ms
+                     :stats {:lines-read (count @out-lines)}})
+
+            ;; nil — clean EOF. Subprocess closed stdout normally
+            ;; (emitted its `result` event and exited). Not a timeout.
+            :else
+            nil))))
     (when dump-writer (.close dump-writer))
     {:lines @out-lines
      :timeout @timeout-reason}))
