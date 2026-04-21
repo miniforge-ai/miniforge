@@ -432,6 +432,45 @@
       (is (some? (get-in resp [:error :message])))
       (is (pos? (count (get-in resp [:error :message])))))))
 
+(deftest error-details-exception-class-test
+  (testing "exception class is attached to :data — no more empty error data on NPE"
+    ;; Iter 11 of planner-convergence dogfood produced {:message "Unknown
+    ;; error" :data {}} which was undiagnosable. Whatever the exception is,
+    ;; its class MUST land in :data.
+    (let [resp (r/error (NullPointerException.))]
+      (is (= "java.lang.NullPointerException"
+             (get-in resp [:error :data :exception/class])))))
+
+  (testing "exception stack preview is attached (first 8 frames)"
+    (let [resp (r/error (Exception. "boom"))
+          preview (get-in resp [:error :data :exception/stack-preview])]
+      (is (vector? preview))
+      (is (<= (count preview) 8))
+      (is (every? string? preview))))
+
+  (testing "ex-data from ex-info is merged with the class/stack preview"
+    (let [ex (ex-info "boom" {:phase :plan :llm-content-length 42})
+          resp (r/error ex)]
+      (is (= "clojure.lang.ExceptionInfo"
+             (get-in resp [:error :data :exception/class])))
+      (is (= :plan (get-in resp [:error :data :phase])))
+      (is (= 42 (get-in resp [:error :data :llm-content-length])))))
+
+  (testing "explicit :data opt takes precedence over ex-data keys of same name"
+    (let [ex (ex-info "boom" {:phase :plan})
+          resp (r/error ex {:data {:phase :override}})]
+      (is (= :override (get-in resp [:error :data :phase])))))
+
+  (testing "non-exception messages: no exception-class key, data stays clean"
+    (let [resp (r/error "plain string")]
+      (is (nil? (get-in resp [:error :data :exception/class])))
+      (is (nil? (get-in resp [:error :data :exception/stack-preview])))))
+
+  (testing "failure preserves the same exception shape"
+    (let [resp (r/failure (NullPointerException.))]
+      (is (= "java.lang.NullPointerException"
+             (get-in resp [:error :data :exception/class]))))))
+
 ;; ============================================================================
 ;; Result map predicates (success?/error?)
 ;; ============================================================================

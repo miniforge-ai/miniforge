@@ -81,21 +81,37 @@
   ([message]
    (error-details message nil))
   ([message data]
-   (let [raw-msg (if (instance? Exception message)
+   (let [exception? (instance? Exception message)
+         raw-msg (if exception?
                    (.getMessage ^Exception message)
                    (str message))
          ;; Ensure message is never nil or empty — downstream (or msg fallback)
          ;; treats "" as truthy, masking useful defaults
          msg (if (or (nil? raw-msg) (clojure.string/blank? raw-msg))
-               (if (instance? Exception message)
+               (if exception?
                  (str (class message))
                  "Unknown error")
                raw-msg)
-         err-data (if (instance? Exception message)
-                   (or data (ex-data message) {})
-                   (or data {}))]
+         ;; For Exception messages, attach class + optional stack preview
+         ;; so failures like NPE (no getMessage, no ex-data) don't come
+         ;; through as {:message "Unknown error" :data {}} — that empty
+         ;; shape is what made iter-11 planner failure un-diagnosable.
+         exception-data (when exception?
+                          (let [st (seq (.getStackTrace ^Exception message))]
+                            (cond-> {:exception/class (.getName (class message))}
+                              st (assoc :exception/stack-preview
+                                        (->> st
+                                             (take 8)
+                                             (mapv (fn [^StackTraceElement e]
+                                                     (str (.getClassName e) "."
+                                                          (.getMethodName e)
+                                                          " (" (.getFileName e)
+                                                          ":" (.getLineNumber e) ")"))))))))
+         err-data (merge (when exception? exception-data)
+                         (when exception? (ex-data message))
+                         data)]
      {:message msg
-      :data err-data})))
+      :data (or err-data {})})))
 
 (defn error
   "Create a canonical error response.
