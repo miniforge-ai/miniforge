@@ -10,8 +10,8 @@
   (:require [ai.miniforge.connector-http.etag :as etag]
             [ai.miniforge.connector-http.pagination :as page]
             [ai.miniforge.schema.interface :as schema]
-            [cheshire.core :as json]
-            [hato.client :as hc]))
+            [babashka.http-client :as http]
+            [cheshire.core :as json]))
 
 ;;------------------------------------------------------------------------------ Layer 0
 ;; Predicates and classifiers
@@ -62,10 +62,10 @@
    Supports ETag conditional requests via If-None-Match header.
    error-fn: (fn [status resp] schema/failure) — supplies connector-specific messages."
   [url headers query-params error-fn]
-  (let [resp   (hc/get url {:headers          (etag/add-etag-header headers url)
-                             :query-params     query-params
-                             :as               :string
-                             :throw-exceptions false})
+  (let [resp   (http/get url {:headers      (etag/add-etag-header headers url)
+                              :query-params query-params
+                              :as           :string
+                              :throw        false})
         status (:status resp)]
     (cond
       (etag/not-modified? status) (not-modified-response resp)

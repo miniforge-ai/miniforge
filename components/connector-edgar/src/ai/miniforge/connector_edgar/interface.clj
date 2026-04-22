@@ -1,8 +1,9 @@
 (ns ai.miniforge.connector-edgar.interface
   "Public API for the EDGAR connector component.
 
-   JVM-only: depends on `hato` via `connector-http` for request dispatch,
-   so this namespace is not loadable under Babashka."
+   JVM-only: EDGAR filings are XML, and the impl parses them with
+   `javax.xml.parsers.DocumentBuilderFactory`, which isn't available
+   under Babashka."
   {:miniforge/runtime :jvm-only}
   (:require [ai.miniforge.connector-edgar.core :as core]))
 

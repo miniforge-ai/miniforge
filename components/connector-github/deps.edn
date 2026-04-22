@@ -1,8 +1,7 @@
 {:paths ["src" "resources"]
  :deps {ai.miniforge/connector      {:local/root "../connector"}
-        ai.miniforge/connector-auth  {:local/root "../connector-auth"}
-        ai.miniforge/connector-http  {:local/root "../connector-http"}
-        ai.miniforge/schema             {:local/root "../schema"}
-        hato/hato                       {:mvn/version "1.0.0"}}
+        ai.miniforge/connector-auth {:local/root "../connector-auth"}
+        ai.miniforge/connector-http {:local/root "../connector-http"}
+        ai.miniforge/schema         {:local/root "../schema"}}
  :aliases {:test {:extra-paths ["test"]
                   :extra-deps {}}}}
