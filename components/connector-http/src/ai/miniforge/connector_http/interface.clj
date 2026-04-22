@@ -1,19 +1,21 @@
 (ns ai.miniforge.connector-http.interface
   "Public API for the HTTP connector component.
 
-   Only metadata and BB-safe cursor/rate-limit helpers are exposed eagerly.
-   Request utilities and the HttpConnector record depend on hato, which
-   isn't Babashka-compatible — they're resolved lazily so sibling
-   connectors can keep `connector-http.interface` in their require list
-   without breaking the GraalVM-compat gate."
-  (:require [ai.miniforge.connector-http.cursors :as cursors]
+   JVM-only: depends on `hato` (request dispatch), so this namespace is
+   not loadable under Babashka. Downstream callers that need to stay
+   BB-compatible should shell out to a JVM subprocess rather than
+   `require` this namespace."
+  {:miniforge/runtime :jvm-only}
+  (:require [ai.miniforge.connector-http.core :as core]
+            [ai.miniforge.connector-http.cursors :as cursors]
             [ai.miniforge.connector-http.rate-limit :as rate-limit]
+            [ai.miniforge.connector-http.request :as request]
             [ai.miniforge.connector.interface :as conn]))
 
 (defn create-http-connector
   "Create a new HttpConnector instance."
   []
-  (@(requiring-resolve 'ai.miniforge.connector-http.core/->HttpConnector)))
+  (core/->HttpConnector))
 
 (def connector-metadata
   "Registration metadata for the HTTP connector."
@@ -32,15 +34,12 @@
 (def sort-by-timestamp    cursors/sort-by-timestamp)
 (def parse-timestamp      cursors/parse-timestamp)
 
-;; -- Request utilities --
-;; Lazy resolution: requiring the `request` namespace at interface load
-;; time pulls in `hato.client` which is not Babashka-compatible. Source
-;; connectors only call these from JVM-resolved code paths.
-(defn coerce-records    [& args] (apply @(requiring-resolve 'ai.miniforge.connector-http.request/coerce-records) args))
-(defn do-request        [& args] (apply @(requiring-resolve 'ai.miniforge.connector-http.request/do-request) args))
-(defn error-response    [& args] (apply @(requiring-resolve 'ai.miniforge.connector-http.request/error-response) args))
-(defn next-url          [& args] (apply @(requiring-resolve 'ai.miniforge.connector-http.request/next-url) args))
-(defn throw-on-failure! [& args] (apply @(requiring-resolve 'ai.miniforge.connector-http.request/throw-on-failure!) args))
+;; -- Request utilities (shared by HTTP-based source connectors) --
+(def coerce-records    request/coerce-records)
+(def do-request        request/do-request)
+(def error-response    request/error-response)
+(def next-url          request/next-url)
+(def throw-on-failure! request/throw-on-failure!)
 
 ;; -- Rate-limit utilities --
 (def acquire-permit!     rate-limit/acquire-permit!)

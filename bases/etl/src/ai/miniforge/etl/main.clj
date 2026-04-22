@@ -20,6 +20,7 @@
   "JVM entry point for `mf etl` subcommands. Shelled out to from the
    Babashka CLI because the concrete source connectors depend on hato
    and Apache POI, which aren't BB-compatible."
+  {:miniforge/runtime :jvm-only}
   (:require
    [ai.miniforge.etl.registry :as registry]
    [ai.miniforge.etl.runner :as runner]
