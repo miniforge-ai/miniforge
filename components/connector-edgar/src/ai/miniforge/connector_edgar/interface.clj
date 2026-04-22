@@ -1,14 +1,15 @@
 (ns ai.miniforge.connector-edgar.interface
   "Public API for the EDGAR connector component.
 
-   The EdgarConnector record depends on hato, which isn't
-   Babashka-compatible — it's resolved lazily so this interface
-   stays loadable under BB.")
+   JVM-only: depends on `hato` via `connector-http` for request dispatch,
+   so this namespace is not loadable under Babashka."
+  {:miniforge/runtime :jvm-only}
+  (:require [ai.miniforge.connector-edgar.core :as core]))
 
 (defn create-edgar-connector
   "Create a new EdgarConnector instance."
   []
-  (@(requiring-resolve 'ai.miniforge.connector-edgar.core/->EdgarConnector)))
+  (core/->EdgarConnector))
 
 (def connector-metadata
   "Registration metadata for the EDGAR connector."

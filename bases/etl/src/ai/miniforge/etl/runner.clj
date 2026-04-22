@@ -24,7 +24,11 @@
 
    Every piece of configuration (which connector type, which auth
    credential, which output destination) stays in the pack; the runner
-   just wires pack data into live instances."
+   just wires pack data into live instances.
+
+   JVM-only: transitively loads the concrete connector chain through
+   `etl.registry`."
+  {:miniforge/runtime :jvm-only}
   (:require
    [ai.miniforge.etl.registry :as registry]
    [ai.miniforge.pipeline-config.interface :as pc]

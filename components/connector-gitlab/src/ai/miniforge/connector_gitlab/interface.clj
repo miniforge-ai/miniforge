@@ -1,5 +1,8 @@
 (ns ai.miniforge.connector-gitlab.interface
-  "Public API for the GitLab REST API connector component."
+  "Public API for the GitLab REST API connector component.
+
+   JVM-only: transitively depends on `hato` via `connector-http`."
+  {:miniforge/runtime :jvm-only}
   (:require [ai.miniforge.connector-gitlab.core :as core]
             [ai.miniforge.connector-gitlab.schema :as schema]
             [ai.miniforge.connector.interface :as conn]))

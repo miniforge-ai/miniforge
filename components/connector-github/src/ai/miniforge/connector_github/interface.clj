@@ -1,5 +1,8 @@
 (ns ai.miniforge.connector-github.interface
-  "Public API for the GitHub REST API connector component."
+  "Public API for the GitHub REST API connector component.
+
+   JVM-only: transitively depends on `hato` via `connector-http`."
+  {:miniforge/runtime :jvm-only}
   (:require [ai.miniforge.connector-github.core :as core]
             [ai.miniforge.connector.interface :as conn]))
 

@@ -20,7 +20,13 @@
   "Maps pack-declared `:connector/type` keywords to the factory that
    constructs a live connector instance. Only the type→factory mapping
    is hardcoded; everything else (which type a pack uses, which auth
-   credentials, which output destination) stays in the pack's env EDN."
+   credentials, which output destination) stays in the pack's env EDN.
+
+   JVM-only: eagerly requires every concrete connector interface, and
+   several of those (http, edgar, excel, github, gitlab, jira) pull in
+   hato/POI. The etl base is shelled out to from Babashka, never
+   loaded under it."
+  {:miniforge/runtime :jvm-only}
   (:require
    [ai.miniforge.connector-edgar.interface :as edgar]
    [ai.miniforge.connector-excel.interface :as excel]

@@ -19,9 +19,17 @@
 (ns graalvm-compatibility-test
   "GraalVM/Babashka compatibility test suite.
 
-   Ensures ALL miniforge bricks (components + bases) can be loaded in
-   Babashka/GraalVM native image environments. New bricks are discovered
-   automatically from the filesystem — no manual list to maintain.
+   Ensures every miniforge brick (component + base) that is *intended*
+   to run under Babashka can actually be loaded there. Bricks that are
+   known JVM-only opt out of the load attempt by declaring
+   `{:miniforge/runtime :jvm-only}` in their namespace metadata; the
+   discovery below reads that marker from the file text (without
+   loading the namespace, which would otherwise pull in the BB-hostile
+   transitive deps we're trying to avoid).
+
+   Also enforces that no JVM-only brick ever ships inside
+   `projects/miniforge/deps.edn`, because the miniforge CLI runs under
+   Babashka.
 
    Run with:
      bb test:graalvm
@@ -30,30 +38,67 @@
   (:require
    [clojure.test :refer [deftest is testing run-tests]]
    [clojure.string :as str]
+   [clojure.edn :as edn]
    [clojure.java.io :as io]))
+
+;; ============================================================================
+;; Runtime classification (reads ns-meta without loading the namespace)
+;; ============================================================================
+
+(def ^:private jvm-only-meta-re
+  "Distinctive enough that the only legitimate place it can appear is a
+   brick's ns-meta marker."
+  #":miniforge/runtime\s+:jvm-only")
+
+(defn- file-marked-jvm-only?
+  [^java.io.File f]
+  (and (.exists f)
+       (boolean (re-find jvm-only-meta-re (slurp f)))))
+
+(defn- component-interface-file
+  [brick-name]
+  (io/file "components" brick-name "src" "ai" "miniforge"
+           (str/replace brick-name "-" "_") "interface.clj"))
+
+(defn jvm-only-component?
+  "True when `components/<brick-name>/…/interface.clj` self-declares
+   `{:miniforge/runtime :jvm-only}` in its ns metadata."
+  [brick-name]
+  (file-marked-jvm-only? (component-interface-file brick-name)))
+
+(defn- base-src-files
+  [base-name]
+  (let [src-dir (io/file "bases" base-name "src")]
+    (when (.exists src-dir)
+      (->> (file-seq src-dir)
+           (filter #(str/ends-with? (.getName %) ".clj"))))))
+
+(defn jvm-only-base?
+  "True when any .clj file under `bases/<base-name>/src` carries the
+   JVM-only marker — bases don't follow the single-interface convention
+   so we treat any marked file as opting the whole base out."
+  [base-name]
+  (boolean (some file-marked-jvm-only? (base-src-files base-name))))
 
 ;; ============================================================================
 ;; Discovery
 ;; ============================================================================
 
 (defn discover-interface-namespaces
-  "Scan components/ for interface.clj files and derive namespace symbols.
-   Returns a sorted seq of namespace symbols."
+  "Return one entry per component with an `interface.clj`:
+     {:brick-name …, :ns-sym …, :jvm-only? bool}"
   []
-  (let [component-dirs (-> (io/file "components") .listFiles seq)
-        interface-files (->> component-dirs
-                             (filter #(.isDirectory %))
-                             (mapcat (fn [dir]
-                                       (let [;; components/<name>/src/ai/miniforge/<name>/interface.clj
-                                             ;; Name may contain hyphens -> underscores in path
-                                             brick-name (.getName dir)
-                                             path-name (str/replace brick-name "-" "_")
-                                             iface (io/file dir "src" "ai" "miniforge" path-name "interface.clj")]
-                                         (when (.exists iface)
-                                           [(symbol (str "ai.miniforge." brick-name ".interface"))])))))]
-    (sort-by str interface-files)))
+  (->> (-> (io/file "components") .listFiles seq)
+       (filter #(.isDirectory %))
+       (keep (fn [dir]
+               (let [brick-name (.getName dir)]
+                 (when (.exists (component-interface-file brick-name))
+                   {:brick-name brick-name
+                    :ns-sym     (symbol (str "ai.miniforge." brick-name ".interface"))
+                    :jvm-only?  (jvm-only-component? brick-name)}))))
+       (sort-by :brick-name)))
 
-(defn path->namespace
+(defn- path->namespace
   "Convert a .clj file path (relative to src/) to a namespace symbol.
    e.g. ai/miniforge/cli/main.clj -> ai.miniforge.cli.main"
   [src-root clj-file]
@@ -67,19 +112,25 @@
         symbol)))
 
 (defn discover-base-namespaces
-  "Scan bases/ for all .clj source files and derive namespace symbols.
-   Returns a sorted seq of namespace symbols."
+  "Return one entry per .clj file under `bases/<base>/src/`:
+     {:ns-sym …, :file …, :jvm-only? bool}
+
+   Per-file rather than per-base because some bases mix BB-safe and
+   JVM-only source files, and the loader tests require each file
+   independently."
   []
-  (let [base-dirs (-> (io/file "bases") .listFiles seq)]
-    (->> base-dirs
-         (filter #(.isDirectory %))
-         (mapcat (fn [dir]
-                   (let [src-dir (io/file dir "src")]
-                     (when (.exists src-dir)
-                       (->> (file-seq src-dir)
-                            (filter #(str/ends-with? (.getName %) ".clj"))
-                            (map #(path->namespace src-dir %)))))))
-         (sort-by str))))
+  (->> (-> (io/file "bases") .listFiles seq)
+       (filter #(.isDirectory %))
+       (mapcat (fn [dir]
+                 (let [src-dir (io/file dir "src")]
+                   (when (.exists src-dir)
+                     (->> (file-seq src-dir)
+                          (filter #(str/ends-with? (.getName %) ".clj"))
+                          (map (fn [f]
+                                 {:ns-sym    (path->namespace src-dir f)
+                                  :file      f
+                                  :jvm-only? (file-marked-jvm-only? f)})))))))
+       (sort-by (comp str :ns-sym))))
 
 ;; ============================================================================
 ;; Helpers
@@ -119,61 +170,60 @@
 ;; ============================================================================
 
 (deftest test-all-components-load-in-babashka
-  (testing "All component interfaces should load in Babashka/GraalVM"
-    (let [all-ns (discover-interface-namespaces)]
-      ;; Ensure we actually found bricks (sanity check)
-      (is (>= (count all-ns) 20)
-          (str "Expected 20+ component interfaces, found " (count all-ns)
+  (testing "Every BB-runtime component interface loads; JVM-only bricks are skipped."
+    (let [bricks (discover-interface-namespaces)]
+      (is (>= (count bricks) 20)
+          (str "Expected 20+ component interfaces, found " (count bricks)
                ". Is the test running from the repo root?"))
 
-      (doseq [ns-sym all-ns]
-        (let [[success? error-msg] (require-namespace ns-sym)]
-          (cond
-            ;; Loaded fine
-            success?
-            (is true (str ns-sym " loaded"))
+      (doseq [{:keys [ns-sym jvm-only?]} bricks]
+        (if jvm-only?
+          (println "  SKIP:" ns-sym "- :miniforge/runtime :jvm-only")
+          (let [[success? error-msg] (require-namespace ns-sym)]
+            (cond
+              success?
+              (is true (str ns-sym " loaded"))
 
-            ;; Not on classpath — warn but don't fail
-            ;; (brick exists but not wired into workspace :dev alias yet)
-            (classpath-error? error-msg)
-            (println "  WARN:" ns-sym "- not on :dev classpath (add to deps.edn :dev alias)")
+              (classpath-error? error-msg)
+              (println "  WARN:" ns-sym "- not on :dev classpath (add to deps.edn :dev alias)")
 
-            ;; JVM-only code detected — hard failure
-            (jvm-only-error? error-msg)
-            (is false (str "JVM-ONLY DEPENDENCY DETECTED in " ns-sym ":\n"
-                           error-msg
-                           "\n\nThis blocks GraalVM native compilation."
-                           "\nFix: use Babashka-compatible alternatives."))
+              (jvm-only-error? error-msg)
+              (is false (str "JVM-ONLY DEPENDENCY DETECTED in " ns-sym ":\n"
+                             error-msg
+                             "\n\nThis blocks GraalVM native compilation."
+                             "\nFix: either use Babashka-compatible alternatives, or add"
+                             "\n     `{:miniforge/runtime :jvm-only}` to the ns metadata"
+                             "\n     if the brick is deliberately JVM-only."))
 
-            ;; Other error — fail with details
-            :else
-            (is false (str "Failed to load " ns-sym ":\n" error-msg))))))))
+              :else
+              (is false (str "Failed to load " ns-sym ":\n" error-msg)))))))))
 
 (deftest test-all-bases-load-in-babashka
-  (testing "All base namespaces should load in Babashka/GraalVM"
-    (let [all-ns (discover-base-namespaces)]
-      ;; Ensure we actually found base namespaces (sanity check)
-      (is (>= (count all-ns) 3)
-          (str "Expected 3+ base namespaces, found " (count all-ns)
+  (testing "Every BB-runtime base namespace loads; JVM-only files are skipped."
+    (let [files (discover-base-namespaces)]
+      (is (>= (count files) 3)
+          (str "Expected 3+ base namespaces, found " (count files)
                ". Is the test running from the repo root?"))
 
-      (doseq [ns-sym all-ns]
-        (let [[success? error-msg] (require-namespace ns-sym)]
-          (cond
-            success?
-            (is true (str ns-sym " loaded"))
+      (doseq [{:keys [ns-sym jvm-only?]} files]
+        (if jvm-only?
+          (println "  SKIP:" ns-sym "- :miniforge/runtime :jvm-only")
+          (let [[success? error-msg] (require-namespace ns-sym)]
+            (cond
+              success?
+              (is true (str ns-sym " loaded"))
 
-            (classpath-error? error-msg)
-            (println "  WARN:" ns-sym "- not on :dev classpath (add to deps.edn :dev alias)")
+              (classpath-error? error-msg)
+              (println "  WARN:" ns-sym "- not on :dev classpath (add to deps.edn :dev alias)")
 
-            (jvm-only-error? error-msg)
-            (is false (str "JVM-ONLY DEPENDENCY DETECTED in " ns-sym ":\n"
-                           error-msg
-                           "\n\nThis blocks GraalVM native compilation."
-                           "\nFix: use Babashka-compatible alternatives."))
+              (jvm-only-error? error-msg)
+              (is false (str "JVM-ONLY DEPENDENCY DETECTED in " ns-sym ":\n"
+                             error-msg
+                             "\n\nFix: use Babashka-compatible alternatives, or mark the"
+                             "\n     file with `{:miniforge/runtime :jvm-only}` ns-meta."))
 
-            :else
-            (is false (str "Failed to load " ns-sym ":\n" error-msg))))))))
+              :else
+              (is false (str "Failed to load " ns-sym ":\n" error-msg)))))))))
 
 (deftest test-no-forbidden-dependencies
   (testing "Forbidden JVM-only dependencies should not be present"
@@ -200,7 +250,6 @@
       (doseq [f src-files]
         (let [content (slurp f)
               rel-path (str/replace (.getPath f) (str (System/getProperty "user.dir") "/") "")]
-          ;; Check for defrecord implementing java.io.Closeable or java.lang.AutoCloseable
           (when (and (str/includes? content "defrecord")
                      (or (str/includes? content "java.io.Closeable")
                          (str/includes? content "java.lang.AutoCloseable")))
@@ -217,6 +266,69 @@
             "Should resolve load-workflow")
         (is (some? (resolve 'ai.miniforge.workflow.interface/run-pipeline))
             "Should resolve run-pipeline")))))
+
+;; ============================================================================
+;; miniforge-project BB-safety gate — no JVM-only bricks on the CLI classpath
+;; ============================================================================
+
+(defn- parse-deps-edn
+  [^java.io.File f]
+  (when (.exists f)
+    (edn/read-string (slurp f))))
+
+(defn- project-local-root-deps
+  "Return every `:local/root` dep declared in `projects/<project>/deps.edn`,
+   flattened across `:deps` and test `:extra-deps`. Each entry is
+   `{:dep-sym … :local-root …}`."
+  [project-name]
+  (let [deps-edn (parse-deps-edn (io/file "projects" project-name "deps.edn"))]
+    (for [[dep-sym dep-spec] (merge (:deps deps-edn)
+                                    (get-in deps-edn [:aliases :test :extra-deps]))
+          :let [local-root (:local/root dep-spec)]
+          :when local-root]
+      {:dep-sym    dep-sym
+       :local-root local-root})))
+
+(defn- classify-local-root
+  "Map a `local-root` like `../../components/connector-http` or
+   `../../bases/etl` to `{:kind :component|:base :name <brick-name>}`.
+   Unrecognised shapes get `:kind nil`."
+  [local-root]
+  (let [parts (vec (str/split local-root #"/"))]
+    (cond
+      (some #{"components"} parts)
+      {:kind :component
+       :name (get parts (inc (.indexOf parts "components")))}
+
+      (some #{"bases"} parts)
+      {:kind :base
+       :name (get parts (inc (.indexOf parts "bases")))}
+
+      :else
+      {:kind nil :name nil})))
+
+(defn- jvm-only-local-root?
+  [local-root]
+  (let [{:keys [kind name]} (classify-local-root local-root)]
+    (case kind
+      :component (jvm-only-component? name)
+      :base      (jvm-only-base? name)
+      false)))
+
+(deftest test-no-jvm-only-brick-in-miniforge-project
+  (testing "projects/miniforge/deps.edn must not ship JVM-only bricks"
+    (let [deps (project-local-root-deps "miniforge")]
+      (is (seq deps)
+          "Expected local-root brick deps in projects/miniforge/deps.edn")
+      (doseq [{:keys [dep-sym local-root]} deps]
+        (is (not (jvm-only-local-root? local-root))
+            (str "JVM-only brick shipped in projects/miniforge/deps.edn: "
+                 dep-sym " (" local-root ")"
+                 "\n  This brick is marked {:miniforge/runtime :jvm-only}."
+                 "\n  The miniforge CLI runs under Babashka and cannot load hato/POI/etc."
+                 "\n  Fix: remove the dep from projects/miniforge/deps.edn, or route"
+                 "\n       the feature through a JVM shell-out (see bases/etl for the"
+                 "\n       canonical pattern)."))))))
 
 ;; ============================================================================
 ;; Entry point
@@ -238,7 +350,8 @@
   ;; Discover all base namespaces
   (discover-base-namespaces)
 
-  ;; Test a specific namespace
-  (require-namespace 'ai.miniforge.dag-executor.interface)
+  ;; Check a specific brick's runtime
+  (jvm-only-component? "connector-http")
+  (jvm-only-component? "connector-file")
 
   :end)
