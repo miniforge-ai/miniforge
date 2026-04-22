@@ -139,14 +139,16 @@
         iterations (get-in ctx [:phase :iterations] 1)
         max-iterations (get-in ctx [:phase :budget :iterations]
                                (get-in default-config [:budget :iterations]))
-        ;; changes-requested always sets :failed — the redirect-to :implement
-        ;; tells the execution engine to jump back (not stay at review).
-        ;; Within budget: redirect to implement for repair.
-        ;; Over budget: fail without redirect (terminal failure).
+        ;; :rejected and :changes-requested both indicate the reviewer found
+        ;; blocking issues. Iter 23 regression: :rejected fell through to
+        ;; :completed, letting release open a PR against a reviewer-rejected
+        ;; artifact. Both decisions now set :failed; within iteration budget
+        ;; the phase redirects to :implement for repair.
         ;; Preserve :failed from gate validation — don't overwrite with :completed.
         gate-failed? (= :failed (:phase/status (get-in ctx [:phase])))
+        reviewer-blocked? (contains? #{:rejected :changes-requested} review-decision)
         phase-status (cond
-                       (= :changes-requested review-decision) :failed
+                       reviewer-blocked? :failed
                        gate-failed? :failed
                        :else :completed)
         updated-ctx (-> ctx
@@ -160,8 +162,9 @@
                         ;; Merge agent metrics into execution metrics
                         (update-in [:execution/metrics :tokens] (fnil + 0) (:tokens metrics 0))
                         (update-in [:execution/metrics :duration-ms] (fnil + 0) (:duration-ms metrics 0)))]
-    ;; Handle changes-requested: redirect to implement with review feedback
-    (doto (if (and (= :changes-requested review-decision)
+    ;; Handle reviewer-blocked (:changes-requested OR :rejected): redirect
+    ;; to implement with review feedback for repair within iteration budget.
+    (doto (if (and reviewer-blocked?
                    (< iterations max-iterations))
             (let [feedback (or (get-in result [:output :review/feedback])
                                (get-in result [:output :review/issues]))]

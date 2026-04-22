@@ -190,18 +190,44 @@
           pre-session-snapshot worktree-path)
          :code/files)))
 
+(def non-substantive-paths
+  "Paths the curator drops before assessing 'files written.'
+
+   These are runtime/session artifacts miniforge writes as side effects,
+   not implementer work. A diff consisting only of these MUST be treated
+   as empty — iter 23 receipt: the implementer produced no source, only
+   `.miniforge-session-id` got bumped, curator blessed it as an artifact,
+   reviewer rejected, release opened an empty-diff PR anyway.
+
+   Add entries here when a new runtime artifact would otherwise count as
+   'implementation.'"
+  #{".miniforge-session-id"})
+
+(defn substantive-file?
+  "True when the file entry represents real implementer work, not a
+   runtime/session side-effect. Exposed via the agent interface so
+   other phases (e.g. release) can filter the same way."
+  [{:keys [path]}]
+  (and (string? path)
+       (not (contains? non-substantive-paths path))
+       (not (.startsWith ^String path ".miniforge/"))))
+
 (defn collect-files
   "Resolve the file diff from available sources, in priority order:
    1. implementer-result has :code/files already (fast path)
    2. fresh collection via executor (capsule mode)
    3. fresh collection via local git status (non-capsule)
 
+   Filters non-substantive files (session markers, miniforge runtime
+   artifacts) — these shouldn't count as implementer output.
+
    Returns a vector (possibly empty) of file entries."
   [input]
-  (vec (or (files-from-result (:implementer-result input))
-           (files-via-executor input)
-           (files-via-local-snapshot input)
-           [])))
+  (filterv substantive-file?
+           (or (files-from-result (:implementer-result input))
+               (files-via-executor input)
+               (files-via-local-snapshot input)
+               [])))
 
 ;------------------------------------------------------------------------------ Layer 2
 ;; Optional LLM enrichment

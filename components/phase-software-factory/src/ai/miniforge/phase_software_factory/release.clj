@@ -28,10 +28,11 @@
   (:require [clojure.java.io :as io]
             [clojure.java.shell :as shell]
             [clojure.string :as str]
+            [ai.miniforge.agent.interface :as agent]
             [ai.miniforge.logging.interface :as log]
             [ai.miniforge.phase.interface :as phase]
             [ai.miniforge.phase-software-factory.messages :as messages]
-            
+
             [ai.miniforge.phase-software-factory.phase-config :as phase-config]
             [ai.miniforge.release-executor.interface :as release-executor]
             [ai.miniforge.response.interface :as response]))
@@ -97,7 +98,12 @@
   "Scan git working tree for new/modified/deleted files; return as :code/files entries.
    Used as fallback when the implement phase wrote files directly to disk
    (design docs, specs, UX assets, etc.) rather than returning them in a
-   :code/files artifact."
+   :code/files artifact.
+
+   Filters out non-substantive paths (session markers, miniforge runtime
+   artifacts) via `agent/substantive-file?` — a diff consisting only of
+   these must not count as releasable work. Matches the same filter the
+   curator applies upstream (iter-23 regression: empty-diff PRs)."
   [root-path]
   (try
     (let [{:keys [out]} (shell/sh "git" "status" "--porcelain" "-uall" :dir root-path)
@@ -114,35 +120,44 @@
                                                :action (if (str/starts-with? (str/trim xy) "?")
                                                          :create
                                                          :modify)}))))
+           (filter agent/substantive-file?)
            vec))
     (catch Exception _ [])))
 
 (defn- git-dirty-files-capsule
   "Scan git working tree inside a task capsule via execute-fn (N11 §9.3).
    Used for K8s executors where the filesystem is not locally accessible.
-   execute-fn is dag-exec/execute! passed through context to avoid cross-component requires."
+   execute-fn is dag-exec/execute! passed through context to avoid cross-component requires.
+
+   Applies the same `agent/substantive-file?` filter as the local variant so
+   session markers and miniforge runtime artifacts don't slip through the
+   governed path (iter-23 empty-diff regression)."
   [execute-fn executor env-id root-path]
   (try
     (let [result (execute-fn executor env-id "git status --porcelain -uall" {:workdir root-path})
           out    (get-in result [:data :stdout] "")
-          lines  (->> (str/split-lines out) (remove str/blank?))]
+          lines  (->> (str/split-lines out) (remove str/blank?))
+          path-of (fn [line] (str/trim (subs line 3)))
+          substantive-line? (fn [line]
+                              (and (>= (count line) 3)
+                                   (agent/substantive-file? {:path (path-of line)})))]
       (->> lines
+           (filter substantive-line?)
            (keep (fn [line]
-                   (when (>= (count line) 3)
-                     (let [status (str/trim (subs line 0 2))
-                           path   (str/trim (subs line 3))]
-                       (cond
-                         (str/includes? status "D")
-                         {:path path :content "" :action :delete}
+                   (let [status (str/trim (subs line 0 2))
+                         path   (path-of line)]
+                     (cond
+                       (str/includes? status "D")
+                       {:path path :content "" :action :delete}
 
-                         :else
-                         ;; Read file content via executor
-                         (let [cat-result (execute-fn executor env-id (str "cat " root-path "/" path)
-                                                     {:workdir root-path})
-                               content (get-in cat-result [:data :stdout] "")]
-                           {:path    path
-                            :content content
-                            :action  (if (= "??" status) :create :modify)}))))))
+                       :else
+                       ;; Read file content via executor
+                       (let [cat-result (execute-fn executor env-id (str "cat " root-path "/" path)
+                                                    {:workdir root-path})
+                             content (get-in cat-result [:data :stdout] "")]
+                         {:path    path
+                          :content content
+                          :action  (if (= "??" status) :create :modify)})))))
            vec))
     (catch Exception _ [])))
 
