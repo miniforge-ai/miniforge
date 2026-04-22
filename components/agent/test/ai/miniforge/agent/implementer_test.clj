@@ -21,6 +21,7 @@
   (:require
    [ai.miniforge.agent.artifact-session :as artifact-session]
    [ai.miniforge.agent.budget :as budget]
+   [clojure.java.io :as io]
    [clojure.test :as test :refer [deftest testing is]]
    [clojure.string :as str]
    [ai.miniforge.agent.core :as core]
@@ -269,6 +270,56 @@
                                       :action :modify}]}
           result (implementer/validate-code-artifact bad-artifact)]
       (is (not (:valid? result))))))
+
+;------------------------------------------------------------------------------ Layer 3b
+;; Session checkpoint — iter-24 regression
+
+(deftest session-checkpoint-is-stored-under-gitignored-directory
+  (testing "the checkpoint lives under .miniforge/, not at the worktree root"
+    ;; Iter-24 receipt: the old `.miniforge-session-id` path at the worktree
+    ;; root was committed into git, so every fresh sub-workflow worktree
+    ;; inherited a stale UUID. Passing `--resume <stale>` to Claude CLI
+    ;; killed the session in ~5s with no output. Parent `.miniforge/` is
+    ;; already gitignored in this repo, so moving the file there decouples
+    ;; the runtime checkpoint from source control automatically.
+    (let [write! @#'implementer/write-session-checkpoint!
+          read  @#'implementer/read-session-checkpoint
+          tmp   (java.io.File/createTempFile "mf-wt-" "")]
+      (.delete tmp) (.mkdirs tmp)
+      (try
+        (let [wt (.getPath tmp)]
+          (is (nil? (read wt))
+              "a fresh worktree with no checkpoint reads nil")
+          (write! wt "sess-123")
+          (is (.exists (io/file wt ".miniforge" "session-id"))
+              "the checkpoint MUST be written under .miniforge/ (gitignored)")
+          (is (not (.exists (io/file wt ".miniforge-session-id")))
+              "the legacy root path MUST NOT be used — it gets committed")
+          (is (= "sess-123" (read wt))
+              "round-trip: write then read returns the session id"))
+        (finally
+          (io/delete-file
+            (io/file tmp ".miniforge" "session-id") true)
+          (io/delete-file
+            (io/file tmp ".miniforge") true)
+          (.delete tmp))))))
+
+(deftest read-session-checkpoint-tolerates-garbage
+  (testing "blank content and read errors produce nil, not a bad --resume id"
+    (let [write! @#'implementer/write-session-checkpoint!
+          read  @#'implementer/read-session-checkpoint
+          tmp   (java.io.File/createTempFile "mf-wt-" "")]
+      (.delete tmp) (.mkdirs tmp)
+      (try
+        (write! (.getPath tmp) "   \n  ")
+        (is (nil? (read (.getPath tmp)))
+            "blank/whitespace content must read as nil — never fed to --resume")
+        (finally
+          (io/delete-file
+            (io/file tmp ".miniforge" "session-id") true)
+          (io/delete-file
+            (io/file tmp ".miniforge") true)
+          (.delete tmp))))))
 
 ;------------------------------------------------------------------------------ Layer 4
 ;; Utility tests

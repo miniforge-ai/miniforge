@@ -69,6 +69,11 @@ work/dogfood-session-*.edn
 work/*-local.spec.edn
 work/*-wip.edn
 .miniforge/
+# Legacy implementer session checkpoint (iter-24 regression: committing a
+# stale Claude session UUID poisoned every sub-workflow worktree's
+# implementer). The path moved under .miniforge/ but ignore the old one
+# defensively.
+.miniforge-session-id
 
 # Claude Code local session state (worktrees, scheduled tasks, local settings)
 .claude/
