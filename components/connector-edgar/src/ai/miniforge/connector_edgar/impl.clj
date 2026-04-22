@@ -7,14 +7,13 @@
             [ai.miniforge.connector-http.interface :as http]
             [ai.miniforge.schema.interface :as schema]
             [babashka.http-client :as bb-http]
-            [cheshire.core :as cheshire])
+            [cheshire.core :as cheshire]
+            [clojure.data.xml :as xml])
   (:import [java.io ByteArrayInputStream]
            [java.time LocalDate]
            [java.time.format DateTimeFormatter]
            [java.time.temporal TemporalAdjusters]
-           [java.util UUID]
-           [javax.xml.parsers DocumentBuilderFactory]
-           [org.w3c.dom Element NodeList]))
+           [java.util UUID]))
 
 ;; -- Handle state --
 
@@ -56,25 +55,30 @@
 ;; -- XML parsing --
 
 (defn- parse-xml
-  "Parse a byte array as XML, return the Document root Element."
+  "Parse a byte-array as XML, return the root element. `clojure.data.xml`
+   elements are records shaped `{:tag :attrs :content}` with content
+   being a seq of child elements and text strings."
   [^bytes xml-bytes]
-  (let [factory (DocumentBuilderFactory/newInstance)
-        builder (.newDocumentBuilder factory)
-        doc     (.parse builder (ByteArrayInputStream. xml-bytes))]
-    (.getDocumentElement doc)))
+  (xml/parse (ByteArrayInputStream. xml-bytes)))
 
 (defn- elements-by-tag
-  "Get all descendant elements with a given tag name."
-  [^Element el ^String tag]
-  (let [^NodeList nl (.getElementsByTagName el tag)]
-    (for [i (range (.getLength nl))]
-      (.item nl i))))
+  "Return every descendant element whose `:tag` matches `tag-kw`.
+   Depth-first, excluding `el` itself — matches the javax.xml
+   `getElementsByTagName` it replaces. `(rest (tree-seq …))` drops the
+   root; `tree-seq` is otherwise self-inclusive."
+  [el tag-kw]
+  (filter (fn [n] (and (map? n) (= tag-kw (:tag n))))
+          (rest (tree-seq :content :content el))))
 
 (defn- text-content
-  "Get text content of the first child element matching tag, or nil."
-  [^Element el ^String tag]
-  (when-let [children (seq (elements-by-tag el tag))]
-    (let [text (.getTextContent ^Element (first children))]
+  "Concatenated text content of the first descendant element with
+   `tag-kw`, or nil when empty. Matches the javax.xml
+   `getTextContent` behaviour the caller expects."
+  [el tag-kw]
+  (when-let [match (first (elements-by-tag el tag-kw))]
+    (let [text (->> (tree-seq :content :content match)
+                    (filter string?)
+                    (apply str))]
       (when-not (empty? text) text))))
 
 ;; -- EDGAR EFTS API --
@@ -113,10 +117,10 @@
   [^bytes xml-bytes transaction-codes]
   (try
     (let [root (parse-xml xml-bytes)]
-      (for [^Element txn (elements-by-tag root "nonDerivativeTransaction")
-            :let [code   (text-content txn "transactionCode")
-                  shares (text-content txn "transactionShares")
-                  price  (text-content txn "transactionPricePerShare")]
+      (for [txn (elements-by-tag root :nonDerivativeTransaction)
+            :let [code   (text-content txn :transactionCode)
+                  shares (text-content txn :transactionShares)
+                  price  (text-content txn :transactionPricePerShare)]
             :when (and code (contains? transaction-codes code))]
         {:code   code
          :shares (when shares (parse-double shares))
