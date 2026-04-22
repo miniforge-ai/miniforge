@@ -6,8 +6,8 @@
             [ai.miniforge.connector-edgar.messages :as msg]
             [ai.miniforge.connector-http.interface :as http]
             [ai.miniforge.schema.interface :as schema]
-            [cheshire.core :as cheshire]
-            [hato.client :as hc])
+            [babashka.http-client :as bb-http]
+            [cheshire.core :as cheshire])
   (:import [java.io ByteArrayInputStream]
            [java.time LocalDate]
            [java.time.format DateTimeFormatter]
@@ -39,11 +39,10 @@
   "Fetch a URL with the SEC-required User-Agent header."
   [url user-agent]
   (rate-limit! 8)
-  (let [resp (hc/get url {:headers          {"User-Agent" user-agent}
-                           :as               :byte-array
-                           :throw-exceptions false
-                           :connect-timeout  30000
-                           :timeout          30000})
+  (let [resp (bb-http/get url {:headers {"User-Agent" user-agent}
+                               :as      :bytes
+                               :throw   false
+                               :timeout 30000})
         status (:status resp)]
     (when (<= 200 status 299)
       (:body resp))))

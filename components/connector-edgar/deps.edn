@@ -3,7 +3,7 @@
         ai.miniforge/connector-auth  {:local/root "../connector-auth"}
         ai.miniforge/connector-http  {:local/root "../connector-http"}
         ai.miniforge/connector-retry {:local/root "../connector-retry"}
-        cheshire/cheshire               {:mvn/version "5.13.0"}
-        hato/hato                       {:mvn/version "1.0.0"}}
+        cheshire/cheshire        {:mvn/version "5.13.0"}
+        org.babashka/http-client {:mvn/version "0.4.22"}}
  :aliases {:test {:extra-paths ["test"]
                   :extra-deps {}}}}

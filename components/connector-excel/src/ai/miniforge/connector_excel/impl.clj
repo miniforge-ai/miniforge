@@ -2,10 +2,9 @@
   "Implementation functions for the Excel connector.
    Downloads a remote Excel file and extracts records using column mappings."
   (:require [ai.miniforge.connector.interface :as connector]
-            [ai.miniforge.connector.interface :as connector]
             [ai.miniforge.connector-excel.messages :as msg]
             [ai.miniforge.schema.interface :as schema]
-            [hato.client :as hc])
+            [babashka.http-client :as http])
   (:import [java.io File FileOutputStream]
            [java.util UUID]
            [org.apache.poi.ss.usermodel WorkbookFactory Cell CellType DateUtil]))
@@ -103,9 +102,9 @@
 (defn- download-to-temp
   "Download a URL to a temporary file. Returns the File."
   [url]
-  (let [resp (hc/get url {:as               :byte-array
-                          :headers           {"User-Agent" "Mozilla/5.0"}
-                          :throw-exceptions  false})
+  (let [resp (http/get url {:as      :bytes
+                            :headers {"User-Agent" "Mozilla/5.0"}
+                            :throw   false})
         status (:status resp)]
     (when-not (<= 200 status 299)
       (throw (ex-info (msg/t :excel/download-failed {:error (str "HTTP " status)})

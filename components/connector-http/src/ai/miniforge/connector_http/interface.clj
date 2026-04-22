@@ -1,11 +1,5 @@
 (ns ai.miniforge.connector-http.interface
-  "Public API for the HTTP connector component.
-
-   JVM-only: depends on `hato` (request dispatch), so this namespace is
-   not loadable under Babashka. Downstream callers that need to stay
-   BB-compatible should shell out to a JVM subprocess rather than
-   `require` this namespace."
-  {:miniforge/runtime :jvm-only}
+  "Public API for the HTTP connector component."
   (:require [ai.miniforge.connector-http.core :as core]
             [ai.miniforge.connector-http.cursors :as cursors]
             [ai.miniforge.connector-http.rate-limit :as rate-limit]

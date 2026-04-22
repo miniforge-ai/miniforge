@@ -2,7 +2,7 @@
   (:require [clojure.test :refer [deftest is testing use-fixtures]]
             [ai.miniforge.connector-http.etag :as etag]
             [ai.miniforge.connector-http.request :as request]
-            [hato.client :as hc]))
+            [babashka.http-client :as http]))
 
 ;;------------------------------------------------------------------------------ Layer 0
 ;; Fixtures
@@ -90,20 +90,20 @@
 
 (deftest do-request-test
   (testing "returns success for 2xx"
-    (with-redefs [hc/get (fn [_ _] {:status 200 :body "[{\"id\":1}]" :headers {}})]
+    (with-redefs [http/get (fn [_ _] {:status 200 :body "[{\"id\":1}]" :headers {}})]
       (let [result (request/do-request "https://example.com" {} {} (fn [_ _] nil))]
         (is (true? (:success? result)))
         (is (= [{:id 1}] (:body result))))))
 
   (testing "returns not-modified for 304"
-    (with-redefs [hc/get (fn [_ _] {:status 304 :body "" :headers {}})]
+    (with-redefs [http/get (fn [_ _] {:status 304 :body "" :headers {}})]
       (let [result (request/do-request "https://example.com" {} {} (fn [_ _] nil))]
         (is (true? (:success? result)))
         (is (nil? (:body result)))
         (is (true? (:not-modified result))))))
 
   (testing "delegates non-2xx non-304 to error-fn"
-    (with-redefs [hc/get (fn [_ _] {:status 429 :body "" :headers {}})]
+    (with-redefs [http/get (fn [_ _] {:status 429 :body "" :headers {}})]
       (let [called (atom nil)]
         (request/do-request "https://example.com" {} {}
                             (fn [s r] (reset! called s) {:success? false :error-type :rate-limited}))
@@ -112,7 +112,7 @@
   (testing "adds If-None-Match when ETag is cached"
     (etag/store-etag! "https://example.com/cached" "W/\"xyz\"")
     (let [received-headers (atom nil)]
-      (with-redefs [hc/get (fn [_ opts] (reset! received-headers (:headers opts))
+      (with-redefs [http/get (fn [_ opts] (reset! received-headers (:headers opts))
                               {:status 200 :body "[]" :headers {}})]
         (request/do-request "https://example.com/cached" {} {} (fn [_ _] nil))
         (is (= "W/\"xyz\"" (get @received-headers "If-None-Match")))))))

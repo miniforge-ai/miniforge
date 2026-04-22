@@ -1,8 +1,5 @@
 (ns ai.miniforge.connector-jira.interface
-  "Public API for the Jira Cloud REST API connector component.
-
-   JVM-only: transitively depends on `hato` via `connector-http`."
-  {:miniforge/runtime :jvm-only}
+  "Public API for the Jira Cloud REST API connector component."
   (:require [ai.miniforge.connector-jira.core :as core]
             [ai.miniforge.connector-jira.schema :as schema]
             [ai.miniforge.connector.interface :as conn]))

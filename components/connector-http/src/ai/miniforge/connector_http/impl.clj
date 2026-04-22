@@ -2,12 +2,11 @@
   "Implementation functions for the HTTP connector.
    Pure logic separated from protocol wiring."
   (:require [ai.miniforge.connector.interface :as connector]
-            [ai.miniforge.connector.interface :as connector]
             [ai.miniforge.connector-http.pagination :as page]
             [ai.miniforge.connector-http.messages :as msg]
             [ai.miniforge.schema.interface :as schema]
-            [cheshire.core :as json]
-            [hato.client :as hc])
+            [babashka.http-client :as http]
+            [cheshire.core :as json])
   (:import [java.util UUID]))
 
 ;; -- Handle state --
@@ -46,10 +45,10 @@
 (defn do-request
   "Execute an HTTP GET request. Returns schema/success or schema/failure."
   [url headers query-params]
-  (let [resp (hc/get url {:headers          headers
-                          :query-params     query-params
-                          :as               :string
-                          :throw-exceptions false})
+  (let [resp (http/get url {:headers      headers
+                            :query-params query-params
+                            :as           :string
+                            :throw        false})
         status (:status resp)]
     (cond
       (<= 200 status 299)
