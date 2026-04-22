@@ -269,6 +269,21 @@
                               ((:enter interceptor) ctx-with-config))
             "Release should fail fast when environment has no changed files"))))))
 
+(deftest release-ignores-non-substantive-paths-test
+  (testing "iter-23 regression: a worktree dirty ONLY with .miniforge-session-id
+            must not be treated as releasable work"
+    (with-test-worktree
+      (fn [worktree]
+        ;; Simulate only a runtime session marker in the worktree.
+        (spit (io/file worktree ".miniforge-session-id") "session-abc")
+        (let [ctx (create-empty-context worktree)
+              ctx-with-config (assoc ctx :phase-config {:phase :release})
+              interceptor (phase/get-phase-interceptor {:phase :release})]
+          (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                                #"Release phase received code artifact with zero files"
+                                ((:enter interceptor) ctx-with-config))
+              "Session-marker-only diffs must filter to empty — no empty-diff PR"))))))
+
 (deftest release-includes-pr-info-test
   (testing "release phase includes PR info in result"
     (with-test-worktree

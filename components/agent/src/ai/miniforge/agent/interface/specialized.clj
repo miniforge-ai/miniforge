@@ -47,6 +47,8 @@
 (def CuratedArtifact curator/CuratedArtifact)
 (def CuratedFileEntry curator/FileEntry)
 (def validate-curated-artifact curator/validate-curated-artifact)
+(def substantive-file? curator/substantive-file?)
+(def non-substantive-paths curator/non-substantive-paths)
 
 (def Plan planner/Plan)
 (def PlanTask planner/PlanTask)

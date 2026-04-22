@@ -188,6 +188,23 @@
                    :worktree-path "/tmp/nothing"})]
       (is (not= :success (:status result))))))
 
+(deftest curate-drops-non-substantive-paths
+  (testing "iter-23 regression: session markers and .miniforge/* must not count as work"
+    (is (false? (sut/substantive-file? {:path ".miniforge-session-id"})))
+    (is (false? (sut/substantive-file? {:path ".miniforge/plan.edn"})))
+    (is (true?  (sut/substantive-file? {:path "src/ai/miniforge/x.clj"}))))
+  (testing "diff containing only runtime markers fails with no-files-written"
+    (let [result (sut/curate-implement-output
+                  {:implementer-result
+                   (impl-result-with-files
+                    [{:path ".miniforge-session-id" :content "abc" :action :modify}
+                     {:path ".miniforge/plan.edn"   :content "{}"  :action :create}])
+                   :worktree-path "/tmp/ghost"})]
+      (is (not= :success (:status result)))
+      (is (= :curator/no-files-written
+             (get-in result [:error :data :code]))
+          "non-substantive paths should be filtered out before the empty check"))))
+
 ;------------------------------------------------------------------------------ Layer 3
 ;; Metrics
 

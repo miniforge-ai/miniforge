@@ -90,6 +90,20 @@
              (:review-feedback phase))
           "Should contain the review issues"))))
 
+(deftest rejected-redirects-to-implement-like-changes-requested
+  (testing "iter-23 regression: :rejected decision must trigger redirect, not :completed"
+    (let [phase (simulate-leave-review :rejected 1 4)]
+      (is (= :failed (:status phase))
+          "Rejected must set :failed — falling through to :completed lets an empty-diff PR open")
+      (is (= :implement (:redirect-to phase))
+          "Rejected within budget must redirect to implement like :changes-requested"))))
+
+(deftest rejected-over-budget-no-redirect
+  (testing ":rejected at max iterations fails terminally (no redirect)"
+    (let [phase (simulate-leave-review :rejected 4 4)]
+      (is (= :failed (:status phase)))
+      (is (nil? (:redirect-to phase))))))
+
 (deftest approved-sets-completed-status
   (testing "approved review sets :completed status"
     (let [phase (simulate-leave-review :approved 1 4)]
