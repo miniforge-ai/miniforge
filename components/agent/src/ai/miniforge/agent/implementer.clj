@@ -436,17 +436,31 @@
         (build-code-response code context tokens cost-usd)
         (response/error (messages/t :error/parse-failed) {:tokens tokens})))))
 
-(def ^:private session-checkpoint-filename ".miniforge-session-id")
+(def ^:private session-checkpoint-filename ".miniforge/session-id")
 
-(defn- read-session-checkpoint [working-dir]
+(defn- read-session-checkpoint
+  "Read the Claude session UUID from the worktree's runtime directory.
+
+   Returns nil on any failure (missing file, permission error, garbage
+   content). Iter 24 receipt: the previous path (`.miniforge-session-id`
+   at the worktree root) got committed into git and every fresh worktree
+   inherited a stale UUID — passing `--resume <stale>` to Claude CLI
+   caused the session to die in ~5s with no output. Path is now under
+   `.miniforge/`, which is gitignored, and readers tolerate anything."
+  [working-dir]
   (when working-dir
-    (let [f (io/file working-dir session-checkpoint-filename)]
-      (when (.exists f)
-        (str/trim (slurp f))))))
+    (try
+      (let [f (io/file working-dir session-checkpoint-filename)]
+        (when (.exists f)
+          (let [s (str/trim (slurp f))]
+            (when-not (str/blank? s) s))))
+      (catch Exception _ nil))))
 
 (defn- write-session-checkpoint! [working-dir session-id]
   (when (and working-dir session-id)
-    (spit (io/file working-dir session-checkpoint-filename) session-id)))
+    (let [f (io/file working-dir session-checkpoint-filename)]
+      (io/make-parents f)
+      (spit f session-id))))
 
 (defn- invoke-implementer-session
   "Session body for the implementer: cache files, build mcp-opts, call LLM."
