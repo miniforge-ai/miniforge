@@ -6,6 +6,9 @@
 
 # fix: restore dogfood and workflow-status CLI surfaces
 
+**PR:** [#635](https://github.com/miniforge-ai/miniforge/pull/635)
+**Branch:** `fix/dogfood-cli-surface`
+
 ## Overview
 
 This PR repairs three stale CLI surfaces that were blocking the current
@@ -116,5 +119,5 @@ Merge normally. No config migration or rollout steps required.
 
 - [x] Standards review completed
 - [x] Validation commands completed
-- [ ] Changes staged and committed
-- [ ] PR opened for review
+- [x] Changes staged and committed
+- [x] PR opened for review
