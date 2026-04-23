@@ -40,6 +40,8 @@
   (:require
    [ai.miniforge.fsm.interface :as fsm]))
 
+(declare current-state)
+
 ;; ============================================================================
 ;; FSM Definition using clj-statecharts
 ;; ============================================================================
@@ -64,6 +66,243 @@
 (def workflow-machine
   "Compiled workflow state machine."
   (fsm/define-machine workflow-machine-config))
+
+;------------------------------------------------------------------------------
+; Layer 0.5: Compiled execution machine
+
+(defn phase-state-id
+  "Build the active execution-machine state id for a pipeline phase."
+  [index phase]
+  (keyword (str "phase-" index "-" (name phase))))
+
+(defn paused-phase-state-id
+  "Build the paused execution-machine state id for a pipeline phase."
+  [index phase]
+  (keyword (str "paused-phase-" index "-" (name phase))))
+
+(defn redirect-event
+  "Build the event keyword used to redirect to a named phase."
+  [phase]
+  (keyword "workflow.event" (str "redirect-to-" (name phase))))
+
+(defn- first-phase-index
+  [pipeline phase]
+  (some (fn [[index config]]
+          (when (= phase (:phase config))
+            index))
+        (map-indexed vector pipeline)))
+
+(defn- build-phase-entry
+  [index config]
+  (let [phase (:phase config)]
+    {:index index
+     :phase phase
+     :config config
+     :state-id (phase-state-id index phase)
+     :paused-state-id (paused-phase-state-id index phase)}))
+
+(defn- state-target
+  [phase-entries index]
+  (some-> (get phase-entries index) :state-id))
+
+(defn- redirect-transitions
+  [phase-entries]
+  (into {}
+        (map (fn [{:keys [phase index]}]
+               [(redirect-event phase)
+                {:target (state-target phase-entries index)
+                 :actions [(fsm/assign {:redirect-count (fn [ctx _event]
+                                                          (inc (get ctx :redirect-count 0)))})]}]))
+        phase-entries))
+
+(defn- build-phase-state
+  [phase-entries {:keys [index config state-id paused-state-id]}]
+  (let [next-index (when (< (inc index) (count phase-entries))
+                     (inc index))
+        on-success-index (or (when-let [target-phase (:on-success config)]
+                               (first-phase-index phase-entries target-phase))
+                             next-index)
+        on-fail-index (when-let [target-phase (:on-fail config)]
+                        (first-phase-index phase-entries target-phase))
+        done-index (first-phase-index phase-entries :done)
+        success-target (or (state-target phase-entries on-success-index)
+                           :completed)
+        failure-target (or (state-target phase-entries on-fail-index)
+                           :failed)
+        already-done-target (or (state-target phase-entries done-index)
+                                :completed)]
+    [state-id
+     {:on (merge
+           {:phase/retry state-id
+            :phase/succeed success-target
+            :phase/already-done already-done-target
+            :phase/fail failure-target
+            :pause paused-state-id
+            :cancel :cancelled
+            :fail :failed
+            :complete :completed}
+           (redirect-transitions phase-entries))}]))
+
+(defn- build-paused-state
+  [{:keys [state-id paused-state-id]}]
+  [paused-state-id
+   {:on {:resume state-id
+         :cancel :cancelled
+         :fail :failed
+         :complete :completed}}])
+
+(defn- projection-entry
+  [entry paused?]
+  [(:state-id entry) {:phase (:phase entry)
+                      :index (:index entry)
+                      :paused? paused?}])
+
+(defn compile-execution-machine
+  "Compile a per-run execution machine from a workflow pipeline.
+
+   The compiled machine is the authoritative source of truth for workflow
+   progression. Coarse lifecycle status and phase/index projections are derived
+   from the resulting machine snapshot."
+  [workflow]
+  (let [pipeline (:workflow/pipeline workflow)
+        phase-entries (mapv build-phase-entry (range) pipeline)
+        first-active-state (some-> phase-entries first :state-id)
+        no-phase-machine? (empty? phase-entries)
+        states (merge
+                {:pending {:on (cond-> {:fail :failed
+                                        :cancel :cancelled}
+                                 no-phase-machine? (assoc :start :running)
+                                 first-active-state (assoc :start first-active-state))}
+                 :running (when no-phase-machine?
+                            {:on {:complete :completed
+                                  :fail :failed
+                                  :pause :paused
+                                  :cancel :cancelled}})
+                 :paused (when no-phase-machine?
+                           {:on {:resume :running
+                                 :cancel :cancelled}})
+                 :completed {:type :final}
+                 :failed {:type :final}
+                 :cancelled {:type :final}}
+                (into {} (map (partial build-phase-state phase-entries)) phase-entries)
+                (into {} (map build-paused-state) phase-entries))
+        state->phase (into {}
+                           (concat
+                            (map #(projection-entry % false) phase-entries)
+                            (map (fn [entry]
+                                   [(:paused-state-id entry)
+                                    {:phase (:phase entry)
+                                     :index (:index entry)
+                                     :paused? true}])
+                                 phase-entries)))]
+    (assoc (fsm/define-machine
+            {:fsm/id :workflow-execution
+             :fsm/initial :pending
+             :fsm/context {:redirect-count 0}
+             :fsm/states (into {} (remove (comp nil? val)) states)})
+           :workflow/phase-entries phase-entries
+           :workflow/state->phase state->phase)))
+
+(defn validate-execution-machine
+  "Validate that a workflow pipeline can compile into an execution machine."
+  [workflow]
+  (let [pipeline (:workflow/pipeline workflow)
+        duplicate-phases (->> pipeline
+                              (map :phase)
+                              frequencies
+                              (filter (fn [[_ count]] (> count 1)))
+                              (map first)
+                              vec)
+        unresolved-success (->> pipeline
+                                (keep (fn [{:keys [phase on-success]}]
+                                        (when (and on-success
+                                                   (nil? (first-phase-index pipeline on-success)))
+                                          {:error :unknown-on-success-target
+                                           :phase phase
+                                           :target on-success})))
+                                vec)
+        unresolved-fail (->> pipeline
+                             (keep (fn [{:keys [phase on-fail]}]
+                                     (when (and on-fail
+                                                (nil? (first-phase-index pipeline on-fail)))
+                                       {:error :unknown-on-fail-target
+                                        :phase phase
+                                        :target on-fail})))
+                             vec)
+        errors (vec (concat
+                     (when (empty? pipeline)
+                       [{:error :empty-pipeline
+                         :message "Workflow pipeline is empty"}])
+                     unresolved-success
+                     unresolved-fail))
+        warnings (vec (concat
+                       (when (seq duplicate-phases)
+                         [{:warning :duplicate-phase-identifiers
+                           :phases duplicate-phases
+                           :message "Duplicate phase ids make transition targets ambiguous"}])))]
+    {:valid? (empty? errors)
+     :errors errors
+     :warnings warnings
+     :machine (when (empty? errors)
+                (compile-execution-machine workflow))}))
+
+(defn machine-phase-entry
+  "Get phase metadata for the current compiled machine state."
+  [machine state]
+  (get-in machine [:workflow/state->phase (current-state state)]))
+
+(defn execution-status
+  "Project coarse execution status from a compiled machine snapshot."
+  [machine state]
+  (let [state-id (current-state state)]
+    (cond
+      (= :pending state-id) :pending
+      (= :completed state-id) :completed
+      (= :failed state-id) :failed
+      (= :cancelled state-id) :cancelled
+      (:paused? (machine-phase-entry machine state)) :paused
+      :else :running)))
+
+(defn current-phase-id
+  "Project the current phase keyword from a compiled machine snapshot."
+  [machine state]
+  (:phase (machine-phase-entry machine state)))
+
+(defn current-phase-index
+  "Project the current phase index from a compiled machine snapshot."
+  [machine state]
+  (:index (machine-phase-entry machine state)))
+
+(defn execution-projection
+  "Project execution fields from a compiled machine snapshot."
+  [machine state]
+  (let [ctx (fsm/context state)]
+    {:execution/status (execution-status machine state)
+     :execution/current-phase (current-phase-id machine state)
+     :execution/phase-index (current-phase-index machine state)
+     :execution/redirect-count (get ctx :redirect-count 0)}))
+
+(defn initialize-execution
+  "Initialize a compiled execution machine."
+  [machine]
+  (fsm/initialize machine))
+
+(defn start-execution
+  "Start a compiled execution machine from :pending."
+  [machine state]
+  (fsm/transition machine state :start))
+
+(defn transition-execution
+  "Apply an event to a compiled execution machine snapshot."
+  [machine state event]
+  (let [event-key (if (keyword? event) event (:type event))
+        transition-defined? (contains? (get-in machine [:states (current-state state) :on] {})
+                                       event-key)
+        next-state (fsm/transition machine state event)]
+    (if (and transition-defined?
+             (= "workflow.event" (namespace event-key)))
+      (fsm/update-context next-state update :redirect-count (fnil inc 0))
+      next-state)))
 
 ;; ============================================================================
 ;; Legacy API - for backward compatibility with state.clj

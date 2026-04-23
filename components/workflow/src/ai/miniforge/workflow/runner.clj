@@ -34,6 +34,7 @@
             [ai.miniforge.response.interface :as response]
             [ai.miniforge.workflow.context :as ctx]
             [ai.miniforge.workflow.execution :as exec]
+            [ai.miniforge.workflow.fsm :as workflow-fsm]
             [ai.miniforge.workflow.messages :as messages]
             [ai.miniforge.workflow.monitoring :as monitoring]
             [ai.miniforge.workflow.runner-cleanup :as cleanup]
@@ -78,7 +79,14 @@
 (defn validate-pipeline
   "Validate a workflow pipeline. Returns {:valid? bool :errors []}."
   [workflow]
-  (phase/validate-pipeline workflow))
+  (let [phase-validation (phase/validate-pipeline workflow)
+        machine-validation (workflow-fsm/validate-execution-machine workflow)]
+    {:valid? (and (:valid? phase-validation)
+                  (:valid? machine-validation))
+     :errors (vec (concat (:errors phase-validation)
+                          (:errors machine-validation)))
+     :warnings (vec (concat (:warnings phase-validation)
+                            (:warnings machine-validation)))}))
 
 ;------------------------------------------------------------------------------ Layer 1: Orchestration helpers
 
@@ -148,7 +156,7 @@
   "Mark context as failed due to rate limiting."
   [phase-ctx error-msg]
   (-> phase-ctx
-      (assoc :execution/status :failed)
+      (ctx/transition-to-failed)
       (update :execution/errors conj (make-execution-error :rate-limited error-msg))))
 
 (defn- apply-backoff-if-retrying!
@@ -206,7 +214,8 @@
    Includes N11 §9.1 evidence fields."
   [ctx]
   (let [phase-results (:execution/phase-results ctx)
-        current-phase (:execution/current-phase ctx)
+        current-phase (or (:execution/current-phase ctx)
+                          (some-> phase-results keys last))
         image-digest  (get-in ctx [:execution/environment-metadata :image-digest])]
     (assoc ctx :execution/output
            (cond-> {:artifacts              (:execution/artifacts ctx)
@@ -307,11 +316,15 @@
   (if (and (phase/succeeded? final-ctx)
            (empty? (:execution/artifacts final-ctx))
            (empty? (:execution/phase-results final-ctx)))
-    (-> final-ctx
-        (update :execution/errors conj
-                (make-execution-error :empty-completion
-                                     (messages/t :status/empty-completion)))
-        (assoc :execution/status :completed-with-warnings))
+    (let [ctx' (-> final-ctx
+                   (update :execution/errors conj
+                           (make-execution-error :empty-completion
+                                                (messages/t :status/empty-completion))))]
+      (if (:execution/fsm-machine ctx')
+        (-> ctx'
+            (assoc :execution/completed-with-warnings? true)
+            (ctx/sync-machine-projections))
+        (assoc ctx' :execution/status :completed-with-warnings)))
     final-ctx))
 
 ;------------------------------------------------------------------------------ Layer 3: Main entry point
@@ -352,7 +365,7 @@
                            (-> initial-ctx
                                (update :execution/errors conj
                                        (make-execution-error :dashboard-stop message))
-                               (assoc :execution/status :failed)))
+                               (ctx/transition-to-failed)))
                          #_{:clj-kondo/ignore [:unresolved-symbol]}
                          (catch Object e
                            (let [throwable (:throwable &throw-context)
@@ -362,7 +375,7 @@
                                  (update :execution/errors conj
                                          (make-execution-error :pipeline-exception msg
                                                                {:data (when (instance? Throwable e) (ex-data e))}))
-                                 (assoc :execution/status :failed)))))
+                                 (ctx/transition-to-failed)))))
              output-ctx (-> final-ctx validate-completion extract-output)]
          (vreset! output-ctx-vol output-ctx)
          (when-not skip-lifecycle?

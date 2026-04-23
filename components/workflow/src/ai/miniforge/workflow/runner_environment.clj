@@ -149,7 +149,9 @@
     (when (= :governed (get context :execution/mode))
       (let [env-id (get context :execution/environment-id)
             branch (get context :execution/task-branch)
-            phase  (get phase-ctx :execution/current-phase :unknown)]
+            phase  (or (get phase-ctx :execution/current-phase)
+                       (some-> phase-ctx :execution/phase-results keys last)
+                       :unknown)]
         (try
           (dag/persist-workspace! executor env-id
                                        {:branch  branch
