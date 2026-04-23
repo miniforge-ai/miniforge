@@ -30,8 +30,8 @@
   "Canonical agent roles ordered by implementation priority."
   [:planner :architect :implementer :tester :reviewer :sre :security :release :historian :operator])
 
-(def meta-agent-roles
-  "Meta-agent roles for workflow monitoring and control."
+(def supervisor-roles
+  "Supervisor roles for workflow monitoring and control."
   [:progress-monitor :test-quality :conflict-detector :resource-manager :evidence-collector])
 
 (def task-types
@@ -65,11 +65,11 @@
    :agent/role     (into [:enum] agent-roles)
    :agent/capability keyword?
 
-   ;; Meta-agent types
-   :meta-agent/id  keyword?
-   :meta-agent/role (into [:enum] meta-agent-roles)
-   :meta-agent/status [:enum :healthy :warning :halt]
-   :meta-agent/priority [:enum :high :medium :low]
+   ;; Supervision types
+   :supervisor/id  keyword?
+   :supervisor/role (into [:enum] supervisor-roles)
+   :supervisor/status [:enum :healthy :warning :halt]
+   :supervisor/priority [:enum :high :medium :low]
 
    ;; Task types
    :task/id        :id/uuid
@@ -195,39 +195,39 @@
    [:workflow/consumed {:optional true} WorkflowBudget]
    [:workflow/spec-id {:optional true} :artifact/id]
    [:workflow/created-at {:optional true} :common/timestamp]
-   [:workflow/meta-agents {:optional true}
+   [:workflow/supervisors {:optional true}
     [:vector
      [:map
-      [:id :meta-agent/id]
+      [:id :supervisor/id]
       [:enabled? {:optional true} boolean?]
       [:config {:optional true} [:map-of keyword? any?]]]]]])
 
-(def MetaAgentConfig
-  "Schema for meta-agent configuration."
+(def SupervisorConfig
+  "Schema for supervisor configuration."
   [:map {:registry registry}
-   [:id :meta-agent/id]
+   [:id :supervisor/id]
    [:name :id/string]
    [:can-halt? boolean?]
    [:check-interval-ms :common/non-neg-int]
-   [:priority :meta-agent/priority]
+   [:priority :supervisor/priority]
    [:enabled? boolean?]])
 
-(def MetaAgentHealthCheck
-  "Schema for meta-agent health check result."
+(def SupervisorHealthCheck
+  "Schema for supervisor health check result."
   [:map {:registry registry}
-   [:status :meta-agent/status]
-   [:agent/id :meta-agent/id]
+   [:status :supervisor/status]
+   [:agent/id :supervisor/id]
    [:message :id/string]
    [:data {:optional true} [:map-of keyword? any?]]
    [:checked-at :common/timestamp]])
 
-(def MetaCoordinatorState
-  "Schema for meta-agent coordinator state."
+(def SupervisionCoordinatorState
+  "Schema for supervision coordinator state."
   [:map {:registry registry}
-   [:status :meta-agent/status]
-   [:checks [:vector MetaAgentHealthCheck]]
+   [:status :supervisor/status]
+   [:checks [:vector SupervisorHealthCheck]]
    [:halt-reason {:optional true} :id/string]
-   [:halting-agent {:optional true} :meta-agent/id]
+   [:halting-agent {:optional true} :supervisor/id]
    [:warnings {:optional true} [:vector :id/string]]
    [:checked-at :common/timestamp]])
 

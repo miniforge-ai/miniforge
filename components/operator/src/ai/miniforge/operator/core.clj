@@ -18,7 +18,7 @@
 
 (ns ai.miniforge.operator.core
   "Core operator implementation.
-   Manages meta-loop: observe signals, detect patterns, propose improvements."
+   Manages the learning loop: observe signals, detect patterns, propose improvements."
   (:require
    [ai.miniforge.operator.protocol :as proto]
    [ai.miniforge.workflow.interface :as wf]
@@ -433,7 +433,7 @@
     (catch Exception _e nil)))
 
 (defn create-operator
-  "Create an operator (meta-agent).
+  "Create an operator for the learning loop.
 
    Options:
    - :knowledge-store - Knowledge store for rule storage

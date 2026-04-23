@@ -16,24 +16,19 @@
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
 
-(ns ai.miniforge.agent.meta-protocol
-  "Protocol and interface for meta-agents that monitor and control workflows.
+(ns ai.miniforge.agent.supervision-protocol
+  "Protocol and helpers for workflow supervisors.
 
-   Meta-agents are specialized agents that observe workflow execution and can
-   halt the factory floor when they detect issues. Unlike regular agents that
-   produce artifacts, meta-agents produce decisions about workflow health.
-
-   Design Philosophy:
-   - Any meta-agent can stop the workflow (distributed authority)
-   - Each meta-agent has focused domain expertise
-   - Decisions are observable and logged
-   - Lightweight coordinator routes information, doesn't control"
+   Supervisors are runtime governance agents that observe in-flight workflow
+   execution and can warn, block, or halt when they detect safety or liveness
+   issues. They are distinct from the learning loop, which analyzes executions
+   across runs and proposes improvements."
   (:require [ai.miniforge.response.interface :as response]))
 
-(defprotocol MetaAgent
-  "Protocol for meta-agents that monitor workflow execution.
+(defprotocol Supervisor
+  "Protocol for supervisors that monitor workflow execution.
 
-   Meta-agents receive workflow state updates and decide whether
+   Supervisors receive workflow state updates and decide whether
    the workflow should continue or halt."
 
   (check-health [this workflow-state]
@@ -61,8 +56,8 @@
      - :warning - Issue detected but not critical yet
      - :halt - Workflow must stop immediately")
 
-  (get-meta-config [this]
-    "Get meta-agent configuration.
+  (get-supervisor-config [this]
+    "Get supervisor configuration.
 
      Returns:
      {:agent/id :progress-monitor
@@ -72,7 +67,7 @@
       :agent/priority :high|:medium|:low}")
 
   (reset-state! [this]
-    "Reset meta-agent internal state. Called when workflow restarts."))
+    "Reset supervisor internal state. Called when workflow restarts."))
 
 (defn healthy?
   "Check if health status indicates workflow can continue."
@@ -105,16 +100,16 @@
                                    :message message}
                             data (assoc :data data)))))
 
-(defrecord MetaAgentConfig
+(defrecord SupervisorConfig
   [id                    ; Keyword ID (:progress-monitor, :test-quality, etc.)
    name                  ; Human-readable name
    can-halt?             ; Can this agent halt the workflow?
    check-interval-ms     ; How often to run health checks
    priority              ; :high, :medium, :low - affects check ordering
-   enabled?])            ; Is this meta-agent active?
+   enabled?])            ; Is this supervisor active?
 
-(defn create-meta-config
-  "Create a meta-agent configuration.
+(defn create-supervisor-config
+  "Create a supervisor configuration.
 
    Options:
    - :id (required) - Keyword identifier
@@ -131,9 +126,9 @@
     :as opts}]
   (when-not (and id name)
     (response/throw-anomaly! :anomalies/incorrect
-                            "Meta-agent config requires :id and :name"
+                            "Supervisor config requires :id and :name"
                             {:provided opts}))
-  (map->MetaAgentConfig
+  (map->SupervisorConfig
    {:id id
     :name name
     :can-halt? can-halt?
@@ -142,9 +137,9 @@
     :enabled? enabled?}))
 
 (comment
-  ;; Example meta-agent implementation
+  ;; Example supervisor implementation
   #_(defrecord ProgressMonitorAgent [monitor-state]
-    MetaAgent
+    Supervisor
     (check-health [this workflow-state]
       (let [timeout-check (check-timeout @monitor-state)]
         (if timeout-check
@@ -159,8 +154,8 @@
            "Workflow making progress"
            (get-stats @monitor-state)))))
 
-    (get-meta-config [this]
-      (create-meta-config
+    (get-supervisor-config [this]
+      (create-supervisor-config
        {:id :progress-monitor
         :name "Progress Monitor"
         :can-halt? true

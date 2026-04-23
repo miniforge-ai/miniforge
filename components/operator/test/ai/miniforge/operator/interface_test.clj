@@ -17,7 +17,7 @@
 ;; limitations under the License.
 
 (ns ai.miniforge.operator.interface-test
-  "Tests for the operator (meta-agent) component."
+  "Tests for the operator learning-loop component."
   (:require
    [clojure.test :refer [deftest is testing]]
    [ai.miniforge.operator.interface :as op]

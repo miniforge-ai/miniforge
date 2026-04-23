@@ -18,11 +18,11 @@
 
 (ns ai.miniforge.workflow.interface.protocols.workflow-observer
   "Public protocol for observing workflow events.
-   This is the extensibility point for operator/meta-loop integration.")
+   This is the extensibility point for operator and learning-loop integration.")
 
 (defprotocol WorkflowObserver
   "Protocol for observing workflow events.
-   Used by the operator for meta-loop signals."
+   Used by the operator for learning-loop signals."
 
   (on-phase-start [this workflow-id phase context]
     "Called when a phase starts.")

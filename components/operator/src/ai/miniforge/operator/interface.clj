@@ -17,8 +17,8 @@
 ;; limitations under the License.
 
 (ns ai.miniforge.operator.interface
-  "Public API for the operator (meta-agent) component.
-   Manages the meta-loop: observe signals, detect patterns, propose improvements."
+  "Public API for the operator learning-loop component.
+   Manages the learning loop: observe signals, detect patterns, propose improvements."
   (:require
    [ai.miniforge.operator.core :as core]
    [ai.miniforge.operator.protocol :as proto]))
@@ -39,7 +39,7 @@
 ;; Operator creation
 
 (def create-operator
-  "Create an operator (meta-agent).
+  "Create an operator for the learning loop.
 
    The operator observes workflow executions, detects patterns,
    and proposes process improvements.

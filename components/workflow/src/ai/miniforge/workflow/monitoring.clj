@@ -17,39 +17,39 @@
 ;; limitations under the License.
 
 (ns ai.miniforge.workflow.monitoring
-  "Meta-agent health monitoring integration.
+  "Workflow supervision integration.
 
-   Provides functions for building workflow state, checking health via meta-agent
-   coordinator, and handling halt conditions."
+   Provides functions for building workflow state, checking health via the
+   supervision coordinator, and handling halt conditions."
   (:require [ai.miniforge.agent.interface :as agent]
             [ai.miniforge.response.interface :as response]))
 
-;------------------------------------------------------------------------------ Meta-agent setup
+;------------------------------------------------------------------------------ Supervisor setup
 
-(defn create-meta-agents
-  "Create meta-agents from workflow configuration.
+(defn create-supervisors
+  "Create supervisors from workflow configuration.
 
-   Falls back to default progress monitor if no meta-agents configured."
+   Falls back to a default progress monitor if no supervisors are configured."
   [workflow]
-  (let [meta-agent-configs (get workflow :workflow/meta-agents [])]
-    (if (seq meta-agent-configs)
-      ;; Use configured meta-agents
-      (for [config meta-agent-configs
+  (let [supervisor-configs (get workflow :workflow/supervisors [])]
+    (if (seq supervisor-configs)
+      ;; Use configured supervisors
+      (for [config supervisor-configs
             :when (:enabled? config true)]
         (case (:id config)
           :progress-monitor
-          (agent/create-progress-monitor-agent
+          (agent/create-progress-monitor-supervisor
            (merge {:check-interval-ms 30000
                    :stagnation-threshold-ms 120000
                    :max-total-ms 600000}
                   (:config config)))))
       ;; Default: just progress monitor
-      [(agent/create-progress-monitor-agent)])))
+      [(agent/create-progress-monitor-supervisor)])))
 
-;------------------------------------------------------------------------------ Health monitoring
+;------------------------------------------------------------------------------ Supervision checks
 
 (defn build-workflow-state
-  "Build workflow state map for meta-agent health checks."
+  "Build workflow state map for supervisor health checks."
   [ctx iteration]
   {:workflow/id (:execution/workflow-id ctx)
    :workflow/phase (:execution/current-phase ctx)
@@ -58,26 +58,26 @@
    :workflow/streaming-activity (:execution/streaming-activity ctx)
    :workflow/files-written (:execution/files-written ctx)})
 
-(defn check-workflow-health
-  "Run meta-agent health checks on workflow state.
+(defn check-workflow-supervision
+  "Run supervisor checks on workflow state.
 
-   Returns health check result."
+   Returns supervision result."
   [coordinator workflow-state]
-  (agent/check-all-meta-agents coordinator workflow-state))
+  (agent/check-all-supervisors coordinator workflow-state))
 
-(defn handle-meta-agent-halt
-  "Handle meta-agent halt signal by transitioning workflow to failed state."
+(defn handle-supervisor-halt
+  "Handle supervisor halt signal by transitioning workflow to failed state."
   [ctx health-check transition-to-failed-fn]
   (-> ctx
       (update :execution/errors conj
-              {:type :meta-agent-halt
+              {:type :supervisor-halt
                :agent (:halting-agent health-check)
                :message (:halt-reason health-check)
                :data (:data (first (filter #(= :halt (:status %))
                                            (:checks health-check))))})
       (update :execution/response-chain
-              response/add-failure :meta-agent
-              :anomalies.workflow/halted-by-meta-agent
+              response/add-failure :supervision
+              :anomalies.workflow/halted-by-supervisor
               {:agent (:halting-agent health-check)
                :reason (:halt-reason health-check)
                :checks (:checks health-check)})

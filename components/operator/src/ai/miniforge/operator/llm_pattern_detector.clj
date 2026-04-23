@@ -17,7 +17,7 @@
 ;; limitations under the License.
 
 (ns ai.miniforge.operator.llm-pattern-detector
-  "LLM-powered pattern detector for the operator meta-loop.
+  "LLM-powered pattern detector for the operator learning loop.
 
    Uses an LLM to analyze workflow signals and detect patterns that
    rule-based detectors may miss, such as subtle anti-patterns,

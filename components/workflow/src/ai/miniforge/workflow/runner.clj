@@ -173,11 +173,11 @@
   [pipeline context callbacks iteration control-state]
   (await-resume! control-state)
   (check-stopped! control-state)
-  (let [coordinator (:execution/meta-coordinator context)
+  (let [coordinator (:execution/supervision-coordinator context)
         workflow-state (monitoring/build-workflow-state context iteration)
-        health-check (monitoring/check-workflow-health coordinator workflow-state)]
+        health-check (monitoring/check-workflow-supervision coordinator workflow-state)]
     (if (= :halt (:status health-check))
-      (monitoring/handle-meta-agent-halt context health-check ctx/transition-to-failed)
+      (monitoring/handle-supervisor-halt context health-check ctx/transition-to-failed)
       (let [phase-ctx (-> (exec/execute-phase-step pipeline context callbacks
                                                    ctx/merge-metrics
                                                    ctx/transition-to-completed

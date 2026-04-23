@@ -1,7 +1,7 @@
 ;; Copyright 2025-2026 Christopher Lester. Licensed under Apache 2.0.
 
 (ns ai.miniforge.agent.meta.loop-test
-  "Integration test for the meta-agent loop.
+  "Integration test for the learning loop.
 
    Tests the full closed-loop cycle: reliability → diagnosis → improvement.
 
@@ -43,7 +43,7 @@
           iterations-list)))
 
 (defn- make-full-context
-  "Create a fully wired meta-loop context."
+  "Create a fully wired learning-loop context."
   [stream]
   (meta-loop/create-meta-loop-context
    {:reliability-engine (rel/create-engine stream {:windows [:7d] :tiers [:standard]})

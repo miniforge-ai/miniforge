@@ -17,9 +17,9 @@
 ;; limitations under the License.
 
 (ns ai.miniforge.operator.protocol
-  "Operator protocols for meta-loop management.
+  "Operator protocols for learning-loop management.
 
-   The Operator is the meta-agent that:
+   The Operator is the learning-loop actor that:
    - Observes workflow executions
    - Captures signals (failures, patterns, improvements)
    - Proposes process improvements
@@ -52,7 +52,7 @@
 ;; Operator protocol
 
 (defprotocol Operator
-  "Protocol for the meta-agent that manages self-improvement."
+  "Protocol for the learning-loop actor that manages self-improvement."
 
   (observe-signal [this signal]
     "Record an observation signal.

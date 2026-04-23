@@ -3,7 +3,7 @@
 ## Overview
 
 Formalize the architectural split between workflow execution, live supervision,
-global degradation mode, the learning/meta loop, and the human supervisory
+global degradation mode, the learning loop, and the human supervisory
 loop. Amend the normative specs so the intended control model is explicit
 before code migration begins.
 
@@ -14,7 +14,7 @@ boundaries are not explicit enough to safely refactor toward formal state
 machines without leaving competing authorities behind. In particular:
 
 - workflow execution currently mixes execution status and phase-transition logic
-- live supervisory checks and learning/meta-loop responsibilities are blurred
+- live supervisory checks and learning-loop responsibilities are blurred
 - the human supervisory role is present in the N5 control-plane material but
   not yet tied cleanly to the orchestrator and machine model
 - resume semantics still reflect phase-index thinking rather than machine
@@ -27,7 +27,7 @@ This PR establishes the contract that the code migration will follow.
 - Amend N1 to separate:
   - control-plane orchestration
   - workflow supervision
-  - learning/meta-loop improvement
+  - learning-loop improvement
   - human supervisory loop
 - Amend N2 to define:
   - a unified execution machine per workflow run
@@ -38,6 +38,11 @@ This PR establishes the contract that the code migration will follow.
   - the human supervisory loop as a peer runtime to the orchestrator
   - bounded intervention lifecycle semantics
   - command/query separation against canonical supervisory state
+- Clarify that semantic-intent and other semantic-violation checks are part of
+  gates and live supervision, not the learning loop
+- Rename the live workflow monitor code path from `meta-agent` terminology to
+  `supervision` terminology, while keeping the learning loop as the only place
+  where `meta` remains intentional
 - Add an informative architecture note describing the target multi-machine,
   peer-runtime model that subsequent implementation PRs will follow
 
@@ -51,9 +56,14 @@ This PR establishes the contract that the code migration will follow.
 - Verify terminology is consistent across:
   - orchestrator
   - supervisory loop
-  - meta loop
+  - learning loop
   - degradation mode
   - workflow execution machine
+- Run focused tests for changed bricks:
+  - `agent`
+  - `workflow`
+  - `operator`
+  - `schema`
 - Run Markdown lint/format checks if needed
 
 ## Deployment Plan
@@ -70,9 +80,11 @@ logic onto formal machines.
 
 ## Checklist
 
-- [x] N1 updated with orchestrator vs supervisory vs meta-loop boundaries
+- [x] N1 updated with orchestrator vs supervisory vs learning-loop boundaries
 - [x] N2 updated with unified execution-machine model
 - [x] N2 resume delta updated for machine snapshot semantics
 - [x] N5 supervisory delta updated for operator supervisory loop and interventions
 - [x] Informative architecture note added
+- [x] Semantic-violation detection classified under gates/supervision
+- [x] Live-monitor code path renamed from meta-agent to supervision terminology
 - [x] Spec language cross-checked for consistency

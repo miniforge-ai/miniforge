@@ -84,7 +84,7 @@
    ### Artifacts & Tracking
    :execution/artifacts        — Vector of lightweight provenance artifacts
                                  produced by phases (not serialized code)
-   :execution/files-written    — Set of file paths written (meta-agent
+   :execution/files-written    — Set of file paths written (supervision
                                  monitoring; populated from environment)
    :execution/metrics          — Accumulated metrics:
                                  {:tokens N :cost-usd N :duration-ms N}
@@ -96,8 +96,8 @@
    :execution/response-chain   — Structured response chain (per-phase
                                  success/failure tracking)
 
-   ### Meta-Agent Support
-   :execution/meta-coordinator    — Coordinator for workflow health monitoring
+   ### Workflow Supervision
+   :execution/supervision-coordinator — Coordinator for workflow supervision
    :execution/streaming-activity  — Transient streaming activity tracking
 
    ### Pass-Through from opts
@@ -125,9 +125,9 @@
   (let [;; Initialize FSM and transition to running state
         fsm-state (-> (fsm/initialize)
                       (fsm/transition-fsm :start))
-        ;; Initialize meta-agents and coordinator
-        meta-agents (monitoring/create-meta-agents workflow)
-        coordinator (agent/create-meta-coordinator meta-agents)]
+        ;; Initialize supervisors and coordinator
+        supervisors (monitoring/create-supervisors workflow)
+        coordinator (agent/create-supervision-coordinator supervisors)]
     (merge
      {:execution/id (random-uuid)
       :execution/workflow workflow
@@ -146,9 +146,9 @@
       :execution/metrics {:tokens 0 :cost-usd 0.0 :duration-ms 0}
       :execution/started-at (System/currentTimeMillis)
       :execution/opts opts
-      ;; Meta-agent coordinator for workflow health monitoring
-      :execution/meta-coordinator coordinator
-      ;; Transient state for meta-agent health checks
+      ;; Supervision coordinator for workflow runtime monitoring
+      :execution/supervision-coordinator coordinator
+      ;; Transient state for supervision checks
       :execution/streaming-activity []
       :execution/files-written #{}}
      ;; Merge opts into top-level context so :llm-backend is accessible to agents

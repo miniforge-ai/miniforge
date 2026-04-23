@@ -17,7 +17,7 @@
 ;; limitations under the License.
 
 (ns ai.miniforge.operator.llm-improvement-generator
-  "LLM-powered improvement generator for the operator meta-loop.
+  "LLM-powered improvement generator for the operator learning loop.
 
    Takes detected patterns and uses an LLM to generate actionable improvement
    proposals that go beyond template-based suggestions, reasoning about the

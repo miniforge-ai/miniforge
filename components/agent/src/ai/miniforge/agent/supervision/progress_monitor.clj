@@ -16,11 +16,11 @@
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
 
-(ns ai.miniforge.agent.meta.progress-monitor
-  "Progress Monitor meta-agent implementation.
+(ns ai.miniforge.agent.supervision.progress-monitor
+  "Progress Monitor supervisor implementation.
 
    Watches streaming activity and file writes to detect stagnation."
-  (:require [ai.miniforge.agent.meta-protocol :as mp]
+  (:require [ai.miniforge.agent.supervision-protocol :as sp]
             [ai.miniforge.llm.interface :as llm]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -28,11 +28,11 @@
 ;;
 ;; All values are milliseconds. Operationally tuned: kept as named
 ;; constants here (vs an EDN file) since callers can override via the
-;; create-progress-monitor-agent options map and there are only three
+;; create-progress-monitor-supervisor options map and there are only three
 ;; numbers to track.
 
 (def ^:const default-check-interval-ms
-  "How often the meta-agent runs its health check."
+  "How often the supervisor runs its health check."
   30000)                                ; 30 seconds
 
 (def ^:const default-stagnation-threshold-ms
@@ -44,8 +44,8 @@
   "Hard upper bound on a single workflow run before forced halt."
   600000)                               ; 10 minutes
 
-(defrecord ProgressMonitorMetaAgent [monitor-state config]
-  mp/MetaAgent
+(defrecord ProgressMonitorSupervisor [monitor-state config]
+  sp/Supervisor
 
   (check-health [_ workflow-state]
     (let [;; Record any new streaming chunks
@@ -61,7 +61,7 @@
 
       (if timeout-check
         ;; Timeout detected - halt workflow
-        (mp/create-health-check
+        (sp/create-health-check
          :progress-monitor
          :halt
          (:message timeout-check)
@@ -72,7 +72,7 @@
         ;; Still healthy - provide current stats
         (let [stats (llm/get-stats monitor-state)]
           (if (:is-active? stats)
-            (mp/create-health-check
+            (sp/create-health-check
              :progress-monitor
              :healthy
              (format "Workflow active: %d chunks, %d files"
@@ -80,14 +80,14 @@
                      (:files-written stats))
              stats)
             ;; Not active but not timed out yet - warning
-            (mp/create-health-check
+            (sp/create-health-check
              :progress-monitor
              :warning
              (format "No activity for %dms"
                      (:time-since-activity-ms stats))
              stats))))))
 
-  (get-meta-config [_]
+  (get-supervisor-config [_]
     config)
 
   (reset-state! [_]
@@ -97,16 +97,16 @@
                  {:stagnation-threshold-ms default-stagnation-threshold-ms
                   :max-total-ms            default-max-total-ms})))))
 
-(defn create-progress-monitor-agent
-  "Create a Progress Monitor meta-agent.
+(defn create-progress-monitor-supervisor
+  "Create a Progress Monitor supervisor.
 
    Options:
    - :check-interval-ms        (default: default-check-interval-ms)        - How often to check
    - :priority                 (default: :high)                             - Check priority
    - :stagnation-threshold-ms  (default: default-stagnation-threshold-ms)   - Stagnation timeout
-   - :max-total-ms             (default: default-max-total-ms)              - Hard timeout limit"
+  - :max-total-ms             (default: default-max-total-ms)              - Hard timeout limit"
   ([]
-   (create-progress-monitor-agent {}))
+   (create-progress-monitor-supervisor {}))
   ([{:keys [check-interval-ms priority stagnation-threshold-ms max-total-ms]
      :or {check-interval-ms       default-check-interval-ms
           priority                :high
@@ -114,7 +114,7 @@
           max-total-ms            default-max-total-ms}}]
    (let [monitor-options {:stagnation-threshold-ms stagnation-threshold-ms
                           :max-total-ms max-total-ms}
-         config (mp/create-meta-config
+         config (sp/create-supervisor-config
                  {:id :progress-monitor
                   :name "Progress Monitor"
                   :can-halt? true
@@ -122,13 +122,13 @@
                   :priority priority
                   :enabled? true
                   :monitor-options monitor-options})]
-     (->ProgressMonitorMetaAgent
+     (->ProgressMonitorSupervisor
       (atom (llm/create-progress-monitor monitor-options))
       config))))
 
 (comment
   ;; Usage
-  (def agent (create-progress-monitor-agent
+  (def agent (create-progress-monitor-supervisor
               {:stagnation-threshold-ms 60000   ; 1 minute
                :max-total-ms 300000}))          ; 5 minutes
 
@@ -138,7 +138,7 @@
                                     "Creating plan..."]
      :workflow/files-written ["src/foo.clj"]})
 
-  (mp/check-health agent workflow-state)
+  (sp/check-health agent workflow-state)
   ;; => {:status :healthy
   ;;     :agent/id :progress-monitor
   ;;     :message "Workflow active: 2 chunks, 1 files"

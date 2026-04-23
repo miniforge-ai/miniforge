@@ -2214,7 +2214,7 @@ The three-layer architecture separates concerns:
 
 - **Control Plane** - Orchestration, supervision, and bounded control logic
 - **Agent Layer** - Execution logic (specialized agents, inner loop)
-- **Learning Layer** - Cross-run improvement logic (observation, meta loop, heuristics)
+- **Learning Layer** - Cross-run improvement logic (observation, learning loop, heuristics)
 
 This enables:
 
@@ -2247,7 +2247,7 @@ Agents are **teammates**, not tools:
 - **Autonomy** - Agents make decisions, don't just execute commands
 - **Collaboration** - Agents communicate and coordinate
 - **Memory** - Agents remember past interactions
-- **Learning** - Agents improve over time via meta loop
+- **Learning** - Agents improve over time via the learning loop
 
 ---
 

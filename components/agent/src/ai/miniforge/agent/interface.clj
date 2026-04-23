@@ -30,6 +30,7 @@
    [ai.miniforge.agent.interface.protocols :as protocols]
    [ai.miniforge.agent.interface.runtime :as runtime]
    [ai.miniforge.agent.interface.specialized :as specialized]
+   [ai.miniforge.agent.interface.supervision :as supervision]
    [ai.miniforge.agent.tool-supervisor :as tool-supervisor]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -78,7 +79,7 @@
 (def list-memories memory/list-memories)
 
 ;------------------------------------------------------------------------------ Layer 2
-;; Messaging, utilities, specialized agents, and meta-operations
+;; Messaging, utilities, specialized agents, supervision, and learning-loop operations
 
 (def create-message-router messaging/create-message-router)
 (def create-agent-messaging messaging/create-agent-messaging)
@@ -153,12 +154,12 @@
 (def release-summary specialized/release-summary)
 (def validate-release-artifact specialized/validate-release-artifact)
 
-(def create-progress-monitor-agent meta/create-progress-monitor-agent)
-(def create-meta-coordinator meta/create-meta-coordinator)
-(def check-all-meta-agents meta/check-all-meta-agents)
-(def reset-all-meta-agents! meta/reset-all-meta-agents!)
-(def get-meta-check-history meta/get-meta-check-history)
-(def get-meta-agent-stats meta/get-meta-agent-stats)
+(def create-progress-monitor-supervisor supervision/create-progress-monitor-supervisor)
+(def create-supervision-coordinator supervision/create-supervision-coordinator)
+(def check-all-supervisors supervision/check-all-supervisors)
+(def reset-all-supervisors! supervision/reset-all-supervisors!)
+(def get-supervision-check-history supervision/get-supervision-check-history)
+(def get-supervisor-stats supervision/get-supervisor-stats)
 (def run-meta-loop-cycle! meta/run-meta-loop-cycle!)
 (def create-meta-loop-context meta/create-meta-loop-context)
 (def record-workflow-outcome! meta/record-workflow-outcome!)

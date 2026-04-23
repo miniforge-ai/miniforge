@@ -70,8 +70,8 @@ policy-evaluated, and executed inside **isolated capsules** with **ephemeral cap
 ### 2.1 Intent Model
 
 Agents express **intent**, not direct tool commands. Intent describes the desired
-outcome, target, scope, and constraints. The orchestrator (or a meta-agent advising
-the orchestrator) compiles intent into a verified action graph.
+outcome, target, scope, and constraints. The orchestrator (or a supervisor
+advising the orchestrator) compiles intent into a verified action graph.
 
 ```clojure
 {:intent/id            uuid       ; REQUIRED: unique identifier

@@ -86,8 +86,8 @@ authority boundaries:
 1. The orchestrator is the only component permitted to apply transitions to the execution, supervision, or degradation
   machines
 2. The human supervisory loop is a peer control surface, not an alternate source of truth
-3. The learning/meta loop remains a learning-layer concern and MUST NOT
-   be treated as the live supervisory mechanism for in-flight workflows
+3. The learning loop remains a learning-layer concern and MUST NOT be
+   treated as the live supervisory mechanism for in-flight workflows
 
 ## 3. Supervisory entities — v1
 
@@ -375,6 +375,7 @@ The TUI MUST derive attention items from supervisory state. Attention items are 
 | Workflow stale (no progress > threshold) | `:warning` | "Workflow {name} stale for {duration}" |
 | PR behind main with merge conflicts | `:warning` | "PR {repo}#{number} has merge conflicts" |
 | Policy violation on PR in active train | `:warning` | "Train PR {repo}#{number} failing policy" |
+| Workflow semantic-intent violation | `:warning` | "Workflow {name} violates declared intent" |
 | PR monitor budget warning | `:warning` | "PR #{number} monitor approaching budget limit" |
 | Workflow completed successfully | `:info` | "Workflow {name} completed" |
 | PR merged | `:info` | "PR {repo}#{number} merged" |

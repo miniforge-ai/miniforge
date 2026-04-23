@@ -526,11 +526,12 @@ Implementations MUST:
 1. Extract signals from workflow execution (duration, iterations, outcomes)
 2. Update knowledge base with learnings
 3. Propose heuristic improvements (if patterns detected)
-4. Record signals for the learning layer and meta loop (see N1, Section 3.3)
+4. Record signals for the learning layer and learning loop (see N1, Section 3.3)
 
 The Observe phase remains part of the per-run execution machine. The cross-run learning
-meta loop consumes Observe outputs and other evidence after or alongside workflow execution,
-but it is not itself the live supervisory mechanism for phase transitions.
+loop consumes Observe outputs and other evidence after or alongside workflow
+execution, but it is not itself the live supervisory mechanism for phase
+transitions.
 
 ```clojure
 ;; Observe output schema
@@ -829,6 +830,10 @@ Implementations MUST support:
 | **Test Pass/Fail**        | Ensure tests pass              | Verify phase             |
 | **Review Approval**       | Human or automated review      | Review phase             |
 | **Deployment Validation** | Validate deployment safety     | Release phase            |
+
+Semantic-intent and other semantic-violation checks are part of the gate and
+supervision surface. They MUST be evaluated as safety/governance signals for
+the in-flight workflow, not as learning-loop decisions.
 
 ### 6.3 Gate Execution Protocol
 
@@ -1225,7 +1230,7 @@ The inner loop enables:
 
 - **Autonomous repair** - Fix issues without human intervention
 - **Quality assurance** - Don't proceed with invalid output
-- **Learning** - Repair attempts generate signals for meta loop
+- **Learning** - Repair attempts generate signals for the learning loop
 - **Resilience** - Handles transient failures (e.g., LLM hallucinations)
 
 ### 12.3 Why Semantic Intent Validation?

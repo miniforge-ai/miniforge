@@ -140,7 +140,7 @@
 
 (def LogEntry
   "Schema for a structured log entry.
-   Core data substrate for debugging, tracing, and meta loop signals."
+   Core data substrate for debugging, tracing, and learning-loop signals."
   [:map {:registry logging-registry}
    ;; Required fields
    [:log/id :log/id]

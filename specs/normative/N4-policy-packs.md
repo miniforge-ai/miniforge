@@ -1366,7 +1366,7 @@ Policy-as-code enables:
 
 - **Consistency** - Same rules applied every time
 - **Automation** - No manual review for common issues
-- **Learning** - Policy violations generate signals for meta loop
+- **Learning** - Policy violations generate signals for the learning loop
 - **Compliance** - Audit trail shows policy enforcement
 
 ### 12.2 Why Semantic Intent Validation?
@@ -1388,7 +1388,7 @@ Auto-repair enables autonomous correction:
 
 - Inner loop can fix violations without human intervention
 - Faster iteration (no waiting for human to fix trivial issues)
-- Learning (repair strategies improve via meta loop)
+- Learning (repair strategies improve via the learning loop)
 
 ---
 

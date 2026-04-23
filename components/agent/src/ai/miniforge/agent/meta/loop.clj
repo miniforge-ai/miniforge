@@ -1,7 +1,7 @@
 ;; Copyright 2025-2026 Christopher Lester. Licensed under Apache 2.0.
 
 (ns ai.miniforge.agent.meta.loop
-  "Meta-agent loop orchestration per N1 §3.3.
+  "Learning-loop orchestration per N1 §3.3.
 
    Wires the complete closed loop:
      reliability → diagnosis → improvement → evaluation → deployment → learning
@@ -19,17 +19,34 @@
 ;; Cycle context
 
 (defn create-meta-loop-context
-  "Create the context required to run meta-loop cycles.
+  "Create the context required to run learning-loop cycles.
 
-   Arguments - all are instances of the respective component interfaces:
-     :reliability-engine    - from reliability/create-engine
-     :degradation-manager   - from reliability/create-degradation-manager
-     :diagnosis-config      - optional config for signal extraction
-     :improvement-pipeline  - from improvement/create-pipeline
-     :event-stream          - event stream atom
-     :knowledge-store       - optional knowledge store for learning capture"
-  [opts]
-  (merge {:cycle-count (atom 0)} opts))
+   Supported call shapes:
+   - (create-meta-loop-context {:event-stream ... :reliability-engine ...})
+   - (create-meta-loop-context event-stream)
+   - (create-meta-loop-context event-stream {:reliability ... :degradation ...})
+
+   When passed an event stream directly, the helper constructs the default
+   reliability engine, degradation manager, improvement pipeline, and metrics
+   store expected by the CLI workflow runner."
+  ([opts-or-event-stream]
+   (if (map? opts-or-event-stream)
+     (merge {:cycle-count (atom 0)} opts-or-event-stream)
+     (create-meta-loop-context opts-or-event-stream nil)))
+  ([event-stream config]
+   {:cycle-count (atom 0)
+    :event-stream event-stream
+    :reliability-engine (reliability/create-engine event-stream (:reliability config))
+    :degradation-manager (reliability/create-degradation-manager event-stream (:degradation config))
+    :diagnosis-config (:diagnosis-config config)
+    :improvement-pipeline (improvement/create-pipeline)
+    :knowledge-store (:knowledge-store config)
+    :metrics-store (atom {:workflow-metrics []
+                          :failure-events []
+                          :phase-metrics []
+                          :gate-metrics []
+                          :tool-metrics []
+                          :context-metrics []})}))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Pipeline stages
@@ -77,10 +94,10 @@
 ;; Meta-loop cycle
 
 (defn run-meta-loop-cycle!
-  "Execute one complete meta-loop cycle.
+  "Execute one complete learning-loop cycle.
 
    Arguments:
-     ctx     - meta-loop context from create-meta-loop-context
+     ctx     - learning-loop context from create-meta-loop-context
      metrics - map of collected metrics for SLI computation:
                {:workflow-metrics :phase-metrics :gate-metrics
                 :tool-metrics :failure-events :context-metrics}
@@ -116,6 +133,33 @@
 
     (emit-cycle-event event-stream summary)
     summary))
+
+(defn record-workflow-outcome!
+  "Record a workflow completion for use in a later learning-loop cycle."
+  [ctx workflow-id status & [failure-class]]
+  (when-let [metrics-store (:metrics-store ctx)]
+    (let [now (java.util.Date.)]
+      (swap! metrics-store update :workflow-metrics conj
+             {:workflow/id workflow-id
+              :status status
+              :timestamp now})
+      (when failure-class
+        (swap! metrics-store update :failure-events conj
+               {:failure/class failure-class
+                :workflow/id workflow-id
+                :timestamp now}))))
+  nil)
+
+(defn run-cycle-from-context!
+  "Run one learning-loop cycle using metrics accumulated in the context."
+  [ctx & [training-examples]]
+  (let [metrics (or (some-> ctx :metrics-store deref) {})]
+    (run-meta-loop-cycle!
+     ctx
+     metrics
+     {:failure-events (get metrics :failure-events [])
+      :phase-metrics (get metrics :phase-metrics [])
+      :training-examples training-examples})))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

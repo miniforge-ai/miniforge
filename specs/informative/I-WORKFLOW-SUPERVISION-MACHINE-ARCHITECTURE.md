@@ -61,7 +61,7 @@ convergence logic belongs.
                                    │
                                    ▼
                      ┌────────────────────────────┐
-                     │ Learning / Meta Loop       │
+                     │ Learning Loop              │
                      │ cross-run improvement      │
                      └────────────────────────────┘
 ```
@@ -157,7 +157,7 @@ It:
 
 It does not directly edit workflow state.
 
-### 4.3 Learning / meta loop
+### 4.3 Learning loop
 
 The learning loop is cross-run and downstream.
 

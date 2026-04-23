@@ -26,7 +26,7 @@
 ;; Pattern detector defaults
 
 (def pattern-detector-system-prompt
-  "You are a workflow pattern analyzer for a software engineering meta-agent.
+  "You are a workflow pattern analyzer for a software engineering learning loop.
 Your job: detect meaningful patterns in workflow execution signals.
 
 Analyze the signals and identify any of these pattern types:
@@ -54,7 +54,7 @@ Return an empty array [] if no significant patterns are detected.")
 ;; Improvement generator defaults
 
 (def improvement-generator-system-prompt
-  "You are a process improvement advisor for a software engineering meta-agent.
+  "You are a process improvement advisor for a software engineering learning loop.
 Your job: generate concrete improvement proposals from detected workflow patterns.
 
 For each pattern, propose one or more improvements using these types:
