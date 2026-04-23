@@ -27,6 +27,19 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Pure extractors
 
+(deftest reconstructed-status-predicates-test
+  (testing "predicates read the reconstructed status flags"
+    (let [completed {:completed? true}
+          failed {:failed? true}
+          paused {:dag-paused? true}
+          running {}]
+      (is (true? (core/completed? completed)))
+      (is (false? (core/completed? running)))
+      (is (true? (core/failed? failed)))
+      (is (false? (core/failed? running)))
+      (is (true? (core/paused? paused)))
+      (is (false? (core/paused? running))))))
+
 (deftest extract-completed-phases-test
   (testing "only :phase-completed events with :success outcome are collected"
     (let [events [{:event/type :workflow/started}
@@ -208,6 +221,9 @@
 
 (deftest interface-reexports-test
   (testing "interface exposes the domain API"
+    (is (= core/completed? wr/completed?))
+    (is (= core/failed? wr/failed?))
+    (is (= core/paused? wr/paused?))
     (is (= core/extract-completed-phases wr/extract-completed-phases))
     (is (= core/reconstruct-context wr/reconstruct-context))
     (is (= core/trim-pipeline wr/trim-pipeline))

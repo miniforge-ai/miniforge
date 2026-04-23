@@ -112,9 +112,9 @@
         last-event (last events)]
     {:workflow-id workflow-id
      :status (cond
-               (:completed? reconstructed) :completed
-               (:failed? reconstructed) :failed
-               (:dag-paused? reconstructed) :paused
+               (wr/completed? reconstructed) :completed
+               (wr/failed? reconstructed) :failed
+               (wr/paused? reconstructed) :paused
                :else :running)
      :spec-name (some-> reconstructed :workflow-spec :name)
      :event-count (:event-count reconstructed)

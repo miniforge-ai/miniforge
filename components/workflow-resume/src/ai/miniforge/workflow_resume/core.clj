@@ -42,6 +42,21 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Pure extractors over an event sequence
 
+(defn completed?
+  "True when a reconstructed workflow context has completed successfully."
+  [reconstructed]
+  (boolean (:completed? reconstructed)))
+
+(defn failed?
+  "True when a reconstructed workflow context has failed."
+  [reconstructed]
+  (boolean (:failed? reconstructed)))
+
+(defn paused?
+  "True when a reconstructed workflow context reflects a paused DAG."
+  [reconstructed]
+  (boolean (:dag-paused? reconstructed)))
+
 (defn extract-completed-dag-tasks
   "Task IDs that finished successfully as `:dag/task-completed` events."
   [events]
