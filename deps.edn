@@ -41,6 +41,7 @@
                        "components/workflow/resources"
                        "components/workflow-financial-etl/src"
                        "components/workflow-financial-etl/resources"
+                       "components/workflow-career/resources"
                        "components/workflow-chain-software-factory/resources"
                        "components/workflow-software-factory/resources"
                        "components/phase-deployment/src"
@@ -198,6 +199,7 @@
                       ai.miniforge/gate {:local/root "components/gate"}
                       ai.miniforge/workflow {:local/root "components/workflow"}
                       ai.miniforge/workflow-financial-etl {:local/root "components/workflow-financial-etl"}
+                      ai.miniforge/workflow-career {:local/root "components/workflow-career"}
                       ai.miniforge/workflow-chain-software-factory {:local/root "components/workflow-chain-software-factory"}
                       ai.miniforge/workflow-software-factory {:local/root "components/workflow-software-factory"}
                       ai.miniforge/release-executor {:local/root "components/release-executor"}
@@ -308,6 +310,8 @@
                        "components/workflow/test-resources"
                        "components/workflow-financial-etl/test"
                        "components/workflow-financial-etl/resources"
+                       "components/workflow-career/test"
+                       "components/workflow-career/resources"
                        "components/workflow-chain-software-factory/resources"
                        "components/workflow-software-factory/resources"
                        "components/operator/test"
@@ -417,6 +421,7 @@
                       ai.miniforge/gate {:local/root "components/gate"}
                       ai.miniforge/workflow {:local/root "components/workflow"}
                       ai.miniforge/workflow-financial-etl {:local/root "components/workflow-financial-etl"}
+                      ai.miniforge/workflow-career {:local/root "components/workflow-career"}
                       ai.miniforge/workflow-chain-software-factory {:local/root "components/workflow-chain-software-factory"}
                       ai.miniforge/workflow-software-factory {:local/root "components/workflow-software-factory"}
                       ai.miniforge/release-executor {:local/root "components/release-executor"}

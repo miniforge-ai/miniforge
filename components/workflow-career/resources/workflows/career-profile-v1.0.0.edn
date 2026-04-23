@@ -1,0 +1,70 @@
+{:workflow/id :career-profile
+ :workflow/version "1.0.0"
+ :workflow/name "Career Profile Workflow"
+ :workflow/description
+ "Retrieve evidence-backed profile context from the career knowledge graph,
+  synthesize a user-facing profile packet, and surface low-confidence areas
+  as explicit open questions."
+
+ :workflow/task-types [:career :profile :knowledge-graph :agentic-synthesis]
+
+ :workflow/pipeline
+ [{:phase :career-profile-check-sufficiency}
+  {:phase :career-profile-query-kg}
+  {:phase :career-profile-synthesize}
+  {:phase :career-profile-ground}
+  {:phase :done}]
+
+ :workflow/config
+ {:max-tokens 60000
+  :max-iterations 8
+
+  :tool-surface
+  {:provider :thesium/kg-mcp-tools
+   :required-tools ["kg.entity_lookup"
+                    "kg.datalog_query"
+                    "kg.fulltext_search"]}
+
+  :policy-pack
+  {:id :career-profile-v1
+   :version "1.0.0"
+   :locale "en-US"}
+
+  :output
+  {:artifact/type :career/profile-packet
+   :persist? true
+   :surface-low-confidence-as-open-questions? true}
+
+  :quality-gates
+  {:minimum-grounding-score 0.85
+   :allow-resume-only? true
+   :require-open-questions-for-low-confidence? true}
+
+  :phase-defaults
+  {:career-profile-check-sufficiency
+   {:agent nil
+    :gates []
+    :budget {:tokens 1000
+             :iterations 1
+             :time-seconds 60}}
+
+   :career-profile-query-kg
+   {:agent :career-profile-analyst
+    :gates []
+    :budget {:tokens 12000
+             :iterations 2
+             :time-seconds 180}}
+
+   :career-profile-synthesize
+   {:agent :career-profile-analyst
+    :gates []
+    :budget {:tokens 35000
+             :iterations 3
+             :time-seconds 300}}
+
+   :career-profile-ground
+   {:agent :career-grounding-reviewer
+    :gates [:grounding-threshold]
+    :budget {:tokens 12000
+             :iterations 2
+             :time-seconds 180}}}}}

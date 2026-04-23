@@ -98,6 +98,7 @@ miniforge/
 │   ├── workflow/       # MiniForge Core — shared workflow runtime
 │   ├── workflow-software-factory/  # Miniforge product workflows
 │   ├── workflow-financial-etl/     # Data Foundry product workflows
+│   ├── workflow-career/            # Thesium Career product workflows
 │   ├── agent/          # AI agent implementations
 │   ├── loop/           # Inner loop (generate-validate-repair)
 │   └── ...

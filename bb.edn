@@ -518,6 +518,7 @@
                  "components/compliance-scanner/resources"
                  "components/workflow-compliance-scanner/src"
                  "components/workflow-compliance-scanner/resources"
+                 "components/workflow-career/resources"
                  "components/workflow-software-factory/resources"
                  "components/workflow-chain-software-factory/resources"
                  "components/pr-sync/src"
