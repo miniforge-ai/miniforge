@@ -150,12 +150,26 @@
    :output  {:skipped true :reason reason}
    :metrics {:tokens 0 :duration-ms 0 :cost-usd 0.0}})
 
+(defn fail-phase
+  "Mark a phase state as failed and attach the error map."
+  [phase-state error]
+  (-> phase-state
+      (assoc :status :failed)
+      (assoc :error error)))
+
 (defn request-redirect
   "Attach a redirect transition request to a phase result."
   [result target-phase]
   (assoc result transition-request-key
          {transition-type-key   redirect-transition-type
           transition-target-key target-phase}))
+
+(defn fail-and-request-redirect
+  "Mark a phase state as failed and request a redirect transition."
+  [phase-state error target-phase]
+  (-> phase-state
+      (fail-phase error)
+      (request-redirect target-phase)))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

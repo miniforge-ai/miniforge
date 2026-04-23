@@ -21,6 +21,7 @@
    OCI events, control-plane events, and sink integration."
   (:require
    [clojure.test :refer [deftest testing is]]
+   [ai.miniforge.phase.interface :as phase]
    [ai.miniforge.event-stream.core :as core]))
 
 ;------------------------------------------------------------------------------ Helpers
@@ -372,10 +373,9 @@
     (let [stream (no-op-stream)
           wf-id (random-uuid)
           event (core/phase-completed stream wf-id :review
-                                      {:outcome :failure
-                                       :phase/transition-request
-                                       {:transition/type :transition/redirect
-                                        :transition/target :implement}})]
+                                      (phase/request-redirect
+                                       {:outcome :failure}
+                                       :implement))]
       (is (= :failure (:phase/outcome event)))
       (is (= :implement
              (get-in event [:phase/transition-request :transition/target]))))))
