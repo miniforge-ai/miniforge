@@ -37,6 +37,16 @@
   [config]
   (get config :enabled? true))
 
+(defn- progress-monitor-config
+  [config]
+  (merge default-progress-monitor-config
+         (get config :config {})))
+
+(defn- create-progress-monitor
+  [config]
+  (supervision/create-progress-monitor-agent
+   (progress-monitor-config config)))
+
 (defn- unsupported-supervisor-exception
   [config]
   (let [supervisor-id (:id config)]
@@ -49,12 +59,10 @@
 
 (defn- create-configured-supervisor
   [config]
-  (let [supervisor-id (:id config)
-        supervisor-config (:config config)]
+  (let [supervisor-id (:id config)]
     (case supervisor-id
       :progress-monitor
-      (supervision/create-progress-monitor-agent
-       (merge default-progress-monitor-config supervisor-config))
+      (create-progress-monitor config)
       (throw (unsupported-supervisor-exception config)))))
 
 (defn create-supervisors
@@ -68,7 +76,7 @@
            (filter enabled-supervisor?)
            (mapv create-configured-supervisor))
       ;; Default: just progress monitor
-      [(supervision/create-progress-monitor-agent)])))
+      [(create-progress-monitor {})])))
 
 ;------------------------------------------------------------------------------ Health monitoring
 
@@ -94,23 +102,38 @@
   (first (filter #(= :halt (:status %))
                  (:checks supervision-result))))
 
+(defn- supervision-halt-data
+  [supervision-result]
+  (let [halting-check' (halting-check supervision-result)]
+    {:supervisor (:halting-agent supervision-result)
+     :reason (:halt-reason supervision-result)
+     :checks (:checks supervision-result)
+     :data (:data halting-check')}))
+
+(defn- supervision-halt-error
+  [halt-data]
+  {:type :supervision-halt
+   :supervisor (:supervisor halt-data)
+   :message (:reason halt-data)
+   :data (:data halt-data)})
+
+(defn- supervision-halt-response
+  [halt-data]
+  {:supervisor (:supervisor halt-data)
+   :reason (:reason halt-data)
+   :checks (:checks halt-data)})
+
 (defn handle-supervision-halt
   "Handle supervision halt signal by transitioning workflow to failed state."
   [ctx supervision-result transition-to-failed-fn]
-  (let [halting-check (halting-check supervision-result)
-        supervisor-id (:halting-agent supervision-result)]
+  (let [halt-data (supervision-halt-data supervision-result)]
     (-> ctx
         (update :execution/errors conj
-                {:type :supervision-halt
-                 :supervisor supervisor-id
-                 :message (:halt-reason supervision-result)
-                 :data (:data halting-check)})
+                (supervision-halt-error halt-data))
         (update :execution/response-chain
                 response/add-failure :supervision
                 :anomalies.workflow/halted-by-supervision
-                {:supervisor supervisor-id
-                 :reason (:halt-reason supervision-result)
-                 :checks (:checks supervision-result)})
+                (supervision-halt-response halt-data))
         (transition-to-failed-fn))))
 
 (defn clear-transient-state
