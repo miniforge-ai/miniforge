@@ -7,6 +7,7 @@
    [ai.miniforge.workflow.context :as ctx]
    [ai.miniforge.dag-executor.interface :as dag-exec]
    [ai.miniforge.logging.interface :as log]
+   [ai.miniforge.workflow.execution :as exec]
    [ai.miniforge.phase.interface]))
 
 ;; ---------------------------------------------------------------------------- extract-output
@@ -109,6 +110,28 @@
               :workflow/pipeline [{:phase :done}]}
           result (runner/run-pipeline wf {:task "Test"} {:max-phases 1})]
       (is (= :completed (:execution/status result))))))
+
+(deftest apply-dag-success-does-not-consume-redirect-budget-test
+  (testing "DAG fast-path advances with normal success events"
+    (let [workflow {:workflow/id :test
+                    :workflow/version "1.0.0"
+                    :workflow/pipeline [{:phase :plan}
+                                        {:phase :implement}
+                                        {:phase :verify}
+                                        {:phase :done}]}
+          pipeline (runner/build-pipeline workflow)
+          context (ctx/create-context workflow {:task "Test"} {})
+          dag-result {:artifacts []
+                      :worktree-paths []
+                      :metrics {:tokens 0 :cost-usd 0.0}}
+          result (exec/apply-dag-success context
+                                         dag-result
+                                         pipeline
+                                         ctx/transition-to-completed
+                                         ctx/transition-to-failed)]
+      (is (= :running (:execution/status result)))
+      (is (= :verify (:execution/current-phase result)))
+      (is (= 0 (:execution/redirect-count result))))))
 
 ;; ---------------------------------------------------------------------------- publish-event edge cases
 

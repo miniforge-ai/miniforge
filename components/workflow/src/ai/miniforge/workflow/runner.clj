@@ -81,7 +81,7 @@
             (:workflow/phases workflow)))))
 
 (defn validate-pipeline
-  "Validate a workflow pipeline. Returns {:valid? bool :errors []}."
+  "Validate a workflow pipeline. Returns {:valid? bool :errors [] :warnings []}."
   [workflow]
   (let [phase-validation (phase/validate-pipeline workflow)
         machine-validation (workflow-fsm/validate-execution-machine workflow)]

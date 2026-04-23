@@ -494,15 +494,19 @@
                          (assoc :execution/dag-result dag-result)
                          (assoc-in [:execution/phase-results :implement]
                                    synthesized-implement-result))
-        post-impl-idx (index-after-phase pipeline :implement)
-        next-phase (some-> (get pipeline post-impl-idx) :config :phase)]
-    (if (and post-impl-idx (< post-impl-idx (count pipeline)))
-      (apply-phase-transition ctx-with-dag
-                              (workflow-fsm/redirect-event next-phase)
+        ctx-after-plan
+        (apply-phase-transition ctx-with-dag
+                                :phase/succeed
+                                pipeline
+                                transition-to-completed-fn
+                                transition-to-failed-fn)]
+    (if (phase/failed? ctx-after-plan)
+      ctx-after-plan
+      (apply-phase-transition ctx-after-plan
+                              :phase/succeed
                               pipeline
                               transition-to-completed-fn
-                              transition-to-failed-fn)
-      (transition-to-completed-fn ctx-with-dag))))
+                              transition-to-failed-fn))))
 
 (defn apply-dag-failure
   "Apply a failed DAG result to the execution context."
