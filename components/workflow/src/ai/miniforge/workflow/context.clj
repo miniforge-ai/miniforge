@@ -144,6 +144,20 @@
         (assoc :execution/ended-at (System/currentTimeMillis))))
     ctx))
 
+(defn active-or-last-phase
+  "Return the active phase when present, otherwise the last completed phase in
+   workflow pipeline order."
+  [ctx]
+  (let [phase-results (:execution/phase-results ctx)
+        pipeline (:workflow/pipeline (:execution/workflow ctx))
+        last-recorded-phase (some->> pipeline
+                                     (map :phase)
+                                     (filter #(contains? phase-results %))
+                                     last)]
+    (if-some [current-phase (:execution/current-phase ctx)]
+      current-phase
+      last-recorded-phase)))
+
 ;------------------------------------------------------------------------------ Context operations
 
 (defn create-context

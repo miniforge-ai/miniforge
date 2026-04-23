@@ -30,7 +30,9 @@
             [ai.miniforge.schema.interface :as schema]
             [ai.miniforge.workflow.context :as context]
             [ai.miniforge.workflow.dag-orchestrator :as dag-orch]
-            [ai.miniforge.workflow.fsm :as workflow-fsm]))
+            [ai.miniforge.workflow.fsm :as workflow-fsm]
+            [ai.miniforge.workflow.runner-defaults :as defaults]
+            [ai.miniforge.workflow.messages :as messages]))
 
 ;------------------------------------------------------------------------------ Layer 0: Atomic operations
 
@@ -135,17 +137,48 @@
           anomaly (if gate-errors
                     (response/gate-anomaly
                      :anomalies.gate/validation-failed
-                     (str "Gate validation failed for phase " (name phase-name))
+                     (messages/t :phase/gate-failed-phase {:phase (name phase-name)})
                      gate-errors
                      {:anomaly/phase phase-name})
                     (response/make-anomaly
                      :anomalies.phase/agent-failed
-                     (str "Agent failed in phase " (name phase-name))
+                     (messages/t :phase/agent-failed-phase {:phase (name phase-name)})
                      {:anomaly/phase phase-name}))]
       (update ctx :execution/response-chain
               response/add-failure phase-name
               anomaly
               phase-result))))
+
+(defn- phase-transition-event-message
+  [event]
+  (messages/t :status/invalid-phase-transition-event {:event event}))
+
+(defn- invalid-phase-transition-anomaly
+  [event]
+  (response/make-anomaly
+   :anomalies.workflow/invalid-transition
+   (phase-transition-event-message event)))
+
+(defn- max-redirects-exceeded-anomaly
+  []
+  (let [max-redirects (defaults/max-redirects)]
+    (response/make-anomaly
+     :anomalies.workflow/max-redirects-exceeded
+     (messages/t :status/max-redirects {:max-redirects max-redirects}))))
+
+(defn- phase-transition-failure
+  [ctx event anomaly transition-to-failed-fn]
+  (let [message (phase-transition-event-message event)]
+    (-> ctx
+        (update :execution/errors conj
+                {:type :invalid-transition
+                 :message message
+                 :anomaly anomaly})
+        (update :execution/response-chain
+                response/add-failure :pipeline anomaly
+                {:error message
+                 :event event})
+        (transition-to-failed-fn))))
 
 (defn record-phase-metrics
   "Record phase metrics in execution context."
@@ -233,7 +266,7 @@
 
 (def max-redirects
   "Maximum number of phase redirects before failing to prevent infinite loops."
-  5)
+  (defaults/max-redirects))
 
 (defn apply-phase-transition
   "Apply a phase-outcome event through the execution machine.
@@ -241,17 +274,16 @@
    Returns updated context with refreshed machine projections or terminal failure."
   [ctx event _pipeline _transition-to-completed-fn transition-to-failed-fn]
   (let [redirect-count (get ctx :execution/redirect-count 0)
-        is-redirect? (= "workflow.event" (namespace event))]
+        is-redirect? (workflow-fsm/redirect-event? event)]
     (cond
       ;; Redirect cycle limit exceeded
       (and is-redirect? (>= redirect-count max-redirects))
-      (let [anom (response/make-anomaly
-                   :anomalies.workflow/max-redirects-exceeded
-                   (str "Redirect cycle limit exceeded (" max-redirects " redirects)"))]
+      (let [anom (max-redirects-exceeded-anomaly)]
         (-> ctx
             (update :execution/errors conj
                     {:type :max-redirects-exceeded
-                     :message (str "Exceeded " max-redirects " redirects")
+                     :message (messages/t :status/max-redirects-hit
+                                          {:max-redirects max-redirects})
                      :anomaly anom})
             (update :execution/response-chain
                     response/add-failure :pipeline anom
@@ -264,20 +296,10 @@
             state-changed? (not= prior-state (:execution/fsm-state next-ctx))]
         (if (or state-changed? (= :phase/retry event))
           next-ctx
-          (let [anom (response/make-anomaly
-                       :anomalies.workflow/invalid-transition
-                       (str "Invalid phase transition event: " event))]
-            (-> ctx
-                (update :execution/errors conj
-                        {:type :invalid-transition
-                         :message (str "Invalid phase transition event: " event)
-                         :anomaly anom})
-                (update :execution/response-chain
-                        response/add-failure :pipeline
-                        anom
-                        {:error (str "Invalid phase transition event: " event)
-                         :event event})
-                (transition-to-failed-fn))))))))
+          (phase-transition-failure ctx
+                                    event
+                                    (invalid-phase-transition-anomaly event)
+                                    transition-to-failed-fn))))))
 
 ;------------------------------------------------------------------------------ Layer 1.5: DAG integration helpers
 
@@ -463,7 +485,8 @@
          :status :completed
          :result {:status         :success
                   :environment-id (get ctx :execution/environment-id)
-                  :summary        (str "DAG executed " task-count " task(s) successfully")
+                  :summary        (messages/t :status/dag-executed-summary
+                                              {:task-count task-count})
                   :metrics        (merge {:task-count task-count}
                                          (:metrics dag-result))}}
         ctx-with-dag (-> ctx

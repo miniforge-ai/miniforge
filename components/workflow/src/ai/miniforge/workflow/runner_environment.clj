@@ -25,6 +25,7 @@
    [ai.miniforge.dag-executor.interface :as dag]
    [ai.miniforge.logging.interface :as log]
    [ai.miniforge.response.interface :as response]
+   [ai.miniforge.workflow.context :as context]
    [ai.miniforge.workflow.messages :as messages]
    [ai.miniforge.workflow.runner-defaults :as defaults]))
 
@@ -142,6 +143,14 @@
       (catch Exception e
         (println (messages/t :env/release-failed {:error (ex-message e)}))))))
 
+(defn- boundary-phase
+  [phase-ctx]
+  (if-some [current-phase (get phase-ctx :execution/current-phase)]
+    current-phase
+    (if-some [last-phase (context/active-or-last-phase phase-ctx)]
+      last-phase
+      :unknown)))
+
 (defn persist-workspace-at-phase-boundary!
   "Persist workspace to task branch after phase completes (governed mode only)."
   [context phase-ctx]
@@ -149,9 +158,7 @@
     (when (= :governed (get context :execution/mode))
       (let [env-id (get context :execution/environment-id)
             branch (get context :execution/task-branch)
-            phase  (or (get phase-ctx :execution/current-phase)
-                       (some-> phase-ctx :execution/phase-results keys last)
-                       :unknown)]
+            phase  (boundary-phase phase-ctx)]
         (try
           (dag/persist-workspace! executor env-id
                                        {:branch  branch

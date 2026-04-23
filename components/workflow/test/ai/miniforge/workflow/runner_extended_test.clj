@@ -33,6 +33,21 @@
       (is (= :failed (:status output)))
       (is (= {:phase/status :failed} (:last-phase-result output))))))
 
+(deftest extract-output-falls-back-to-pipeline-phase-order-test
+  (testing "extract-output chooses the last recorded phase using workflow pipeline order"
+    (let [ctx {:execution/workflow {:workflow/pipeline [{:phase :plan}
+                                                       {:phase :implement}
+                                                       {:phase :done}]}
+               :execution/artifacts []
+               :execution/phase-results {:done {:phase/status :succeeded}
+                                         :plan {:phase/status :succeeded}}
+               :execution/current-phase nil
+               :execution/status :completed}
+          output (:execution/output (runner/extract-output ctx))]
+      (is (= {:phase/status :succeeded} (:last-phase-result output)))
+      (is (= {:phase/status :succeeded}
+             (get-in output [:phase-results :done]))))))
+
 ;; ---------------------------------------------------------------------------- build-pipeline edge cases
 
 (deftest build-pipeline-nil-pipeline-falls-back-to-legacy-test
@@ -297,4 +312,3 @@
                     (fn [& _] (throw (ex-info "Docker gone" {})))]
         ;; Should not throw
         (is (nil? (persist-fn context phase-ctx)))))))
-

@@ -65,15 +65,19 @@
 
 ;------------------------------------------------------------------------------ Layer 0: Pipeline construction
 
+(defn- legacy-phase-interceptor
+  [phase-def]
+  (phase/get-phase-interceptor
+   {:phase (:phase/id phase-def)
+    :config phase-def}))
+
 (defn build-pipeline
   "Build interceptor pipeline from workflow config."
   [workflow]
   (let [pipeline-config (:workflow/pipeline workflow)]
     (if (seq pipeline-config)
       (mapv phase/get-phase-interceptor pipeline-config)
-      (mapv (fn [phase-def]
-              (phase/get-phase-interceptor
-               {:phase (:phase/id phase-def) :config phase-def}))
+      (mapv legacy-phase-interceptor
             (:workflow/phases workflow)))))
 
 (defn validate-pipeline
@@ -214,8 +218,7 @@
    Includes N11 §9.1 evidence fields."
   [ctx]
   (let [phase-results (:execution/phase-results ctx)
-        current-phase (or (:execution/current-phase ctx)
-                          (some-> phase-results keys last))
+        current-phase (ctx/active-or-last-phase ctx)
         image-digest  (get-in ctx [:execution/environment-metadata :image-digest])]
     (assoc ctx :execution/output
            (cond-> {:artifacts              (:execution/artifacts ctx)
@@ -251,18 +254,21 @@
 (defn- wrap-phase-callbacks
   "Wrap caller callbacks with event publishing."
   [event-stream opts]
-  {:on-phase-start
-   (fn [ctx interceptor]
-     (when-let [phase-name (get interceptor :phase (get-in interceptor [:config :phase]))]
-       (events/publish-phase-started! event-stream ctx phase-name))
-     (when-let [cb (:on-phase-start opts)]
-       (cb ctx interceptor)))
-   :on-phase-complete
-   (fn [ctx interceptor result]
-     (when-let [phase-name (get interceptor :phase (get-in interceptor [:config :phase]))]
-       (events/publish-phase-completed! event-stream ctx phase-name result))
-     (when-let [cb (:on-phase-complete opts)]
-       (cb ctx interceptor result)))})
+  (letfn [(phase-name [interceptor]
+            (get interceptor :phase
+                 (get-in interceptor [:config :phase])))
+          (on-phase-start [ctx interceptor]
+            (when-let [phase-name' (phase-name interceptor)]
+              (events/publish-phase-started! event-stream ctx phase-name'))
+            (when-let [callback (:on-phase-start opts)]
+              (callback ctx interceptor)))
+          (on-phase-complete [ctx interceptor result]
+            (when-let [phase-name' (phase-name interceptor)]
+              (events/publish-phase-completed! event-stream ctx phase-name' result))
+            (when-let [callback (:on-phase-complete opts)]
+              (callback ctx interceptor result)))]
+    {:on-phase-start on-phase-start
+     :on-phase-complete on-phase-complete}))
 
 (defn- build-initial-context
   "Build the initial execution context from workflow, input, and opts."

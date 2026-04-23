@@ -38,13 +38,30 @@
    - :resume  - Resume paused execution
    - :cancel  - Cancel workflow"
   (:require
-   [ai.miniforge.fsm.interface :as fsm]))
+   [ai.miniforge.fsm.interface :as fsm]
+   [ai.miniforge.workflow.messages :as messages]))
 
-(declare current-state)
+(declare current-state first-phase-index)
 
 ;; ============================================================================
 ;; FSM Definition using clj-statecharts
 ;; ============================================================================
+
+(def redirect-event-namespace
+  "Namespace used for redirect events in the compiled execution machine."
+  "workflow.event")
+
+(def phase-state-prefix
+  "Prefix used for active phase state identifiers."
+  "phase")
+
+(def paused-phase-state-prefix
+  "Prefix used for paused phase state identifiers."
+  "paused-phase")
+
+(defn- phase-state-name
+  [prefix index phase]
+  (str prefix "-" index "-" (name phase)))
 
 (def workflow-machine-config
   "Workflow execution state machine configuration."
@@ -73,23 +90,63 @@
 (defn phase-state-id
   "Build the active execution-machine state id for a pipeline phase."
   [index phase]
-  (keyword (str "phase-" index "-" (name phase))))
+  (keyword (phase-state-name phase-state-prefix index phase)))
 
 (defn paused-phase-state-id
   "Build the paused execution-machine state id for a pipeline phase."
   [index phase]
-  (keyword (str "paused-phase-" index "-" (name phase))))
+  (keyword (phase-state-name paused-phase-state-prefix index phase)))
 
 (defn redirect-event
   "Build the event keyword used to redirect to a named phase."
   [phase]
-  (keyword "workflow.event" (str "redirect-to-" (name phase))))
+  (keyword redirect-event-namespace (str "redirect-to-" (name phase))))
+
+(defn- increment-redirect-count
+  [redirect-count]
+  (inc (or redirect-count 0)))
+
+(defn- matching-phase-index
+  [phase [index config]]
+  (when (= phase (:phase config))
+    index))
+
+(defn- duplicate-phase?
+  [[_phase count]]
+  (> count 1))
+
+(defn- unresolved-target-error
+  [error-key phase target]
+  {:error error-key
+   :phase phase
+   :target target})
+
+(defn- unknown-success-target
+  [pipeline {:keys [phase on-success]}]
+  (when (and on-success
+             (nil? (first-phase-index pipeline on-success)))
+    (unresolved-target-error :unknown-on-success-target phase on-success)))
+
+(defn- unknown-fail-target
+  [pipeline {:keys [phase on-fail]}]
+  (when (and on-fail
+             (nil? (first-phase-index pipeline on-fail)))
+    (unresolved-target-error :unknown-on-fail-target phase on-fail)))
+
+(defn- duplicate-phase-warning
+  [duplicate-phases]
+  {:warning :duplicate-phase-identifiers
+   :phases duplicate-phases
+   :message (messages/t :status/duplicate-phases)})
+
+(defn- empty-pipeline-error
+  []
+  {:error :empty-pipeline
+   :message (messages/t :status/empty-pipeline)})
 
 (defn- first-phase-index
   [pipeline phase]
-  (some (fn [[index config]]
-          (when (= phase (:phase config))
-            index))
+  (some (partial matching-phase-index phase)
         (map-indexed vector pipeline)))
 
 (defn- build-phase-entry
@@ -105,15 +162,52 @@
   [phase-entries index]
   (some-> (get phase-entries index) :state-id))
 
+(defn- redirect-transition-entry
+  [phase-entries {:keys [phase index]}]
+  (let [target (state-target phase-entries index)]
+    [(redirect-event phase)
+     {:target target}]))
+
 (defn- redirect-transitions
   [phase-entries]
   (into {}
-        (map (fn [{:keys [phase index]}]
-               [(redirect-event phase)
-                {:target (state-target phase-entries index)
-                 :actions [(fsm/assign {:redirect-count (fn [ctx _event]
-                                                          (inc (get ctx :redirect-count 0)))})]}]))
+        (map (partial redirect-transition-entry phase-entries))
         phase-entries))
+
+(defn redirect-event?
+  "True when an event keyword represents a workflow phase redirect."
+  [event-key]
+  (= redirect-event-namespace (namespace event-key)))
+
+(defn- machine-transition-defined?
+  [machine state event-key]
+  (contains? (get-in machine [:states (current-state state) :on] {})
+             event-key))
+
+(defn transition-execution
+  "Apply an event to a compiled execution machine snapshot."
+  [machine state event]
+  (let [event-key (if (keyword? event) event (:type event))
+        transition-defined? (machine-transition-defined? machine state event-key)
+        next-state (fsm/transition machine state event)]
+    (if (and transition-defined?
+             (redirect-event? event-key))
+      (fsm/update-context next-state update :redirect-count increment-redirect-count)
+      next-state)))
+
+(defn- terminal-state-message
+  [current-state]
+  (messages/t :status/terminal-state-transition {:state current-state}))
+
+(defn- invalid-state-message
+  [current-state]
+  (messages/t :status/invalid-current-state {:state current-state}))
+
+(defn- no-transition-message
+  [current-state event]
+  (messages/t :status/no-transition-defined
+              {:state current-state
+               :event event}))
 
 (defn- build-phase-state
   [phase-entries {:keys [index config state-id paused-state-id]}]
@@ -157,6 +251,13 @@
                       :index (:index entry)
                       :paused? paused?}])
 
+(defn- paused-projection-entry
+  [entry]
+  [(:paused-state-id entry)
+   {:phase (:phase entry)
+    :index (:index entry)
+    :paused? true}])
+
 (defn compile-execution-machine
   "Compile a per-run execution machine from a workflow pipeline.
 
@@ -189,12 +290,7 @@
         state->phase (into {}
                            (concat
                             (map #(projection-entry % false) phase-entries)
-                            (map (fn [entry]
-                                   [(:paused-state-id entry)
-                                    {:phase (:phase entry)
-                                     :index (:index entry)
-                                     :paused? true}])
-                                 phase-entries)))]
+                            (map paused-projection-entry phase-entries)))]
     (assoc (fsm/define-machine
             {:fsm/id :workflow-execution
              :fsm/initial :pending
@@ -210,36 +306,23 @@
         duplicate-phases (->> pipeline
                               (map :phase)
                               frequencies
-                              (filter (fn [[_ count]] (> count 1)))
+                              (filter duplicate-phase?)
                               (map first)
                               vec)
         unresolved-success (->> pipeline
-                                (keep (fn [{:keys [phase on-success]}]
-                                        (when (and on-success
-                                                   (nil? (first-phase-index pipeline on-success)))
-                                          {:error :unknown-on-success-target
-                                           :phase phase
-                                           :target on-success})))
+                                (keep (partial unknown-success-target pipeline))
                                 vec)
         unresolved-fail (->> pipeline
-                             (keep (fn [{:keys [phase on-fail]}]
-                                     (when (and on-fail
-                                                (nil? (first-phase-index pipeline on-fail)))
-                                       {:error :unknown-on-fail-target
-                                        :phase phase
-                                        :target on-fail})))
+                             (keep (partial unknown-fail-target pipeline))
                              vec)
         errors (vec (concat
                      (when (empty? pipeline)
-                       [{:error :empty-pipeline
-                         :message "Workflow pipeline is empty"}])
+                       [(empty-pipeline-error)])
                      unresolved-success
                      unresolved-fail))
         warnings (vec (concat
                        (when (seq duplicate-phases)
-                         [{:warning :duplicate-phase-identifiers
-                           :phases duplicate-phases
-                           :message "Duplicate phase ids make transition targets ambiguous"}])))]
+                         [(duplicate-phase-warning duplicate-phases)])))]
     {:valid? (empty? errors)
      :errors errors
      :warnings warnings
@@ -291,18 +374,6 @@
   "Start a compiled execution machine from :pending."
   [machine state]
   (fsm/transition machine state :start))
-
-(defn transition-execution
-  "Apply an event to a compiled execution machine snapshot."
-  [machine state event]
-  (let [event-key (if (keyword? event) event (:type event))
-        transition-defined? (contains? (get-in machine [:states (current-state state) :on] {})
-                                       event-key)
-        next-state (fsm/transition machine state event)]
-    (if (and transition-defined?
-             (= "workflow.event" (namespace event-key)))
-      (fsm/update-context next-state update :redirect-count (fnil inc 0))
-      next-state)))
 
 ;; ============================================================================
 ;; Legacy API - for backward compatibility with state.clj
@@ -389,25 +460,25 @@
      (terminal-state? current-state)
      {:success? false
       :error :terminal-state
-      :message (str "Cannot transition from terminal state: " current-state)}
+      :message (terminal-state-message current-state)}
 
      ;; Invalid state
      (not (contains? workflow-states current-state))
      {:success? false
       :error :invalid-state
-      :message (str "Invalid current state: " current-state)}
+      :message (invalid-state-message current-state)}
 
      ;; Guard function failed
      (not (guard-fn current-state event))
      {:success? false
       :error :guard-failed
-      :message "Guard function rejected transition"}
+      :message (messages/t :status/guard-rejected-transition)}
 
      ;; Invalid transition
      (not (valid-transition? current-state event))
      {:success? false
       :error :invalid-transition
-      :message (str "No transition defined for [" current-state " " event "]")}
+      :message (no-transition-message current-state event)}
 
      ;; Valid transition - use clj-statecharts for actual transition
      :else

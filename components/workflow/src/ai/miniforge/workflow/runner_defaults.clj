@@ -30,6 +30,7 @@
       {})))
 
 (defn max-phases           [] (get @defaults :max-phases 50))
+(defn max-redirects        [] (get @defaults :max-redirects 5))
 (defn max-backoff-ms       [] (get @defaults :max-backoff-ms 30000))
 (defn backoff-base-ms      [] (get @defaults :backoff-base-ms 1000))
 (defn pause-poll-interval-ms [] (get @defaults :pause-poll-interval-ms 1000))
