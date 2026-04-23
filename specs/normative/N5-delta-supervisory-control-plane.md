@@ -7,9 +7,9 @@
 # N5 Delta — Supervisory Control Plane
 
 - **Spec ID:** `N5-delta-supervisory-control-plane-v1`
-- **Version:** `0.2.0-draft`
+- **Version:** `0.3.0-draft`
 - **Status:** Draft
-- **Date:** 2026-04-17
+- **Date:** 2026-04-22
 - **Amends:** N5 — Interface Standard: CLI/TUI/API
 - **Related:** N3 (event stream), N4 (policy packs), N6 (evidence), N8 (observability control), N9 (external PR
   integration), pr-monitor-loop-v1 (autonomous PR comment resolution)
@@ -30,6 +30,8 @@ model, governance states, and bounded interventions that the TUI must support.
 - Attention items as a first-class supervisory concept (§5)
 - Waiver semantics for policy overrides (§6)
 - Bounded intervention vocabulary (§7)
+- Intervention request lifecycle semantics (§7)
+- Command/query separation against canonical supervisory state (§7)
 - Monitor mode as default TUI posture (§8)
 - Durable startup and stale-read requirements (§9)
 
@@ -60,6 +62,32 @@ The human's role in the supervisory model is:
 - **Auditor** — reviews evidence bundles and governance dispositions
 
 The TUI MUST be optimized for these roles, not for direct workflow operation.
+
+### 2.3 Human supervisory loop
+
+The supervisory UX runtime is a **human supervisory loop** that operates as a
+peer to the orchestrator within the control plane.
+
+The human supervisory loop MUST:
+
+1. Query canonical supervisory state through the supervisory-state projection
+2. Submit bounded intervention requests rather than mutating workflow state directly
+3. Receive durable intervention results and evidence after the orchestrator applies an action
+
+The human supervisory loop MAY be exposed through a TUI, dashboard, API-backed
+operator agent, or other UX surfaces, but all such surfaces MUST share the same
+canonical intervention model.
+
+### 2.4 Boundary to orchestrator and learning loop
+
+The orchestrator and the human supervisory loop are separate actors with different
+authority boundaries:
+
+1. The orchestrator is the only component permitted to apply transitions to the execution, supervision, or degradation
+  machines
+2. The human supervisory loop is a peer control surface, not an alternate source of truth
+3. The learning/meta loop remains a learning-layer concern and MUST NOT
+   be treated as the live supervisory mechanism for in-flight workflows
 
 ## 3. Supervisory entities — v1
 
@@ -175,6 +203,29 @@ Minimum required keys for supervisory display:
  :evidence/gate-summary  map?}      ;; {:passed N :failed N :skipped N}
 ```
 
+#### InterventionRequest
+
+A durable request to perform a bounded supervisory action against the system.
+
+Minimum required keys:
+
+```clojure
+{:intervention/id            uuid?
+ :intervention/type          keyword?   ;; see §7.1
+ :intervention/target-type   keyword?   ;; :workflow, :policy-eval, :degradation, :supervision
+ :intervention/target-id     any?
+ :intervention/requested-by  string?
+ :intervention/request-source keyword?  ;; :tui, :dashboard, :api, :ux-agent
+ :intervention/state         keyword?   ;; see §3.3
+ :intervention/justification string?
+ :intervention/requested-at  inst?
+ :intervention/updated-at    inst?}
+```
+
+InterventionRequests MUST be the canonical representation of supervisory control
+intent. UI actions, operator-agent actions, and API commands MUST all materialize
+as InterventionRequests before they are applied.
+
 ### 3.2 Workflow execution states
 
 WorkflowRun `:workflow-run/status` MUST distinguish at least:
@@ -192,7 +243,27 @@ WorkflowRun `:workflow-run/status` MUST distinguish at least:
 Terminal states (`:completed`, `:failed`, `:cancelled`) MUST NOT transition back to active states. A retry MUST produce
 a new WorkflowRun.
 
-### 3.3 Existing entities carried forward
+WorkflowRun state is a supervisory projection over the authoritative execution and
+supervision machines. It MUST NOT be mutated directly by the UI.
+
+### 3.3 Intervention lifecycle states
+
+InterventionRequest `:intervention/state` MUST distinguish at least:
+
+| State | Meaning |
+|-------|---------|
+| `:proposed` | Intervention created but not yet validated |
+| `:pending-human` | Waiting on explicit human approval or confirmation |
+| `:approved` | Approved and ready for dispatch |
+| `:rejected` | Explicitly denied |
+| `:dispatched` | Submitted to the orchestrator for execution |
+| `:applied` | Target machine transition or side effect applied |
+| `:verified` | Post-application verification succeeded |
+| `:failed` | Dispatch or post-application verification failed |
+
+Terminal states are `:rejected`, `:verified`, and `:failed`.
+
+### 3.4 Existing entities carried forward
 
 The following entities already exist in sufficient form across N1, N4, N9, and existing components. They do not require
 new formalization for v1 but MUST be correlatable to v1 entities:
@@ -207,7 +278,7 @@ new formalization for v1 but MUST be correlatable to v1 entities:
 - **PRTrain** — defined in N9 and the pr-train component
 - **WorkflowPhase** — defined in N2; tracked in events
 
-### 3.4 Materialization — the supervisory-state component
+### 3.5 Materialization — the supervisory-state component
 
 The entities defined in §3.1 MUST be materialized by a dedicated component,
 `components/supervisory-state`, which is the canonical source of supervisory
@@ -238,7 +309,8 @@ control console).
    derived inside this component and emitted as `:supervisory/attention-derived`
    (N3 §3.19). No other component MAY emit attention snapshots.
 6. **One source per entity family.** For each of WorkflowRun, AgentSession,
-   PrFleetEntry, PolicyEvaluation, AttentionItem the component MUST be the
+   PrFleetEntry, PolicyEvaluation, AttentionItem, and InterventionRequest the
+   component MUST be the
    sole emitter of the corresponding `:supervisory/*-upserted` event.
    Other components MAY and SHOULD continue emitting their own fine-grained
    lifecycle events, but MUST NOT produce snapshot events directly.
@@ -254,6 +326,7 @@ control console).
 | `:control-plane/agent-registered` / `:agent-discovered` | Inserts `AgentSession` |
 | `:control-plane/agent-state-changed` / `:control-plane/status-changed` | Updates status |
 | `:control-plane/agent-heartbeat` | Advances `:agent/last-heartbeat` |
+| `:supervisory/intervention-requested` / `:supervisory/intervention-state-changed` | Upserts `InterventionRequest` |
 | `:pr/created` / `:pr/merged` / `:pr/closed` / `:pr-monitor/*` | Upserts `PrFleetEntry` |
 | `:gate/passed` / `:gate/failed` | Emits new immutable `PolicyEvaluation` |
 
@@ -351,18 +424,39 @@ The TUI MUST support a bounded set of supervisory interventions. These extend N5
 |-------------|--------|--------|
 | `acknowledge` | AttentionItem | Marks item as seen; does not resolve |
 | `retry` | WorkflowRun (failed) | Creates a new run from the same spec |
+| `retry-from-phase` | WorkflowRun | Rebuilds resume state and requests restart from a specific phase |
 | `pause` | WorkflowRun (running) | Suspends execution |
 | `resume` | WorkflowRun (paused) | Resumes execution |
 | `cancel` | WorkflowRun (active) | Terminates execution |
+| `request-replan` | WorkflowRun | Requests a new planning pass or workflow-selection pass |
 | `waive` | PolicyEvaluation | Creates a Waiver record with reason |
 | `re-evaluate` | PullRequest | Triggers a new PolicyEvaluation |
+| `force-safe-mode` | DegradationScope | Requests transition into a stricter degradation posture |
+| `exit-safe-mode` | DegradationScope | Requests return to a less restrictive degradation posture |
+| `request-human-review` | WorkflowRun or PullRequest | Escalates the target for explicit human review |
 
-### 7.2 Intervention recording
+### 7.2 Intervention lifecycle and recording
 
-Interventions MUST produce a durable record per N5 §6.2. The existing override logging schema in N5 §6.2 is sufficient;
-this delta does not add new fields.
+Every intervention MUST produce:
 
-### 7.3 Boundary constraint
+1. A durable `InterventionRequest` record in the lifecycle defined by §3.3
+2. Audit logging per N5 §6.2
+3. A resulting success, rejection, or failure state after orchestrator handling
+
+Human-triggered interventions that carry material risk MAY require a
+`pending-human` approval step before dispatch, even when the request was created
+from a UX surface.
+
+### 7.3 Command/query separation
+
+The supervisory surface MUST separate read and write paths:
+
+1. Queries MUST resolve from canonical supervisory-state projections
+2. Commands MUST materialize as InterventionRequests
+3. The orchestrator MUST validate, dispatch, and apply approved interventions
+4. External supervisory clients MUST NOT write execution or supervision state directly
+
+### 7.4 Boundary constraint
 
 The supervisory surface MUST NOT expand beyond the intervention vocabulary defined here without a spec amendment. It
 MUST NOT become a general-purpose command shell.
@@ -447,6 +541,11 @@ The TUI monitor MUST display control plane state:
 Control plane events (`:control-plane/*`) MUST be handled by the TUI event subscription alongside `:workflow/*` and
 `:pr-monitor/*` events.
 
+The orchestrator MUST be treated as the sole transition authority for execution,
+supervision, and degradation machines. The TUI and other supervisory surfaces
+render projection state and submit interventions; they do not apply transitions
+themselves.
+
 The `control-plane-completion.spec.edn` work spec covers wiring decision delivery and event emission from the
 orchestrator. The TUI work (this delta + companion work spec) covers rendering that data in monitor mode.
 
@@ -464,7 +563,6 @@ The following concepts are recognized as architecturally important but deferred 
 | Concept | Reason for deferral |
 |---------|-------------------|
 | `Lens` abstraction | Extract after monitor patterns stabilize |
-| Full `Intervention` audit trail | Simple recording (N5 §6.2) sufficient for v1 |
 | Event versioning | Existing event envelope sufficient for v1 |
 | Cross-entity correlation IDs | Add incrementally where missing |
 | Multi-project fleet aggregation | Single-project dogfooding is current scope |
@@ -483,6 +581,8 @@ through without error. Required keys MUST be present and correctly typed.
 3. Waivers MUST be separate records, not mutations of evaluations
 4. AttentionItems MUST be derivable from canonical state
 5. Terminal WorkflowRun states MUST NOT transition to active states
+6. Every supervisory write action MUST materialize as an InterventionRequest before application
+7. External supervisory clients MUST NOT directly mutate execution or supervision state
 
 ### 12.3 Monitor mode conformance
 
