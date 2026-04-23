@@ -21,7 +21,10 @@
 
    Handles execution of individual phase steps through the enter -> gates -> leave lifecycle.
    Processes results, tracks metrics/files/artifacts, and determines phase transitions."
-  (:require [ai.miniforge.gate.interface :as gate]
+  (:require [clojure.java.io :as io]
+            [clojure.java.shell :as shell]
+            [clojure.string :as str]
+            [ai.miniforge.gate.interface :as gate]
             [ai.miniforge.phase.interface :as phase]
             [ai.miniforge.response.interface :as response]
             [ai.miniforge.schema.interface :as schema]
@@ -475,17 +478,17 @@
   [parent-worktree sub-worktree-paths]
   (doseq [sub-wt sub-worktree-paths]
     (try
-      (let [{:keys [out]} (clojure.java.shell/sh
+      (let [{:keys [out]} (shell/sh
                             "git" "diff" "--name-only" "HEAD"
                             :dir sub-wt)
-            changed-files (remove clojure.string/blank?
-                                  (clojure.string/split-lines (or out "")))]
+            changed-files (remove str/blank?
+                                  (str/split-lines (or out "")))]
         (doseq [f changed-files]
-          (let [src (clojure.java.io/file sub-wt f)
-                dst (clojure.java.io/file parent-worktree f)]
+          (let [src (io/file sub-wt f)
+                dst (io/file parent-worktree f)]
             (when (.exists src)
-              (clojure.java.io/make-parents dst)
-              (clojure.java.io/copy src dst)))))
+              (io/make-parents dst)
+              (io/copy src dst)))))
       (catch Exception _e nil))))
 
 (defn apply-dag-success
