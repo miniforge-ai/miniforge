@@ -43,15 +43,34 @@
     (catch Exception e
       (println (messages/t :warn/websocket-send {:error (ex-message e)})))))
 
+(defn- websocket-stream?
+  [event-stream]
+  (boolean (:websocket event-stream)))
+
+(defn- durable-event-stream?
+  [event-stream]
+  (instance? clojure.lang.IDeref event-stream))
+
+(defn- dispatchable-event-stream?
+  [event-stream]
+  (or (websocket-stream? event-stream)
+      (durable-event-stream? event-stream)))
+
 (defn publish-event!
   "Publish event to event stream or dashboard WebSocket.
    Safe to call with nil event-stream (no-op)."
   [event-stream event]
-  (when event-stream
+  (when (dispatchable-event-stream? event-stream)
     (try
-      (if (:websocket event-stream)
+      (cond
+        (websocket-stream? event-stream)
         (publish-via-websocket! event-stream event)
-        (es/publish! event-stream event))
+
+        (durable-event-stream? event-stream)
+        (es/publish! event-stream event)
+
+        :else
+        nil)
       (catch Exception e
         (println (messages/t :warn/publish-event {:error (ex-message e)}))))))
 
@@ -138,7 +157,7 @@
 (defn publish-workflow-started!
   "Publish workflow started event."
   [event-stream context]
-  (when event-stream
+  (when (dispatchable-event-stream? event-stream)
     (try
       (publish-event! event-stream
                       (merge (es/workflow-started event-stream
@@ -152,7 +171,7 @@
 (defn publish-workflow-completed!
   "Publish workflow completed/failed event."
   [event-stream context]
-  (when event-stream
+  (when (dispatchable-event-stream? event-stream)
     (try
       (let [wf-id        (:execution/id context)
             metrics-opts (build-completion-metrics context)
@@ -175,7 +194,7 @@
 (defn publish-phase-started!
   "Publish phase started event."
   [event-stream context phase-name]
-  (when event-stream
+  (when (dispatchable-event-stream? event-stream)
     (try
       (publish-event! event-stream
                       (merge (es/phase-started event-stream (:execution/id context) phase-name
@@ -187,7 +206,7 @@
 (defn publish-phase-completed!
   "Publish phase completed event."
   [event-stream context phase-name result]
-  (when event-stream
+  (when (dispatchable-event-stream? event-stream)
     (try
       (publish-event! event-stream
                       (es/phase-completed event-stream (:execution/id context) phase-name
@@ -209,7 +228,8 @@
                     :config (get-in context [:execution/opts :self-healing-config])}
             switch-result (self-healing/check-backend-health-and-switch sh-ctx)]
         (when (:switched? switch-result)
-          (publish-event! event-stream (self-healing/emit-backend-switch-event sh-ctx switch-result))
+          (when (dispatchable-event-stream? event-stream)
+            (publish-event! event-stream (self-healing/emit-backend-switch-event sh-ctx switch-result)))
           switch-result))
       (catch Exception e
         (println (messages/t :warn/health-check {:error (ex-message e)}))

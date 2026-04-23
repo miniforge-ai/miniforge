@@ -28,7 +28,11 @@
             [ai.miniforge.phase.interface :as phase]
             [ai.miniforge.response.interface :as response]
             [ai.miniforge.schema.interface :as schema]
-            [ai.miniforge.workflow.dag-orchestrator :as dag-orch]))
+            [ai.miniforge.workflow.context :as context]
+            [ai.miniforge.workflow.dag-orchestrator :as dag-orch]
+            [ai.miniforge.workflow.fsm :as workflow-fsm]
+            [ai.miniforge.workflow.runner-defaults :as defaults]
+            [ai.miniforge.workflow.messages :as messages]))
 
 ;------------------------------------------------------------------------------ Layer 0: Atomic operations
 
@@ -46,7 +50,7 @@
             (error-fn ctx ex)
             (let [anom (response/from-exception ex)]
               (-> ctx
-                  (assoc :execution/status :failed)
+                  (context/transition-to-failed)
                   (update :execution/errors conj
                           {:type :phase-error
                            :phase phase-name
@@ -133,17 +137,48 @@
           anomaly (if gate-errors
                     (response/gate-anomaly
                      :anomalies.gate/validation-failed
-                     (str "Gate validation failed for phase " (name phase-name))
+                     (messages/t :phase/gate-failed-phase {:phase (name phase-name)})
                      gate-errors
                      {:anomaly/phase phase-name})
                     (response/make-anomaly
                      :anomalies.phase/agent-failed
-                     (str "Agent failed in phase " (name phase-name))
+                     (messages/t :phase/agent-failed-phase {:phase (name phase-name)})
                      {:anomaly/phase phase-name}))]
       (update ctx :execution/response-chain
               response/add-failure phase-name
               anomaly
               phase-result))))
+
+(defn- phase-transition-event-message
+  [event]
+  (messages/t :status/invalid-phase-transition-event {:event event}))
+
+(defn- invalid-phase-transition-anomaly
+  [event]
+  (response/make-anomaly
+   :anomalies.workflow/invalid-transition
+   (phase-transition-event-message event)))
+
+(defn- max-redirects-exceeded-anomaly
+  []
+  (let [max-redirects (defaults/max-redirects)]
+    (response/make-anomaly
+     :anomalies.workflow/max-redirects-exceeded
+     (messages/t :status/max-redirects {:max-redirects max-redirects}))))
+
+(defn- phase-transition-failure
+  [ctx event anomaly transition-to-failed-fn]
+  (let [message (phase-transition-event-message event)]
+    (-> ctx
+        (update :execution/errors conj
+                {:type :invalid-transition
+                 :message message
+                 :anomaly anomaly})
+        (update :execution/response-chain
+                response/add-failure :pipeline anomaly
+                {:error message
+                 :event event})
+        (transition-to-failed-fn))))
 
 (defn record-phase-metrics
   "Record phase metrics in execution context."
@@ -206,127 +241,65 @@
       (record-phase-artifacts phase-result)
       (track-phase-files phase-result)))
 
-(defn determine-next-index
-  "Determine next phase index based on result and config.
-
-   Arguments:
-   - pipeline: Vector of phase interceptors
-   - current-index: Current phase index
-   - phase-config: Current phase configuration
-   - phase-result: Result from phase execution
-
-   Returns next index or :done/:error."
-  [pipeline current-index phase-config phase-result]
-  (let [on-fail (:on-fail phase-config)
-        on-success (:on-success phase-config)
-        redirect-to (:redirect-to phase-result)]
+(defn determine-phase-event
+  "Translate a phase result into an execution-machine event."
+  [_phase-config phase-result]
+  (let [redirect-to (:redirect-to phase-result)]
     (cond
-      ;; Phase retrying (transient error, stay at current index)
       (phase/retrying? phase-result)
-      current-index
+      :phase/retry
 
-      ;; Phase already done — skip to done
       (phase/already-done? phase-result)
-      (let [done-index (->> pipeline
-                            (map-indexed vector)
-                            (filter #(= :done (get-in (second %) [:config :phase])))
-                            (first))]
-        (if done-index (first done-index) :done))
+      :phase/already-done
 
-      ;; Phase completed successfully
       (phase/succeeded? phase-result)
-      (if on-success
-        ;; Find target phase by name
-        (let [target-index (->> pipeline
-                                (map-indexed vector)
-                                (filter #(= on-success (get-in (second %) [:config :phase])))
-                                (first))]
-          (if target-index (first target-index) (inc current-index)))
-        ;; Default: next phase
-        (let [next-idx (inc current-index)]
-          (if (< next-idx (count pipeline))
-            next-idx
-            :done)))
+      :phase/succeed
 
-      ;; Phase failed with redirect — jump to target phase
       (and (phase/failed? phase-result) redirect-to)
-      (let [target-index (->> pipeline
-                              (map-indexed vector)
-                              (filter #(= redirect-to (get-in (second %) [:config :phase])))
-                              (first))]
-        (if target-index (first target-index) :error))
+      (workflow-fsm/redirect-event redirect-to)
 
-      ;; Phase failed
       (phase/failed? phase-result)
-      (if on-fail
-        ;; Find target phase by name
-        (let [target-index (->> pipeline
-                                (map-indexed vector)
-                                (filter #(= on-fail (get-in (second %) [:config :phase])))
-                                (first))]
-          (if target-index
-            (first target-index)
-            :error))
-        :error)
+      :phase/fail
 
-      ;; Default: move to next
-      :else (inc current-index))))
+      :else
+      :phase/succeed)))
 
 (def max-redirects
   "Maximum number of phase redirects before failing to prevent infinite loops."
-  5)
+  (defaults/max-redirects))
 
 (defn apply-phase-transition
-  "Apply phase transition based on next-index.
+  "Apply a phase-outcome event through the execution machine.
 
-   Returns context with updated status/phase-index or terminal state."
-  [ctx next-index pipeline transition-to-completed-fn transition-to-failed-fn]
-  (let [current-index (:execution/phase-index ctx)
-        is-redirect? (and (number? next-index) (not= next-index (inc current-index)))
-        redirect-count (get ctx :execution/redirect-count 0)]
+   Returns updated context with refreshed machine projections or terminal failure."
+  [ctx event _pipeline _transition-to-completed-fn transition-to-failed-fn]
+  (let [redirect-count (get ctx :execution/redirect-count 0)
+        is-redirect? (workflow-fsm/redirect-event? event)]
     (cond
       ;; Redirect cycle limit exceeded
       (and is-redirect? (>= redirect-count max-redirects))
-      (let [anom (response/make-anomaly
-                   :anomalies.workflow/max-redirects-exceeded
-                   (str "Redirect cycle limit exceeded (" max-redirects " redirects)"))]
+      (let [anom (max-redirects-exceeded-anomaly)]
         (-> ctx
             (update :execution/errors conj
                     {:type :max-redirects-exceeded
-                     :message (str "Exceeded " max-redirects " redirects")
+                     :message (messages/t :status/max-redirects-hit
+                                          {:max-redirects max-redirects})
                      :anomaly anom})
             (update :execution/response-chain
                     response/add-failure :pipeline anom
                     {:redirect-count redirect-count})
             (transition-to-failed-fn)))
 
-      (= :done next-index)
-      (transition-to-completed-fn ctx)
-
-      (= :error next-index)
-      (transition-to-failed-fn ctx)
-
-      (number? next-index)
-      (if (< next-index (count pipeline))
-        (cond-> (assoc ctx :execution/phase-index next-index)
-          is-redirect? (update :execution/redirect-count (fnil inc 0)))
-        (transition-to-completed-fn ctx))
-
       :else
-      (let [anom (response/make-anomaly
-                   :anomalies.workflow/invalid-transition
-                   (str "Invalid next index: " next-index))]
-        (-> ctx
-            (update :execution/errors conj
-                    {:type :invalid-transition
-                     :message (str "Invalid next index: " next-index)
-                     :anomaly anom})
-            (update :execution/response-chain
-                    response/add-failure :pipeline
-                    anom
-                    {:error (str "Invalid next index: " next-index)
-                     :next-index next-index})
-            (transition-to-failed-fn))))))
+      (let [prior-state (:execution/fsm-state ctx)
+            next-ctx (context/transition-execution ctx event)
+            state-changed? (not= prior-state (:execution/fsm-state next-ctx))]
+        (if (or state-changed? (= :phase/retry event))
+          next-ctx
+          (phase-transition-failure ctx
+                                    event
+                                    (invalid-phase-transition-anomaly event)
+                                    transition-to-failed-fn))))))
 
 ;------------------------------------------------------------------------------ Layer 1.5: DAG integration helpers
 
@@ -496,7 +469,7 @@
    Merges artifact provenance, copies sub-worktree file changes into the
    parent worktree, synthesizes an :implement phase result, and advances
    past implement to verify → review → release."
-  [ctx dag-result pipeline transition-to-completed-fn]
+  [ctx dag-result pipeline transition-to-completed-fn transition-to-failed-fn]
   (let [artifacts  (:artifacts dag-result)
         task-count (count artifacts)
         ;; Merge sub-worktree changes into parent worktree so the release
@@ -512,7 +485,8 @@
          :status :completed
          :result {:status         :success
                   :environment-id (get ctx :execution/environment-id)
-                  :summary        (str "DAG executed " task-count " task(s) successfully")
+                  :summary        (messages/t :status/dag-executed-summary
+                                              {:task-count task-count})
                   :metrics        (merge {:task-count task-count}
                                          (:metrics dag-result))}}
         ctx-with-dag (-> ctx
@@ -520,10 +494,19 @@
                          (assoc :execution/dag-result dag-result)
                          (assoc-in [:execution/phase-results :implement]
                                    synthesized-implement-result))
-        post-impl-idx (index-after-phase pipeline :implement)]
-    (if (and post-impl-idx (< post-impl-idx (count pipeline)))
-      (assoc ctx-with-dag :execution/phase-index post-impl-idx)
-      (transition-to-completed-fn ctx-with-dag))))
+        ctx-after-plan
+        (apply-phase-transition ctx-with-dag
+                                :phase/succeed
+                                pipeline
+                                transition-to-completed-fn
+                                transition-to-failed-fn)]
+    (if (phase/failed? ctx-after-plan)
+      ctx-after-plan
+      (apply-phase-transition ctx-after-plan
+                              :phase/succeed
+                              pipeline
+                              transition-to-completed-fn
+                              transition-to-failed-fn))))
 
 (defn apply-dag-failure
   "Apply a failed DAG result to the execution context."
@@ -563,7 +546,9 @@
                                      :plan/task-count (count (:plan/tasks plan))})
             dag-result (dag-orch/execute-plan-as-dag plan ctx-with-resume)]
         (if (schema/succeeded? dag-result)
-          (apply-dag-success ctx dag-result pipeline transition-to-completed-fn)
+          (apply-dag-success ctx dag-result pipeline
+                             transition-to-completed-fn
+                             transition-to-failed-fn)
           (apply-dag-failure ctx dag-result transition-to-failed-fn))))))
 
 ;------------------------------------------------------------------------------ Layer 2: Phase step execution
@@ -604,9 +589,8 @@
       (or (try-dag-execution ctx-processed phase-name phase-result pipeline
                              transition-to-completed-fn transition-to-failed-fn)
           ;; Normal transition (non-plan phases, or plan not parallelizable)
-          (let [next-index (determine-next-index pipeline phase-index
-                                                 (:config interceptor)
-                                                 phase-result)]
-            (apply-phase-transition ctx-processed next-index pipeline
+          (let [event (determine-phase-event (:config interceptor)
+                                             phase-result)]
+            (apply-phase-transition ctx-processed event pipeline
                                     transition-to-completed-fn
                                     transition-to-failed-fn))))))

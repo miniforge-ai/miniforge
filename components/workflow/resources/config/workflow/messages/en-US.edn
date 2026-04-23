@@ -13,10 +13,24 @@
   :status/gate-failed        "Gate validation failed"
   :status/no-phases          "Workflow has no phases"
   :status/max-phases         "Exceeded maximum phase count: {max-phases}"
+  :status/empty-pipeline     "Workflow pipeline is empty"
+  :status/duplicate-phases   "Duplicate phase ids make transition targets ambiguous"
   :status/paused             "⏸  Workflow paused, waiting for resume..."
   :status/stopped-dashboard  "⏹  Workflow stopped by dashboard"
   :status/stopped-control    "Workflow stopped by control plane"
   :status/empty-completion   "Workflow completed but produced no artifacts or phase results"
+  :status/max-redirects      "Redirect cycle limit exceeded ({max-redirects} redirects)"
+  :status/max-redirects-hit  "Exceeded {max-redirects} redirects"
+  :status/invalid-phase-transition-event "Invalid phase transition event: {event}"
+  :status/terminal-state-transition "Cannot transition from terminal state: {state}"
+  :status/invalid-current-state "Invalid current state: {state}"
+  :status/guard-rejected-transition "Guard function rejected transition"
+  :status/no-transition-defined "No transition defined for [{state} {event}]"
+  :status/dag-executed-summary "DAG executed {task-count} task(s) successfully"
+
+  ;; Phase result messages
+  :phase/gate-failed-phase   "Gate validation failed for phase {phase}"
+  :phase/agent-failed-phase  "Agent failed in phase {phase}"
 
   ;; Execution mode
   :governed/no-capsule      "No capsule executor available for governed workflow"

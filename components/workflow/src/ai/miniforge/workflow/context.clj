@@ -32,9 +32,13 @@
    :execution/workflow         — Workflow configuration map
    :execution/workflow-id      — UUID from workflow config
    :execution/workflow-version — Version string from workflow config
-   :execution/status           — FSM state: :running | :completed | :failed |
+   :execution/status           — Derived from the authoritative execution
+                                 machine snapshot:
+                                 :pending | :running | :paused | :completed |
+                                 :failed | :cancelled |
                                  :completed-with-warnings
-   :execution/fsm-state        — Raw FSM state map
+   :execution/fsm-machine      — Compiled execution machine for this run
+   :execution/fsm-state        — Authoritative machine snapshot
 
    ### Input / Output
    :execution/input            — Input data for the workflow (task spec, etc.)
@@ -59,9 +63,9 @@
 
    ### Phase Execution
    :execution/phase-results    — Map of phase-name → phase result (see below)
-   :execution/current-phase    — Currently executing phase keyword
-   :execution/phase-index      — Current position in the pipeline vector
-   :execution/redirect-count   — Phase redirect counter (guards against loops)
+   :execution/current-phase    — Derived projection of the active machine state
+   :execution/phase-index      — Derived projection of the active machine state
+   :execution/redirect-count   — Derived from machine context
 
    ### Phase Result Schema
    Entries in :execution/phase-results follow the shape:
@@ -110,6 +114,50 @@
             [ai.miniforge.workflow.monitoring :as monitoring]
             [ai.miniforge.agent.interface :as agent]))
 
+;------------------------------------------------------------------------------ Internal helpers
+
+(defn sync-machine-projections
+  "Project workflow fields from the authoritative machine snapshot."
+  [ctx]
+  (let [machine (:execution/fsm-machine ctx)
+        fsm-state (:execution/fsm-state ctx)
+        projection (when (and machine fsm-state)
+                     (fsm/execution-projection machine fsm-state))
+        ctx' (cond-> (merge ctx projection)
+               (and (= :completed (:execution/status projection))
+                    (:execution/completed-with-warnings? ctx))
+               (assoc :execution/status :completed-with-warnings))]
+    ctx'))
+
+(defn transition-execution
+  "Apply an event to the authoritative execution machine and refresh projections."
+  [ctx event]
+  (if-let [machine (:execution/fsm-machine ctx)]
+    (let [fsm-state (:execution/fsm-state ctx)
+          next-state (fsm/transition-execution machine fsm-state event)
+          next-ctx (sync-machine-projections
+                    (assoc ctx :execution/fsm-state next-state))]
+      (cond-> next-ctx
+        (and (contains? #{:completed :failed :cancelled}
+                        (:execution/status next-ctx))
+             (nil? (:execution/ended-at next-ctx)))
+        (assoc :execution/ended-at (System/currentTimeMillis))))
+    ctx))
+
+(defn active-or-last-phase
+  "Return the active phase when present, otherwise the last completed phase in
+   workflow pipeline order."
+  [ctx]
+  (let [phase-results (:execution/phase-results ctx)
+        pipeline (:workflow/pipeline (:execution/workflow ctx))
+        last-recorded-phase (some->> pipeline
+                                     (map :phase)
+                                     (filter #(contains? phase-results %))
+                                     last)]
+    (if-some [current-phase (:execution/current-phase ctx)]
+      current-phase
+      last-recorded-phase)))
+
 ;------------------------------------------------------------------------------ Context operations
 
 (defn create-context
@@ -122,40 +170,39 @@
 
    Returns execution context map with FSM state initialized."
   [workflow input opts]
-  (let [;; Initialize FSM and transition to running state
-        fsm-state (-> (fsm/initialize)
-                      (fsm/transition-fsm :start))
+  (let [execution-machine (fsm/compile-execution-machine workflow)
+        fsm-state (let [initial-state (fsm/initialize-execution execution-machine)]
+                    (fsm/start-execution execution-machine initial-state))
         ;; Initialize meta-agents and coordinator
         meta-agents (monitoring/create-meta-agents workflow)
         coordinator (agent/create-meta-coordinator meta-agents)]
-    (merge
-     {:execution/id (random-uuid)
-      :execution/workflow workflow
-      :execution/workflow-id (:workflow/id workflow)
-      :execution/workflow-version (:workflow/version workflow)
-      :execution/status (fsm/current-state fsm-state)
-      :execution/fsm-state fsm-state
-      :execution/input input
-      :execution/artifacts []
-      :execution/errors []  ; DEPRECATED: Use :execution/response-chain instead
-      :execution/response-chain (response/create (:workflow/id workflow))
-      :execution/phase-results {}
-      :execution/output nil
-      :execution/current-phase nil
-      :execution/phase-index 0
-      :execution/metrics {:tokens 0 :cost-usd 0.0 :duration-ms 0}
-      :execution/started-at (System/currentTimeMillis)
-      :execution/opts opts
-      ;; Meta-agent coordinator for workflow health monitoring
-      :execution/meta-coordinator coordinator
-      ;; Transient state for meta-agent health checks
-      :execution/streaming-activity []
-      :execution/files-written #{}}
-     ;; Merge opts into top-level context so :llm-backend is accessible to agents
-     (select-keys opts [:llm-backend :artifact-store :knowledge-store
-                        :on-phase-start :on-phase-complete
-                        :executor :environment-id :sandbox-workdir
-                        :on-chunk :event-stream :worktree-path]))))
+    (sync-machine-projections
+     (merge
+      {:execution/id (random-uuid)
+       :execution/workflow workflow
+       :execution/workflow-id (:workflow/id workflow)
+       :execution/workflow-version (:workflow/version workflow)
+       :execution/fsm-machine execution-machine
+       :execution/fsm-state fsm-state
+       :execution/input input
+       :execution/artifacts []
+       :execution/errors []  ; DEPRECATED: Use :execution/response-chain instead
+       :execution/response-chain (response/create (:workflow/id workflow))
+       :execution/phase-results {}
+       :execution/output nil
+       :execution/metrics {:tokens 0 :cost-usd 0.0 :duration-ms 0}
+       :execution/started-at (System/currentTimeMillis)
+       :execution/opts opts
+       ;; Meta-agent coordinator for workflow health monitoring
+       :execution/meta-coordinator coordinator
+       ;; Transient state for meta-agent health checks
+       :execution/streaming-activity []
+       :execution/files-written #{}}
+      ;; Merge opts into top-level context so :llm-backend is accessible to agents
+      (select-keys opts [:llm-backend :artifact-store :knowledge-store
+                         :on-phase-start :on-phase-complete
+                         :executor :environment-id :sandbox-workdir
+                         :on-chunk :event-stream :worktree-path])))))
 
 (defn merge-metrics
   "Merge phase metrics into execution metrics.
@@ -168,19 +215,15 @@
 (defn transition-to-completed
   "Transition workflow to completed state using FSM."
   [ctx]
-  (let [fsm-state (:execution/fsm-state ctx)
-        new-fsm-state (fsm/transition-fsm fsm-state :complete)]
-    (-> ctx
-        (assoc :execution/fsm-state new-fsm-state)
-        (assoc :execution/status (fsm/current-state new-fsm-state))
-        (assoc :execution/ended-at (System/currentTimeMillis)))))
+  (-> (if (:execution/fsm-machine ctx)
+        (transition-execution ctx :complete)
+        (assoc ctx :execution/status :completed))
+      (assoc :execution/ended-at (System/currentTimeMillis))))
 
 (defn transition-to-failed
   "Transition workflow to failed state using FSM."
   [ctx]
-  (let [fsm-state (:execution/fsm-state ctx)
-        new-fsm-state (fsm/transition-fsm fsm-state :fail)]
-    (-> ctx
-        (assoc :execution/fsm-state new-fsm-state)
-        (assoc :execution/status (fsm/current-state new-fsm-state))
-        (assoc :execution/ended-at (System/currentTimeMillis)))))
+  (-> (if (:execution/fsm-machine ctx)
+        (transition-execution ctx :fail)
+        (assoc ctx :execution/status :failed))
+      (assoc :execution/ended-at (System/currentTimeMillis))))

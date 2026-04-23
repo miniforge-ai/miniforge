@@ -6,6 +6,8 @@
    [ai.miniforge.workflow.runner :as runner]
    [ai.miniforge.workflow.context :as ctx]
    [ai.miniforge.dag-executor.interface :as dag-exec]
+   [ai.miniforge.logging.interface :as log]
+   [ai.miniforge.workflow.execution :as exec]
    [ai.miniforge.phase.interface]))
 
 ;; ---------------------------------------------------------------------------- extract-output
@@ -32,6 +34,21 @@
           output (:execution/output (runner/extract-output ctx))]
       (is (= :failed (:status output)))
       (is (= {:phase/status :failed} (:last-phase-result output))))))
+
+(deftest extract-output-falls-back-to-pipeline-phase-order-test
+  (testing "extract-output chooses the last recorded phase using workflow pipeline order"
+    (let [ctx {:execution/workflow {:workflow/pipeline [{:phase :plan}
+                                                       {:phase :implement}
+                                                       {:phase :done}]}
+               :execution/artifacts []
+               :execution/phase-results {:done {:phase/status :succeeded}
+                                         :plan {:phase/status :succeeded}}
+               :execution/current-phase nil
+               :execution/status :completed}
+          output (:execution/output (runner/extract-output ctx))]
+      (is (= {:phase/status :succeeded} (:last-phase-result output)))
+      (is (= {:phase/status :succeeded}
+             (get-in output [:phase-results :done]))))))
 
 ;; ---------------------------------------------------------------------------- build-pipeline edge cases
 
@@ -94,6 +111,28 @@
           result (runner/run-pipeline wf {:task "Test"} {:max-phases 1})]
       (is (= :completed (:execution/status result))))))
 
+(deftest apply-dag-success-does-not-consume-redirect-budget-test
+  (testing "DAG fast-path advances with normal success events"
+    (let [workflow {:workflow/id :test
+                    :workflow/version "1.0.0"
+                    :workflow/pipeline [{:phase :plan}
+                                        {:phase :implement}
+                                        {:phase :verify}
+                                        {:phase :done}]}
+          pipeline (runner/build-pipeline workflow)
+          context (ctx/create-context workflow {:task "Test"} {})
+          dag-result {:artifacts []
+                      :worktree-paths []
+                      :metrics {:tokens 0 :cost-usd 0.0}}
+          result (exec/apply-dag-success context
+                                         dag-result
+                                         pipeline
+                                         ctx/transition-to-completed
+                                         ctx/transition-to-failed)]
+      (is (= :running (:execution/status result)))
+      (is (= :verify (:execution/current-phase result)))
+      (is (= 0 (:execution/redirect-count result))))))
+
 ;; ---------------------------------------------------------------------------- publish-event edge cases
 
 (deftest publish-event-nil-stream-test
@@ -102,8 +141,7 @@
     (is (nil? (runner/publish-event! nil {:event/type :test})))))
 
 (deftest publish-event-in-memory-stream-test
-  (testing "publish-event with in-memory stream dispatches to event-stream ns"
-    ;; This tests the fallback path - it should not throw even if ns not found
+  (testing "publish-event no-ops for non-stream maps"
     (is (nil? (runner/publish-event! {} {:event/type :test})))))
 
 ;; ---------------------------------------------------------------------------- terminal-state?
@@ -294,7 +332,8 @@
                    :execution/task-branch "b"}
           phase-ctx {:execution/current-phase :release}]
       (with-redefs [dag-exec/persist-workspace!
-                    (fn [& _] (throw (ex-info "Docker gone" {})))]
+                    (fn [& _] (throw (ex-info "Docker gone" {})))
+                    log/warn
+                    (fn [& _] nil)]
         ;; Should not throw
         (is (nil? (persist-fn context phase-ctx)))))))
-

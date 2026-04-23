@@ -188,3 +188,66 @@
           (let [r4 (fsm/transition (:state r3) :complete)]
             (is (:success? r4))
             (is (= :completed (:state r4)))))))))
+
+(deftest compiled-execution-machine-projects-phase-state-test
+  (let [workflow {:workflow/id :test
+                  :workflow/pipeline [{:phase :plan}
+                                      {:phase :implement}
+                                      {:phase :done}]}
+        machine (fsm/compile-execution-machine workflow)
+        pending-state (fsm/initialize-execution machine)
+        running-state (fsm/start-execution machine pending-state)]
+    (testing "pending state projects no active phase"
+      (is (= {:execution/status :pending
+              :execution/current-phase nil
+              :execution/phase-index nil
+              :execution/redirect-count 0}
+             (fsm/execution-projection machine pending-state))))
+    (testing "start enters the first pipeline phase"
+      (is (= :running (fsm/execution-status machine running-state)))
+      (is (= :plan (fsm/current-phase-id machine running-state)))
+      (is (= 0 (fsm/current-phase-index machine running-state))))))
+
+(deftest compiled-execution-machine-follows-phase-transitions-test
+  (let [workflow {:workflow/id :test
+                  :workflow/pipeline [{:phase :plan}
+                                      {:phase :implement}
+                                      {:phase :verify :on-fail :implement}
+                                      {:phase :done}]}
+        machine (fsm/compile-execution-machine workflow)
+        s0 (fsm/start-execution machine (fsm/initialize-execution machine))
+        s1 (fsm/transition-execution machine s0 :phase/succeed)
+        s2 (fsm/transition-execution machine s1 :phase/succeed)
+        s3 (fsm/transition-execution machine s2 (fsm/redirect-event :implement))
+        s4 (fsm/transition-execution machine s3 :pause)
+        s5 (fsm/transition-execution machine s4 :resume)
+        s6 (fsm/transition-execution machine s5 :phase/succeed)
+        s7 (fsm/transition-execution machine s6 :phase/already-done)]
+    (testing "success transitions advance through the compiled phase graph"
+      (is (= :implement (fsm/current-phase-id machine s1)))
+      (is (= :verify (fsm/current-phase-id machine s2))))
+    (testing "redirect transitions return to the configured phase and increment redirect count"
+      (is (= :implement (fsm/current-phase-id machine s3)))
+      (is (= 1 (:execution/redirect-count (fsm/execution-projection machine s3)))))
+    (testing "pause and resume are phase-local machine states"
+      (is (= :paused (fsm/execution-status machine s4)))
+      (is (= :implement (fsm/current-phase-id machine s4)))
+      (is (= :running (fsm/execution-status machine s5))))
+    (testing "already-done transitions jump to :done and then completion"
+      (is (= :verify (fsm/current-phase-id machine s6)))
+      (is (= :done (fsm/current-phase-id machine s7))))))
+
+(deftest validate-execution-machine-test
+  (testing "detects unresolved transition targets"
+    (let [result (fsm/validate-execution-machine
+                  {:workflow/id :bad
+                   :workflow/pipeline [{:phase :plan :on-success :missing}]})]
+      (is (false? (:valid? result)))
+      (is (= :unknown-on-success-target (-> result :errors first :error)))))
+  (testing "warns on duplicate phase ids because target resolution becomes ambiguous"
+    (let [result (fsm/validate-execution-machine
+                  {:workflow/id :dup
+                   :workflow/pipeline [{:phase :plan}
+                                       {:phase :plan}]})]
+      (is (true? (:valid? result)))
+      (is (= :duplicate-phase-identifiers (-> result :warnings first :warning))))))
