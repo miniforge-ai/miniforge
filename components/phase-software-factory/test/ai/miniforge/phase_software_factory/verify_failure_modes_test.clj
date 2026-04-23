@@ -137,7 +137,7 @@
                               :implement)
           result (verify/leave-verify ctx)]
       (is (= :implement (phase/transition-target (get result :phase))))
-      (is (= :failed (get-in result [:phase :status]))))))
+      (is (phase/failed? (get result :phase))))))
 
 (deftest leave-verify-no-redirect-on-timeout-test
   (testing "timeout error does NOT redirect even with :on-fail configured"
@@ -146,7 +146,7 @@
                               :implement)
           result (verify/leave-verify ctx)]
       (is (not (phase/redirect-requested? (get result :phase))))
-      (is (= :failed (get-in result [:phase :status])))
+      (is (phase/failed? (get result :phase)))
       (is (true? (get-in result [:phase :error :timeout?]))))))
 
 (deftest leave-verify-no-redirect-on-rate-limit-test
@@ -156,7 +156,7 @@
                               :implement)
           result (verify/leave-verify ctx)]
       (is (not (phase/redirect-requested? (get result :phase))))
-      (is (= :failed (get-in result [:phase :status])))
+      (is (phase/failed? (get result :phase)))
       (is (some? (get-in result [:phase :error :rate-limited?]))))
 
     (testing "rate-limit variant: you've hit your limit"
@@ -173,7 +173,7 @@
                               nil)
           result (verify/leave-verify ctx)]
       (is (not (phase/redirect-requested? (get result :phase))))
-      (is (= :failed (get-in result [:phase :status]))))))
+      (is (phase/failed? (get result :phase))))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 

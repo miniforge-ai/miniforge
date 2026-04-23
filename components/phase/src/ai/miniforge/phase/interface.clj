@@ -218,9 +218,17 @@
   "Build a skipped-phase result for phases that short-circuit."
   phase-result/skipped)
 
+(def fail-phase
+  "Mark a phase state as failed and attach the error map."
+  phase-result/fail-phase)
+
 (def request-redirect
   "Attach a redirect transition request to a phase result."
   phase-result/request-redirect)
+
+(def fail-and-request-redirect
+  "Mark a phase state as failed and request a redirect transition."
+  phase-result/fail-and-request-redirect)
 
 (def test-metrics
   "Build a standard test-phase metrics map."

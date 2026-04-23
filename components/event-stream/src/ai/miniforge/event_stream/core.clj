@@ -176,7 +176,8 @@
       (cond-> context (assoc :phase/context context))))
 
 (defn phase-completed [stream workflow-id phase & [result]]
-  (let [outcome (get result :outcome :success)]
+  (let [outcome (get result :outcome :success)
+        transition-request (get result :phase/transition-request)]
     (-> (create-envelope stream :workflow/phase-completed workflow-id
                          (str (name phase) " phase " (name outcome)))
         (assoc :workflow/phase phase
@@ -185,8 +186,7 @@
           (:duration-ms result) (assoc :phase/duration-ms (:duration-ms result))
           (:artifacts result) (assoc :phase/artifacts (:artifacts result))
           (:error result) (assoc :phase/error (:error result))
-          (:phase/transition-request result)
-          (assoc :phase/transition-request (:phase/transition-request result))
+          transition-request (assoc :phase/transition-request transition-request)
           (:tokens result) (assoc :phase/tokens (:tokens result))
           (:cost-usd result) (assoc :phase/cost-usd (:cost-usd result))))))
 

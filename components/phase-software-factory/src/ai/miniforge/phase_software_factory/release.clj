@@ -387,7 +387,8 @@
   [ctx ex]
   (let [iterations (get-in ctx [:phase :iterations] 0)
         max-iterations (get-in ctx [:phase :budget :iterations] 2)
-        on-fail (get-in ctx [:phase-config :on-fail])]
+        on-fail (get-in ctx [:phase-config :on-fail])
+        error-map (phase/exception-error ex)]
     (cond
       ;; Within budget - retry
       (< iterations max-iterations)
@@ -399,16 +400,15 @@
       ;; Has on-fail transition - redirect
       on-fail
       (let [phase-result (-> (:phase ctx)
-                             (assoc :status :failed)
-                             (assoc :error (phase/exception-error ex))
-                             (phase/request-redirect on-fail))]
+                             (phase/fail-and-request-redirect
+                              error-map
+                              on-fail))]
         (assoc ctx :phase phase-result))
 
       ;; No recovery - propagate
       :else
       (-> ctx
-          (assoc-in [:phase :status] :failed)
-          (assoc-in [:phase :error] (phase/exception-error ex))))))
+          (assoc :phase (phase/fail-phase (:phase ctx) error-map)))))) 
 
 ;------------------------------------------------------------------------------ Layer 2
 ;; Registry methods

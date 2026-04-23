@@ -60,7 +60,7 @@
 (deftest changes-requested-sets-failed-status
   (testing "changes-requested sets :failed status (not :retrying)"
     (let [phase (simulate-leave-review :changes-requested 1 4)]
-      (is (= :failed (:status phase))
+      (is (phase/failed? phase)
           "Status should be :failed so execution can follow the transition request")
       (is (not (phase/retrying? phase))
           "Should NOT be retrying (would cause review to re-run in place)"))))
@@ -76,7 +76,7 @@
 (deftest changes-requested-over-budget-no-redirect
   (testing "changes-requested at max iterations fails without redirect"
     (let [phase (simulate-leave-review :changes-requested 4 4)]
-      (is (= :failed (:status phase))
+      (is (phase/failed? phase)
           "Should be failed")
       (is (not (phase/redirect-requested? phase))
           "Should NOT redirect — iteration budget exhausted"))))
@@ -93,7 +93,7 @@
 (deftest rejected-redirects-to-implement-like-changes-requested
   (testing "iter-23 regression: :rejected decision must trigger redirect, not :completed"
     (let [phase (simulate-leave-review :rejected 1 4)]
-      (is (= :failed (:status phase))
+      (is (phase/failed? phase)
           "Rejected must set :failed — falling through to :completed lets an empty-diff PR open")
       (is (= :implement (phase/transition-target phase))
           "Rejected within budget must redirect to implement like :changes-requested"))))
@@ -101,13 +101,13 @@
 (deftest rejected-over-budget-no-redirect
   (testing ":rejected at max iterations fails terminally (no redirect)"
     (let [phase (simulate-leave-review :rejected 4 4)]
-      (is (= :failed (:status phase)))
+      (is (phase/failed? phase))
       (is (not (phase/redirect-requested? phase))))))
 
 (deftest approved-sets-completed-status
   (testing "approved review sets :completed status"
     (let [phase (simulate-leave-review :approved 1 4)]
-      (is (= :completed (:status phase))
+      (is (phase/succeeded? phase)
           "Approved review should complete normally")
       (is (not (phase/redirect-requested? phase))
           "No redirect needed for approved review"))))
