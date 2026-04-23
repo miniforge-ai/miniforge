@@ -6,6 +6,7 @@
    [ai.miniforge.workflow.runner :as runner]
    [ai.miniforge.workflow.context :as ctx]
    [ai.miniforge.dag-executor.interface :as dag-exec]
+   [ai.miniforge.logging.interface :as log]
    [ai.miniforge.phase.interface]))
 
 ;; ---------------------------------------------------------------------------- extract-output
@@ -117,8 +118,7 @@
     (is (nil? (runner/publish-event! nil {:event/type :test})))))
 
 (deftest publish-event-in-memory-stream-test
-  (testing "publish-event with in-memory stream dispatches to event-stream ns"
-    ;; This tests the fallback path - it should not throw even if ns not found
+  (testing "publish-event no-ops for non-stream maps"
     (is (nil? (runner/publish-event! {} {:event/type :test})))))
 
 ;; ---------------------------------------------------------------------------- terminal-state?
@@ -309,6 +309,8 @@
                    :execution/task-branch "b"}
           phase-ctx {:execution/current-phase :release}]
       (with-redefs [dag-exec/persist-workspace!
-                    (fn [& _] (throw (ex-info "Docker gone" {})))]
+                    (fn [& _] (throw (ex-info "Docker gone" {})))
+                    log/warn
+                    (fn [& _] nil)]
         ;; Should not throw
         (is (nil? (persist-fn context phase-ctx)))))))

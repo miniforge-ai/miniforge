@@ -158,12 +158,13 @@
                              {:task/id task-b
                               :task/description "Task B"
                               :task/type :implement
-                              :task/dependencies [task-a phantom]}]}
-          dag-tasks (dag-orch/plan->dag-tasks plan {})]
-      ;; Task B should only have task-a as a dep; phantom is dropped
-      (is (= #{task-a} (:task/deps (second dag-tasks))))
-      ;; Task A has no deps
-      (is (empty? (:task/deps (first dag-tasks)))))))
+                              :task/dependencies [task-a phantom]}]}]
+      (with-redefs [println (fn [& _] nil)]
+        (let [dag-tasks (dag-orch/plan->dag-tasks plan {})]
+          ;; Task B should only have task-a as a dep; phantom is dropped
+          (is (= #{task-a} (:task/deps (second dag-tasks))))
+          ;; Task A has no deps
+          (is (empty? (:task/deps (first dag-tasks)))))))))
 
 (deftest test-plan->dag-tasks-drops-string-phantom-deps
   (testing "string UUID dependencies to non-existent tasks are also dropped"
@@ -178,10 +179,11 @@
                              {:task/id task-b
                               :task/description "Task B"
                               :task/type :implement
-                              :task/dependencies [(str task-a) phantom-str]}]}
-          dag-tasks (dag-orch/plan->dag-tasks plan {})]
-      ;; task-a string should resolve; phantom string should be dropped
-      (is (= #{task-a} (:task/deps (second dag-tasks)))))))
+                              :task/dependencies [(str task-a) phantom-str]}]}]
+      (with-redefs [println (fn [& _] nil)]
+        (let [dag-tasks (dag-orch/plan->dag-tasks plan {})]
+          ;; task-a string should resolve; phantom string should be dropped
+          (is (= #{task-a} (:task/deps (second dag-tasks)))))))))
 
 (deftest test-plan->dag-tasks-all-deps-valid
   (testing "valid dependencies are preserved unchanged"
@@ -300,7 +302,9 @@
                       (dag/ok {:task-id (:task/id task-def)
                                :status :implemented
                                :artifacts []
-                               :metrics {:tokens 0 :cost-usd 0.0}}))]
+                               :metrics {:tokens 0 :cost-usd 0.0}}))
+                    println
+                    (fn [& _] nil)]
         (let [result (dag-orch/execute-plan-as-dag plan {:logger logger})]
           ;; All 3 tasks should complete — phantom dep dropped at plan conversion
           (is (:success? result))
