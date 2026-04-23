@@ -185,7 +185,8 @@
           (:duration-ms result) (assoc :phase/duration-ms (:duration-ms result))
           (:artifacts result) (assoc :phase/artifacts (:artifacts result))
           (:error result) (assoc :phase/error (:error result))
-          (:redirect-to result) (assoc :phase/redirect-to (:redirect-to result))
+          (:phase/transition-request result)
+          (assoc :phase/transition-request (:phase/transition-request result))
           (:tokens result) (assoc :phase/tokens (:tokens result))
           (:cost-usd result) (assoc :phase/cost-usd (:cost-usd result))))))
 

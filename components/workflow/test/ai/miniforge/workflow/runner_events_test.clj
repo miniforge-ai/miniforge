@@ -22,6 +22,7 @@
    so the Rust StateManager can deserialize WorkflowRun projections."
   (:require
    [clojure.test :refer [deftest testing is]]
+   [ai.miniforge.phase.interface :as phase]
    [ai.miniforge.workflow.runner-events :as events]
    [ai.miniforge.event-stream.interface :as event-stream]))
 
@@ -112,3 +113,17 @@
 (deftest publish-phase-started-nil-stream-is-noop-test
   (testing "nil event-stream does not throw"
     (is (nil? (events/publish-phase-started! nil (test-context) :plan)))))
+
+;------------------------------------------------------------------------------ publish-phase-completed!
+
+(deftest publish-phase-completed-includes-transition-request-test
+  (testing "phase completion events include transition requests when present"
+    (let [stream (create-stream)
+          ctx (test-context)
+          phase-result (phase/request-redirect {:status :failed
+                                                :error {:message "tests failed"}}
+                                               :implement)]
+      (events/publish-phase-completed! stream ctx :verify phase-result)
+      (let [event (first-event stream)]
+        (is (= :workflow/phase-completed (:event/type event)))
+        (is (= :implement (get-in event [:phase/transition-request :transition/target])))))))

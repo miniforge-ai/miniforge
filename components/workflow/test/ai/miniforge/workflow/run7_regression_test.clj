@@ -21,10 +21,10 @@
    1. Duration-ms always 0 — agent metrics fallback shadows real wall-clock time
    2. Terminal event silently dropped — requiring-resolve nil causes when-let short-circuit
    3. Phase leave functions must override agent duration-ms with wall-clock time
-   4. Stale :phase map cleared between phases
+   4. Stale phase transition request cleared between phases
    5. Review feedback lost during phase clearing (Run 9)"
   (:require
-   [ai.miniforge.phase.interface]
+   [ai.miniforge.phase.interface :as phase]
    [clojure.test :refer [deftest testing is]]
    [ai.miniforge.workflow.runner :as runner]
    [ai.miniforge.workflow.execution :as exec]))
@@ -142,11 +142,12 @@
 (deftest phase-map-cleared-between-phases-test
   (testing "execute-phase-lifecycle clears :phase before entering next phase"
     ;; Simulate a context with a stale :phase map from a previous phase
-    ;; (e.g., verify left :redirect-to :implement on it)
-    (let [stale-ctx {:phase {:name :verify
-                             :status :failed
-                             :redirect-to :implement
-                             :duration-ms 3000}
+    ;; (e.g., verify left a redirect transition request on it)
+    (let [stale-phase (phase/request-redirect {:name :verify
+                                               :status :failed
+                                               :duration-ms 3000}
+                                              :implement)
+          stale-ctx {:phase stale-phase
                      :execution/input {:description "test"}
                      :execution/phase-results {}
                      :execution/errors []
@@ -158,9 +159,9 @@
           interceptor (ai.miniforge.phase.interface/get-phase-interceptor {:phase :done})
           ;; execute-phase-lifecycle should clear :phase first
           [ctx-after _result] (exec/execute-phase-lifecycle interceptor stale-ctx)]
-      ;; The stale :redirect-to should NOT be present
-      (is (not= :implement (get-in ctx-after [:phase :redirect-to]))
-          "Stale :redirect-to from previous phase must not leak"))))
+      ;; The stale transition request should NOT be present.
+      (is (nil? (get-in ctx-after [:phase :phase/transition-request]))
+          "Stale phase transition request must not leak"))))
 
 ;; ============================================================================
 ;; Fix 5: Review feedback survives :phase clearing (Run 9 bug)

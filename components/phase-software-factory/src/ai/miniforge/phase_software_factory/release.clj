@@ -398,10 +398,11 @@
 
       ;; Has on-fail transition - redirect
       on-fail
-      (-> ctx
-          (assoc-in [:phase :status] :failed)
-          (assoc-in [:phase :redirect-to] on-fail)
-          (assoc-in [:phase :error] (phase/exception-error ex)))
+      (let [phase-result (-> (:phase ctx)
+                             (assoc :status :failed)
+                             (assoc :error (phase/exception-error ex))
+                             (phase/request-redirect on-fail))]
+        (assoc ctx :phase phase-result))
 
       ;; No recovery - propagate
       :else

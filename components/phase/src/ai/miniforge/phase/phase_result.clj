@@ -44,6 +44,34 @@
   [result]
   (= :error (:status result)))
 
+(def ^:private transition-request-key
+  :phase/transition-request)
+
+(def ^:private transition-type-key
+  :transition/type)
+
+(def ^:private transition-target-key
+  :transition/target)
+
+(def ^:private redirect-transition-type
+  :transition/redirect)
+
+(defn transition-request
+  "Return the transition request attached to a phase result, if any."
+  [result]
+  (get result transition-request-key))
+
+(defn transition-target
+  "Return the requested transition target phase, if any."
+  [result]
+  (get-in result [transition-request-key transition-target-key]))
+
+(defn redirect-requested?
+  "True when a phase result requests a redirect transition."
+  [result]
+  (= redirect-transition-type
+     (get-in result [transition-request-key transition-type-key])))
+
 ;------------------------------------------------------------------------------ Layer 1
 ;; Metric factories
 
@@ -121,6 +149,13 @@
   {:status  :success
    :output  {:skipped true :reason reason}
    :metrics {:tokens 0 :duration-ms 0 :cost-usd 0.0}})
+
+(defn request-redirect
+  "Attach a redirect transition request to a phase result."
+  [result target-phase]
+  (assoc result transition-request-key
+         {transition-type-key   redirect-transition-type
+          transition-target-key target-phase}))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

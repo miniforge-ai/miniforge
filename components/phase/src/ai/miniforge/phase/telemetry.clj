@@ -141,7 +141,7 @@
    - ctx      — execution context map
    - phase-kw — phase keyword (e.g. :verify, :review, :release)
    - result   — optional map with :outcome, :duration-ms, :tokens,
-                 :cost-usd, :error, :redirect-to, :artifacts"
+                 :cost-usd, :error, :phase/transition-request, :artifacts"
   [ctx phase-kw result]
   (when-let [stream (resolve-event-stream ctx)]
     (let [workflow-id (resolve-workflow-id ctx)]
@@ -164,7 +164,7 @@
 (defn emit-agent-started!
   "Publish an :agent/started event.
    Called when a phase begins executing an agent invocation."
-  [ctx phase-kw agent-id]
+  [ctx _phase-kw agent-id]
   (when-let [stream (resolve-event-stream ctx)]
     (let [workflow-id (resolve-workflow-id ctx)]
       (try
@@ -177,7 +177,7 @@
 (defn emit-agent-completed!
   "Publish an :agent/completed event.
    Called when a phase's agent invocation finishes."
-  [ctx phase-kw agent-id result]
+  [ctx _phase-kw agent-id _result]
   (when-let [stream (resolve-event-stream ctx)]
     (let [workflow-id (resolve-workflow-id ctx)]
       (try
@@ -203,7 +203,7 @@
    - ctx      — execution context map
    - phase-kw — phase keyword that completed (used as the milestone name)
    - result   — result map from the phase (may include :artifacts, :tokens, :cost-usd)"
-  [ctx phase-kw result]
+  [ctx phase-kw _result]
   (when-let [stream (resolve-event-stream ctx)]
     (let [workflow-id (resolve-workflow-id ctx)]
       (try
@@ -245,7 +245,7 @@
    - ctx      — execution context map
    - phase-kw — phase keyword used as the milestone identifier
    - result   — result map from the phase (may include :artifacts, :tokens, :cost-usd)"
-  [ctx phase-kw result]
+  [ctx phase-kw _result]
   (when-let [stream (resolve-event-stream ctx)]
     (let [workflow-id (resolve-workflow-id ctx)]
       (try

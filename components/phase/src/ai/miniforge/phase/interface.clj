@@ -137,6 +137,18 @@
   "Check if a result map indicates retry."
   registry/retrying?)
 
+(def transition-request
+  "Return the transition request attached to a phase result, if any."
+  phase-result/transition-request)
+
+(def transition-target
+  "Return the requested transition target phase, if any."
+  phase-result/transition-target)
+
+(def redirect-requested?
+  "True when a phase result requests a redirect transition."
+  phase-result/redirect-requested?)
+
 (def create-streaming-callback
   "Create a phase-scoped streaming callback when an event stream is available."
   telemetry/create-streaming-callback)
@@ -205,6 +217,10 @@
 (def skipped
   "Build a skipped-phase result for phases that short-circuit."
   phase-result/skipped)
+
+(def request-redirect
+  "Attach a redirect transition request to a phase result."
+  phase-result/request-redirect)
 
 (def test-metrics
   "Build a standard test-phase metrics map."

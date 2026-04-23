@@ -220,8 +220,8 @@
 
    Returns [ctx phase-result]."
   [interceptor ctx]
-  ;; Clear :phase map before each phase to prevent stale state (e.g. :redirect-to)
-  ;; from leaking across phase boundaries
+  ;; Clear :phase map before each phase to prevent stale transition requests
+  ;; from leaking across phase boundaries.
   (let [ctx-clean (dissoc ctx :phase)
         ctx-entered (execute-enter interceptor ctx-clean)
         phase-result (extract-phase-result ctx-entered)
@@ -241,10 +241,15 @@
       (record-phase-artifacts phase-result)
       (track-phase-files phase-result)))
 
+(defn- redirect-target
+  [phase-result]
+  (when (phase/redirect-requested? phase-result)
+    (phase/transition-target phase-result)))
+
 (defn determine-phase-event
   "Translate a phase result into an execution-machine event."
   [_phase-config phase-result]
-  (let [redirect-to (:redirect-to phase-result)]
+  (let [target-phase (redirect-target phase-result)]
     (cond
       (phase/retrying? phase-result)
       :phase/retry
@@ -255,8 +260,8 @@
       (phase/succeeded? phase-result)
       :phase/succeed
 
-      (and (phase/failed? phase-result) redirect-to)
-      (workflow-fsm/redirect-event redirect-to)
+      (and (phase/failed? phase-result) target-phase)
+      (workflow-fsm/redirect-event target-phase)
 
       (phase/failed? phase-result)
       :phase/fail
