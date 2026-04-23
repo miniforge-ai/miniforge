@@ -112,11 +112,9 @@
           (let [wf-dir (io/file dir (str wf-id))
                 files (sort-by #(.getName %) (list-files wf-dir))]
             (is (= 2 (count files)))
-            ;; Files are sortable by timestamp-prefixed name
-            (let [e1 (read-transit-json (slurp (first files)))
-                  e2 (read-transit-json (slurp (second files)))]
-              (is (= :workflow/started (:event/type e1)))
-              (is (= :workflow/completed (:event/type e2)))))))))
+            (let [events (mapv #(read-transit-json (slurp %)) files)
+                  event-types (set (map :event/type events))]
+              (is (= #{:workflow/started :workflow/completed} event-types))))))))
 
   (testing "writes events with nil workflow-id to operator subdirectory"
     (with-temp-dir

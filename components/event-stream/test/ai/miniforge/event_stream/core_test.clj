@@ -365,17 +365,20 @@
       (is (= "API error" (:workflow/failure-reason event))))))
 
 ;------------------------------------------------------------------------------ Layer 3
-;; Phase completed redirect
+;; Phase completed transition request
 
-(deftest phase-completed-redirect-test
-  (testing "phase-completed with redirect-to field"
+(deftest phase-completed-transition-request-test
+  (testing "phase-completed includes transition requests"
     (let [stream (no-op-stream)
           wf-id (random-uuid)
           event (core/phase-completed stream wf-id :review
-                                       {:outcome :redirect
-                                        :redirect-to :implement})]
-      (is (= :redirect (:phase/outcome event)))
-      (is (= :implement (:phase/redirect-to event))))))
+                                      {:outcome :failure
+                                       :phase/transition-request
+                                       {:transition/type :transition/redirect
+                                        :transition/target :implement}})]
+      (is (= :failure (:phase/outcome event)))
+      (is (= :implement
+             (get-in event [:phase/transition-request :transition/target]))))))
 
 (deftest phase-completed-with-error-test
   (testing "phase-completed captures error details"

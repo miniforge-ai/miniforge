@@ -61,24 +61,24 @@
   (testing "changes-requested sets :failed status (not :retrying)"
     (let [phase (simulate-leave-review :changes-requested 1 4)]
       (is (= :failed (:status phase))
-          "Status should be :failed so execution engine uses redirect-to")
+          "Status should be :failed so execution can follow the transition request")
       (is (not (phase/retrying? phase))
           "Should NOT be retrying (would cause review to re-run in place)"))))
 
 (deftest changes-requested-within-budget-redirects-to-implement
-  (testing "changes-requested within budget sets redirect-to :implement"
+  (testing "changes-requested within budget requests redirect to :implement"
     (let [phase (simulate-leave-review :changes-requested 1 4)]
-      (is (= :implement (:redirect-to phase))
+      (is (= :implement (phase/transition-target phase))
           "Should redirect to implement for repair")
       (is (phase/failed? phase)
-          "Must be failed for redirect-to to be honored by execution engine"))))
+          "Must be failed for the transition request to be honored by execution"))))
 
 (deftest changes-requested-over-budget-no-redirect
   (testing "changes-requested at max iterations fails without redirect"
     (let [phase (simulate-leave-review :changes-requested 4 4)]
       (is (= :failed (:status phase))
           "Should be failed")
-      (is (nil? (:redirect-to phase))
+      (is (not (phase/redirect-requested? phase))
           "Should NOT redirect — iteration budget exhausted"))))
 
 (deftest changes-requested-stores-review-feedback
@@ -95,21 +95,21 @@
     (let [phase (simulate-leave-review :rejected 1 4)]
       (is (= :failed (:status phase))
           "Rejected must set :failed — falling through to :completed lets an empty-diff PR open")
-      (is (= :implement (:redirect-to phase))
+      (is (= :implement (phase/transition-target phase))
           "Rejected within budget must redirect to implement like :changes-requested"))))
 
 (deftest rejected-over-budget-no-redirect
   (testing ":rejected at max iterations fails terminally (no redirect)"
     (let [phase (simulate-leave-review :rejected 4 4)]
       (is (= :failed (:status phase)))
-      (is (nil? (:redirect-to phase))))))
+      (is (not (phase/redirect-requested? phase))))))
 
 (deftest approved-sets-completed-status
   (testing "approved review sets :completed status"
     (let [phase (simulate-leave-review :approved 1 4)]
       (is (= :completed (:status phase))
           "Approved review should complete normally")
-      (is (nil? (:redirect-to phase))
+      (is (not (phase/redirect-requested? phase))
           "No redirect needed for approved review"))))
 
 (deftest iteration-counter-incremented-on-redirect
@@ -119,18 +119,18 @@
           "Iterations should increment from 1 to 2"))))
 
 ;; ============================================================================
-;; Execution engine integration: failed + redirect-to triggers redirect
+;; Execution engine integration: failed + transition request triggers redirect
 ;; ============================================================================
 
-(deftest failed-with-redirect-not-confused-with-retrying
-  (testing "execution engine distinguishes failed+redirect from retrying"
-    (let [phase-result {:status :failed :redirect-to :implement}]
+(deftest failed-with-transition-request-not-confused-with-retrying
+  (testing "execution engine distinguishes failed+transition-request from retrying"
+    (let [phase-result (phase/request-redirect {:status :failed} :implement)]
       ;; The key invariant: failed? is true, retrying? is false
       (is (phase/failed? phase-result)
           "Should be detected as failed")
       (is (not (phase/retrying? phase-result))
           "Should NOT be detected as retrying")
-      ;; This means determine-next-index will hit the redirect branch,
+      ;; This means execution will hit the redirect branch,
       ;; not the retrying branch (which would stay at current index)
       )))
 

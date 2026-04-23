@@ -131,12 +131,12 @@
     on-fail (assoc :phase-config {:on-fail on-fail})))
 
 (deftest leave-verify-redirects-on-normal-failure-test
-  (testing "normal verify failure with :on-fail configured sets :redirect-to"
+  (testing "normal verify failure with :on-fail configured requests a redirect"
     (let [ctx (make-leave-ctx {:status :error
                                :error {:message "Tests failed: 3 assertions"}}
                               :implement)
           result (verify/leave-verify ctx)]
-      (is (= :implement (get-in result [:phase :redirect-to])))
+      (is (= :implement (phase/transition-target (get result :phase))))
       (is (= :failed (get-in result [:phase :status]))))))
 
 (deftest leave-verify-no-redirect-on-timeout-test
@@ -145,7 +145,7 @@
                                :error {:message "Agent timed out after 600000ms"}}
                               :implement)
           result (verify/leave-verify ctx)]
-      (is (nil? (get-in result [:phase :redirect-to])))
+      (is (not (phase/redirect-requested? (get result :phase))))
       (is (= :failed (get-in result [:phase :status])))
       (is (true? (get-in result [:phase :error :timeout?]))))))
 
@@ -155,7 +155,7 @@
                                :error {:message "429 rate limit exceeded"}}
                               :implement)
           result (verify/leave-verify ctx)]
-      (is (nil? (get-in result [:phase :redirect-to])))
+      (is (not (phase/redirect-requested? (get result :phase))))
       (is (= :failed (get-in result [:phase :status])))
       (is (some? (get-in result [:phase :error :rate-limited?]))))
 
@@ -164,15 +164,15 @@
                                  :error {:message "You've hit your limit · resets 7pm"}}
                                 :implement)
             result (verify/leave-verify ctx)]
-        (is (nil? (get-in result [:phase :redirect-to])))))))
+        (is (not (phase/redirect-requested? (get result :phase))))))))
 
 (deftest leave-verify-no-redirect-without-on-fail-test
-  (testing "normal failure without :on-fail does not set :redirect-to"
+  (testing "normal failure without :on-fail does not request a redirect"
     (let [ctx (make-leave-ctx {:status :error
                                :error {:message "Tests failed"}}
                               nil)
           result (verify/leave-verify ctx)]
-      (is (nil? (get-in result [:phase :redirect-to])))
+      (is (not (phase/redirect-requested? (get result :phase))))
       (is (= :failed (get-in result [:phase :status]))))))
 
 ;------------------------------------------------------------------------------ Rich Comment

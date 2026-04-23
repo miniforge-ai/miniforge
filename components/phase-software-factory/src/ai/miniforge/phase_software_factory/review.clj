@@ -126,8 +126,8 @@
 
    Records review metrics: issues found, approval status.
    When review decision is :changes-requested and within iteration budget,
-   sets status to :failed with :redirect-to :implement so the execution engine
-   jumps back to implement with the review feedback attached."
+   sets status to :failed with a redirect transition request so the execution
+   engine jumps back to implement with the review feedback attached."
   [ctx]
   (let [start-time (get-in ctx [:phase :started-at])
         end-time (System/currentTimeMillis)
@@ -143,7 +143,7 @@
         ;; blocking issues. Iter 23 regression: :rejected fell through to
         ;; :completed, letting release open a PR against a reviewer-rejected
         ;; artifact. Both decisions now set :failed; within iteration budget
-        ;; the phase redirects to :implement for repair.
+        ;; the phase requests a redirect to :implement for repair.
         ;; Preserve :failed from gate validation — don't overwrite with :completed.
         gate-failed? (= :failed (:phase/status (get-in ctx [:phase])))
         reviewer-blocked? (contains? #{:rejected :changes-requested} review-decision)
@@ -171,10 +171,11 @@
               (knowledge/capture-feedback-learning!
                (:knowledge-store ctx) :reviewer
                (get-in ctx [:execution/input :title]) feedback)
-              (-> updated-ctx
-                  (update-in [:phase :iterations] (fnil inc 1))
-                  (assoc-in [:phase :review-feedback] feedback)
-                  (assoc-in [:phase :redirect-to] :implement)))
+              (let [phase-result (-> (:phase updated-ctx)
+                                     (update :iterations (fnil inc 1))
+                                     (assoc :review-feedback feedback)
+                                     (phase/request-redirect :implement))]
+                (assoc updated-ctx :phase phase-result)))
             updated-ctx)
       (phase/emit-phase-completed! :review
         {:outcome     (if (= :completed phase-status) :success :failure)
@@ -199,11 +200,12 @@
 
       ;; Has on-fail transition - redirect
       on-fail
-      (-> ctx
-          (assoc-in [:phase :status] :failed)
-          (assoc-in [:phase :redirect-to] on-fail)
-          (assoc-in [:phase :error] {:message (ex-message ex)
-                                     :data (ex-data ex)}))
+      (let [phase-result (-> (:phase ctx)
+                             (assoc :status :failed)
+                             (assoc :error {:message (ex-message ex)
+                                            :data (ex-data ex)})
+                             (phase/request-redirect on-fail))]
+        (assoc ctx :phase phase-result))
 
       ;; No recovery - propagate
       :else

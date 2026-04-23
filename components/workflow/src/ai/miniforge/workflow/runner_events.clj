@@ -119,13 +119,14 @@
                            {:message (messages/t :status/gate-failed) :details msg})
                          (when-let [msg (:message result)]
                            {:message msg})))
+        transition-request (phase/transition-request result)
         tokens   (get-in result [:metrics :tokens]
                    (get-in result [:phase/metrics :tokens]))
         cost-usd (get-in result [:metrics :cost-usd]
                    (get-in result [:phase/metrics :cost-usd]))]
     (cond-> {:outcome outcome :duration-ms duration-ms}
       error-info    (assoc :error error-info)
-      (:redirect-to result) (assoc :redirect-to (:redirect-to result))
+      transition-request (assoc :phase/transition-request transition-request)
       tokens        (assoc :tokens tokens)
       cost-usd      (assoc :cost-usd cost-usd))))
 

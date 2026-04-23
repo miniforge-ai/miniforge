@@ -202,7 +202,7 @@
   "Post-processing for verification phase.
 
    Records test metrics: count, pass rate, coverage.
-   When verification fails and :on-fail is configured, sets :redirect-to
+   When verification fails and :on-fail is configured, requests a redirect
    so the execution engine jumps to the target phase (typically :implement)."
   [ctx]
   (let [start-time (get-in ctx [:phase :started-at])
@@ -244,12 +244,13 @@
     ;; implement won't help, so we do not redirect in those cases.
     (doto (if (and (= :failed phase-status) on-fail
                      (not timeout?) (not rate-limited?))
-              (-> updated-ctx
-                  (assoc-in [:phase :redirect-to] on-fail)
-                  (assoc-in [:phase :error]
-                            {:message      error-message
-                             :agent-status agent-status
-                             :gate-failed? gate-failed?}))
+              (let [phase-result (-> (:phase updated-ctx)
+                                     (assoc :error
+                                            {:message      error-message
+                                             :agent-status agent-status
+                                             :gate-failed? gate-failed?})
+                                     (phase/request-redirect on-fail))]
+                (assoc updated-ctx :phase phase-result))
               (cond-> updated-ctx
                 (= :failed phase-status)
                 (assoc-in [:phase :error]
@@ -281,10 +282,11 @@
 
       ;; Has on-fail transition - redirect
       on-fail
-      (-> ctx
-          (assoc-in [:phase :status] :failed)
-          (assoc-in [:phase :redirect-to] on-fail)
-          (assoc-in [:phase :error] (phase/exception-error ex)))
+      (let [phase-result (-> (:phase ctx)
+                             (assoc :status :failed)
+                             (assoc :error (phase/exception-error ex))
+                             (phase/request-redirect on-fail))]
+        (assoc ctx :phase phase-result))
 
       ;; No recovery - propagate
       :else
