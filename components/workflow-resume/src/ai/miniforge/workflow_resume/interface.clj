@@ -40,6 +40,9 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Pure extractors
 
+(def completed?                  core/completed?)
+(def failed?                     core/failed?)
+(def paused?                     core/paused?)
 (def extract-completed-dag-tasks core/extract-completed-dag-tasks)
 (def extract-dag-pause-info      core/extract-dag-pause-info)
 (def extract-completed-phases    core/extract-completed-phases)

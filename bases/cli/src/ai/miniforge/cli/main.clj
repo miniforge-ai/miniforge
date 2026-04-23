@@ -65,7 +65,9 @@
    [ai.miniforge.cli.main.commands.artifact-cmds :as cmd-artifact]
    [ai.miniforge.cli.main.commands.etl :as cmd-etl]
    [ai.miniforge.agent.interface :as agent]
+   [ai.miniforge.event-stream.interface :as es]
    [ai.miniforge.mcp-context-server.interface :as mcp-context-server]
+   [ai.miniforge.workflow-resume.interface :as wr]
    [ai.miniforge.lsp-mcp-bridge.main :as lsp-bridge]
    [ai.miniforge.lsp-mcp-bridge.tasks :as lsp-tasks]
    [slingshot.slingshot :refer [try+]]))
@@ -101,6 +103,52 @@
   [cmd]
   (let [{:keys [exit]} (process/sh "which" cmd)]
     (zero? exit)))
+
+(defn- workflow-status-summary
+  [workflow-id]
+  (let [events-dir (app-config/events-dir)
+        events (es/read-workflow-events-by-id events-dir workflow-id)
+        reconstructed (wr/reconstruct-context events-dir workflow-id)
+        last-event (last events)]
+    {:workflow-id workflow-id
+     :status (cond
+               (wr/completed? reconstructed) :completed
+               (wr/failed? reconstructed) :failed
+               (wr/paused? reconstructed) :paused
+               :else :running)
+     :spec-name (some-> reconstructed :workflow-spec :name)
+     :event-count (:event-count reconstructed)
+     :completed-phases (:completed-phases reconstructed)
+     :completed-dag-task-count (count (:completed-dag-tasks reconstructed))
+     :last-updated (:event/timestamp last-event)}))
+
+(defn- print-workflow-status
+  [{:keys [workflow-id status spec-name event-count completed-phases
+           completed-dag-task-count last-updated]}]
+  (display/print-info (messages/t :status/workflow {:workflow-id workflow-id}))
+  (println "  status:" (name status))
+  (println "  spec:" (or spec-name "unknown"))
+  (println "  events:" event-count)
+  (println "  last-updated:" (or last-updated "unknown"))
+  (println "  completed-phases:"
+           (if (seq completed-phases)
+             (str/join ", " (map name completed-phases))
+             "none"))
+  (println "  completed-dag-tasks:" completed-dag-task-count))
+
+(defn- all-workflow-summaries
+  []
+  (let [events-dir (app-config/events-dir)]
+    (if (fs/exists? events-dir)
+      (->> (fs/list-dir events-dir)
+           (filter fs/directory?)
+           (map #(fs/file-name %))
+           (keep (fn [workflow-id]
+                   (try
+                     (workflow-status-summary workflow-id)
+                     (catch Exception _ nil))))
+           (sort-by :last-updated #(compare %2 %1)))
+      [])))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Command implementations
@@ -141,12 +189,20 @@
   [m]
   (let [{:keys [workflow-id]} (get-opts m)]
     (if workflow-id
-      (do
-        (display/print-info (messages/t :status/workflow {:workflow-id workflow-id}))
-        (println (messages/t :status/workflow-todo)))
+      (try
+        (print-workflow-status (workflow-status-summary (str workflow-id)))
+        (catch Exception e
+          (display/print-error (str "Failed to read workflow status: " (ex-message e)))))
       (do
         (display/print-info (messages/t :status/all-workflows))
-        (println (messages/t :status/all-workflows-todo))))))
+        (if-let [summaries (seq (take 10 (all-workflow-summaries)))]
+          (doseq [{:keys [workflow-id status spec-name last-updated]} summaries]
+            (println (format "  %-36s %-10s %s"
+                             workflow-id
+                             (name status)
+                             (or spec-name "unknown")))
+            (println "    last-updated:" (or last-updated "unknown")))
+          (println "  none"))))))
 
 ;; Config commands — one-liner delegates
 (defn config-init-cmd [m] (config/cmd-init (get-opts m)))

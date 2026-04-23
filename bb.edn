@@ -375,20 +375,17 @@
   dogfood:check
   {:doc "Check dogfooding prerequisites"
    :requires ([dogfood])
-   :task (dogfood/check)}
+   :task (apply dogfood/check *command-line-args*)}
 
   dogfood:dry-run
-  {:doc "Dry run - show what would be executed"
-   :task (p/shell "bb" "scripts/dogfood-dag.clj" "dogfood-tasks.edn")}
+  {:doc "Show the dogfood command that would run (usage: bb dogfood:dry-run [spec-path])"
+   :requires ([dogfood])
+   :task (apply dogfood/dry-run *command-line-args*)}
 
   dogfood
-  {:doc "Run dogfooding session - miniforge works on itself"
-   :task (do
-           (println "🤖 Starting miniforge dogfooding...")
-           (println "📖 See DOGFOODING.md for full guide")
-           (println "\n⚠️  Note: Full execution requires task-1 completion")
-           (println "   (wiring LLM backend into generate.clj)")
-           (p/shell "bb" "dogfood:dry-run"))}
+  {:doc "Run dogfooding via the development CLI (usage: bb dogfood [spec-path])"
+   :requires ([dogfood])
+   :task (apply dogfood/run *command-line-args*)}
 
   ;; ──────────────────────────────────────────────────────────────────────────
   ;; MCP Context Server
@@ -483,6 +480,7 @@
                  "components/event-stream/src"
                  "components/event-stream/resources"
                  "components/supervisory-state/src"
+                 "components/workflow-resume/src"
                  "components/dag-primitives/src"
                  "components/dag-executor/src"
                  "components/dag-executor/resources"
