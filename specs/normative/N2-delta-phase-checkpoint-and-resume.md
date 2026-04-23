@@ -4,16 +4,16 @@
   Copyright 2025-2026 Christopher Lester. Licensed under Apache 2.0.
 -->
 
-# Normative Spec Extension: Phase Checkpoint & Resume
+# Normative Spec Extension: Phase Checkpoint, Machine Snapshot & Resume
 
 ## Purpose
 
-Make miniforge workflows genuinely resumable at **phase granularity**.
+Make miniforge workflows genuinely resumable at **phase granularity** with an
+authoritative **execution-machine snapshot**.
 
-N2 §1.1 already lists **resumability** as a core design principle
-("Workflows MUST be resumable from last successful phase"). This delta
-defines what that requires of implementations and what the user-facing
-contract looks like. Without it, users who are rate-limited,
+N2 §1.1 already lists **resumability** as a core design principle. This
+delta defines what that requires of implementations and what the
+user-facing contract looks like. Without it, users who are rate-limited,
 disconnected, or hit an LLM-provider bug mid-workflow must re-run
 already-paid-for phases to make progress — a product failure.
 
@@ -41,9 +41,10 @@ back to the broken one.
 
 - `N2-workflows.md` — parent spec. §1.1 principle #5 mandates
   resumability; this delta operationalizes it.
-- `N3-event-stream.md` — checkpoint writes emit events
+- `N3-event-stream.md` — checkpoint and snapshot writes emit events
   (`:workflow/checkpoint-written`, `:workflow/checkpoint-write-failed`,
-  `:workflow/resumed`).
+  `:workflow/machine-snapshot-written`,
+  `:workflow/machine-snapshot-write-failed`, `:workflow/resumed`).
 - `workflow-phase-checkpoint-and-resume.spec.edn` — the work spec that
   implements this extension.
 - `agent-stream-watchdog-and-resume.spec.edn` — complementary
@@ -60,18 +61,22 @@ worktree from its scratch ref.
 
 ## Spec metadata
 
-- **Title:** Phase Checkpoint & Resume
+- **Title:** Phase Checkpoint, Machine Snapshot & Resume
 - **Type:** Normative extension to N2
-- **Version:** 0.1.0-draft
+- **Version:** 0.2.0-draft
 - **Status:** Draft
 - **Conformance:** MUST (on any implementation that persists to disk)
-- **Date:** 2026-04-18
+- **Date:** 2026-04-22
 
 ## Definitions
 
 - **Phase checkpoint** — A durable serialization of a phase's output
   sufficient to reconstruct that phase's contribution to the execution
   context without re-running the phase.
+- **Execution-machine snapshot** — A durable serialization of the
+  authoritative workflow machine state, machine context, and resume
+  metadata required to continue execution without rebuilding control
+  flow from ad hoc phase indexes.
 - **Workflow manifest** — A per-workflow index file describing the
   workflow's identity, spec provenance, completed phases, and resume
   metadata.
@@ -82,22 +87,25 @@ worktree from its scratch ref.
 
 ## Normative Requirements
 
-### §1. Phase checkpoint after successful `:leave`
+### §1. Phase checkpoint and machine snapshot after successful transition
 
 When a phase's `:leave` interceptor completes without error, the
-workflow runner MUST persist the phase's contribution to
-`[:execution/phase-results <phase>]` to the checkpoint store as a
-single `.edn` file.
+workflow runner MUST persist:
+
+1. The phase's contribution to `[:execution/phase-results <phase>]` as
+   a single `.edn` file
+2. The updated execution-machine snapshot for the workflow run
 
 The write MUST be atomic (write to a temp file in the same directory,
 then rename). A partial or corrupt checkpoint MUST NOT be observable by
 a later resume.
 
-If the write fails (disk full, permission denied, etc.), the workflow
-MUST NOT fail as a result. The runner MUST log the error and emit a
-`:workflow/checkpoint-write-failed` event, then continue. Loss of a
-single checkpoint degrades resumability for that run but does not
-compromise the run itself.
+If one of these writes fails (disk full, permission denied, etc.), the
+workflow MUST NOT fail as a result. The runner MUST log the error and
+emit a `:workflow/checkpoint-write-failed` or
+`:workflow/machine-snapshot-write-failed` event, then continue. Loss of
+a single checkpoint or snapshot degrades resumability for that run but
+does not compromise the run itself.
 
 ### §2. Workflow manifest
 
@@ -110,6 +118,8 @@ file containing at least:
 - `:workflow/started-at` — ISO-8601 timestamp
 - `:workflow/phases-completed` — ordered vector of phase keywords
   checkpointed so far
+- `:workflow/machine-state` — current authoritative machine state keyword
+- `:workflow/machine-snapshot-path` — path to the latest machine snapshot
 - `:workflow/last-checkpoint-at` — ISO-8601 timestamp
 - `:workflow/backend` — string identifying the LLM backend in use
   (`claude`, `codex`, `openai`, etc.)
@@ -117,7 +127,7 @@ file containing at least:
   `:cancelled`, `:paused`
 
 The manifest MUST be updated atomically after each successful phase
-checkpoint.
+checkpoint or machine snapshot write.
 
 ### §3. Checkpoint store location
 
@@ -127,7 +137,7 @@ configurable via user config (`:checkpoint/root`) and per-invocation
 flag. A host-level GC policy MUST NOT delete checkpoints under the
 default retention window (see §7).
 
-### §4. Resume from last successful phase
+### §4. Resume from authoritative machine snapshot
 
 A user-invoked `miniforge resume <workflow-id>` command MUST:
 
@@ -135,15 +145,20 @@ A user-invoked `miniforge resume <workflow-id>` command MUST:
 2. Verify the manifest's `:workflow/spec-hash` against the current spec
    file content
 3. If the hash matches (or `--force` is passed), reconstruct the
-   execution context:
+   execution context from the machine snapshot and phase checkpoints:
+   - `:execution/machine-snapshot` restored from the persisted snapshot
+   - `:execution/machine-state` restored from the authoritative snapshot
+   - `:execution/machine-context` restored from the authoritative snapshot
    - `:execution/phase-results` populated from the checkpoint files
-   - `:execution/phase-index` pointing to the first phase NOT in
-     `:workflow/phases-completed`
    - `:execution/id` set to the original workflow id (no new id, no new
      event-log directory)
-4. Continue execution from that phase
+   - derived projections such as `:workflow/status` and
+     `:workflow/current-phase` recomputed from the machine state
+4. Continue execution by dispatching the next legal machine event
 5. Emit a `:workflow/resumed` event with
-   `{:from-phase <phase> :skipping <vector-of-skipped-phases>}`
+   `{:from-state <machine-state>
+     :from-phase <phase-or-nil>
+     :skipping <vector-of-skipped-phases>}`
 
 If the hash does NOT match and `--force` is NOT passed, the command
 MUST error with a message that identifies the drift and lists the
@@ -154,9 +169,10 @@ specs.
 
 `miniforge resume <id> --from-phase <phase>` MUST discard any
 checkpoints for `<phase>` and any later phases, truncate
-`:workflow/phases-completed`, and resume from `<phase>`. This supports
-the case where a bug is discovered in a specific phase but earlier
-phases are still valid.
+`:workflow/phases-completed`, rebuild the execution-machine snapshot to
+the last state before `<phase>`, and resume from `<phase>`. This
+supports the case where a bug is discovered in a specific phase but
+earlier phases are still valid.
 
 ### §6. Resumable workflow enumeration
 
@@ -199,15 +215,20 @@ stream contract):
   - `:workflow/id`, `:phase/name`, `:checkpoint/path`, `:checkpoint/size-bytes`
 - `:workflow/checkpoint-write-failed` on write error
   - `:workflow/id`, `:phase/name`, `:error/message`
+- `:workflow/machine-snapshot-written` after each successful snapshot write
+  - `:workflow/id`, `:machine/state`, `:snapshot/path`, `:snapshot/size-bytes`
+- `:workflow/machine-snapshot-write-failed` on snapshot write error
+  - `:workflow/id`, `:machine/state`, `:error/message`
 - `:workflow/resumed` on successful resume
-  - `:workflow/id`, `:from-phase`, `:skipping`
+  - `:workflow/id`, `:from-state`, `:from-phase`, `:skipping`
 - `:workflow/spec-hash-mismatch` on detected drift
   - `:workflow/id`, `:expected-hash`, `:actual-hash`
 
 ### §10. Billing and replay semantics
 
 A resumed workflow MUST NOT re-execute phases listed in
-`:workflow/phases-completed`. In particular:
+`:workflow/phases-completed` or any machine transitions already covered
+by the restored snapshot. In particular:
 
 - LLM agents for completed phases MUST NOT be invoked on resume
 - Side-effecting operations (commits, PRs, external API calls)
@@ -218,8 +239,9 @@ for the work they lost.
 
 ## Conformance Levels
 
-- **MUST** — §1 (checkpoint after `:leave`), §2 (manifest), §4 (resume
-  from last successful phase), §9 (event emission), §10 (no re-execute).
+- **MUST** — §1 (checkpoint and machine snapshot after `:leave`), §2
+  (manifest), §4 (resume from authoritative machine snapshot), §9
+  (event emission), §10 (no re-execute).
 - **SHOULD** — §5 (`--from-phase`), §6 (`list --resumable`), §7 (GC
   policy), §8 (worktree integration).
 - **MAY** — Cross-workflow replay (`miniforge replay <old-id> --into
@@ -245,6 +267,13 @@ different outcome than one who resumes an identical spec. Silently
 resuming across a spec edit produces subtly wrong results. The
 explicit `--force` flag preserves the override for the cases where the
 user knows what they're doing.
+
+### Why machine snapshot, not phase index
+
+Phase indexes alone are not authoritative enough once a workflow can
+skip phases, redirect, retry, await supervision, or support multiple
+workflow profiles. The machine snapshot carries the actual control-flow
+state and eliminates a second hidden state machine in the runner.
 
 ### Why same workflow id continues
 

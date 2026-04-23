@@ -7,7 +7,7 @@
 # N2 — Workflow Execution Model
 
 **Version:** 0.5.0-draft
-**Date:** 2026-03-08
+**Date:** 2026-04-22
 **Status:** Draft
 **Conformance:** MUST
 
@@ -20,7 +20,7 @@ This specification defines the **workflow execution model** for miniforge autono
 - **Phase graph** structure and execution order
 - **Phase responsibilities** and expected outputs
 - **Inner loop** validation and repair mechanism
-- **Outer loop** phase transition state machine
+- **Unified execution machine** for workflow progression
 - **Gate contract** for validation checkpoints
 - **Context handoff** protocol between phases
 
@@ -32,39 +32,69 @@ This specification builds upon core concepts defined in N1 (Architecture).
 2. **Fail-safe** - Validation failures MUST trigger repair, not silent progression
 3. **Observable** - All phase transitions MUST emit events (see N3)
 4. **Traceable** - Complete evidence trail from intent to outcome (see N6)
-5. **Resumable** - Workflows MUST be resumable from last successful phase
+5. **Resumable** - Workflows MUST be resumable from an authoritative machine snapshot
 
 ---
 
 ## 2. Workflow Lifecycle
 
-### 2.1 Workflow States
+### 2.1 Authoritative Execution Model
+
+Each workflow run MUST execute against exactly one compiled **execution machine**.
+
+The execution machine is the authoritative source of truth for:
+
+1. Workflow lifecycle status
+2. Current phase or non-phase execution state
+3. Retry and redirect budgets
+4. Resume checkpoints and snapshots
+5. Legal next transitions
+
+Implementations MUST NOT split authority between a coarse lifecycle FSM
+and separate ad hoc phase-index or redirect logic.
+
+`:workflow/status`, `:workflow/current-phase`, and similar convenience
+fields MAY be materialized for UI, telemetry, or APIs, but they MUST be
+derived projections of the execution machine state.
+
+### 2.2 Workflow State Projections
+
+The execution machine MUST project at least these workflow lifecycle states:
 
 ```clojure
 :workflow/status
   :pending      ; Workflow created, not yet started
-  :executing    ; Workflow running (in some phase)
+  :running      ; Workflow running (in some phase or supervisory wait state)
   :completed    ; Workflow completed successfully
   :failed       ; Workflow failed (gate failure, agent error)
   :cancelled    ; Workflow cancelled by user
 ```
 
-### 2.2 State Transition Diagram
+The machine MAY use more specific internal state identifiers such as `:phase/plan`,
+`:phase/verify`, `:awaiting-operator`, or `:releasing`, but those states MUST map
+deterministically onto the lifecycle projection above.
+
+### 2.3 State Transition Diagram
 
 ```text
-pending ──[start]──► executing ──[complete all phases]──► completed
-                         │
-                         │ [gate failure, agent error]
-                         ▼
-                       failed
-                         ▲
-                         │
-                   [user action]
-                         │
-                     cancelled
+pending ──[start]──► running ──[complete machine]──► completed
+                        │
+                        │ [terminal failure]
+                        ▼
+                      failed
+                        ▲
+                        │
+                  [cancel action]
+                        │
+                    cancelled
 ```
 
-### 2.3 Workflow Lifecycle Events
+Within `:running`, the execution machine MAY move through workflow-defined states,
+including phase states, retry states, review or release states, and temporary
+awaiting-supervision states, provided those transitions are encoded in the same
+authoritative machine.
+
+### 2.4 Workflow Lifecycle Events
 
 Implementations MUST emit these events (see N3):
 
@@ -77,13 +107,59 @@ Implementations MUST emit these events (see N3):
 
 ---
 
-## 3. Phase Graph
+## 3. Workflow Graph and Phase Model
 
-### 3.1 Standard Phase Sequence
+### 3.1 Workflow Definition Model
+
+A workflow definition is a graph that is compiled into the per-run execution machine.
+
+Implementations MUST support workflow definitions that declare:
+
+1. Workflow family (for example `:software-factory` or `:etl`)
+2. Workflow profile (for example `:canonical-sdlc`, `:quick-fix`, `:review-first`, `:financial-etl`)
+3. Nodes or states
+4. Transitions and terminal states
+5. Retry, rollback, or redirect budgets
+6. Optional skip or policy-gated edges
+
+### 3.1.1 Canonical SDLC Profile
 
 ```text
 Plan → Design → Implement → Verify → Review → Release → Observe
 ```
+
+The sequence above defines the **canonical SDLC** profile for software-factory workflows.
+It is not the only valid workflow shape. ETL workflows and future SDLC paradigms MAY
+compile different graphs so long as they satisfy this specification's machine,
+gate, evidence, and observability requirements.
+
+### 3.1.2 Workflow Family and Profile Selection
+
+Implementations MUST separate **workflow selection** from **workflow execution**:
+
+1. Selection chooses a workflow family, profile, and policy set for the run
+2. Execution runs the compiled machine for that chosen definition
+
+The selected definition MAY be static, policy-driven, or later learned by convergence logic,
+but once execution begins, the run MUST have one authoritative compiled machine snapshot.
+Mid-run re-planning MAY be supported only as an explicit machine transition or intervention,
+not by mutating the workflow graph out-of-band.
+
+### 3.1.3 Phase Outcome Semantics
+
+Phases MUST NOT imperatively choose the next phase by mutating execution indexes,
+redirect targets, or other control-flow fields.
+
+Instead, a phase MUST emit one or more outcome events, such as:
+
+- `:phase/succeeded`
+- `:phase/failed`
+- `:phase/retry-requested`
+- `:phase/rollback-requested`
+- `:phase/escalated`
+
+The compiled execution machine MUST determine the legal next transition from those events,
+its current state, guards, and configured budgets.
 
 ### 3.2 Phase Definitions
 
@@ -450,7 +526,11 @@ Implementations MUST:
 1. Extract signals from workflow execution (duration, iterations, outcomes)
 2. Update knowledge base with learnings
 3. Propose heuristic improvements (if patterns detected)
-4. Record in learning layer for meta loop (see N1, Section 3.3)
+4. Record signals for the learning layer and meta loop (see N1, Section 3.3)
+
+The Observe phase remains part of the per-run execution machine. The cross-run learning
+meta loop consumes Observe outputs and other evidence after or alongside workflow execution,
+but it is not itself the live supervisory mechanism for phase transitions.
 
 ```clojure
 ;; Observe output schema
@@ -492,23 +572,26 @@ Before executing a phase, implementations MUST verify:
 
 For each phase, implementations MUST:
 
-1. **Emit phase-started event** (see N3)
-2. **Initialize agent** with context
-3. **Execute agent** (invoke method)
-4. **Run inner loop** validation and repair (see Section 5)
-5. **Execute gates** (see Section 6)
-6. **Store artifacts** with provenance (see N6)
-7. **Update phase context** for next phase
-8. **Emit phase-completed event** (see N3)
+1. **Confirm the current machine state** permits entering that phase
+2. **Emit phase-started event** (see N3)
+3. **Initialize agent** with context
+4. **Execute agent** (invoke method)
+5. **Run inner loop** validation and repair (see Section 5)
+6. **Execute gates** (see Section 6)
+7. **Emit phase outcome event(s)** for the execution machine
+8. **Persist machine snapshot and artifacts** with provenance (see N6)
+9. **Update derived phase context** for downstream consumers
+10. **Emit phase-completed or phase-failed event** (see N3)
 
 ### 4.3 Phase Failure Handling
 
 If a phase fails, implementations MUST:
 
-1. **Emit phase-failed event** with reason
+1. **Emit phase-failed and machine-transition events** with reason
 2. **Record partial evidence** (even for incomplete phase)
-3. **Halt workflow** (do not proceed to next phase)
-4. **Escalate to human** with failure details and remediation options
+3. **Apply the failure transition defined by the execution machine**
+4. **Notify the supervisory machine** so live governance state reflects the failure
+5. **Escalate to human** with failure details and remediation options when machine policy requires it
 
 Options for user:
 
@@ -516,6 +599,10 @@ Options for user:
 - Skip phase (if safe)
 - Cancel workflow
 - Override gate (if permitted by policy)
+
+Human or automated intervention MUST flow through bounded supervisory control actions.
+The workflow runner MUST NOT accept direct phase-index manipulation or uncontrolled
+state mutation as a substitute for those actions.
 
 ### 4.4 Phase Context Handoff
 
@@ -525,6 +612,9 @@ Each phase MUST receive a complete context:
 {:workflow/id uuid
  :workflow/spec {...}              ; Original specification
  :workflow/intent {...}            ; Intent declaration
+
+ :execution/machine-state keyword  ; Current authoritative execution state
+ :execution/machine-snapshot {...} ; Durable snapshot for resume and supervision
 
  :phase/name keyword               ; Current phase
  :phase/input-context
@@ -895,7 +985,7 @@ If phase skipped, implementations MUST emit:
 
 ### 8.1 Resume Requirements
 
-Implementations MUST support resuming workflows from last successful phase if:
+Implementations MUST support resuming workflows from an authoritative machine snapshot if:
 
 - Workflow failed due to transient error (LLM timeout, network issue)
 - User cancelled workflow and wants to restart
@@ -905,15 +995,16 @@ Implementations MUST support resuming workflows from last successful phase if:
 
 To resume workflow:
 
-1. **Load workflow state** from persistent storage
-2. **Identify last successful phase**
-3. **Restore context** from that phase
-4. **Resume execution** from next phase
+1. **Load the most recent machine snapshot** from persistent storage
+2. **Verify the snapshot and workflow definition** are compatible
+3. **Restore machine state, machine context, and completed phase artifacts**
+4. **Rebuild derived projections** such as `:workflow/status` and `:workflow/current-phase`
+5. **Resume execution** by dispatching the next legal machine event
 
 ```clojure
 ;; Resume workflow
 (workflow/resume engine workflow-id)
-;; → Resumes from phase after last completed phase
+;; → Restores the execution machine and continues from its next legal transition
 ```
 
 ### 8.3 Resume Constraints
@@ -921,7 +1012,7 @@ To resume workflow:
 Implementations MUST NOT resume if:
 
 - Workflow already completed
-- Workflow state is corrupted
+- Machine snapshot or workflow state is corrupted
 - Too much time has passed (state may be stale)
 
 ---
@@ -949,16 +1040,24 @@ Implementations MUST NOT resume if:
 
  :workflow/context {...}           ; OPTIONAL: Domain-specific context (AWS region, etc.)
 
+ :workflow/definition
+ {:workflow/family keyword         ; REQUIRED: :software-factory | :etl | future families
+  :workflow/profile keyword        ; REQUIRED: :canonical-sdlc | :quick-fix | :review-first | :financial-etl | ...
+  :workflow/graph {...}            ; OPTIONAL: inline graph or reference-resolved graph
+  :workflow/policies
+  {:skip-phases #{keyword}         ; OPTIONAL: phases or states that may be skipped
+   :retry-budgets map              ; OPTIONAL: per-state or per-transition budgets
+   :auto-merge? boolean}}          ; OPTIONAL: release policy for eligible workflows
+
  :workflow/validation
  {:policy-packs [string ...]       ; REQUIRED: Policy packs to enforce
   :require-evidence? boolean       ; REQUIRED: Generate evidence bundle?
   :semantic-intent-check? boolean  ; REQUIRED: Validate semantic intent?
   :slo-overrides map}              ; OPTIONAL: Per-workflow SLO target overrides (see N1 §5.5.3)
-
- :workflow/phases
- {:skip-design? boolean            ; OPTIONAL: Skip design phase if true
-  :auto-merge? boolean             ; OPTIONAL: Auto-merge PR if gates pass
-  :max-inner-loop-iterations long}} ; OPTIONAL: Override default retry budget
+ 
+ :workflow/runtime
+ {:max-inner-loop-iterations long  ; OPTIONAL: Override default retry budget
+  :checkpoint-policy map}}         ; OPTIONAL: Snapshot/checkpoint configuration
 ```
 
 #### 9.1.1 ETL Workflow Type
@@ -975,9 +1074,10 @@ ETL workflows SHOULD emit:
 ETL workflows MUST default generated packs to `:untrusted` unless explicitly promoted under policy.
 
 **Custom Phase Sequence:** ETL workflows use a fundamentally different process than
-standard infrastructure change workflows. While the standard phase sequence is
+standard software-factory workflows. While the canonical SDLC sequence is
 (Plan → Design → Implement → Verify → Review → Release → Observe), ETL workflows
-MAY define custom phases appropriate to the ingestion and normalization process
+MAY define custom phases appropriate to the ingestion and normalization process,
+provided those phases are still compiled into a single authoritative execution machine.
 (e.g., Inventory → Classify → Scan → Extract → Validate → Index). The workflow
 extensibility model treats ETL as just another workflow type with its own phase graph.
 
@@ -1194,6 +1294,10 @@ Implementations MUST support these transitions:
 | `:ready-to-merge` | `:merging` | Merge initiated |
 | `:merging` | `:merged` | Merge successful |
 | Any non-terminal | `:failed` | Max retries exceeded, unrecoverable error |
+
+This task lifecycle MUST itself be implemented as an explicit machine or transition table
+with legal-state validation. Implementations MUST NOT permit unconstrained direct writes
+to task status fields.
 
 ### 13.3 Automated CI/Review Fix Iteration
 
@@ -1426,7 +1530,7 @@ Chained execution MUST preserve provenance across workflow boundaries:
    :edge/from-workflow-id uuid         ; Upstream workflow
    :edge/to-workflow-id uuid           ; Downstream workflow
    :edge/bindings [...]                ; Input bindings (§14.2)
-   :edge/status keyword                ; :pending, :executing, :completed, :failed
+   :edge/status keyword                ; :pending, :running, :completed, :failed
    :edge/started-at inst
    :edge/completed-at inst}]}
 ```

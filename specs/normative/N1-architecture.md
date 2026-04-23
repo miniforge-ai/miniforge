@@ -7,7 +7,7 @@
 # N1 — Core Architecture & Concepts
 
 **Version:** 0.5.0-draft
-**Date:** 2026-03-08
+**Date:** 2026-04-22
 **Status:** Draft
 **Conformance:** MUST
 
@@ -47,13 +47,19 @@ A **workflow** is the top-level unit of autonomous execution.
 ```clojure
 {:workflow/id uuid                  ; REQUIRED: Unique workflow identifier
  :workflow/type keyword             ; REQUIRED: :infrastructure-change, :feature, :refactor
- :workflow/status keyword           ; REQUIRED: :pending, :executing, :completed, :failed, :cancelled
+ :workflow/status keyword           ; REQUIRED derived projection: :pending, :running, :completed, :failed, :cancelled
+
+ :workflow/machine                  ; REQUIRED: authoritative execution-machine state
+ {:machine/id keyword               ; Compiled machine identity
+  :machine/state keyword            ; Current execution state
+  :machine/context {...}            ; Execution context owned by the machine
+  :machine/snapshot {...}}          ; Durable resume snapshot (see N2)
 
  :workflow/spec {...}               ; REQUIRED: Workflow specification (see N2)
  :workflow/intent {...}             ; REQUIRED: Intent declaration (see N6)
 
- :workflow/current-phase keyword    ; OPTIONAL: :plan, :design, :implement, :verify, :review, :release, :observe
- :workflow/phases {...}             ; REQUIRED: Phase execution records
+ :workflow/current-phase keyword    ; OPTIONAL derived projection from :workflow/machine
+ :workflow/phases {...}             ; REQUIRED: Phase execution records and artifacts
 
  :workflow/created-at inst          ; REQUIRED
  :workflow/started-at inst          ; OPTIONAL
@@ -67,10 +73,12 @@ A **workflow** is the top-level unit of autonomous execution.
 Implementations MUST:
 
 1. Assign unique UUID to each workflow
-2. Track workflow status through lifecycle
+2. Track workflow lifecycle through a single authoritative execution machine
 3. Record all phase executions
 4. Generate evidence bundle upon completion (success or failure)
 5. Emit events for all state transitions (see N3)
+6. Derive `:workflow/status` and `:workflow/current-phase` from machine
+   state rather than treating them as independent write targets
 
 ### 2.2 Phase
 
@@ -308,14 +316,23 @@ See N6 for detailed artifact provenance specification.
 
 #### 2.9.1 Data Foundry Extension Nouns
 
-The following nouns are defined by the Data Foundry extension (see Data Foundry N1–N4) and recognised as first-class concepts within the Core domain model:
+The following nouns are defined by the Data Foundry extension (see Data Foundry N1–N4) and recognised as first-class
+concepts within the Core domain model:
 
-- **Dataset** — A versioned, structured collection of data with a formal schema, storage location, partitioning strategy, and complete provenance chain. Datasets are artifacts (`:artifact/type :dataset`) and MUST satisfy N6 §3.1 requirements. See Data Foundry N1.
-- **Schema** — A formal, versioned definition of dataset structure including field names, types, constraints, and nullability rules. Schemas are versioned independently and MAY be shared across dataset versions. See Data Foundry N1.
-- **Connector** — A governed tool (N10) that bridges Data Foundry and external systems for data ingestion or publication. Connectors declare capabilities, authentication requirements, and configuration schemas. See Data Foundry N2.
-- **Pipeline** — A declarative DAG of stages that ingests, transforms, and publishes data. Pipelines are specialised workflows (N2) with data-specific execution semantics. See Data Foundry N3.
-- **QualityRule** — A named, versioned data validation constraint that extends Core policy rules (N4) with data-specific check types and thresholds. See Data Foundry N4.
-- **LineageGraph** — A directed acyclic graph tracking dataset dependencies and transformations, enabling impact analysis and reprocessing decisions. See Data Foundry N4.
+- **Dataset** — A versioned, structured collection of data with a formal schema, storage location, partitioning
+  strategy, and complete provenance chain. Datasets are artifacts (`:artifact/type :dataset`) and MUST satisfy N6 §3.1
+  requirements. See Data Foundry N1.
+- **Schema** — A formal, versioned definition of dataset structure including field names, types, constraints, and
+  nullability rules. Schemas are versioned independently and MAY be shared across dataset versions. See Data Foundry N1.
+- **Connector** — A governed tool (N10) that bridges Data Foundry and external systems for data ingestion or
+  publication. Connectors declare capabilities, authentication requirements, and configuration schemas. See Data Foundry
+  N2.
+- **Pipeline** — A declarative DAG of stages that ingests, transforms, and publishes data. Pipelines are specialised
+  workflows (N2) with data-specific execution semantics. See Data Foundry N3.
+- **QualityRule** — A named, versioned data validation constraint that extends Core policy rules (N4) with data-specific
+  check types and thresholds. See Data Foundry N4.
+- **LineageGraph** — A directed acyclic graph tracking dataset dependencies and transformations, enabling impact
+  analysis and reprocessing decisions. See Data Foundry N4.
 
 ### 2.10 Knowledge Base
 
@@ -1386,24 +1403,43 @@ miniforge is structured as three cooperating layers:
 
 ### 3.1 Control Plane
 
-The **Control Plane** coordinates workflow execution.
+The **Control Plane** coordinates workflow execution, live supervision, and bounded interventions.
 
 #### 3.1.1 Responsibilities
 
 The Control Plane MUST:
 
 1. Accept workflow specifications from users
-2. Initialize workflow execution context
-3. Orchestrate phase transitions
-4. Enforce policy gates
-5. Generate evidence bundles
-6. Provide operational visibility
+2. Initialize workflow execution and supervisory context
+3. Compile or load the execution machine for each workflow run
+4. Orchestrate workflow and supervisory state transitions
+5. Enforce policy gates and degradation constraints
+6. Apply bounded control actions through authoritative machines
+7. Generate evidence bundles
+8. Provide operational visibility via canonical projections
 
 #### 3.1.2 Components
 
-- **Operator Agent** - Manages workflow lifecycle
-- **Workflow Engine** - Executes phase graph (see N2)
+- **Orchestrator** - Sole authority that applies transitions to execution, supervision, and degradation machines
+- **Workflow Execution Machine** - Per-run compiled FSM that executes the workflow graph (see N2)
+- **Workflow Supervision Machine** - Per-run FSM for live governance, safety, and operator intervention state
 - **Policy Engine** - Enforces policy packs (see N4)
+- **Supervisory State Projection** - Canonical query surface for TUI, dashboard, API, and operator tooling
+- **Human Supervisory Loop** - Peer runtime that queries supervisory
+  state and submits bounded interventions through the orchestrator
+
+#### 3.1.3 Runtime Boundaries
+
+The Control Plane MUST enforce these runtime boundaries:
+
+1. The orchestrator is the only component permitted to apply control
+   actions to workflow execution, supervision, or degradation machines
+2. The human supervisory loop MUST operate through bounded intervention
+   requests and MUST NOT directly mutate workflow state
+3. Live supervision of in-flight workflows is a control-plane concern, not a learning-layer concern
+4. The supervisory-state projection is the canonical read model for
+   external consumers and MUST remain separate from orchestration
+   scratch state
 
 ### 3.2 Agent Layer
 
@@ -1438,15 +1474,26 @@ The Learning Layer MUST:
 3. Update heuristics based on performance
 4. Maintain knowledge base of learnings
 5. Provide context to agents from past executions
+6. Produce improvement proposals without directly mutating live workflow execution state
 
 #### 3.3.2 Components
 
 - **Observer Agent** - Captures execution signals
-- **Meta Loop** - Analyzes patterns, proposes improvements
+- **Meta Loop** - Cross-run learning loop that analyzes patterns and proposes improvements
 - **Heuristic Registry** - Stores and versions prompt heuristics
 - **Knowledge Base** - Zettelkasten-based learning repository
 
-#### 3.3.3 Evaluation Pipeline
+#### 3.3.3 Boundary to Control Plane
+
+The Learning Layer MUST remain downstream of workflow execution:
+
+1. The Meta Loop MAY consume execution outcomes, evidence bundles, and observation signals
+2. The Meta Loop MUST NOT directly advance, pause, resume, or cancel an in-flight workflow
+3. Any learning-derived recommendation that affects a live workflow
+   MUST be routed back through the control plane as a bounded control
+   action or future workflow selection input
+
+#### 3.3.4 Evaluation Pipeline
 
 The Learning Layer MUST support a closed-loop evaluation pipeline for detecting regressions
 and validating changes to prompts, models, policies, tool schemas, and indexes.
@@ -1719,7 +1766,7 @@ Implementations MUST:
 
 1. **Fail-safe** - Workflow failure MUST NOT corrupt state
 2. **Fail-visible** - All failures MUST emit events and create evidence bundle
-3. **Fail-recoverable** - Workflows MUST be resumable from last successful phase
+3. **Fail-recoverable** - Workflows MUST be resumable from an authoritative machine snapshot
 4. **Fail-escalatable** - Agent failures MUST escalate to human after retry budget exhausted
 
 #### 5.3.2 Retry Budget
@@ -2165,9 +2212,9 @@ Implementations MUST demonstrate:
 
 The three-layer architecture separates concerns:
 
-- **Control Plane** - Orchestration logic (workflow engine, policy enforcement)
+- **Control Plane** - Orchestration, supervision, and bounded control logic
 - **Agent Layer** - Execution logic (specialized agents, inner loop)
-- **Learning Layer** - Improvement logic (observation, meta loop, heuristics)
+- **Learning Layer** - Cross-run improvement logic (observation, meta loop, heuristics)
 
 This enables:
 
