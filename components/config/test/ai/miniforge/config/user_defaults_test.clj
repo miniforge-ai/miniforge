@@ -41,7 +41,11 @@
       (is (= "claude-sonnet-4-6" (get-in cfg [:agents :default-models :execution]))))
 
     (testing "default self-healing enables claude and codex failover"
-      (is (= [:claude :codex] (get-in cfg [:self-healing :allowed-failover-backends]))))))
+      (is (= [:claude :codex] (get-in cfg [:self-healing :allowed-failover-backends]))))
+
+    (testing "default workflow checkpoint root is configured as data"
+      (is (= "~/.miniforge/checkpoints"
+             (get-in cfg [:workflow :checkpoint-root]))))))
 
 (deftest load-default-config-falls-back-to-edn-resource-test
   (let [orig-resource io/resource]
@@ -53,7 +57,9 @@
                                   nil))]
       (let [cfg (user/load-default-config)]
         (is (= :codex (get-in cfg [:llm :backend])))
-        (is (= "claude-sonnet-4-6" (get-in cfg [:agents :default-models :execution])))))))
+        (is (= "claude-sonnet-4-6" (get-in cfg [:agents :default-models :execution])))
+        (is (= "~/.miniforge/checkpoints"
+               (get-in cfg [:workflow :checkpoint-root])))))))
 
 (deftest repo-config-support-test
   (testing "repo-config-path appends .miniforge/config.edn to the provided root"

@@ -21,6 +21,7 @@
    Public API groups live under ai.miniforge.workflow.interface.* namespaces,
    while this namespace remains the Polylith entrypoint."
   (:require
+   [ai.miniforge.workflow.interface.checkpoints :as checkpoints]
    [ai.miniforge.workflow.interface.configurable :as configurable]
    [ai.miniforge.workflow.interface.pipeline :as pipeline]
    [ai.miniforge.workflow.interface.profiles :as profiles]
@@ -61,6 +62,7 @@
 (def run-pipeline pipeline/run-pipeline)
 (def build-pipeline pipeline/build-pipeline)
 (def validate-pipeline pipeline/validate-pipeline)
+(def load-checkpoint-data checkpoints/load-checkpoint-data)
 (def run-chain pipeline/run-chain)
 (def load-chain pipeline/load-chain)
 (def list-chains pipeline/list-chains)

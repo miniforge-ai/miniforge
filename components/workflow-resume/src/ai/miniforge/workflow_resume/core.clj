@@ -37,6 +37,7 @@
   (:require
    [ai.miniforge.event-stream.interface :as es]
    [ai.miniforge.response.interface :as response]
+   [ai.miniforge.workflow.interface :as workflow]
    [ai.miniforge.workflow-resume.schema :as schema]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -134,27 +135,38 @@
   (schema/validate! schema/ReconstructContextInput
                     {:events-dir events-dir :workflow-id workflow-id}
                     {:message "Invalid reconstruct-context input"})
-  (let [raw-events (es/read-workflow-events-by-id events-dir workflow-id)
+  (let [checkpoint-data (workflow/load-checkpoint-data workflow-id)
+        raw-events (or (es/read-workflow-events-by-id events-dir workflow-id) [])
         events (vec (filter schema/valid-event? raw-events))
-        _ (when-not (seq events)
+        _ (when-not (or checkpoint-data (seq events))
             (response/throw-anomaly! :anomalies/not-found
                                     (str "No events found for workflow: " workflow-id)
                                     {:workflow-id workflow-id
                                      :events-dir (str events-dir)
                                      :raw-event-count (count raw-events)}))
         by-type (group-by :event/type events)
-        completed-phases (extract-completed-phases events)
-        phase-results (extract-phase-results events)
+        completed-phases (or (some-> checkpoint-data :manifest :workflow/phases-completed)
+                             (extract-completed-phases events))
+        phase-results (if checkpoint-data
+                        (:phase-results checkpoint-data)
+                        (extract-phase-results events))
         workflow-spec (find-workflow-spec events)
         started-event (first (get by-type :workflow/started))
-        completed? (boolean (seq (get by-type :workflow/completed)))
-        failed? (boolean (seq (get by-type :workflow/failed)))
+        machine-snapshot (:machine-snapshot checkpoint-data)
+        checkpoint-status (:execution/status machine-snapshot)
+        completed? (or (boolean (seq (get by-type :workflow/completed)))
+                       (= :completed checkpoint-status)
+                       (= :completed-with-warnings checkpoint-status))
+        failed? (or (boolean (seq (get by-type :workflow/failed)))
+                    (= :failed checkpoint-status))
         completed-dag-tasks (extract-completed-dag-tasks events)
         dag-pause-info (extract-dag-pause-info events)]
     {:phase-results phase-results
      :completed-phases completed-phases
      :workflow-spec workflow-spec
-     :workflow-id (or (:workflow/id started-event) workflow-id)
+     :workflow-id (or (:execution/id machine-snapshot)
+                      (:workflow/id started-event)
+                      workflow-id)
      :completed? completed?
      :failed? failed?
      :event-count (count events)
@@ -162,7 +174,9 @@
                               (:completed-task-ids dag-pause-info)
                               #{})
      :dag-paused? (boolean dag-pause-info)
-     :dag-pause-reason (:pause-reason dag-pause-info)}))
+     :dag-pause-reason (:pause-reason dag-pause-info)
+     :machine-snapshot machine-snapshot
+     :checkpoint-manifest (:manifest checkpoint-data)}))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Pipeline trimming
@@ -200,9 +214,12 @@
                     {:reconstructed reconstructed :fallback-fn fallback-fn}
                     {:message "Invalid resolve-workflow-identity input"})
   (let [workflow-spec (:workflow-spec reconstructed)
-        workflow-type (or (some-> workflow-spec :name keyword)
+        machine-snapshot (:machine-snapshot reconstructed)
+        workflow-type (or (:execution/workflow-id machine-snapshot)
+                          (some-> workflow-spec :name keyword)
                           (fallback-fn))
-        workflow-version (get workflow-spec :version "latest")]
+        workflow-version (or (:execution/workflow-version machine-snapshot)
+                             (get workflow-spec :version "latest"))]
     (when-not workflow-type
       (response/throw-anomaly! :anomalies/not-found
                               "Could not resolve a workflow type for resume"

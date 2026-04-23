@@ -21,6 +21,8 @@
    [clojure.test :refer [deftest testing is]]
    [clojure.java.io :as io]
    [cheshire.core :as json]
+   [ai.miniforge.event-stream.interface :as es]
+   [ai.miniforge.workflow.interface :as workflow]
    [ai.miniforge.workflow-resume.core :as core]
    [ai.miniforge.workflow-resume.interface :as wr]))
 
@@ -136,6 +138,14 @@
              {:workflow-spec {:name "lean-sdlc"}}
              (constantly nil))))))
 
+(deftest resolve-workflow-identity-from-machine-snapshot-test
+  (testing "machine snapshot identity wins when no workflow spec is present"
+    (is (= {:workflow-type :canonical-sdlc :workflow-version "2.0.0"}
+           (core/resolve-workflow-identity
+            {:machine-snapshot {:execution/workflow-id :canonical-sdlc
+                                :execution/workflow-version "2.0.0"}}
+            (constantly nil))))))
+
 (deftest resolve-workflow-identity-fallback-test
   (testing "no spec → fallback-fn result used as :workflow-type"
     (is (= {:workflow-type :default-sdlc :workflow-version "latest"}
@@ -215,6 +225,25 @@
              clojure.lang.ExceptionInfo
              #"No events found for workflow:"
              (core/reconstruct-context base-dir (str (random-uuid)))))))))
+
+(deftest reconstruct-context-prefers-machine-snapshot-test
+  (testing "checkpoint data restores without requiring event files"
+    (let [workflow-id (str (random-uuid))
+          checkpoint-data {:machine-snapshot {:execution/id workflow-id
+                                             :execution/workflow-id :canonical-sdlc
+                                             :execution/workflow-version "1.0.0"
+                                             :execution/status :running}
+                           :manifest {:workflow/phases-completed [:plan]}
+                           :phase-results {:plan {:status :completed}}}]
+      (with-redefs [workflow/load-checkpoint-data (fn [_workflow-run-id] checkpoint-data)
+                    es/read-workflow-events-by-id (fn [_events-dir _workflow-run-id] nil)]
+        (let [ctx (core/reconstruct-context "/tmp/unused-events" workflow-id)]
+          (is (= workflow-id (:workflow-id ctx)))
+          (is (= (:machine-snapshot checkpoint-data) (:machine-snapshot ctx)))
+          (is (= [:plan] (:completed-phases ctx)))
+          (is (= {:status :completed}
+                 (get-in ctx [:phase-results :plan])))
+          (is (= 0 (:event-count ctx))))))))
 
 ;------------------------------------------------------------------------------ Layer 3
 ;; Interface re-exports

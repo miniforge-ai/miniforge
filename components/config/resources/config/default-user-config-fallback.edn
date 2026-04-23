@@ -9,7 +9,8 @@
         :max-tokens 32000}
   :workflow {:max-iterations 50
              :max-tokens 150000
-             :failure-strategy :retry}
+             :failure-strategy :retry
+             :checkpoint-root "~/.miniforge/checkpoints"}
   :artifacts {:dir "~/.miniforge/artifacts"}
   :meta-loop {:enabled true
               :max-convergence-iterations 10
