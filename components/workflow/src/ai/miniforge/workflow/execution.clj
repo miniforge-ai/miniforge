@@ -187,7 +187,7 @@
           (get phase-result :metrics {})))
 
 (defn track-phase-files
-  "Track files written by phase for meta-agent monitoring.
+  "Track files written by phase for workflow supervision.
 
    In the new environment model, code changes live in the execution
    environment's git working tree (:execution/worktree-path) rather than

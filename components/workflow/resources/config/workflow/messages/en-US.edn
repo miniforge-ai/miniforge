@@ -32,6 +32,10 @@
   :phase/gate-failed-phase   "Gate validation failed for phase {phase}"
   :phase/agent-failed-phase  "Agent failed in phase {phase}"
 
+  ;; Supervision
+  :supervision/unsupported-supervisor
+  "Unsupported workflow supervisor id: {supervisor-id}"
+
   ;; Execution mode
   :governed/no-capsule      "No capsule executor available for governed workflow"
   :governed/no-capsule-hint "Start Docker or configure a Kubernetes cluster"

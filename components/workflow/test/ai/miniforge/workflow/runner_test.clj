@@ -39,6 +39,10 @@
       (is (= :test (:execution/workflow-id ctx)))
       (is (= :running (:execution/status ctx)))
       (is (= {:task "Test"} (:execution/input ctx)))
+      (is (contains? ctx :execution/supervision-runtime))
+      (is (contains? ctx :execution/meta-coordinator))
+      (is (identical? (:execution/supervision-runtime ctx)
+                      (:execution/meta-coordinator ctx)))
       (is (vector? (:execution/artifacts ctx)))
       (is (number? (:execution/started-at ctx))))))
 

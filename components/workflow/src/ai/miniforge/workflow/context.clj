@@ -88,8 +88,8 @@
    ### Artifacts & Tracking
    :execution/artifacts        — Vector of lightweight provenance artifacts
                                  produced by phases (not serialized code)
-   :execution/files-written    — Set of file paths written (meta-agent
-                                 monitoring; populated from environment)
+   :execution/files-written    — Set of file paths written (supervision
+                                 tracking; populated from environment)
    :execution/metrics          — Accumulated metrics:
                                  {:tokens N :cost-usd N :duration-ms N}
    :execution/started-at       — System time millis at workflow start
@@ -100,8 +100,10 @@
    :execution/response-chain   — Structured response chain (per-phase
                                  success/failure tracking)
 
-   ### Meta-Agent Support
-   :execution/meta-coordinator    — Coordinator for workflow health monitoring
+   ### Supervision Support
+   :execution/supervision-runtime — Runtime for workflow health supervision
+   :execution/meta-coordinator    — DEPRECATED alias for
+                                    :execution/supervision-runtime
    :execution/streaming-activity  — Transient streaming activity tracking
 
    ### Pass-Through from opts
@@ -173,9 +175,9 @@
   (let [execution-machine (fsm/compile-execution-machine workflow)
         fsm-state (let [initial-state (fsm/initialize-execution execution-machine)]
                     (fsm/start-execution execution-machine initial-state))
-        ;; Initialize meta-agents and coordinator
-        meta-agents (monitoring/create-meta-agents workflow)
-        coordinator (agent/create-meta-coordinator meta-agents)]
+        ;; Initialize live workflow supervision runtime.
+        supervisors (monitoring/create-supervisors workflow)
+        supervision-runtime (agent/create-supervision-coordinator supervisors)]
     (sync-machine-projections
      (merge
       {:execution/id (random-uuid)
@@ -193,9 +195,12 @@
        :execution/metrics {:tokens 0 :cost-usd 0.0 :duration-ms 0}
        :execution/started-at (System/currentTimeMillis)
        :execution/opts opts
-       ;; Meta-agent coordinator for workflow health monitoring
-       :execution/meta-coordinator coordinator
-       ;; Transient state for meta-agent health checks
+       ;; Live workflow supervision runtime
+       :execution/supervision-runtime supervision-runtime
+       ;; DEPRECATED: Temporary backwards-compatible alias for integration and
+       ;; end-to-end tests that still read the pre-refactor execution key.
+       :execution/meta-coordinator supervision-runtime
+       ;; Transient state for supervision checks
        :execution/streaming-activity []
        :execution/files-written #{}}
       ;; Merge opts into top-level context so :llm-backend is accessible to agents

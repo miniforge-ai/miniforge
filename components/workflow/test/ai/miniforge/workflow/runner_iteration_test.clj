@@ -5,6 +5,8 @@
    Includes slingshot try+/throw+ bb-compatibility tests."
   (:require
    [clojure.test :refer [deftest testing is]]
+   [ai.miniforge.workflow.context :as ctx]
+   [ai.miniforge.workflow.monitoring :as monitoring]
    [ai.miniforge.workflow.runner :as runner]
    [slingshot.slingshot :refer [try+ throw+]]))
 
@@ -12,6 +14,18 @@
 (def ^:private rate-limited? #'runner/rate-limited?)
 (defn- backoff-ms [n] (#'runner/backoff-ms n))
 (def ^:private make-execution-error #'runner/make-execution-error)
+
+(defn- running-control-state
+  []
+  (atom {:paused false :stopped false :adjustments {}}))
+
+(defn- halted-supervision-result
+  []
+  {:status :halt
+   :halt-reason "workflow stalled"
+   :halting-agent :progress-monitor
+   :checks [{:status :halt
+             :data {:elapsed-ms 120000}}]})
 
 ;; ============================================================================
 ;; rate-limited?
@@ -113,3 +127,28 @@
                      {:caught true :message message}))]
       (is (true? (:caught result)))
       (is (= "stopped" (:message result))))))
+
+;; ============================================================================
+;; execute-single-iteration
+;; ============================================================================
+
+(deftest execute-single-iteration-halts-on-supervision-test
+  (testing "supervision halt transitions the workflow to failed"
+    (let [workflow {:workflow/id :test
+                    :workflow/version "1.0.0"
+                    :workflow/pipeline [{:phase :done}]}
+          context (ctx/create-context workflow {:task "Test"} {})
+          result (with-redefs [monitoring/check-workflow-supervision
+                               (fn [_runtime _workflow-state]
+                                 (halted-supervision-result))]
+                   (runner/execute-single-iteration
+                    []
+                    context
+                    {}
+                    1
+                    (running-control-state)))]
+      (is (= :failed (:execution/status result)))
+      (is (some #(= :supervision-halt (:type %))
+                (:execution/errors result)))
+      (is (= :progress-monitor
+             (:supervisor (last (:execution/errors result))))))))
