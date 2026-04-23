@@ -102,6 +102,8 @@
 
    ### Supervision Support
    :execution/supervision-runtime — Runtime for workflow health supervision
+   :execution/meta-coordinator    — DEPRECATED alias for
+                                    :execution/supervision-runtime
    :execution/streaming-activity  — Transient streaming activity tracking
 
    ### Pass-Through from opts
@@ -195,6 +197,9 @@
        :execution/opts opts
        ;; Live workflow supervision runtime
        :execution/supervision-runtime supervision-runtime
+       ;; DEPRECATED: Temporary backwards-compatible alias for integration and
+       ;; end-to-end tests that still read the pre-refactor execution key.
+       :execution/meta-coordinator supervision-runtime
        ;; Transient state for supervision checks
        :execution/streaming-activity []
        :execution/files-written #{}}

@@ -22,6 +22,7 @@
    Provides functions for building workflow state, checking health via the
    live supervision runtime, and handling halt conditions."
   (:require [ai.miniforge.agent.interface.supervision :as supervision]
+            [ai.miniforge.workflow.messages :as messages]
             [ai.miniforge.response.interface :as response]))
 
 ;------------------------------------------------------------------------------ Supervision setup
@@ -32,6 +33,30 @@
    :stagnation-threshold-ms 120000
    :max-total-ms 600000})
 
+(defn- enabled-supervisor?
+  [config]
+  (get config :enabled? true))
+
+(defn- unsupported-supervisor-exception
+  [config]
+  (let [supervisor-id (:id config)]
+    (ex-info
+     (messages/t :supervision/unsupported-supervisor
+                 {:supervisor-id (pr-str supervisor-id)})
+     {:anomaly/category :anomalies.workflow/invalid-supervisor
+      :supervisor/id supervisor-id
+      :supervisor/config config})))
+
+(defn- create-configured-supervisor
+  [config]
+  (let [supervisor-id (:id config)
+        supervisor-config (:config config)]
+    (case supervisor-id
+      :progress-monitor
+      (supervision/create-progress-monitor-agent
+       (merge default-progress-monitor-config supervisor-config))
+      (throw (unsupported-supervisor-exception config)))))
+
 (defn create-supervisors
   "Create supervisors from workflow configuration.
 
@@ -39,14 +64,9 @@
   [workflow]
   (let [supervisor-configs (get workflow :workflow/meta-agents [])]
     (if (seq supervisor-configs)
-      ;; Use configured supervisors from the existing workflow config key.
-      (for [config supervisor-configs
-            :when (:enabled? config true)]
-        (case (:id config)
-          :progress-monitor
-          (supervision/create-progress-monitor-agent
-           (merge default-progress-monitor-config
-                  (:config config)))))
+      (->> supervisor-configs
+           (filter enabled-supervisor?)
+           (mapv create-configured-supervisor))
       ;; Default: just progress monitor
       [(supervision/create-progress-monitor-agent)])))
 
