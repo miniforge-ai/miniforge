@@ -123,3 +123,32 @@
       (is (= 1 (:cycle-number r1)))
       (is (= 2 (:cycle-number r2)))
       (is (= 3 (:cycle-number r3))))))
+
+(deftest meta-loop-context-records-workflow-outcomes-test
+  (testing "context metrics store accumulates workflow outcomes and failures"
+    (let [ctx (meta-loop/create-meta-loop-context (make-stream))]
+      (meta-loop/record-workflow-outcome! ctx #uuid "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa" :completed)
+      (meta-loop/record-workflow-outcome! ctx
+                                          #uuid "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
+                                          :failed
+                                          :failure.class/timeout)
+      (let [metrics-store @(:metrics-store ctx)]
+        (is (= 2 (count (:workflow-metrics metrics-store))))
+        (is (= 1 (count (:failure-events metrics-store))))))))
+
+(deftest meta-loop-context-cycle-test
+  (testing "context-backed cycle returns the public namespaced learning result"
+    (let [stream (make-stream)
+          ctx (meta-loop/create-meta-loop-context stream
+                                                  {:reliability {:windows [:7d]
+                                                                 :tiers [:standard]}})
+          _ (meta-loop/record-workflow-outcome! ctx
+                                                #uuid "cccccccc-cccc-cccc-cccc-cccccccccccc"
+                                                :failed
+                                                :failure.class/timeout)
+          result (meta-loop/run-cycle-from-context! ctx)]
+      (is (contains? result :cycle/started-at))
+      (is (contains? result :cycle/duration-ms))
+      (is (contains? result :cycle/signal-count))
+      (is (contains? result :cycle/diagnosis-count))
+      (is (contains? result :cycle/degradation-mode)))))
