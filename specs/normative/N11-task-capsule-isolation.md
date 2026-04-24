@@ -6,8 +6,8 @@
 
 # N11 — Task Capsule Isolation
 
-**Version:** 0.1.0-draft
-**Date:** 2026-04-03
+**Version:** 0.2.0-draft
+**Date:** 2026-04-23
 **Status:** Draft
 **Conformance:** MUST
 **Amends:** N2-workflows §13.4, N10-governed-tool-execution §7
@@ -46,7 +46,8 @@ This specification defines:
 - **Execution modes**: local vs. governed, and the no-silent-downgrade rule (§7)
 - **Secret handling and network policy** inside capsules (§8)
 - **Evidence and artifact discipline**: what exits the capsule and how (§9)
-- **Implementation mapping** to the existing codebase (§10)
+- The **TaskExecutor protocol**: pluggable substrate contract with workspace persistence (§10)
+- **Implementation mapping** to the existing codebase (§11)
 
 ### 1.1 Relationship to N2 and N10
 
@@ -496,7 +497,212 @@ workspace directory during BOOTSTRAP.
 
 ---
 
-## 10. Implementation Mapping
+## 10. TaskExecutor Protocol
+
+Task capsules are created and managed via a pluggable backend protocol. The
+**TaskExecutor** protocol is the normative contract between the workflow
+runner (which requests a capsule per task) and the concrete substrate
+implementation (Docker, Kubernetes, or worktree fallback).
+
+This protocol is what Fleet's distributed executors (e.g., K8s with object-store
+workspace persistence) extend; it MUST remain stable across substrates.
+
+### 10.1 Protocol Methods
+
+Implementations MUST provide these methods:
+
+```clojure
+(defprotocol TaskExecutor
+  (executor-type [this]
+    "Returns the substrate keyword: :kubernetes | :docker | :worktree.")
+
+  (available? [this]
+    "Returns true if this executor can currently acquire environments on
+     the host. Used by the executor registry for selection and for runtime
+     health checks. MUST NOT throw.")
+
+  (acquire-environment! [this task-id env-config]
+    "Acquire an isolated capsule for a task. env-config is a map:
+       {:workspace/mode      :checkout | :persist | :none
+        :workspace/repo-url  string        ; required when mode=:checkout
+        :workspace/commit    string        ; full SHA; required when mode=:checkout
+        :workspace/branch    string        ; optional; branch to create
+        :env                 {string string}
+        :workdir             string
+        :resources           {:cpu :memory :timeout-ms}
+        :network-policy      {...}         ; see §8.2
+        :secrets             [{...}]}      ; see §8.1
+     Returns:
+       {:environment-id uuid
+        :workdir        string             ; absolute path inside capsule
+        :runtime-class  keyword            ; matches executor-type
+        :image-digest   string             ; OPTIONAL for container substrates
+        :acquired-at    inst}
+     MUST fail (not downgrade) if the requested substrate is unavailable.")
+
+  (executor-execute! [this environment-id command opts]
+    "Execute a command inside the capsule. command is argv (seq of string)
+     or a single string routed through /bin/sh -c. opts:
+       {:env        {string string}        ; merged over env-config env
+        :stdin      string                  ; OPTIONAL
+        :timeout-ms long
+        :cwd        string}                 ; OPTIONAL, defaults to :workdir
+     Returns:
+       {:exit-status int
+        :stdout      string
+        :stderr      string
+        :started-at  inst
+        :finished-at inst}")
+
+  (copy-to! [this environment-id host-path capsule-path]
+    "Copy a file or directory from host into capsule. host-path MUST be
+     absolute. capsule-path is relative to :workdir. Idempotent: overwrites.")
+
+  (copy-from! [this environment-id capsule-path host-path]
+    "Copy a file or directory from capsule to host. capsule-path is
+     relative to :workdir.")
+
+  (persist-workspace! [this environment-id persistence-config]
+    "Persist the capsule workspace to a durable layer so it can be restored
+     into a different capsule (possibly on a different node). persistence-config:
+       {:persistence/kind   :git | :object-store
+        :git/remote         string             ; for :git
+        :git/branch         string             ; for :git
+        :object-store/uri   string             ; for :object-store (s3://, gs://, ...)
+        :object-store/key   string             ; for :object-store
+        :object-store/credentials keyword}     ; ref to secret name
+     Returns:
+       {:workspace/digest   string             ; sha256 of persisted bundle
+        :workspace/uri      string             ; retrievable address
+        :workspace/bytes    long
+        :persisted-at       inst}
+     MUST produce a reproducible digest: the same workspace state MUST
+     yield the same digest regardless of substrate or persistence kind.")
+
+  (restore-workspace! [this environment-id persistence-ref]
+    "Restore a previously persisted workspace into this capsule.
+     persistence-ref is the map returned by persist-workspace!.
+     MUST verify the restored workspace matches :workspace/digest and
+     MUST fail if it does not. MAY be called immediately after
+     acquire-environment! with :workspace/mode :persist (no :workspace/commit
+     required in that case — the persisted state defines the starting point).")
+
+  (release-environment! [this environment-id]
+    "Destroy the capsule and reclaim resources. MUST be called exactly once
+     per acquire-environment!. MUST succeed even if the capsule was already
+     terminated (idempotent tear-down). MUST NOT propagate host-side writes."))
+```
+
+### 10.2 Method Requirements
+
+**Idempotency and failure.**
+
+- `acquire-environment!` MUST fail loudly (no downgrade) per N11.MD.1.
+- `release-environment!` MUST be idempotent — calling twice with the same id
+  MUST succeed on both calls.
+- `persist-workspace!` MUST be repeatable with stable digests; calling twice
+  on an unchanged workspace MUST yield the same `:workspace/digest`.
+- `restore-workspace!` MUST verify digest before considering the restore
+  successful; digest mismatch is a non-retriable failure.
+
+**Ordering.** The lifecycle MUST be:
+
+```text
+acquire-environment! → { executor-execute! | copy-to! | copy-from!
+                       | persist-workspace! | restore-workspace! }*
+                     → release-environment!
+```
+
+`restore-workspace!` called on an environment that already has a populated
+workspace (via `:workspace/mode :checkout`) MUST fail with
+`:workspace/already-populated` unless the workspace was explicitly cleared.
+
+**Workspace persistence kinds.**
+
+- `:git` — push the workspace to a task branch via `git push`; restore via
+  `git fetch` + checkout. Required for all substrates as a baseline (works
+  even in worktree fallback).
+- `:object-store` — tar the workspace, upload to S3/GCS/MinIO, restore via
+  download + extract. Required for the `:kubernetes` substrate when pods may
+  reschedule across nodes; OPTIONAL for `:docker` and `:worktree`.
+
+Implementations MAY support additional persistence kinds but MUST support
+at least `:git` for all substrates.
+
+**Workspace digest.** The `:workspace/digest` is computed over a canonical
+serialization of tracked workspace contents:
+
+```text
+SHA-256(
+  for each tracked file F in lexicographic path order:
+    "<posix-path>\n"
+    "<sha256-hex of F bytes>\n"
+)
+```
+
+Where "tracked" means: everything under `:workdir` that would be included by
+`git add -A` followed by `git ls-files -z` — i.e., respecting `.gitignore`.
+Untracked files MUST NOT contribute to the digest, to ensure reproducibility.
+
+### 10.3 Executor Registry and Selection
+
+Implementations MUST provide an executor registry and selection API:
+
+```clojure
+;; Create a registry from a config map. Registered executors are instantiated
+;; lazily; selection MAY instantiate.
+(create-executor-registry
+  {:kubernetes {...}   ; substrate-specific config
+   :docker     {...}
+   :worktree   {...}})
+
+;; Select the preferred available executor given the workflow's execution mode.
+(select-executor registry
+  {:execution/mode     :governed | :local
+   :preferred           keyword  ; OPTIONAL explicit preference
+   :require-persistence keyword}) ; OPTIONAL required persistence kind
+;; Returns a TaskExecutor or throws :no-conformant-executor
+```
+
+Selection MUST respect N11.MD.1 (no silent downgrade): in `:governed` mode,
+`:worktree` is NEVER selected unless explicitly preferred AND the execution
+mode permits it.
+
+### 10.4 Evidence Emissions
+
+Every lifecycle method MUST emit events (N3) and contribute to the evidence
+record (§9.1):
+
+| Method | Event | Evidence contribution |
+|--------|-------|-----------------------|
+| `acquire-environment!` | `capsule/acquired` | `:evidence/runtime-class`, `:evidence/image-digest`, `:evidence/task-started-at` |
+| `executor-execute!` | `capsule/command-executed` (throttled per N3 §4.2) | command + exit status + duration in run transcript |
+| `persist-workspace!` | `workspace/persisted` | `:evidence/workspace-persistence` with digest + uri |
+| `restore-workspace!` | `workspace/restored` | verification result + source digest |
+| `release-environment!` | `capsule/released` | `:evidence/task-finished-at`, `:evidence/exit-status` |
+
+The `workspace/persisted` and `workspace/restored` events MUST be emitted when
+persistence crosses capsule boundaries (e.g., phase transitions that hand off
+workspace state between capsules).
+
+### 10.5 Fleet Extension Point
+
+Fleet-grade deployments extend this protocol in two ways:
+
+1. **Object-store workspace persistence for Kubernetes** — a Fleet-provided
+   implementation of `persist-workspace!`/`restore-workspace!` using
+   `:object-store` kind (S3/GCS/MinIO). This implementation MUST conform to
+   §10.2 and MUST NOT require changes to OSS callers.
+2. **Cross-node capsule binding** — a Fleet scheduler MAY bind a
+   `restore-workspace!` call on node B to a persistence record produced by
+   `persist-workspace!` on node A. The persistence URI MUST be network-reachable
+   from both nodes.
+
+OSS MUST NOT assume cross-node capsule binding; it is a Fleet capability.
+
+---
+
+## 11. Implementation Mapping
 
 This section maps the normative requirements above to the existing codebase and
 identifies the minimum change set.
@@ -577,7 +783,7 @@ The following are already conformant with this spec or are in the right directio
 
 ---
 
-## 11. Conformance Requirements
+## 12. Conformance Requirements
 
 | ID | Level | Requirement |
 |----|-------|-------------|
@@ -597,7 +803,7 @@ The following are already conformant with this spec or are in the right directio
 
 ---
 
-## 12. New Definitions
+## 13. New Definitions
 
 **Task Capsule** — A bounded, destroyable runtime environment that contains the full
 execution context of a DAG task (agent process, tools, filesystem, git, secrets).
@@ -624,7 +830,7 @@ host process) when no conformant capsule substrate is available.
 
 ---
 
-## 13. References
+## 14. References
 
 - **N2 §13.4** — Task execution isolation (amended by this spec)
 - **N10 §7** — Capsule isolation (scope extended by this spec to full task runtime)
@@ -641,3 +847,13 @@ host process) when no conformant capsule substrate is available.
   injection point)
 - `components/agent/src/ai/miniforge/agent/artifact_session.clj:201–237` — MCP config and governance hook setup (must
   run inside capsule)
+
+---
+
+**Version History:**
+
+- 0.2.0-draft (2026-04-23): Fleet enablement amendments — TaskExecutor Protocol (§10)
+  hoisted to normative; adds persist-workspace! / restore-workspace! methods, workspace
+  digest, object-store persistence kind, Fleet extension point; renumbered prior §10–§13
+  to §11–§14; closes OSS spec gap G1 for Fleet K8s workspace persistence
+- 0.1.0-draft (2026-04-03): Initial task capsule isolation specification
