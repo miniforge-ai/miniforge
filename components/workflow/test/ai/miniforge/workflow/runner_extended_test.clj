@@ -134,6 +134,23 @@
       (is (= :verify (:execution/current-phase result)))
       (is (= 0 (:execution/redirect-count result))))))
 
+(deftest execute-phase-step-uses-machine-state-over-phase-index-test
+  (testing "standard execution selects the active phase from the machine snapshot"
+    (let [workflow {:workflow/id :test
+                    :workflow/version "1.0.0"
+                    :workflow/pipeline [{:phase :done}]}
+          pipeline (runner/build-pipeline workflow)
+          context (-> (ctx/create-context workflow {:task "Test"} {})
+                      (assoc :execution/phase-index 99))
+          result (exec/execute-phase-step pipeline
+                                          context
+                                          {}
+                                          ctx/merge-metrics
+                                          ctx/transition-to-completed
+                                          ctx/transition-to-failed)]
+      (is (= :completed (:execution/status result)))
+      (is (contains? (:execution/phase-results result) :done)))))
+
 ;; ---------------------------------------------------------------------------- publish-event edge cases
 
 (deftest publish-event-nil-stream-test

@@ -206,7 +206,14 @@
     (testing "start enters the first pipeline phase"
       (is (= :running (fsm/execution-status machine running-state)))
       (is (= :plan (fsm/current-phase-id machine running-state)))
-      (is (= 0 (fsm/current-phase-index machine running-state))))))
+      (is (= 0 (fsm/current-phase-index machine running-state))))
+    (testing "active machine entry includes the phase config and index"
+      (is (= {:index 0
+              :phase :plan
+              :config {:phase :plan}
+              :state-id :phase-0-plan
+              :paused-state-id :paused-phase-0-plan}
+             (fsm/machine-active-phase-entry machine running-state))))))
 
 (deftest compiled-execution-machine-follows-phase-transitions-test
   (let [workflow {:workflow/id :test
