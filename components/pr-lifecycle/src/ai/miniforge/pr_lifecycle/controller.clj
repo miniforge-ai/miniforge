@@ -32,6 +32,7 @@
    [ai.miniforge.pr-lifecycle.merge :as merge]
    [ai.miniforge.pr-lifecycle.review-monitor :as review]
    [ai.miniforge.release-executor.interface :as release]
+   [ai.miniforge.schema.interface :as schema]
    [ai.miniforge.logging.interface :as log]
    [clojure.string :as str]))
 
@@ -40,6 +41,9 @@
 
 (def ^:private lifecycle-loop-sleep-ms
   1000)
+
+(def ^:private lifecycle-failed-status
+  :failed)
 
 (defn- format-acceptance-criteria
   [criteria]
@@ -92,18 +96,28 @@
   (ex-info (messages/t :controller/invalid-transition)
            {:from current-status
             :to new-status
-            :error (:error transition-result)
-            :message (:message transition-result)
+            :error (controller-fsm/transition-error-code transition-result)
+            :message (controller-fsm/transition-error-message transition-result)
             :valid-targets (controller-fsm/valid-targets current-status)}))
+
+(defn- result-status
+  "Return a normalized status keyword for result payloads."
+  [result]
+  (if (schema/succeeded? result) :succeeded :failed))
+
+(defn- fix-completion-data
+  "Create history payload for a completed fix attempt."
+  [fix-result]
+  {:result-status (result-status fix-result)})
 
 (defn- transition-status
   "Validate and apply a status transition to the current controller snapshot."
   [controller-state new-status]
   (let [current-status (:status controller-state)
         transition-result (controller-fsm/transition current-status new-status)]
-    (if (:success? transition-result)
+    (if (controller-fsm/succeeded? transition-result)
       (assoc controller-state
-             :status (:state transition-result)
+             :status (controller-fsm/transition-state transition-result)
              :updated-at (java.util.Date.))
       (throw (invalid-transition-ex current-status new-status transition-result)))))
 
@@ -187,7 +201,7 @@
 (defn fail-controller!
   "Mark controller as failed and return a DAG error."
   [controller error-key error-msg]
-  (update-status! controller :failed)
+  (update-status! controller lifecycle-failed-status)
   (dag/err error-key error-msg))
 
 (defn create-and-checkout-branch!
@@ -195,7 +209,7 @@
    Returns the branch result or a DAG error."
   [controller worktree-path branch-name]
   (let [branch-result (release/create-branch! worktree-path branch-name)]
-    (if (:success? branch-result)
+    (if (schema/succeeded? branch-result)
       branch-result
       (do
         (add-history! controller :pr-creation-failed {:error (:error branch-result)})
@@ -216,7 +230,7 @@
   [controller worktree-path task task-id]
   (let [commit-msg (build-commit-message task task-id)
         commit-result (release/commit-changes! worktree-path commit-msg)]
-    (if (:success? commit-result)
+    (if (schema/succeeded? commit-result)
       commit-result
       (fail-controller! controller :commit-failed (:error commit-result)))))
 
@@ -225,7 +239,7 @@
    Returns the PR info map or a DAG error."
   [controller worktree-path branch-name base-branch task task-id commit-result]
   (let [push-result (release/push-branch! worktree-path branch-name)]
-    (if-not (:success? push-result)
+    (if-not (schema/succeeded? push-result)
       (fail-controller! controller :push-failed (:error push-result))
       (let [pr-title (build-pr-title task task-id)
             pr-body (build-pr-body task)
@@ -233,7 +247,7 @@
                                           {:title pr-title
                                            :body pr-body
                                            :base-branch base-branch})]
-        (if-not (:success? pr-result)
+        (if-not (schema/succeeded? pr-result)
           (fail-controller! controller :pr-creation-failed (:error pr-result))
           {:pr/id       (:pr-number pr-result)
            :pr/url      (:pr-url pr-result)
@@ -377,7 +391,7 @@
                        :event-bus event-bus
                        :dag/id (:dag/id @controller)
                        :run/id (:run/id @controller)})]
-      (add-history! controller :ci-fix-completed {:success? (:success? fix-result)})
+      (add-history! controller :ci-fix-completed (fix-completion-data fix-result))
       fix-result)))
 
 (defn handle-review-feedback!
@@ -410,7 +424,7 @@
                        :dag/id (:dag/id @controller)
                        :run/id (:run/id @controller)
                        :auto-resolve-comments auto-resolve-comments})]
-      (add-history! controller :review-fix-completed {:success? (:success? fix-result)})
+      (add-history! controller :review-fix-completed (fix-completion-data fix-result))
       fix-result)))
 
 ;------------------------------------------------------------------------------ Layer 1
@@ -513,20 +527,20 @@
                   (:failure :timed-out)
                   ;; CI failed - run fix loop
                   (let [fix-result (handle-ci-failure! controller (:ci/logs ci-result))]
-                    (if (:success? fix-result)
+                    (if (schema/succeeded? fix-result)
                       (do
                         ;; Fix pushed - restart CI monitoring
                         (start-ci-monitoring! controller)
                         (recur))
                       (do
                         ;; Fix failed
-                        (update-status! controller :failed)
-                        {:status :failed :reason :fix-failed})))
+                        (update-status! controller lifecycle-failed-status)
+                        {:status lifecycle-failed-status :reason :fix-failed})))
 
                   ;; Unknown status
                   (do
-                    (update-status! controller :failed)
-                    {:status :failed :reason :unknown-ci-status}))))
+                    (update-status! controller lifecycle-failed-status)
+                    {:status lifecycle-failed-status :reason :unknown-ci-status}))))
 
             ;; Review monitoring
             :monitoring-review
@@ -554,15 +568,15 @@
                 ;; Run fix loop for review feedback
                 (let [fix-result (handle-review-feedback!
                                   controller (:actionable-comments review-result))]
-                  (if (:success? fix-result)
+                  (if (schema/succeeded? fix-result)
                     (do
                       ;; Fix pushed - restart CI monitoring
                       (start-ci-monitoring! controller)
                       (recur))
                     (do
                       ;; Fix failed
-                      (update-status! controller :failed)
-                      {:status :failed :reason :fix-failed})))
+                      (update-status! controller lifecycle-failed-status)
+                      {:status lifecycle-failed-status :reason :fix-failed})))
 
                 ;; Unknown/timeout
                 {:status :pending :waiting-for :review}))
@@ -578,7 +592,7 @@
             {:status :merged}
 
             :failed
-            {:status :failed :history (:history @controller)}
+            {:status lifecycle-failed-status :history (:history @controller)}
 
             ;; Default
             (do
@@ -586,11 +600,11 @@
               (recur)))))
 
       (catch Exception e
-        (let [final-status (if (= :failed (:status @controller))
-                             :failed
+        (let [final-status (if (= lifecycle-failed-status (:status @controller))
+                             lifecycle-failed-status
                              (try
-                               (update-status! controller :failed)
-                               :failed
+                               (update-status! controller lifecycle-failed-status)
+                               lifecycle-failed-status
                                (catch clojure.lang.ExceptionInfo _
                                  (:status @controller))))]
         (add-history! controller :exception {:message (.getMessage e)})

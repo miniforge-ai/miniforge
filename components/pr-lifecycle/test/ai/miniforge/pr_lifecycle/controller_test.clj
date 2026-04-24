@@ -32,7 +32,8 @@
    [ai.miniforge.pr-lifecycle.events :as events]
    [ai.miniforge.pr-lifecycle.fix-loop :as fix]
    [ai.miniforge.dag-executor.interface :as dag]
-   [ai.miniforge.release-executor.interface :as release]))
+   [ai.miniforge.release-executor.interface :as release]
+   [ai.miniforge.schema.interface :as schema]))
 
 ;------------------------------------------------------------------------------ Test Data
 
@@ -48,6 +49,24 @@
   (re-pattern
    (java.util.regex.Pattern/quote
     (messages/t :controller/max-fix-iterations-exceeded))))
+
+(defn- release-success
+  [data]
+  (merge {:success? true} data))
+
+(defn- release-failure
+  [error]
+  {:success? false
+   :error error})
+
+(defn- fix-success
+  [data]
+  (merge {:success? true} data))
+
+(defn- fix-failure
+  [reason]
+  {:success? false
+   :reason reason})
 
 (defn make-event-collector
   "Create a minimal event bus that collects published events."
@@ -471,6 +490,38 @@
             (max-fix-iterations-exceeded-pattern)
             (controller/handle-ci-failure! ctrl "logs"))))))
 
+(deftest handle-ci-failure-records-normalized-result-status-test
+  (testing "handle-ci-failure! records normalized result status in history"
+    (let [ctrl (controller/create-controller
+                 "dag" "run" "task" test-task
+                 :worktree-path "/tmp"
+                 :generate-fn (fn [& _] nil))]
+      (swap! ctrl assoc
+             :status :monitoring-ci
+             :pr {:pr/id 123 :pr/branch "feat/x" :pr/head-sha "abc"}
+             :fix-iterations 0)
+      (with-redefs [fix/fix-ci-failure (fn [& _]
+                                         (fix-success {:commit-sha "abc123"}))]
+        (controller/handle-ci-failure! ctrl "logs")
+        (is (= {:result-status :succeeded}
+               (:data (last (:history @ctrl)))))))))
+
+(deftest handle-review-feedback-records-normalized-result-status-test
+  (testing "handle-review-feedback! records normalized result status in history"
+    (let [ctrl (controller/create-controller
+                 "dag" "run" "task" test-task
+                 :worktree-path "/tmp"
+                 :generate-fn (fn [& _] nil))]
+      (swap! ctrl assoc
+             :status :monitoring-review
+             :pr {:pr/id 123 :pr/branch "feat/x" :pr/head-sha "abc"}
+             :fix-iterations 0)
+      (with-redefs [fix/fix-review-feedback (fn [& _]
+                                              (fix-failure :fix-failed))]
+        (controller/handle-review-feedback! ctrl [{:body "Fix"}])
+        (is (= {:result-status :failed}
+               (:data (last (:history @ctrl)))))))))
+
 ;------------------------------------------------------------------------------ State Manipulation (via atom)
 
 (deftest controller-status-transitions-test
@@ -573,16 +624,16 @@
   (testing "Returns branch result on success"
     (let [ctrl (make-controller)]
       (with-redefs [release/create-branch! (fn [_path _name]
-                                              {:success? true :base-branch "main"})]
+                                              (release-success {:base-branch "main"}))]
         (let [result (controller/create-and-checkout-branch! ctrl "/tmp" "feat/x")]
-          (is (:success? result))
+          (is (schema/succeeded? result))
           (is (= "main" (:base-branch result))))))))
 
 (deftest create-and-checkout-branch-failure
   (testing "Returns DAG error on failure and adds history"
     (let [ctrl (make-controller)]
       (with-redefs [release/create-branch! (fn [_path _name]
-                                              {:success? false :error "git error"})]
+                                              (release-failure "git error"))]
         (let [result (controller/create-and-checkout-branch! ctrl "/tmp" "feat/x")]
           (is (dag/err? result))
           (is (= :failed (:status @ctrl)))
@@ -614,16 +665,16 @@
     (let [ctrl (make-controller)
           task-id "task-00000001"]
       (with-redefs [release/commit-changes! (fn [_path _msg]
-                                               {:success? true :commit-sha "abc123"})]
+                                               (release-success {:commit-sha "abc123"}))]
         (let [result (controller/commit-changes! ctrl "/tmp" test-task task-id)]
-          (is (:success? result))
+          (is (schema/succeeded? result))
           (is (= "abc123" (:commit-sha result))))))))
 
 (deftest commit-changes-failure
   (testing "Returns DAG error on commit failure"
     (let [ctrl (make-controller)]
       (with-redefs [release/commit-changes! (fn [_path _msg]
-                                               {:success? false :error "nothing to commit"})]
+                                               (release-failure "nothing to commit"))]
         (let [result (controller/commit-changes! ctrl "/tmp" test-task "t-1")]
           (is (dag/err? result))
           (is (= :failed (:status @ctrl))))))))
@@ -634,7 +685,7 @@
           captured-msg (atom nil)]
       (with-redefs [release/commit-changes! (fn [_path msg]
                                                (reset! captured-msg msg)
-                                               {:success? true :commit-sha "x"})]
+                                               (release-success {:commit-sha "x"}))]
         (controller/commit-changes! ctrl "/tmp" test-task "t-1")
         (is (.contains @captured-msg "Implement feature X"))))))
 
@@ -644,11 +695,11 @@
   (testing "Returns PR info map on success"
     (let [ctrl (make-controller)]
       (with-redefs [release/push-branch! (fn [_path _branch]
-                                            {:success? true})
+                                            (release-success {}))
                     release/create-pr! (fn [_path _opts]
-                                         {:success? true
-                                          :pr-number 42
-                                          :pr-url "https://github.com/org/repo/pull/42"})]
+                                         (release-success
+                                          {:pr-number 42
+                                           :pr-url "https://github.com/org/repo/pull/42"}))]
         (let [commit {:commit-sha "abc123"}
               result (controller/push-and-create-pr! ctrl "/tmp" "feat/x" "main"
                                                       test-task "t-1" commit)]
@@ -662,7 +713,7 @@
   (testing "Returns DAG error when push fails"
     (let [ctrl (make-controller)]
       (with-redefs [release/push-branch! (fn [_path _branch]
-                                            {:success? false :error "remote rejected"})]
+                                            (release-failure "remote rejected"))]
         (let [result (controller/push-and-create-pr! ctrl "/tmp" "feat/x" "main"
                                                       test-task "t-1" {:commit-sha "x"})]
           (is (dag/err? result))
@@ -672,9 +723,9 @@
   (testing "Returns DAG error when PR creation fails"
     (let [ctrl (make-controller)]
       (with-redefs [release/push-branch! (fn [_path _branch]
-                                            {:success? true})
+                                            (release-success {}))
                     release/create-pr! (fn [_path _opts]
-                                         {:success? false :error "repo not found"})]
+                                         (release-failure "repo not found"))]
         (let [result (controller/push-and-create-pr! ctrl "/tmp" "feat/x" "main"
                                                       test-task "t-1" {:commit-sha "x"})]
           (is (dag/err? result)))))))
@@ -683,10 +734,10 @@
   (testing "PR body includes acceptance criteria from task"
     (let [ctrl (make-controller)
           captured-opts (atom nil)]
-      (with-redefs [release/push-branch! (fn [_path _branch] {:success? true})
+      (with-redefs [release/push-branch! (fn [_path _branch] (release-success {}))
                     release/create-pr! (fn [_path opts]
                                          (reset! captured-opts opts)
-                                         {:success? true :pr-number 1 :pr-url "url"})]
+                                         (release-success {:pr-number 1 :pr-url "url"}))]
         (controller/push-and-create-pr! ctrl "/tmp" "feat/x" "main"
                                          test-task "t-1" {:commit-sha "x"})
         (is (.contains (:body @captured-opts) "Tests pass"))

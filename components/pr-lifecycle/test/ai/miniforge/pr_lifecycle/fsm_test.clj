@@ -21,7 +21,8 @@
   (:require
    [clojure.test :refer [deftest is testing]]
    [ai.miniforge.pr-lifecycle.messages :as messages]
-   [ai.miniforge.pr-lifecycle.fsm :as sut]))
+   [ai.miniforge.pr-lifecycle.fsm :as sut]
+   [ai.miniforge.schema.interface :as schema]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Test helpers
@@ -36,54 +37,71 @@
 
 (deftest valid-transition-happy-path-test
   (testing "happy path transitions succeed through merge"
-    (is (= {:success? true :state :creating-pr :event :create-pr}
-           (transition-result :pending :creating-pr)))
-    (is (= {:success? true :state :monitoring-ci :event :start-ci-monitoring}
-           (transition-result :creating-pr :monitoring-ci)))
-    (is (= {:success? true :state :monitoring-review :event :start-review-monitoring}
-           (transition-result :monitoring-ci :monitoring-review)))
-    (is (= {:success? true :state :ready-to-merge :event :mark-ready-to-merge}
-           (transition-result :monitoring-review :ready-to-merge)))
-    (is (= {:success? true :state :merged :event :merge}
-           (transition-result :ready-to-merge :merged)))))
+    (let [creating-pr (transition-result :pending :creating-pr)
+          monitoring-ci (transition-result :creating-pr :monitoring-ci)
+          monitoring-review (transition-result :monitoring-ci :monitoring-review)
+          ready-to-merge (transition-result :monitoring-review :ready-to-merge)
+          merged (transition-result :ready-to-merge :merged)]
+      (is (schema/succeeded? creating-pr))
+      (is (= {:state :creating-pr :event :create-pr} (:transition creating-pr)))
+      (is (schema/succeeded? monitoring-ci))
+      (is (= {:state :monitoring-ci :event :start-ci-monitoring} (:transition monitoring-ci)))
+      (is (schema/succeeded? monitoring-review))
+      (is (= {:state :monitoring-review :event :start-review-monitoring}
+             (:transition monitoring-review)))
+      (is (schema/succeeded? ready-to-merge))
+      (is (= {:state :ready-to-merge :event :mark-ready-to-merge}
+             (:transition ready-to-merge)))
+      (is (schema/succeeded? merged))
+      (is (= {:state :merged :event :merge} (:transition merged))))))
 
 (deftest valid-transition-fix-loop-test
   (testing "fix loop transitions return to CI monitoring"
-    (is (= {:success? true :state :fixing :event :start-fixing}
-           (transition-result :monitoring-ci :fixing)))
-    (is (= {:success? true :state :monitoring-ci :event :start-ci-monitoring}
-           (transition-result :fixing :monitoring-ci)))
-    (is (= {:success? true :state :fixing :event :start-fixing}
-           (transition-result :monitoring-review :fixing)))))
+    (let [start-fixing (transition-result :monitoring-ci :fixing)
+          restart-ci (transition-result :fixing :monitoring-ci)
+          restart-fixing (transition-result :monitoring-review :fixing)]
+      (is (schema/succeeded? start-fixing))
+      (is (= {:state :fixing :event :start-fixing} (:transition start-fixing)))
+      (is (schema/succeeded? restart-ci))
+      (is (= {:state :monitoring-ci :event :start-ci-monitoring} (:transition restart-ci)))
+      (is (schema/succeeded? restart-fixing))
+      (is (= {:state :fixing :event :start-fixing} (:transition restart-fixing))))))
 
 (deftest invalid-status-and-transition-test
   (testing "invalid statuses and undefined transitions are rejected"
     (let [invalid-state-result (transition-result :bogus-status :creating-pr)
           invalid-target-result (transition-result :pending :bogus-status)
           invalid-transition-result (transition-result :monitoring-ci :pending)]
-      (is (= :invalid-state (:error invalid-state-result)))
-      (is (= :invalid-target-status (:error invalid-target-result)))
-      (is (= :invalid-transition (:error invalid-transition-result)))
+      (is (schema/failed? invalid-state-result))
+      (is (= :invalid-state (sut/transition-error-code invalid-state-result)))
+      (is (schema/failed? invalid-target-result))
+      (is (= :invalid-target-status (sut/transition-error-code invalid-target-result)))
+      (is (schema/failed? invalid-transition-result))
+      (is (= :invalid-transition (sut/transition-error-code invalid-transition-result)))
       (is (= (messages/t :fsm/invalid-state {:status :bogus-status})
-             (:message invalid-state-result)))
+             (sut/transition-error-message invalid-state-result)))
       (is (= (messages/t :fsm/invalid-target-status {:status :bogus-status})
-             (:message invalid-target-result)))
+             (sut/transition-error-message invalid-target-result)))
       (is (= (messages/t :fsm/invalid-transition
                          {:from-status :monitoring-ci
                           :to-status :pending})
-             (:message invalid-transition-result))))))
+             (sut/transition-error-message invalid-transition-result))))))
 
 (deftest terminal-state-rejected-test
   (testing "terminal statuses reject further transitions"
-    (is (= :terminal-state (:error (transition-result :merged :monitoring-ci))))
-    (is (= :terminal-state (:error (transition-result :failed :creating-pr))))))
+    (is (= :terminal-state
+           (sut/transition-error-code (transition-result :merged :monitoring-ci))))
+    (is (= :terminal-state
+           (sut/transition-error-code (transition-result :failed :creating-pr))))))
 
 (deftest same-state-transition-remains-idempotent-test
   (testing "same-state transitions are allowed as idempotent updates"
-    (is (= {:success? true :state :monitoring-ci :event nil}
-           (transition-result :monitoring-ci :monitoring-ci)))
-    (is (= {:success? true :state :merged :event nil}
-           (transition-result :merged :merged)))))
+    (let [monitoring-ci (transition-result :monitoring-ci :monitoring-ci)
+          merged (transition-result :merged :merged)]
+      (is (schema/succeeded? monitoring-ci))
+      (is (= {:state :monitoring-ci :event nil} (:transition monitoring-ci)))
+      (is (schema/succeeded? merged))
+      (is (= {:state :merged :event nil} (:transition merged))))))
 
 (deftest valid-transition-predicate-test
   (testing "valid-transition? requires recognized statuses"

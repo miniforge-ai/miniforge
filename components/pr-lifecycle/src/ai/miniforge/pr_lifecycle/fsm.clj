@@ -90,6 +90,16 @@
   [status]
   (contains? terminal-statuses status))
 
+(defn succeeded?
+  "Check whether a controller transition result succeeded."
+  [result]
+  (schema/succeeded? result))
+
+(defn failed?
+  "Check whether a controller transition result failed."
+  [result]
+  (schema/failed? result))
+
 (defn- transition-targets
   "Return all configured targets from `from-status`."
   [from-status]
@@ -132,7 +142,57 @@
 ;------------------------------------------------------------------------------ Layer 2
 ;; Transition execution
 
+(def ^:private transition-data-key
+  :transition)
+
 (declare transition-failure)
+
+(defn- transition-result
+  "Create a successful controller transition result."
+  [state event]
+  (let [transition {:state state
+                    :event event}]
+    (schema/success transition-data-key transition)))
+
+(defn- transition-error
+  "Create a structured controller transition error map."
+  [error-code from-status to-status]
+  (let [message (case error-code
+                  :invalid-state
+                  (messages/t :fsm/invalid-state {:status from-status})
+
+                  :invalid-target-status
+                  (messages/t :fsm/invalid-target-status {:status to-status})
+
+                  :terminal-state
+                  (messages/t :fsm/terminal-state {:status from-status})
+
+                  :invalid-transition
+                  (messages/t :fsm/invalid-transition
+                              {:from-status from-status
+                               :to-status to-status}))]
+    {:code error-code
+     :message message}))
+
+(defn transition-state
+  "Return the target controller state from a transition result."
+  [result]
+  (get-in result [transition-data-key :state]))
+
+(defn transition-event
+  "Return the transition event from a transition result."
+  [result]
+  (get-in result [transition-data-key :event]))
+
+(defn transition-error-code
+  "Return the transition error code from a failed result."
+  [result]
+  (get-in result [:error :code]))
+
+(defn transition-error-message
+  "Return the transition error message from a failed result."
+  [result]
+  (get-in result [:error :message]))
 
 (def controller-state-definitions
   "Machine state definitions keyed by controller status."
@@ -154,8 +214,8 @@
   "Attempt a controller status transition.
 
    Returns:
-   - `{:success? true :state new-status :event event-or-nil}` on success
-   - `{:success? false :error keyword :message string}` on failure"
+   - `(schema/success :transition {:state new-status :event event-or-nil})` on success
+   - `(schema/failure :transition {:code keyword :message string})` on failure"
   [from-status to-status]
   (cond
     (not (valid-status? from-status))
@@ -165,9 +225,7 @@
     (transition-failure :invalid-target-status from-status to-status)
 
     (= from-status to-status)
-    {:success? true
-     :state from-status
-     :event nil}
+    (transition-result from-status nil)
 
     (terminal-status? from-status)
     (transition-failure :terminal-state from-status to-status)
@@ -177,31 +235,14 @@
       (let [state-map {:_state from-status}
             new-state-map (fsm/transition controller-machine state-map event)
             new-state (fsm/current-state new-state-map)]
-        {:success? true
-         :state new-state
-         :event event})
+        (transition-result new-state event))
       (transition-failure :invalid-transition from-status to-status))))
 
 (defn- transition-failure
-  "Return a consistent controller transition failure map."
-  [error from-status to-status]
-  (let [message (case error
-                  :invalid-state
-                  (messages/t :fsm/invalid-state {:status from-status})
-
-                  :invalid-target-status
-                  (messages/t :fsm/invalid-target-status {:status to-status})
-
-                  :terminal-state
-                  (messages/t :fsm/terminal-state {:status from-status})
-
-                  :invalid-transition
-                  (messages/t :fsm/invalid-transition
-                              {:from-status from-status
-                               :to-status to-status}))]
-    {:success? false
-     :error error
-     :message message}))
+  "Return a consistent controller transition failure result."
+  [error-code from-status to-status]
+  (let [error (transition-error error-code from-status to-status)]
+    (schema/failure transition-data-key error)))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
