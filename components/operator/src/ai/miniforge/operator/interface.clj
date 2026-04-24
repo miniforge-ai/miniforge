@@ -21,6 +21,7 @@
    Manages the meta-loop: observe signals, detect patterns, propose improvements."
   (:require
    [ai.miniforge.operator.core :as core]
+   [ai.miniforge.operator.intervention :as intervention]
    [ai.miniforge.operator.protocol :as proto]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -34,6 +35,10 @@
 ;; Type definitions
 (def signal-types proto/signal-types)
 (def improvement-types proto/improvement-types)
+(def intervention-types intervention/intervention-types)
+(def intervention-target-types intervention/target-types)
+(def intervention-lifecycle-states intervention/lifecycle-states)
+(def intervention-terminal-states intervention/terminal-states)
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Operator creation
@@ -67,6 +72,85 @@
   "Create a governance manager.
    Controls improvement approval policies."
   core/create-governance)
+
+;------------------------------------------------------------------------------ Layer 1a
+;; Bounded supervisory interventions
+
+(def create-intervention
+  "Create a bounded InterventionRequest map."
+  intervention/create-intervention)
+
+(def approval-required?
+  "Check whether an intervention type defaults to a pending-human step."
+  intervention/approval-required?)
+
+(def valid-intervention-type?
+  "Check if an intervention type is part of the bounded vocabulary."
+  intervention/valid-type?)
+
+(def valid-intervention-target-type?
+  "Check if an intervention target type is recognized."
+  intervention/valid-target-type?)
+
+(def valid-intervention-state?
+  "Check if an intervention lifecycle state is valid."
+  intervention/valid-state?)
+
+(def intervention-terminal-state?
+  "Check if an intervention lifecycle state is terminal."
+  intervention/terminal-state?)
+
+(def intervention-target-type
+  "Resolve the default target type for an intervention."
+  intervention/intervention-target-type)
+
+(def valid-intervention-transition?
+  "Check if an intervention lifecycle transition is valid."
+  intervention/valid-transition?)
+
+(def next-intervention-state
+  "Resolve the next lifecycle state for an intervention transition."
+  intervention/next-state)
+
+(def transition-intervention
+  "Apply a lifecycle transition to an intervention."
+  intervention/transition)
+
+(def start-intervention-approval
+  "Move an intervention into :pending-human."
+  intervention/start-approval)
+
+(def approve-intervention
+  "Approve an intervention."
+  intervention/approve)
+
+(def reject-intervention
+  "Reject an intervention."
+  intervention/reject)
+
+(def dispatch-intervention
+  "Mark an intervention as dispatched."
+  intervention/dispatch)
+
+(def apply-intervention-result
+  "Mark an intervention as applied."
+  intervention/apply-result)
+
+(def verify-intervention
+  "Mark an intervention as verified."
+  intervention/verify)
+
+(def fail-intervention
+  "Mark an intervention as failed."
+  intervention/fail)
+
+(def supported-target-types
+  "Return the supported target types for an intervention type."
+  intervention/supported-target-types)
+
+(def bounded-intervention-vocabulary?
+  "Check if a set of intervention types is within the bounded vocabulary."
+  intervention/bounded-vocabulary?)
 
 ;------------------------------------------------------------------------------ Layer 2
 ;; Signal observation

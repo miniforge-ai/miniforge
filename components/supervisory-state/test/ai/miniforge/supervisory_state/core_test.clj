@@ -20,7 +20,7 @@
   "End-to-end tests for the supervisory-state component lifecycle:
    replay, live subscription, snapshot emission, and re-emit prevention."
   (:require
-   [clojure.test :refer [deftest testing is]]
+   [clojure.test :refer [deftest is]]
    [ai.miniforge.event-stream.core :as es-core]
    [ai.miniforge.event-stream.interface :as es]
    [ai.miniforge.supervisory-state.core :as core]
@@ -221,3 +221,53 @@
       (is (= "approve"   (:decision/resolution (:supervisory/entity final))))
       (is (= aid         (:decision/agent-id (:supervisory/entity final)))
           "resolve event must preserve the agent-id from the create event"))))
+
+;------------------------------------------------------------------------------ InterventionRequest
+
+(defn- intervention-requested-event [workflow-id intervention-id]
+  {:event/type :supervisory/intervention-requested
+   :event/id (random-uuid)
+   :event/timestamp (java.util.Date.)
+   :event/version "1.0.0"
+   :event/sequence-number 0
+   :workflow/id workflow-id
+   :intervention/id intervention-id
+   :intervention/type :pause
+   :intervention/target-type :workflow
+   :intervention/target-id workflow-id
+   :intervention/requested-by "operator@example.com"
+   :intervention/request-source :tui
+   :intervention/state :proposed
+   :intervention/requested-at (java.util.Date.)
+   :intervention/updated-at (java.util.Date.)
+   :message "Pause requested"})
+
+(defn- intervention-state-changed-event [workflow-id intervention-id next-state]
+  {:event/type :supervisory/intervention-state-changed
+   :event/id (random-uuid)
+   :event/timestamp (java.util.Date.)
+   :event/version "1.0.0"
+   :event/sequence-number 0
+   :workflow/id workflow-id
+   :intervention/id intervention-id
+   :intervention/state next-state
+   :intervention/outcome {:paused true}
+   :message (str "Intervention " intervention-id " → " (name next-state))})
+
+(deftest intervention-events-produce-supervisory-intervention-snapshots
+  (let [stream (no-sink-stream)
+        comp   (iface/create stream)
+        workflow-id (random-uuid)
+        intervention-id (random-uuid)]
+    (iface/start! comp)
+    (es/publish! stream (intervention-requested-event workflow-id intervention-id))
+    (es/publish! stream (intervention-state-changed-event workflow-id intervention-id :applied))
+    (let [snaps (->> (supervisory-events stream)
+                     (filter #(= :supervisory/intervention-upserted (:event/type %))))
+          final (last snaps)]
+      (is (= 2 (count snaps)) "request + applied state change should each emit a snapshot")
+      (is (= :applied (get-in final [:supervisory/entity :intervention/state])))
+      (is (= {:paused true} (get-in final [:supervisory/entity :intervention/outcome])))
+      (is (= intervention-id (->> (iface/interventions comp)
+                                  first
+                                  :intervention/id))))))

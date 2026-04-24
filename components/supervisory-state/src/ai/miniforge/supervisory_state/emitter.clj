@@ -98,6 +98,16 @@
                                " → " (name (or (:decision/status decision-entity) :pending))))
       (assoc :supervisory/entity decision-entity)))
 
+(defn intervention-upserted
+  [stream intervention-entity]
+  (-> (es/create-envelope stream
+                          :supervisory/intervention-upserted
+                          nil
+                          (str "Intervention " (:intervention/id intervention-entity)
+                               " → "
+                               (name (or (:intervention/state intervention-entity) :proposed))))
+      (assoc :supervisory/entity intervention-entity)))
+
 ;------------------------------------------------------------------------------ Layer 1
 ;; Diff + emit — publish one event per entity that changed
 
@@ -127,4 +137,5 @@
     (emit-diff! stream attention-derived  (:attention    old-table) (:attention    new-table))
     (emit-diff! stream task-node-upserted (:tasks         old-table) (:tasks        new-table))
     (emit-diff! stream decision-upserted  (:decisions     old-table) (:decisions    new-table))
+    (emit-diff! stream intervention-upserted (:interventions old-table) (:interventions new-table))
     (- (count (es/get-events stream)) before)))

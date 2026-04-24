@@ -22,6 +22,15 @@
    See specs/normative/N3-event-stream.md for the full specification.")
 
 ;------------------------------------------------------------------------------ Layer 0
+;; Shared payload schemas
+
+(def TransitionRequest
+  "Schema for a phase transition request payload."
+  [:map
+   [:transition/type keyword?]
+   [:transition/target keyword?]])
+
+;------------------------------------------------------------------------------ Layer 0
 ;; Event envelope (base schema all events must conform to)
 
 (def EventEnvelope
@@ -82,6 +91,9 @@
    [:phase/duration-ms {:optional true} int?]
    [:phase/outcome {:optional true} [:enum :success :failure :skipped]]
    [:phase/artifacts {:optional true} [:vector uuid?]]
+   [:phase/transition-request {:optional true} TransitionRequest]
+   [:phase/redirect-to {:optional true} keyword?]
+   [:phase/error {:optional true} map?]
    [:phase/tokens {:optional true} int?]
    [:phase/cost-usd {:optional true} number?]
    [:message string?]])
@@ -284,6 +296,8 @@
    :llm/request      :internal
    :llm/response     :internal
    :supervision/tool-use-evaluated :internal
+   :supervisory/intervention-requested :confidential
+   :supervisory/intervention-state-changed :confidential
    :control-action/requested :confidential
    :control-action/executed  :confidential
    :annotation/created       :internal
@@ -340,6 +354,55 @@
    [:supervision/meta-eval? {:optional true} boolean?]
    [:supervision/confidence {:optional true} number?]
    [:workflow/phase {:optional true} keyword?]
+   [:message string?]])
+
+(def InterventionRequested
+  "Schema for supervisory/intervention-requested event."
+  [:map
+   [:event/type [:= :supervisory/intervention-requested]]
+   [:event/id uuid?]
+   [:event/timestamp inst?]
+   [:event/version string?]
+   [:event/sequence-number int?]
+   [:workflow/id {:optional true} [:maybe uuid?]]
+   [:intervention/id uuid?]
+   [:intervention/type keyword?]
+   [:intervention/target-type keyword?]
+   [:intervention/target-id any?]
+   [:intervention/requested-by string?]
+   [:intervention/request-source keyword?]
+   [:intervention/state keyword?]
+   [:intervention/justification {:optional true} string?]
+   [:intervention/details {:optional true} map?]
+   [:intervention/approval-required? {:optional true} boolean?]
+   [:intervention/requested-at inst?]
+   [:intervention/updated-at inst?]
+   [:message string?]])
+
+(def InterventionStateChanged
+  "Schema for supervisory/intervention-state-changed event."
+  [:map
+   [:event/type [:= :supervisory/intervention-state-changed]]
+   [:event/id uuid?]
+   [:event/timestamp inst?]
+   [:event/version string?]
+   [:event/sequence-number int?]
+   [:workflow/id {:optional true} [:maybe uuid?]]
+   [:intervention/id uuid?]
+   [:intervention/state keyword?]
+   [:intervention/from-state {:optional true} keyword?]
+   [:intervention/type {:optional true} keyword?]
+   [:intervention/target-type {:optional true} keyword?]
+   [:intervention/target-id {:optional true} any?]
+   [:intervention/requested-by {:optional true} string?]
+   [:intervention/request-source {:optional true} keyword?]
+   [:intervention/justification {:optional true} string?]
+   [:intervention/details {:optional true} map?]
+   [:intervention/reason {:optional true} string?]
+   [:intervention/outcome {:optional true} any?]
+   [:intervention/approval-required? {:optional true} boolean?]
+   [:intervention/requested-at {:optional true} inst?]
+   [:intervention/updated-at {:optional true} inst?]
    [:message string?]])
 
 ;; OCI container event schemas

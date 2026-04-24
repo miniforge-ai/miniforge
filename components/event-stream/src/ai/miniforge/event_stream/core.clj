@@ -19,6 +19,7 @@
 (ns ai.miniforge.event-stream.core
   "Event bus and event constructors for workflow observability."
   (:require
+   [ai.miniforge.phase.interface :as phase]
    [ai.miniforge.logging.interface :as log]
    [ai.miniforge.response.interface :as response]
    [ai.miniforge.event-stream.sinks :as sinks]))
@@ -27,6 +28,22 @@
 ;; Constants
 
 (def ^:const event-version "1.0.0")
+
+(def ^:private redirect-transition-type
+  :transition/redirect)
+
+(defn- redirect-target
+  "Project a redirect target for legacy consumers.
+
+   The workflow runner now emits :phase/transition-request. This helper keeps
+   :phase/redirect-to available only when the transition request represents a
+   redirect, so older event consumers do not break while the newer event shape
+   remains authoritative."
+  [result]
+  (let [transition-request (phase/transition-request result)
+        transition-type (get transition-request :transition/type)]
+    (when (= redirect-transition-type transition-type)
+      (get transition-request :transition/target))))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Event persistence via configurable sinks
@@ -177,7 +194,9 @@
 
 (defn phase-completed [stream workflow-id phase & [result]]
   (let [outcome (get result :outcome :success)
-        transition-request (get result :phase/transition-request)]
+        transition-request (phase/transition-request result)
+        redirect-to (or (redirect-target result)
+                        (:redirect-to result))]
     (-> (create-envelope stream :workflow/phase-completed workflow-id
                          (str (name phase) " phase " (name outcome)))
         (assoc :workflow/phase phase
@@ -187,6 +206,7 @@
           (:artifacts result) (assoc :phase/artifacts (:artifacts result))
           (:error result) (assoc :phase/error (:error result))
           transition-request (assoc :phase/transition-request transition-request)
+          redirect-to (assoc :phase/redirect-to redirect-to)
           (:tokens result) (assoc :phase/tokens (:tokens result))
           (:cost-usd result) (assoc :phase/cost-usd (:cost-usd result))))))
 
@@ -585,6 +605,63 @@
                        (str "Decision " decision-id " resolved: " resolution))
       (assoc :cp/decision-id decision-id
              :cp/resolution resolution)))
+
+(defn intervention-requested
+  "Emit when a bounded supervisory intervention is created."
+  [stream workflow-id intervention]
+  (-> (create-envelope stream :supervisory/intervention-requested workflow-id
+                       (str "Intervention "
+                            (name (:intervention/type intervention))
+                            " requested"))
+      (merge intervention)))
+
+(defn intervention-state-changed
+  "Emit when an InterventionRequest changes lifecycle state."
+  [stream workflow-id intervention-id to-state & [opts]]
+  (-> (create-envelope stream :supervisory/intervention-state-changed workflow-id
+                       (str "Intervention " intervention-id " → " (name to-state)))
+      (assoc :intervention/id intervention-id
+             :intervention/state to-state)
+      (cond->
+        (:intervention/from-state opts)
+        (assoc :intervention/from-state (:intervention/from-state opts))
+
+        (:intervention/type opts)
+        (assoc :intervention/type (:intervention/type opts))
+
+        (:intervention/target-type opts)
+        (assoc :intervention/target-type (:intervention/target-type opts))
+
+        (contains? opts :intervention/target-id)
+        (assoc :intervention/target-id (:intervention/target-id opts))
+
+        (:intervention/requested-by opts)
+        (assoc :intervention/requested-by (:intervention/requested-by opts))
+
+        (:intervention/request-source opts)
+        (assoc :intervention/request-source (:intervention/request-source opts))
+
+        (:intervention/justification opts)
+        (assoc :intervention/justification (:intervention/justification opts))
+
+        (:intervention/details opts)
+        (assoc :intervention/details (:intervention/details opts))
+
+        (:intervention/reason opts)
+        (assoc :intervention/reason (:intervention/reason opts))
+
+        (:intervention/outcome opts)
+        (assoc :intervention/outcome (:intervention/outcome opts))
+
+        (:intervention/requested-at opts)
+        (assoc :intervention/requested-at (:intervention/requested-at opts))
+
+        (:intervention/updated-at opts)
+        (assoc :intervention/updated-at (:intervention/updated-at opts))
+
+        (contains? opts :intervention/approval-required?)
+        (assoc :intervention/approval-required?
+               (:intervention/approval-required? opts)))))
 
 ;------------------------------------------------------------------------------ Layer 6
 ;; PR scoring events (N5-delta-2 §4.1)

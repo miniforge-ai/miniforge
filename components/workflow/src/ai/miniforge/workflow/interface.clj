@@ -26,7 +26,8 @@
    [ai.miniforge.workflow.interface.profiles :as profiles]
    [ai.miniforge.workflow.interface.protocols :as protocols]
    [ai.miniforge.workflow.interface.registry :as registry]
-   [ai.miniforge.workflow.interface.runtime :as runtime]))
+   [ai.miniforge.workflow.interface.runtime :as runtime]
+   [ai.miniforge.workflow.interface.supervision :as supervision]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Protocols and workflow topology
@@ -56,6 +57,24 @@
 (def run-workflow runtime/run-workflow)
 
 ;------------------------------------------------------------------------------ Layer 2
+;; Supervision machine
+
+(def supervision-states supervision/supervision-states)
+(def supervision-terminal-states supervision/terminal-states)
+(def supervision-transitions supervision/supervision-transitions)
+(def valid-supervision-state? supervision/valid-state?)
+(def supervision-terminal-state? supervision/terminal-state?)
+(def valid-supervision-transition? supervision/valid-transition?)
+(def next-supervision-state supervision/next-state)
+(def transition-supervision supervision/transition)
+(def get-supervision-events supervision/get-available-events)
+(def supervision-machine-graph supervision/machine-graph)
+(def initialize-supervision supervision/initialize)
+(def transition-supervision-fsm supervision/transition-fsm)
+(def current-supervision-state supervision/current-state)
+(def final-supervision-state? supervision/is-final?)
+
+;------------------------------------------------------------------------------ Layer 3
 ;; Pipeline, configurable workflows, persistence, and registry helpers
 
 (def run-pipeline pipeline/run-pipeline)

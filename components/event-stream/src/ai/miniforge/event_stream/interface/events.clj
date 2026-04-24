@@ -82,6 +82,8 @@
 (def cp-agent-state-changed core/cp-agent-state-changed)
 (def cp-decision-created core/cp-decision-created)
 (def cp-decision-resolved core/cp-decision-resolved)
+(def intervention-requested core/intervention-requested)
+(def intervention-state-changed core/intervention-state-changed)
 
 ;------------------------------------------------------------------------------ Layer 2
 ;; PR scoring event constructors (N5-delta-2 §4.1)
