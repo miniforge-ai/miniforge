@@ -869,6 +869,8 @@ A common pattern that preserves adoption while capturing value:
 
 **Version History:**
 
-- 0.2.0-draft (2026-04-23): Fleet enablement amendments — `:pr-context-pack` artifact
-  type added to §9.1 (emitted by ingestion on PR creation and significant updates)
+- 0.2.0-draft (2026-04-23): External-PR artifact amendment — `:pr-context-pack`
+  added to §9.1 with the obligation that ingestion emits the artifact on PR
+  creation and on significant updates (diff, CI status, review state, base-branch
+  change). Schema lives in N6 §3.1.1; this section defines the emission contract
 - 0.1.0-draft (2026-02-07): Initial external PR integration specification

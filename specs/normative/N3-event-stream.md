@@ -58,10 +58,6 @@ All events MUST conform to this base envelope:
  :event/sequence-number long   ; REQUIRED: monotonic sequence within workflow
  :event/parent-id uuid          ; OPTIONAL: parent event ID (for causality)
 
- :tenant/id string              ; OPTIONAL in OSS local mode (implicit "local");
-                                 ;   REQUIRED in Fleet (inherited from workflow
-                                 ;   or PR Work Item — see N1 §2.32)
-
  ;; Event-specific payload
  ...
 }
@@ -1840,23 +1836,20 @@ Implementations MUST support:
 
 Implementations MUST provide a Server-Sent Events (SSE) endpoint and MAY
 provide a WebSocket endpoint. Both carry the same event envelope (§2) and
-the same ordering guarantees (§2.2). Fleet listeners (N8 §2.1) attaching to
-remote instances consume these endpoints; this section is the wire contract.
+the same ordering guarantees (§2.2). This section is the wire contract for
+the per-workflow stream; cross-workflow aggregation endpoints are out of
+scope for OSS and defined by downstream products.
 
-#### 5.3.1 Endpoints
+#### 5.3.1 Endpoint
 
 ```http
-GET  /api/workflows/:id/stream          ; single-workflow SSE
-GET  /api/fleet/stream                  ; cross-workflow SSE (requires auth)
+GET  /api/workflows/:id/stream          ; per-workflow SSE
 WS   /api/workflows/:id/stream          ; OPTIONAL WebSocket alternative
 ```
 
-A request to `/api/fleet/stream` MUST include at least one filter parameter
-(see §5.3.4) to prevent accidental full-firehose subscriptions.
-
 #### 5.3.2 Authentication
 
-Both endpoints MUST accept a bearer token via:
+The endpoint MUST accept a bearer token via:
 
 ```http
 Authorization: Bearer <token>
@@ -1868,9 +1861,8 @@ set headers on `EventSource`. Implementations MUST then either (a) require the
 token to be single-use and short-lived, or (b) reject it entirely.
 
 Tokens resolve to a principal + RBAC role (N8 §2.3). Unauthenticated requests
-to `/api/fleet/stream` MUST fail with HTTP 401. Unauthenticated requests to
-`/api/workflows/:id/stream` MAY succeed in local OSS mode with `localhost`-only
-binding but MUST fail with HTTP 401 in any network-exposed deployment.
+MAY succeed in local mode with `localhost`-only binding but MUST fail with
+HTTP 401 in any network-exposed deployment.
 
 #### 5.3.3 Listener Attach Handshake
 
@@ -1880,7 +1872,7 @@ The SSE/WebSocket connection IS the listener attach per N8 §2.1. On connection:
 
     ```http
     X-Listener-Id:          <uuid>          ; OPTIONAL — client-chosen id
-    X-Listener-Type:        watcher|dashboard|fleet|enterprise
+    X-Listener-Type:        watcher|dashboard
     X-Listener-Capability:  observe|advise|control
     X-Listener-Buffer-Size: <int>           ; OPTIONAL — server MAY cap
     ```
@@ -1910,26 +1902,20 @@ HTTP POST requests to OCI endpoints (N8 §9). SSE is strictly server-to-client.
 Clients MAY restrict the event stream via query parameters:
 
 ```text
-?workflow-id=<uuid>        (repeatable)
-&event-type=<keyword>      (repeatable; accepts glob, e.g. pack.run/*)
+?event-type=<keyword>      (repeatable; accepts glob, e.g. pack.run/*)
 &phase=<keyword>           (repeatable)
 &agent=<keyword>           (repeatable)
 &pr-id=<uuid>              (repeatable)
-&tenant-id=<string>        (repeatable; see N1 §2.32 tenant scoping)
 &from-sequence=<long>      (resume — see §5.3.5)
-&include-payloads=true|false (default: false for :fleet, true for :workflow)
+&include-payloads=true|false (default: true)
 &sampling-rate=<float>     (0.0–1.0; default 1.0)
 ```
 
 Filter evaluation is server-side; un-filtered events MUST NOT cross the wire.
-The server MUST enforce that multi-tenant listeners (N1 §2.32) only receive
-events whose `:event/scope` or `:tenant/id` matches the authenticated
-principal's tenant set, regardless of client-supplied filters.
 
 #### 5.3.5 Resume-from-Sequence
 
-Every event MUST carry a monotonic `:event/sequence-number` (per-workflow for
-`/api/workflows/:id/stream`; per-tenant for `/api/fleet/stream`).
+Every event MUST carry a monotonic `:event/sequence-number` per workflow.
 
 On reconnect, clients MAY supply `?from-sequence=<N>` to resume. The server
 MUST:
@@ -2201,10 +2187,14 @@ Event stream will extend to:
 
 **Version History:**
 
-- 0.8.0-draft (2026-04-23): Fleet enablement amendments — Streaming Protocol Details
-  (§5.3 expanded with auth, resume-from-sequence, listener attach handshake, filters,
-  backpressure, SSE/WebSocket wire formats); tenant-id added to event envelope;
-  closes OSS spec gap G5 for Fleet N10–N12
+- 0.8.0-draft (2026-04-23): Per-workflow streaming wire-contract amendments — §5.3
+  expanded from a one-line SSE sketch to a complete contract for the per-workflow
+  stream: authentication via bearer token (with browser-friendly query-param
+  fallback), listener attach handshake aligned with N8 §2.1, server-side
+  subscription filters, resume-from-sequence on reconnect, backpressure and
+  buffer-overflow behavior, SSE wire format (event/id/data/retry + heartbeats),
+  optional WebSocket wire format, rate limiting. Cross-workflow aggregation
+  endpoints remain out of OSS scope
 - 0.6.0-draft (2026-03-08): Reliability Nines amendments — `:failure/class` enum on all
   failure events, reliability metric events (§3.17), repository intelligence events (§3.18)
 - 0.5.0-draft (2026-02-16): Added pack lifecycle, Pack Run, capability denial, and chain

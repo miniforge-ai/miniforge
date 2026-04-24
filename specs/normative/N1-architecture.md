@@ -65,10 +65,7 @@ A **workflow** is the top-level unit of autonomous execution.
  :workflow/started-at inst          ; OPTIONAL
  :workflow/completed-at inst        ; OPTIONAL
 
- :workflow/evidence-bundle-id uuid  ; OPTIONAL: Created upon completion (see N6)
-
- :tenant/id string}                 ; OPTIONAL in OSS local mode (implicit "local");
-                                    ;   REQUIRED in Fleet deployments (see §2.32)
+ :workflow/evidence-bundle-id uuid} ; OPTIONAL: Created upon completion (see N6)
 ```
 
 #### 2.1.1 Workflow Requirements
@@ -582,7 +579,7 @@ If they diverge, the signature is invalid regardless of cryptographic verificati
 
 Multiple signers MAY counter-sign via `:signature/chain`. Each chain entry signs
 the same `:signature/signed-hash` independently. Implementations MAY enforce a
-minimum number of valid chain signatures via pack trust policy (§N10 Fleet).
+minimum number of valid chain signatures via pack trust policy.
 
 ##### Public Key Distribution (`pack.sig.pub`)
 
@@ -1102,10 +1099,7 @@ is an observable, auditable unit of work that produces evidence and artifacts.
  :pack-run/evidence-bundle-id uuid     ; OPTIONAL: created upon completion
 
  :pack-run/started-at inst             ; OPTIONAL
- :pack-run/completed-at inst           ; OPTIONAL
-
- :tenant/id string}                    ; OPTIONAL in OSS local mode (inherits from workflow);
-                                       ;   REQUIRED in Fleet (see §2.32)
+ :pack-run/completed-at inst}          ; OPTIONAL
 ```
 
 #### 2.26.1 Pack Run Requirements
@@ -1563,8 +1557,8 @@ that pack **capabilities** (§2.25) resolve against: a capability declaration
 like `github.pr.read` is meaningful only if a matching tool is registered and
 the agent has been granted permission to invoke it.
 
-Workflow Packs (§2.24), the capability-grant gate (N4 §5.1.9), governed tool
-execution (N10), and fleet registries (Fleet N10) all depend on this contract.
+Workflow Packs (§2.24), the capability-grant gate (N4 §5.1.9), and governed
+tool execution (N10) all depend on this contract.
 
 #### 2.31.1 Tool Descriptor
 
@@ -1589,7 +1583,8 @@ Every registered tool MUST conform to this schema:
  :tool/enabled?    boolean          ; REQUIRED: whether available for grant
  :tool/tags        #{keyword ...}   ; OPTIONAL: discovery tags
 
- :tool/source      keyword          ; REQUIRED: :builtin | :user | :project | :fleet
+ :tool/source      keyword          ; REQUIRED: :builtin | :user | :project
+                                     ;   (downstream products MAY define more)
  :tool/source-path string}          ; OPTIONAL: path of the EDN descriptor file
 ```
 
@@ -1655,7 +1650,10 @@ Implementations MUST load tool descriptors from configured roots in this order
 1. **Built-in** — tools packaged with the miniforge distribution
 2. **User** — `~/.miniforge/tools/**/*.edn`
 3. **Project** — `.miniforge/tools/**/*.edn` (in the working repo root)
-4. **Fleet** — Fleet-distributed tool descriptors (Fleet extension)
+
+Downstream products MAY define additional roots (e.g., centrally-distributed
+descriptors); they MUST slot below the project root in override order to
+preserve user/project autonomy.
 
 Override semantics: a later-root descriptor with the same `:tool/id` fully
 replaces the earlier one; there is no merge. A `:tool/enabled? false` later
@@ -1716,116 +1714,7 @@ Implementations MUST expose per-tool health state for long-lived tools
 ```
 
 Health state is observable but not part of the descriptor; it is runtime-only.
-The CLI surface for listener-visible status is defined in N5 §2.3.x; fleet
-aggregation is defined in Fleet N10.
-
-### 2.32 Tenant
-
-A **Tenant** is the organizational unit that owns workflows, pack runs,
-evidence, and events. Single-user OSS deployments have a single implicit
-tenant and never need to think about scoping. Fleet deployments carry every
-runtime datum through tenant boundaries for isolation, RBAC, and billing.
-
-Tenant scoping is the foundation of:
-
-- Fleet cross-instance aggregation (Fleet N10 §5, N11 fleet dashboard)
-- Enterprise multi-tenancy in listeners (N8 §8.2)
-- Pack registry publisher namespacing (Fleet N10 §2.4)
-- Evidence retention and compliance export (Fleet N12)
-
-#### 2.32.1 Tenant Identity
-
-A tenant is identified by:
-
-```clojure
-{:tenant/id          string              ; REQUIRED: stable identifier
-                                          ;   e.g. "acme-corp" or UUID
- :tenant/display-name string              ; REQUIRED: human-readable name
- :tenant/kind        keyword              ; REQUIRED: :user | :team | :org
- :tenant/parent-id   string               ; OPTIONAL: parent tenant for hierarchy
- :tenant/created-at  inst}                ; REQUIRED
-```
-
-Single-user OSS deployments MUST assign the implicit tenant id
-`"local"` (with `:tenant/kind :user`). Implementations MUST NOT require users
-to configure tenant identity in local mode; the literal `"local"` is a
-reserved identifier.
-
-#### 2.32.2 Tenant Field in Core Schemas
-
-The following core entity schemas are extended with an OPTIONAL `:tenant/id`
-field. "Optional" here means OSS single-instance runtimes MAY omit the field
-(implicit `"local"`); Fleet runtimes MUST populate it on every record.
-
-- **Workflow** (§2.1): `:tenant/id`
-- **Pack Run** (§2.26): `:tenant/id`
-- **Evidence Bundle** (see N6 §2): `:tenant/id`
-- **Artifact** (§2.9): `:tenant/id`
-- **Event Envelope** (see N3 §2): `:tenant/id`
-- **PR Work Item** (§2.19): `:tenant/id`
-- **Control Action** (§2.17): `:tenant/id`
-- **Listener** (§2.15): `:listener/tenant-set` — a set of tenant ids the
-  listener is authorized to observe (may be `#{"*"}` for super-admins, subject
-  to RBAC)
-
-#### 2.32.3 Tenant Propagation Rules
-
-Tenant id MUST propagate through runtime data by these rules:
-
-1. **Origin.** A workflow's `:tenant/id` is established at creation time
-   (CLI invocation, API call, pack run request). It MUST be derived from the
-   authenticated principal's tenant membership; it MUST NOT be client-supplied
-   for authenticated sessions (prevents tenant-spoofing).
-
-2. **Inheritance.** Every event, artifact, evidence bundle, control action,
-   and sub-entity produced by or for a workflow MUST carry the workflow's
-   `:tenant/id`. The tenant id is immutable for the lifetime of the workflow;
-   it cannot be changed after creation.
-
-3. **Chaining.** When one workflow's output chains into another (N2 §14),
-   the downstream workflow MUST inherit the upstream workflow's `:tenant/id`.
-   Cross-tenant chaining is NOT permitted in the base contract; Fleet N12 MAY
-   define an explicit cross-tenant handoff with separate authorization.
-
-4. **Pack Runs.** A Pack Run inherits `:tenant/id` from the workflow that
-   invoked it. The pack itself is tenant-agnostic; only the run is scoped.
-
-5. **External PRs.** N9 PR Work Items derive `:tenant/id` from the
-   multi-repo configuration (N9 §4) — each configured repo maps to a tenant.
-
-#### 2.32.4 Tenant Enforcement
-
-Implementations MUST:
-
-1. Filter all queries (workflows, evidence, events, PR work items) by the
-   authenticated principal's `:tenant/id` set. Cross-tenant reads MUST fail
-   with `:tenant/unauthorized` unless the principal has an explicit
-   cross-tenant grant.
-2. Refuse to write records with a `:tenant/id` the authenticated principal
-   does not belong to. Server-side attribution from the session identity
-   takes precedence over any client-supplied value.
-3. Record `:tenant/id` in all audit trails, including control actions (N8)
-   and pack run evidence (N6).
-4. In OSS local mode (single tenant `"local"`), MAY skip enforcement
-   entirely — the field is still recorded for forward compatibility.
-
-#### 2.32.5 Tenant Hierarchy (Informative)
-
-Fleet deployments typically organize tenants as:
-
-```text
-org:acme
-├── team:platform
-│   ├── user:alice
-│   └── user:bob
-└── team:infra
-    └── user:charlie
-```
-
-A principal belongs to one or more tenants. A principal MAY inherit read access
-to all descendant tenants via `:tenant/parent-id` chains; write access is
-never inherited — each tenant boundary requires explicit grant. Precise
-inheritance rules are defined in Fleet N12.
+The CLI surface for listener-visible status is defined in N5.
 
 ---
 
@@ -2898,9 +2787,13 @@ conformance checklist.
 
 **Version History:**
 
-- 0.6.0-draft (2026-04-23): Fleet enablement amendments — Pack Signature Format (§2.10.4.1),
-  Pack Bundle Format (§2.10.6), Tool Registry (§2.31), Tenant (§2.32); tenant-id added to
-  Workflow and Pack Run schemas; closes OSS spec gaps G2–G4, G6 for Fleet N10–N12
+- 0.6.0-draft (2026-04-23): Pack interchange and tool registry amendments — Pack Signature
+  Format (§2.10.4.1) defining detached-signature wire format and verification API so
+  signed packs are portable between OSS implementations; Pack Bundle Format (§2.10.6)
+  defining the on-disk archive layout and canonical-EDN content-hash so any miniforge
+  instance can install a pack produced by another; Tool Registry (§2.31) hoisting the
+  tool/connector contract from informative to normative so the capability-grant gate
+  (N4 §5.1.9) has a canonical surface to enforce against
 - 0.5.0-draft (2026-03-08): Reliability Nines amendments — Failure Taxonomy (§5.3.3),
   Reliability Model with SLIs/SLOs/Error Budgets (§5.5), Unified Autonomy Model (§5.6),
   Trust Boundary Validation (§5.7), Index Quality Metrics and Canary Protocol (§2.27.9–2.27.10),

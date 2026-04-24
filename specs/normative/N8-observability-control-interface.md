@@ -968,9 +968,12 @@ A minimal compliant implementation MAY defer:
 
 **Version History:**
 
-- 0.3.0-draft (2026-04-23): Fleet enablement amendments — Checkpoint Control (§3.1.5),
-  Model Control (§3.1.6); new events `checkpoint/reached`, `checkpoint/expired`,
-  `model/overridden`, `model/override-expired` (§10); closes OSS spec gap G8 for Fleet N11
+- 0.3.0-draft (2026-04-23): Control-action surface extensions — Checkpoint Control
+  (§3.1.5: request/approve/reject) for governed pause-points in Workflow Packs and
+  chained workflows (N2 §14); Model Control (§3.1.6: override/set/clear) for
+  policy-bounded LLM model substitution with required justification, expiration,
+  and no silent fallback. Corresponding events `checkpoint/reached`,
+  `checkpoint/expired`, `model/overridden`, `model/override-expired` added in §10
 - 0.2.0-draft (2026-03-08): Safe-mode posture (§3.4) — triggers, behavior, exit protocol,
   state/events; unified autonomy model back-reference (N1 §5.6)
 - 0.1.0-draft (2026-02-01): Initial observability control interface specification

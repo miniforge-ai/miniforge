@@ -1,149 +1,188 @@
-# docs: Fleet enablement amendments to N-spec contracts (G1–G8)
+# docs: pack interchange, control surface, and per-workflow streaming amendments
 
 ## Overview
 
-Close eight OSS specification gaps that block Fleet (the commercial extension)
-from reaching its N10/N11/N12 Minimal Compliant Implementation. The miniforge
-core specs already covered the data shapes for Workflow Packs, Pack Runs, OCI,
-and PR Work Items, but Fleet implementation surfaced several missing wire
-contracts, on-disk formats, and runtime protocols that Fleet cannot legitimately
-work around without inventing parallel concepts.
+Six related amendments that close real OSS contract gaps surfaced by
+implementation pressure: pack signature and bundle formats so signed packs are
+portable between miniforge installs; the tool registry hoisted from informative
+to normative so the capability-grant gate has something canonical to enforce
+against; checkpoint and model-override control actions in the OCI surface;
+the per-workflow event-stream wire contract; and the TaskExecutor protocol
+hoisted to normative so substrate plug-ins (Docker, Kubernetes, worktree)
+have a stable contract.
 
-This PR is documentation-only. No code changes, no test changes. It bumps
-seven normative specs and the SPEC_INDEX.
+Documentation-only. No code or test changes.
 
 ## Motivation
 
-Fleet's `miniforge-fleet-specs` repo defines normative N10 (Workflow Pack
-Marketplace), N11 (Native Control Console), and N12 (Enterprise Add-ons) that
-extend the OSS core. An audit against the OSS specs identified eight gaps where
-the OSS contract was either informative-only, sketched, or absent — leaving
-Fleet's implementation work without a stable foundation:
+Each amendment fixes a place where the OSS contract was either informative-only
+(so downstream callers couldn't depend on it without breakage), sketched
+(so two correct implementations would not interoperate), or absent
+(so downstream concerns had to invent contracts that should be shared).
 
-- The K8s object-store workspace persistence work (Fleet `work/11`) referenced
-  a `TaskExecutor` protocol that lived only in informative docs.
-- The capability-grant gate (N4 §5.1.9) referenced a "tool registry (N1 §2.3)"
-  that didn't exist normatively — N1 §2.3 is the Agent definition.
-- N1 §2.10.4 specified pack-signing key management but not the signature wire
-  format or verification API; registries had no interoperable contract.
-- N1 spec'd the pack manifest data shape but not the on-disk archive layout
-  that registries store and runtimes load.
-- N3 §5.3 sketched an SSE endpoint with one example line but no auth, no
-  resume-from-sequence, no listener attach handshake — none of which a Fleet
-  listener attaching to remote miniforge instances can do without.
-- Fleet N10 §6 defined a `:pr-context-pack` artifact type Fleet-side, but it
-  was not registered in OSS N6/N9.
-- Fleet N11 §1.1 referenced `checkpoint.request` / `model.override` /
-  `model.set` OCI actions that did not exist in N8.
-- Workflow / Pack Run / Evidence / Event schemas had no `:tenant/id` field;
-  Fleet had to bolt tenancy on as an external mapping.
+The deltas were identified by trying to write a second consumer against the
+existing OSS contracts — once a second consumer exists, every gap that the
+first consumer paved over becomes load-bearing.
 
-Each gap closure is the smallest contract that lets Fleet build cleanly without
-re-litigating the OSS trust or runtime model.
+Areas that are clearly outside the OSS scope as currently framed (multi-tenant
+control planes, cross-instance fleet aggregation transport, mandatory remote
+persistence backends) are deliberately not part of this PR — those belong
+downstream of OSS in the products that need them.
 
 ## Changes In Detail
 
 ### N1 — Architecture (0.5.0 → 0.6.0)
 
-- **§2.10.4.1 Pack Signature Format** (G4): detached `pack.sig` and
-  `pack.sig.pub` files; signs the canonical content-hash; chain signatures for
-  multi-signer; pure `verify-pack-signature` API contract.
-- **§2.10.6 Pack Bundle Format** (G3): `.pack.tar.gz` archive; directory layout
-  (`pack.edn`, `entrypoints/`, `templates/`, `policy-fragments/`, `schemas/`,
-  `resources/`); canonical EDN serialization rules for content-hash;
-  bundle-integrity validation requirements.
-- **§2.31 Tool Registry** (G2): tool descriptor schema; four tool types
-  (`:function | :lsp | :mcp | :external`); discovery order; capability
-  resolution and binding; capability enforcement at invocation; tool health
-  state.
-- **§2.32 Tenant** (G6): tenant identity schema; the canonical list of core
-  schemas extended with `:tenant/id`; propagation rules (origin from
-  authenticated principal, inheritance, chaining, pack runs, external PRs);
-  enforcement; informative tenant hierarchy.
-- **§2.1 Workflow** and **§2.26 Pack Run** schemas: `:tenant/id` field added
-  (OPTIONAL in OSS local mode — implicit `"local"` — REQUIRED in Fleet).
+- **§2.10.4.1 Pack Signature Format.** §2.10.4 already specified key
+  management (ed25519, KRL, rotation) but not the signature artifact itself.
+  This section defines a detached `pack.sig` (single-line EDN) that signs the
+  canonical `:pack/content-hash`, an optional `pack.sig.pub` for embedded
+  public-key bundles, optional counter-signature chains, and a pure
+  `verify-pack-signature` API contract whose result enumerates the failure
+  reason. Without this, two OSS implementations could both "support pack
+  signing" and still not accept each other's signed packs.
+
+- **§2.10.6 Pack Bundle Format.** §2.10.3 specified the manifest data shape
+  but not the on-disk artifact a runtime loads or a registry stores. This
+  section defines a gzipped tar archive (`.pack.tar.gz`), the directory
+  layout (`pack.edn`, `entrypoints/`, `templates/`, `policy-fragments/`,
+  `schemas/`, `resources/`), the canonical-EDN serialization used to compute
+  `:pack/content-hash` over the bundle, and bundle-integrity validation
+  obligations at install and run time.
+
+- **§2.31 Tool Registry.** Capabilities use the pattern
+  `<connector>.<resource>.<action>` (e.g., `github.pr.read`). N10 §11
+  referenced "the tool registry (N1 §2.3)" but N1 §2.3 is the Agent
+  definition; the actual registry was documented only in
+  `informative/tool-registry.md`. Without a normative tool-registry contract,
+  the capability-grant gate (N4 §5.1.9) had no canonical surface to enforce
+  against. This section defines the tool descriptor schema; four tool types
+  (`:function | :lsp | :mcp | :external`); discovery order
+  (built-in → user → project, with downstream products free to slot
+  additional roots below project); capability resolution and binding; and
+  capability enforcement at every connector invocation.
 
 ### N3 — Event Stream (0.7.0 → 0.8.0)
 
-- **§5.3 Streaming Endpoints (HTTP)** (G5): rewritten from a one-line sketch.
-  Now defines:
-  - §5.3.1 Endpoints (per-workflow + cross-fleet SSE; optional WebSocket)
-  - §5.3.2 Authentication (Bearer + access-token query param fallback for SSE)
-  - §5.3.3 Listener Attach Handshake (maps to N8 §2.1; emits
-    `listener/attached` and `listener/detached`)
-  - §5.3.4 Subscription Filters (server-side filtering; multi-tenant
-    enforcement)
-  - §5.3.5 Resume-from-Sequence (`?from-sequence=<N>` and `Last-Event-ID`;
-    catch-up boundary markers; HTTP 410 on out-of-retention)
-  - §5.3.6 Backpressure and Buffer Overflow
-  - §5.3.7 SSE Wire Format
-  - §5.3.8 WebSocket Wire Format
+- **§5.3 Streaming Endpoints (HTTP).** Previously a one-line SSE sketch with
+  one example response line. Insufficient for any consumer outside the
+  process emitting the events. This rewrite specifies the per-workflow wire
+  contract:
+  - §5.3.1 Endpoint (per-workflow SSE; optional WebSocket)
+  - §5.3.2 Authentication (Bearer header; query-param fallback for browsers
+    that can't set headers on `EventSource`)
+  - §5.3.3 Listener Attach Handshake (the connection IS the N8 §2.1
+    listener attach; emits `listener/attached` first, `listener/detached`
+    last)
+  - §5.3.4 Subscription Filters (server-side; un-filtered events MUST NOT
+    cross the wire)
+  - §5.3.5 Resume-from-Sequence (`?from-sequence=` and standard
+    `Last-Event-ID`; HTTP 410 if past retention)
+  - §5.3.6 Backpressure and Buffer Overflow (drop-oldest vs disconnect;
+    consistent within a deployment)
+  - §5.3.7 SSE Wire Format (event/id/data/retry; heartbeats every ≤30s)
+  - §5.3.8 WebSocket Wire Format (optional)
   - §5.3.9 Rate Limiting and Quotas
-- **§2 Event Envelope**: `:tenant/id` field added.
+  Cross-workflow aggregation endpoints are explicitly out of OSS scope.
 
 ### N6 — Evidence & Provenance (0.5.0 → 0.6.0)
 
-- **§3.1.1 Artifact Types** (G7): `:pr-context-pack` registered under External
-  PR artifact types with full content schema (PR id, provider, repo, diff
+- **§3.1.1 Artifact Types.** Adds `:pr-context-pack` to the External PR
+  artifact types with the full content schema (PR id, provider, repo, diff
   summary, metadata, CI status, review status, readiness, risk, capture
-  timestamp).
-- **§2.1 Evidence Bundle Structure** and **§3.1 Artifact Structure**:
-  `:tenant/id` field added.
+  timestamp). PR Context Packs are the normalized PR snapshot that reviewer,
+  meta, and governance workflow packs consume; registering the artifact type
+  makes the contract portable across packs and across N9 ingestion
+  implementations.
 
 ### N8 — Observability Control Interface (0.2.0 → 0.3.0)
 
-- **§3.1.5 Checkpoint Control** (G8): `checkpoint.request`,
-  `checkpoint.approve`, `checkpoint.reject` actions with parameters and
-  protocol (emit `checkpoint/reached`, transition workflow to
-  `:paused-awaiting-checkpoint`, expiration handling).
-- **§3.1.6 Model Control** (G8): `model.override`, `model.set`, `model.clear`
-  with required justification, allowed-models policy check, expiration, no
-  silent fallback, no cross-workflow persistence.
-- **§10 Event Stream Extensions**: new events `checkpoint/reached`,
+- **§3.1.5 Checkpoint Control.** `checkpoint.request`, `checkpoint.approve`,
+  `checkpoint.reject` for governed pause-points in Workflow Packs (N1 §2.24)
+  and chained workflows (N2 §14). When reached, the workflow transitions to
+  `:paused-awaiting-checkpoint`, emits `checkpoint/reached`, and waits for an
+  approve/reject. Expiration handling is normative.
+
+- **§3.1.6 Model Control.** `model.override`, `model.set`, `model.clear` for
+  policy-bounded LLM model substitution. Justification is required (empty
+  reason MUST fail). Allowed-models policy check is normative. Expiration is
+  enforced. Silent fallback on unavailability is forbidden when the operator
+  declares `:model/fallback-allowed? false`. Overrides MUST NOT persist
+  across workflow boundaries.
+
+- **§10 Event Stream Extensions.** New events `checkpoint/reached`,
   `checkpoint/expired`, `model/overridden`, `model/override-expired`.
 
 ### N9 — External PR Integration (0.1.0 → 0.2.0)
 
-- **§9.1 New Artifact Types** (G7): `:pr-context-pack` registered (schema in
-  N6 §3.1.1); ingestion emission obligation on PR creation and significant
-  updates; immutability requirement.
+- **§9.1 New Artifact Types.** Adds `:pr-context-pack` to the list of N9
+  artifacts with the obligation that ingestion emits the artifact on PR
+  creation and on significant updates (diff change, CI state change, review
+  state change, base-branch change). Schema lives in N6 §3.1.1; this section
+  defines the emission contract.
 
 ### N11 — Task Capsule Isolation (0.1.0 → 0.2.0)
 
-- **§10 TaskExecutor Protocol** (G1): hoisted from informative docs to
-  normative. Defines:
-  - §10.1 Protocol methods: `executor-type`, `available?`,
+- **§10 TaskExecutor Protocol.** Hoisted from `informative/I-DAG-ORCHESTRATION.md`
+  and `informative/I-TASK-EXECUTOR.md` to normative. Defines:
+  - §10.1 Protocol methods (`executor-type`, `available?`,
     `acquire-environment!`, `executor-execute!`, `copy-to!`, `copy-from!`,
-    **`persist-workspace!`**, **`restore-workspace!`**, `release-environment!`
-  - §10.2 Method requirements: idempotency, ordering, persistence kinds
-    (`:git`, `:object-store`), workspace digest computation
+    `persist-workspace!`, `restore-workspace!`, `release-environment!`)
+  - §10.2 Method requirements (idempotency, ordering, persistence kinds,
+    workspace digest)
   - §10.3 Executor registry and selection (no silent downgrade per N11.MD.1)
   - §10.4 Evidence emissions per lifecycle method
-  - §10.5 Fleet extension point for cross-node capsule binding
+  - §10.5 Substrate extensibility — the protocol intentionally does not
+    require any specific substrate or persistence kind beyond the `:git`
+    baseline. Cross-node capsule binding and additional persistence backends
+    are deployment decisions made by downstream products.
 - §11–§14 renumbered (was §10 Implementation Mapping → §11; §11 Conformance
   → §12; §12 New Definitions → §13; §13 References → §14).
-- §1 scope listing updated to reference new §10.
+- §1 scope listing updated.
 
 ### SPEC_INDEX (0.6.0 → 0.7.0)
 
-- Top-level version bumped; new history entry summarizes the fleet enablement
-  amendments and per-spec bumps.
+- Top-level version bumped; new history entry summarizes the per-spec bumps.
+
+## What is NOT in this PR (intentionally out of scope)
+
+The audit that surfaced these gaps also surfaced concerns that belong
+downstream of OSS, not in OSS:
+
+- **Multi-tenant runtime data and enforcement.** OSS does not currently model
+  organizations or tenants in the runtime data; pulling that in would change
+  the OSS product framing and conflict with the supervisory-control-plane
+  deferral in N5-delta. Stays downstream.
+- **Cross-workflow / cross-instance event-stream aggregation.** The
+  `/api/fleet/stream` endpoint, multi-tenant filtering, per-tenant sequence
+  numbering, and remote listener semantics are control-plane transport, not
+  per-workflow event semantics. Stays downstream.
+- **Object-store / cross-node workspace persistence as a required behavior
+  for any substrate.** OSS defines `persist-workspace!` / `restore-workspace!`
+  with `:git` as the required baseline. Operational requirements like
+  "Kubernetes pods reschedule across nodes therefore object-store is
+  required" are deployment decisions, not contract requirements. Stays
+  downstream.
+
+These are real gaps for products that do multi-tenant fleet operations, but
+they should land in those products' specs — not here.
 
 ## Testing
 
-This PR is documentation-only. No code changes, no schema-validation tests
-break (the only schema additions are OPTIONAL fields). Reviewers should
-verify:
+Documentation-only. No code touched. The pre-commit hook on this branch ran
+806 tests on bricks modified by unrelated WIP on main (event-stream, operator,
+pr-lifecycle, supervisory-state, workflow); 4,093 assertions, 0 failures.
 
-- [ ] Section numbering is consistent (especially N11 renumber)
-- [ ] Cross-references between specs resolve (e.g., N6 §3.1.1
-      `:pr-context-pack` schema matches N9 §9.1 description and Fleet N10 §6)
-- [ ] Tenant propagation rules in N1 §2.32 are consistent with the field
-      additions in N3 §2 envelope, N6 §2.1 bundle, N6 §3.1 artifact, and N1
-      §2.1/§2.26 schemas
-- [ ] TaskExecutor protocol method signatures are realizable (the existing
-      Docker/K8s/Worktree implementations should map cleanly to the new
-      protocol)
+Reviewers should verify:
+
+- [ ] Section numbering consistent (especially N11 renumber §10–§13 → §11–§14)
+- [ ] Cross-references resolve (e.g., N6 §3.1.1 `:pr-context-pack` schema
+      matches N9 §9.1 emission description)
+- [ ] TaskExecutor protocol method signatures realizable against existing
+      Docker/K8s/Worktree implementations without requiring substrate-specific
+      changes
+- [ ] No remaining language that pulls product-boundary concerns into OSS
+      (the previous revision of this PR did and was rejected by review)
 
 ## Checklist
 
@@ -152,7 +191,7 @@ verify:
 - [x] Documentation-only change; no test impact
 - [x] Pre-commit validation passes (no `--no-verify`)
 - [x] No commented-out tests
-- [x] No giant functions
+- [x] No giant functions (n/a — docs)
 - [x] Functions are small and composable (n/a — docs)
 - [x] New behavior has tests (n/a — docs)
 
@@ -162,10 +201,11 @@ verify:
 - [x] Linting passes (markdown only)
 - [x] README/docs updated if needed (SPEC_INDEX bumped)
 - [x] PR doc created (this file)
-- [x] Focused PR (single concern: close 8 spec gaps required for Fleet MCI)
+- [x] Focused PR (single concern: pack interchange, control surface, and
+      per-workflow streaming amendments)
 
 ## Related
 
-- Closes: G1–G8 in the Fleet build plan
-  (`pensive-matsumoto-68bcce` worktree of `miniforge.ai`)
-- Unblocks: `miniforge-fleet-specs` Wave 1+ implementation
+- Originally bundled tenant-scoping and cross-fleet streaming amendments;
+  those were removed after review identified them as product-boundary
+  violations and will land in their respective downstream products.

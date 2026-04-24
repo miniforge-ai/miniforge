@@ -43,10 +43,6 @@ contracts that make autonomous workflows credible to platform and security teams
  :evidence-bundle/created-at inst
  :evidence-bundle/version string
 
- :tenant/id string                       ; OPTIONAL in OSS local mode (implicit "local");
-                                          ;   REQUIRED in Fleet (inherited from workflow,
-                                          ;   see N1 §2.32)
-
  ;; Original Intent
  :evidence/intent {...}
 
@@ -498,10 +494,7 @@ and template.
  :artifact/size-bytes long
 
  :artifact/provenance {...}       ; See 3.2
- :artifact/metadata {...}         ; OPTIONAL: Type-specific metadata
-
- :tenant/id string}               ; OPTIONAL in OSS local mode; REQUIRED in Fleet
-                                   ;   (inherited from evidence bundle — see N1 §2.32)
+ :artifact/metadata {...}}        ; OPTIONAL: Type-specific metadata
 ```
 
 #### 3.1.1 Artifact Types
@@ -1086,9 +1079,11 @@ Fleet-wide evidence will enable:
 
 **Version History:**
 
-- 0.6.0-draft (2026-04-23): Fleet enablement amendments — `:pr-context-pack` artifact
-  type registered (§3.1.1); tenant-id added to evidence bundle and artifact schemas;
-  closes OSS spec gaps G6–G7 for Fleet N10–N12
+- 0.6.0-draft (2026-04-23): External-PR artifact amendment — `:pr-context-pack`
+  artifact type registered in §3.1.1 with full content schema. PR Context Packs are
+  the normalized PR snapshot that reviewer, meta, and governance workflow packs
+  consume; registering the artifact type makes the contract portable across packs
+  and across N9 ingestion implementations
 - 0.5.0-draft (2026-03-08): Reliability Nines amendments — Outcome evidence extended with
   SLI measurements, failure class, workflow tier, degradation mode (§2.6); golden-set
   and eval-run-result artifact types (§3.1.1)

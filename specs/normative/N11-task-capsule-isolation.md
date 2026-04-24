@@ -504,8 +504,9 @@ Task capsules are created and managed via a pluggable backend protocol. The
 runner (which requests a capsule per task) and the concrete substrate
 implementation (Docker, Kubernetes, or worktree fallback).
 
-This protocol is what Fleet's distributed executors (e.g., K8s with object-store
-workspace persistence) extend; it MUST remain stable across substrates.
+The protocol is intentionally substrate-agnostic. Downstream products may add
+substrate implementations or persistence kinds; the protocol itself MUST
+remain stable so OSS callers do not depend on substrate-specific behavior.
 
 ### 10.1 Protocol Methods
 
@@ -565,15 +566,14 @@ Implementations MUST provide these methods:
   (persist-workspace! [this environment-id persistence-config]
     "Persist the capsule workspace to a durable layer so it can be restored
      into a different capsule (possibly on a different node). persistence-config:
-       {:persistence/kind   :git | :object-store
-        :git/remote         string             ; for :git
-        :git/branch         string             ; for :git
-        :object-store/uri   string             ; for :object-store (s3://, gs://, ...)
-        :object-store/key   string             ; for :object-store
-        :object-store/credentials keyword}     ; ref to secret name
+       {:persistence/kind   keyword             ; :git is the required baseline;
+                                                ;   implementations MAY define more
+        :git/remote         string              ; for :git
+        :git/branch         string              ; for :git
+        ...}                                    ; kind-specific keys
      Returns:
-       {:workspace/digest   string             ; sha256 of persisted bundle
-        :workspace/uri      string             ; retrievable address
+       {:workspace/digest   string              ; sha256 of persisted bundle
+        :workspace/uri      string              ; retrievable address
         :workspace/bytes    long
         :persisted-at       inst}
      MUST produce a reproducible digest: the same workspace state MUST
@@ -622,12 +622,12 @@ workspace (via `:workspace/mode :checkout`) MUST fail with
 - `:git` — push the workspace to a task branch via `git push`; restore via
   `git fetch` + checkout. Required for all substrates as a baseline (works
   even in worktree fallback).
-- `:object-store` — tar the workspace, upload to S3/GCS/MinIO, restore via
-  download + extract. Required for the `:kubernetes` substrate when pods may
-  reschedule across nodes; OPTIONAL for `:docker` and `:worktree`.
 
-Implementations MAY support additional persistence kinds but MUST support
-at least `:git` for all substrates.
+Implementations MAY support additional persistence kinds (e.g., object-store
+backends for distributed substrates) but MUST support at least `:git` for all
+substrates. Additional persistence kinds and their applicability to specific
+substrates are operational decisions made by deployments and downstream
+products, not OSS contract requirements.
 
 **Workspace digest.** The `:workspace/digest` is computed over a canonical
 serialization of tracked workspace contents:
@@ -685,20 +685,16 @@ The `workspace/persisted` and `workspace/restored` events MUST be emitted when
 persistence crosses capsule boundaries (e.g., phase transitions that hand off
 workspace state between capsules).
 
-### 10.5 Fleet Extension Point
+### 10.5 Substrate Extensibility
 
-Fleet-grade deployments extend this protocol in two ways:
+Implementations MAY define additional substrates and additional persistence
+kinds beyond `:git`. Cross-node capsule binding (where `restore-workspace!`
+on one node consumes state produced by `persist-workspace!` on another) is
+out of scope for the OSS contract — substrates that support it MUST document
+their own binding semantics and reachability requirements.
 
-1. **Object-store workspace persistence for Kubernetes** — a Fleet-provided
-   implementation of `persist-workspace!`/`restore-workspace!` using
-   `:object-store` kind (S3/GCS/MinIO). This implementation MUST conform to
-   §10.2 and MUST NOT require changes to OSS callers.
-2. **Cross-node capsule binding** — a Fleet scheduler MAY bind a
-   `restore-workspace!` call on node B to a persistence record produced by
-   `persist-workspace!` on node A. The persistence URI MUST be network-reachable
-   from both nodes.
-
-OSS MUST NOT assume cross-node capsule binding; it is a Fleet capability.
+OSS callers MUST NOT assume cross-node capsule binding; only the per-substrate
+`:git` baseline is portable.
 
 ---
 
@@ -852,8 +848,11 @@ host process) when no conformant capsule substrate is available.
 
 **Version History:**
 
-- 0.2.0-draft (2026-04-23): Fleet enablement amendments — TaskExecutor Protocol (§10)
-  hoisted to normative; adds persist-workspace! / restore-workspace! methods, workspace
-  digest, object-store persistence kind, Fleet extension point; renumbered prior §10–§13
-  to §11–§14; closes OSS spec gap G1 for Fleet K8s workspace persistence
+- 0.2.0-draft (2026-04-23): TaskExecutor Protocol normative amendment — §10 hoists
+  the TaskExecutor protocol from informative docs to normative, defining the
+  pluggable substrate contract (acquire/execute/copy/release) plus
+  `persist-workspace!` / `restore-workspace!` for workspace handoff between
+  capsules with reproducible digests. `:git` is the required baseline persistence
+  kind; additional kinds and substrate extensibility are deployment decisions
+  (§10.5). Prior §10–§13 renumbered to §11–§14
 - 0.1.0-draft (2026-04-03): Initial task capsule isolation specification
