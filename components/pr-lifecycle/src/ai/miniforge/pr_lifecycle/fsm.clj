@@ -58,19 +58,20 @@
                     {:hint (messages/t :config/classpath-hint)}))))
 
 (def ^:private fsm-config
-  (delay (load-fsm-config)))
+  "Validated PR lifecycle FSM configuration loaded eagerly at require time."
+  (load-fsm-config))
 
 (def initial-status
   "Initial controller status."
-  (get-in @fsm-config [:pr-lifecycle/fsm :initial-status]))
+  (get-in fsm-config [:pr-lifecycle/fsm :initial-status]))
 
 (def controller-status-order
   "Ordered controller statuses for machine compilation."
-  (get-in @fsm-config [:pr-lifecycle/fsm :statuses]))
+  (get-in fsm-config [:pr-lifecycle/fsm :statuses]))
 
 (def status-transition-events
   "Configured controller transitions keyed by `[from-status to-status]`."
-  (get-in @fsm-config [:pr-lifecycle/fsm :status-transition-events]))
+  (get-in fsm-config [:pr-lifecycle/fsm :status-transition-events]))
 
 (def controller-statuses
   "Valid controller statuses."
@@ -78,7 +79,7 @@
 
 (def terminal-statuses
   "Terminal controller statuses."
-  (get-in @fsm-config [:pr-lifecycle/fsm :terminal-statuses]))
+  (get-in fsm-config [:pr-lifecycle/fsm :terminal-statuses]))
 
 (defn valid-status?
   "Check whether `status` is a recognized controller status."

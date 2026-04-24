@@ -155,6 +155,22 @@
       (is (= (:branch-name-prefix (controller-config/controller-defaults))
              (get-in @ctrl [:config :branch-name-prefix]))))))
 
+(deftest create-controller-nil-options-preserve-defaults-test
+  (testing "Nil options do not overwrite configured defaults"
+    (let [defaults (controller-config/controller-defaults)
+          ctrl (controller/create-controller
+                 "dag" "run" "task" test-task
+                 :worktree-path "/tmp/repo"
+                 :ci-poll-interval-ms nil
+                 :review-poll-interval-ms nil
+                 :auto-resolve-comments nil)]
+      (is (= (:ci-poll-interval-ms defaults)
+             (get-in @ctrl [:config :ci-poll-interval-ms])))
+      (is (= (:review-poll-interval-ms defaults)
+             (get-in @ctrl [:config :review-poll-interval-ms])))
+      (is (= (:auto-resolve-comments defaults)
+             (get-in @ctrl [:config :auto-resolve-comments]))))))
+
 (deftest create-controller-with-dependencies-test
   (testing "Controller stores event-bus, logger, generate-fn"
     (let [bus (make-event-collector)

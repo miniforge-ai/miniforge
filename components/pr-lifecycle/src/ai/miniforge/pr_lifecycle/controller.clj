@@ -45,6 +45,11 @@
 (def ^:private lifecycle-failed-status
   :failed)
 
+(defn- remove-nil-values
+  "Drop entries whose values are nil."
+  [m]
+  (into {} (remove (comp nil? val)) m))
+
 (defn- format-acceptance-criteria
   [criteria]
   (->> criteria
@@ -144,9 +149,10 @@
    Returns controller state atom."
   [dag-id run-id task-id task
    & {:as opts}]
-  (let [defaults (merge (controller-config/controller-defaults)
+  (let [non-nil-opts (remove-nil-values opts)
+        defaults (merge (controller-config/controller-defaults)
                         {:merge-policy merge/default-merge-policy}
-                        opts)
+                        non-nil-opts)
         worktree-path (:worktree-path defaults)
         merge-policy (:merge-policy defaults)
         created-at (java.util.Date.)
@@ -161,9 +167,9 @@
            :config config
 
            ;; Dependencies
-           :event-bus (:event-bus opts)
-           :logger (:logger opts)
-           :generate-fn (:generate-fn opts)
+           :event-bus (:event-bus non-nil-opts)
+           :logger (:logger non-nil-opts)
+           :generate-fn (:generate-fn non-nil-opts)
 
            ;; State
            :status controller-fsm/initial-status
