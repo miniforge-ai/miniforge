@@ -1,5 +1,5 @@
 {:observe/phase-defaults
- {:agent nil
+ {:agent :default
   :gates []
   :budget {:tokens 0
            :iterations 1

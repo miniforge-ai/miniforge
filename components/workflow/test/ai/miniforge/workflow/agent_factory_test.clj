@@ -65,6 +65,15 @@
       (is (nil? agent-instance)
           "Should return nil for :none agent"))))
 
+(deftest test-create-agent-for-phase-default-throws
+  (testing "Throw for :default — requires :phase/handler or interceptor"
+    (let [phase {:phase/id :observe
+                 :phase/agent :default}
+          context {}]
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                            #"requires a :phase/handler"
+                            (factory/create-agent-for-phase phase context))))))
+
 (deftest test-create-agent-for-phase-reviewer-throws
   (testing "Throw for :reviewer — requires :phase/handler or interceptor"
     (let [phase {:phase/id :review

@@ -19,6 +19,7 @@
 
 (deftest default-config-loaded-from-edn-test
   (testing "observe phase defaults come from resource config"
+    (is (= :default (:agent sut/default-config)))
     (is (= 259200 (get-in sut/default-config [:budget :time-seconds])))
     (is (= [] (:gates sut/default-config)))))
 
