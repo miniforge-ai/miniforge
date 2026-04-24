@@ -1,0 +1,52 @@
+{:pr-lifecycle/messages
+ {;; Config
+  :config/missing-resource
+  "Missing classpath resource: {resource}"
+  :config/classpath-hint
+  "Add components/pr-lifecycle/resources to your classpath"
+
+  ;; Controller
+  :controller/invalid-transition
+  "Invalid PR lifecycle controller status transition"
+  :controller/creating-pr
+  "Creating PR for task"
+  :controller/pr-created
+  "PR created successfully"
+  :controller/max-fix-iterations-exceeded
+  "Max fix iterations exceeded"
+  :controller/fixing-ci
+  "Running fix loop for CI failure"
+  :controller/fixing-review
+  "Running fix loop for review feedback"
+  :controller/attempting-merge
+  "Attempting to merge PR"
+  :controller/merged
+  "PR merged successfully"
+  :controller/lifecycle-starting
+  "Starting PR lifecycle"
+  :controller/pr-creation-failed
+  "PR creation failed"
+  :controller/exception
+  "Controller exception"
+  :controller/default-commit-title
+  "implement task"
+  :controller/commit-message
+  "feat: {title}\n\nTask: {task-id}"
+  :controller/default-pr-title
+  "Task {task-fragment}"
+  :controller/default-task-description
+  "Automated task implementation"
+  :controller/pr-body-template
+  "## Task\n\n{description}\n\n## Acceptance Criteria\n\n{criteria}"
+  :controller/criterion-line
+  "- {criterion}"
+
+  ;; FSM
+  :fsm/invalid-state
+  "Invalid controller status: {status}"
+  :fsm/invalid-target-status
+  "Invalid target controller status: {status}"
+  :fsm/terminal-state
+  "Cannot transition from terminal state: {status}"
+  :fsm/invalid-transition
+  "No controller transition defined for [{from-status} -> {to-status}]"}}

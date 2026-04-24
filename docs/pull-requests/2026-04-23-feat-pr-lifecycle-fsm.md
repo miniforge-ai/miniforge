@@ -15,12 +15,17 @@ explicit, testable, and reusable through the shared FSM foundation.
 ## Changes In Detail
 
 - Add `pr_lifecycle.fsm` with:
-  - controller status order and valid-status predicates
-  - transition graph and valid-target helpers
+  - controller status order and transition graph loaded from
+    `config/pr-lifecycle/fsm.edn`
+  - valid-status predicates and valid-target helpers
   - explicit transition execution with structured failure maps
   - compiled controller machine config backed by `fsm/define-machine`
 - Refactor `pr_lifecycle.controller` to route `update-status!` through the FSM
   and preserve the existing exception/reporting contract
+- Load controller defaults from
+  `config/pr-lifecycle/controller-defaults.edn`
+- Localize controller/FSM emitted text through
+  `config/pr-lifecycle/messages/en-US.edn`
 - Update controller tests to assert rejected invalid transitions, terminal
   behavior, and idempotent same-state updates
 - Add focused FSM tests for the happy path, fix loop, invalid inputs, terminal

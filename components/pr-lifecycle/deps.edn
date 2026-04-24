@@ -1,6 +1,8 @@
 {:paths ["src" "resources"]
  :deps {ai.miniforge/config {:local/root "../config"}
         ai.miniforge/dag-executor {:local/root "../dag-executor"}
+        ai.miniforge/fsm {:local/root "../fsm"}
+        ai.miniforge/messages {:local/root "../messages"}
         ai.miniforge/release-executor {:local/root "../release-executor"}
         ai.miniforge/loop {:local/root "../loop"}
         ai.miniforge/agent {:local/root "../agent"}

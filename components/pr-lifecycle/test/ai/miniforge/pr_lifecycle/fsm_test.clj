@@ -20,6 +20,7 @@
   "Unit tests for the PR lifecycle controller FSM."
   (:require
    [clojure.test :refer [deftest is testing]]
+   [ai.miniforge.pr-lifecycle.messages :as messages]
    [ai.miniforge.pr-lifecycle.fsm :as sut]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -57,9 +58,20 @@
 
 (deftest invalid-status-and-transition-test
   (testing "invalid statuses and undefined transitions are rejected"
-    (is (= :invalid-state (:error (transition-result :bogus-status :creating-pr))))
-    (is (= :invalid-target-status (:error (transition-result :pending :bogus-status))))
-    (is (= :invalid-transition (:error (transition-result :monitoring-ci :pending))))))
+    (let [invalid-state-result (transition-result :bogus-status :creating-pr)
+          invalid-target-result (transition-result :pending :bogus-status)
+          invalid-transition-result (transition-result :monitoring-ci :pending)]
+      (is (= :invalid-state (:error invalid-state-result)))
+      (is (= :invalid-target-status (:error invalid-target-result)))
+      (is (= :invalid-transition (:error invalid-transition-result)))
+      (is (= (messages/t :fsm/invalid-state {:status :bogus-status})
+             (:message invalid-state-result)))
+      (is (= (messages/t :fsm/invalid-target-status {:status :bogus-status})
+             (:message invalid-target-result)))
+      (is (= (messages/t :fsm/invalid-transition
+                         {:from-status :monitoring-ci
+                          :to-status :pending})
+             (:message invalid-transition-result))))))
 
 (deftest terminal-state-rejected-test
   (testing "terminal statuses reject further transitions"

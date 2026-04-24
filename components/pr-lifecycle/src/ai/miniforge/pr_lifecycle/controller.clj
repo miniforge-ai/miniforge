@@ -24,9 +24,11 @@
   (:require
    [ai.miniforge.dag-executor.interface :as dag]
    [ai.miniforge.pr-lifecycle.ci-monitor :as ci]
+   [ai.miniforge.pr-lifecycle.controller-config :as controller-config]
    [ai.miniforge.pr-lifecycle.events :as events]
    [ai.miniforge.pr-lifecycle.fix-loop :as fix]
    [ai.miniforge.pr-lifecycle.fsm :as controller-fsm]
+   [ai.miniforge.pr-lifecycle.messages :as messages]
    [ai.miniforge.pr-lifecycle.merge :as merge]
    [ai.miniforge.pr-lifecycle.review-monitor :as review]
    [ai.miniforge.release-executor.interface :as release]
@@ -36,10 +38,58 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Controller state
 
+(def ^:private lifecycle-loop-sleep-ms
+  1000)
+
+(defn- format-acceptance-criteria
+  [criteria]
+  (->> criteria
+       (map #(messages/t :controller/criterion-line {:criterion %}))
+       (str/join "\n")))
+
+(defn- task-id-fragment
+  [task-id]
+  (let [task-id-string (str task-id)
+        fragment-length (min 8 (count task-id-string))]
+    (subs task-id-string 0 fragment-length)))
+
+(defn- build-commit-message
+  [task task-id]
+  (let [title (get task :task/title (messages/t :controller/default-commit-title))]
+    (messages/t :controller/commit-message
+                {:title title
+                 :task-id task-id})))
+
+(defn- build-pr-title
+  [task task-id]
+  (get task :task/title
+       (messages/t :controller/default-pr-title
+                   {:task-fragment (task-id-fragment task-id)})))
+
+(defn- build-pr-body
+  [task]
+  (let [description (get task :task/description
+                         (messages/t :controller/default-task-description))
+        criteria (format-acceptance-criteria
+                  (get task :task/acceptance-criteria []))]
+    (messages/t :controller/pr-body-template
+                {:description description
+                 :criteria criteria})))
+
+(defn- controller-config-map
+  [worktree-path merge-policy controller-defaults]
+  {:worktree-path worktree-path
+   :merge-policy merge-policy
+   :max-fix-iterations (:max-fix-iterations controller-defaults)
+   :ci-poll-interval-ms (:ci-poll-interval-ms controller-defaults)
+   :review-poll-interval-ms (:review-poll-interval-ms controller-defaults)
+   :auto-resolve-comments (:auto-resolve-comments controller-defaults)
+   :branch-name-prefix (:branch-name-prefix controller-defaults)})
+
 (defn- invalid-transition-ex
   "Create an exception describing an invalid controller status transition."
   [current-status new-status transition-result]
-  (ex-info "Invalid PR lifecycle controller status transition"
+  (ex-info (messages/t :controller/invalid-transition)
            {:from current-status
             :to new-status
             :error (:error transition-result)
@@ -79,45 +129,38 @@
 
    Returns controller state atom."
   [dag-id run-id task-id task
-   & {:keys [worktree-path event-bus logger generate-fn merge-policy
-             max-fix-iterations ci-poll-interval-ms review-poll-interval-ms
-             auto-resolve-comments]
-      :or {max-fix-iterations 5
-           ci-poll-interval-ms 30000
-           review-poll-interval-ms 30000
-           merge-policy merge/default-merge-policy
-           auto-resolve-comments true}}]
-  (atom {:controller/id (random-uuid)
-         :dag/id dag-id
-         :run/id run-id
-         :task/id task-id
-         :task task
+   & {:as opts}]
+  (let [defaults (merge (controller-config/controller-defaults)
+                        {:merge-policy merge/default-merge-policy}
+                        opts)
+        worktree-path (:worktree-path defaults)
+        merge-policy (:merge-policy defaults)
+        created-at (java.util.Date.)
+        config (controller-config-map worktree-path merge-policy defaults)]
+    (atom {:controller/id (random-uuid)
+           :dag/id dag-id
+           :run/id run-id
+           :task/id task-id
+           :task task
 
-         ;; Configuration
-         :config {:worktree-path worktree-path
-                  :merge-policy merge-policy
-                  :max-fix-iterations max-fix-iterations
-                  :ci-poll-interval-ms ci-poll-interval-ms
-                  :review-poll-interval-ms review-poll-interval-ms
-                  :auto-resolve-comments auto-resolve-comments}
+           ;; Configuration
+           :config config
 
-         ;; Dependencies
-         :event-bus event-bus
-         :logger logger
-         :generate-fn generate-fn
+           ;; Dependencies
+           :event-bus (:event-bus opts)
+           :logger (:logger opts)
+           :generate-fn (:generate-fn opts)
 
-         ;; State
-         :status controller-fsm/initial-status ; :pending :creating-pr :monitoring-ci
-                                               ; :monitoring-review :fixing
-                                               ; :ready-to-merge :merged :failed
-         :pr nil         ; PR info once created
-         :ci-monitor nil
-         :review-monitor nil
-         :fix-iterations 0
-         :ci-retries 0
-         :history []
-         :created-at (java.util.Date.)
-         :updated-at (java.util.Date.)}))
+           ;; State
+           :status controller-fsm/initial-status
+           :pr nil
+           :ci-monitor nil
+           :review-monitor nil
+           :fix-iterations 0
+           :ci-retries 0
+           :history []
+           :created-at created-at
+           :updated-at created-at})))
 
 (defn update-status!
   "Update controller status using the formal PR lifecycle FSM."
@@ -171,8 +214,7 @@
   "Stage and commit all changes with the given task info.
    Returns the commit result or a DAG error."
   [controller worktree-path task task-id]
-  (let [commit-msg (str "feat: " (get task :task/title "implement task")
-                        "\n\nTask: " task-id)
+  (let [commit-msg (build-commit-message task task-id)
         commit-result (release/commit-changes! worktree-path commit-msg)]
     (if (:success? commit-result)
       commit-result
@@ -185,13 +227,8 @@
   (let [push-result (release/push-branch! worktree-path branch-name)]
     (if-not (:success? push-result)
       (fail-controller! controller :push-failed (:error push-result))
-      (let [pr-title (or (:task/title task) (str "Task " (subs (str task-id) 0 8)))
-            pr-body  (str "## Task\n\n"
-                          (get task :task/description "Automated task implementation")
-                          "\n\n"
-                          "## Acceptance Criteria\n\n"
-                          (when-let [criteria (:task/acceptance-criteria task)]
-                            (str/join "\n" (map #(str "- " %) criteria))))
+      (let [pr-title (build-pr-title task task-id)
+            pr-body (build-pr-body task)
             pr-result (release/create-pr! worktree-path
                                           {:title pr-title
                                            :body pr-body
@@ -219,7 +256,7 @@
                      logger))
   (when logger
     (log/info logger :pr-lifecycle :controller/pr-created
-              {:message "PR created successfully"
+              {:message (messages/t :controller/pr-created)
                :data {:pr-url (:pr/url pr-info)}}))
   (dag/ok pr-info))
 
@@ -237,15 +274,15 @@
   [controller code-artifact]
   (let [{dag-id :dag/id run-id :run/id task-id :task/id
          :keys [task config event-bus logger]} @controller
-        {:keys [worktree-path]} config
-        branch-name (str "task-" (subs (str task-id) 0 8))]
+        {:keys [worktree-path branch-name-prefix]} config
+        branch-name (str branch-name-prefix (task-id-fragment task-id))]
 
     (update-status! controller :creating-pr)
     (add-history! controller :pr-creation-started {:branch branch-name})
 
     (when logger
       (log/info logger :pr-lifecycle :controller/creating-pr
-                {:message "Creating PR for task"
+                {:message (messages/t :controller/creating-pr)
                  :data {:task-id task-id :branch branch-name}}))
 
     (let [branch-result (create-and-checkout-branch! controller worktree-path branch-name)]
@@ -319,9 +356,9 @@
       (add-history! controller :max-fix-iterations-exceeded {:iterations current-iterations})
       (when logger
         (log/warn logger :pr-lifecycle :controller/max-iterations
-                  {:message "Max fix iterations exceeded"
+                  {:message (messages/t :controller/max-fix-iterations-exceeded)
                    :data {:task-id task-id :iterations current-iterations}}))
-      (throw (ex-info "Max fix iterations exceeded"
+      (throw (ex-info (messages/t :controller/max-fix-iterations-exceeded)
                       {:task-id task-id :iterations current-iterations})))
 
     (update-status! controller :fixing)
@@ -330,7 +367,7 @@
 
     (when logger
       (log/info logger :pr-lifecycle :controller/fixing-ci
-                {:message "Running fix loop for CI failure"
+                {:message (messages/t :controller/fixing-ci)
                  :data {:task-id task-id :iteration (inc current-iterations)}}))
 
     (let [fix-result (fix/fix-ci-failure
@@ -353,7 +390,7 @@
     (when (>= current-iterations max-fix-iterations)
       (update-status! controller :failed)
       (add-history! controller :max-fix-iterations-exceeded {:iterations current-iterations})
-      (throw (ex-info "Max fix iterations exceeded"
+      (throw (ex-info (messages/t :controller/max-fix-iterations-exceeded)
                       {:task-id task-id :iterations current-iterations})))
 
     (update-status! controller :fixing)
@@ -362,7 +399,7 @@
 
     (when logger
       (log/info logger :pr-lifecycle :controller/fixing-review
-                {:message "Running fix loop for review feedback"
+                {:message (messages/t :controller/fixing-review)
                  :data {:task-id task-id :comment-count (count review-comments)}}))
 
     (let [fix-result (fix/fix-review-feedback
@@ -391,7 +428,7 @@
 
     (when logger
       (log/info logger :pr-lifecycle :controller/merging
-                {:message "Attempting to merge PR"
+                {:message (messages/t :controller/attempting-merge)
                  :data {:pr-id (:pr/id pr)}}))
 
     (let [merge-result (merge/attempt-merge
@@ -408,7 +445,7 @@
           (add-history! controller :merged {:pr-id (:pr/id pr)})
           (when logger
             (log/info logger :pr-lifecycle :controller/merged
-                      {:message "PR merged successfully"
+                      {:message (messages/t :controller/merged)
                        :data {:pr-id (:pr/id pr)}})))
         (add-history! controller :merge-blocked {:reason (:error merge-result)}))
       merge-result)))
@@ -440,7 +477,7 @@
 
     (when logger
       (log/info logger :pr-lifecycle :controller/lifecycle-starting
-                {:message "Starting PR lifecycle"
+                {:message (messages/t :controller/lifecycle-starting)
                  :data {:task-id (:task/id @controller)}}))
 
     (try
@@ -448,7 +485,8 @@
       (when-not skip-pr-creation?
         (let [pr-result (create-pr! controller code-artifact)]
           (when (dag/err? pr-result)
-            (throw (ex-info "PR creation failed" {:error (:error pr-result)})))))
+            (throw (ex-info (messages/t :controller/pr-creation-failed)
+                            {:error (:error pr-result)})))))
 
       ;; Step 2: CI/Review loop
       (loop []
@@ -532,7 +570,7 @@
             ;; Fixing in progress
             :fixing
             (do
-              (Thread/sleep 1000) ; Wait for fix to complete
+              (Thread/sleep lifecycle-loop-sleep-ms)
               (recur))
 
             ;; Terminal states
@@ -544,7 +582,7 @@
 
             ;; Default
             (do
-              (Thread/sleep 1000)
+              (Thread/sleep lifecycle-loop-sleep-ms)
               (recur)))))
 
       (catch Exception e
@@ -558,7 +596,7 @@
         (add-history! controller :exception {:message (.getMessage e)})
         (when logger
           (log/error logger :pr-lifecycle :controller/exception
-                     {:message "Controller exception"
+                     {:message (messages/t :controller/exception)
                       :data {:error (.getMessage e)}}))
         {:status final-status :error (.getMessage e)})))))
 

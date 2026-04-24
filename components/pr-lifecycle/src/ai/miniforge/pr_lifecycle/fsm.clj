@@ -23,44 +23,54 @@
    transition policy explicit, testable, and backed by the shared FSM
    foundation component."
   (:require
-   [ai.miniforge.fsm.interface :as fsm]))
+   [ai.miniforge.fsm.interface :as fsm]
+   [ai.miniforge.pr-lifecycle.messages :as messages]
+   [ai.miniforge.schema.interface :as schema]
+   [clojure.edn :as edn]
+   [clojure.java.io :as io]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; FSM definition
 
+(def PrLifecycleFsmConfig
+  [:map
+   [:pr-lifecycle/fsm
+    [:map
+     [:initial-status keyword?]
+     [:statuses [:vector keyword?]]
+     [:terminal-statuses [:set keyword?]]
+     [:status-transition-events [:map-of [:tuple keyword? keyword?] keyword?]]]]])
+
+(def ^:private fsm-config-resource
+  "Classpath resource holding the PR lifecycle FSM definition."
+  "config/pr-lifecycle/fsm.edn")
+
+(defn- validate!
+  [result-schema value]
+  (schema/validate result-schema value))
+
+(defn- load-fsm-config
+  []
+  (if-let [resource (io/resource fsm-config-resource)]
+    (->> resource slurp edn/read-string (validate! PrLifecycleFsmConfig))
+    (throw (ex-info (messages/t :config/missing-resource
+                                {:resource fsm-config-resource})
+                    {:hint (messages/t :config/classpath-hint)}))))
+
+(def ^:private fsm-config
+  (delay (load-fsm-config)))
+
 (def initial-status
   "Initial controller status."
-  :pending)
+  (get-in @fsm-config [:pr-lifecycle/fsm :initial-status]))
 
 (def controller-status-order
   "Ordered controller statuses for machine compilation."
-  [:pending
-   :creating-pr
-   :monitoring-ci
-   :monitoring-review
-   :fixing
-   :ready-to-merge
-   :merged
-   :failed])
+  (get-in @fsm-config [:pr-lifecycle/fsm :statuses]))
 
 (def status-transition-events
   "Configured controller transitions keyed by `[from-status to-status]`."
-  {[:pending :creating-pr]              :create-pr
-   [:pending :monitoring-ci]           :start-ci-monitoring
-   [:pending :failed]                  :fail
-   [:creating-pr :monitoring-ci]       :start-ci-monitoring
-   [:creating-pr :failed]              :fail
-   [:monitoring-ci :monitoring-review] :start-review-monitoring
-   [:monitoring-ci :fixing]            :start-fixing
-   [:monitoring-ci :failed]            :fail
-   [:monitoring-review :ready-to-merge] :mark-ready-to-merge
-   [:monitoring-review :fixing]        :start-fixing
-   [:monitoring-review :failed]        :fail
-   [:fixing :monitoring-ci]            :start-ci-monitoring
-   [:fixing :failed]                   :fail
-   [:ready-to-merge :monitoring-ci]    :start-ci-monitoring
-   [:ready-to-merge :merged]           :merge
-   [:ready-to-merge :failed]           :fail})
+  (get-in @fsm-config [:pr-lifecycle/fsm :status-transition-events]))
 
 (def controller-statuses
   "Valid controller statuses."
@@ -68,7 +78,7 @@
 
 (def terminal-statuses
   "Terminal controller statuses."
-  #{:merged :failed})
+  (get-in @fsm-config [:pr-lifecycle/fsm :terminal-statuses]))
 
 (defn valid-status?
   "Check whether `status` is a recognized controller status."
@@ -177,17 +187,18 @@
   [error from-status to-status]
   (let [message (case error
                   :invalid-state
-                  (str "Invalid controller status: " from-status)
+                  (messages/t :fsm/invalid-state {:status from-status})
 
                   :invalid-target-status
-                  (str "Invalid target controller status: " to-status)
+                  (messages/t :fsm/invalid-target-status {:status to-status})
 
                   :terminal-state
-                  (str "Cannot transition from terminal state: " from-status)
+                  (messages/t :fsm/terminal-state {:status from-status})
 
                   :invalid-transition
-                  (str "No controller transition defined for ["
-                       from-status " -> " to-status "]"))]
+                  (messages/t :fsm/invalid-transition
+                              {:from-status from-status
+                               :to-status to-status}))]
     {:success? false
      :error error
      :message message}))

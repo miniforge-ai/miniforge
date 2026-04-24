@@ -26,7 +26,9 @@
   (:require
    [clojure.test :refer [deftest testing is]]
    [ai.miniforge.pr-lifecycle.controller :as controller]
+   [ai.miniforge.pr-lifecycle.controller-config :as controller-config]
    [ai.miniforge.pr-lifecycle.merge :as merge]
+   [ai.miniforge.pr-lifecycle.messages :as messages]
    [ai.miniforge.pr-lifecycle.events :as events]
    [ai.miniforge.pr-lifecycle.fix-loop :as fix]
    [ai.miniforge.dag-executor.interface :as dag]
@@ -40,6 +42,12 @@
    :task/description "Add the feature"
    :task/acceptance-criteria ["Tests pass" "No lint errors"]
    :task/constraints ["No breaking changes"]})
+
+(defn- max-fix-iterations-exceeded-pattern
+  []
+  (re-pattern
+   (java.util.regex.Pattern/quote
+    (messages/t :controller/max-fix-iterations-exceeded))))
 
 (defn make-event-collector
   "Create a minimal event bus that collects published events."
@@ -91,15 +99,22 @@
 
 (deftest create-controller-default-config-test
   (testing "Controller uses default configuration values"
-    (let [ctrl (controller/create-controller
+    (let [defaults (controller-config/controller-defaults)
+          ctrl (controller/create-controller
                  "dag" "run" "task" test-task
                  :worktree-path "/tmp/repo")]
       (is (= "/tmp/repo" (get-in @ctrl [:config :worktree-path])))
-      (is (= 5 (get-in @ctrl [:config :max-fix-iterations])))
-      (is (= 30000 (get-in @ctrl [:config :ci-poll-interval-ms])))
-      (is (= 30000 (get-in @ctrl [:config :review-poll-interval-ms])))
+      (is (= (:max-fix-iterations defaults)
+             (get-in @ctrl [:config :max-fix-iterations])))
+      (is (= (:ci-poll-interval-ms defaults)
+             (get-in @ctrl [:config :ci-poll-interval-ms])))
+      (is (= (:review-poll-interval-ms defaults)
+             (get-in @ctrl [:config :review-poll-interval-ms])))
       (is (= merge/default-merge-policy (get-in @ctrl [:config :merge-policy])))
-      (is (true? (get-in @ctrl [:config :auto-resolve-comments]))))))
+      (is (= (:auto-resolve-comments defaults)
+             (get-in @ctrl [:config :auto-resolve-comments])))
+      (is (= (:branch-name-prefix defaults)
+             (get-in @ctrl [:config :branch-name-prefix]))))))
 
 (deftest create-controller-custom-config-test
   (testing "Controller accepts custom configuration"
@@ -117,7 +132,9 @@
       (is (= 5000 (get-in @ctrl [:config :ci-poll-interval-ms])))
       (is (= 10000 (get-in @ctrl [:config :review-poll-interval-ms])))
       (is (= custom-policy (get-in @ctrl [:config :merge-policy])))
-      (is (false? (get-in @ctrl [:config :auto-resolve-comments]))))))
+      (is (false? (get-in @ctrl [:config :auto-resolve-comments])))
+      (is (= (:branch-name-prefix (controller-config/controller-defaults))
+             (get-in @ctrl [:config :branch-name-prefix]))))))
 
 (deftest create-controller-with-dependencies-test
   (testing "Controller stores event-bus, logger, generate-fn"
@@ -166,7 +183,7 @@
                  :worktree-path "/tmp")]
       (is (= #{:worktree-path :merge-policy :max-fix-iterations
                :ci-poll-interval-ms :review-poll-interval-ms
-               :auto-resolve-comments}
+               :auto-resolve-comments :branch-name-prefix}
              (set (keys (:config @ctrl))))))))
 
 ;------------------------------------------------------------------------------ State Machine Transitions via update-status!
@@ -381,7 +398,7 @@
       (swap! ctrl assoc :fix-iterations 3)
       (is (thrown-with-msg?
             clojure.lang.ExceptionInfo
-            #"Max fix iterations exceeded"
+            (max-fix-iterations-exceeded-pattern)
             (controller/handle-ci-failure! ctrl "some ci logs"))))))
 
 (deftest handle-review-feedback-max-iterations-test
@@ -393,7 +410,7 @@
       (swap! ctrl assoc :fix-iterations 2)
       (is (thrown-with-msg?
             clojure.lang.ExceptionInfo
-            #"Max fix iterations exceeded"
+            (max-fix-iterations-exceeded-pattern)
             (controller/handle-review-feedback! ctrl [{:body "Fix"}]))))))
 
 (deftest handle-ci-failure-increments-iteration-before-max-test
@@ -451,7 +468,7 @@
                  :max-fix-iterations 0)]
       (is (thrown-with-msg?
             clojure.lang.ExceptionInfo
-            #"Max fix iterations exceeded"
+            (max-fix-iterations-exceeded-pattern)
             (controller/handle-ci-failure! ctrl "logs"))))))
 
 ;------------------------------------------------------------------------------ State Manipulation (via atom)
