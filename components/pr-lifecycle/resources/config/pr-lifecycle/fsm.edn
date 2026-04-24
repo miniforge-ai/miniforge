@@ -1,0 +1,30 @@
+{:pr-lifecycle/fsm
+ {:initial-status :pending
+  :statuses
+  [:pending
+   :creating-pr
+   :monitoring-ci
+   :monitoring-review
+   :fixing
+   :ready-to-merge
+   :merged
+   :failed]
+  :terminal-statuses
+  #{:merged :failed}
+  :status-transition-events
+  {[:pending :creating-pr] :create-pr
+   [:pending :monitoring-ci] :start-ci-monitoring
+   [:pending :failed] :fail
+   [:creating-pr :monitoring-ci] :start-ci-monitoring
+   [:creating-pr :failed] :fail
+   [:monitoring-ci :monitoring-review] :start-review-monitoring
+   [:monitoring-ci :fixing] :start-fixing
+   [:monitoring-ci :failed] :fail
+   [:monitoring-review :ready-to-merge] :mark-ready-to-merge
+   [:monitoring-review :fixing] :start-fixing
+   [:monitoring-review :failed] :fail
+   [:fixing :monitoring-ci] :start-ci-monitoring
+   [:fixing :failed] :fail
+   [:ready-to-merge :monitoring-ci] :start-ci-monitoring
+   [:ready-to-merge :merged] :merge
+   [:ready-to-merge :failed] :fail}}}

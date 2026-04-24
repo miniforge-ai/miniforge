@@ -26,11 +26,14 @@
   (:require
    [clojure.test :refer [deftest testing is]]
    [ai.miniforge.pr-lifecycle.controller :as controller]
+   [ai.miniforge.pr-lifecycle.controller-config :as controller-config]
    [ai.miniforge.pr-lifecycle.merge :as merge]
+   [ai.miniforge.pr-lifecycle.messages :as messages]
    [ai.miniforge.pr-lifecycle.events :as events]
    [ai.miniforge.pr-lifecycle.fix-loop :as fix]
    [ai.miniforge.dag-executor.interface :as dag]
-   [ai.miniforge.release-executor.interface :as release]))
+   [ai.miniforge.release-executor.interface :as release]
+   [ai.miniforge.schema.interface :as schema]))
 
 ;------------------------------------------------------------------------------ Test Data
 
@@ -41,12 +44,45 @@
    :task/acceptance-criteria ["Tests pass" "No lint errors"]
    :task/constraints ["No breaking changes"]})
 
+(defn- max-fix-iterations-exceeded-pattern
+  []
+  (re-pattern
+   (java.util.regex.Pattern/quote
+    (messages/t :controller/max-fix-iterations-exceeded))))
+
+(defn- release-success
+  [data]
+  (merge {:success? true} data))
+
+(defn- release-failure
+  [error]
+  {:success? false
+   :error error})
+
+(defn- fix-success
+  [data]
+  (merge {:success? true} data))
+
+(defn- fix-failure
+  [reason]
+  {:success? false
+   :reason reason})
+
 (defn make-event-collector
   "Create a minimal event bus that collects published events."
   []
   (let [events (atom [])]
     {:publish! (fn [event] (swap! events conj event) nil)
      :events events}))
+
+(defn transition-error-data
+  "Return ex-data for an invalid controller status transition."
+  [controller target-status]
+  (try
+    (controller/update-status! controller target-status)
+    nil
+    (catch clojure.lang.ExceptionInfo ex
+      (ex-data ex))))
 
 ;------------------------------------------------------------------------------ Controller Creation
 
@@ -82,15 +118,22 @@
 
 (deftest create-controller-default-config-test
   (testing "Controller uses default configuration values"
-    (let [ctrl (controller/create-controller
+    (let [defaults (controller-config/controller-defaults)
+          ctrl (controller/create-controller
                  "dag" "run" "task" test-task
                  :worktree-path "/tmp/repo")]
       (is (= "/tmp/repo" (get-in @ctrl [:config :worktree-path])))
-      (is (= 5 (get-in @ctrl [:config :max-fix-iterations])))
-      (is (= 30000 (get-in @ctrl [:config :ci-poll-interval-ms])))
-      (is (= 30000 (get-in @ctrl [:config :review-poll-interval-ms])))
+      (is (= (:max-fix-iterations defaults)
+             (get-in @ctrl [:config :max-fix-iterations])))
+      (is (= (:ci-poll-interval-ms defaults)
+             (get-in @ctrl [:config :ci-poll-interval-ms])))
+      (is (= (:review-poll-interval-ms defaults)
+             (get-in @ctrl [:config :review-poll-interval-ms])))
       (is (= merge/default-merge-policy (get-in @ctrl [:config :merge-policy])))
-      (is (true? (get-in @ctrl [:config :auto-resolve-comments]))))))
+      (is (= (:auto-resolve-comments defaults)
+             (get-in @ctrl [:config :auto-resolve-comments])))
+      (is (= (:branch-name-prefix defaults)
+             (get-in @ctrl [:config :branch-name-prefix]))))))
 
 (deftest create-controller-custom-config-test
   (testing "Controller accepts custom configuration"
@@ -108,7 +151,25 @@
       (is (= 5000 (get-in @ctrl [:config :ci-poll-interval-ms])))
       (is (= 10000 (get-in @ctrl [:config :review-poll-interval-ms])))
       (is (= custom-policy (get-in @ctrl [:config :merge-policy])))
-      (is (false? (get-in @ctrl [:config :auto-resolve-comments]))))))
+      (is (false? (get-in @ctrl [:config :auto-resolve-comments])))
+      (is (= (:branch-name-prefix (controller-config/controller-defaults))
+             (get-in @ctrl [:config :branch-name-prefix]))))))
+
+(deftest create-controller-nil-options-preserve-defaults-test
+  (testing "Nil options do not overwrite configured defaults"
+    (let [defaults (controller-config/controller-defaults)
+          ctrl (controller/create-controller
+                 "dag" "run" "task" test-task
+                 :worktree-path "/tmp/repo"
+                 :ci-poll-interval-ms nil
+                 :review-poll-interval-ms nil
+                 :auto-resolve-comments nil)]
+      (is (= (:ci-poll-interval-ms defaults)
+             (get-in @ctrl [:config :ci-poll-interval-ms])))
+      (is (= (:review-poll-interval-ms defaults)
+             (get-in @ctrl [:config :review-poll-interval-ms])))
+      (is (= (:auto-resolve-comments defaults)
+             (get-in @ctrl [:config :auto-resolve-comments]))))))
 
 (deftest create-controller-with-dependencies-test
   (testing "Controller stores event-bus, logger, generate-fn"
@@ -157,7 +218,7 @@
                  :worktree-path "/tmp")]
       (is (= #{:worktree-path :merge-policy :max-fix-iterations
                :ci-poll-interval-ms :review-poll-interval-ms
-               :auto-resolve-comments}
+               :auto-resolve-comments :branch-name-prefix}
              (set (keys (:config @ctrl))))))))
 
 ;------------------------------------------------------------------------------ State Machine Transitions via update-status!
@@ -273,52 +334,60 @@
       (is (= :failed (:status @ctrl))))))
 
 ;------------------------------------------------------------------------------ Invalid / Unexpected State Transitions
-;;
-;; NOTE: The current controller uses a simple atom and does not enforce
-;; state transition guards. These tests document that arbitrary status
-;; values are stored as-is (they are NOT rejected). This is important
-;; for understanding the controller's current contract and for detecting
-;; regressions if transition guards are added in the future.
 
-(deftest invalid-status-value-stored-as-is-test
-  (testing "Controller stores arbitrary status values (no guard)"
+(deftest invalid-status-value-rejected-test
+  (testing "Controller rejects unknown statuses and preserves the current state"
+    (let [ctrl (controller/create-controller
+                 "dag" "run" "task" test-task
+                 :worktree-path "/tmp")
+          error-data (transition-error-data ctrl :bogus-status)]
+      (is (= :invalid-target-status (:error error-data)))
+      (is (= :pending (:status @ctrl))))))
+
+(deftest backward-transition-rejected-test
+  (testing "Controller rejects backward transitions that are outside the FSM"
+    (let [ctrl (controller/create-controller
+                 "dag" "run" "task" test-task
+                 :worktree-path "/tmp")
+          _ (controller/update-status! ctrl :monitoring-ci)
+          error-data (transition-error-data ctrl :pending)]
+      (is (= :invalid-transition (:error error-data)))
+      (is (= :monitoring-ci (:status @ctrl)))
+      (is (= #{:monitoring-ci :monitoring-review :fixing :failed}
+             (:valid-targets error-data))))))
+
+(deftest transition-from-terminal-state-rejected-test
+  (testing "Transitioning away from :merged is rejected"
     (let [ctrl (controller/create-controller
                  "dag" "run" "task" test-task
                  :worktree-path "/tmp")]
-      ;; An invalid status keyword is stored without rejection
-      (controller/update-status! ctrl :bogus-status)
-      (is (= :bogus-status (:status @ctrl))
-          "Controller currently accepts any keyword as status"))))
-
-(deftest backward-transition-not-rejected-test
-  (testing "Backward transitions are not rejected (no guard)"
-    (let [ctrl (controller/create-controller
-                 "dag" "run" "task" test-task
-                 :worktree-path "/tmp")]
+      (controller/update-status! ctrl :creating-pr)
       (controller/update-status! ctrl :monitoring-ci)
-      (controller/update-status! ctrl :pending)
-      (is (= :pending (:status @ctrl))
-          "Controller allows going back to :pending from :monitoring-ci"))))
-
-(deftest transition-from-terminal-state-not-rejected-test
-  (testing "Transitioning from :merged (terminal) is not rejected (no guard)"
-    (let [ctrl (controller/create-controller
-                 "dag" "run" "task" test-task
-                 :worktree-path "/tmp")]
+      (controller/update-status! ctrl :monitoring-review)
+      (controller/update-status! ctrl :ready-to-merge)
       (controller/update-status! ctrl :merged)
-      (controller/update-status! ctrl :monitoring-ci)
-      (is (= :monitoring-ci (:status @ctrl))
-          "Controller allows transition away from terminal :merged state"))))
+      (let [error-data (transition-error-data ctrl :monitoring-ci)]
+        (is (= :terminal-state (:error error-data)))
+        (is (= :merged (:status @ctrl)))))))
 
-(deftest transition-from-failed-state-not-rejected-test
-  (testing "Transitioning from :failed (terminal) is not rejected (no guard)"
+(deftest transition-from-failed-state-rejected-test
+  (testing "Transitioning away from :failed is rejected"
     (let [ctrl (controller/create-controller
                  "dag" "run" "task" test-task
                  :worktree-path "/tmp")]
       (controller/update-status! ctrl :failed)
-      (controller/update-status! ctrl :creating-pr)
-      (is (= :creating-pr (:status @ctrl))
-          "Controller allows transition away from terminal :failed state"))))
+      (let [error-data (transition-error-data ctrl :creating-pr)]
+        (is (= :terminal-state (:error error-data)))
+        (is (= :failed (:status @ctrl)))))))
+
+(deftest idempotent-transition-remains-valid-test
+  (testing "Controller allows same-state transitions for idempotent status updates"
+    (let [ctrl (controller/create-controller
+                 "dag" "run" "task" test-task
+                 :worktree-path "/tmp")]
+      (controller/update-status! ctrl :monitoring-ci)
+      (is (= :monitoring-ci (controller/update-status! ctrl :monitoring-ci)))
+      (is (= :monitoring-ci (:status @ctrl))))))
 
 ;------------------------------------------------------------------------------ add-history! Function
 
@@ -364,7 +433,7 @@
       (swap! ctrl assoc :fix-iterations 3)
       (is (thrown-with-msg?
             clojure.lang.ExceptionInfo
-            #"Max fix iterations exceeded"
+            (max-fix-iterations-exceeded-pattern)
             (controller/handle-ci-failure! ctrl "some ci logs"))))))
 
 (deftest handle-review-feedback-max-iterations-test
@@ -376,7 +445,7 @@
       (swap! ctrl assoc :fix-iterations 2)
       (is (thrown-with-msg?
             clojure.lang.ExceptionInfo
-            #"Max fix iterations exceeded"
+            (max-fix-iterations-exceeded-pattern)
             (controller/handle-review-feedback! ctrl [{:body "Fix"}]))))))
 
 (deftest handle-ci-failure-increments-iteration-before-max-test
@@ -388,6 +457,7 @@
                  :generate-fn (fn [& _] nil))]
       ;; We need to set up PR info for the fix loop
       (swap! ctrl assoc
+             :status :monitoring-ci
              :pr {:pr/id 123 :pr/branch "feat/x" :pr/head-sha "abc"}
              :fix-iterations 0)
       ;; The actual fix-ci-failure call will fail because generate-fn
@@ -433,8 +503,40 @@
                  :max-fix-iterations 0)]
       (is (thrown-with-msg?
             clojure.lang.ExceptionInfo
-            #"Max fix iterations exceeded"
+            (max-fix-iterations-exceeded-pattern)
             (controller/handle-ci-failure! ctrl "logs"))))))
+
+(deftest handle-ci-failure-records-normalized-result-status-test
+  (testing "handle-ci-failure! records normalized result status in history"
+    (let [ctrl (controller/create-controller
+                 "dag" "run" "task" test-task
+                 :worktree-path "/tmp"
+                 :generate-fn (fn [& _] nil))]
+      (swap! ctrl assoc
+             :status :monitoring-ci
+             :pr {:pr/id 123 :pr/branch "feat/x" :pr/head-sha "abc"}
+             :fix-iterations 0)
+      (with-redefs [fix/fix-ci-failure (fn [& _]
+                                         (fix-success {:commit-sha "abc123"}))]
+        (controller/handle-ci-failure! ctrl "logs")
+        (is (= {:result-status :succeeded}
+               (:data (last (:history @ctrl)))))))))
+
+(deftest handle-review-feedback-records-normalized-result-status-test
+  (testing "handle-review-feedback! records normalized result status in history"
+    (let [ctrl (controller/create-controller
+                 "dag" "run" "task" test-task
+                 :worktree-path "/tmp"
+                 :generate-fn (fn [& _] nil))]
+      (swap! ctrl assoc
+             :status :monitoring-review
+             :pr {:pr/id 123 :pr/branch "feat/x" :pr/head-sha "abc"}
+             :fix-iterations 0)
+      (with-redefs [fix/fix-review-feedback (fn [& _]
+                                              (fix-failure :fix-failed))]
+        (controller/handle-review-feedback! ctrl [{:body "Fix"}])
+        (is (= {:result-status :failed}
+               (:data (last (:history @ctrl)))))))))
 
 ;------------------------------------------------------------------------------ State Manipulation (via atom)
 
@@ -538,16 +640,16 @@
   (testing "Returns branch result on success"
     (let [ctrl (make-controller)]
       (with-redefs [release/create-branch! (fn [_path _name]
-                                              {:success? true :base-branch "main"})]
+                                              (release-success {:base-branch "main"}))]
         (let [result (controller/create-and-checkout-branch! ctrl "/tmp" "feat/x")]
-          (is (:success? result))
+          (is (schema/succeeded? result))
           (is (= "main" (:base-branch result))))))))
 
 (deftest create-and-checkout-branch-failure
   (testing "Returns DAG error on failure and adds history"
     (let [ctrl (make-controller)]
       (with-redefs [release/create-branch! (fn [_path _name]
-                                              {:success? false :error "git error"})]
+                                              (release-failure "git error"))]
         (let [result (controller/create-and-checkout-branch! ctrl "/tmp" "feat/x")]
           (is (dag/err? result))
           (is (= :failed (:status @ctrl)))
@@ -579,16 +681,16 @@
     (let [ctrl (make-controller)
           task-id "task-00000001"]
       (with-redefs [release/commit-changes! (fn [_path _msg]
-                                               {:success? true :commit-sha "abc123"})]
+                                               (release-success {:commit-sha "abc123"}))]
         (let [result (controller/commit-changes! ctrl "/tmp" test-task task-id)]
-          (is (:success? result))
+          (is (schema/succeeded? result))
           (is (= "abc123" (:commit-sha result))))))))
 
 (deftest commit-changes-failure
   (testing "Returns DAG error on commit failure"
     (let [ctrl (make-controller)]
       (with-redefs [release/commit-changes! (fn [_path _msg]
-                                               {:success? false :error "nothing to commit"})]
+                                               (release-failure "nothing to commit"))]
         (let [result (controller/commit-changes! ctrl "/tmp" test-task "t-1")]
           (is (dag/err? result))
           (is (= :failed (:status @ctrl))))))))
@@ -599,7 +701,7 @@
           captured-msg (atom nil)]
       (with-redefs [release/commit-changes! (fn [_path msg]
                                                (reset! captured-msg msg)
-                                               {:success? true :commit-sha "x"})]
+                                               (release-success {:commit-sha "x"}))]
         (controller/commit-changes! ctrl "/tmp" test-task "t-1")
         (is (.contains @captured-msg "Implement feature X"))))))
 
@@ -609,11 +711,11 @@
   (testing "Returns PR info map on success"
     (let [ctrl (make-controller)]
       (with-redefs [release/push-branch! (fn [_path _branch]
-                                            {:success? true})
+                                            (release-success {}))
                     release/create-pr! (fn [_path _opts]
-                                         {:success? true
-                                          :pr-number 42
-                                          :pr-url "https://github.com/org/repo/pull/42"})]
+                                         (release-success
+                                          {:pr-number 42
+                                           :pr-url "https://github.com/org/repo/pull/42"}))]
         (let [commit {:commit-sha "abc123"}
               result (controller/push-and-create-pr! ctrl "/tmp" "feat/x" "main"
                                                       test-task "t-1" commit)]
@@ -627,7 +729,7 @@
   (testing "Returns DAG error when push fails"
     (let [ctrl (make-controller)]
       (with-redefs [release/push-branch! (fn [_path _branch]
-                                            {:success? false :error "remote rejected"})]
+                                            (release-failure "remote rejected"))]
         (let [result (controller/push-and-create-pr! ctrl "/tmp" "feat/x" "main"
                                                       test-task "t-1" {:commit-sha "x"})]
           (is (dag/err? result))
@@ -637,9 +739,9 @@
   (testing "Returns DAG error when PR creation fails"
     (let [ctrl (make-controller)]
       (with-redefs [release/push-branch! (fn [_path _branch]
-                                            {:success? true})
+                                            (release-success {}))
                     release/create-pr! (fn [_path _opts]
-                                         {:success? false :error "repo not found"})]
+                                         (release-failure "repo not found"))]
         (let [result (controller/push-and-create-pr! ctrl "/tmp" "feat/x" "main"
                                                       test-task "t-1" {:commit-sha "x"})]
           (is (dag/err? result)))))))
@@ -648,10 +750,10 @@
   (testing "PR body includes acceptance criteria from task"
     (let [ctrl (make-controller)
           captured-opts (atom nil)]
-      (with-redefs [release/push-branch! (fn [_path _branch] {:success? true})
+      (with-redefs [release/push-branch! (fn [_path _branch] (release-success {}))
                     release/create-pr! (fn [_path opts]
                                          (reset! captured-opts opts)
-                                         {:success? true :pr-number 1 :pr-url "url"})]
+                                         (release-success {:pr-number 1 :pr-url "url"}))]
         (controller/push-and-create-pr! ctrl "/tmp" "feat/x" "main"
                                          test-task "t-1" {:commit-sha "x"})
         (is (.contains (:body @captured-opts) "Tests pass"))

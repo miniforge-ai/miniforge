@@ -1,0 +1,6 @@
+{:pr-lifecycle/controller-defaults
+ {:max-fix-iterations 5
+  :ci-poll-interval-ms 30000
+  :review-poll-interval-ms 30000
+  :auto-resolve-comments true
+  :branch-name-prefix "task-"}}
