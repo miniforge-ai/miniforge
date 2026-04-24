@@ -32,7 +32,7 @@
   "Agent types that require a :phase/handler or phase interceptor.
    These phases have real responsibilities (gate evaluation, release ops,
    metrics collection) that cannot be fulfilled by a stub artifact."
-  #{:reviewer :releaser :observer})
+  #{:default :reviewer :releaser :observer})
 
 (defn create-agent-for-phase
   "Create agent instance from :phase/agent keyword.
@@ -45,10 +45,11 @@
    - :spec-analyzer -> planner with spec-focus prompt
    - :designer -> planner with design-focus prompt
    - :none -> nil (skip phase)
+   - :default -> invalid here; requires :phase/handler or phase interceptor
 
-   Throws for :reviewer, :releaser, :observer — these require a :phase/handler
-   or a registered phase interceptor (see phase.registry). Using this factory
-   for them produces a silent stub that does no real work.
+   Throws for :default, :reviewer, :releaser, :observer — these require a
+   :phase/handler or a registered phase interceptor (see phase.registry).
+   Using this factory for them produces a silent stub that does no real work.
 
    Arguments:
    - phase: Phase configuration map with :phase/agent
@@ -83,7 +84,9 @@
       ;; Unknown agent type — fail loud
       (throw (ex-info (str "Unknown agent type: " agent-type
                            ". Supported: :planner :implementer :tester "
-                           ":spec-analyzer :designer :none")
+                           ":spec-analyzer :designer :none. "
+                           "Use :default only with a :phase/handler or "
+                           "phase interceptor.")
                       {:agent-type agent-type
                        :phase-id (:phase/id phase)})))))
 
