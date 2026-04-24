@@ -19,21 +19,43 @@
 (ns ai.miniforge.pr-lifecycle.controller
   "PR lifecycle controller - orchestrates task→PR→merge workflow.
 
-   This is the main state machine that drives a task through its
-   PR lifecycle, coordinating CI/review monitoring, fix loops, and merge."
+   This controller uses an explicit FSM-backed status model to drive a task
+   through PR creation, CI/review monitoring, fix loops, and merge."
   (:require
    [ai.miniforge.dag-executor.interface :as dag]
-   [ai.miniforge.pr-lifecycle.events :as events]
    [ai.miniforge.pr-lifecycle.ci-monitor :as ci]
-   [ai.miniforge.pr-lifecycle.review-monitor :as review]
+   [ai.miniforge.pr-lifecycle.events :as events]
    [ai.miniforge.pr-lifecycle.fix-loop :as fix]
+   [ai.miniforge.pr-lifecycle.fsm :as controller-fsm]
    [ai.miniforge.pr-lifecycle.merge :as merge]
+   [ai.miniforge.pr-lifecycle.review-monitor :as review]
    [ai.miniforge.release-executor.interface :as release]
    [ai.miniforge.logging.interface :as log]
    [clojure.string :as str]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Controller state
+
+(defn- invalid-transition-ex
+  "Create an exception describing an invalid controller status transition."
+  [current-status new-status transition-result]
+  (ex-info "Invalid PR lifecycle controller status transition"
+           {:from current-status
+            :to new-status
+            :error (:error transition-result)
+            :message (:message transition-result)
+            :valid-targets (controller-fsm/valid-targets current-status)}))
+
+(defn- transition-status
+  "Validate and apply a status transition to the current controller snapshot."
+  [controller-state new-status]
+  (let [current-status (:status controller-state)
+        transition-result (controller-fsm/transition current-status new-status)]
+    (if (:success? transition-result)
+      (assoc controller-state
+             :status (:state transition-result)
+             :updated-at (java.util.Date.))
+      (throw (invalid-transition-ex current-status new-status transition-result)))))
 
 (defn create-controller
   "Create a PR lifecycle controller for a task.
@@ -85,8 +107,9 @@
          :generate-fn generate-fn
 
          ;; State
-         :status :pending ; :pending :creating-pr :monitoring-ci :monitoring-review
-                         ; :fixing :ready-to-merge :merging :merged :failed
+         :status controller-fsm/initial-status ; :pending :creating-pr :monitoring-ci
+                                               ; :monitoring-review :fixing
+                                               ; :ready-to-merge :merged :failed
          :pr nil         ; PR info once created
          :ci-monitor nil
          :review-monitor nil
@@ -97,12 +120,14 @@
          :updated-at (java.util.Date.)}))
 
 (defn update-status!
-  "Update controller status with timestamp."
+  "Update controller status using the formal PR lifecycle FSM."
   [controller new-status]
-  (swap! controller assoc
-         :status new-status
-         :updated-at (java.util.Date.))
-  new-status)
+  (loop []
+    (let [current-state @controller
+          updated-state (transition-status current-state new-status)]
+      (if (compare-and-set! controller current-state updated-state)
+        (:status updated-state)
+        (recur)))))
 
 (defn add-history!
   "Add an event to controller history."
@@ -523,13 +548,19 @@
               (recur)))))
 
       (catch Exception e
-        (update-status! controller :failed)
+        (let [final-status (if (= :failed (:status @controller))
+                             :failed
+                             (try
+                               (update-status! controller :failed)
+                               :failed
+                               (catch clojure.lang.ExceptionInfo _
+                                 (:status @controller))))]
         (add-history! controller :exception {:message (.getMessage e)})
         (when logger
           (log/error logger :pr-lifecycle :controller/exception
                      {:message "Controller exception"
                       :data {:error (.getMessage e)}}))
-        {:status :failed :error (.getMessage e)}))))
+        {:status final-status :error (.getMessage e)})))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

@@ -48,6 +48,15 @@
     {:publish! (fn [event] (swap! events conj event) nil)
      :events events}))
 
+(defn transition-error-data
+  "Return ex-data for an invalid controller status transition."
+  [controller target-status]
+  (try
+    (controller/update-status! controller target-status)
+    nil
+    (catch clojure.lang.ExceptionInfo ex
+      (ex-data ex))))
+
 ;------------------------------------------------------------------------------ Controller Creation
 
 (deftest create-controller-initial-state-test
@@ -273,52 +282,60 @@
       (is (= :failed (:status @ctrl))))))
 
 ;------------------------------------------------------------------------------ Invalid / Unexpected State Transitions
-;;
-;; NOTE: The current controller uses a simple atom and does not enforce
-;; state transition guards. These tests document that arbitrary status
-;; values are stored as-is (they are NOT rejected). This is important
-;; for understanding the controller's current contract and for detecting
-;; regressions if transition guards are added in the future.
 
-(deftest invalid-status-value-stored-as-is-test
-  (testing "Controller stores arbitrary status values (no guard)"
+(deftest invalid-status-value-rejected-test
+  (testing "Controller rejects unknown statuses and preserves the current state"
+    (let [ctrl (controller/create-controller
+                 "dag" "run" "task" test-task
+                 :worktree-path "/tmp")
+          error-data (transition-error-data ctrl :bogus-status)]
+      (is (= :invalid-target-status (:error error-data)))
+      (is (= :pending (:status @ctrl))))))
+
+(deftest backward-transition-rejected-test
+  (testing "Controller rejects backward transitions that are outside the FSM"
+    (let [ctrl (controller/create-controller
+                 "dag" "run" "task" test-task
+                 :worktree-path "/tmp")
+          _ (controller/update-status! ctrl :monitoring-ci)
+          error-data (transition-error-data ctrl :pending)]
+      (is (= :invalid-transition (:error error-data)))
+      (is (= :monitoring-ci (:status @ctrl)))
+      (is (= #{:monitoring-ci :monitoring-review :fixing :failed}
+             (:valid-targets error-data))))))
+
+(deftest transition-from-terminal-state-rejected-test
+  (testing "Transitioning away from :merged is rejected"
     (let [ctrl (controller/create-controller
                  "dag" "run" "task" test-task
                  :worktree-path "/tmp")]
-      ;; An invalid status keyword is stored without rejection
-      (controller/update-status! ctrl :bogus-status)
-      (is (= :bogus-status (:status @ctrl))
-          "Controller currently accepts any keyword as status"))))
-
-(deftest backward-transition-not-rejected-test
-  (testing "Backward transitions are not rejected (no guard)"
-    (let [ctrl (controller/create-controller
-                 "dag" "run" "task" test-task
-                 :worktree-path "/tmp")]
+      (controller/update-status! ctrl :creating-pr)
       (controller/update-status! ctrl :monitoring-ci)
-      (controller/update-status! ctrl :pending)
-      (is (= :pending (:status @ctrl))
-          "Controller allows going back to :pending from :monitoring-ci"))))
-
-(deftest transition-from-terminal-state-not-rejected-test
-  (testing "Transitioning from :merged (terminal) is not rejected (no guard)"
-    (let [ctrl (controller/create-controller
-                 "dag" "run" "task" test-task
-                 :worktree-path "/tmp")]
+      (controller/update-status! ctrl :monitoring-review)
+      (controller/update-status! ctrl :ready-to-merge)
       (controller/update-status! ctrl :merged)
-      (controller/update-status! ctrl :monitoring-ci)
-      (is (= :monitoring-ci (:status @ctrl))
-          "Controller allows transition away from terminal :merged state"))))
+      (let [error-data (transition-error-data ctrl :monitoring-ci)]
+        (is (= :terminal-state (:error error-data)))
+        (is (= :merged (:status @ctrl)))))))
 
-(deftest transition-from-failed-state-not-rejected-test
-  (testing "Transitioning from :failed (terminal) is not rejected (no guard)"
+(deftest transition-from-failed-state-rejected-test
+  (testing "Transitioning away from :failed is rejected"
     (let [ctrl (controller/create-controller
                  "dag" "run" "task" test-task
                  :worktree-path "/tmp")]
       (controller/update-status! ctrl :failed)
-      (controller/update-status! ctrl :creating-pr)
-      (is (= :creating-pr (:status @ctrl))
-          "Controller allows transition away from terminal :failed state"))))
+      (let [error-data (transition-error-data ctrl :creating-pr)]
+        (is (= :terminal-state (:error error-data)))
+        (is (= :failed (:status @ctrl)))))))
+
+(deftest idempotent-transition-remains-valid-test
+  (testing "Controller allows same-state transitions for idempotent status updates"
+    (let [ctrl (controller/create-controller
+                 "dag" "run" "task" test-task
+                 :worktree-path "/tmp")]
+      (controller/update-status! ctrl :monitoring-ci)
+      (is (= :monitoring-ci (controller/update-status! ctrl :monitoring-ci)))
+      (is (= :monitoring-ci (:status @ctrl))))))
 
 ;------------------------------------------------------------------------------ add-history! Function
 
@@ -388,6 +405,7 @@
                  :generate-fn (fn [& _] nil))]
       ;; We need to set up PR info for the fix loop
       (swap! ctrl assoc
+             :status :monitoring-ci
              :pr {:pr/id 123 :pr/branch "feat/x" :pr/head-sha "abc"}
              :fix-iterations 0)
       ;; The actual fix-ci-failure call will fail because generate-fn
