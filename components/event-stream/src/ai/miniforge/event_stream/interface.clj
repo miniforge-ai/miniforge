@@ -103,6 +103,8 @@
 (def cp-agent-state-changed events/cp-agent-state-changed)
 (def cp-decision-created events/cp-decision-created)
 (def cp-decision-resolved events/cp-decision-resolved)
+(def intervention-requested events/intervention-requested)
+(def intervention-state-changed events/intervention-state-changed)
 
 ;; PR scoring (N5-delta-2 §4.1)
 (def pr-scored events/pr-scored)

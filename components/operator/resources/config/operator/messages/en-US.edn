@@ -1,0 +1,25 @@
+{:operator/messages
+ {;; Intervention lifecycle
+  :intervention/unknown-type
+  "Unknown intervention type"
+
+  :intervention/target-type-required
+  "Intervention target type is required"
+
+  :intervention/unknown-target-type
+  "Unknown intervention target type"
+
+  :intervention/target-id-required
+  "Intervention target id is required"
+
+  :intervention/requester-required
+  "Intervention requester identity is required"
+
+  :intervention/invalid-state
+  "Invalid intervention state: {state}"
+
+  :intervention/terminal-state
+  "Cannot transition from terminal state: {state}"
+
+  :intervention/invalid-transition
+  "No intervention transition defined for [{state} {event}]"}}

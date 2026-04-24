@@ -1,0 +1,36 @@
+{:operator/intervention
+ {:initial-state :proposed
+  :approval-required-types
+  #{:cancel :retry-from-phase :force-safe-mode :exit-safe-mode :request-human-review}
+
+  :terminal-states
+  #{:rejected :verified :failed}
+
+  :default-target-type-by-intervention
+  {:acknowledge :attention
+   :retry :workflow
+   :retry-from-phase :workflow
+   :pause :workflow
+   :resume :workflow
+   :cancel :workflow
+   :request-replan :workflow
+   :waive :policy-eval
+   :re-evaluate :pr
+   :force-safe-mode :degradation
+   :exit-safe-mode :degradation
+   :request-human-review :supervision}
+
+  :lifecycle-transitions
+  {[:proposed :require-human] :pending-human
+   [:proposed :approve] :approved
+   [:proposed :reject] :rejected
+   [:proposed :fail] :failed
+   [:pending-human :approve] :approved
+   [:pending-human :reject] :rejected
+   [:pending-human :fail] :failed
+   [:approved :dispatch] :dispatched
+   [:approved :fail] :failed
+   [:dispatched :apply] :applied
+   [:dispatched :fail] :failed
+   [:applied :verify] :verified
+   [:applied :fail] :failed}}}

@@ -37,6 +37,7 @@
 (def PolicyEvaluation schema/PolicyEvaluation)
 (def PolicyViolation  schema/PolicyViolation)
 (def AttentionItem    schema/AttentionItem)
+(def InterventionRequest schema/InterventionRequest)
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Lifecycle
@@ -56,6 +57,9 @@
 (def prs           core/prs)
 (def policy-evals  core/policy-evals)
 (def attention     core/attention)
+(def tasks         core/tasks)
+(def decisions     core/decisions)
+(def interventions core/interventions)
 
 (comment
   (require '[ai.miniforge.event-stream.interface :as es])

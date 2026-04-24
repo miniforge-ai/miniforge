@@ -36,8 +36,8 @@
    ## Audit verdict (2026-03-28)
 
    * NO mismatches: every browser `case` string exactly matches the server keyword.
-   * LARGE coverage gap: only 6 of 43 server-side event types are handled in
-     the browser switch; the remaining 37 silently fall through to `default: break`.
+   * LARGE coverage gap: only 6 of 45 server-side event types are handled in
+     the browser switch; the remaining 39 silently fall through to `default: break`.
    * NAMING ASYMMETRIES: 13 constructors use a function name whose implied
      namespace differs from the actual `:event/type` namespace.  See
      `naming-asymmetries` below."
@@ -297,6 +297,16 @@
     :asymmetry?  true
     :asymmetry-note "Constructor prefix 'cp-' expands to full namespace 'control-plane'"}
 
+   {:constructor "intervention-requested"
+    :event-type  :supervisory/intervention-requested
+    :json-string "supervisory/intervention-requested"
+    :browser?    false}
+
+   {:constructor "intervention-state-changed"
+    :event-type  :supervisory/intervention-state-changed
+    :json-string "supervisory/intervention-state-changed"
+    :browser?    false}
+
    ;; PR scoring (N5-delta-2 §4.1)
    {:constructor "pr-scored"
     :event-type  :pr/scored
@@ -316,7 +326,7 @@
 ;;     "workflow/completed" "workflow/failed" "agent/chunk"]
 
 (def browser-unhandled-events
-  "37 event types emitted server-side that the browser switch silently ignores.
+  "39 event types emitted server-side that the browser switch silently ignores.
    These are the gap items for Tasks 1–7."
   (->> event-type-registry
        (remove :browser?)
@@ -357,10 +367,10 @@
    :audit/source-browser "components/web-dashboard/resources/public/js/app.js"
    :audit/browser-switch "handleWorkflowEvent"
 
-   :total-server-events      43
-   :browser-handled-count    6
-   :browser-unhandled-count  37
-   :naming-asymmetry-count   11
+   :total-server-events      (count event-type-registry)
+   :browser-handled-count    (count browser-handled-events)
+   :browser-unhandled-count  (count browser-unhandled-events)
+   :naming-asymmetry-count   (count naming-asymmetries)
 
    ;; Verdict
    :string-mismatches []
@@ -368,7 +378,7 @@
    ;; The 6 handled events are a correct, strict subset of server events.
 
    :coverage-gaps browser-unhandled-events
-   ;; ^ 37 events silently ignored by the browser. Adding cases for these
+   ;; ^ 39 events silently ignored by the browser. Adding cases for these
    ;;   is the primary work of Tasks 1–7.
 
    :asymmetries naming-asymmetries

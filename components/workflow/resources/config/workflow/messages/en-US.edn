@@ -35,6 +35,14 @@
   ;; Supervision
   :supervision/unsupported-supervisor
   "Unsupported workflow supervisor id: {supervisor-id}"
+  :supervision/terminal-state
+  "Cannot transition from terminal state: {state}"
+  :supervision/invalid-state
+  "Invalid supervision state: {state}"
+  :supervision/guard-rejected
+  "Guard function rejected supervision transition"
+  :supervision/invalid-transition
+  "No supervision transition defined for [{state} {event}]"
 
   ;; Execution mode
   :governed/no-capsule      "No capsule executor available for governed workflow"

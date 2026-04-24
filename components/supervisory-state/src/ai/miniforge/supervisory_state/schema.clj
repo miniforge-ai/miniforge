@@ -99,6 +99,11 @@
    `:pending` (on create) and `:resolved` (on resolve)."
   [:pending :resolved :expired])
 
+(def intervention-states
+  "Lifecycle states of an InterventionRequest per
+   N5-delta-supervisory-control-plane §3.3."
+  [:proposed :pending-human :approved :rejected :dispatched :applied :verified :failed])
+
 ;------------------------------------------------------------------------------ Layer 0a
 ;; Registry extensions for supervisory v1
 
@@ -159,7 +164,11 @@
    :decision/id                  :id/uuid
    :decision/type                (into [:enum] decision-types)
    :decision/priority            (into [:enum] decision-priorities)
-   :decision/status              (into [:enum] decision-statuses)})
+   :decision/status              (into [:enum] decision-statuses)
+
+   ;; InterventionRequest (N5 supervisory delta §3.1 / §3.3)
+   :intervention/id              :id/uuid
+   :intervention/state           (into [:enum] intervention-states)})
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Entity schemas — open maps, mirror N5-delta-1 §3.1
@@ -380,6 +389,27 @@
    [:decision/comment    {:optional true} [:maybe string?]]
    [:decision/resolved-at {:optional true} [:maybe :common/timestamp]]])
 
+(def InterventionRequest
+  "A bounded supervisory control request per N5 supervisory delta §3.1.
+
+   The type and target-type stay open keywords at this boundary so replay and
+   downstream consumers preserve future spec-aligned additions."
+  [:map {:registry registry}
+   [:intervention/id :intervention/id]
+   [:intervention/type keyword?]
+   [:intervention/target-type keyword?]
+   [:intervention/target-id any?]
+   [:intervention/requested-by [:string {:min 1}]]
+   [:intervention/request-source keyword?]
+   [:intervention/state :intervention/state]
+   [:intervention/requested-at :common/timestamp]
+   [:intervention/updated-at :common/timestamp]
+   [:intervention/justification {:optional true} [:maybe string?]]
+   [:intervention/details {:optional true} [:maybe map?]]
+   [:intervention/approval-required? {:optional true} boolean?]
+   [:intervention/reason {:optional true} [:maybe string?]]
+   [:intervention/outcome {:optional true} any?]])
+
 ;------------------------------------------------------------------------------ Layer 2
 ;; Component-internal entity table
 
@@ -392,7 +422,8 @@
    [:policy-evals  [:map-of :id/uuid PolicyEvaluation]]
    [:attention     [:map-of :id/uuid AttentionItem]]
    [:tasks         [:map-of :id/uuid TaskNode]]
-   [:decisions     [:map-of :id/uuid DecisionCard]]])
+   [:decisions     [:map-of :id/uuid DecisionCard]]
+   [:interventions [:map-of :id/uuid InterventionRequest]]])
 
 (def empty-table
   "Initial empty entity table."
@@ -402,4 +433,5 @@
    :policy-evals {}
    :attention {}
    :tasks {}
-   :decisions {}})
+   :decisions {}
+   :interventions {}})

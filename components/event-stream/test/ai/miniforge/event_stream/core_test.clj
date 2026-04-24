@@ -20,8 +20,9 @@
   "Direct unit tests for event-stream core — chain events, error handling,
    OCI events, control-plane events, and sink integration."
   (:require
-   [clojure.test :refer [deftest testing is]]
+   [ai.miniforge.event-stream.messages :as messages]
    [ai.miniforge.phase.interface :as phase]
+   [clojure.test :refer [deftest testing is]]
    [ai.miniforge.event-stream.core :as core]))
 
 ;------------------------------------------------------------------------------ Helpers
@@ -344,6 +345,49 @@
       (is (= decision-id (:cp/decision-id event)))
       (is (= "approved" (:cp/resolution event))))))
 
+(deftest intervention-requested-test
+  (testing "creates supervisory intervention requested event"
+    (let [stream (no-op-stream)
+          workflow-id (random-uuid)
+          intervention {:intervention/id (random-uuid)
+                        :intervention/type :pause
+                        :intervention/target-type :workflow
+                        :intervention/target-id workflow-id
+                        :intervention/requested-by "operator@example.com"
+                        :intervention/request-source :tui
+                        :intervention/state :proposed
+                        :intervention/requested-at (java.util.Date.)
+                        :intervention/updated-at (java.util.Date.)}
+          event (core/intervention-requested stream workflow-id intervention)]
+      (is (= :supervisory/intervention-requested (:event/type event)))
+      (is (= :pause (:intervention/type event)))
+      (is (= :workflow (:intervention/target-type event)))
+      (is (= :proposed (:intervention/state event)))
+      (is (= (messages/t :supervisory/intervention-requested {:type "pause"})
+             (:message event))))))
+
+(deftest intervention-state-changed-test
+  (testing "creates supervisory intervention lifecycle event"
+    (let [stream (no-op-stream)
+          intervention-id (random-uuid)
+          event (core/intervention-state-changed
+                 stream
+                 (random-uuid)
+                 intervention-id
+                 :applied
+                 {:intervention/from-state :dispatched
+                  :intervention/type :pause
+                  :intervention/outcome {:paused true}})]
+      (is (= :supervisory/intervention-state-changed (:event/type event)))
+      (is (= intervention-id (:intervention/id event)))
+      (is (= :dispatched (:intervention/from-state event)))
+      (is (= :applied (:intervention/state event)))
+      (is (= {:paused true} (:intervention/outcome event)))
+      (is (= (messages/t :supervisory/intervention-state-changed
+                         {:intervention-id intervention-id
+                          :state "applied"})
+             (:message event))))))
+
 ;------------------------------------------------------------------------------ Layer 3
 ;; Workflow failed edge cases
 
@@ -369,16 +413,17 @@
 ;; Phase completed transition request
 
 (deftest phase-completed-transition-request-test
-  (testing "phase-completed includes transition requests"
+  (testing "phase-completed preserves transition requests and legacy redirect projection"
     (let [stream (no-op-stream)
           wf-id (random-uuid)
-          event (core/phase-completed stream wf-id :review
-                                      (phase/request-redirect
-                                       {:outcome :failure}
-                                       :implement))]
+          result (phase/request-redirect {:outcome :failure} :implement)
+          event (core/phase-completed stream wf-id :review result)]
       (is (= :failure (:phase/outcome event)))
+      (is (= :transition/redirect
+             (get-in event [:phase/transition-request :transition/type])))
       (is (= :implement
-             (get-in event [:phase/transition-request :transition/target]))))))
+             (get-in event [:phase/transition-request :transition/target])))
+      (is (= :implement (:phase/redirect-to event))))))
 
 (deftest phase-completed-with-error-test
   (testing "phase-completed captures error details"

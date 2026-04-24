@@ -1,0 +1,7 @@
+{:event-stream/messages
+ {;; Supervisory intervention events
+  :supervisory/intervention-requested
+  "Intervention {type} requested"
+
+  :supervisory/intervention-state-changed
+  "Intervention {intervention-id} -> {state}"}}

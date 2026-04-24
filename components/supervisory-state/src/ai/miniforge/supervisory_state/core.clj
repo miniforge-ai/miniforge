@@ -88,7 +88,8 @@
                :supervisory/policy-evaluated
                :supervisory/attention-derived
                :supervisory/task-node-upserted
-               :supervisory/decision-upserted}
+               :supervisory/decision-upserted
+               :supervisory/intervention-upserted}
              (:event/type event))
     (swap! component tick event)))
 
@@ -138,3 +139,6 @@
 (defn prs         [component] (vals (get-in @component [:table :prs])))
 (defn policy-evals [component] (vals (get-in @component [:table :policy-evals])))
 (defn attention   [component] (vals (get-in @component [:table :attention])))
+(defn tasks       [component] (vals (get-in @component [:table :tasks])))
+(defn decisions   [component] (vals (get-in @component [:table :decisions])))
+(defn interventions [component] (vals (get-in @component [:table :interventions])))

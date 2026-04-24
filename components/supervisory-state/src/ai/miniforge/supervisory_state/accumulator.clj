@@ -29,8 +29,7 @@
    It is a pure function from an event-stream prefix to an EntityTable."
   (:require
    [clojure.edn :as edn]
-   [clojure.java.io :as io]
-   [clojure.string :as str]))
+   [clojure.java.io :as io]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Helpers
@@ -45,6 +44,9 @@
   [workflow-id]
   (let [s (str workflow-id)]
     (str "wf-" (subs s 0 (min 8 (count s))))))
+
+(def ^:private default-agent-heartbeat-interval-ms
+  30000)
 
 (defn- now
   "Wall-clock instant. Indirected through a fn so tests can with-redefs it."
@@ -82,7 +84,8 @@
         ts       (event-instant event)
         spec     (:workflow/spec event)
         intent   (or (some-> event :workflow/intent str)
-                     (or (:message event) ""))
+                     (:message event)
+                     "")
         wf-key   (or (:workflow/key spec)
                      (some-> spec :workflow/spec name)
                      (workflow-key-fallback id))
@@ -153,6 +156,15 @@
                    {:workflow-run/status     :failed
                     :workflow-run/updated-at ts}))))
 
+(defn workflow-cancelled
+  [table {:workflow/keys [id] :as event}]
+  (let [ts (event-instant event)]
+    (-> table
+        (ensure-workflow id ts)
+        (update-in [:workflows id] merge
+                   {:workflow-run/status     :cancelled
+                    :workflow-run/updated-at ts}))))
+
 ;------------------------------------------------------------------------------ Layer 1
 ;; AgentSession handlers
 
@@ -166,7 +178,7 @@
                :agent/name                 (or agent-name (some-> vendor name) "")
                :agent/status               :idle
                :agent/capabilities         (or capabilities [])
-               :agent/heartbeat-interval-ms 30000
+               :agent/heartbeat-interval-ms default-agent-heartbeat-interval-ms
                :agent/metadata             (or (:cp/metadata event) {})
                :agent/tags                 []
                :agent/registered-at        ts
@@ -499,6 +511,90 @@
     (cond-> table
       entity (assoc-in [:decisions (:decision/id entity)] entity))))
 
+;------------------------------------------------------------------------------ Layer 1
+;; InterventionRequest handlers
+
+(defn- intervention-stub
+  [event]
+  (let [ts (event-instant event)]
+    {:intervention/id (or (:intervention/id event) (random-uuid))
+     :intervention/type :request-human-review
+     :intervention/target-type :supervision
+     :intervention/target-id nil
+     :intervention/requested-by "unknown"
+     :intervention/request-source :api
+     :intervention/state :proposed
+     :intervention/requested-at ts
+     :intervention/updated-at ts}))
+
+(defn- intervention-attributes
+  [event requested-at updated-at]
+  (cond-> {:intervention/id (:intervention/id event)
+           :intervention/state (get event :intervention/state :proposed)
+           :intervention/requested-at requested-at
+           :intervention/updated-at updated-at}
+    (:intervention/type event)
+    (assoc :intervention/type (:intervention/type event))
+
+    (:intervention/target-type event)
+    (assoc :intervention/target-type (:intervention/target-type event))
+
+    (contains? event :intervention/target-id)
+    (assoc :intervention/target-id (:intervention/target-id event))
+
+    (:intervention/requested-by event)
+    (assoc :intervention/requested-by (:intervention/requested-by event))
+
+    (:intervention/request-source event)
+    (assoc :intervention/request-source (:intervention/request-source event))
+
+    (:intervention/justification event)
+    (assoc :intervention/justification (:intervention/justification event))
+
+    (:intervention/details event)
+    (assoc :intervention/details (:intervention/details event))
+
+    (:intervention/reason event)
+    (assoc :intervention/reason (:intervention/reason event))
+
+    (:intervention/outcome event)
+    (assoc :intervention/outcome (:intervention/outcome event))
+
+    (contains? event :intervention/approval-required?)
+    (assoc :intervention/approval-required?
+           (:intervention/approval-required? event))))
+
+(defn supervisory-intervention-requested
+  [table event]
+  (let [intervention-id (:intervention/id event)
+        ts (or (:intervention/requested-at event) (event-instant event))
+        request (intervention-attributes event ts (or (:intervention/updated-at event) ts))]
+    (cond-> table
+      intervention-id (assoc-in [:interventions intervention-id] request))))
+
+(defn supervisory-intervention-state-changed
+  [table event]
+  (let [intervention-id (:intervention/id event)
+        existing (get-in table [:interventions intervention-id] (intervention-stub event))
+        updated-at (or (:intervention/updated-at event) (event-instant event))
+        updated (merge existing
+                       (intervention-attributes event
+                                                (or (:intervention/requested-at event)
+                                                    (:intervention/requested-at existing))
+                                                updated-at)
+                       {:intervention/state (or (:intervention/state event)
+                                                (:intervention/state existing)
+                                                :proposed)
+                        :intervention/updated-at updated-at})]
+    (cond-> table
+      intervention-id (assoc-in [:interventions intervention-id] updated))))
+
+(defn supervisory-intervention-upserted
+  [table event]
+  (let [entity (:supervisory/entity event)]
+    (cond-> table
+      entity (assoc-in [:interventions (:intervention/id entity)] entity))))
+
 ;------------------------------------------------------------------------------ Layer 3
 ;; Dispatch table — events not listed are no-ops at the entity-state level
 
@@ -509,12 +605,15 @@
    :workflow/phase-completed               workflow-phase-completed
    :workflow/completed                     workflow-completed
    :workflow/failed                        workflow-failed
+   :workflow/cancelled                     workflow-cancelled
    :control-plane/agent-registered         cp-agent-registered
    :control-plane/agent-state-changed      cp-agent-state-changed
    :control-plane/status-changed           cp-agent-state-changed
    :control-plane/agent-heartbeat          cp-agent-heartbeat
    :control-plane/decision-created         cp-decision-created
    :control-plane/decision-resolved        cp-decision-resolved
+   :supervisory/intervention-requested     supervisory-intervention-requested
+   :supervisory/intervention-state-changed supervisory-intervention-state-changed
    :agent/status                           agent-status
    :pr/created                             pr-created
    :pr/merged                              pr-merged
@@ -529,6 +628,7 @@
    :supervisory/pr-upserted                supervisory-pr-upserted
    :supervisory/task-node-upserted         supervisory-task-node-upserted
    :supervisory/decision-upserted          supervisory-decision-upserted
+   :supervisory/intervention-upserted      supervisory-intervention-upserted
    :supervisory/policy-evaluated           supervisory-policy-evaluated
    :supervisory/attention-derived          supervisory-attention-derived})
 

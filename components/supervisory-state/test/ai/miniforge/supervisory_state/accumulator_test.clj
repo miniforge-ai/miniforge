@@ -85,6 +85,13 @@
                   (acc/apply-event (ev :workflow/failed  {:workflow/id wf-id})))]
     (is (= :failed (get-in table [:workflows wf-id :workflow-run/status])))))
 
+(deftest workflow-cancelled-sets-cancelled-status
+  (let [wf-id (random-uuid)
+        table (-> schema/empty-table
+                  (acc/apply-event (ev :workflow/started {:workflow/id wf-id}))
+                  (acc/apply-event (ev :workflow/cancelled {:workflow/id wf-id})))]
+    (is (= :cancelled (get-in table [:workflows wf-id :workflow-run/status])))))
+
 ;------------------------------------------------------------------------------ AgentSession
 
 (deftest cp-agent-registered-inserts-session
@@ -452,6 +459,78 @@
                                 (ev :supervisory/decision-upserted
                                     {:supervisory/entity entity}))]
     (is (= entity (get-in table [:decisions did])))))
+
+;------------------------------------------------------------------------------ InterventionRequest
+
+(defn- intervention-requested-event
+  [intervention-id intervention-type target-type target-id & [extra]]
+  (ev :supervisory/intervention-requested
+      (merge {:intervention/id intervention-id
+              :intervention/type intervention-type
+              :intervention/target-type target-type
+              :intervention/target-id target-id
+              :intervention/requested-by "operator@example.com"
+              :intervention/request-source :tui
+              :intervention/state :proposed
+              :intervention/requested-at (java.util.Date.)
+              :intervention/updated-at (java.util.Date.)}
+             extra)))
+
+(defn- intervention-state-changed-event
+  [intervention-id next-state & [extra]]
+  (ev :supervisory/intervention-state-changed
+      (merge {:intervention/id intervention-id
+              :intervention/state next-state}
+             extra)))
+
+(deftest intervention-requested-creates-record
+  (let [intervention-id (random-uuid)
+        workflow-id (random-uuid)
+        table (acc/apply-event schema/empty-table
+                               (intervention-requested-event intervention-id
+                                                             :pause
+                                                             :workflow
+                                                             workflow-id))
+        request (get-in table [:interventions intervention-id])]
+    (is (= :pause (:intervention/type request)))
+    (is (= :workflow (:intervention/target-type request)))
+    (is (= workflow-id (:intervention/target-id request)))
+    (is (= :proposed (:intervention/state request)))))
+
+(deftest intervention-state-change-merges-onto-existing-record
+  (let [intervention-id (random-uuid)
+        table (-> schema/empty-table
+                  (acc/apply-event (intervention-requested-event intervention-id
+                                                                :pause
+                                                                :workflow
+                                                                (random-uuid)))
+                  (acc/apply-event (intervention-state-changed-event
+                                    intervention-id
+                                    :applied
+                                    {:intervention/outcome {:paused true}
+                                     :intervention/reason "operator confirmed"})))
+        request (get-in table [:interventions intervention-id])]
+    (is (= :applied (:intervention/state request)))
+    (is (= {:paused true} (:intervention/outcome request)))
+    (is (= "operator confirmed" (:intervention/reason request)))
+    (is (= :pause (:intervention/type request))
+        "state-change events preserve creation fields from the request record")))
+
+(deftest intervention-upserted-applies-baseline
+  (let [intervention-id (random-uuid)
+        entity {:intervention/id intervention-id
+                :intervention/type :waive
+                :intervention/target-type :policy-eval
+                :intervention/target-id (random-uuid)
+                :intervention/requested-by "operator@example.com"
+                :intervention/request-source :dashboard
+                :intervention/state :verified
+                :intervention/requested-at (java.util.Date.)
+                :intervention/updated-at (java.util.Date.)}
+        table (acc/apply-event schema/empty-table
+                               (ev :supervisory/intervention-upserted
+                                   {:supervisory/entity entity}))]
+    (is (= entity (get-in table [:interventions intervention-id])))))
 
 ;------------------------------------------------------------------------------ PolicyEvaluation
 
