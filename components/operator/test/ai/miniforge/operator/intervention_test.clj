@@ -20,6 +20,7 @@
   "Tests for bounded intervention lifecycle helpers."
   (:require
    [clojure.test :refer [deftest is testing]]
+   [ai.miniforge.operator.messages :as messages]
    [ai.miniforge.operator.interface :as op]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -84,10 +85,13 @@
           result (op/dispatch-intervention rejected)]
       (is (= :rejected (:intervention/state rejected)))
       (is (false? (:success? result)))
-      (is (= :terminal-state (:error result)))))
+      (is (= :terminal-state (:error result)))
+      (is (= (messages/t :intervention/terminal-state {:state :rejected})
+             (:message result)))))
 
   (testing "given an unknown intervention type → creation throws"
     (is (thrown-with-msg? clojure.lang.ExceptionInfo
-                          #"Unknown intervention type"
+                          (re-pattern (java.util.regex.Pattern/quote
+                                       (messages/t :intervention/unknown-type)))
                           (op/create-intervention
                            (intervention-request :unknown-action (random-uuid)))))))

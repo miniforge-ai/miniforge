@@ -22,74 +22,64 @@
    This namespace models supervisory intervention intent and lifecycle state
    transitions. It does not apply control actions directly."
   (:require
-   [clojure.set :as set]))
+   [clojure.edn :as edn]
+   [clojure.java.io :as io]
+   [clojure.set :as set]
+   [ai.miniforge.operator.messages :as messages]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Known vocabulary
+;; Config
 
-(def intervention-types
-  "Bounded v1 intervention vocabulary per N5-delta-supervisory-control-plane
-   §7.1."
-  #{:acknowledge
-    :retry
-    :retry-from-phase
-    :pause
-    :resume
-    :cancel
-    :request-replan
-    :waive
-    :re-evaluate
-    :force-safe-mode
-    :exit-safe-mode
-    :request-human-review})
+(def ^:private intervention-config-resource
+  "Classpath location of the intervention lifecycle config."
+  "config/operator/intervention.edn")
 
-(def target-types
-  "Known target categories for v1 interventions."
-  #{:attention :workflow :policy-eval :pr :degradation :supervision})
+(defn- load-intervention-config
+  []
+  (if-let [resource (io/resource intervention-config-resource)]
+    (:operator/intervention (edn/read-string (slurp resource)))
+    (throw (ex-info "Missing operator intervention config resource"
+                    {:resource intervention-config-resource}))))
 
-(def lifecycle-states
-  "Intervention lifecycle states per N5-delta-supervisory-control-plane §3.3."
-  #{:proposed :pending-human :approved :rejected :dispatched :applied :verified :failed})
+(def ^:private intervention-config
+  (delay (load-intervention-config)))
 
-(def terminal-states
-  "Terminal intervention lifecycle states."
-  #{:rejected :verified :failed})
+(def ^:private initial-state
+  (:initial-state @intervention-config))
 
 (def approval-required-types
   "Interventions that default to an explicit human approval step because the
    requested action materially changes runtime posture or execution."
-  #{:cancel :retry-from-phase :force-safe-mode :exit-safe-mode :request-human-review})
+  (:approval-required-types @intervention-config))
+
+(def terminal-states
+  "Terminal intervention lifecycle states."
+  (:terminal-states @intervention-config))
 
 (def default-target-type-by-intervention
   "Default target type for each intervention."
-  {:acknowledge :attention
-   :retry :workflow
-   :retry-from-phase :workflow
-   :pause :workflow
-   :resume :workflow
-   :cancel :workflow
-   :request-replan :workflow
-   :waive :policy-eval
-   :re-evaluate :pr
-   :force-safe-mode :degradation
-   :exit-safe-mode :degradation
-   :request-human-review :supervision})
+  (:default-target-type-by-intervention @intervention-config))
 
 (def lifecycle-transitions
   "Valid intervention lifecycle transitions. Map of [from-state event] -> to-state."
-  {[:proposed :require-human] :pending-human
-   [:proposed :approve] :approved
-   [:proposed :reject] :rejected
-   [:proposed :fail] :failed
-   [:pending-human :approve] :approved
-   [:pending-human :reject] :rejected
-   [:pending-human :fail] :failed
-   [:approved :dispatch] :dispatched
-   [:approved :fail] :failed
-   [:dispatched :apply] :applied
-   [:dispatched :fail] :failed
-   [:applied :verify] :verified
-   [:applied :fail] :failed})
+  (:lifecycle-transitions @intervention-config))
+
+(def intervention-types
+  "Bounded v1 intervention vocabulary per N5-delta-supervisory-control-plane
+   §7.1."
+  (set (keys default-target-type-by-intervention)))
+
+(def target-types
+  "Known target categories for v1 interventions."
+  (set (vals default-target-type-by-intervention)))
+
+(def lifecycle-states
+  "Intervention lifecycle states per N5-delta-supervisory-control-plane §3.3."
+  (-> (set (mapcat (fn [[[from-state _event] to-state]]
+                     [from-state to-state])
+                   lifecycle-transitions))
+      (conj initial-state)
+      (set/union terminal-states)))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Construction and validation
@@ -167,24 +157,24 @@
                                          (approval-required? type)))]
      (cond
       (not (valid-type? type))
-      (throw (ex-info "Unknown intervention type"
+      (throw (ex-info (messages/t :intervention/unknown-type)
                       {:intervention/type type}))
 
       (nil? resolved-target-type)
-      (throw (ex-info "Intervention target type is required"
+      (throw (ex-info (messages/t :intervention/target-type-required)
                       {:intervention/type type}))
 
       (not (valid-target-type? resolved-target-type))
-      (throw (ex-info "Unknown intervention target type"
+      (throw (ex-info (messages/t :intervention/unknown-target-type)
                       {:intervention/type type
                        :intervention/target-type resolved-target-type}))
 
       (nil? target-id)
-      (throw (ex-info "Intervention target id is required"
+      (throw (ex-info (messages/t :intervention/target-id-required)
                       {:intervention/type type}))
 
       (or (nil? requested-by) (nil? request-source))
-      (throw (ex-info "Intervention requester identity is required"
+      (throw (ex-info (messages/t :intervention/requester-required)
                       {:intervention/type type
                        :intervention/requested-by requested-by
                        :intervention/request-source request-source}))
@@ -196,7 +186,7 @@
                :intervention/target-id target-id
                :intervention/requested-by requested-by
                :intervention/request-source request-source
-               :intervention/state :proposed
+               :intervention/state initial-state
                :intervention/requested-at now
                :intervention/updated-at now}
         (:intervention/justification request)
@@ -240,18 +230,19 @@
        (not (valid-state? current-state))
        (intervention-transition-error
         :invalid-state
-        (str "Invalid intervention state: " current-state))
+        (messages/t :intervention/invalid-state {:state current-state}))
 
        (terminal-state? current-state)
        (intervention-transition-error
         :terminal-state
-        (str "Cannot transition from terminal state: " current-state))
+        (messages/t :intervention/terminal-state {:state current-state}))
 
        (nil? next)
        (intervention-transition-error
         :invalid-transition
-        (str "No intervention transition defined for ["
-             current-state " " event "]"))
+        (messages/t :intervention/invalid-transition
+                    {:state current-state
+                     :event event}))
 
        :else
        {:success? true

@@ -19,6 +19,7 @@
 (ns ai.miniforge.event-stream.core
   "Event bus and event constructors for workflow observability."
   (:require
+   [ai.miniforge.event-stream.messages :as messages]
    [ai.miniforge.phase.interface :as phase]
    [ai.miniforge.logging.interface :as log]
    [ai.miniforge.response.interface :as response]
@@ -609,59 +610,62 @@
 (defn intervention-requested
   "Emit when a bounded supervisory intervention is created."
   [stream workflow-id intervention]
-  (-> (create-envelope stream :supervisory/intervention-requested workflow-id
-                       (str "Intervention "
-                            (name (:intervention/type intervention))
-                            " requested"))
-      (merge intervention)))
+  (let [message (messages/t :supervisory/intervention-requested
+                            {:type (name (:intervention/type intervention))})]
+    (-> (create-envelope stream :supervisory/intervention-requested workflow-id
+                         message)
+        (merge intervention))))
 
 (defn intervention-state-changed
   "Emit when an InterventionRequest changes lifecycle state."
   [stream workflow-id intervention-id to-state & [opts]]
-  (-> (create-envelope stream :supervisory/intervention-state-changed workflow-id
-                       (str "Intervention " intervention-id " → " (name to-state)))
-      (assoc :intervention/id intervention-id
-             :intervention/state to-state)
-      (cond->
-        (:intervention/from-state opts)
-        (assoc :intervention/from-state (:intervention/from-state opts))
+  (let [message (messages/t :supervisory/intervention-state-changed
+                            {:intervention-id intervention-id
+                             :state (name to-state)})]
+    (-> (create-envelope stream :supervisory/intervention-state-changed workflow-id
+                         message)
+        (assoc :intervention/id intervention-id
+               :intervention/state to-state)
+        (cond->
+          (:intervention/from-state opts)
+          (assoc :intervention/from-state (:intervention/from-state opts))
 
-        (:intervention/type opts)
-        (assoc :intervention/type (:intervention/type opts))
+          (:intervention/type opts)
+          (assoc :intervention/type (:intervention/type opts))
 
-        (:intervention/target-type opts)
-        (assoc :intervention/target-type (:intervention/target-type opts))
+          (:intervention/target-type opts)
+          (assoc :intervention/target-type (:intervention/target-type opts))
 
-        (contains? opts :intervention/target-id)
-        (assoc :intervention/target-id (:intervention/target-id opts))
+          (contains? opts :intervention/target-id)
+          (assoc :intervention/target-id (:intervention/target-id opts))
 
-        (:intervention/requested-by opts)
-        (assoc :intervention/requested-by (:intervention/requested-by opts))
+          (:intervention/requested-by opts)
+          (assoc :intervention/requested-by (:intervention/requested-by opts))
 
-        (:intervention/request-source opts)
-        (assoc :intervention/request-source (:intervention/request-source opts))
+          (:intervention/request-source opts)
+          (assoc :intervention/request-source (:intervention/request-source opts))
 
-        (:intervention/justification opts)
-        (assoc :intervention/justification (:intervention/justification opts))
+          (:intervention/justification opts)
+          (assoc :intervention/justification (:intervention/justification opts))
 
-        (:intervention/details opts)
-        (assoc :intervention/details (:intervention/details opts))
+          (:intervention/details opts)
+          (assoc :intervention/details (:intervention/details opts))
 
-        (:intervention/reason opts)
-        (assoc :intervention/reason (:intervention/reason opts))
+          (:intervention/reason opts)
+          (assoc :intervention/reason (:intervention/reason opts))
 
-        (:intervention/outcome opts)
-        (assoc :intervention/outcome (:intervention/outcome opts))
+          (:intervention/outcome opts)
+          (assoc :intervention/outcome (:intervention/outcome opts))
 
-        (:intervention/requested-at opts)
-        (assoc :intervention/requested-at (:intervention/requested-at opts))
+          (:intervention/requested-at opts)
+          (assoc :intervention/requested-at (:intervention/requested-at opts))
 
-        (:intervention/updated-at opts)
-        (assoc :intervention/updated-at (:intervention/updated-at opts))
+          (:intervention/updated-at opts)
+          (assoc :intervention/updated-at (:intervention/updated-at opts))
 
-        (contains? opts :intervention/approval-required?)
-        (assoc :intervention/approval-required?
-               (:intervention/approval-required? opts)))))
+          (contains? opts :intervention/approval-required?)
+          (assoc :intervention/approval-required?
+                 (:intervention/approval-required? opts))))))
 
 ;------------------------------------------------------------------------------ Layer 6
 ;; PR scoring events (N5-delta-2 §4.1)

@@ -20,6 +20,7 @@
   "Tests for the per-run workflow supervision machine."
   (:require
    [clojure.test :refer [deftest is testing]]
+   [ai.miniforge.workflow.messages :as messages]
    [ai.miniforge.workflow.supervision :as sut]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -51,12 +52,18 @@
   (testing "given an invalid event from nominal → transition returns a failure result"
     (let [result (sut/transition :nominal :operator-resumed)]
       (is (false? (:success? result)))
-      (is (= :invalid-transition (:error result)))))
+      (is (= :invalid-transition (:error result)))
+      (is (= (messages/t :supervision/invalid-transition
+                         {:state :nominal
+                          :event :operator-resumed})
+             (:message result)))))
 
   (testing "given a terminal state → no further transitions are allowed"
     (let [result (sut/transition :halted :operator-cleared)]
       (is (false? (:success? result)))
-      (is (= :terminal-state (:error result))))))
+      (is (= :terminal-state (:error result)))
+      (is (= (messages/t :supervision/terminal-state {:state :halted})
+             (:message result))))))
 
 (deftest supervision-lifecycle-covers-live-governance-path
   (testing "given a warning, escalation, and operator clear → the machine returns to nominal"

@@ -20,6 +20,7 @@
   "Direct unit tests for event-stream core — chain events, error handling,
    OCI events, control-plane events, and sink integration."
   (:require
+   [ai.miniforge.event-stream.messages :as messages]
    [ai.miniforge.phase.interface :as phase]
    [clojure.test :refer [deftest testing is]]
    [ai.miniforge.event-stream.core :as core]))
@@ -361,7 +362,9 @@
       (is (= :supervisory/intervention-requested (:event/type event)))
       (is (= :pause (:intervention/type event)))
       (is (= :workflow (:intervention/target-type event)))
-      (is (= :proposed (:intervention/state event))))))
+      (is (= :proposed (:intervention/state event)))
+      (is (= (messages/t :supervisory/intervention-requested {:type "pause"})
+             (:message event))))))
 
 (deftest intervention-state-changed-test
   (testing "creates supervisory intervention lifecycle event"
@@ -379,7 +382,11 @@
       (is (= intervention-id (:intervention/id event)))
       (is (= :dispatched (:intervention/from-state event)))
       (is (= :applied (:intervention/state event)))
-      (is (= {:paused true} (:intervention/outcome event))))))
+      (is (= {:paused true} (:intervention/outcome event)))
+      (is (= (messages/t :supervisory/intervention-state-changed
+                         {:intervention-id intervention-id
+                          :state "applied"})
+             (:message event))))))
 
 ;------------------------------------------------------------------------------ Layer 3
 ;; Workflow failed edge cases

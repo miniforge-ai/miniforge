@@ -1,0 +1,36 @@
+{:workflow/supervision
+ {:fsm/id :workflow-supervision
+  :fsm/initial :nominal
+  :fsm/context {}
+  :fsm/states
+  {:nominal
+   {:on {:warning-detected :warning
+         :operator-paused :paused-by-supervisor
+         :operator-escalated :awaiting-operator
+         :execution-failed :awaiting-operator
+         :execution-completed :halted
+         :execution-cancelled :halted}}
+
+   :warning
+   {:on {:warning-cleared :nominal
+         :operator-paused :paused-by-supervisor
+         :operator-escalated :awaiting-operator
+         :execution-failed :awaiting-operator
+         :execution-completed :halted
+         :execution-cancelled :halted}}
+
+   :paused-by-supervisor
+   {:on {:operator-resumed :nominal
+         :operator-escalated :awaiting-operator
+         :execution-failed :awaiting-operator
+         :execution-completed :halted
+         :execution-cancelled :halted}}
+
+   :awaiting-operator
+   {:on {:operator-cleared :nominal
+         :operator-paused :paused-by-supervisor
+         :execution-completed :halted
+         :execution-cancelled :halted}}
+
+   :halted
+   {:type :final}}}}

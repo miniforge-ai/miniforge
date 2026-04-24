@@ -21,77 +21,56 @@
 
    This machine is intentionally separate from the execution machine in
    `workflow.fsm`. It models the runtime supervisory stance around a run,
-   not the workflow graph itself."
+  not the workflow graph itself."
   (:require
-   [ai.miniforge.fsm.interface :as fsm]))
+   [clojure.edn :as edn]
+   [clojure.java.io :as io]
+   [ai.miniforge.fsm.interface :as fsm]
+   [ai.miniforge.workflow.messages :as messages]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Machine definition
 
-(def supervision-states
-  "Known per-run supervision states per
-   I-WORKFLOW-SUPERVISION-MACHINE-ARCHITECTURE §3.2."
-  #{:nominal :warning :paused-by-supervisor :awaiting-operator :halted})
+(def ^:private supervision-config-resource
+  "Classpath location of the per-run supervision machine config."
+  "config/workflow/supervision.edn")
 
-(def terminal-states
-  "Supervision terminal states."
-  #{:halted})
-
-(def supervision-transitions
-  "Valid supervision transitions. Map of [from-state event] -> to-state."
-  {[:nominal :warning-detected]              :warning
-   [:nominal :operator-paused]               :paused-by-supervisor
-   [:nominal :operator-escalated]            :awaiting-operator
-   [:nominal :execution-failed]              :awaiting-operator
-   [:nominal :execution-completed]           :halted
-   [:nominal :execution-cancelled]           :halted
-
-   [:warning :warning-cleared]               :nominal
-   [:warning :operator-paused]               :paused-by-supervisor
-   [:warning :operator-escalated]            :awaiting-operator
-   [:warning :execution-failed]              :awaiting-operator
-   [:warning :execution-completed]           :halted
-   [:warning :execution-cancelled]           :halted
-
-   [:paused-by-supervisor :operator-resumed] :nominal
-   [:paused-by-supervisor :operator-escalated] :awaiting-operator
-   [:paused-by-supervisor :execution-failed] :awaiting-operator
-   [:paused-by-supervisor :execution-completed] :halted
-   [:paused-by-supervisor :execution-cancelled] :halted
-
-   [:awaiting-operator :operator-cleared]    :nominal
-   [:awaiting-operator :operator-paused]     :paused-by-supervisor
-   [:awaiting-operator :execution-completed] :halted
-   [:awaiting-operator :execution-cancelled] :halted})
+(defn- load-supervision-machine-config
+  []
+  (if-let [resource (io/resource supervision-config-resource)]
+    (:workflow/supervision (edn/read-string (slurp resource)))
+    (throw (ex-info "Missing workflow supervision config resource"
+                    {:resource supervision-config-resource}))))
 
 (def supervision-machine-config
   "Data-driven machine config used by the shared fsm component."
-  {:fsm/id :workflow-supervision
-   :fsm/initial :nominal
-   :fsm/context {}
-   :fsm/states
-   {:nominal              {:on {:warning-detected :warning
-                                :operator-paused :paused-by-supervisor
-                                :operator-escalated :awaiting-operator
-                                :execution-failed :awaiting-operator
-                                :execution-completed :halted
-                                :execution-cancelled :halted}}
-    :warning              {:on {:warning-cleared :nominal
-                                :operator-paused :paused-by-supervisor
-                                :operator-escalated :awaiting-operator
-                                :execution-failed :awaiting-operator
-                                :execution-completed :halted
-                                :execution-cancelled :halted}}
-    :paused-by-supervisor {:on {:operator-resumed :nominal
-                                :operator-escalated :awaiting-operator
-                                :execution-failed :awaiting-operator
-                                :execution-completed :halted
-                                :execution-cancelled :halted}}
-    :awaiting-operator    {:on {:operator-cleared :nominal
-                                :operator-paused :paused-by-supervisor
-                                :execution-completed :halted
-                                :execution-cancelled :halted}}
-    :halted               {:type :final}}})
+  (load-supervision-machine-config))
+
+(defn- state-definitions
+  []
+  (:fsm/states supervision-machine-config))
+
+(def supervision-states
+  "Known per-run supervision states per
+   I-WORKFLOW-SUPERVISION-MACHINE-ARCHITECTURE §3.2."
+  (set (keys (state-definitions))))
+
+(def terminal-states
+  "Supervision terminal states."
+  (->> (state-definitions)
+       (keep (fn [[state definition]]
+               (when (= :final (:type definition))
+                 state)))
+       set))
+
+(def supervision-transitions
+  "Valid supervision transitions. Map of [from-state event] -> to-state."
+  (->> (state-definitions)
+       (mapcat (fn [[from-state definition]]
+                 (map (fn [[event to-state]]
+                        [[from-state event] to-state])
+                      (:on definition))))
+       (into {})))
 
 (def supervision-machine
   "Compiled supervision state machine."
@@ -140,23 +119,24 @@
      (terminal-state? current-state)
      (transition-error
       :terminal-state
-      (str "Cannot transition from terminal state: " current-state))
+      (messages/t :supervision/terminal-state {:state current-state}))
 
      (not (valid-state? current-state))
      (transition-error
       :invalid-state
-      (str "Invalid supervision state: " current-state))
+      (messages/t :supervision/invalid-state {:state current-state}))
 
      (not (guard-fn current-state event))
      (transition-error
       :guard-failed
-      "Guard function rejected supervision transition")
+      (messages/t :supervision/guard-rejected))
 
      (not (valid-transition? current-state event))
      (transition-error
       :invalid-transition
-      (str "No supervision transition defined for ["
-           current-state " " event "]"))
+      (messages/t :supervision/invalid-transition
+                  {:state current-state
+                   :event event}))
 
      :else
      (let [state-map {:_state current-state}
