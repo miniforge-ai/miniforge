@@ -105,6 +105,41 @@
        first
        :workflow/spec))
 
+(defn- ensure-reconstruction-source!
+  [checkpoint-data events-dir workflow-id raw-events]
+  (when-not (or checkpoint-data (seq raw-events))
+    (response/throw-anomaly! :anomalies/not-found
+                             (str "No events found for workflow: " workflow-id)
+                             {:workflow-id workflow-id
+                              :events-dir (str events-dir)
+                              :raw-event-count (count raw-events)})))
+
+(defn- checkpoint-status
+  [checkpoint-data]
+  (get-in checkpoint-data [:machine-snapshot :execution/status]))
+
+(defn- reconstructed-completed?
+  [by-type checkpoint-data]
+  (or (boolean (seq (get by-type :workflow/completed)))
+      (= :completed (checkpoint-status checkpoint-data))
+      (= :completed-with-warnings (checkpoint-status checkpoint-data))))
+
+(defn- reconstructed-failed?
+  [by-type checkpoint-data]
+  (or (boolean (seq (get by-type :workflow/failed)))
+      (= :failed (checkpoint-status checkpoint-data))))
+
+(defn- restored-completed-phases
+  [checkpoint-data events]
+  (or (some-> checkpoint-data :manifest :workflow/phases-completed)
+      (extract-completed-phases events)))
+
+(defn- restored-phase-results
+  [checkpoint-data events]
+  (if checkpoint-data
+    (:phase-results checkpoint-data)
+    (extract-phase-results events)))
+
 ;------------------------------------------------------------------------------ Layer 1
 ;; Context reconstruction
 
@@ -138,27 +173,15 @@
   (let [checkpoint-data (workflow/load-checkpoint-data workflow-id)
         raw-events (or (es/read-workflow-events-by-id events-dir workflow-id) [])
         events (vec (filter schema/valid-event? raw-events))
-        _ (when-not (or checkpoint-data (seq events))
-            (response/throw-anomaly! :anomalies/not-found
-                                    (str "No events found for workflow: " workflow-id)
-                                    {:workflow-id workflow-id
-                                     :events-dir (str events-dir)
-                                     :raw-event-count (count raw-events)}))
+        _ (ensure-reconstruction-source! checkpoint-data events-dir workflow-id raw-events)
         by-type (group-by :event/type events)
-        completed-phases (or (some-> checkpoint-data :manifest :workflow/phases-completed)
-                             (extract-completed-phases events))
-        phase-results (if checkpoint-data
-                        (:phase-results checkpoint-data)
-                        (extract-phase-results events))
+        completed-phases (restored-completed-phases checkpoint-data events)
+        phase-results (restored-phase-results checkpoint-data events)
         workflow-spec (find-workflow-spec events)
         started-event (first (get by-type :workflow/started))
         machine-snapshot (:machine-snapshot checkpoint-data)
-        checkpoint-status (:execution/status machine-snapshot)
-        completed? (or (boolean (seq (get by-type :workflow/completed)))
-                       (= :completed checkpoint-status)
-                       (= :completed-with-warnings checkpoint-status))
-        failed? (or (boolean (seq (get by-type :workflow/failed)))
-                    (= :failed checkpoint-status))
+        completed? (reconstructed-completed? by-type checkpoint-data)
+        failed? (reconstructed-failed? by-type checkpoint-data)
         completed-dag-tasks (extract-completed-dag-tasks events)
         dag-pause-info (extract-dag-pause-info events)]
     {:phase-results phase-results

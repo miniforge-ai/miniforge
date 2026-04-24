@@ -20,6 +20,7 @@
   "Durable execution-machine snapshots and phase checkpoints."
   (:require
    [ai.miniforge.config.interface :as config]
+   [ai.miniforge.workflow.schemas :as schemas]
    [babashka.fs :as fs]
    [clojure.edn :as edn]
    [clojure.walk :as walk]))
@@ -212,15 +213,20 @@
 (defn persist-execution-state!
   "Persist a machine snapshot, manifest, and current phase checkpoint."
   [ctx]
-  (try
-    (when-let [workflow-run-id (:execution/id ctx)]
-      (let [checkpoint-root (resolve-checkpoint-root ctx)
-            phase-name (active-or-last-phase ctx)
-            phase-result (get-in ctx [:execution/phase-results phase-name])
-            snapshot-path' (machine-snapshot-path checkpoint-root workflow-run-id)
-            manifest-path' (manifest-path checkpoint-root workflow-run-id)
-            snapshot (build-machine-snapshot ctx)
-            manifest (build-manifest ctx checkpoint-root)]
+  (when-let [workflow-run-id (:execution/id ctx)]
+    (let [checkpoint-root (resolve-checkpoint-root ctx)
+          phase-name (active-or-last-phase ctx)
+          phase-result (get-in ctx [:execution/phase-results phase-name])
+          snapshot-path' (machine-snapshot-path checkpoint-root workflow-run-id)
+          manifest-path' (manifest-path checkpoint-root workflow-run-id)
+          snapshot (build-machine-snapshot ctx)
+          manifest (build-manifest ctx checkpoint-root)
+          checkpoint-data {:checkpoint/root checkpoint-root
+                           :manifest manifest
+                           :machine-snapshot snapshot
+                           :phase-results (or (:execution/phase-results ctx) {})}]
+      (schemas/validate-checkpoint-data! checkpoint-data)
+      (try
         (when (and phase-name phase-result)
           (write-edn-atomically!
            (phase-checkpoint-path checkpoint-root workflow-run-id phase-name)
@@ -229,9 +235,9 @@
         (write-edn-atomically! manifest-path' manifest)
         {:checkpoint/root checkpoint-root
          :checkpoint/machine-snapshot-path snapshot-path'
-         :checkpoint/manifest-path manifest-path'}))
-    (catch Exception _
-      nil)))
+         :checkpoint/manifest-path manifest-path'}
+        (catch Exception _
+          nil)))))
 
 (defn load-checkpoint-data
   "Load durable checkpoint data for a workflow run, if present."

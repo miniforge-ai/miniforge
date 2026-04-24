@@ -21,7 +21,8 @@
    [clojure.java.io :as io]
    [clojure.test :refer [deftest is testing]]
    [ai.miniforge.workflow.checkpoint-store :as checkpoint-store]
-   [ai.miniforge.workflow.context :as ctx]))
+   [ai.miniforge.workflow.context :as ctx]
+   [ai.miniforge.workflow.interface :as workflow]))
 
 (defn- with-temp-checkpoint-root
   [f]
@@ -70,3 +71,42 @@
         (testing "manifest tracks checkpointed phases"
           (is (= [:done]
                  (get-in checkpoint-data [:manifest :workflow/phases-completed]))))))))
+
+(deftest persist-execution-state-validates-before-saving-test
+  (with-temp-checkpoint-root
+    (fn [checkpoint-root]
+      (let [workflow {:workflow/id :test
+                      :workflow/version "1.0.0"
+                      :workflow/pipeline [{:phase :done}]}
+            invalid-ctx (-> (ctx/create-context workflow {:task "Test"}
+                                                {:checkpoint/root checkpoint-root})
+                            (assoc :execution/phase-results {:done :invalid-phase-result}))]
+        (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                              #"Invalid checkpoint data"
+                              (checkpoint-store/persist-execution-state! invalid-ctx)))))))
+
+(deftest load-checkpoint-data-validates-at-interface-boundary-test
+  (testing "invalid checkpoint payloads are rejected at the public interface"
+    (with-redefs [checkpoint-store/load-checkpoint-data
+                  (fn [_workflow-run-id _opts]
+                    {:checkpoint/root "/tmp/checkpoints"
+                     :manifest {:workflow/id (random-uuid)
+                                :workflow/workflow-id :canonical-sdlc
+                                :workflow/workflow-version "1.0.0"
+                                :workflow/phases-completed [:plan]
+                                :workflow/machine-snapshot-path "/tmp/checkpoints/run/machine-snapshot.edn"
+                                :workflow/phase-checkpoints {:plan "/tmp/checkpoints/run/phases/plan.edn"}
+                                :workflow/last-checkpoint-at "2026-04-24T00:00:00Z"}
+                     :machine-snapshot {:execution/id (random-uuid)
+                                        :execution/workflow-id :canonical-sdlc
+                                        :execution/workflow-version "1.0.0"
+                                        :execution/status :running
+                                        :execution/fsm-state {:_state :running}
+                                        :execution/response-chain {}
+                                        :execution/errors []
+                                        :execution/artifacts []
+                                        :execution/metrics {}}
+                     :phase-results {:plan :invalid-phase-result}})]
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                            #"Invalid checkpoint data"
+                            (workflow/load-checkpoint-data (random-uuid) {}))))))

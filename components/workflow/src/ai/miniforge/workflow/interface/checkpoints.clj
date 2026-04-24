@@ -19,6 +19,13 @@
 (ns ai.miniforge.workflow.interface.checkpoints
   "Workflow checkpointing and resume data APIs."
   (:require
-   [ai.miniforge.workflow.checkpoint-store :as checkpoint-store]))
+   [ai.miniforge.workflow.checkpoint-store :as checkpoint-store]
+   [ai.miniforge.workflow.schemas :as schemas]))
 
-(def load-checkpoint-data checkpoint-store/load-checkpoint-data)
+(defn load-checkpoint-data
+  "Load checkpoint data and validate it at the public boundary."
+  ([workflow-run-id]
+   (load-checkpoint-data workflow-run-id {}))
+  ([workflow-run-id opts]
+   (some-> (checkpoint-store/load-checkpoint-data workflow-run-id opts)
+           schemas/validate-checkpoint-data!)))
