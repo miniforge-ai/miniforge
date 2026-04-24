@@ -6,7 +6,7 @@
 
 # N8 — Observability Control Interface
 
-**Version:** 0.2.0-draft
+**Version:** 0.3.0-draft
 **Date:** 2026-03-08
 **Status:** Draft
 **Conformance:** MUST
@@ -238,6 +238,83 @@ Implementations MUST support these control actions:
 | `emergency-stop` | Halt all fleet workflows                     | Critical   |
 | `drain`          | Stop accepting new workflows, complete existing| High     |
 | `scale`          | Adjust fleet concurrency limits              | Medium     |
+
+#### 3.1.5 Checkpoint Control
+
+Workflow Packs (N1 §2.24) and chained workflows (N2 §14) MAY declare checkpoints
+where execution pauses pending explicit approval. Checkpoint control actions:
+
+| Action              | Description                                          | Risk Level |
+| ------------------- | ---------------------------------------------------- | ---------- |
+| `checkpoint.request`| Request a checkpoint at the next eligible boundary   | Low        |
+| `checkpoint.approve`| Approve a pending checkpoint and resume              | Medium     |
+| `checkpoint.reject` | Reject a pending checkpoint and halt the workflow    | Medium     |
+
+`checkpoint.request` parameters:
+
+```clojure
+{:action/type :checkpoint.request
+ :action/target {:target-type :workflow | :chain-edge
+                 :target-id uuid}
+ :action/parameters
+ {:checkpoint/at keyword        ; :next-phase | :next-chain-edge | :pre-release
+  :checkpoint/reason string     ; OPTIONAL: operator justification
+  :checkpoint/expires-at inst}} ; OPTIONAL: auto-approve if not rejected
+```
+
+When a checkpoint is reached, implementations MUST:
+
+1. Emit `checkpoint/reached` event (§10) with the pending action id
+2. Transition the workflow to `:paused-awaiting-checkpoint`
+3. Wait for `checkpoint.approve` or `checkpoint.reject`
+4. If `:checkpoint/expires-at` elapses without a decision, emit
+   `checkpoint/expired` and treat as reject unless policy specifies otherwise
+
+Checkpoint approval MAY require multi-party approval per §3.3.
+
+#### 3.1.6 Model Control
+
+When policy permits, operators MAY override the LLM model used by an agent
+for a scoped run. Model control actions:
+
+| Action          | Description                                              | Risk Level |
+| --------------- | -------------------------------------------------------- | ---------- |
+| `model.override`| Override model for the CURRENT phase or call only        | High       |
+| `model.set`     | Override model for the remainder of the workflow         | High       |
+| `model.clear`   | Revert any active override; fall back to workflow default| Medium     |
+
+`model.override` and `model.set` parameters:
+
+```clojure
+{:action/type :model.override | :model.set
+ :action/target {:target-type :agent | :workflow
+                 :target-id uuid}
+ :action/parameters
+ {:model/provider keyword             ; :anthropic | :openai | :local | ...
+  :model/id string                    ; provider-specific model id
+  :model/reason string                ; REQUIRED: justification
+  :model/expires-at inst              ; REQUIRED for :model.set; MAY be omitted for :override
+  :model/scope #{:current-phase :current-workflow :current-call}
+  :model/fallback-allowed? boolean}}  ; default false — fail if override model unavailable
+```
+
+Implementations MUST:
+
+1. Verify the target model is in the deployment's allowed-models list per
+   policy (N4); reject if not
+2. Require justification text; actions with empty `:model/reason` MUST fail
+3. Record the pre-override model and the override in Pack Run evidence
+   (N6 §2.11.1) and in `:evidence/control-actions` (§11.1)
+4. Emit `model/overridden` event (§10) with `:model/provider`, `:model/id`,
+   and scope; redact any provider credentials
+5. Enforce `:model/expires-at` — on expiration, automatically emit
+   `model.clear` and a `model/override-expired` event
+6. If `:model/fallback-allowed?` is false and the override model becomes
+   unavailable mid-run, the workflow MUST fail rather than silently
+   falling back
+
+Model overrides MUST NOT persist across workflow boundaries. A `model.set`
+that outlives a workflow is a bug.
 
 ### 3.2 Control Action Schema
 
@@ -742,6 +819,52 @@ OCI adds these event types to N3:
  :message "Approval required for {type}: {required} approvers needed"}
 ```
 
+#### checkpoint/reached
+
+```clojure
+{:event/type :checkpoint/reached
+ :action/id uuid                       ; the originating checkpoint.request
+ :workflow/id uuid
+ :checkpoint/at keyword                ; :next-phase | :next-chain-edge | :pre-release
+ :checkpoint/expires-at inst           ; OPTIONAL
+ :message "Checkpoint reached: {at}"}
+```
+
+#### checkpoint/expired
+
+```clojure
+{:event/type :checkpoint/expired
+ :action/id uuid
+ :workflow/id uuid
+ :checkpoint/resolution keyword        ; :auto-approved | :auto-rejected (per policy)
+ :message "Checkpoint expired: {resolution}"}
+```
+
+#### model/overridden
+
+```clojure
+{:event/type :model/overridden
+ :action/id uuid
+ :workflow/id uuid
+ :agent/id uuid                        ; OPTIONAL
+ :model/provider keyword
+ :model/id string
+ :model/scope keyword                  ; :current-phase | :current-workflow | :current-call
+ :model/expires-at inst                ; OPTIONAL
+ :model/previous {:provider keyword :id string}
+ :message "Model overridden: {provider}/{id}"}
+```
+
+#### model/override-expired
+
+```clojure
+{:event/type :model/override-expired
+ :action/id uuid
+ :workflow/id uuid
+ :model/restored {:provider keyword :id string}
+ :message "Model override expired; restored: {provider}/{id}"}
+```
+
 ---
 
 ## 11. Evidence Extensions (N6 Extension)
@@ -845,6 +968,12 @@ A minimal compliant implementation MAY defer:
 
 **Version History:**
 
+- 0.3.0-draft (2026-04-23): Control-action surface extensions — Checkpoint Control
+  (§3.1.5: request/approve/reject) for governed pause-points in Workflow Packs and
+  chained workflows (N2 §14); Model Control (§3.1.6: override/set/clear) for
+  policy-bounded LLM model substitution with required justification, expiration,
+  and no silent fallback. Corresponding events `checkpoint/reached`,
+  `checkpoint/expired`, `model/overridden`, `model/override-expired` added in §10
 - 0.2.0-draft (2026-03-08): Safe-mode posture (§3.4) — triggers, behavior, exit protocol,
   state/events; unified autonomy model back-reference (N1 §5.6)
 - 0.1.0-draft (2026-02-01): Initial observability control interface specification

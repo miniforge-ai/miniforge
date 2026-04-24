@@ -6,8 +6,8 @@
 
 # miniforge Specification Index
 
-**Version:** 0.6.0-draft
-**Date:** 2026-03-08
+**Version:** 0.7.0-draft
+**Date:** 2026-04-23
 **Status:** Living specification during OSS development
 
 ---
@@ -403,6 +403,19 @@ Normative specs are enforced by:
 
 ## Version History
 
+- **0.7.0-draft** (2026-04-23) - Pack interchange, control surface, and per-workflow streaming
+  amendments. **N1**: Pack Signature Format (§2.10.4.1) and Pack Bundle Format (§2.10.6) so signed
+  packs and pack archives are portable between OSS implementations; Tool Registry (§2.31) hoists
+  the tool/connector contract from informative to normative so the capability-grant gate
+  (N4 §5.1.9) has a canonical surface to enforce against. **N3**: §5.3 expanded from a one-line
+  SSE sketch to a complete per-workflow wire contract (auth, listener attach handshake,
+  filters, resume-from-sequence, backpressure, SSE/WebSocket formats, rate limiting). **N6**:
+  `:pr-context-pack` artifact type registered. **N8**: Checkpoint Control (§3.1.5) and Model
+  Control (§3.1.6) added to the control-action surface, with corresponding events in §10.
+  **N9**: ingestion emission obligation for `:pr-context-pack`. **N11**: TaskExecutor Protocol
+  (§10) hoisted to normative — pluggable substrate contract plus `persist-workspace!` /
+  `restore-workspace!` for workspace handoff with reproducible digest; `:git` baseline kind only.
+  Per-spec bumps: N1 0.5→0.6, N3 0.7→0.8, N6 0.5→0.6, N8 0.2→0.3, N9 0.1→0.2, N11 0.1→0.2
 - **0.6.0-draft** (2026-03-08) - Reliability nines amendments: canonical failure taxonomy, SLIs/SLOs/error
   budgets, unified autonomy model (A0-A5), trust boundary validation, retrieval governance, evaluation
   pipeline in N1; workflow tier + compensation/success predicates in N2; failure class enum +

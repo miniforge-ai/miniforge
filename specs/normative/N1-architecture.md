@@ -6,7 +6,7 @@
 
 # N1 — Core Architecture & Concepts
 
-**Version:** 0.5.0-draft
+**Version:** 0.6.0-draft
 **Date:** 2026-04-22
 **Status:** Draft
 **Conformance:** MUST
@@ -544,6 +544,101 @@ Minimal key configuration schema:
 
 Implementations MUST validate signatures using the `ed25519` algorithm (RECOMMENDED) or `rsa-sha256` (acceptable).
 
+##### Signature Format
+
+Pack signatures are **detached** — the signature lives beside the pack manifest,
+not inside it. This keeps `pack.edn` content-hash-stable regardless of who
+signs it and allows multi-signer packs.
+
+The signed payload is the canonical content hash (§2.10.6) — not the raw
+archive, not the manifest file. This ensures a signature is valid across
+archive re-packaging (e.g., timestamp differences, compression level changes)
+as long as the bundle's logical content is unchanged.
+
+##### On-Disk Signature File (`pack.sig`)
+
+If present at `<pack-root>/pack.sig`, the signature file MUST be a single-line
+EDN map:
+
+```clojure
+{:signature/algorithm keyword          ; REQUIRED: :ed25519 | :rsa-sha256
+ :signature/key-id string              ; REQUIRED: identifies signer public key
+ :signature/signed-hash string         ; REQUIRED: the :pack/content-hash signed (hex)
+ :signature/value string               ; REQUIRED: base64-encoded signature bytes
+ :signature/created-at inst            ; REQUIRED: signature timestamp
+ :signature/signer string              ; OPTIONAL: human-readable signer identity
+ :signature/chain                      ; OPTIONAL: counter-signatures
+ [{:signature/key-id string
+   :signature/algorithm keyword
+   :signature/value string
+   :signature/created-at inst}]}
+```
+
+The `:signature/signed-hash` MUST match the `:pack/content-hash` in `pack.edn`.
+If they diverge, the signature is invalid regardless of cryptographic verification.
+
+Multiple signers MAY counter-sign via `:signature/chain`. Each chain entry signs
+the same `:signature/signed-hash` independently. Implementations MAY enforce a
+minimum number of valid chain signatures via pack trust policy.
+
+##### Public Key Distribution (`pack.sig.pub`)
+
+If present at `<pack-root>/pack.sig.pub`, this file MUST be an EDN vector of
+public-key records matching the `:public-keys` schema above. This allows a
+bundle to carry the signer's public key inline for bootstrap verification.
+
+Trust of the embedded key is **NOT** implied — implementations MUST cross-check
+the `:key-id` against configured trusted keys before treating the signature as
+valid. An embedded key bundle is purely a convenience for offline verification
+once trust is already established.
+
+##### Signature Verification API
+
+Implementations MUST provide a pure verification function with this contract:
+
+```clojure
+;; Inputs:
+;;   pack-content-hash  — string, the canonical :pack/content-hash
+;;   signature          — map, the :signature/* record above
+;;   trusted-keys       — seq of {:key-id :public-key :valid-from :valid-until :revoked?}
+;;   now                — inst, verification timestamp
+;;
+;; Returns:
+;;   {:verified? boolean
+;;    :verified-by keyword   ; :trusted-key | :embedded-key | nil
+;;    :key-id string         ; which key verified (if :verified?)
+;;    :reason keyword}       ; if NOT :verified?:
+;;                            ;   :unknown-key | :revoked-key | :expired-key
+;;                            ;   | :hash-mismatch | :bad-signature
+;;                            ;   | :algorithm-not-supported
+(verify-pack-signature pack-content-hash signature trusted-keys now)
+```
+
+Verification MUST:
+
+1. Reject if `:signature/signed-hash` ≠ `pack-content-hash`
+2. Look up `:signature/key-id` in `trusted-keys`
+3. Reject if the key is `:revoked?`, not yet valid (`:valid-from` > now), or
+   expired (`:valid-until` ≤ now)
+4. Reject if `:signature/algorithm` is not supported
+5. Cryptographically verify `:signature/value` against `pack-content-hash` bytes
+   using the trusted public key
+6. For chained signatures (`:signature/chain`), verify each entry independently
+   and return per-entry results
+
+Verification MUST NOT perform network calls, filesystem writes, or mutate state.
+
+##### Signature Verification at Install and Run
+
+Install-time verification (§2.10.6 step 3) and run-time verification (§2.26.1)
+both invoke `verify-pack-signature`. The Pack Run evidence bundle (N6 §2.11.1)
+MUST record the full verification result, including `:verified-by`, `:key-id`,
+and `:reason` on failure.
+
+If `pack.sig` is absent, implementations MUST treat the pack as unsigned
+(`:pack/signature-verified? false`). Pack trust policy (§N4 §5.1.8) determines
+whether unsigned packs are permitted.
+
 #### 2.10.5 ETL Pipelines (Repository → Packs)
 
 miniforge SHOULD provide an ETL pipeline that converts existing repositories (docs/specs/rules)
@@ -579,6 +674,99 @@ Incremental ETL MUST:
 5. **Maintain pack index:** Update pack index incrementally, preserving provenance of unchanged packs.
 
 Implementations MAY cache intermediate classification and scanner results for performance.
+
+#### 2.10.6 Pack Bundle Format
+
+Packs are distributed as **pack bundles** — self-contained, content-addressable
+archives. This section defines the on-disk layout that registries store and
+runtimes load.
+
+##### Archive Format
+
+A pack bundle MUST be distributed as a gzipped tar archive (`.pack.tar.gz`).
+The archive MUST NOT contain absolute paths, symlinks that escape the archive
+root, or device/FIFO entries.
+
+Implementations MAY additionally support OCI image layout for registry-to-registry
+transfer, but the canonical interchange format is `.pack.tar.gz`.
+
+##### Directory Layout
+
+A pack bundle, when extracted, MUST have this layout:
+
+```text
+<pack-root>/
+├── pack.edn                     ; REQUIRED: manifest (§2.10.3 schema)
+├── pack.sig                     ; OPTIONAL: detached signature (§2.10.4.1)
+├── pack.sig.pub                 ; OPTIONAL: signer public key bundle
+├── README.md                    ; OPTIONAL: human-facing description
+├── entrypoints/                 ; REQUIRED for :workflow-pack
+│   └── <entrypoint-name>.edn    ; one file per entrypoint, referenced by
+│                                ;   :entrypoint/workflow-ref in pack.edn
+├── templates/                   ; OPTIONAL: render templates for reports
+│   └── <template-name>.<ext>
+├── policy-fragments/            ; OPTIONAL: advisory policy rules (N4)
+│   └── <fragment-name>.edn
+├── schemas/                     ; OPTIONAL: shared EDN schemas referenced
+│   └── <schema-name>.edn        ;   from entrypoints
+└── resources/                   ; OPTIONAL: arbitrary resource files
+    └── ...                      ;   (read-only at runtime)
+```
+
+Implementations MUST:
+
+1. Reject bundles where `pack.edn` is missing or fails schema validation
+2. Reject bundles where a referenced `:entrypoint/workflow-ref` cannot be
+   resolved within `entrypoints/`
+3. Normalize path separators to `/` (POSIX) when computing content hashes
+4. Reject bundles containing paths that resolve outside `<pack-root>/`
+
+Implementations MUST NOT execute any file in a pack bundle as host-native code.
+Workflow and template files are data consumed by the runtime.
+
+##### Canonical EDN Serialization
+
+The `:pack/content-hash` field in `pack.edn` (§2.10.3) is computed over a
+**canonical serialization** of the bundle, not the raw archive. This ensures
+that equivalent packs produce identical hashes regardless of archive metadata
+(timestamps, file order, compression settings).
+
+The canonical serialization is:
+
+```text
+SHA-256(
+  for each file F in bundle in lexicographic path order:
+    "<posix-path>\n"
+    "<sha256-hex of F bytes>\n"
+)
+```
+
+Where:
+
+- `<posix-path>` is the file's path relative to `<pack-root>/`, with `/`
+  separators, no leading `./`
+- `<sha256-hex>` is the lowercase hex-encoded SHA-256 of the file's raw bytes
+- Entries are separated and terminated by a single `\n` byte
+- The `pack.sig` and `pack.sig.pub` files MUST be excluded from the canonical
+  serialization (they sign the hash; they cannot be part of what is hashed)
+
+The final `:pack/content-hash` is the lowercase hex SHA-256 of the concatenated
+canonical serialization bytes.
+
+##### Bundle Integrity Validation
+
+At install time, implementations MUST:
+
+1. Extract the bundle and compute the canonical content hash
+2. Compare against `:pack/content-hash` in `pack.edn`; FAIL on mismatch
+3. If `pack.sig` is present, verify the signature per §2.10.4.1
+4. Validate `pack.edn` against the schema in §2.10.3
+5. Resolve all `:entrypoint/workflow-ref` paths and validate entrypoint files
+   against their declared `:entrypoint/input-schema` and
+   `:entrypoint/output-schema`
+
+At run time, implementations MUST re-validate at least steps 1 and 4 unless
+the bundle is loaded from a content-addressed store that guarantees immutability.
 
 ### 2.11 Operational Policy (N7)
 
@@ -1360,6 +1548,173 @@ Implementations SHOULD use these defaults (tunable per-repo):
 On budget exhaustion with `:fail-closed` policy: the tool call MUST return an error with
 remaining budget state. The agent MAY request escalation via `context.extend` if the policy
 envelope permits `:request-escalation`.
+
+### 2.31 Tool Registry
+
+A **Tool Registry** is the runtime catalog of executable tools and connectors
+available to agents, workflow packs, and validators. It is the canonical thing
+that pack **capabilities** (§2.25) resolve against: a capability declaration
+like `github.pr.read` is meaningful only if a matching tool is registered and
+the agent has been granted permission to invoke it.
+
+Workflow Packs (§2.24), the capability-grant gate (N4 §5.1.9), and governed
+tool execution (N10) all depend on this contract.
+
+#### 2.31.1 Tool Descriptor
+
+Every registered tool MUST conform to this schema:
+
+```clojure
+{:tool/id          keyword          ; REQUIRED: namespaced id, e.g. :github/pr or :lsp/clojure
+ :tool/type        keyword          ; REQUIRED: :function | :lsp | :mcp | :external
+ :tool/name        string           ; REQUIRED: human-readable name
+ :tool/description string           ; REQUIRED: one-line description
+ :tool/version     string           ; REQUIRED: semantic version
+
+ :tool/capabilities #{string ...}   ; REQUIRED: capabilities this tool provides,
+                                     ;   using the <connector>.<resource>.<action>
+                                     ;   naming from §2.25 (e.g. "github.pr.read")
+ :tool/verb-classes {string keyword} ; REQUIRED: per-capability action class
+                                     ;   from N10 §3.1 (:A | :B | :C | :D | :E)
+
+ :tool/config      map              ; REQUIRED: type-specific config (see §2.31.2)
+ :tool/requires    #{keyword ...}   ; OPTIONAL: platform/runtime requirements
+                                     ;   (e.g. #{:subprocess/spawn :network/egress})
+ :tool/enabled?    boolean          ; REQUIRED: whether available for grant
+ :tool/tags        #{keyword ...}   ; OPTIONAL: discovery tags
+
+ :tool/source      keyword          ; REQUIRED: :builtin | :user | :project
+                                     ;   (downstream products MAY define more)
+ :tool/source-path string}          ; OPTIONAL: path of the EDN descriptor file
+```
+
+The `:tool/capabilities` set is authoritative. A pack declaring
+`:capability/id "github.pr.comment.write"` resolves to a tool whose
+`:tool/capabilities` contains `"github.pr.comment.write"`. The capability-grant
+gate (N4 §5.1.9) MUST reject pack runs where any declared capability has no
+matching registered tool.
+
+#### 2.31.2 Tool Types and Config
+
+**`:function`** — In-process Clojure function tool.
+
+```clojure
+{:tool/type :function
+ :tool/config {:fn-ref symbol        ; REQUIRED: resolvable symbol
+               :schema map}}          ; REQUIRED: Malli schema for inputs/outputs
+```
+
+**`:lsp`** — Language Server Protocol subprocess.
+
+```clojure
+{:tool/type :lsp
+ :tool/config {:lsp/command       [string ...]   ; REQUIRED: argv
+               :lsp/languages     #{string ...}  ; REQUIRED: language ids
+               :lsp/file-patterns [string ...]   ; REQUIRED: glob patterns
+               :lsp/start-mode    keyword        ; :on-demand | :eager
+               :lsp/shutdown-after-ms long}}     ; idle timeout
+```
+
+**`:mcp`** — Model Context Protocol server.
+
+```clojure
+{:tool/type :mcp
+ :tool/config {:mcp/command   [string ...]       ; REQUIRED: argv
+               :mcp/transport keyword            ; REQUIRED: :stdio | :http | :sse
+               :mcp/env       {string string}    ; OPTIONAL: env vars
+               :mcp/timeout-ms long}}            ; OPTIONAL: per-call timeout
+```
+
+**`:external`** — External adapter invoked via shell or HTTP (e.g., Shipyard,
+Tonic). Governed per N10.
+
+```clojure
+{:tool/type :external
+ :tool/config {:external/command    [string ...]  ; OPTIONAL: argv
+               :external/endpoint   string        ; OPTIONAL: HTTP endpoint
+               :external/timeout-ms long
+               :external/retry      map}          ; N10 §3.4 retry config
+ :tool/metadata
+ {:adapter/protocols [keyword ...]                ; e.g. [:ValidationAdapter]
+  :adapter/supported-environments [keyword ...]}}
+```
+
+Implementations MUST reject descriptors whose `:tool/config` does not satisfy
+the schema for the declared `:tool/type`.
+
+#### 2.31.3 Registry Discovery Order
+
+Implementations MUST load tool descriptors from configured roots in this order
+(later roots override earlier on matching `:tool/id`):
+
+1. **Built-in** — tools packaged with the miniforge distribution
+2. **User** — `~/.miniforge/tools/**/*.edn`
+3. **Project** — `.miniforge/tools/**/*.edn` (in the working repo root)
+
+Downstream products MAY define additional roots (e.g., centrally-distributed
+descriptors); they MUST slot below the project root in override order to
+preserve user/project autonomy.
+
+Override semantics: a later-root descriptor with the same `:tool/id` fully
+replaces the earlier one; there is no merge. A `:tool/enabled? false` later
+descriptor disables a built-in tool without removal.
+
+The project root is the lowest-trust source for instruction-authority purposes;
+project-root tools MUST default to `:tool/source :project` and MUST NOT be
+granted capabilities automatically — they require explicit user grant even if
+the capability is normally auto-granted for the same tool from a higher-trust
+source.
+
+#### 2.31.4 Capability Resolution
+
+The runtime MUST expose a pure resolution function:
+
+```clojure
+;; Returns the set of tool descriptors providing a capability.
+(resolve-capability registry capability-id)
+;; Returns: seq of :tool/id, ordered by discovery order (later first)
+
+;; Returns the single tool descriptor that a pack run invokes for a capability.
+(bind-capability registry capability-id grant-context)
+;; grant-context: {:pack-run/id, :pack/source, :environment}
+;; Returns: :tool/id or throws :capability/unresolvable
+```
+
+`bind-capability` MUST be deterministic given `registry` and `grant-context`.
+The chosen tool MUST be recorded in Pack Run evidence (N6 §2.11.1) as part
+of `:pack/capabilities-granted` — specifically, each granted capability MUST
+carry the `:tool/id` that fulfilled it, so the run can be reproduced with the
+same binding.
+
+#### 2.31.5 Capability Enforcement at Invocation
+
+Every connector action from within a Pack Run MUST pass through the registry:
+
+1. The calling agent or workflow names a capability (not a tool)
+2. The runtime resolves the capability to a `:tool/id` via the grant set
+3. The runtime verifies the grant set includes the resolved capability
+4. The runtime invokes the tool via its type-specific transport (§2.31.2)
+5. The runtime emits a tool-invocation event (N3) and records the action in
+   Pack Run evidence (N6 §2.11.1 `:pack-run/connector-actions`)
+
+An attempted invocation whose capability is not in the pack run's grant set
+MUST fail with `:capability/denied` and emit `capability/denied` (N3 §3.12).
+
+#### 2.31.6 Registry Health and Tool Status
+
+Implementations MUST expose per-tool health state for long-lived tools
+(`:lsp`, `:mcp`, `:external`):
+
+```clojure
+{:tool/id         keyword
+ :tool/status     keyword              ; :stopped | :starting | :running
+                                        ; | :error | :unavailable
+ :tool/started-at inst                 ; OPTIONAL
+ :tool/last-error string}              ; OPTIONAL
+```
+
+Health state is observable but not part of the descriptor; it is runtime-only.
+The CLI surface for listener-visible status is defined in N5.
 
 ---
 
@@ -2432,6 +2787,13 @@ conformance checklist.
 
 **Version History:**
 
+- 0.6.0-draft (2026-04-23): Pack interchange and tool registry amendments — Pack Signature
+  Format (§2.10.4.1) defining detached-signature wire format and verification API so
+  signed packs are portable between OSS implementations; Pack Bundle Format (§2.10.6)
+  defining the on-disk archive layout and canonical-EDN content-hash so any miniforge
+  instance can install a pack produced by another; Tool Registry (§2.31) hoisting the
+  tool/connector contract from informative to normative so the capability-grant gate
+  (N4 §5.1.9) has a canonical surface to enforce against
 - 0.5.0-draft (2026-03-08): Reliability Nines amendments — Failure Taxonomy (§5.3.3),
   Reliability Model with SLIs/SLOs/Error Budgets (§5.5), Unified Autonomy Model (§5.6),
   Trust Boundary Validation (§5.7), Index Quality Metrics and Canary Protocol (§2.27.9–2.27.10),

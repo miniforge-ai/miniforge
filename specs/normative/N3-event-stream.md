@@ -6,7 +6,7 @@
 
 # N3 — Event Stream & Observability Contract
 
-**Version:** 0.7.0-draft
+**Version:** 0.8.0-draft
 **Date:** 2026-04-17
 **Status:** Draft
 **Conformance:** MUST
@@ -1834,23 +1834,172 @@ Implementations MUST support:
 
 ### 5.3 Streaming Endpoints (HTTP)
 
-Implementations MUST provide Server-Sent Events (SSE) endpoint:
+Implementations MUST provide a Server-Sent Events (SSE) endpoint and MAY
+provide a WebSocket endpoint. Both carry the same event envelope (§2) and
+the same ordering guarantees (§2.2). This section is the wire contract for
+the per-workflow stream; cross-workflow aggregation endpoints are out of
+scope for OSS and defined by downstream products.
+
+#### 5.3.1 Endpoint
 
 ```http
-GET /api/workflows/:id/stream
+GET  /api/workflows/:id/stream          ; per-workflow SSE
+WS   /api/workflows/:id/stream          ; OPTIONAL WebSocket alternative
 ```
 
-Response format:
+#### 5.3.2 Authentication
+
+The endpoint MUST accept a bearer token via:
+
+```http
+Authorization: Bearer <token>
+```
+
+For SSE, the token MAY additionally be supplied via a cryptographically-random
+query parameter `?access_token=<token>` to accommodate browsers that cannot
+set headers on `EventSource`. Implementations MUST then either (a) require the
+token to be single-use and short-lived, or (b) reject it entirely.
+
+Tokens resolve to a principal + RBAC role (N8 §2.3). Unauthenticated requests
+MAY succeed in local mode with `localhost`-only binding but MUST fail with
+HTTP 401 in any network-exposed deployment.
+
+#### 5.3.3 Listener Attach Handshake
+
+The SSE/WebSocket connection IS the listener attach per N8 §2.1. On connection:
+
+1. The client MAY send listener registration metadata via request headers:
+
+    ```http
+    X-Listener-Id:          <uuid>          ; OPTIONAL — client-chosen id
+    X-Listener-Type:        watcher|dashboard
+    X-Listener-Capability:  observe|advise|control
+    X-Listener-Buffer-Size: <int>           ; OPTIONAL — server MAY cap
+    ```
+
+   The server MUST validate that the authenticated principal's RBAC role
+   permits the declared `X-Listener-Capability`. If not, respond HTTP 403.
+
+2. The server MUST emit a `listener/attached` event (N8 §10) as the first
+   event on the stream, echoing the assigned listener id:
+
+    ```text
+    event: listener-attached
+    data: {"event/type":"listener/attached","listener/id":"...",
+           "listener/capability":"observe","sequence-number":0}
+    ```
+
+3. The server MUST emit a `listener/detached` event (N8 §10) immediately
+   before closing the stream, including a `:listener/reason` of
+   `:disconnect | :timeout | :revoked`.
+
+`ADVISE` and `CONTROL` listeners MAY emit annotations or request control
+actions over a separate bidirectional channel (WebSocket), or via parallel
+HTTP POST requests to OCI endpoints (N8 §9). SSE is strictly server-to-client.
+
+#### 5.3.4 Subscription Filters
+
+Clients MAY restrict the event stream via query parameters:
 
 ```text
-event: agent-status
-data: {"event/type":"agent/status","workflow/id":"...","message":"..."}
-
-event: milestone-reached
-data: {"event/type":"milestone/reached","workflow/id":"...","milestone/id":"code-generated"}
+?event-type=<keyword>      (repeatable; accepts glob, e.g. pack.run/*)
+&phase=<keyword>           (repeatable)
+&agent=<keyword>           (repeatable)
+&pr-id=<uuid>              (repeatable)
+&from-sequence=<long>      (resume — see §5.3.5)
+&include-payloads=true|false (default: true)
+&sampling-rate=<float>     (0.0–1.0; default 1.0)
 ```
 
-Implementations MAY provide WebSocket endpoint as alternative.
+Filter evaluation is server-side; un-filtered events MUST NOT cross the wire.
+
+#### 5.3.5 Resume-from-Sequence
+
+Every event MUST carry a monotonic `:event/sequence-number` per workflow.
+
+On reconnect, clients MAY supply `?from-sequence=<N>` to resume. The server
+MUST:
+
+1. Replay events with `sequence-number > N` in ascending order, followed by
+   live events
+2. If `N` is older than the server's retention horizon, respond HTTP 410 Gone
+   with body `{:error "sequence-out-of-retention", :oldest-available <long>}`
+   so the client can re-subscribe from a valid position
+3. Emit SSE comment lines to mark the catch-up → live transition:
+
+    ```text
+    : catch-up-start from=123 to=456
+    event: agent-status
+    data: {...,"sequence-number":124}
+    ...
+    : catch-up-end at=456
+    ```
+
+For SSE, servers MUST honor the standard `Last-Event-ID` header as an
+alternative to `?from-sequence=` — both resume the same way.
+
+#### 5.3.6 Backpressure and Buffer Overflow
+
+If a listener falls behind the server's send buffer (default: 1000 events per
+N8 §2.1 `:buffer-size`), the server MUST either:
+
+1. Drop oldest events and emit a `listener/overflow` event with the number of
+   dropped events, then continue; OR
+2. Disconnect the listener with `listener/detached` reason `:timeout`.
+
+Choice is per-implementation but MUST be consistent within a deployment and
+MUST be documented. `CONTROL` listeners SHOULD prefer option (2) to maintain
+ordering integrity; `OBSERVE` listeners MAY prefer option (1).
+
+#### 5.3.7 SSE Wire Format
+
+SSE responses MUST use these fields per event:
+
+```text
+event: <event-type-short>     ; dashed, e.g. "agent-status", "pack-run-started"
+id: <sequence-number>         ; decimal; enables Last-Event-ID resume
+data: <json>                  ; JSON serialization of the full event envelope
+retry: <milliseconds>         ; OPTIONAL; reconnection hint
+```
+
+Multi-line `data:` fields are permitted per the SSE specification; clients
+MUST reassemble before parsing JSON.
+
+The server MUST emit an SSE comment (`:`) heartbeat at least every 30 seconds
+to prevent proxy idle-timeout disconnects.
+
+#### 5.3.8 WebSocket Wire Format (Optional)
+
+If provided, WebSocket MUST use text frames carrying JSON messages:
+
+```json
+{"kind":"event","event":{...full envelope...}}
+{"kind":"listener-attached","listener-id":"...","sequence-number":0}
+{"kind":"listener-overflow","dropped":42}
+{"kind":"pong","at":"..."}
+```
+
+Client-to-server frames (for `ADVISE`/`CONTROL` listeners):
+
+```json
+{"kind":"annotation","annotation":{...N8 §4 schema...}}
+{"kind":"control-action","action":{...N8 §3.2 schema...}}
+{"kind":"ping","at":"..."}
+```
+
+The server MUST send `pong` within 5 seconds of receiving `ping` or terminate
+the connection.
+
+#### 5.3.9 Rate Limiting and Quotas
+
+Implementations MUST enforce per-principal connection limits:
+
+- Default: 10 concurrent streaming connections per principal
+- Configurable per RBAC role
+- Exceeding the limit: HTTP 429 with `Retry-After` header
+
+Per-connection event-emission rate is governed by N3 §4.2 throttling, which
+applies equally regardless of listener count.
 
 ---
 
@@ -2038,6 +2187,14 @@ Event stream will extend to:
 
 **Version History:**
 
+- 0.8.0-draft (2026-04-23): Per-workflow streaming wire-contract amendments — §5.3
+  expanded from a one-line SSE sketch to a complete contract for the per-workflow
+  stream: authentication via bearer token (with browser-friendly query-param
+  fallback), listener attach handshake aligned with N8 §2.1, server-side
+  subscription filters, resume-from-sequence on reconnect, backpressure and
+  buffer-overflow behavior, SSE wire format (event/id/data/retry + heartbeats),
+  optional WebSocket wire format, rate limiting. Cross-workflow aggregation
+  endpoints remain out of OSS scope
 - 0.6.0-draft (2026-03-08): Reliability Nines amendments — `:failure/class` enum on all
   failure events, reliability metric events (§3.17), repository intelligence events (§3.18)
 - 0.5.0-draft (2026-02-16): Added pack lifecycle, Pack Run, capability denial, and chain

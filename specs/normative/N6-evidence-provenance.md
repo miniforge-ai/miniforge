@@ -6,7 +6,7 @@
 
 # N6 — Evidence & Provenance Standard
 
-**Version:** 0.5.0-draft
+**Version:** 0.6.0-draft
 **Date:** 2026-03-08
 **Status:** Draft
 **Conformance:** MUST
@@ -538,6 +538,41 @@ Implementations MUST support:
 - `:risk-assessment` - Risk evaluation for a PR with explainable factors (see N9 §5.1)
 - `:pr-policy-result` - Policy evaluation result for an external PR
 - `:pr-readiness-snapshot` - Point-in-time readiness assessment for a PR
+- `:pr-context-pack` - Normalized PR context for consumption by reviewer, meta,
+  and governance workflow packs. Content schema:
+
+  ```clojure
+  {:artifact/type :pr-context-pack
+   :artifact/content
+   {:pr/id            uuid                ; PR Work Item id (N9 §2.1)
+    :pr/provider      keyword             ; :github | :gitlab | ...
+    :pr/repo          string              ; "org/name"
+    :pr/number        long
+    :pr/diff-summary  {:files-changed long
+                       :additions     long
+                       :deletions     long
+                       :languages     [keyword ...]
+                       :paths         [string ...]}
+    :pr/metadata      {:author      string
+                       :labels      [string ...]
+                       :base-branch string
+                       :head-branch string
+                       :title       string
+                       :body        string}
+    :pr/ci-status     {:state   keyword   ; :passing | :failing | :pending
+                       :checks  [{:name :state :url}]}
+    :pr/review-status {:state     keyword ; :approved | :changes-requested | :pending
+                       :reviewers [string ...]}
+    :pr/readiness     {...}               ; N9 §2.2 readiness snapshot
+    :pr/risk          {...}               ; N9 §5 risk assessment summary
+    :pr/captured-at   inst}               ; snapshot timestamp
+   :artifact/content-hash string}
+  ```
+
+  PR Context Packs are emitted by the N9 ingestion pipeline on PR creation
+  and on significant updates (see N9 §9.1). They are immutable and
+  content-addressable per §5.1; a significant update produces a new
+  artifact with a new content-hash, not an in-place mutation.
 
 **Evaluation artifact types (N1 §3.3.3):**
 
@@ -1044,6 +1079,11 @@ Fleet-wide evidence will enable:
 
 **Version History:**
 
+- 0.6.0-draft (2026-04-23): External-PR artifact amendment — `:pr-context-pack`
+  artifact type registered in §3.1.1 with full content schema. PR Context Packs are
+  the normalized PR snapshot that reviewer, meta, and governance workflow packs
+  consume; registering the artifact type makes the contract portable across packs
+  and across N9 ingestion implementations
 - 0.5.0-draft (2026-03-08): Reliability Nines amendments — Outcome evidence extended with
   SLI measurements, failure class, workflow tier, degradation mode (§2.6); golden-set
   and eval-run-result artifact types (§3.1.1)

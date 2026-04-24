@@ -6,7 +6,7 @@
 
 # N9 — External PR Integration
 
-**Version:** 0.1.0-draft
+**Version:** 0.2.0-draft
 **Date:** 2026-02-07
 **Status:** Draft
 **Conformance:** MUST
@@ -565,6 +565,13 @@ N6 §3.1.1 MUST be extended with:
 - `:risk-assessment` — Risk evaluation for a PR (see §5.1)
 - `:pr-policy-result` — Policy evaluation result for an external PR
 - `:pr-readiness-snapshot` — Point-in-time readiness assessment
+- `:pr-context-pack` — Normalized PR context for consumption by reviewer, meta,
+  and governance workflow packs (schema in N6 §3.1.1). Emitted by the
+  ingestion pipeline (§3) on PR creation and on significant updates
+  (diff changed, CI status changed, review state changed, base-branch changed).
+  A new artifact MUST be produced per update; existing artifacts MUST NOT be
+  mutated. Downstream reviewer/governance workflow packs consume these as
+  input artifacts via workflow chaining (N2 §14).
 
 All artifacts MUST have `:artifact/content-hash`, `:artifact/provenance`, and
 `:artifact/created-at` per N6 §3.
@@ -862,4 +869,8 @@ A common pattern that preserves adoption while capturing value:
 
 **Version History:**
 
+- 0.2.0-draft (2026-04-23): External-PR artifact amendment — `:pr-context-pack`
+  added to §9.1 with the obligation that ingestion emits the artifact on PR
+  creation and on significant updates (diff, CI status, review state, base-branch
+  change). Schema lives in N6 §3.1.1; this section defines the emission contract
 - 0.1.0-draft (2026-02-07): Initial external PR integration specification
