@@ -112,11 +112,32 @@
    :knowledge-store — Knowledge base store
    :event-stream   — Event stream for telemetry"
   (:require [ai.miniforge.response.interface :as response]
+            [ai.miniforge.workflow.checkpoint-store :as checkpoint-store]
             [ai.miniforge.workflow.fsm :as fsm]
             [ai.miniforge.workflow.monitoring :as monitoring]
             [ai.miniforge.agent.interface :as agent]))
 
 ;------------------------------------------------------------------------------ Internal helpers
+
+(def execution-passthrough-option-keys
+  "Execution options that are copied onto the top-level workflow context."
+  [:llm-backend :artifact-store :knowledge-store
+   :on-phase-start :on-phase-complete
+   :executor :environment-id :sandbox-workdir
+   :on-chunk :event-stream :worktree-path])
+
+(defn- passthrough-option-values
+  [opts]
+  (select-keys opts execution-passthrough-option-keys))
+
+(defn- monitoring-runtime-fields
+  [workflow]
+  (let [supervisors (monitoring/create-supervisors workflow)
+        supervision-runtime (agent/create-supervision-coordinator supervisors)]
+    {:execution/supervision-runtime supervision-runtime
+     :execution/meta-coordinator supervision-runtime
+     :execution/streaming-activity []
+     :execution/files-written #{}}))
 
 (defn sync-machine-projections
   "Project workflow fields from the authoritative machine snapshot."
@@ -175,9 +196,7 @@
   (let [execution-machine (fsm/compile-execution-machine workflow)
         fsm-state (let [initial-state (fsm/initialize-execution execution-machine)]
                     (fsm/start-execution execution-machine initial-state))
-        ;; Initialize live workflow supervision runtime.
-        supervisors (monitoring/create-supervisors workflow)
-        supervision-runtime (agent/create-supervision-coordinator supervisors)]
+        checkpoint-root (checkpoint-store/resolve-checkpoint-root opts)]
     (sync-machine-projections
      (merge
       {:execution/id (random-uuid)
@@ -195,19 +214,31 @@
        :execution/metrics {:tokens 0 :cost-usd 0.0 :duration-ms 0}
        :execution/started-at (System/currentTimeMillis)
        :execution/opts opts
-       ;; Live workflow supervision runtime
-       :execution/supervision-runtime supervision-runtime
-       ;; DEPRECATED: Temporary backwards-compatible alias for integration and
-       ;; end-to-end tests that still read the pre-refactor execution key.
-       :execution/meta-coordinator supervision-runtime
-       ;; Transient state for supervision checks
-       :execution/streaming-activity []
-       :execution/files-written #{}}
+       :execution/checkpoint-root checkpoint-root}
+      (monitoring-runtime-fields workflow)
       ;; Merge opts into top-level context so :llm-backend is accessible to agents
-      (select-keys opts [:llm-backend :artifact-store :knowledge-store
-                         :on-phase-start :on-phase-complete
-                         :executor :environment-id :sandbox-workdir
-                         :on-chunk :event-stream :worktree-path])))))
+      (passthrough-option-values opts)))))
+
+(defn restore-context
+  "Restore execution context from a durable machine snapshot and phase checkpoints."
+  [workflow input machine-snapshot phase-results opts]
+  (let [execution-machine (fsm/compile-execution-machine workflow)
+        checkpoint-root (checkpoint-store/resolve-checkpoint-root
+                         (merge opts machine-snapshot))]
+    (sync-machine-projections
+     (merge
+      machine-snapshot
+      {:execution/workflow workflow
+       :execution/workflow-id (:workflow/id workflow)
+       :execution/workflow-version (:workflow/version workflow)
+       :execution/fsm-machine execution-machine
+       :execution/fsm-state (:execution/fsm-state machine-snapshot)
+       :execution/input (get machine-snapshot :execution/input input)
+       :execution/phase-results phase-results
+       :execution/opts opts
+       :execution/checkpoint-root checkpoint-root}
+      (monitoring-runtime-fields workflow)
+      (passthrough-option-values opts)))))
 
 (defn merge-metrics
   "Merge phase metrics into execution metrics.

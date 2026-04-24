@@ -32,6 +32,7 @@
             [ai.miniforge.logging.interface :as log]
             [ai.miniforge.phase.interface :as phase]
             [ai.miniforge.response.interface :as response]
+            [ai.miniforge.workflow.checkpoint-store :as checkpoint-store]
             [ai.miniforge.workflow.context :as ctx]
             [ai.miniforge.workflow.execution :as exec]
             [ai.miniforge.workflow.fsm :as workflow-fsm]
@@ -189,26 +190,29 @@
         workflow-state (monitoring/build-supervision-state context iteration)
         supervision-result (monitoring/check-workflow-supervision
                             supervision-runtime
-                            workflow-state)]
-    (if (= :halt (:status supervision-result))
-      (monitoring/handle-supervision-halt
-       context
-       supervision-result
-       ctx/transition-to-failed)
-      (let [phase-ctx (-> (exec/execute-phase-step pipeline context callbacks
-                                                   ctx/merge-metrics
-                                                   ctx/transition-to-completed
-                                                   ctx/transition-to-failed)
-                          (monitoring/clear-transient-state))
-            _ (env/persist-workspace-at-phase-boundary! context phase-ctx)
-            phase-error-msg (get-in phase-ctx
-                                    [:execution/phase-results
-                                     (:execution/current-phase phase-ctx)
-                                     :error :message] "")]
-        (if (rate-limited? phase-error-msg)
-          (apply-rate-limit-failure phase-ctx phase-error-msg)
-          (do (apply-backoff-if-retrying! phase-ctx context)
-              (apply-health-switch phase-ctx)))))))
+                            workflow-state)
+        iteration-result
+        (if (= :halt (:status supervision-result))
+          (monitoring/handle-supervision-halt
+           context
+           supervision-result
+           ctx/transition-to-failed)
+          (let [phase-ctx (-> (exec/execute-phase-step pipeline context callbacks
+                                                       ctx/merge-metrics
+                                                       ctx/transition-to-completed
+                                                       ctx/transition-to-failed)
+                              (monitoring/clear-transient-state))
+                _ (env/persist-workspace-at-phase-boundary! context phase-ctx)
+                phase-error-msg (get-in phase-ctx
+                                        [:execution/phase-results
+                                         (:execution/current-phase phase-ctx)
+                                         :error :message] "")]
+            (if (rate-limited? phase-error-msg)
+              (apply-rate-limit-failure phase-ctx phase-error-msg)
+              (do (apply-backoff-if-retrying! phase-ctx context)
+                  (apply-health-switch phase-ctx)))))]
+    (checkpoint-store/persist-execution-state! iteration-result)
+    iteration-result))
 
 ;------------------------------------------------------------------------------ Layer 1.5: Output extraction
 
@@ -278,7 +282,9 @@
 (defn- build-initial-context
   "Build the initial execution context from workflow, input, and opts."
   [workflow input opts]
-  (let [mode      (get opts :execution-mode :local)
+  (let [resume-machine-snapshot (:resume-machine-snapshot opts)
+        resume-phase-results (:resume-phase-results opts)
+        mode      (get opts :execution-mode :local)
         governed? (and (= :governed mode)
                        (get opts :executor)
                        (get opts :environment-id))]
@@ -292,7 +298,12 @@
                              (get opts :executor)
                              (get opts :environment-id)
                              (get opts :worktree-path (defaults/default-workdir))))]
-      (-> (ctx/create-context workflow input opts)
+      (-> (if (and resume-machine-snapshot resume-phase-results)
+            (ctx/restore-context workflow input
+                                 resume-machine-snapshot
+                                 resume-phase-results
+                                 opts)
+            (ctx/create-context workflow input opts))
           (assoc :execution/executor (get opts :executor)
                  :execution/environment-id (get opts :environment-id)
                  :execution/worktree-path (get opts :worktree-path
@@ -361,6 +372,8 @@
          initial-ctx         (build-initial-context workflow input opts)
          output-ctx-vol      (volatile! nil)
          exception-vol       (volatile! nil)]
+
+     (checkpoint-store/persist-execution-state! initial-ctx)
 
      (when-not skip-lifecycle?
        (events/publish-workflow-started! event-stream initial-ctx))

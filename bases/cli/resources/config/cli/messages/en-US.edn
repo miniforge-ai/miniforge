@@ -490,6 +490,7 @@
   :resume/resuming-from-phase "Resuming from phase: {phase} ({count} phases remaining)"
   :resume/all-phases-completed "All phases already completed."
   :resume/new-workflow-id "New workflow ID: {workflow-id}"
+  :resume/restored-workflow-id "Restored workflow ID: {workflow-id}"
   :resume/phase-starting "Phase: {phase}"
   :resume/completed-status "Resumed workflow completed with status: {status}"
   :resume/failed "Resume failed: {error}"

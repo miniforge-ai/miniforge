@@ -44,6 +44,46 @@
    [:has-review boolean?]
    [:has-testing boolean?]])
 
+(def WorkflowRunId
+  "Workflow run identifier persisted in checkpoint data."
+  [:or uuid? string? keyword?])
+
+(def CheckpointManifest
+  "Durable checkpoint manifest persisted for a workflow run."
+  [:map {:closed false}
+   [:workflow/id WorkflowRunId]
+   [:workflow/workflow-id [:maybe keyword?]]
+   [:workflow/workflow-version [:maybe string?]]
+   [:workflow/phases-completed [:vector keyword?]]
+   [:workflow/machine-snapshot-path string?]
+   [:workflow/phase-checkpoints [:map-of keyword? string?]]
+   [:workflow/last-checkpoint-at string?]])
+
+(def MachineSnapshot
+  "Serializable execution snapshot persisted for workflow resume."
+  [:map {:closed false}
+   [:execution/id WorkflowRunId]
+   [:execution/workflow-id [:maybe keyword?]]
+   [:execution/workflow-version [:maybe string?]]
+   [:execution/status keyword?]
+   [:execution/fsm-state some?]
+   [:execution/response-chain map?]
+   [:execution/errors [:vector map?]]
+   [:execution/artifacts [:vector any?]]
+   [:execution/metrics map?]])
+
+(def PhaseResults
+  "Checkpointed phase results keyed by phase id."
+  [:map-of keyword? map?])
+
+(def CheckpointData
+  "Loaded checkpoint payload returned from the workflow checkpoint boundary."
+  [:map {:closed false}
+   [:checkpoint/root string?]
+   [:manifest CheckpointManifest]
+   [:machine-snapshot MachineSnapshot]
+   [:phase-results PhaseResults]])
+
 ;;------------------------------------------------------------------------------ Layer 1
 ;; Workflow recommendation schema
 
@@ -82,6 +122,11 @@
   [value]
   (m/validate WorkflowRecommendation value))
 
+(defn valid-checkpoint-data?
+  "Check if a value is valid loaded checkpoint data."
+  [value]
+  (m/validate CheckpointData value))
+
 (defn explain-characteristics
   "Get human-readable explanation of validation errors for characteristics.
 
@@ -103,3 +148,18 @@
   [value]
   (when-let [explanation (m/explain WorkflowRecommendation value)]
     (me/humanize explanation)))
+
+(defn explain-checkpoint-data
+  "Get human-readable explanation of validation errors for checkpoint data."
+  [value]
+  (when-let [explanation (m/explain CheckpointData value)]
+    (me/humanize explanation)))
+
+(defn validate-checkpoint-data!
+  "Validate loaded or soon-to-be-persisted checkpoint data at the boundary."
+  [value]
+  (if (valid-checkpoint-data? value)
+    value
+    (throw (ex-info "Invalid checkpoint data"
+                    {:value value
+                     :errors (explain-checkpoint-data value)}))))

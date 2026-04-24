@@ -7,6 +7,7 @@
    [ai.miniforge.workflow.context :as ctx]
    [ai.miniforge.dag-executor.interface :as dag-exec]
    [ai.miniforge.logging.interface :as log]
+   [ai.miniforge.workflow.messages :as messages]
    [ai.miniforge.workflow.execution :as exec]
    [ai.miniforge.phase.interface]))
 
@@ -308,7 +309,8 @@
         (is (= "env-42" (:env-id @call-args)))
         (is (= "task/abc" (get-in @call-args [:opts :branch])))
         (is (= "/workspace" (get-in @call-args [:opts :workdir])))
-        (is (= "implement phase completed" (get-in @call-args [:opts :message])))))))
+        (is (= (messages/t :env/persist-message {:phase "implement"})
+               (get-in @call-args [:opts :message])))))))
 
 (deftest persist-workspace-uses-unknown-when-no-phase-test
   (testing "uses 'unknown' when phase-ctx has no :execution/current-phase"
@@ -322,7 +324,8 @@
                     (fn [_exec _env-id opts]
                       (reset! call-args opts))]
         (persist-fn context phase-ctx)
-        (is (= "unknown phase completed" (:message @call-args)))))))
+        (is (= (messages/t :env/persist-message {:phase "unknown"})
+               (:message @call-args)))))))
 
 (deftest persist-workspace-catches-exceptions-test
   (testing "catches exceptions from persist-workspace! without propagating"

@@ -21,10 +21,23 @@
    Tests that execute real phase pipelines (plan, implement, etc.)
    live in runner-integration-test under project tests."
   (:require
+   [clojure.java.io :as io]
    [clojure.test :refer [deftest is testing]]
+   [ai.miniforge.workflow.checkpoint-store :as checkpoint-store]
    [ai.miniforge.workflow.runner :as runner]
    [ai.miniforge.workflow.context :as ctx]
    [ai.miniforge.phase.interface]))
+
+(defn- with-temp-checkpoint-root
+  [f]
+  (let [root (doto (io/file (System/getProperty "java.io.tmpdir")
+                            (str "mf-runner-checkpoint-test-" (random-uuid)))
+               .mkdirs)]
+    (try
+      (f (.getAbsolutePath root))
+      (finally
+        (doseq [file (reverse (file-seq root))]
+          (.delete ^java.io.File file))))))
 
 ;; ============================================================================
 ;; Context creation tests
@@ -114,6 +127,23 @@
       (is (= :completed (:execution/status result)))
       (is (number? (:execution/ended-at result))))))
 
+(deftest run-pipeline-persists-machine-snapshot-test
+  (with-temp-checkpoint-root
+    (fn [checkpoint-root]
+      (let [workflow {:workflow/id :test
+                      :workflow/version "1.0.0"
+                      :workflow/pipeline [{:phase :done}]}
+            result (runner/run-pipeline workflow {:task "Test"}
+                                        {:checkpoint/root checkpoint-root})
+            checkpoint-data (checkpoint-store/load-checkpoint-data
+                             (:execution/id result)
+                             {:checkpoint/root checkpoint-root})]
+        (is (= :completed (:execution/status result)))
+        (is (= (:execution/id result)
+               (get-in checkpoint-data [:machine-snapshot :execution/id])))
+        (is (= [:done]
+               (get-in checkpoint-data [:manifest :workflow/phases-completed])))))))
+
 (deftest run-pipeline-callbacks-test
   (testing "run-pipeline invokes callbacks"
     (let [workflow {:workflow/id :test
@@ -142,6 +172,20 @@
                     :workflow/pipeline [{:phase :done}]}
           result (runner/run-pipeline workflow {:task "Test"} {:max-phases 50})]
       (is (= :completed (:execution/status result))))))
+
+(deftest run-pipeline-resume-machine-snapshot-test
+  (testing "resume-machine-snapshot preserves the original execution id"
+    (let [workflow {:workflow/id :test
+                    :workflow/version "1.0.0"
+                    :workflow/pipeline [{:phase :done}]}
+          resume-ctx (ctx/create-context workflow {:task "Test"} {})
+          result (runner/run-pipeline workflow
+                                      {:task "Ignored"}
+                                      {:resume-machine-snapshot
+                                       (checkpoint-store/build-machine-snapshot resume-ctx)
+                                       :resume-phase-results {}})]
+      (is (= :completed (:execution/status result)))
+      (is (= (:execution/id resume-ctx) (:execution/id result))))))
 
 ;; ============================================================================
 ;; Phase result recording tests

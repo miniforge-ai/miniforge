@@ -101,11 +101,21 @@
             {:keys [workflow-type workflow-version]} (resolve-resume-workflow reconstructed)
             {:keys [workflow]} (load-workflow workflow-type workflow-version {})
 
-            ;; Pipeline trimming — delegated to the component
-            resume-workflow (wr/trim-pipeline workflow completed-phases)
+            machine-snapshot (:machine-snapshot reconstructed)
+            resume-workflow (if machine-snapshot
+                              workflow
+                              (wr/trim-pipeline workflow completed-phases))
             remaining-pipeline (:workflow/pipeline resume-workflow)
+            resume-run-id (or (:execution/id machine-snapshot) (random-uuid))
             _ (when-not quiet
-                (if (seq remaining-pipeline)
+                (if machine-snapshot
+                  (display/print-info
+                    (messages/t :resume/restored-workflow-id
+                                {:workflow-id resume-run-id}))
+                  (display/print-info
+                    (messages/t :resume/new-workflow-id
+                                {:workflow-id resume-run-id})))
+                (if (and (not machine-snapshot) (seq remaining-pipeline))
                   (display/print-info
                     (messages/t :resume/resuming-from-phase
                                 {:phase (name (:phase (first remaining-pipeline)))
@@ -115,14 +125,9 @@
             ;; Runtime wiring (CLI concern — stays here)
             event-stream (es/create-event-stream)
             _supervisor (supervisory/attach! event-stream)
-            new-workflow-id (random-uuid)
             control-state (es/create-control-state)
-            command-poller-cleanup (dashboard/start-command-poller! new-workflow-id control-state)
+            command-poller-cleanup (dashboard/start-command-poller! resume-run-id control-state)
             llm-client (context/create-llm-client workflow nil quiet)]
-
-        (when-not quiet
-          (display/print-info (messages/t :resume/new-workflow-id
-                                          {:workflow-id new-workflow-id})))
 
         (try
           (let [result (run-pipeline resume-workflow
@@ -130,6 +135,8 @@
                                      {:llm-backend llm-client
                                       :event-stream event-stream
                                       :control-state control-state
+                                      :resume-machine-snapshot machine-snapshot
+                                      :resume-phase-results (:phase-results reconstructed)
                                       :skip-lifecycle-events false
                                       :pre-completed-dag-tasks (:completed-dag-tasks reconstructed)
                                       :on-phase-start (fn [_ctx interceptor]
