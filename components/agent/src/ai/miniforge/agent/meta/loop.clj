@@ -18,6 +18,31 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Cycle context
 
+(defn- empty-metrics-store
+  []
+  {:workflow-metrics []
+   :failure-events []
+   :phase-metrics []
+   :gate-metrics []
+   :tool-metrics []
+   :context-metrics []})
+
+(defn- context-map
+  [opts]
+  (merge {:cycle-count (atom 0)
+          :metrics-store (atom (empty-metrics-store))}
+         opts))
+
+(defn- event-stream-context
+  [event-stream config]
+  (context-map
+   {:event-stream event-stream
+    :reliability-engine (reliability/create-engine event-stream (:reliability config))
+    :degradation-manager (reliability/create-degradation-manager event-stream (:degradation config))
+    :diagnosis-config (:diagnosis config)
+    :improvement-pipeline (improvement/create-pipeline)
+    :knowledge-store (:knowledge-store config)}))
+
 (defn create-meta-loop-context
   "Create the context required to run meta-loop cycles.
 
@@ -28,8 +53,12 @@
      :improvement-pipeline  - from improvement/create-pipeline
      :event-stream          - event stream atom
      :knowledge-store       - optional knowledge store for learning capture"
-  [opts]
-  (merge {:cycle-count (atom 0)} opts))
+  ([context-or-event-stream]
+   (if (map? context-or-event-stream)
+     (context-map context-or-event-stream)
+     (event-stream-context context-or-event-stream nil)))
+  ([event-stream config]
+   (event-stream-context event-stream config)))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Pipeline stages
@@ -73,6 +102,53 @@
     (stream/publish! event-stream
                      (events/meta-loop-cycle-completed event-stream summary))))
 
+(defn- execute-cycle
+  [ctx metrics diagnosis-data]
+  (let [{:keys [reliability-engine degradation-manager
+                diagnosis-config improvement-pipeline]} ctx
+        reliability-result (compute-reliability reliability-engine metrics)
+        degradation-mode (or (evaluate-degradation degradation-manager reliability-result)
+                             :nominal)
+        diagnosis-result (run-diagnosis diagnosis-data reliability-result diagnosis-config)
+        proposals (generate-proposals (:diagnoses diagnosis-result)
+                                      degradation-mode
+                                      improvement-pipeline)]
+    {:degradation-mode degradation-mode
+     :diagnosis-result diagnosis-result
+     :proposals proposals
+     :reliability-result reliability-result}))
+
+(defn- cycle-summary
+  [cycle-number cycle-data]
+  (let [{:keys [degradation-mode diagnosis-result proposals reliability-result]} cycle-data]
+    {:cycle-number cycle-number
+     :reliability reliability-result
+     :degradation-mode degradation-mode
+     :signals (count (:signals diagnosis-result))
+     :correlations (count (:correlations diagnosis-result))
+     :diagnoses (count (:diagnoses diagnosis-result))
+     :proposals (count (or proposals []))}))
+
+(defn- cycle-result
+  [started-at duration-ms cycle-data]
+  (let [{:keys [degradation-mode diagnosis-result proposals reliability-result]} cycle-data
+        breaches (get reliability-result :breaches [])
+        recommendation (get reliability-result :recommendation)
+        slis (get reliability-result :slis [])
+        diagnoses (:diagnoses diagnosis-result)
+        signals (:signals diagnosis-result)
+        correlations (:correlations diagnosis-result)]
+    {:cycle/started-at started-at
+     :cycle/duration-ms duration-ms
+     :cycle/sli-count (count slis)
+     :cycle/breach-count (count breaches)
+     :cycle/signal-count (count signals)
+     :cycle/correlation-count (count correlations)
+     :cycle/diagnosis-count (count diagnoses)
+     :cycle/proposal-count (count (or proposals []))
+     :cycle/degradation-mode degradation-mode
+     :cycle/recommendation recommendation}))
+
 ;------------------------------------------------------------------------------ Layer 1
 ;; Meta-loop cycle
 
@@ -94,28 +170,50 @@
       :signals int
       :diagnoses int
       :proposals int}"
-  [ctx metrics diagnosis-data]
-  (let [{:keys [reliability-engine degradation-manager
-                diagnosis-config improvement-pipeline
-                event-stream cycle-count]} ctx
+  ([ctx]
+   (let [started-at (java.util.Date.)
+         metrics (get ctx :metrics {})
+         diagnosis-data {:failure-events (get metrics :failure-events [])
+                         :training-examples (get ctx :training-examples [])
+                         :phase-metrics (get metrics :phase-metrics [])}
+         completed-cycle (execute-cycle ctx metrics diagnosis-data)
+         duration-ms (- (System/currentTimeMillis) (.getTime started-at))
+         result (cycle-result started-at duration-ms completed-cycle)]
+     (emit-cycle-event (:event-stream ctx) result)
+     result))
+  ([ctx metrics diagnosis-data]
+   (let [cycle-number (swap! (:cycle-count ctx) inc)
+         completed-cycle (execute-cycle ctx metrics diagnosis-data)
+         summary (cycle-summary cycle-number completed-cycle)]
+     (emit-cycle-event (:event-stream ctx) summary)
+     summary)))
 
-        cycle-num          (swap! cycle-count inc)
-        reliability-result (compute-reliability reliability-engine metrics)
-        deg-mode           (evaluate-degradation degradation-manager reliability-result)
-        diag-result        (run-diagnosis diagnosis-data reliability-result diagnosis-config)
-        proposals          (generate-proposals (:diagnoses diag-result)
-                                              (or deg-mode :nominal)
-                                              improvement-pipeline)
-        summary            {:cycle-number    cycle-num
-                            :reliability     reliability-result
-                            :degradation-mode (or deg-mode :nominal)
-                            :signals         (count (:signals diag-result))
-                            :correlations    (count (:correlations diag-result))
-                            :diagnoses       (count (:diagnoses diag-result))
-                            :proposals       (count (or proposals []))}]
+(defn record-workflow-outcome!
+  "Record a workflow completion for use in the next meta-loop cycle."
+  [ctx workflow-id status & [failure-class]]
+  (let [now (java.util.Date.)]
+    (swap! (:metrics-store ctx) update :workflow-metrics conj
+           {:workflow/id workflow-id
+            :status status
+            :timestamp now})
+    (when failure-class
+      (swap! (:metrics-store ctx) update :failure-events conj
+             {:failure/class failure-class
+              :workflow/id workflow-id
+              :timestamp now})))
+  nil)
 
-    (emit-cycle-event event-stream summary)
-    summary))
+(defn run-cycle-from-context!
+  "Run one meta-loop cycle using the accumulated metrics in `ctx`."
+  [ctx & [training-examples]]
+  (run-meta-loop-cycle!
+   {:event-stream (:event-stream ctx)
+    :reliability-engine (:reliability-engine ctx)
+    :degradation-manager (:degradation-manager ctx)
+    :diagnosis-config (:diagnosis-config ctx)
+    :improvement-pipeline (:improvement-pipeline ctx)
+    :metrics @(:metrics-store ctx)
+    :training-examples training-examples}))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

@@ -20,6 +20,7 @@
   "Meta-agent orchestration API."
   (:require
    [ai.miniforge.agent.meta-coordinator :as meta-coord]
+   [ai.miniforge.agent.meta.loop :as meta-loop]
    [ai.miniforge.agent.meta.progress-monitor :as progress-monitor]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -46,7 +47,7 @@
 
    Returns: {:cycle/sli-count :cycle/breach-count :cycle/signal-count
              :cycle/diagnosis-count :cycle/proposal-count :cycle/degradation-mode ...}"
-  meta-coord/run-meta-loop-cycle!)
+  meta-loop/run-meta-loop-cycle!)
 
 (def create-meta-loop-context
   "Create a MetaLoopContext bundling reliability engine, degradation manager,
@@ -55,7 +56,7 @@
    Arguments:
      event-stream - event stream atom
      config       - optional {:reliability {} :degradation {}}"
-  meta-coord/create-meta-loop-context)
+  meta-loop/create-meta-loop-context)
 
 (def record-workflow-outcome!
   "Record a workflow completion for use in the next meta-loop cycle.
@@ -65,7 +66,7 @@
      workflow-id   - uuid
      status        - :completed | :failed | :escalated
      failure-class - optional :failure.class/* keyword"
-  meta-coord/record-workflow-outcome!)
+  meta-loop/record-workflow-outcome!)
 
 (def run-cycle-from-context!
   "Run one meta-loop cycle using the accumulated metrics in ctx.
@@ -75,4 +76,4 @@
      training-examples - optional vector of training records
 
    Returns: cycle result map."
-  meta-coord/run-cycle-from-context!)
+  meta-loop/run-cycle-from-context!)
