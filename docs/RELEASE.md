@@ -110,10 +110,12 @@ git push origin "v${VERSION}"
 
 This will automatically:
 
-1. Build binaries for all platforms (macOS arm64/x86, Linux arm64/x86)
+1. Build binaries for all platforms (macOS arm64/x86, Linux arm64/x86,
+   Windows x86_64 — preview)
 2. Generate SHA256 checksums
 3. Create a GitHub release with assets
 4. Update the Homebrew formula in `homebrew-tap`
+5. Publish the scoop manifest (Windows — preview, gated on tester sign-off)
 
 ### Manual Release
 
@@ -148,7 +150,7 @@ After the release workflow completes:
 Visit `https://github.com/miniforge-ai/miniforge/releases` and verify:
 
 - Release was created with correct version
-- All 8 assets are present:
+- All 10 assets are present (8 stable + 2 Windows preview):
   - `miniforge-macos-arm64`
   - `miniforge-macos-arm64.sha256`
   - `miniforge-macos-x86_64`
@@ -157,6 +159,8 @@ Visit `https://github.com/miniforge-ai/miniforge/releases` and verify:
   - `miniforge-linux-arm64.sha256`
   - `miniforge-linux-x86_64`
   - `miniforge-linux-x86_64.sha256`
+  - `miniforge-windows-x86_64.zip` (preview)
+  - `miniforge-windows-x86_64.zip.sha256` (preview)
 
 ### 2. Check Homebrew Formula
 
@@ -192,6 +196,19 @@ chmod +x miniforge
 # Verify checksum
 curl -L https://github.com/miniforge-ai/miniforge/releases/download/v2026.01.20.1/miniforge-macos-arm64.sha256 -o miniforge.sha256
 shasum -a 256 -c miniforge.sha256
+```
+
+```powershell
+# Windows x86_64 (preview)
+Invoke-WebRequest -Uri https://github.com/miniforge-ai/miniforge/releases/download/v2026.01.20.1/miniforge-windows-x86_64.zip -OutFile miniforge.zip
+Expand-Archive miniforge.zip -DestinationPath miniforge
+.\miniforge\mf.cmd version
+
+# Verify checksum
+Invoke-WebRequest -Uri https://github.com/miniforge-ai/miniforge/releases/download/v2026.01.20.1/miniforge-windows-x86_64.zip.sha256 -OutFile miniforge.zip.sha256
+Get-FileHash miniforge.zip -Algorithm SHA256 | Format-List
+# Compare against the value in miniforge.zip.sha256 by eye, or:
+#   (Get-FileHash miniforge.zip -Algorithm SHA256).Hash -eq (Get-Content miniforge.zip.sha256).Split()[0]
 ```
 
 ## Post-Release
