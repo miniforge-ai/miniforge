@@ -122,8 +122,11 @@ enforce hard stops. All decisions produce evidence bundles for traceability.
 
 ### Prerequisites
 
-- macOS, Linux, or Windows
-- [Babashka](https://github.com/babashka/babashka#installation)
+- macOS, Linux, or Windows — see [Platform Support](docs/platform-support.md)
+  for the install path on each. Native Windows is in beta; WSL2 and Git Bash
+  are first-class today.
+- [Babashka](https://github.com/babashka/babashka#installation) (Mac/Linux:
+  Homebrew or `bash <(curl …) --static`; Windows: `scoop install babashka`)
 - An LLM backend: [Claude Code](https://claude.ai/claude-code) CLI,
   [Codex](https://openai.com/codex) CLI, or an API key (Anthropic/OpenAI)
 
@@ -181,6 +184,11 @@ Specs can also be written as Markdown with YAML frontmatter. See
 # Watch miniforge improve itself (dogfooding demo)
 bash examples/demo/run-demo.sh
 ```
+
+The demo is a Bash script. On native Windows, run it from Git Bash or WSL2 —
+or invoke the underlying workflow directly with `mf run
+examples/demo/add-utility-function.edn`. See [Platform
+Support](docs/platform-support.md) for details.
 
 See [Demo Guide](docs/demo.md) for a guided walkthrough.
 

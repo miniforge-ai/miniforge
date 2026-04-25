@@ -4,17 +4,40 @@ Get from zero to a miniforge-generated pull request in under 5 minutes.
 
 ## Prerequisites
 
-- macOS or Linux
+- macOS, Linux, or Windows — see [Platform Support](platform-support.md)
 - [Babashka](https://github.com/babashka/babashka#installation) (bb)
 - An LLM backend — one of:
   - [Claude Code](https://claude.ai/claude-code) CLI (recommended)
   - [Codex](https://openai.com/codex) CLI
   - An API key (Anthropic or OpenAI)
 
+Install Babashka:
+
 ```bash
-# Install Babashka if needed
+# macOS
 brew install babashka/brew/babashka
+
+# Linux (static binary; avoids glibc surprises)
+curl -sLO https://raw.githubusercontent.com/babashka/babashka/master/install
+chmod +x install
+./install --static
 ```
+
+```powershell
+# Windows (PowerShell, native — preview)
+# If you hit an execution-policy error first:
+#   Set-ExecutionPolicy RemoteSigned -Scope CurrentUser
+Invoke-Expression (New-Object System.Net.WebClient).DownloadString('https://get.scoop.sh')
+scoop bucket add scoop-clojure https://github.com/littleli/scoop-clojure
+scoop bucket add extras
+scoop install babashka
+```
+
+> **Native Windows is in beta.** The bb-based workflow runs, but the
+> `bb bootstrap` task and the bash demo script still assume a Unix shell.
+> If you hit a wall, fall back to **WSL2** or **Git Bash** and follow the
+> Linux instructions above. See [Platform Support](platform-support.md) for
+> the current matrix and known gaps.
 
 ## 1. Clone and Bootstrap
 

@@ -20,13 +20,31 @@ Thank you for contributing to Miniforge! This guide will help you get started.
 2. **Install Dependencies**
 
    ```bash
-   # Install Babashka (if not already installed)
-   brew install bbedit/brew/babashka  # macOS
-   # or follow https://github.com/babashka/babashka#installation
+   # macOS
+   brew install babashka/brew/babashka
 
-   # Install markdownlint
+   # Linux (static binary)
+   curl -sLO https://raw.githubusercontent.com/babashka/babashka/master/install
+   chmod +x install && ./install --static
+
+   # markdownlint (all platforms)
    npm install -g markdownlint-cli
    ```
+
+   ```powershell
+   # Windows (PowerShell — native, in beta)
+   # If you hit an execution-policy error:
+   #   Set-ExecutionPolicy RemoteSigned -Scope CurrentUser
+   Invoke-Expression (New-Object System.Net.WebClient).DownloadString('https://get.scoop.sh')
+   scoop bucket add scoop-clojure https://github.com/littleli/scoop-clojure
+   scoop bucket add extras
+   scoop install babashka clojure
+   npm install -g markdownlint-cli
+   ```
+
+   > Native Windows dev is in beta. `bb bootstrap` and the bash demo
+   > script still assume a Unix shell — if you hit them, use **WSL2** or
+   > **Git Bash**. See [Platform Support](docs/platform-support.md).
 
 3. **Run Tests**
 

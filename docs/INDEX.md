@@ -9,6 +9,7 @@
 ## Getting Started
 
 - **[Quickstart](quickstart.md)** -- Clone, bootstrap, run your first workflow in 5 minutes
+- **[Platform Support](platform-support.md)** -- macOS, Linux, Windows install paths and status matrix
 - **[Writing Specs](user-guide/writing-specs.md)** -- Task format, EDN syntax, acceptance criteria
 - **[Configuration](user-guide/configuration.md)** -- Environment, LLM backends, cost limits
 - **[Demo Walkthrough](demo.md)** -- Guided example from spec to pull request
