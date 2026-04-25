@@ -8,7 +8,7 @@
  :tasks
  {:requires ([babashka.fs :as fs]
              [babashka.process :as p]
-             [ai.miniforge.bb-test-runner.interface :as bb-test-runner]
+             [ai.miniforge.bb-dev-tools.interface :as bb-dev-tools]
              [clojure.string :as str])
 
   :init (do
@@ -93,9 +93,9 @@
            (run 'test:integration))}
 
   ccov
-  {:doc  "Run Cloverage against the repo test classpath"
-   :task (let [exit (bb-test-runner/run-coverage {:repo-root "."
-                                                  :alias-keys [:dev :test]})]
+  {:doc  "Run the repo coverage toolset from bb-tools.edn"
+   :task (let [exit (bb-dev-tools/run-toolset {:repo-root "."
+                                               :toolset-id :toolset/coverage})]
            (when-not (zero? exit)
              (System/exit exit)))}
 
@@ -262,8 +262,9 @@
    :task (brew-install "borkdude/brew/clj-kondo")}
 
   install:coverage
-  {:doc  "Prefetch the Cloverage dependency used by `bb ccov`"
-   :task (let [exit (bb-test-runner/install-coverage-tool {:repo-root "."})]
+  {:doc  "Install or prefetch the repo coverage toolset from bb-tools.edn"
+   :task (let [exit (bb-dev-tools/install-toolset {:repo-root "."
+                                                   :toolset-id :toolset/coverage})]
            (when-not (zero? exit)
              (System/exit exit)))}
 
