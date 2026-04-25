@@ -23,7 +23,8 @@
 
    Layer 0: argument normalization (pure).
    Layer 1: process invocations on top of Layer 0."
-  (:require [babashka.process :as p]))
+  (:require [babashka.fs :as fs]
+            [babashka.process :as p]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Argument normalization (pure)
@@ -65,9 +66,10 @@
     (apply p/sh opts cmd)))
 
 (defn installed?
-  "True if `cmd` resolves on PATH."
+  "True if `cmd` resolves on PATH. Uses `babashka.fs/which`, which is
+   portable: invokes `which` on Unix shells and `where` on Windows."
   [cmd]
-  (zero? (:exit (p/sh "which" cmd))))
+  (some? (fs/which cmd)))
 
 (defn destroy!
   "Destroy a background process and wait briefly for it to exit."

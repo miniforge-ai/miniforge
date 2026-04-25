@@ -71,7 +71,9 @@
             "bb-utils"       {:alias "bb-utils"
                               :necessary ["bb-config"
                                           "bb-data-plane-http"
+                                          "bb-dev-tools"
                                           "bb-etl-runner"
                                           "bb-generate-icon"
+                                          "bb-platform"
                                           "bb-r2"
                                           "bb-test-runner"]}}}
