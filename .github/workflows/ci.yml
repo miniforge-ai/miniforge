@@ -154,21 +154,25 @@ jobs:
             clojure-${{ runner.os }}-
 
       # scripts/test-changed-bricks.bb shells out to the standalone `poly`
-      # CLI. setup-clojure does not install it, and windows-latest has no
-      # scoop preinstalled — so we bring scoop up first, then install
-      # polylith from the same scoop-clojure bucket end users follow.
-      # This doubles as a smoke test for the scoop install path.
-      - name: Install scoop + polylith (Windows)
+      # CLI. Polylith does not have a scoop manifest in any of the
+      # standard buckets (scoop-clojure, Main, Extras), so we drop the
+      # official uberjar with a poly.cmd shim — symmetric with the
+      # Linux install in PR #661. Pinned to deps.edn :poly alias.
+      - name: Install polylith CLI (Windows)
         shell: pwsh
         run: |
-          if (-not (Get-Command scoop -ErrorAction SilentlyContinue)) {
-            Set-ExecutionPolicy RemoteSigned -Scope Process -Force
-            Invoke-Expression (New-Object System.Net.WebClient).DownloadString('https://get.scoop.sh')
-          }
-          # Persist scoop's shim dir on PATH for subsequent steps.
-          "$env:USERPROFILE\scoop\shims" >> $env:GITHUB_PATH
-          scoop bucket add scoop-clojure https://github.com/littleli/scoop-clojure
-          scoop install polylith
+          $polyVersion = "0.2.21"
+          $polyDir = "$env:USERPROFILE\.poly"
+          New-Item -ItemType Directory -Force -Path $polyDir | Out-Null
+          Invoke-WebRequest `
+            -Uri "https://github.com/polyfy/polylith/releases/download/v${polyVersion}/poly-${polyVersion}.jar" `
+            -OutFile "$polyDir\poly.jar"
+          @"
+          @echo off
+          java -jar "%USERPROFILE%\.poly\poly.jar" %*
+          "@ | Out-File -Encoding ascii "$polyDir\poly.cmd"
+          "$polyDir" >> $env:GITHUB_PATH
+          Write-Host "poly installed at $polyDir\poly.cmd"
 
       - name: Platform check
         run: bb check:platform
