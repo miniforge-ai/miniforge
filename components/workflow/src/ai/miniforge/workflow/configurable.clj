@@ -25,13 +25,29 @@
    the workflow automatically delegates to the DAG executor
    for parallel execution."
   (:require
-   [ai.miniforge.workflow.state :as state]
    [ai.miniforge.workflow.agent-factory :as factory]
+   [ai.miniforge.workflow.context :as ctx]
    [ai.miniforge.workflow.dag-orchestrator :as dag-orch]
+   [ai.miniforge.workflow.messages :as messages]
+   [ai.miniforge.schema.interface :as schema]
    [ai.miniforge.loop.interface :as loop]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Phase lookup
+
+(def default-max-phases
+  "Safety limit for configurable workflow execution iterations."
+  50)
+
+(def default-phase-metrics
+  "Default metrics for configurable phase results."
+  {:tokens 0
+   :cost-usd 0.0
+   :duration-ms 0})
+
+(def default-inner-loop-iterations
+  "Default maximum iterations for configurable phase inner loops."
+  5)
 
 (defn find-phase
   "Find phase configuration by ID in workflow.
@@ -45,37 +61,170 @@
   (first (filter #(= phase-id (:phase/id %))
                  (:workflow/phases workflow))))
 
-;------------------------------------------------------------------------------ Layer 1
-;; Phase transition logic
+(defn- first-transition-target
+  [phase]
+  (get-in phase [:phase/next 0 :target]))
 
-(defn select-next-phase
-  "Select next phase based on current phase result and workflow config.
+(defn- phase->pipeline-entry
+  [phase]
+  (let [target-phase (first-transition-target phase)]
+    (cond-> {:phase (:phase/id phase)}
+      target-phase (assoc :on-success target-phase))))
 
-   Arguments:
-   - workflow: Workflow configuration
-   - exec-state: Current execution state
-   - phase-result: Result of current phase execution
+(defn- ensure-execution-pipeline
+  [workflow]
+  (if (:workflow/pipeline workflow)
+    workflow
+    (assoc workflow
+           :workflow/pipeline
+           (mapv phase->pipeline-entry
+                 (:workflow/phases workflow)))))
 
-   Returns:
-   - Next phase ID
-   - :done if workflow should complete
-   - nil if no valid transition"
-  [workflow exec-state _phase-result]
-  (let [current-phase-id (:execution/current-phase exec-state)
-        current-phase (find-phase workflow current-phase-id)
-        next-transitions (:phase/next current-phase [])]
+(defn- merged-phase-metrics
+  [metrics]
+  (merge default-phase-metrics metrics))
 
-    ;; Check if no transitions defined (exit phase)
-    (if (empty? next-transitions)
-      :done
+(defn- configurable-phase-result
+  [success? artifacts errors metrics]
+  {:success? success?
+   :artifacts artifacts
+   :errors errors
+   :metrics (merged-phase-metrics metrics)})
 
-      ;; For now, use first transition
-      ;; Future: evaluate conditions and probabilities
-      (let [transition (first next-transitions)
-            target (:target transition)]
+(defn- successful-phase-result
+  [artifacts metrics]
+  (configurable-phase-result true artifacts [] metrics))
 
-        ;; Return target or :done if no target defined
-        (or target :done)))))
+(defn- phase-error
+  [error-type message]
+  {:type error-type
+   :message message})
+
+(defn- failed-phase-result
+  ([error-type message]
+   (failed-phase-result error-type message {}))
+  ([error-type message {:keys [metrics]}]
+   (configurable-phase-result false
+                              []
+                              [(phase-error error-type message)]
+                              metrics)))
+
+(defn- missing-phase-handler-message
+  [handler-key]
+  (messages/t :configurable/missing-phase-handler
+              {:handler-key handler-key}))
+
+(defn- phase-execution-failure-message
+  [error]
+  (messages/t :configurable/phase-execution-failed
+              {:error error}))
+
+(defn- missing-phase-message
+  [phase-id]
+  (messages/t :configurable/phase-not-found
+              {:phase phase-id}))
+
+(defn- dag-execution-failed-message
+  []
+  (messages/t :configurable/dag-execution-failed))
+
+(defn- inner-loop-succeeded?
+  [result]
+  (true? (:success result)))
+
+(defn- terminal-status?
+  [exec-state]
+  (contains? #{:completed :failed :cancelled}
+             (:execution/status exec-state)))
+
+(defn- phase-order
+  [workflow]
+  (mapv :phase/id (:workflow/phases workflow)))
+
+(defn- phase-index
+  [workflow phase-id]
+  (some (fn [[idx current-phase]]
+          (when (= current-phase phase-id)
+            idx))
+        (map-indexed vector (phase-order workflow))))
+
+(defn- last-recorded-phase
+  [exec-state]
+  (let [recorded-phases (keys (:execution/phase-results exec-state))
+        ordered-phases (phase-order (:execution/workflow exec-state))]
+    (last (filter (set recorded-phases) ordered-phases))))
+
+(defn- project-terminal-phase
+  [exec-state]
+  (let [phase-id (or (:execution/current-phase exec-state)
+                     (last-recorded-phase exec-state))
+        projected-index (phase-index (:execution/workflow exec-state) phase-id)]
+    (cond-> exec-state
+      phase-id (assoc :execution/current-phase phase-id)
+      (some? projected-index) (assoc :execution/phase-index projected-index))))
+
+(defn- phase-transition-entry
+  [from-phase to-phase reason]
+  {:from-phase from-phase
+   :to-phase to-phase
+   :reason reason
+   :timestamp (System/currentTimeMillis)})
+
+(defn- record-phase-transition
+  [exec-state from-phase to-phase reason]
+  (update exec-state :execution/history conj
+          (phase-transition-entry from-phase to-phase reason)))
+
+(defn- transition-phase
+  [exec-state event reason]
+  (let [prior-machine-state (:execution/fsm-state exec-state)
+        from-phase (:execution/current-phase exec-state)
+        transitioned (ctx/transition-execution exec-state event)
+        next-phase (:execution/current-phase transitioned)
+        state-changed? (not= prior-machine-state
+                             (:execution/fsm-state transitioned))]
+    (cond-> transitioned
+      (and state-changed?
+           from-phase
+           next-phase
+           (not= from-phase next-phase))
+      (record-phase-transition from-phase next-phase reason))))
+
+(defn- append-execution-error
+  [exec-state error-type message extra-data]
+  (update exec-state :execution/errors conj
+          (merge {:type error-type
+                  :message message}
+                 extra-data)))
+
+(defn- fail-execution
+  ([exec-state error-type message]
+   (fail-execution exec-state error-type message {}))
+  ([exec-state error-type message extra-data]
+   (-> exec-state
+       (append-execution-error error-type message extra-data)
+       (ctx/transition-to-failed)
+       (project-terminal-phase))))
+
+(defn- initialize-execution
+  [workflow input context]
+  (assoc (ctx/create-context workflow input context)
+         :execution/history []))
+
+(defn- record-phase-result
+  [exec-state phase-id phase-result]
+  (let [phase-metrics (:metrics phase-result)]
+    (-> exec-state
+        (assoc-in [:execution/phase-results phase-id] phase-result)
+        (update :execution/artifacts into (get phase-result :artifacts []))
+        (update :execution/errors into (get phase-result :errors []))
+        (update :execution/metrics ctx/merge-metrics phase-metrics))))
+
+(defn- configurable-phase-event
+  [phase-result]
+  (if (schema/succeeded? phase-result)
+    :phase/succeed
+    :phase/fail))
 
 ;------------------------------------------------------------------------------ Layer 2
 ;; Phase execution (real implementation)
@@ -87,13 +236,8 @@
         handler (get (:phase-handlers context) handler-key)]
     (if handler
       (handler phase exec-state context)
-      {:success? false
-       :artifacts []
-       :errors [{:type :missing-phase-handler
-                 :phase (:phase/id phase)
-                 :handler handler-key
-                 :message (str "No phase handler registered for " handler-key)}]
-       :metrics {}})))
+      (failed-phase-result :missing-phase-handler
+                           (missing-phase-handler-message handler-key)))))
 
 (defn execute-configurable-phase
   "Execute a single phase of a configurable workflow.
@@ -116,7 +260,9 @@
   [phase exec-state context]
   (let [phase-agent (:phase/agent phase)
         inner-loop (:phase/inner-loop phase {})
-        max-iterations (get inner-loop :max-iterations 5)]
+        max-iterations (get inner-loop
+                            :max-iterations
+                            default-inner-loop-iterations)]
 
     (cond
       (:phase/handler phase)
@@ -124,10 +270,7 @@
 
       ;; Skip :none agent
       (= :none phase-agent)
-      {:success? true
-       :artifacts []
-       :errors []
-       :metrics {:tokens 0 :cost-usd 0.0 :duration-ms 0}}
+      (successful-phase-result [] default-phase-metrics)
 
       ;; Real execution
       :else
@@ -145,26 +288,23 @@
                      (loop/run-simple task generate-fn loop-context)
                      (catch Exception e
                        {:success false
-                        :error (str "Phase execution failed: " (.getMessage e))
-                        :metrics {:tokens 0 :cost-usd 0.0 :duration-ms 0}}))]
+                        :error (phase-execution-failure-message
+                                (.getMessage e))
+                        :metrics default-phase-metrics}))]
 
-        (if (:success result)
+        (if (inner-loop-succeeded? result)
           ;; Success - build standard artifact
           (let [raw-artifact (:artifact result)
                 metrics (:metrics result {})
                 standard-artifact (factory/build-artifact-for-phase raw-artifact phase metrics)]
-            {:success? true
-             :artifacts [standard-artifact]
-             :errors []
-             :metrics metrics})
+            (successful-phase-result [standard-artifact] metrics))
 
           ;; Failure - return error
-          {:success? false
-           :artifacts []
-           :errors [{:type :phase-failed
-                     :phase (:phase/id phase)
-                     :message (get result :error "Phase execution failed")}]
-           :metrics (:metrics result {})})))))
+          (failed-phase-result :phase-failed
+                               (get result
+                                    :error
+                                    (messages/t :configurable/default-phase-error))
+                               {:metrics (:metrics result)}))))))
 
 ;------------------------------------------------------------------------------ Layer 3
 ;; Workflow execution
@@ -209,10 +349,14 @@
                                                           (:artifacts dag-result [])))
                 (update :execution/metrics
                         (fn [m]
-                          (merge-with + m (:metrics dag-result {:tokens 0 :cost-usd 0.0}))))
+                          (merge-with + m (merged-phase-metrics (:metrics dag-result)))))
                 (assoc-in [:execution/phase-results :dag-execution] dag-result)
                 (assoc :execution/dag-result dag-result))
       (seq pr-infos) (assoc :execution/dag-pr-infos pr-infos))))
+
+(defn- continue-execution
+  [exec-state]
+  [:continue exec-state])
 
 (defn execute-phase-step
   "Execute a single phase step in the workflow.
@@ -220,7 +364,7 @@
 
    After plan phase, checks if the plan has parallelizable tasks and
    automatically delegates to DAG executor if so."
-  [workflow exec-state phase context callbacks]
+  [_workflow exec-state phase context callbacks]
   (let [{:keys [on-phase-start on-phase-complete]} callbacks
         current-phase-id (:execution/current-phase exec-state)]
 
@@ -230,7 +374,7 @@
 
     ;; Execute phase and record result
     (let [phase-result (execute-configurable-phase phase exec-state context)
-          exec-state' (state/record-phase-result exec-state current-phase-id phase-result)]
+          exec-state' (record-phase-result exec-state current-phase-id phase-result)]
 
       ;; Invoke phase complete callback
       (when on-phase-complete
@@ -240,7 +384,7 @@
       (let [is-plan-phase? (= :plan current-phase-id)
             plan (when is-plan-phase? (extract-plan-from-result phase-result))
             should-parallelize? (and plan
-                                     (:success? phase-result)
+                                     (schema/succeeded? phase-result)
                                      (dag-orch/parallelizable-plan? plan)
                                      ;; Allow disabling via context
                                      (not (:disable-dag-parallelization context)))]
@@ -248,34 +392,29 @@
         (if should-parallelize?
           ;; Execute plan via DAG — each task produces its own PR
           (let [exec-state-with-dag (execute-dag-for-plan exec-state' plan context callbacks)
-                dag-success? (get-in exec-state-with-dag [:execution/dag-result :success?])]
-            (if dag-success?
-              ;; DAG tasks produced PRs — transition to :pr-monitor for CI/review/merge
-              [:continue (state/transition-to-phase exec-state-with-dag
-                                                    :pr-monitor
-                                                    :dag-complete)]
-              ;; DAG failed
-              (state/mark-failed exec-state-with-dag
-                                 {:type :dag-execution-failed
-                                  :message "Parallel task execution failed"
-                                  :dag-result (:execution/dag-result exec-state-with-dag)})))
+                dag-result (:execution/dag-result exec-state-with-dag)]
+            (if (schema/succeeded? dag-result)
+              (let [next-state (transition-phase exec-state-with-dag
+                                                 :phase/succeed
+                                                 :dag-complete)]
+                (if (terminal-status? next-state)
+                  (project-terminal-phase next-state)
+                  (continue-execution next-state)))
+              (fail-execution exec-state-with-dag
+                              :dag-execution-failed
+                              (dag-execution-failed-message)
+                              {:dag-result dag-result})))
 
-          ;; Normal flow - determine next phase
-          (let [next-phase-id (select-next-phase workflow exec-state' phase-result)]
+          ;; Normal flow - transition according to the compiled execution machine
+          (let [next-state (transition-phase exec-state'
+                                             (configurable-phase-event phase-result)
+                                             :advance)]
             (cond
-              ;; :done means workflow should complete
-              (= :done next-phase-id)
-              (state/mark-completed exec-state')
+              (terminal-status? next-state)
+              (project-terminal-phase next-state)
 
-              ;; Valid next phase - continue
-              next-phase-id
-              [:continue (state/transition-to-phase exec-state' next-phase-id :advance)]
-
-              ;; No valid transition
               :else
-              (state/mark-failed exec-state'
-                                 {:type :no-valid-transition
-                                  :message (str "No valid transition from phase: " current-phase-id)}))))))))
+              (continue-execution next-state))))))))
 
 (defn run-configurable-workflow
   "Execute a complete configurable workflow.
@@ -293,46 +432,54 @@
 
    The workflow executes as follows:
    1. Create initial execution state
-   2. Loop through phases:
+  2. Loop through phases:
       a. Get current phase config
       b. Execute phase (invoke agent + inner loop)
       c. Record result
-      d. Determine next phase
-      e. Transition to next phase
+      d. Apply the outcome through the authoritative execution machine
    3. Mark as completed or failed"
   [workflow input context]
-  (let [max-phases (get context :max-phases 50)
+  (let [execution-workflow (ensure-execution-pipeline workflow)
+        max-phases (get context :max-phases default-max-phases)
         callbacks {:on-phase-start (:on-phase-start context)
                    :on-phase-complete (:on-phase-complete context)}]
 
-    (loop [exec-state (state/create-execution-state workflow input)
+    (loop [exec-state (initialize-execution execution-workflow input context)
            phase-count 0]
 
       ;; Early exit: max phases exceeded
       (cond
         (>= phase-count max-phases)
-        (state/mark-failed exec-state
-                           {:type :max-phases-exceeded
-                            :message (str "Exceeded maximum phase count: " max-phases)})
+        (fail-execution exec-state
+                        :max-phases-exceeded
+                        (messages/t :status/max-phases
+                                    {:max-phases max-phases}))
+
+        (terminal-status? exec-state)
+        (project-terminal-phase exec-state)
 
         ;; Execute phase step
         :else
         (let [current-phase-id (:execution/current-phase exec-state)
-              phase (find-phase workflow current-phase-id)]
+              phase (find-phase execution-workflow current-phase-id)]
 
           (if-not phase
             ;; Phase not found - fail workflow
-            (state/mark-failed exec-state
-                               {:type :phase-not-found
-                                :message (str "Phase not found: " current-phase-id)})
+            (fail-execution exec-state
+                            :phase-not-found
+                            (missing-phase-message current-phase-id))
 
             ;; Execute phase step
-            (let [result (execute-phase-step workflow exec-state phase context callbacks)]
+            (let [result (execute-phase-step execution-workflow
+                                             exec-state
+                                             phase
+                                             context
+                                             callbacks)]
               (if (vector? result)
                 ;; [:continue new-state] - continue to next phase
                 (recur (second result) (inc phase-count))
                 ;; Terminal state (completed or failed) - return it
-                result))))))))
+                (project-terminal-phase result)))))))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

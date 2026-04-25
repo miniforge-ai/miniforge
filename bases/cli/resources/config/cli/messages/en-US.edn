@@ -337,7 +337,7 @@
   :web-ui/no-url "#"
   :web-ui/no-chat-question ""
   :web-ui/no-chat-answer ""
-  :web-ui/no-workflow-name "Unknown workflow"}}
+  :web-ui/no-workflow-name "Unknown workflow"
   :etl/output-path "  Output: {path}"
   :etl/failed "ETL failed: {error}"
   :etl/clone-failed "Clone failed: {error}"

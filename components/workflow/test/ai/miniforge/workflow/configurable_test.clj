@@ -43,40 +43,35 @@
       (is (nil? (configurable/find-phase workflow :missing))
           "Should return nil for non-existent phase"))))
 
-(deftest select-next-phase-test
-  (testing "Select next phase with transition"
-    (let [workflow {:workflow/phases
+(deftest configurable-workflow-uses-machine-transitions-test
+  (testing "Configurable workflows advance through the compiled execution machine"
+    (let [workflow {:workflow/id :machine-backed
+                    :workflow/version "1.0.0"
+                    :workflow/phases
                     [{:phase/id :plan
                       :phase/name "Plan"
-                      :phase/next [{:target :implement}]}]
-                    :workflow/exit-phases [:done]}
-          exec-state {:execution/current-phase :plan}
-          phase-result {:success? true}
-          next-phase (configurable/select-next-phase workflow exec-state phase-result)]
-      (is (= :implement next-phase)
-          "Should transition to target phase")))
-
-  (testing "Select :done when at exit phase"
-    (let [workflow {:workflow/phases
-                    [{:phase/id :done
-                      :phase/name "Done"}]
-                    :workflow/exit-phases [:done]}
-          exec-state {:execution/current-phase :done}
-          phase-result {:success? true}
-          next-phase (configurable/select-next-phase workflow exec-state phase-result)]
-      (is (= :done next-phase)
-          "Should select :done when at exit phase")))
-
-  (testing "Select :done when no transition defined"
-    (let [workflow {:workflow/phases
-                    [{:phase/id :orphan
-                      :phase/name "Orphan"}]
-                    :workflow/exit-phases [:done]}
-          exec-state {:execution/current-phase :orphan}
-          phase-result {:success? true}
-          next-phase (configurable/select-next-phase workflow exec-state phase-result)]
-      (is (= :done next-phase)
-          "Should select :done when no transition defined"))))
+                      :phase/agent :none
+                      :phase/next [{:target :implement}]}
+                     {:phase/id :implement
+                      :phase/name "Implement"
+                      :phase/agent :none
+                      :phase/next [{:target :done}]}
+                     {:phase/id :done
+                      :phase/name "Done"
+                      :phase/agent :none
+                      :phase/next []}]}
+          exec-state (configurable/run-configurable-workflow workflow {} {})]
+      (is (state/completed? exec-state))
+      (is (= :done (:execution/current-phase exec-state)))
+      (is (= 2 (:execution/phase-index exec-state)))
+      (is (= #{:plan :implement :done}
+             (set (keys (:execution/phase-results exec-state)))))
+      (let [phase-transitions (filter :from-phase (:execution/history exec-state))]
+        (is (= 2 (count phase-transitions)))
+        (is (= :plan (:from-phase (first phase-transitions))))
+        (is (= :implement (:to-phase (first phase-transitions))))
+        (is (= :implement (:from-phase (second phase-transitions))))
+        (is (= :done (:to-phase (second phase-transitions))))))))
 
 (deftest execute-configurable-phase-test
   (testing "Execute normal phase returns success"
@@ -257,14 +252,14 @@
       ;; Verify workflow completed all phases
       (is (state/completed? exec-state)
           "Workflow should complete")
-      (is (= 3 (count (:execution/phase-results exec-state)))
-          "Should have results for 3 executed phases (plan, implement, verify)")
+      (is (= 4 (count (:execution/phase-results exec-state)))
+          "Should have results for all executed phases, including :done")
 
       ;; Verify transition history
       (let [history (:execution/history exec-state)
             phase-transitions (filter :from-phase history)]
-        (is (= 2 (count phase-transitions))
-            "Should have 2 phase transitions (plan->impl, impl->verify)")
+        (is (= 3 (count phase-transitions))
+            "Should have 3 phase transitions (plan->impl, impl->verify, verify->done)")
         (is (= :plan (:from-phase (first phase-transitions)))
             "First transition from plan")
         (is (= :implement (:to-phase (first phase-transitions)))
