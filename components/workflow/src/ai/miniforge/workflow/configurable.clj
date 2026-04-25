@@ -26,6 +26,7 @@
    for parallel execution."
   (:require
    [ai.miniforge.workflow.agent-factory :as factory]
+   [ai.miniforge.workflow.configurable-defaults :as defaults]
    [ai.miniforge.workflow.context :as ctx]
    [ai.miniforge.workflow.dag-orchestrator :as dag-orch]
    [ai.miniforge.workflow.messages :as messages]
@@ -34,20 +35,6 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Phase lookup
-
-(def default-max-phases
-  "Safety limit for configurable workflow execution iterations."
-  50)
-
-(def default-phase-metrics
-  "Default metrics for configurable phase results."
-  {:tokens 0
-   :cost-usd 0.0
-   :duration-ms 0})
-
-(def default-inner-loop-iterations
-  "Default maximum iterations for configurable phase inner loops."
-  5)
 
 (defn find-phase
   "Find phase configuration by ID in workflow.
@@ -82,7 +69,7 @@
 
 (defn- merged-phase-metrics
   [metrics]
-  (merge default-phase-metrics metrics))
+  (merge (defaults/default-phase-metrics) metrics))
 
 (defn- configurable-phase-result
   [success? artifacts errors metrics]
@@ -136,6 +123,10 @@
   [exec-state]
   (contains? #{:completed :failed :cancelled}
              (:execution/status exec-state)))
+
+(defn- dag-disabled?
+  [context]
+  (true? (get context :disable-dag-parallelization false)))
 
 (defn- phase-order
   [workflow]
@@ -262,7 +253,7 @@
         inner-loop (:phase/inner-loop phase {})
         max-iterations (get inner-loop
                             :max-iterations
-                            default-inner-loop-iterations)]
+                            (defaults/default-inner-loop-iterations))]
 
     (cond
       (:phase/handler phase)
@@ -270,7 +261,7 @@
 
       ;; Skip :none agent
       (= :none phase-agent)
-      (successful-phase-result [] default-phase-metrics)
+      (successful-phase-result [] (defaults/default-phase-metrics))
 
       ;; Real execution
       :else
@@ -290,7 +281,7 @@
                        {:success false
                         :error (phase-execution-failure-message
                                 (.getMessage e))
-                        :metrics default-phase-metrics}))]
+                        :metrics (defaults/default-phase-metrics)}))]
 
         (if (inner-loop-succeeded? result)
           ;; Success - build standard artifact
@@ -358,6 +349,31 @@
   [exec-state]
   [:continue exec-state])
 
+(defn- dag-implement-phase-result
+  [dag-result]
+  (let [artifacts (get dag-result :artifacts [])
+        metrics (get dag-result :metrics {})]
+    (successful-phase-result artifacts metrics)))
+
+(defn- record-dag-implement-result
+  [exec-state dag-result]
+  (assoc-in exec-state
+            [:execution/phase-results :implement]
+            (dag-implement-phase-result dag-result)))
+
+(defn- continue-from-dag-success
+  [exec-state]
+  (let [dag-result (:execution/dag-result exec-state)
+        after-plan (transition-phase exec-state :phase/succeed :dag-complete)
+        next-state (if (= :implement (:execution/current-phase after-plan))
+                     (-> after-plan
+                         (record-dag-implement-result dag-result)
+                         (transition-phase :phase/succeed :dag-complete))
+                     after-plan)]
+    (if (terminal-status? next-state)
+      (project-terminal-phase next-state)
+      (continue-execution next-state))))
+
 (defn execute-phase-step
   "Execute a single phase step in the workflow.
    Returns updated execution state or [:continue new-state] to continue loop.
@@ -386,20 +402,14 @@
             should-parallelize? (and plan
                                      (schema/succeeded? phase-result)
                                      (dag-orch/parallelizable-plan? plan)
-                                     ;; Allow disabling via context
-                                     (not (:disable-dag-parallelization context)))]
+                                     (not (dag-disabled? context)))]
 
         (if should-parallelize?
           ;; Execute plan via DAG — each task produces its own PR
           (let [exec-state-with-dag (execute-dag-for-plan exec-state' plan context callbacks)
                 dag-result (:execution/dag-result exec-state-with-dag)]
             (if (schema/succeeded? dag-result)
-              (let [next-state (transition-phase exec-state-with-dag
-                                                 :phase/succeed
-                                                 :dag-complete)]
-                (if (terminal-status? next-state)
-                  (project-terminal-phase next-state)
-                  (continue-execution next-state)))
+              (continue-from-dag-success exec-state-with-dag)
               (fail-execution exec-state-with-dag
                               :dag-execution-failed
                               (dag-execution-failed-message)
@@ -440,7 +450,7 @@
    3. Mark as completed or failed"
   [workflow input context]
   (let [execution-workflow (ensure-execution-pipeline workflow)
-        max-phases (get context :max-phases default-max-phases)
+        max-phases (get context :max-phases (defaults/max-phases))
         callbacks {:on-phase-start (:on-phase-start context)
                    :on-phase-complete (:on-phase-complete context)}]
 

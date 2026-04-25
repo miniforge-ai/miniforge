@@ -16,11 +16,11 @@
 
 - add `components/bb-dev-tools/src` and `components/bb-dev-tools/test`
   to the repo test classpath in
-  [deps.edn](/tmp/mf-configurable-compiled-machine/deps.edn)
+  [deps.edn](/deps.edn)
   This was required because `bb pre-commit` could not load
   `ai.miniforge.bb-dev-tools.core-test`.
 - fix an early-closing brace in
-  [bases/cli/resources/config/cli/messages/en-US.edn](/tmp/mf-configurable-compiled-machine/bases/cli/resources/config/cli/messages/en-US.edn)
+  [bases/cli/resources/config/cli/messages/en-US.edn](/bases/cli/resources/config/cli/messages/en-US.edn)
   That bug truncated the loaded CLI catalog and caused changed-brick
   CLI tests to fail with missing message keys.
 
