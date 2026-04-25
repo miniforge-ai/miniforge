@@ -307,7 +307,12 @@
     :json-string "supervisory/intervention-state-changed"
     :browser?    false}
 
-   ;; PR scoring (N5-delta-2 §4.1)
+   ;; PR fleet + scoring (N5-delta-2 §3 / §4.1)
+   {:constructor "pr-created"
+    :event-type  :pr/created
+    :json-string "pr/created"
+    :browser?    false}
+
    {:constructor "pr-scored"
     :event-type  :pr/scored
     :json-string "pr/scored"

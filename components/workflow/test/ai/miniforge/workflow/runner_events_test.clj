@@ -47,6 +47,9 @@
 (defn- first-event [stream]
   (first (:events @stream)))
 
+(defn- all-events [stream]
+  (:events @stream))
+
 ;------------------------------------------------------------------------------ publish-workflow-started!
 
 (deftest publish-workflow-started-includes-entity-fields-test
@@ -88,6 +91,26 @@
         (is (= (:execution/id ctx) (:workflow-run/id ev)))
         (is (= :completed (:workflow-run/status ev)))
         (is (= "plan" (:workflow-run/current-phase ev)))))))
+
+(deftest publish-workflow-completed-emits-pr-created-for-owned-prs-test
+  (testing "workflow completion emits canonical pr/created events for workflow-owned PRs"
+    (let [stream (create-stream)
+          ctx    (assoc (test-context)
+                        :execution/status :completed
+                        :workflow/pr-info {:pr-number 42
+                                           :pr-url "https://github.com/acme/widget/pull/42"
+                                           :branch "feature/widget"})]
+      (events/publish-workflow-completed! stream ctx)
+      (let [emitted (all-events stream)
+            completion (first emitted)
+            pr-created (second emitted)]
+        (is (= 2 (count emitted)))
+        (is (= :workflow/completed (:event/type completion)))
+        (is (= :pr/created (:event/type pr-created)))
+        (is (= (:execution/id ctx) (:workflow/id pr-created)))
+        (is (= "acme/widget" (:pr/repo pr-created)))
+        (is (= 42 (:pr/number pr-created)))
+        (is (= "feature/widget" (:pr/branch pr-created)))))))
 
 (deftest publish-workflow-completed-failed-entity-fields-test
   (testing "publish-workflow-completed! merges workflow-run/* on failure"

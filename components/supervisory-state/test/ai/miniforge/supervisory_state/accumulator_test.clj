@@ -78,6 +78,38 @@
                   (acc/apply-event (ev :workflow/completed {:workflow/id wf-id})))]
     (is (= :completed (get-in table [:workflows wf-id :workflow-run/status])))))
 
+(deftest workflow-phase-completed-accumulates-artifact-ids
+  (let [wf-id (random-uuid)
+        artifact-a (random-uuid)
+        artifact-b (random-uuid)
+        table (-> schema/empty-table
+                  (acc/apply-event (ev :workflow/started {:workflow/id wf-id}))
+                  (acc/apply-event (ev :workflow/phase-completed
+                                       {:workflow/id wf-id
+                                        :phase/artifacts [artifact-a {:artifact/id artifact-b}]}))
+                  (acc/apply-event (ev :workflow/phase-completed
+                                       {:workflow/id wf-id
+                                        :phase/artifacts [{:artifact/id artifact-a}]})))]
+    (is (= [artifact-a artifact-b]
+           (get-in table [:workflows wf-id :workflow-run/artifact-ids])))))
+
+(deftest workflow-completed-captures-owned-prs
+  (let [wf-id (random-uuid)
+        table (-> schema/empty-table
+                  (acc/apply-event (ev :workflow/started {:workflow/id wf-id}))
+                  (acc/apply-event (ev :workflow/completed
+                                       {:workflow/id wf-id
+                                        :workflow/pr-info {:pr-number 42
+                                                           :pr-url "https://github.com/acme/widget/pull/42"
+                                                           :branch "feature/widget"}})))
+        prs   (get-in table [:workflows wf-id :workflow-run/prs])]
+    (is (= 1 (count prs)))
+    (is (= {:pr/repo "acme/widget"
+            :pr/number 42
+            :pr/url "https://github.com/acme/widget/pull/42"
+            :pr/branch "feature/widget"}
+           (select-keys (first prs) [:pr/repo :pr/number :pr/url :pr/branch])))))
+
 (deftest workflow-failed-sets-failed-status
   (let [wf-id (random-uuid)
         table (-> schema/empty-table
@@ -145,9 +177,11 @@
 ;------------------------------------------------------------------------------ PR
 
 (deftest pr-created-then-merged
-  (let [table (-> schema/empty-table
+  (let [wf-id (random-uuid)
+        table (-> schema/empty-table
                   (acc/apply-event (ev :pr/created
                                        {:pr/repo "acme/widget"
+                                        :workflow/id wf-id
                                         :pr/number 42
                                         :pr/title "Add thing"}))
                   (acc/apply-event (ev :pr/merged
@@ -155,7 +189,8 @@
                                         :pr/number 42})))
         pr    (get-in table [:prs ["acme/widget" 42]])]
     (is (= :merged (:pr/status pr)))
-    (is (some? (:pr/merged-at pr)))))
+    (is (some? (:pr/merged-at pr)))
+    (is (= wf-id (:pr/workflow-run-id pr)))))
 
 ;------------------------------------------------------------------------------ :pr/scored
 

@@ -88,6 +88,7 @@
 ;------------------------------------------------------------------------------ Layer 2
 ;; PR scoring event constructors (N5-delta-2 §4.1)
 
+(def pr-created core/pr-created)
 (def pr-scored core/pr-scored)
 
 ;------------------------------------------------------------------------------ Layer 2

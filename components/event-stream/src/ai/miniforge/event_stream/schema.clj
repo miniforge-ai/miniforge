@@ -128,6 +128,31 @@
    [:workflow/error-details {:optional true} map?]
    [:message string?]])
 
+;------------------------------------------------------------------------------ Layer 1.5
+;; PR lifecycle event schemas
+
+(def PRCreated
+  "Schema for pr/created event.
+
+   Emitted when a workflow creates a PR that should appear in the
+   supervisory PR fleet. `:workflow/id` is the owning workflow run, which
+   lets downstream consumers correlate the PR back to the run/spec dossier."
+  [:map
+   [:event/type [:= :pr/created]]
+   [:event/id uuid?]
+   [:event/timestamp inst?]
+   [:event/version string?]
+   [:event/sequence-number int?]
+   [:workflow/id uuid?]
+   [:pr/repo string?]
+   [:pr/number int?]
+   [:pr/url string?]
+   [:pr/branch string?]
+   [:pr/title {:optional true} string?]
+   [:pr/author {:optional true} string?]
+   [:pr/merge-order {:optional true} int?]
+   [:message string?]])
+
 ;------------------------------------------------------------------------------ Layer 2
 ;; Agent lifecycle event schemas
 

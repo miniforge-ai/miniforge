@@ -186,7 +186,19 @@
    [:workflow-run/started-at :common/timestamp]
    [:workflow-run/updated-at :common/timestamp]
    [:workflow-run/trigger-source :workflow-run/trigger-source]
-   [:workflow-run/correlation-id :id/uuid]])
+   [:workflow-run/correlation-id :id/uuid]
+   [:workflow-run/artifact-ids {:optional true} [:vector :id/uuid]]
+   [:workflow-run/evidence-bundle-id {:optional true} [:maybe :id/uuid]]
+   [:workflow-run/prs {:optional true}
+    [:vector
+     [:map
+      [:pr/repo [:string {:min 1}]]
+      [:pr/number :common/non-neg-int]
+      [:pr/url string?]
+      [:pr/branch string?]
+      [:pr/title {:optional true} [:maybe string?]]
+      [:pr/author {:optional true} [:maybe string?]]
+      [:pr/merge-order {:optional true} [:maybe :common/non-neg-int]]]]]])
 
 (def AgentSession
   "An external or internal agent observable to the supervisory plane.
@@ -299,6 +311,7 @@
    [:pr/changed-files-count {:optional true} [:maybe :common/non-neg-int]]
    [:pr/behind-main {:optional true} [:maybe boolean?]]
    [:pr/merged-at {:optional true} [:maybe :common/timestamp]]
+   [:pr/workflow-run-id {:optional true} [:maybe :id/uuid]]
    [:pr/readiness {:optional true} [:maybe PrReadiness]]
    [:pr/risk {:optional true} [:maybe PrRisk]]
    [:pr/policy {:optional true} [:maybe PrPolicy]]
