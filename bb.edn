@@ -1,12 +1,14 @@
 {:min-bb-version "1.3.0"
 
- :deps {io.github.lispyclouds/bblgum {:git/sha "df647fb50f32e05b26e46e58d7249b4798e469e6"}}
+ :deps {io.github.lispyclouds/bblgum {:git/sha "df647fb50f32e05b26e46e58d7249b4798e469e6"}
+        ai.miniforge/bb-utils {:local/root "projects/bb-utils"}}
 
  :paths ["tasks"]
 
  :tasks
  {:requires ([babashka.fs :as fs]
              [babashka.process :as p]
+             [ai.miniforge.bb-test-runner.interface :as bb-test-runner]
              [clojure.string :as str])
 
   :init (do
@@ -89,6 +91,13 @@
    :task (do
            (run 'test)
            (run 'test:integration))}
+
+  ccov
+  {:doc  "Run Cloverage against the repo test classpath"
+   :task (let [exit (bb-test-runner/run-coverage {:repo-root "."
+                                                  :alias-keys [:dev :test]})]
+           (when-not (zero? exit)
+             (System/exit exit)))}
 
   test:conformance
   {:doc  "Run N1 conformance test suite"
@@ -251,6 +260,12 @@
   install:clj-kondo
   {:doc  "Install clj-kondo linter"
    :task (brew-install "borkdude/brew/clj-kondo")}
+
+  install:coverage
+  {:doc  "Prefetch the Cloverage dependency used by `bb ccov`"
+   :task (let [exit (bb-test-runner/install-coverage-tool {:repo-root "."})]
+           (when-not (zero? exit)
+             (System/exit exit)))}
 
   install:markdownlint
   {:doc  "Install markdownlint-cli"

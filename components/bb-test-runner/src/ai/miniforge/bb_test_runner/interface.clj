@@ -24,7 +24,8 @@
    path won't resolve (`babashka.classpath` is Babashka-only), so tests
    of bb-utils components themselves run under JVM via the pure helpers
    (`path->ns-symbol`, `discover-test-namespaces`) + the standard
-   cognitect test-runner."
+   cognitect test-runner. Coverage execution shells out to a JVM
+   Cloverage process using the repo's deps.edn."
   (:require [ai.miniforge.bb-test-runner.core :as core]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -50,8 +51,40 @@
   [relative-path]
   (core/path->ns-symbol relative-path))
 
+(defn classify-coverage-paths
+  "Pure helper: split merged classpath paths into source and test roots
+   suitable for Cloverage."
+  [paths]
+  (core/classify-coverage-paths paths))
+
+(defn coverage-args
+  "Pure helper: build the Cloverage argv for a repo deps config."
+  [deps-config opts]
+  (core/coverage-args deps-config opts))
+
+(defn install-coverage-tool
+  "Prefetch the Cloverage dependency into the repo's local Clojure cache.
+   Accepts `{:repo-root \".\"}` and returns the process exit code."
+  [opts]
+  (core/install-coverage-tool opts))
+
+(defn run-coverage
+  "Run Cloverage for the repo rooted at `:repo-root` using the selected
+   deps.edn alias. Options:
+
+   - `:repo-root`       repo path, default `.`
+   - `:alias-key`       single deps alias keyword
+   - `:alias-keys`      vector of deps alias keywords, default `[:test]`
+   - `:output-dir`      coverage output dir, default `target/coverage`
+   - `:fail-threshold`  integer percentage, default `0`
+
+   Returns the process exit code."
+  [opts]
+  (core/run-coverage opts))
+
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
   (path->ns-symbol "ai/miniforge/bb_paths/core_test.clj")
+  (classify-coverage-paths ["tasks" "test" "mvp/src"])
 
   :leave-this-here)
