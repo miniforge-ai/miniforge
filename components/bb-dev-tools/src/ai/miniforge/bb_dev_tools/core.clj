@@ -22,8 +22,8 @@
    Layer 0: pure catalog and command-plan helpers
    Layer 1: repo-rooted catalog loading
    Layer 2: command execution and toolset orchestration"
-  (:require [ai.miniforge.bb-paths.interface :as paths]
-            [ai.miniforge.bb-test-runner.core :as bb-test-runner]
+  (:require [ai.miniforge.bb-dev-tools.adapters.interface :as adapters]
+            [ai.miniforge.bb-paths.interface :as paths]
             [babashka.fs :as fs]
             [clojure.edn :as edn]
             [clojure.java.shell :as shell]
@@ -69,64 +69,10 @@
          (filter enabled?)
          vec)))
 
-(defn- absolute-cwd
-  [repo-root cwd]
-  (str (fs/path repo-root (or cwd "."))))
-
-(defn- normalize-commands
-  [stage]
-  (let [commands (get stage :commands [])
-        command (get stage :command)]
-    (if command
-      [command]
-      commands)))
-
-(defn- external-stage-plans
-  [repo-root tool stage-key]
-  (let [stage (get tool (keyword "tool" (name stage-key)))
-        cwd (absolute-cwd repo-root (get stage :cwd))]
-    (->> (normalize-commands stage)
-         (mapv (fn [command]
-                 {:tool/id (get tool :tool/id)
-                  :stage stage-key
-                  :cwd cwd
-                  :command command})))))
-
-(defn- cloverage-config
-  [tool]
-  (get tool :tool/config {}))
-
-(defn- cloverage-install-plan
-  [repo-root tool]
-  [{:tool/id (get tool :tool/id)
-    :stage :install
-    :cwd (absolute-cwd repo-root ".")
-    :command (vec (concat ["clojure"]
-                          (bb-test-runner/coverage-install-args)))}])
-
-(defn- cloverage-run-plan
-  [repo-root tool]
-  (let [deps-config (bb-test-runner/load-deps-config repo-root)
-        command-args (bb-test-runner/coverage-args deps-config (cloverage-config tool))]
-    [{:tool/id (get tool :tool/id)
-      :stage :run
-      :cwd (absolute-cwd repo-root ".")
-      :command (vec (concat ["clojure"] command-args))}]))
-
 (defn stage-plans
   "Build command plans for a tool and stage."
   [repo-root tool stage-key]
-  (let [adapter (get tool :tool/adapter)]
-    (case adapter
-      :clojure/cloverage
-      (if (= stage-key :install)
-        (cloverage-install-plan repo-root tool)
-        (cloverage-run-plan repo-root tool))
-
-      :external/command
-      (external-stage-plans repo-root tool stage-key)
-
-      [])))
+  (adapters/stage-plans repo-root tool stage-key))
 
 (defn load-catalog
   "Load the whole repo-local tool catalog."
@@ -144,6 +90,11 @@
           (println err)))
       (assoc plan :exit exit))))
 
+(defn- stage-exit
+  [results]
+  (or (some #(when (pos? (get % :exit 0)) (get % :exit)) results)
+      0))
+
 (defn- run-stage
   [repo-root tool stage-key]
   (let [plans (stage-plans repo-root tool stage-key)]
@@ -156,12 +107,21 @@
             []
             plans)))
 
+(defn- install-or-check-results
+  [repo-root tool]
+  (let [check-results (run-stage repo-root tool :check)]
+    (if (and (seq check-results) (zero? (stage-exit check-results)))
+      check-results
+      (run-stage repo-root tool :install))))
+
 (defn- toolset-results
   [repo-root catalog toolset-id stage-key]
   (let [tools (resolve-toolset-tools catalog toolset-id)]
     (reduce (fn [results tool]
-              (let [stage-results (run-stage repo-root tool stage-key)
-                    failed? (some #(pos? (get % :exit 0)) stage-results)
+              (let [stage-results (if (= stage-key :install)
+                                    (install-or-check-results repo-root tool)
+                                    (run-stage repo-root tool stage-key))
+                    failed? (pos? (stage-exit stage-results))
                     next-results (into results stage-results)]
                 (if failed?
                   (reduced next-results)

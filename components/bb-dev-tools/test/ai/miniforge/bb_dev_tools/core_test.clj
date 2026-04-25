@@ -32,6 +32,8 @@
     :coverage/swift
     {:tool/id :coverage/swift
      :tool/adapter :external/command
+     :tool/check {:cwd "thesium-app"
+                  :commands [["swift" "--version"]]}
      :tool/run {:cwd "thesium-app"
                 :commands [["swift" "test" "--enable-code-coverage"]]}}
     :coverage/disabled
@@ -69,6 +71,23 @@
           plan (first plans)]
       (is (= "/tmp/example/thesium-app" (:cwd plan)))
       (is (= ["swift" "test" "--enable-code-coverage"] (:command plan))))))
+
+(deftest stage-plans-build-external-check-steps
+  (testing "external command tools can declare a check stage for idempotent installs"
+    (let [plans (sut/stage-plans "/tmp/example"
+                                 (get-in sample-catalog [:tools :coverage/swift])
+                                 :check)
+          plan (first plans)]
+      (is (= "/tmp/example/thesium-app" (:cwd plan)))
+      (is (= ["swift" "--version"] (:command plan))))))
+
+(deftest stage-plans-ignore-unknown-adapters
+  (testing "unknown adapters do not add hardcoded behavior to the core runner"
+    (is (= []
+           (sut/stage-plans "/tmp/example"
+                            {:tool/id :coverage/unknown
+                             :tool/adapter :coverage/unknown}
+                            :run)))))
 
 (deftest stage-plans-build-cloverage-command
   (testing "cloverage tool derives a JVM command from repo deps.edn and tool config"

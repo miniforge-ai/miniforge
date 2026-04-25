@@ -26,8 +26,17 @@ hardcoding one JVM-only coverage tool.
   - add coverage-path, deps-merge, and Cloverage argv tests
 - `components/bb-dev-tools/*`
   - add a repo-local dev-tool catalog and toolset runner
+  - keep the runner generic by moving tool behavior into adapter namespaces
   - support adapter-driven tools like `:clojure/cloverage`
   - support generic external command tools for non-Clojure repos
+  - support optional `:tool/check` commands so installs can be idempotent
+- `bases/cli/src/ai/miniforge/cli/web/components.clj`
+  - split the oversized dashboard renderer into small helpers
+  - move dashboard copy into the CLI message catalog
+- `bases/cli/resources/config/cli/messages/en-US.edn`
+  - add localized dashboard UI copy used by the CLI web surface
+- `bases/cli/test/ai/miniforge/cli/web/components_test.clj`
+  - add focused HTML contract coverage for the CLI web dashboard
 - `bb.edn`
   - route `bb ccov` through the repo toolset
   - route `bb install:coverage` through the repo toolset
@@ -56,17 +65,19 @@ hardcoding one JVM-only coverage tool.
 - `clojure -Sdeps '{:deps {ai.miniforge/bb-test-runner {:local/root "components/bb-test-runner"} io.github.cognitect-labs/test-runner {:git/tag "v0.5.1" :git/sha "dfb30dd"} babashka/fs {:mvn/version "0.5.22"}} :paths ["components/bb-test-runner/src" "components/bb-test-runner/test"]}' -M -m cognitect.test-runner -d components/bb-test-runner/test`
 - `clojure -Sdeps '{:deps {ai.miniforge/bb-dev-tools {:local/root "components/bb-dev-tools"} io.github.cognitect-labs/test-runner {:git/tag "v0.5.1" :git/sha "dfb30dd"} babashka/fs {:mvn/version "0.5.22"} ai.miniforge/bb-paths {:local/root "components/bb-paths"} ai.miniforge/bb-test-runner {:local/root "components/bb-test-runner"}} :paths ["components/bb-dev-tools/src" "components/bb-dev-tools/test" "components/bb-test-runner/src" "components/bb-paths/src"]}' -M -m cognitect.test-runner -d components/bb-dev-tools/test`
 - `clojure -M:test -e "(require 'ai.miniforge.web-dashboard.views-test)(let [result (clojure.test/run-tests 'ai.miniforge.web-dashboard.views-test)] (when (pos? (+ (:fail result) (:error result))) (System/exit 1)))"`
+- `clojure -Sdeps '{:paths ["bases/cli/src" "bases/cli/resources" "bases/cli/test"]}' -M:test -e "(require 'ai.miniforge.cli.web.components-test) (let [result (clojure.test/run-tests 'ai.miniforge.cli.web.components-test)] (when (pos? (+ (:fail result) (:error result))) (System/exit 1)))"`
 - `bb ccov`
 
 Results:
 - `bb install:coverage` passed
 - `bb bootstrap` passed
 - `bb-test-runner` component tests passed: 11 tests, 26 assertions
-- `bb-dev-tools` component tests passed: 4 tests, 12 assertions
+- `bb-dev-tools` component tests passed: 6 tests, 15 assertions
 - `web-dashboard.views-test` passed: 5 tests, 18 assertions
+- `cli.web.components-test` passed: 4 tests, 12 assertions
 
 Note:
 - the original Cloverage blocker in `web_dashboard/views.clj` is fixed;
-  the next full-repo coverage blocker is now
-  `components/cli-web/src/ai/miniforge/cli/web/components.clj`, which
-  fails instrumentation with the same JVM `Method code too large!` limit.
+  the CLI web dashboard now has the same helper/localization treatment.
+  `bb ccov` was rerun after that refactor to check whether the next
+  full-repo blocker has moved again.
