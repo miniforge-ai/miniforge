@@ -44,3 +44,8 @@
            :workflow/pipeline
            (mapv phase->pipeline-entry
                  (:workflow/phases workflow)))))
+
+(defn execution-pipeline
+  "Return the normalized execution pipeline for a workflow definition."
+  [workflow]
+  (:workflow/pipeline (ensure-execution-pipeline workflow)))

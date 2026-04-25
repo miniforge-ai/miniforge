@@ -321,8 +321,7 @@
    progression. Coarse lifecycle status and phase/index projections are derived
    from the resulting machine snapshot."
   [workflow]
-  (let [normalized-workflow (definition/ensure-execution-pipeline workflow)
-        pipeline (:workflow/pipeline normalized-workflow)
+  (let [pipeline (definition/execution-pipeline workflow)
         phase-entries (mapv build-phase-entry (range) pipeline)
         first-active-state (some-> phase-entries first :state-id)
         no-phase-machine? (empty? phase-entries)
@@ -370,7 +369,7 @@
   "Validate that a workflow pipeline can compile into an execution machine."
   [workflow]
   (let [normalized-workflow (definition/ensure-execution-pipeline workflow)
-        pipeline (:workflow/pipeline normalized-workflow)
+        pipeline (definition/execution-pipeline normalized-workflow)
         duplicate-phases (->> pipeline
                               (map :phase)
                               frequencies

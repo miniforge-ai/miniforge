@@ -22,7 +22,6 @@
   (:require
    [clojure.java.io :as io]
    [clojure.edn :as edn]
-   [ai.miniforge.workflow.definition :as definition]
    [ai.miniforge.workflow.fsm :as workflow-fsm]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -38,6 +37,21 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Schema validation
+
+(defn valid?
+  "Predicate for workflow validation result maps."
+  [validation]
+  (true? (:valid? validation)))
+
+(defn- validation-result
+  [errors]
+  {:valid? (empty? errors)
+   :errors (vec errors)})
+
+(defn- validation-result-with-warnings
+  [errors warnings]
+  (assoc (validation-result errors)
+         :warnings (vec warnings)))
 
 (defn validate-schema
   "Validate workflow config against Malli schema.
@@ -101,19 +115,17 @@
       (when-not (vector? task-types)
         (swap! errors conj ":workflow/task-types must be a vector")))
 
-    {:valid? (empty? @errors)
-     :errors @errors}))
+    (validation-result @errors)))
 
 ;------------------------------------------------------------------------------ Layer 2
 ;; Compiled-machine validation
 
 (defn- machine-validation-messages
   [workflow]
-  (let [normalized-workflow (definition/ensure-execution-pipeline workflow)
-        validation (workflow-fsm/validate-execution-machine normalized-workflow)]
-    {:valid? (:valid? validation)
-     :errors (mapv :message (:errors validation))
-     :warnings (mapv :message (:warnings validation))}))
+  (let [validation (workflow-fsm/validate-execution-machine workflow)
+        errors (mapv :message (:errors validation))
+        warnings (mapv :message (:warnings validation))]
+    (validation-result-with-warnings errors warnings)))
 
 (defn validate-dag
   "Validate workflow DAG structure.
@@ -149,8 +161,7 @@
         (when-not (pos? duration)
           (swap! errors conj "Budget duration must be positive"))))
 
-    {:valid? (empty? @errors)
-     :errors @errors}))
+    (validation-result @errors)))
 
 ;------------------------------------------------------------------------------ Layer 4
 ;; Combined validation
@@ -171,9 +182,7 @@
                            (:errors machine-result)
                            (:errors budget-result))
         warnings (:warnings machine-result)]
-    {:valid? (empty? all-errors)
-     :errors (vec all-errors)
-     :warnings (vec warnings)}))
+    (validation-result-with-warnings all-errors warnings)))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
