@@ -29,6 +29,7 @@
    [ai.miniforge.workflow.configurable-defaults :as defaults]
    [ai.miniforge.workflow.context :as ctx]
    [ai.miniforge.workflow.dag-orchestrator :as dag-orch]
+   [ai.miniforge.workflow.definition :as definition]
    [ai.miniforge.workflow.messages :as messages]
    [ai.miniforge.schema.interface :as schema]
    [ai.miniforge.loop.interface :as loop]))
@@ -47,25 +48,6 @@
   [workflow phase-id]
   (first (filter #(= phase-id (:phase/id %))
                  (:workflow/phases workflow))))
-
-(defn- first-transition-target
-  [phase]
-  (get-in phase [:phase/next 0 :target]))
-
-(defn- phase->pipeline-entry
-  [phase]
-  (let [target-phase (first-transition-target phase)]
-    (cond-> {:phase (:phase/id phase)}
-      target-phase (assoc :on-success target-phase))))
-
-(defn- ensure-execution-pipeline
-  [workflow]
-  (if (:workflow/pipeline workflow)
-    workflow
-    (assoc workflow
-           :workflow/pipeline
-           (mapv phase->pipeline-entry
-                 (:workflow/phases workflow)))))
 
 (defn- merged-phase-metrics
   [metrics]
@@ -449,7 +431,7 @@
       d. Apply the outcome through the authoritative execution machine
    3. Mark as completed or failed"
   [workflow input context]
-  (let [execution-workflow (ensure-execution-pipeline workflow)
+  (let [execution-workflow (definition/ensure-execution-pipeline workflow)
         max-phases (get context :max-phases (defaults/max-phases))
         callbacks {:on-phase-start (:on-phase-start context)
                    :on-phase-complete (:on-phase-complete context)}]

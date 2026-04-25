@@ -22,7 +22,8 @@
   (:require
    [clojure.java.io :as io]
    [clojure.edn :as edn]
-   [clojure.set :as set]))
+   [ai.miniforge.workflow.definition :as definition]
+   [ai.miniforge.workflow.fsm :as workflow-fsm]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Schema loading
@@ -104,92 +105,22 @@
      :errors @errors}))
 
 ;------------------------------------------------------------------------------ Layer 2
-;; DAG validation
+;; Compiled-machine validation
 
-(defn build-phase-graph
-  "Build adjacency list from phases.
-   Returns map of phase-id -> #{target-phase-ids}"
-  [phases]
-  (reduce
-   (fn [graph phase]
-     (let [phase-id (:phase/id phase)
-           next-transitions (:phase/next phase [])
-           targets (set (map :target next-transitions))]
-       (assoc graph phase-id targets)))
-   {}
-   phases))
-
-(defn reachable-phases
-  "Find all phases reachable from entry-phase.
-   Returns set of phase-ids."
-  [graph entry-phase]
-  (loop [to-visit [entry-phase]
-         visited #{}]
-    (if (empty? to-visit)
-      visited
-      (let [current (first to-visit)
-            to-visit' (rest to-visit)]
-        (if (contains? visited current)
-          (recur to-visit' visited)
-          (let [neighbors (get graph current #{})
-                new-to-visit (concat to-visit' neighbors)]
-            (recur new-to-visit (conj visited current))))))))
+(defn- machine-validation-messages
+  [workflow]
+  (let [normalized-workflow (definition/ensure-execution-pipeline workflow)
+        validation (workflow-fsm/validate-execution-machine normalized-workflow)]
+    {:valid? (:valid? validation)
+     :errors (mapv :message (:errors validation))
+     :warnings (mapv :message (:warnings validation))}))
 
 (defn validate-dag
   "Validate workflow DAG structure.
-   Checks:
-   - At least one phase exists
-   - All phases referenced in transitions exist (old format only)
-   - All phases are reachable from entry phase (old format only)
-
-   Note: Pipeline format is linear by default, so DAG validation is simpler.
-   Cycles are allowed in old format (for retry/rollback patterns).
-
-   Returns:
-   {:valid? boolean
-    :errors [string]}"
+   Delegates to the compiled execution-machine validator so legacy
+   phase workflows and pipeline workflows share one authority."
   [config]
-  (let [errors (atom [])
-        phases (:workflow/phases config)
-        pipeline (:workflow/pipeline config)]
-
-    ;; Pipeline format validation (new format)
-    (when pipeline
-      (when (empty? pipeline)
-        (swap! errors conj "Workflow must have at least one phase")))
-
-    ;; Phases format validation (old format)
-    (when phases
-      (let [phase-ids (set (map :phase/id phases))
-            entry-phase (when (seq phases) (:phase/id (first phases)))
-            graph (build-phase-graph phases)]
-
-        ;; Check we have at least one phase
-        (when (empty? phases)
-          (swap! errors conj "Workflow must have at least one phase"))
-
-        ;; Check all transition targets exist
-        (doseq [phase phases]
-          (let [phase-id (:phase/id phase)
-                next-transitions (:phase/next phase [])]
-            (doseq [transition next-transitions]
-              (when-let [target (:target transition)]
-                (when-not (contains? phase-ids target)
-                  (swap! errors conj (str "Phase " phase-id " references non-existent phase: " target)))))))
-
-        ;; Note: We don't check for cycles because workflows commonly have
-        ;; intentional cycles for retry/rollback logic (e.g., verify -> implement on failure)
-        ;; Cycles are a valid workflow pattern
-
-        ;; Check reachability (only if no errors so far)
-        (when (and entry-phase (empty? @errors))
-          (let [reachable (reachable-phases graph entry-phase)
-                unreachable (set/difference phase-ids reachable)]
-            (when (seq unreachable)
-              (swap! errors conj (str "Unreachable phases: " (vec unreachable))))))))
-
-    {:valid? (empty? @errors)
-     :errors @errors}))
+  (machine-validation-messages config))
 
 ;------------------------------------------------------------------------------ Layer 3
 ;; Budget validation
@@ -228,18 +159,21 @@
   "Perform full validation of workflow config.
    Combines schema, DAG, and budget validation.
 
-   Returns:
-   {:valid? boolean
-    :errors [string]}"
+  Returns:
+  {:valid? boolean
+   :errors [string]
+   :warnings [string]}"
   [config]
   (let [schema-result (validate-schema config)
-        dag-result (validate-dag config)
+        machine-result (validate-dag config)
         budget-result (validate-budgets config)
         all-errors (concat (:errors schema-result)
-                           (:errors dag-result)
-                           (:errors budget-result))]
+                           (:errors machine-result)
+                           (:errors budget-result))
+        warnings (:warnings machine-result)]
     {:valid? (empty? all-errors)
-     :errors (vec all-errors)}))
+     :errors (vec all-errors)
+     :warnings (vec warnings)}))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

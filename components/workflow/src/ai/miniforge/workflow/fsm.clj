@@ -40,6 +40,7 @@
   (:require
    [clojure.set :as set]
    [ai.miniforge.fsm.interface :as fsm]
+   [ai.miniforge.workflow.definition :as definition]
    [ai.miniforge.workflow.messages :as messages]))
 
 (declare current-state first-phase-index reachable-states unreachable-states)
@@ -120,7 +121,10 @@
   [error-key phase target]
   {:error error-key
    :phase phase
-   :target target})
+   :target target
+   :message (messages/t error-key
+                        {:phase phase
+                         :target target})})
 
 (defn- unknown-success-target
   [pipeline {:keys [phase on-success]}]
@@ -317,7 +321,8 @@
    progression. Coarse lifecycle status and phase/index projections are derived
    from the resulting machine snapshot."
   [workflow]
-  (let [pipeline (:workflow/pipeline workflow)
+  (let [normalized-workflow (definition/ensure-execution-pipeline workflow)
+        pipeline (:workflow/pipeline normalized-workflow)
         phase-entries (mapv build-phase-entry (range) pipeline)
         first-active-state (some-> phase-entries first :state-id)
         no-phase-machine? (empty? phase-entries)
@@ -364,7 +369,8 @@
 (defn validate-execution-machine
   "Validate that a workflow pipeline can compile into an execution machine."
   [workflow]
-  (let [pipeline (:workflow/pipeline workflow)
+  (let [normalized-workflow (definition/ensure-execution-pipeline workflow)
+        pipeline (:workflow/pipeline normalized-workflow)
         duplicate-phases (->> pipeline
                               (map :phase)
                               frequencies
@@ -380,7 +386,7 @@
         machine (when (and (seq pipeline)
                            (empty? unresolved-success)
                            (empty? unresolved-fail))
-                  (compile-execution-machine workflow))
+                  (compile-execution-machine normalized-workflow))
         unreachable-state-set (when machine
                                 (unreachable-states machine))
         unreachable-phases (when machine

@@ -148,8 +148,8 @@
                   :workflow/exit-phases [:end]}
           result (validator/validate-dag config)]
       (is (not (:valid? result)) "Non-existent phase reference should fail")
-      (is (some #(re-find #"non-existent" %) (:errors result))
-          "Should report non-existent phase")))
+      (is (some #(re-find #"unknown on-success target" %) (:errors result))
+          "Should report unknown target")))
 
   ;; TODO: Validator doesn't currently validate :workflow/entry-phase
   ;; It just uses first phase by default. Uncomment when implemented.
@@ -185,20 +185,20 @@
                   [{:phase/id :start
                     :phase/name "Start"
                     :phase/agent :planner
-                    :phase/next [{:target :end}]}
-                   {:phase/id :end
-                    :phase/name "End"
-                    :phase/agent :none
-                    :phase/next []}
+                    :phase/next [{:target :done}]}
                    {:phase/id :orphan
                     :phase/name "Orphan"
                     :phase/agent :implementer
-                    :phase/next []}]  ; No path to this phase
+                    :phase/next [{:target :done}]}
+                   {:phase/id :done
+                    :phase/name "Done"
+                    :phase/agent :none
+                    :phase/next []}]  ; start skips orphan in compiled-machine path
                   :workflow/entry-phase :start
-                  :workflow/exit-phases [:end]}
+                  :workflow/exit-phases [:done]}
           result (validator/validate-dag config)]
       (is (not (:valid? result)) "Unreachable phases should fail")
-      (is (some #(re-find #"Unreachable" %) (:errors result))
+      (is (some #(re-find #"unreachable phases" %) (:errors result))
           "Should report unreachable phases"))))
 
 (deftest validate-budgets-test
@@ -297,8 +297,8 @@
           result (validator/validate-workflow config)]
       (is (not (:valid? result)) "Invalid workflow should fail")
       (is (>= (count (:errors result)) 2) "Should report multiple errors")
-      ;; Should have errors from DAG and budget validation
-      (is (some #(re-find #"non-existent" %) (:errors result))
-          "Should report non-existent phase")
+      ;; Should have errors from compiled-machine and budget validation
+      (is (some #(re-find #"unknown on-success target" %) (:errors result))
+          "Should report unknown target")
       (is (some #(re-find #"positive" %) (:errors result))
           "Should report negative budget"))))

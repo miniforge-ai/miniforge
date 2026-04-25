@@ -26,6 +26,10 @@
   :status/invalid-current-state "Invalid current state: {state}"
   :status/guard-rejected-transition "Guard function rejected transition"
   :status/no-transition-defined "No transition defined for [{state} {event}]"
+  :unknown-on-success-target
+  "Phase {phase} references unknown on-success target {target}"
+  :unknown-on-fail-target
+  "Phase {phase} references unknown on-fail target {target}"
   :status/unreachable-machine-states
   "Compiled workflow machine contains unreachable states: {states}"
   :status/unreachable-machine-phases
