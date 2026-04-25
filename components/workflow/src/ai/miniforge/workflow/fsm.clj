@@ -258,6 +258,14 @@
     :index (:index entry)
     :paused? true}])
 
+(defn- state-entry
+  [entry state-id]
+  [state-id entry])
+
+(defn- paused-state-entry
+  [entry]
+  [(:paused-state-id entry) entry])
+
 (defn compile-execution-machine
   "Compile a per-run execution machine from a workflow pipeline.
 
@@ -290,14 +298,19 @@
         state->phase (into {}
                            (concat
                             (map #(projection-entry % false) phase-entries)
-                            (map paused-projection-entry phase-entries)))]
+                            (map paused-projection-entry phase-entries)))
+        state->entry (into {}
+                           (concat
+                            (map #(state-entry % (:state-id %)) phase-entries)
+                            (map paused-state-entry phase-entries)))]
     (assoc (fsm/define-machine
             {:fsm/id :workflow-execution
              :fsm/initial :pending
              :fsm/context {:redirect-count 0}
              :fsm/states (into {} (remove (comp nil? val)) states)})
            :workflow/phase-entries phase-entries
-           :workflow/state->phase state->phase)))
+           :workflow/state->phase state->phase
+           :workflow/state->entry state->entry)))
 
 (defn validate-execution-machine
   "Validate that a workflow pipeline can compile into an execution machine."
@@ -333,6 +346,11 @@
   "Get phase metadata for the current compiled machine state."
   [machine state]
   (get-in machine [:workflow/state->phase (current-state state)]))
+
+(defn machine-active-phase-entry
+  "Get the active workflow phase entry for the current compiled machine state."
+  [machine state]
+  (get-in machine [:workflow/state->entry (current-state state)]))
 
 (defn execution-status
   "Project coarse execution status from a compiled machine snapshot."

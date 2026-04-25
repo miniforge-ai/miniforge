@@ -571,31 +571,52 @@
 
    Returns updated context."
   [pipeline ctx callbacks merge-metrics-fn transition-to-completed-fn transition-to-failed-fn]
-  (let [phase-index (:execution/phase-index ctx)
-        interceptor (get pipeline phase-index)
+  (let [machine-entry (when-let [machine (:execution/fsm-machine ctx)]
+                        (workflow-fsm/machine-active-phase-entry machine
+                                                                 (:execution/fsm-state ctx)))
+        current-phase (:execution/current-phase ctx)
+        interceptor (cond
+                      machine-entry (get pipeline (:index machine-entry))
+                      current-phase (some #(when (= current-phase
+                                                   (get-in % [:config :phase]))
+                                         %)
+                                          pipeline)
+                      :else nil)
         phase-name (get-in interceptor [:config :phase])
         {:keys [on-phase-start on-phase-complete]} callbacks
         ctx-with-phase (assoc ctx :execution/current-phase phase-name)]
+    (if-not interceptor
+      (let [phase-label (or current-phase
+                            (:phase machine-entry)
+                            :unknown)]
+        (-> ctx
+            (update :execution/errors conj
+                    {:type :missing-current-phase
+                     :phase phase-label
+                     :message (messages/t :status/no-transition-defined
+                                          {:state phase-label
+                                           :event :phase/execute})})
+            (transition-to-failed-fn)))
+      (do
+        ;; Notify phase start
+        (when on-phase-start
+          (on-phase-start ctx-with-phase interceptor))
 
-    ;; Notify phase start
-    (when on-phase-start
-      (on-phase-start ctx-with-phase interceptor))
+        ;; Execute phase lifecycle: enter -> gates -> leave
+        (let [[ctx-after-lifecycle phase-result] (execute-phase-lifecycle interceptor ctx-with-phase)
+              ;; Process result: response chain + metrics + files + artifacts
+              ctx-processed (process-phase-result ctx-after-lifecycle phase-name phase-result merge-metrics-fn)]
 
-    ;; Execute phase lifecycle: enter -> gates -> leave
-    (let [[ctx-after-lifecycle phase-result] (execute-phase-lifecycle interceptor ctx-with-phase)
-          ;; Process result: response chain + metrics + files + artifacts
-          ctx-processed (process-phase-result ctx-after-lifecycle phase-name phase-result merge-metrics-fn)]
+          ;; Notify phase complete
+          (when on-phase-complete
+            (on-phase-complete ctx-processed interceptor phase-result))
 
-      ;; Notify phase complete
-      (when on-phase-complete
-        (on-phase-complete ctx-processed interceptor phase-result))
-
-      ;; After plan phase, attempt DAG parallelization before normal transition
-      (or (try-dag-execution ctx-processed phase-name phase-result pipeline
-                             transition-to-completed-fn transition-to-failed-fn)
-          ;; Normal transition (non-plan phases, or plan not parallelizable)
-          (let [event (determine-phase-event (:config interceptor)
-                                             phase-result)]
-            (apply-phase-transition ctx-processed event pipeline
-                                    transition-to-completed-fn
-                                    transition-to-failed-fn))))))
+          ;; After plan phase, attempt DAG parallelization before normal transition
+          (or (try-dag-execution ctx-processed phase-name phase-result pipeline
+                                 transition-to-completed-fn transition-to-failed-fn)
+              ;; Normal transition (non-plan phases, or plan not parallelizable)
+              (let [event (determine-phase-event (:config interceptor)
+                                                 phase-result)]
+                (apply-phase-transition ctx-processed event pipeline
+                                        transition-to-completed-fn
+                                        transition-to-failed-fn))))))))

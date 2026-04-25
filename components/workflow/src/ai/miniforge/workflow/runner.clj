@@ -166,9 +166,10 @@
 
 (defn- apply-backoff-if-retrying!
   "Sleep with exponential backoff when a phase is being retried."
-  [phase-ctx context]
-  (let [retrying? (= (:execution/phase-index phase-ctx)
-                     (:execution/phase-index context))
+  [phase-ctx _context]
+  (let [current-phase (:execution/current-phase phase-ctx)
+        retrying? (phase/retrying?
+                   (get-in phase-ctx [:execution/phase-results current-phase]))
         retry-count (get-in phase-ctx [:phase :iterations] 1)]
     (when (and retrying? (> retry-count 1))
       (Thread/sleep (backoff-ms retry-count)))))
