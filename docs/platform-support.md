@@ -124,7 +124,19 @@ bb test
   elevated shell.
 - **Line endings** — set `git config --global core.autocrlf input` before
   cloning to keep LF in checked-in files; mismatched CRLF will fail
-  `bb fmt:md` and pre-commit.
+  `bb fmt:md` and pre-commit. Critically, this also affects the SHA-256
+  digests baked into governance config integrity checks — those are
+  computed on LF content and a CRLF checkout will fail
+  `ai.miniforge.config.governance/verify-and-warn` at startup.
+- **Java cannot delete `.git/objects` pack files** — integration tests
+  that create temp git repos (e.g.
+  `ai.miniforge.workflow.release-integration-test`) fail on Windows
+  with `AccessDeniedException` during cleanup. Git marks pack files
+  read-only; `java.nio.file.Files.delete` does not clear the read-only
+  flag before unlinking. Workaround in test code:
+  `setWritable(true)` recursively before deleting, or use
+  `babashka.fs/delete-tree` (which handles this). The `test-windows`
+  CI job is `continue-on-error: true` until this is fixed.
 
 ## Windows — WSL2 or Git Bash (Works Today)
 
