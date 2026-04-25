@@ -77,6 +77,19 @@
         (is (str/includes? html "j</kbd>/"))
         (is (str/includes? html "refresh"))))))
 
+(deftest workflow-status-renders-localized-summary-test
+  (testing "workflow status renders counts and the empty-state copy"
+    (with-redefs [fleet/get-workflow-status (constantly {:running 1
+                                                         :failed 2
+                                                         :succeeded 3
+                                                         :runs []})]
+      (let [html (str (sut/workflow-status ["miniforge"]))]
+        (is (str/includes? html "Workflow Status"))
+        (is (str/includes? html "1 ⏳"))
+        (is (str/includes? html "2 ✗"))
+        (is (str/includes? html "3 ✓"))
+        (is (str/includes? html "No recent workflows"))))))
+
 (deftest empty-detail-renders-localized-empty-state-test
   (testing "empty detail renders the localized empty state copy"
     (let [html (str (sut/empty-detail))]
