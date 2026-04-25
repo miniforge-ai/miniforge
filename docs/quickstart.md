@@ -24,7 +24,8 @@ cd miniforge
 bb bootstrap
 ```
 
-This installs Java, Clojure, linters, and configures the project.
+This installs Java, Clojure, linters, prefetches the coverage tool used
+by `bb ccov`, and configures the project.
 
 ## 2. LLM Backend
 

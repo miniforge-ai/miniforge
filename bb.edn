@@ -335,7 +335,7 @@
 
   bootstrap
   {:doc     "Full project bootstrap: install deps + configure environment"
-   :depends [install:deps]
+   :depends [install:deps install:coverage]
    :task    (do
               (println "\n🔧 Configuring development environment...\n")
               (run 'setup:hooks)

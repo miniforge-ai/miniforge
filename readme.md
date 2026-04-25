@@ -141,6 +141,9 @@ bb bootstrap
 mf run examples/workflows/simple-refactor.edn
 ```
 
+`bb bootstrap` installs the runtime dependencies, configures the repo,
+and prefetches the coverage tool used by `bb ccov`.
+
 See the [Quickstart Guide](docs/quickstart.md) for a detailed walkthrough.
 
 ### Write a Spec
