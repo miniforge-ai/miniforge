@@ -68,6 +68,12 @@ work/dogfood-tasks*.edn
 work/dogfood-session-*.edn
 work/*-local.spec.edn
 work/*-wip.edn
+# Failed specs are local intermediate state — only :not-started and :finished
+# spec states belong in git. A failed spec is just an in-flight spec that hit
+# an error; if the underlying work needs to be redone, the source spec returns
+# to work/ and re-runs.
+work/failed/*
+!work/failed/.gitkeep
 .miniforge/
 # Legacy implementer session checkpoint (iter-24 regression: committing a
 # stale Claude session UUID poisoned every sub-workflow worktree's
