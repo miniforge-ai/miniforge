@@ -26,6 +26,13 @@
   :status/invalid-current-state "Invalid current state: {state}"
   :status/guard-rejected-transition "Guard function rejected transition"
   :status/no-transition-defined "No transition defined for [{state} {event}]"
+  :status/unreachable-machine-states
+  "Compiled workflow machine contains unreachable states: {states}"
+  :status/unreachable-machine-phases
+  "Compiled workflow machine contains unreachable phases: {phases}"
+  :status/missing-workflow-id "Workflow must have :workflow/id"
+  :status/invalid-workflow-registration
+  "Workflow {workflow-id} failed registration validation"
   :status/dag-executed-summary "DAG executed {task-count} task(s) successfully"
 
   ;; Phase result messages
