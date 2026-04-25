@@ -153,14 +153,22 @@ jobs:
           restore-keys: |
             clojure-${{ runner.os }}-
 
-      # scripts/test-changed-bricks.bb shells out to the standalone `poly`
-      # CLI. Polylith does not have a scoop manifest in any of the
-      # standard buckets (scoop-clojure, Main, Extras), so we drop the
-      # official uberjar with a poly.cmd shim — symmetric with the
-      # Linux install in PR #661. Pinned to deps.edn :poly alias.
-      - name: Install polylith CLI (Windows)
+      # Two missing pieces on windows-latest after setup-clojure runs:
+      #
+      #   1. polylith — has no scoop manifest in any standard bucket
+      #      (scoop-clojure, Main, Extras), so download the official
+      #      uberjar and shim. Pinned to deps.edn :poly alias version.
+      #
+      #   2. clojure as a binary — setup-clojure on Windows installs
+      #      clojure as a PowerShell module, not clojure.exe. babashka's
+      #      p/process invokes via Java ProcessBuilder which does not
+      #      resolve PowerShell modules, so `bb test:integration`
+      #      (which shells out to `clojure`) fails. Drop deps.clj as
+      #      clojure.exe to provide a real binary clojure on PATH.
+      - name: Install polylith CLI + deps.clj (Windows)
         shell: pwsh
         run: |
+          # 1. Polylith uberjar + poly.cmd shim
           $polyVersion = "0.2.21"
           $polyDir = "$env:USERPROFILE\.poly"
           New-Item -ItemType Directory -Force -Path $polyDir | Out-Null
@@ -172,7 +180,22 @@ jobs:
           java -jar "%USERPROFILE%\.poly\poly.jar" %*
           "@ | Out-File -Encoding ascii "$polyDir\poly.cmd"
           "$polyDir" >> $env:GITHUB_PATH
+
+          # 2. deps.clj as clojure.exe / clj.exe
+          $depsVersion = "1.12.4.1618"
+          $depsDir = "$env:USERPROFILE\.deps-clj"
+          New-Item -ItemType Directory -Force -Path $depsDir | Out-Null
+          Invoke-WebRequest `
+            -Uri "https://github.com/borkdude/deps.clj/releases/download/v${depsVersion}/deps.clj-${depsVersion}-windows-amd64.zip" `
+            -OutFile deps.zip
+          Expand-Archive deps.zip -DestinationPath $depsDir -Force
+          # deps.exe is a drop-in replacement for clojure / clj — provide both names.
+          Copy-Item "$depsDir\deps.exe" "$depsDir\clojure.exe"
+          Copy-Item "$depsDir\deps.exe" "$depsDir\clj.exe"
+          "$depsDir" >> $env:GITHUB_PATH
+
           Write-Host "poly installed at $polyDir\poly.cmd"
+          Write-Host "clojure/clj installed at $depsDir (via deps.clj $depsVersion)"
 
       - name: Platform check
         run: bb check:platform
