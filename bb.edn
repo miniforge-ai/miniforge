@@ -21,20 +21,70 @@
             (let [{:keys [exit]} (deref (apply p/process {:out :inherit :err :inherit} args))]
               exit))
 
+          (def os-key
+            (let [n (str/lower-case (or (System/getProperty "os.name") ""))]
+              (cond (str/includes? n "mac")     :macos
+                    (str/includes? n "windows") :windows
+                    :else                       :linux)))
+
+          ;; fs/which is portable: invokes `which` on Unix, `where` on Windows.
           (defn installed? [cmd]
-            (zero? (:exit (p/sh "which" cmd))))
+            (some? (fs/which cmd)))
+
+          ;; Per-formula install routing. brew formulas like "borkdude/brew/clj-kondo"
+          ;; map to a single command name (last path segment), which is what
+          ;; both `installed?` and the Windows scoop bucket expect.
+          ;; Scoop packages assume the user has run:
+          ;;   scoop bucket add scoop-clojure https://github.com/littleli/scoop-clojure
+          ;;   scoop bucket add extras
+          ;; (see docs/platform-support.md). When we don't have an automated path
+          ;; (Linux), we print install instructions instead of failing — this keeps
+          ;; bb bootstrap recoverable on any platform.
+          (def manual-install-hints
+            {"clojure"          "https://clojure.org/guides/install_clojure"
+             "clj-kondo"        "https://github.com/clj-kondo/clj-kondo/blob/master/doc/install.md"
+             "markdownlint"     "npm install -g markdownlint-cli"
+             "poly"             "https://polylith.gitbook.io/polylith/install"
+             "bb"               "curl -sLO https://raw.githubusercontent.com/babashka/babashka/master/install && chmod +x install && ./install --static"
+             "java"             "Install Temurin 21 via your distro package manager (apt/dnf/pacman)"})
+
+          (defn- formula->cmd [formula]
+            (last (str/split formula (re-pattern "/"))))
 
           (defn brew-install [formula]
-            (let [cmd (last (str/split formula (re-pattern "/")))]
-              (if (installed? cmd)
+            (let [cmd (formula->cmd formula)]
+              (cond
+                (installed? cmd)
                 (println "  ✓" formula "already installed")
-                (do
-                  (println "  ⬇️ Installing" formula "...")
-                  (p/shell "brew" "install" formula)))))
+
+                (= os-key :macos)
+                (do (println "  ⬇️ Installing" formula "via brew ...")
+                    (p/shell "brew" "install" formula))
+
+                (= os-key :windows)
+                (do (println "  ⬇️ Installing" cmd "via scoop ...")
+                    (p/shell {:continue true} "scoop" "install" cmd))
+
+                :else
+                (do (println "  ⚠️  No automated installer for" cmd "on" (name os-key))
+                    (when-let [hint (get manual-install-hints cmd)]
+                      (println "      Install manually:" hint))))))
 
           (defn brew-upgrade [formula]
-            (println "  ⬆️ Upgrading" formula "...")
-            (p/shell {:continue true} "brew" "upgrade" formula)))
+            (let [cmd (formula->cmd formula)]
+              (cond
+                (= os-key :macos)
+                (do (println "  ⬆️ Upgrading" formula "via brew ...")
+                    (p/shell {:continue true} "brew" "upgrade" formula))
+
+                (= os-key :windows)
+                (do (println "  ⬆️ Upgrading" cmd "via scoop ...")
+                    (p/shell {:continue true} "scoop" "update" cmd))
+
+                :else
+                (do (println "  ⚠️  No automated upgrader for" cmd "on" (name os-key))
+                    (when-let [hint (get manual-install-hints cmd)]
+                      (println "      Upgrade per:" hint)))))))
 
   ;; ──────────────────────────────────────────────────────────────────────────
   ;; Linting & Formatting
@@ -249,9 +299,20 @@
 
   install:java
   {:doc  "Install Java (Temurin 21)"
-   :task (if (installed? "java")
+   :task (cond
+           (installed? "java")
            (println "  ✓ java already installed")
-           (p/shell "brew" "install" "--cask" "temurin@21"))}
+
+           (= os-key :macos)
+           (p/shell "brew" "install" "--cask" "temurin@21")
+
+           (= os-key :windows)
+           (do (println "  ⬇️ Installing Temurin 21 via scoop ...")
+               (p/shell {:continue true} "scoop" "install" "temurin21-jdk"))
+
+           :else
+           (do (println "  ⚠️  No automated Java installer on" (name os-key))
+               (println "      Install Temurin 21 via your distro package manager (apt/dnf/pacman)")))}
 
   install:clojure
   {:doc  "Install Clojure CLI"
@@ -270,9 +331,20 @@
 
   install:markdownlint
   {:doc  "Install markdownlint-cli"
-   :task (if (installed? "markdownlint")
+   :task (cond
+           (installed? "markdownlint")
            (println "  ✓ markdownlint-cli already installed")
-           (p/shell "brew" "install" "markdownlint-cli"))}
+
+           (= os-key :macos)
+           (p/shell "brew" "install" "markdownlint-cli")
+
+           ;; markdownlint-cli is an npm package — same install on Win/Linux.
+           :else
+           (if (installed? "npm")
+             (do (println "  ⬇️ Installing markdownlint-cli via npm ...")
+                 (p/shell {:continue true} "npm" "install" "-g" "markdownlint-cli"))
+             (do (println "  ⚠️  npm not found.")
+                 (println "      Install Node.js + npm, then: npm install -g markdownlint-cli"))))}
 
   install:poly
   {:doc  "Install Polylith CLI"
@@ -282,6 +354,41 @@
   {:doc     "Install all required dependencies"
    :depends [install:java install:clojure install:clj-kondo install:markdownlint install:poly]
    :task    (println "\n✅ All dependencies installed")}
+
+  check:platform
+  {:doc  "Report OS, shell, and required-tool status"
+   :task (let [props      (System/getProperties)
+               os-name    (.get props "os.name")
+               os-arch    (.get props "os.arch")
+               shell      (or (System/getenv "SHELL")
+                              (System/getenv "ComSpec")
+                              "(unknown)")
+               java-ver   (.get props "java.version")
+               bb-ver     (System/getProperty "babashka.version")
+               check      (fn [cmd]
+                            (if (installed? cmd)
+                              (str "  ✓ " cmd)
+                              (str "  ✗ " cmd " (not on PATH)")))]
+           (println "Miniforge platform check")
+           (println "────────────────────────")
+           (println "  OS       :" os-name "(" (name os-key) ")")
+           (println "  Arch     :" os-arch)
+           (println "  Shell    :" shell)
+           (println "  Java     :" java-ver)
+           (println "  Babashka :" bb-ver)
+           (println)
+           (println "Required tools:")
+           (doseq [cmd ["java" "clojure" "clj-kondo" "poly" "git" "markdownlint"]]
+             (println (check cmd)))
+           (when (= os-key :windows)
+             (println)
+             (println "Windows notes:")
+             (println "  • bb bootstrap routes brew installs to scoop on Windows.")
+             (println "  • Ensure these scoop buckets are added:")
+             (println "      scoop bucket add scoop-clojure https://github.com/littleli/scoop-clojure")
+             (println "      scoop bucket add extras")
+             (println "  • run-demo.sh requires Git Bash or WSL2.")
+             (println "  • See docs/platform-support.md for the full status matrix.")))}
 
   ;; ──────────────────────────────────────────────────────────────────────────
   ;; Upgraders

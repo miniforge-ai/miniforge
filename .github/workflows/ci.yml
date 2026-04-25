@@ -114,6 +114,53 @@ jobs:
           path: test-output.log
           retention-days: 7
 
+  # Windows fidelity job. Non-blocking (continue-on-error) until the
+  # Windows tester signs off — see docs/platform-support.md. Once stable,
+  # promote this to a required check and drop continue-on-error.
+  test-windows:
+    name: Test (Windows preview)
+    runs-on: windows-latest
+    continue-on-error: true
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure git for stable line endings
+        run: |
+          git config --global core.autocrlf input
+          git config --global core.eol lf
+        shell: pwsh
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+
+      - name: Install Clojure + bb (Windows)
+        uses: DeLaGuardo/setup-clojure@12.5
+        with:
+          cli: latest
+          bb: latest
+
+      - name: Cache Clojure dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.m2/repository
+            ~/.gitlibs
+          key: clojure-${{ runner.os }}-${{ hashFiles('deps.edn', '**/deps.edn') }}
+          restore-keys: |
+            clojure-${{ runner.os }}-
+
+      - name: Platform check
+        run: bb check:platform
+        shell: pwsh
+
+      - name: Run tests
+        run: bb test:all
+        shell: pwsh
+
   build:
     name: Build
     runs-on: ubuntu-latest
