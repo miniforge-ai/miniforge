@@ -20,7 +20,8 @@
   "Unit tests for bb-test-runner. Only the pure helpers are tested here;
    `run-all` is a Babashka-only entry point that calls `System/exit`
    and is exercised by the bb.edn `test` task rather than clojure.test."
-  (:require [clojure.test :refer [deftest testing is]]
+  (:require [clojure.string :as str]
+            [clojure.test :refer [deftest testing is]]
             [babashka.fs :as fs]
             [ai.miniforge.bb-test-runner.core :as sut]))
 
@@ -85,6 +86,71 @@
 (deftest test-discover-empty-for-no-roots
   (testing "given no roots → empty seq"
     (is (empty? (sut/discover-test-namespaces [])))))
+
+(deftest test-classify-coverage-paths-excludes-resources
+  (testing "merged classpath paths split into source and test roots"
+    (let [classified (sut/classify-coverage-paths
+                      ["tasks"
+                       "test"
+                       "mvp/src"
+                       "components/agent/src"
+                       "components/agent/resources"
+                       "components/agent/test"])]
+      (is (= ["test" "components/agent/test"] (:test-paths classified)))
+      (is (= ["tasks" "mvp/src" "components/agent/src"] (:source-paths classified))))))
+
+(deftest test-merge-deps-config-includes-test-alias-paths-and-deps
+  (testing "deps root and alias classpath merge into one runnable config"
+    (let [deps-config {:paths ["tasks"]
+                       :deps '{org.clojure/clojure {:mvn/version "1.12.0"}}
+                       :aliases {:test {:extra-paths ["test" "mvp/src"]
+                                        :extra-deps '{io.github.cognitect-labs/test-runner
+                                                      {:git/tag "v0.5.1"}}}}}
+          merged (sut/merge-deps-config deps-config {:alias-key :test})]
+      (is (= ["tasks" "test" "mvp/src"] (:paths merged)))
+      (is (= '{org.clojure/clojure {:mvn/version "1.12.0"}
+               io.github.cognitect-labs/test-runner {:git/tag "v0.5.1"}}
+             (:deps merged))))))
+
+(deftest test-coverage-args-builds-cloverage-command
+  (testing "coverage argv includes cloverage invocation and derived roots"
+    (let [deps-config {:paths ["tasks"]
+                       :deps '{org.clojure/clojure {:mvn/version "1.12.0"}}
+                       :aliases {:test {:extra-paths ["test" "mvp/src" "resources"]}}}
+          args (sut/coverage-args deps-config {:alias-key :test
+                                               :output-dir "target/custom-coverage"
+                                               :fail-threshold 75})
+          command-string (str/join " " args)]
+      (is (some #{"-Sdeps"} args))
+      (is (some #{"cloverage.coverage"} args))
+      (is (some #{"--src-ns-path"} args))
+      (is (some #{"--test-ns-path"} args))
+      (is (str/includes? command-string "target/custom-coverage"))
+      (is (str/includes? command-string "--fail-threshold 75"))
+      (is (str/includes? command-string "--src-ns-path tasks"))
+      (is (str/includes? command-string "--src-ns-path mvp/src"))
+      (is (str/includes? command-string "--test-ns-path test"))
+      (is (not (str/includes? command-string "--src-ns-path resources"))))))
+
+(deftest test-coverage-install-args-prefetches-cloverage
+  (testing "install argv prefetches the cloverage dependency"
+    (let [args (sut/coverage-install-args)
+          command-string (str/join " " args)]
+      (is (= "-P" (first args)))
+      (is (str/includes? command-string "cloverage"))
+      (is (str/includes? command-string "1.2.4")))))
+
+(deftest test-merge-deps-config-supports-multiple-aliases
+  (testing "multiple alias keys compose source and test classpaths"
+    (let [deps-config {:paths []
+                       :deps '{org.clojure/clojure {:mvn/version "1.12.0"}}
+                       :aliases {:dev {:extra-paths ["components/foo/src" "components/foo/resources"]}
+                                 :test {:extra-paths ["components/foo/test"]}}}
+          merged (sut/merge-deps-config deps-config {:alias-keys [:dev :test]})]
+      (is (= ["components/foo/src"
+              "components/foo/resources"
+              "components/foo/test"]
+             (:paths merged))))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

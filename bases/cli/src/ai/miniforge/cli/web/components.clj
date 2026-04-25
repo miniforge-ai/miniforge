@@ -23,26 +23,51 @@
    [clojure.string :as str]
    [hiccup2.core :as h]
    [hiccup.util :refer [raw-string]]
+   [ai.miniforge.cli.messages :as messages]
    [ai.miniforge.cli.web.risk :as risk]
    [ai.miniforge.cli.web.fleet :as fleet]))
+
+(def ^:const language-tag
+  "en")
+
+(def ^:const page-title-key
+  :web-ui/page-title)
+
+(def ^:const selected-class
+  "selected")
+
+(def ^:const sidebar-refresh-style
+  "padding: 4px 8px; font-size: 11px;")
+
+(def ^:const batch-approve-style
+  "padding: 6px 12px;")
+
+(def ^:const empty-state-style
+  "margin-top: 8px;")
+
+(def ^:const ai-placeholder-style
+  "color: var(--text-muted); font-style: italic; padding: 12px;")
+
+(def ^:const no-workflows-style
+  "color: var(--text-muted); font-size: 12px; text-align: center;")
+
+(def ^:const summary-message-style
+  "margin-top: 16px;")
+
+(def ^:const factors-style
+  "margin-top: 8px; color: var(--text-secondary);")
+
+(def ^:const chat-empty-style
+  "color: var(--text-muted); font-size: 13px;")
+
+(def ^:const chat-response-style
+  "white-space: pre-wrap; word-wrap: break-word;")
 
 (def css-styles
   (slurp (io/file "bases/cli/resources/dashboard.css")))
 
-(defn page [body]
-  (str
-   "<!DOCTYPE html>"
-   (h/html
-    [:html {:lang "en"}
-     [:head
-      [:meta {:charset "UTF-8"}]
-      [:meta {:name "viewport" :content "width=device-width, initial-scale=1.0"}]
-      [:title "Miniforge Fleet Dashboard"]
-      [:script {:src "https://unpkg.com/htmx.org@1.9.10"}]
-      [:style (raw-string css-styles)]]
-     [:body
-      body
-      [:script (raw-string "
+(def ^:const keyboard-shortcuts-script
+  "
         document.addEventListener('keydown', function(e) {
           if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
           switch(e.key) {
@@ -57,7 +82,28 @@
               break;
           }
         });
-      ")]]])))
+      ")
+
+(defn- t
+  ([message-key]
+   (messages/t message-key))
+  ([message-key params]
+   (messages/t message-key params)))
+
+(defn page [body]
+  (str
+   "<!DOCTYPE html>"
+   (h/html
+    [:html {:lang language-tag}
+     [:head
+      [:meta {:charset "UTF-8"}]
+      [:meta {:name "viewport" :content "width=device-width, initial-scale=1.0"}]
+      [:title (t page-title-key)]
+      [:script {:src "https://unpkg.com/htmx.org@1.9.10"}]
+      [:style (raw-string css-styles)]]
+     [:body
+      body
+      [:script (raw-string keyboard-shortcuts-script)]]])))
 
 (defn toast [message success?]
   (h/html
@@ -71,16 +117,21 @@
    [:div
     [:div.chat-message.user question]
     [:div.chat-message.assistant
-     [:pre {:style "white-space: pre-wrap; word-wrap: break-word;"} response]]]))
+     [:pre {:style chat-response-style} response]]]))
+
+(defn- overall-status-key
+  [overall]
+  (case overall
+    :healthy :web-ui/status-healthy
+    :degraded :web-ui/status-degraded
+    :warning :web-ui/status-warning
+    :error :web-ui/status-error
+    :web-ui/status-unknown))
 
 (defn status-indicator [status]
-  (let [status-class (name (:overall status))
-        status-text (case (:overall status)
-                      :healthy "All systems operational"
-                      :degraded "Some repos unreachable"
-                      :warning "No repos configured"
-                      :error "GitHub CLI not authenticated"
-                      "Unknown")]
+  (let [overall (get status :overall)
+        status-class (name overall)
+        status-text (t (overall-status-key overall))]
     (h/html
      [:div.status-indicator {:class (str "status-" status-class)
                              :hx-get "/api/status"
@@ -102,7 +153,7 @@
     (h/html
      [:div.workflow-status
       {:hx-get "/api/workflows" :hx-trigger "every 60s" :hx-swap "outerHTML"}
-      [:div.workflow-status-header [:span "⚙️ Workflow Status"]]
+      [:div.workflow-status-header [:span (t :web-ui/workflow-status-header)]]
       [:div.workflow-stats
        [:span.workflow-stat.workflow-stat-running [:span (str running " ⏳")]]
        [:span.workflow-stat.workflow-stat-failed [:span (str failed " ✗")]]
@@ -114,13 +165,13 @@
             [:span.workflow-run-status (workflow-status-icon run)]
             [:span.workflow-run-name (:workflowName run)]
             [:span.workflow-run-time (fleet/format-time-ago (:createdAt run))]])
-         [:div {:style "color: var(--text-muted); font-size: 12px; text-align: center;"}
-          "No recent workflows"])]])))
+         [:div {:style no-workflows-style}
+          (t :web-ui/workflow-status-none)])]])))
 
 (defn ai-summary [summary]
   (h/html
    [:div.ai-summary
-    [:div.ai-summary-header [:span "🤖"] [:span "AI Analysis"]]
+    [:div.ai-summary-header [:span "🤖"] [:span (t :web-ui/ai-analysis)]]
     [:div.ai-summary-content (:summary summary)]]))
 
 (defn ai-summary-placeholder [repo number]
@@ -128,22 +179,30 @@
    [:div
     {:hx-post (str "/api/pr/" (java.net.URLEncoder/encode repo "UTF-8") "/" number "/summary")
      :hx-trigger "load" :hx-target "this" :hx-swap "outerHTML"}
-    [:div {:style "color: var(--text-muted); font-style: italic; padding: 12px;"}
-     "🤖 Generating AI summary..."]]))
+    [:div {:style ai-placeholder-style}
+     (t :web-ui/ai-summary-loading)]]))
 
 (defn ai-summary-error [message]
   (h/html
    [:div.ai-summary
-    [:div.ai-summary-header [:span "⚠️"] [:span "Summary Unavailable"]]
+    [:div.ai-summary-header [:span "⚠️"] [:span (t :web-ui/summary-unavailable)]]
     [:div.ai-summary-content {:style "color: var(--text-muted)"} message]]))
 
 (defn empty-detail []
   (h/html
    [:div.empty-state
     [:div.empty-state-icon "📋"]
-    [:h3 "Select a PR to view details"]
-    [:p {:style "margin-top: 8px;"}
-     "Choose a pull request from the list to see AI analysis and take actions."]]))
+    [:h3 (t :web-ui/empty-detail-heading)]
+    [:p {:style empty-state-style}
+     (t :web-ui/empty-detail-body)]]))
+
+(defn- batch-approve-confirm
+  [count]
+  (t :web-ui/batch-approve-confirm {:count count}))
+
+(defn- batch-approve-label
+  [count]
+  (t :web-ui/batch-approve-label {:count count}))
 
 (defn fleet-summary [summary]
   (let [{:keys [total recommendation high-risk medium-risk low-risk]} summary
@@ -156,7 +215,7 @@
      [:div.fleet-summary
       [:div.fleet-summary-icon icon]
       [:div.fleet-summary-content
-       [:div.fleet-summary-title (str total " Open PRs Across Fleet")]
+       [:div.fleet-summary-title (t :web-ui/open-prs-title {:count total})]
        [:div.fleet-summary-recommendation recommendation]]
       [:div.fleet-summary-actions
        (when (pos? (:count low-risk))
@@ -164,163 +223,267 @@
           {:hx-post "/api/batch-approve"
            :hx-target "#toast-container"
            :hx-swap "innerHTML"
-           :hx-confirm (str "Approve all " (:count low-risk) " low-risk PRs?")}
-          (str "Approve " (:count low-risk) " Safe")])]])))
+           :hx-confirm (batch-approve-confirm (:count low-risk))}
+          (batch-approve-label (:count low-risk))])]])))
 
 (defn pr-url [repo number]
   (str "/api/pr/" (java.net.URLEncoder/encode repo "UTF-8") "/" number))
 
+(defn- risk-label
+  [risk-level]
+  (t (case risk-level
+       :low :web-ui/risk-low
+       :medium :web-ui/risk-medium
+       :high :web-ui/risk-high
+       :web-ui/risk-unknown)))
+
+(defn- detail-header
+  [risk-level number repo author additions deletions]
+  (let [author-login (get author :login (t :web-ui/unknown-author))]
+    [:div.detail-header
+     [:div.detail-title
+      [:span.risk-badge {:class (name risk-level)}
+       (case risk-level :low "●" :medium "◐" :high "◉")
+       (risk-label risk-level)]
+      (t :web-ui/pr-number {:number number})]
+     [:div.detail-meta
+      [:span (t :web-ui/repo-meta {:repo repo})]
+      [:span (t :web-ui/author-meta {:author author-login})]
+      [:span (t :web-ui/change-meta {:additions additions :deletions deletions})]]]))
+
+ (defn- analysis-stats
+  [risk-level complexity total-changes file-count]
+  [:div.stats-grid
+   [:div.stat-card
+    [:div.stat-card-value {:style (str "color: " (get risk/colors risk-level))}
+     (risk-label risk-level)]
+    [:div.stat-card-label (t :web-ui/risk-level-label)]]
+   [:div.stat-card
+    [:div.stat-card-value (str/capitalize (name complexity))]
+    [:div.stat-card-label (t :web-ui/complexity-label)]]
+   [:div.stat-card
+    [:div.stat-card-value total-changes]
+    [:div.stat-card-label (t :web-ui/lines-changed-label)]]
+   [:div.stat-card
+    [:div.stat-card-value file-count]
+    [:div.stat-card-label (t :web-ui/files-modified-label)]]])
+
+(defn- recommendation-box
+  [risk-level suggested-action]
+  (let [background-color (get risk/bg-colors risk-level)
+        style-value (str "margin-top: 16px; padding: 12px; border-radius: 6px; background: "
+                         background-color)]
+    [:div {:style style-value}
+     [:strong (t :web-ui/recommendation-prefix)]
+     suggested-action]))
+
+(defn- ai-analysis-section
+  [repo number {:keys [risk complexity summary suggested-action reasons total-changes file-count]}]
+  [:div.section
+   [:div.section-title (t :web-ui/ai-analysis)]
+   (analysis-stats risk complexity total-changes file-count)
+   [:div {:style summary-message-style}
+    [:strong (t :web-ui/summary-prefix)]
+    summary]
+   (when (seq reasons)
+     [:div {:style factors-style}
+      [:strong (t :web-ui/factors-prefix)]
+      (str/join ", " reasons)])
+   (recommendation-box risk suggested-action)
+   [:div#ai-summary-container (ai-summary-placeholder repo number)]])
+
+(defn- action-buttons
+  [repo number url]
+  [:div.actions
+   [:button.btn.btn-success
+    {:hx-post (str (pr-url repo number) "/approve")
+     :hx-target "#toast-container"
+     :hx-swap "innerHTML"}
+    (t :web-ui/approve-button)]
+   [:button.btn.btn-danger
+    {:hx-post (str (pr-url repo number) "/reject")
+     :hx-target "#toast-container"
+     :hx-swap "innerHTML"
+     :hx-prompt (t :web-ui/reject-prompt)}
+    (t :web-ui/reject-button)]
+   [:a.btn.btn-secondary {:href url :target "_blank"}
+    (t :web-ui/open-github-button)]])
+
+(defn- detail-actions
+  [repo number url]
+  [:div.section
+   [:div.section-title (t :web-ui/actions-heading)]
+   (action-buttons repo number url)])
+
+(defn- quick-question-buttons
+  [repo number]
+  (for [{:keys [label prompt]} (t :web-ui/chat-quick-questions)]
+    [:button.quick-question
+     {:hx-post (str (pr-url repo number) "/chat")
+      :hx-target "#chat-messages"
+      :hx-swap "beforeend"
+      :hx-vals (str "{\"question\": \"" prompt "\"}")}
+     label]))
+
+(defn- chat-section
+  [repo number]
+  [:div.chat-section
+   [:div.chat-header
+    [:span "💬"]
+    [:span (t :web-ui/chat-heading)]]
+   [:div#chat-messages.chat-messages
+    [:div {:style chat-empty-style}
+     (t :web-ui/chat-empty-state)]]
+   [:div.quick-questions
+    (quick-question-buttons repo number)]
+   [:form.chat-input-container
+    {:hx-post (str (pr-url repo number) "/chat")
+     :hx-target "#chat-messages"
+     :hx-swap "beforeend"}
+    [:input.chat-input
+     {:type "text"
+      :name "question"
+      :placeholder (t :web-ui/chat-placeholder)
+      :autocomplete "off"}]
+    [:button.btn.btn-primary {:type "submit"}
+     (t :web-ui/chat-submit-button)]]])
+
 (defn pr-detail [{:keys [number title author url repo additions deletions analysis]}]
-  (let [{:keys [risk complexity summary suggested-action reasons total-changes file-count]} analysis]
+  (let [risk-level (get analysis :risk)]
     (h/html
      [:div
-      [:div.detail-header
-       [:div.detail-title
-        [:span.risk-badge {:class (name risk)}
-         (case risk :low "●" :medium "◐" :high "◉")
-         (str/upper-case (name risk))]
-        (str "PR #" number)]
-       [:div.detail-meta
-        [:span "📦 " repo]
-        [:span "👤 " (get author :login "unknown")]
-        [:span "📊 +" additions " / -" deletions]]]
-
+      (detail-header risk-level number repo author additions deletions)
       [:div.detail-content
        [:div.section
-        [:div.section-title "Title"]
+        [:div.section-title (t :web-ui/title-heading)]
         [:p title]]
+       (ai-analysis-section repo number analysis)
+       (detail-actions repo number url)
+       (chat-section repo number)]])))
 
-       [:div.section
-        [:div.section-title "AI Analysis"]
-        [:div.stats-grid
-         [:div.stat-card
-          [:div.stat-card-value {:style (str "color: " (get risk/colors risk))}
-           (str/upper-case (name risk))]
-          [:div.stat-card-label "Risk Level"]]
-         [:div.stat-card
-          [:div.stat-card-value (str/capitalize (name complexity))]
-          [:div.stat-card-label "Complexity"]]
-         [:div.stat-card
-          [:div.stat-card-value total-changes]
-          [:div.stat-card-label "Lines Changed"]]
-         [:div.stat-card
-          [:div.stat-card-value file-count]
-          [:div.stat-card-label "Files Modified"]]]
+(defn- repo-item-selected?
+  [selected-pr repo number]
+  (and selected-pr
+       (= (:repo selected-pr) repo)
+       (= (:number selected-pr) number)))
 
-        [:div {:style "margin-top: 16px;"} [:strong "Summary: "] summary]
+(defn- repo-pr-item
+  [repo selected-pr {:keys [number title analysis]}]
+  (let [selected? (repo-item-selected? selected-pr repo number)
+        item-class (when selected? selected-class)]
+    [:div.pr-item
+     {:class item-class
+      :hx-get (pr-url repo number)
+      :hx-target "#detail-panel"
+      :hx-swap "innerHTML"}
+     [:span.pr-risk-dot {:class (str "pr-risk-" (name (:risk analysis)))}]
+     [:span.pr-number (str "#" number)]
+     [:span.pr-title title]]))
 
-        (when (seq reasons)
-          [:div {:style "margin-top: 8px; color: var(--text-secondary);"}
-           [:strong "Factors: "] (str/join ", " reasons)])
+(defn- repo-group
+  [selected-pr {:keys [repo prs]}]
+  [:div.repo-group
+   [:div.repo-header.expanded
+    [:span.repo-icon "📦"]
+    [:span.repo-name repo]
+    [:span.repo-count (count prs)]]
+   [:div.pr-list
+    (for [pr prs]
+      (repo-pr-item repo selected-pr pr))]])
 
-        [:div {:style (str "margin-top: 16px; padding: 12px; border-radius: 6px; background: " (get risk/bg-colors risk))}
-         [:strong "Recommendation: "] suggested-action]
-
-        [:div#ai-summary-container (ai-summary-placeholder repo number)]]
-
-       [:div.section
-        [:div.section-title "Actions"]
-        [:div.actions
-         [:button.btn.btn-success
-          {:hx-post (str (pr-url repo number) "/approve")
-           :hx-target "#toast-container" :hx-swap "innerHTML"}
-          "✓ Approve"]
-         [:button.btn.btn-danger
-          {:hx-post (str (pr-url repo number) "/reject")
-           :hx-target "#toast-container" :hx-swap "innerHTML"
-           :hx-prompt "Reason for requesting changes:"}
-          "✗ Request Changes"]
-         [:a.btn.btn-secondary {:href url :target "_blank"} "Open in GitHub"]]]
-
-       [:div.chat-section
-        [:div.chat-header [:span "💬"] [:span "Ask AI about this PR"]]
-        [:div#chat-messages.chat-messages
-         [:div {:style "color: var(--text-muted); font-size: 13px;"}
-          "Ask questions about this PR to get AI-powered insights."]]
-        [:div.quick-questions
-         (for [[label q] [["What could break?" "What could break with these changes?"]
-                          ["Security concerns?" "Are there any security concerns?"]
-                          ["Summarize changes" "Summarize the key changes in this PR."]
-                          ["Test suggestions" "What tests should be added for these changes?"]]]
-           [:button.quick-question
-            {:hx-post (str (pr-url repo number) "/chat")
-             :hx-target "#chat-messages" :hx-swap "beforeend"
-             :hx-vals (str "{\"question\": \"" q "\"}")}
-            label])]
-        [:form.chat-input-container
-         {:hx-post (str (pr-url repo number) "/chat")
-          :hx-target "#chat-messages" :hx-swap "beforeend"}
-         [:input.chat-input {:type "text" :name "question"
-                             :placeholder "Ask a question about this PR..."
-                             :autocomplete "off"}]
-         [:button.btn.btn-primary {:type "submit"} "Ask"]]]]])))
+(defn- sidebar-header
+  []
+  [:div.sidebar-header
+   [:span (t :web-ui/repositories-heading)]
+   [:button.btn.btn-secondary
+    {:hx-get "/api/refresh"
+     :hx-target "#main-content"
+     :hx-swap "innerHTML"
+     :style sidebar-refresh-style}
+    (t :web-ui/refresh-button)]])
 
 (defn repo-tree [repos-with-prs selected-pr]
   (h/html
    [:div.sidebar
-    [:div.sidebar-header
-     [:span "Repositories"]
-     [:button.btn.btn-secondary
-      {:hx-get "/api/refresh" :hx-target "#main-content" :hx-swap "innerHTML"
-       :style "padding: 4px 8px; font-size: 11px;"}
-      "Refresh"]]
+    (sidebar-header)
     [:div.sidebar-content
-     (for [{:keys [repo prs]} repos-with-prs]
-       [:div.repo-group
-        [:div.repo-header.expanded
-         [:span.repo-icon "📦"]
-         [:span.repo-name repo]
-         [:span.repo-count (count prs)]]
-        [:div.pr-list
-         (for [{:keys [number title analysis]} prs
-               :let [selected? (and selected-pr
-                                    (= (:repo selected-pr) repo)
-                                    (= (:number selected-pr) number))]]
-           [:div.pr-item
-            {:class (when selected? "selected")
-             :hx-get (pr-url repo number) :hx-target "#detail-panel" :hx-swap "innerHTML"}
-            [:span.pr-risk-dot {:class (str "pr-risk-" (name (:risk analysis)))}]
-            [:span.pr-number (str "#" number)]
-            [:span.pr-title title]])]])
+     (for [repo-group-data repos-with-prs]
+       (repo-group selected-pr repo-group-data))
      (workflow-status (map :repo repos-with-prs))]]))
+
+(defn- pr-counts
+  [all-prs]
+  {:total (count all-prs)
+   :low (count (filter #(= :low (get-in % [:analysis :risk])) all-prs))
+   :medium (count (filter #(= :medium (get-in % [:analysis :risk])) all-prs))
+   :high (count (filter #(= :high (get-in % [:analysis :risk])) all-prs))})
+
+(defn- fleet-header
+  [fleet-status]
+  [:div.header
+   [:div {:style "display: flex; align-items: center; gap: 16px;"}
+    [:h1 (t :web-ui/fleet-dashboard-heading)]
+    (status-indicator fleet-status)]])
+
+(defn- stat-pill
+  [class-name text]
+  [:span {:class class-name} text])
+
+(defn- batch-approve-safe-button
+  [safe-count]
+  [:button.btn.btn-success
+   {:hx-post "/api/batch-approve"
+    :hx-target "#toast-container"
+    :hx-swap "innerHTML"
+    :hx-confirm (batch-approve-confirm safe-count)
+    :style batch-approve-style}
+   (t :web-ui/batch-approve-safe)])
+
+(defn- dashboard-stats
+  [{:keys [total low medium high]}]
+  [:div.header-stats
+   (stat-pill "stat" (t :web-ui/pr-total {:count total}))
+   (stat-pill "stat stat-low" (t :web-ui/pr-low {:count low}))
+   (stat-pill "stat stat-medium" (t :web-ui/pr-medium {:count medium}))
+   (stat-pill "stat stat-high" (t :web-ui/pr-high {:count high}))
+   (when (pos? low)
+     (batch-approve-safe-button low))])
+
+(defn- detail-panel
+  [selected-pr]
+  [:div#detail-panel.detail-panel
+   (if selected-pr
+     (pr-detail selected-pr)
+     (empty-detail))])
+
+(defn- keyboard-hint
+  [prefix-key suffix-key label]
+  [:span
+   [:kbd prefix-key]
+   "/"
+   [:kbd suffix-key]
+   (str " " label)])
+
+(defn- keyboard-hints
+  []
+  [:div.keyboard-hints
+   (keyboard-hint "j" "k" (t :web-ui/hint-navigate))
+   [:span [:kbd "r"] (str " " (t :web-ui/hint-refresh))]
+   [:span [:kbd "a"] (str " " (t :web-ui/hint-approve))]
+   [:span [:kbd "x"] (str " " (t :web-ui/hint-reject))]])
 
 (defn dashboard [repos-with-prs selected-pr fleet-status]
   (let [all-prs (mapcat :prs repos-with-prs)
-        pr-counts {:total (count all-prs)
-                   :low (count (filter #(= :low (get-in % [:analysis :risk])) all-prs))
-                   :medium (count (filter #(= :medium (get-in % [:analysis :risk])) all-prs))
-                   :high (count (filter #(= :high (get-in % [:analysis :risk])) all-prs))}
+        counts (pr-counts all-prs)
         summary (fleet/generate-summary repos-with-prs)]
     (h/html
      [:div.container
-      [:div.header
-       [:div {:style "display: flex; align-items: center; gap: 16px;"}
-        [:h1 "⚡ Fleet Dashboard"]
-        (status-indicator fleet-status)]
-       [:div.header-stats
-        [:span.stat (str (:total pr-counts) " PRs")]
-        [:span.stat.stat-low "● " (:low pr-counts) " safe"]
-        [:span.stat.stat-medium "◐ " (:medium pr-counts) " review"]
-        [:span.stat.stat-high "◉ " (:high pr-counts) " risky"]
-        (when (pos? (:low pr-counts))
-          [:button.btn.btn-success
-           {:hx-post "/api/batch-approve"
-            :hx-target "#toast-container" :hx-swap "innerHTML"
-            :hx-confirm (str "Approve all " (:low pr-counts) " low-risk PRs?")
-            :style "padding: 6px 12px;"}
-           "Batch Approve Safe"])]]
-
-      (when (pos? (:total summary)) (fleet-summary summary))
-
+      (fleet-header fleet-status)
+      (dashboard-stats counts)
+      (when (pos? (:total summary))
+        (fleet-summary summary))
       [:div#main-content.main-content
        (repo-tree repos-with-prs selected-pr)
-       [:div#detail-panel.detail-panel
-        (if selected-pr (pr-detail selected-pr) (empty-detail))]]
-
-      [:div.keyboard-hints
-       [:span [:kbd "j"] "/" [:kbd "k"] " navigate"]
-       [:span [:kbd "r"] " refresh"]
-       [:span [:kbd "a"] " approve"]
-       [:span [:kbd "x"] " reject"]]
-
+       (detail-panel selected-pr)]
+      (keyboard-hints)
       [:div#toast-container]])))

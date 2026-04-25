@@ -1,12 +1,14 @@
 {:min-bb-version "1.3.0"
 
- :deps {io.github.lispyclouds/bblgum {:git/sha "df647fb50f32e05b26e46e58d7249b4798e469e6"}}
+ :deps {io.github.lispyclouds/bblgum {:git/sha "df647fb50f32e05b26e46e58d7249b4798e469e6"}
+        ai.miniforge/bb-utils {:local/root "projects/bb-utils"}}
 
  :paths ["tasks"]
 
  :tasks
  {:requires ([babashka.fs :as fs]
              [babashka.process :as p]
+             [ai.miniforge.bb-dev-tools.interface :as bb-dev-tools]
              [clojure.string :as str])
 
   :init (do
@@ -89,6 +91,13 @@
    :task (do
            (run 'test)
            (run 'test:integration))}
+
+  ccov
+  {:doc  "Run the repo coverage toolset from bb-tools.edn"
+   :task (let [exit (bb-dev-tools/run-toolset {:repo-root "."
+                                               :toolset-id :toolset/coverage})]
+           (when-not (zero? exit)
+             (System/exit exit)))}
 
   test:conformance
   {:doc  "Run N1 conformance test suite"
@@ -252,6 +261,13 @@
   {:doc  "Install clj-kondo linter"
    :task (brew-install "borkdude/brew/clj-kondo")}
 
+  install:coverage
+  {:doc  "Install or prefetch the repo coverage toolset from bb-tools.edn"
+   :task (let [exit (bb-dev-tools/install-toolset {:repo-root "."
+                                                   :toolset-id :toolset/coverage})]
+           (when-not (zero? exit)
+             (System/exit exit)))}
+
   install:markdownlint
   {:doc  "Install markdownlint-cli"
    :task (if (installed? "markdownlint")
@@ -320,7 +336,7 @@
 
   bootstrap
   {:doc     "Full project bootstrap: install deps + configure environment"
-   :depends [install:deps]
+   :depends [install:deps install:coverage]
    :task    (do
               (println "\n🔧 Configuring development environment...\n")
               (run 'setup:hooks)

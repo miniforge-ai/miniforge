@@ -1,0 +1,12 @@
+{:tools
+ {:coverage/cloverage
+  {:tool/id :coverage/cloverage
+   :tool/type :coverage
+   :tool/adapter :clojure/cloverage
+   :tool/config {:alias-keys [:dev :test]
+                 :output-dir "target/coverage"}}}
+
+ :toolsets
+ {:toolset/coverage
+  {:toolset/id :toolset/coverage
+   :toolset/tools [:coverage/cloverage]}}}

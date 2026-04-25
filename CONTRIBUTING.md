@@ -125,7 +125,7 @@ clojure -M:poly test component:workflow
 clojure -M:test -n ai.miniforge.workflow.validator-test
 
 # Run with coverage
-bb test:coverage
+bb ccov
 ```
 
 ## Code Style
