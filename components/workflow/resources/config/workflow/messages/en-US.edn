@@ -35,6 +35,18 @@
   "Workflow {workflow-id} failed registration validation"
   :status/dag-executed-summary "DAG executed {task-count} task(s) successfully"
 
+  ;; Configurable workflow execution
+  :configurable/missing-phase-handler
+  "No phase handler registered for {handler-key}"
+  :configurable/phase-execution-failed
+  "Phase execution failed: {error}"
+  :configurable/default-phase-error
+  "Phase execution failed"
+  :configurable/phase-not-found
+  "Phase not found: {phase}"
+  :configurable/dag-execution-failed
+  "Parallel task execution failed"
+
   ;; Phase result messages
   :phase/gate-failed-phase   "Gate validation failed for phase {phase}"
   :phase/agent-failed-phase  "Agent failed in phase {phase}"

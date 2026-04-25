@@ -21,6 +21,8 @@
    [clojure.test :refer [deftest is testing]]
    [ai.miniforge.artifact.interface :as artifact]
    [ai.miniforge.workflow.configurable :as configurable]
+   [ai.miniforge.workflow.context :as ctx]
+   [ai.miniforge.workflow.dag-orchestrator :as dag-orch]
    [ai.miniforge.workflow.state :as state]
    [ai.miniforge.agent.interface :as agent]))
 
@@ -43,40 +45,105 @@
       (is (nil? (configurable/find-phase workflow :missing))
           "Should return nil for non-existent phase"))))
 
-(deftest select-next-phase-test
-  (testing "Select next phase with transition"
-    (let [workflow {:workflow/phases
+(deftest configurable-workflow-uses-machine-transitions-test
+  (testing "Configurable workflows advance through the compiled execution machine"
+    (let [workflow {:workflow/id :machine-backed
+                    :workflow/version "1.0.0"
+                    :workflow/phases
                     [{:phase/id :plan
                       :phase/name "Plan"
-                      :phase/next [{:target :implement}]}]
-                    :workflow/exit-phases [:done]}
-          exec-state {:execution/current-phase :plan}
-          phase-result {:success? true}
-          next-phase (configurable/select-next-phase workflow exec-state phase-result)]
-      (is (= :implement next-phase)
-          "Should transition to target phase")))
+                      :phase/agent :none
+                      :phase/next [{:target :implement}]}
+                     {:phase/id :implement
+                      :phase/name "Implement"
+                      :phase/agent :none
+                      :phase/next [{:target :done}]}
+                     {:phase/id :done
+                      :phase/name "Done"
+                      :phase/agent :none
+                      :phase/next []}]}
+          exec-state (configurable/run-configurable-workflow workflow {} {})]
+      (is (state/completed? exec-state))
+      (is (= :done (:execution/current-phase exec-state)))
+      (is (= 2 (:execution/phase-index exec-state)))
+      (is (= #{:plan :implement :done}
+             (set (keys (:execution/phase-results exec-state)))))
+      (let [phase-transitions (filter :from-phase (:execution/history exec-state))]
+        (is (= 2 (count phase-transitions)))
+        (is (= :plan (:from-phase (first phase-transitions))))
+        (is (= :implement (:to-phase (first phase-transitions))))
+        (is (= :implement (:from-phase (second phase-transitions))))
+        (is (= :done (:to-phase (second phase-transitions))))))))
 
-  (testing "Select :done when at exit phase"
-    (let [workflow {:workflow/phases
-                    [{:phase/id :done
-                      :phase/name "Done"}]
-                    :workflow/exit-phases [:done]}
-          exec-state {:execution/current-phase :done}
-          phase-result {:success? true}
-          next-phase (configurable/select-next-phase workflow exec-state phase-result)]
-      (is (= :done next-phase)
-          "Should select :done when at exit phase")))
-
-  (testing "Select :done when no transition defined"
-    (let [workflow {:workflow/phases
-                    [{:phase/id :orphan
-                      :phase/name "Orphan"}]
-                    :workflow/exit-phases [:done]}
-          exec-state {:execution/current-phase :orphan}
-          phase-result {:success? true}
-          next-phase (configurable/select-next-phase workflow exec-state phase-result)]
-      (is (= :done next-phase)
-          "Should select :done when no transition defined"))))
+(deftest configurable-workflow-dag-success-skips-implement-test
+  (testing "successful DAG execution advances past synthesized implement work"
+    (let [plan-artifact {:plan/id (random-uuid)
+                         :artifact/type :plan
+                         :tasks [{:task/id "task-1"}]}
+          dag-artifact {:artifact/type :pull-request
+                        :artifact/id (random-uuid)}
+          workflow {:workflow/id :dag-configurable
+                    :workflow/version "1.0.0"
+                    :workflow/phases
+                    [{:phase/id :plan
+                      :phase/name "Plan"
+                      :phase/handler :test/plan
+                      :phase/next [{:target :implement}]}
+                     {:phase/id :implement
+                      :phase/name "Implement"
+                      :phase/agent :none
+                      :phase/next [{:target :pr-monitor}]}
+                     {:phase/id :pr-monitor
+                      :phase/name "PR Monitor"
+                      :phase/agent :none
+                      :phase/next [{:target :done}]}
+                     {:phase/id :done
+                      :phase/name "Done"
+                      :phase/agent :none
+                      :phase/next []}]
+                    :workflow/pipeline
+                    [{:phase :plan :on-success :implement}
+                     {:phase :implement :on-success :pr-monitor}
+                     {:phase :pr-monitor :on-success :done}
+                     {:phase :done}]}
+          execution-context {:phase-handlers {:test/plan
+                                              (fn [_phase _exec-state _context]
+                                                {:success? true
+                                                 :artifacts [plan-artifact]
+                                                 :errors []
+                                                 :metrics {:duration-ms 1}})}}
+          exec-state (ctx/create-context workflow {} execution-context)
+          plan-phase (configurable/find-phase workflow :plan)]
+      (with-redefs [dag-orch/parallelizable-plan? (fn [_plan] true)
+                    dag-orch/execute-plan-as-dag (fn [_plan _context]
+                                                  {:success? true
+                                                   :artifacts [dag-artifact]
+                                                   :metrics {:tokens 3
+                                                             :cost-usd 0.0
+                                                             :duration-ms 5}
+                                                   :pr-infos [{:pr/url "https://example.test/pr/1"}]})]
+        (let [[status next-state]
+              (configurable/execute-phase-step workflow
+                                               exec-state
+                                               plan-phase
+                                               execution-context
+                                               {})]
+          (is (= :continue status))
+          (is (= :pr-monitor (:execution/current-phase next-state)))
+          (is (= #{:plan :implement :dag-execution}
+                 (set (keys (:execution/phase-results next-state)))))
+          (is (true? (get-in next-state [:execution/phase-results :implement :success?])))
+          (is (= [dag-artifact]
+                 (get-in next-state [:execution/phase-results :implement :artifacts])))
+          (is (= [{:pr/url "https://example.test/pr/1"}]
+                 (:execution/dag-pr-infos next-state)))
+          (let [phase-transitions (filter :from-phase (:execution/history next-state))
+                transition-pairs (set (map (juxt :from-phase :to-phase)
+                                           phase-transitions))]
+            (is (= 2 (count phase-transitions)))
+            (is (= #{[:plan :implement]
+                     [:implement :pr-monitor]}
+                   transition-pairs))))))))
 
 (deftest execute-configurable-phase-test
   (testing "Execute normal phase returns success"
@@ -257,14 +324,14 @@
       ;; Verify workflow completed all phases
       (is (state/completed? exec-state)
           "Workflow should complete")
-      (is (= 3 (count (:execution/phase-results exec-state)))
-          "Should have results for 3 executed phases (plan, implement, verify)")
+      (is (= 4 (count (:execution/phase-results exec-state)))
+          "Should have results for all executed phases, including :done")
 
       ;; Verify transition history
       (let [history (:execution/history exec-state)
             phase-transitions (filter :from-phase history)]
-        (is (= 2 (count phase-transitions))
-            "Should have 2 phase transitions (plan->impl, impl->verify)")
+        (is (= 3 (count phase-transitions))
+            "Should have 3 phase transitions (plan->impl, impl->verify, verify->done)")
         (is (= :plan (:from-phase (first phase-transitions)))
             "First transition from plan")
         (is (= :implement (:to-phase (first phase-transitions)))

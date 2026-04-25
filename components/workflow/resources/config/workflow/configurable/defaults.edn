@@ -1,0 +1,7 @@
+{:configurable/defaults
+ {:max-phases 50
+  :default-inner-loop-iterations 5
+  :default-phase-metrics
+  {:tokens 0
+   :cost-usd 0.0
+   :duration-ms 0}}}
