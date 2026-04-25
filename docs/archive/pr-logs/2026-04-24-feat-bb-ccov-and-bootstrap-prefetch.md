@@ -30,6 +30,13 @@ first coverage run does not have to install tooling on demand.
   - document bootstrap coverage prefetch
 - `CONTRIBUTING.md`
   - standardize coverage command on `bb ccov`
+- `components/web-dashboard/src/ai/miniforge/web_dashboard/views.clj`
+  - split the large layout renderer into smaller helpers
+  - move layout copy to localized message lookups
+- `components/web-dashboard/resources/config/web-dashboard/messages/en-US.edn`
+  - add localized layout strings
+- `components/web-dashboard/test/ai/miniforge/web_dashboard/views_test.clj`
+  - add focused layout contract coverage
 
 ## Verification
 
@@ -37,13 +44,17 @@ first coverage run does not have to install tooling on demand.
 - `bb install:coverage`
 - `bb bootstrap`
 - `clojure -Sdeps '{:deps {ai.miniforge/bb-test-runner {:local/root "components/bb-test-runner"} io.github.cognitect-labs/test-runner {:git/tag "v0.5.1" :git/sha "dfb30dd"} babashka/fs {:mvn/version "0.5.22"}} :paths ["components/bb-test-runner/src" "components/bb-test-runner/test"]}' -M -m cognitect.test-runner -d components/bb-test-runner/test`
+- `clojure -M:test -e "(require 'ai.miniforge.web-dashboard.views-test)(let [result (clojure.test/run-tests 'ai.miniforge.web-dashboard.views-test)] (when (pos? (+ (:fail result) (:error result))) (System/exit 1)))"`
+- `bb ccov`
 
 Results:
 - `bb install:coverage` passed
 - `bb bootstrap` passed
 - `bb-test-runner` component tests passed: 11 tests, 26 assertions
+- `web-dashboard.views-test` passed: 5 tests, 18 assertions
 
 Note:
-- `bb ccov` was started against the full monorepo but did not complete in
-  a reasonable interactive window, so this PR does not claim a completed
-  full-repo coverage run yet.
+- the original Cloverage blocker in `web_dashboard/views.clj` is fixed;
+  the next full-repo coverage blocker is now
+  `components/cli-web/src/ai/miniforge/cli/web/components.clj`, which
+  fails instrumentation with the same JVM `Method code too large!` limit.
