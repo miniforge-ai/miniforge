@@ -31,6 +31,9 @@
    [clojure.java.io :as io]
    [clojure.string :as str]
    [ai.miniforge.response.interface :as response]
+   [ai.miniforge.workflow.fsm :as workflow-fsm]
+   [ai.miniforge.workflow.messages :as messages]
+   [ai.miniforge.workflow.validator :as validator]
    [ai.miniforge.workflow.schemas :as schemas])
   (:import
    [java.util.jar JarFile]))
@@ -164,19 +167,41 @@
 ;;------------------------------------------------------------------------------ Layer 3
 ;; Registry operations
 
+(defn- registration-errors
+  [workflow]
+  (let [workflow-validation (validator/validate-workflow workflow)
+        machine-validation (when (:workflow/pipeline workflow)
+                             (workflow-fsm/validate-execution-machine workflow))]
+    (vec (concat (:errors workflow-validation)
+                 (:errors machine-validation)))))
+
+(defn- validate-workflow-registration!
+  [workflow]
+  (let [workflow-id (:workflow/id workflow)
+        errors (registration-errors workflow)]
+    (when (seq errors)
+      (response/throw-anomaly!
+       :anomalies.workflow/invalid-config
+       (messages/t :status/invalid-workflow-registration
+                   {:workflow-id workflow-id})
+       {:workflow-id workflow-id
+        :validation/errors errors}))
+    workflow))
+
 (defn register-workflow!
   "Register a workflow in the registry.
 
    Arguments:
      workflow - Workflow definition map
 
-   Returns: The registered workflow"
+  Returns: The registered workflow"
   [workflow]
   (let [id (:workflow/id workflow)]
     (when-not id
       (response/throw-anomaly! :anomalies/incorrect
-                              "Workflow must have :workflow/id"
+                              (messages/t :status/missing-workflow-id)
                               {:workflow workflow}))
+    (validate-workflow-registration! workflow)
     (swap! registry assoc id workflow)
     workflow))
 

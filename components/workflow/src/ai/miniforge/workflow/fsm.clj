@@ -38,10 +38,11 @@
    - :resume  - Resume paused execution
    - :cancel  - Cancel workflow"
   (:require
+   [clojure.set :as set]
    [ai.miniforge.fsm.interface :as fsm]
    [ai.miniforge.workflow.messages :as messages]))
 
-(declare current-state first-phase-index)
+(declare current-state first-phase-index reachable-states unreachable-states)
 
 ;; ============================================================================
 ;; FSM Definition using clj-statecharts
@@ -162,17 +163,12 @@
   [phase-entries index]
   (some-> (get phase-entries index) :state-id))
 
-(defn- redirect-transition-entry
-  [phase-entries {:keys [phase index]}]
-  (let [target (state-target phase-entries index)]
-    [(redirect-event phase)
-     {:target target}]))
-
-(defn- redirect-transitions
-  [phase-entries]
-  (into {}
-        (map (partial redirect-transition-entry phase-entries))
-        phase-entries))
+(defn- redirect-transition
+  [phase-entries {:keys [config]}]
+  (when-let [target-phase (:on-fail config)]
+    (when-let [target-index (first-phase-index phase-entries target-phase)]
+      {(redirect-event target-phase)
+       {:target (state-target phase-entries target-index)}})))
 
 (defn redirect-event?
   "True when an event keyword represents a workflow phase redirect."
@@ -235,7 +231,7 @@
             :cancel :cancelled
             :fail :failed
             :complete :completed}
-           (redirect-transitions phase-entries))}]))
+           (redirect-transition phase-entries {:config config}))}]))
 
 (defn- build-paused-state
   [{:keys [state-id paused-state-id]}]
@@ -266,6 +262,54 @@
   [entry]
   [(:paused-state-id entry) entry])
 
+(defn- transition-target
+  [transition]
+  (cond
+    (keyword? transition) transition
+    (map? transition) (:target transition)
+    :else nil))
+
+(defn- state-transition-targets
+  [state-config]
+  (->> (get state-config :on {})
+       vals
+       (keep transition-target)
+       set))
+
+(defn- build-state-graph
+  [states]
+  (into {}
+        (map (fn [[state-id state-config]]
+               [state-id (state-transition-targets state-config)]))
+        states))
+
+(defn- bfs-reachable-states
+  [state-graph start-state]
+  (loop [to-visit [start-state]
+         visited #{}]
+    (if (empty? to-visit)
+      visited
+      (let [current-state (first to-visit)
+            remaining (rest to-visit)]
+        (if (contains? visited current-state)
+          (recur remaining visited)
+          (recur (concat remaining (get state-graph current-state #{}))
+                 (conj visited current-state)))))))
+
+(defn- unreachable-phase-error
+  [phases]
+  {:error :unreachable-phase-states
+   :phases phases
+   :message (messages/t :status/unreachable-machine-phases
+                        {:phases phases})})
+
+(defn- unreachable-state-error
+  [states]
+  {:error :unreachable-machine-states
+   :states states
+   :message (messages/t :status/unreachable-machine-states
+                        {:states states})})
+
 (defn compile-execution-machine
   "Compile a per-run execution machine from a workflow pipeline.
 
@@ -295,6 +339,8 @@
                  :cancelled {:type :final}}
                 (into {} (map (partial build-phase-state phase-entries)) phase-entries)
                 (into {} (map build-paused-state) phase-entries))
+        compiled-states (into {} (remove (comp nil? val)) states)
+        state-graph (build-state-graph compiled-states)
         state->phase (into {}
                            (concat
                             (map #(projection-entry % false) phase-entries)
@@ -307,10 +353,13 @@
             {:fsm/id :workflow-execution
              :fsm/initial :pending
              :fsm/context {:redirect-count 0}
-             :fsm/states (into {} (remove (comp nil? val)) states)})
+             :fsm/states compiled-states})
            :workflow/phase-entries phase-entries
            :workflow/state->phase state->phase
-           :workflow/state->entry state->entry)))
+           :workflow/state->entry state->entry
+           :workflow/state-graph state-graph
+           :workflow/state-ids (set (keys compiled-states))
+           :workflow/initial-state :pending)))
 
 (defn validate-execution-machine
   "Validate that a workflow pipeline can compile into an execution machine."
@@ -328,11 +377,27 @@
         unresolved-fail (->> pipeline
                              (keep (partial unknown-fail-target pipeline))
                              vec)
+        machine (when (and (seq pipeline)
+                           (empty? unresolved-success)
+                           (empty? unresolved-fail))
+                  (compile-execution-machine workflow))
+        unreachable-state-set (when machine
+                                (unreachable-states machine))
+        unreachable-phases (when machine
+                             (->> (:workflow/phase-entries machine)
+                                  (keep (fn [{:keys [phase state-id]}]
+                                          (when (contains? unreachable-state-set state-id)
+                                            phase)))
+                                  vec))
         errors (vec (concat
                      (when (empty? pipeline)
                        [(empty-pipeline-error)])
                      unresolved-success
-                     unresolved-fail))
+                     unresolved-fail
+                     (when (seq unreachable-phases)
+                       [(unreachable-phase-error unreachable-phases)])
+                     (when (seq unreachable-state-set)
+                       [(unreachable-state-error (vec unreachable-state-set))])))
         warnings (vec (concat
                        (when (seq duplicate-phases)
                          [(duplicate-phase-warning duplicate-phases)])))]
@@ -340,7 +405,37 @@
      :errors errors
      :warnings warnings
      :machine (when (empty? errors)
-                (compile-execution-machine workflow))}))
+                machine)}))
+
+(defn state-graph
+  "Return the compiled state graph for a workflow execution machine."
+  [machine]
+  (:workflow/state-graph machine))
+
+(defn compiled-state-ids
+  "Return the set of states defined by a compiled workflow execution machine."
+  [machine]
+  (:workflow/state-ids machine))
+
+(defn reachable-states
+  "Return the set of states reachable in a compiled workflow machine.
+
+   With one arg, traversal starts from the machine's initial state.
+   With two args, traversal starts from the provided state id."
+  ([machine]
+   (reachable-states machine (:workflow/initial-state machine)))
+  ([machine start-state]
+   (if start-state
+     (bfs-reachable-states (state-graph machine) start-state)
+     #{})))
+
+(defn unreachable-states
+  "Return the set of defined states that are not reachable in a compiled workflow machine."
+  ([machine]
+   (unreachable-states machine (:workflow/initial-state machine)))
+  ([machine start-state]
+   (set/difference (compiled-state-ids machine)
+                   (reachable-states machine start-state))))
 
 (defn machine-phase-entry
   "Get phase metadata for the current compiled machine state."

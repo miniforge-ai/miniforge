@@ -244,6 +244,36 @@
       (is (= :verify (fsm/current-phase-id machine s6)))
       (is (= :done (fsm/current-phase-id machine s7))))))
 
+(deftest compiled-execution-machine-reachability-test
+  (let [workflow {:workflow/id :test
+                  :workflow/pipeline [{:phase :plan}
+                                      {:phase :implement}
+                                      {:phase :done}]}
+        machine (fsm/compile-execution-machine workflow)
+        expected-reachable
+        #{:pending
+          :phase-0-plan
+          :paused-phase-0-plan
+          :phase-1-implement
+          :paused-phase-1-implement
+          :phase-2-done
+          :paused-phase-2-done
+          :completed
+          :failed
+          :cancelled}]
+    (testing "initial reachability exactly matches the compiled machine state set"
+      (is (= expected-reachable
+             (fsm/compiled-state-ids machine)))
+      (is (= expected-reachable
+             (fsm/reachable-states machine)))
+      (is (= #{}
+             (fsm/unreachable-states machine))))
+    (testing "terminal states cannot reach active workflow states"
+      (is (= #{:completed}
+             (fsm/reachable-states machine :completed)))
+      (is (= (disj expected-reachable :completed)
+             (fsm/unreachable-states machine :completed))))))
+
 (deftest validate-execution-machine-test
   (testing "detects unresolved transition targets"
     (let [result (fsm/validate-execution-machine
@@ -257,4 +287,16 @@
                    :workflow/pipeline [{:phase :plan}
                                        {:phase :plan}]})]
       (is (true? (:valid? result)))
-      (is (= :duplicate-phase-identifiers (-> result :warnings first :warning))))))
+      (is (= :duplicate-phase-identifiers (-> result :warnings first :warning)))))
+  (testing "rejects compiled workflows with unreachable phase states"
+    (let [result (fsm/validate-execution-machine
+                  {:workflow/id :skip-impl
+                   :workflow/pipeline [{:phase :plan :on-success :verify}
+                                       {:phase :implement}
+                                       {:phase :verify :on-success :done}
+                                       {:phase :done}]})]
+      (is (false? (:valid? result)))
+      (is (some #(= :unreachable-phase-states (:error %))
+                (:errors result)))
+      (is (some #(= :unreachable-machine-states (:error %))
+                (:errors result))))))
