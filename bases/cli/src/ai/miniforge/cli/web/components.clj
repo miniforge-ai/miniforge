@@ -24,6 +24,7 @@
    [hiccup2.core :as h]
    [hiccup.util :refer [raw-string]]
    [ai.miniforge.cli.messages :as messages]
+   [ai.miniforge.cli.web.components.status :as status-components]
    [ai.miniforge.cli.web.risk :as risk]
    [ai.miniforge.cli.web.fleet :as fleet]))
 
@@ -47,9 +48,6 @@
 
 (def ^:const ai-placeholder-style
   "color: var(--text-muted); font-style: italic; padding: 12px;")
-
-(def ^:const no-workflows-style
-  "color: var(--text-muted); font-size: 12px; text-align: center;")
 
 (def ^:const summary-message-style
   "margin-top: 16px;")
@@ -119,54 +117,14 @@
     [:div.chat-message.assistant
      [:pre {:style chat-response-style} response]]]))
 
-(defn- overall-status-key
-  [overall]
-  (case overall
-    :healthy :web-ui/status-healthy
-    :degraded :web-ui/status-degraded
-    :warning :web-ui/status-warning
-    :error :web-ui/status-error
-    :web-ui/status-unknown))
+(def status-indicator
+  status-components/status-indicator)
 
-(defn status-indicator [status]
-  (let [overall (get status :overall)
-        status-class (name overall)
-        status-text (t (overall-status-key overall))]
-    (h/html
-     [:div.status-indicator {:class (str "status-" status-class)
-                             :hx-get "/api/status"
-                             :hx-trigger "every 60s"
-                             :hx-swap "outerHTML"}
-      [:span.status-dot]
-      [:span status-text]])))
+(def workflow-status-icon
+  status-components/workflow-status-icon)
 
-(defn workflow-status-icon [run]
-  (let [s (:status run) c (:conclusion run)]
-    (cond
-      (= s "in_progress") "⏳"
-      (= c "success") "✓"
-      (#{"failure" "timed_out" "startup_failure"} c) "✗"
-      :else "○")))
-
-(defn workflow-status [repos]
-  (let [{:keys [running failed succeeded runs]} (fleet/get-workflow-status repos)]
-    (h/html
-     [:div.workflow-status
-      {:hx-get "/api/workflows" :hx-trigger "every 60s" :hx-swap "outerHTML"}
-      [:div.workflow-status-header [:span (t :web-ui/workflow-status-header)]]
-      [:div.workflow-stats
-       [:span.workflow-stat.workflow-stat-running [:span (str running " ⏳")]]
-       [:span.workflow-stat.workflow-stat-failed [:span (str failed " ✗")]]
-       [:span.workflow-stat.workflow-stat-passed [:span (str succeeded " ✓")]]]
-      [:div.workflow-runs
-       (if (seq runs)
-         (for [run runs]
-           [:div.workflow-run
-            [:span.workflow-run-status (workflow-status-icon run)]
-            [:span.workflow-run-name (:workflowName run)]
-            [:span.workflow-run-time (fleet/format-time-ago (:createdAt run))]])
-         [:div {:style no-workflows-style}
-          (t :web-ui/workflow-status-none)])]])))
+(def workflow-status
+  status-components/workflow-status)
 
 (defn ai-summary [summary]
   (h/html
