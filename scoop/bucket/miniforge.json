@@ -1,0 +1,24 @@
+{
+  "version": "0.0.0-template",
+  "description": "Autonomous software factory — built on MiniForge Core",
+  "homepage": "https://miniforge.ai",
+  "license": "Apache-2.0",
+  "url": "https://github.com/miniforge-ai/miniforge/releases/download/v0.0.0-template/miniforge-windows-x86_64.zip",
+  "hash": "0000000000000000000000000000000000000000000000000000000000000000",
+  "bin": "mf.cmd",
+  "depends": "scoop-clojure/babashka",
+  "checkver": {
+    "github": "https://github.com/miniforge-ai/miniforge"
+  },
+  "autoupdate": {
+    "url": "https://github.com/miniforge-ai/miniforge/releases/download/v$version/miniforge-windows-x86_64.zip",
+    "hash": {
+      "url": "$url.sha256"
+    }
+  },
+  "notes": [
+    "Miniforge requires Babashka. Scoop should pull it automatically via the 'depends' field.",
+    "If 'scoop install' reports the bucket missing, run: scoop bucket add scoop-clojure https://github.com/littleli/scoop-clojure",
+    "Run 'mf check:platform' (when invoked through bb against the miniforge repo) to verify your install."
+  ]
+}

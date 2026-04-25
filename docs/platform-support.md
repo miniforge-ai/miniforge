@@ -62,6 +62,30 @@ unmodified.
 
 ## Windows — Native (Beta)
 
+### End users (`scoop install miniforge`)
+
+Once `miniforge-ai/scoop-bucket` is provisioned (template lives at
+[`scoop/`](../scoop/) — see its README for bootstrap steps), end users
+install with:
+
+```powershell
+# One-time scoop install (skip if already present)
+# If you hit an execution-policy error first:
+#   Set-ExecutionPolicy RemoteSigned -Scope CurrentUser
+Invoke-Expression (New-Object System.Net.WebClient).DownloadString('https://get.scoop.sh')
+
+# Add buckets and install. Babashka is pulled automatically as a dep.
+scoop bucket add scoop-clojure https://github.com/littleli/scoop-clojure
+scoop bucket add miniforge https://github.com/miniforge-ai/scoop-bucket
+scoop install miniforge
+
+mf version
+```
+
+Upgrade later with `scoop update miniforge`.
+
+### Contributors (cloning and running from source)
+
 ```powershell
 # 1. Install scoop (skip if already installed)
 # If you hit an execution-policy error first:
