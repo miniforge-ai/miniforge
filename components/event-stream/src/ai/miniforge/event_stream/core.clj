@@ -254,7 +254,10 @@
       (cond-> duration-ms (assoc :workflow/duration-ms duration-ms)
               (:tokens opts) (assoc :workflow/tokens (:tokens opts))
               (:cost-usd opts) (assoc :workflow/cost-usd (:cost-usd opts))
-              (:pr-info opts) (assoc :workflow/pr-info (:pr-info opts)))))
+              (:pr-info opts) (assoc :workflow/pr-info (:pr-info opts))
+              (seq (:pr-infos opts)) (assoc :workflow/pr-infos (:pr-infos opts))
+              (:workflow/evidence-bundle-id opts)
+              (assoc :workflow/evidence-bundle-id (:workflow/evidence-bundle-id opts)))))
 
 (defn workflow-failed [stream workflow-id error & [{:keys [failure/class]}]]
   (let [;; Handle anomaly maps, Throwables, and plain error maps
@@ -669,6 +672,24 @@
 
 ;------------------------------------------------------------------------------ Layer 6
 ;; PR scoring events (N5-delta-2 §4.1)
+
+(defn pr-created
+  "Emit when a workflow-owned PR is created.
+
+   This is the canonical fine-grained event that lets `supervisory-state`
+   attach a PR back to the owning workflow run instead of forcing
+   consumers to infer that relationship from summary payloads later."
+  [stream workflow-id {:pr/keys [repo number url branch title author merge-order] :as _pr}]
+  (-> (create-envelope stream :pr/created workflow-id
+                       (str "PR " repo "#" number " created"))
+      (assoc :pr/repo repo
+             :pr/number number
+             :pr/url url
+             :pr/branch branch)
+      (cond->
+        title       (assoc :pr/title title)
+        author      (assoc :pr/author author)
+        merge-order (assoc :pr/merge-order merge-order))))
 
 (defn pr-scored
   "Emit when the pr-scoring component has computed readiness, risk, and

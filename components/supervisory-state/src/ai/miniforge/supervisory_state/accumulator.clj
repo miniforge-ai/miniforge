@@ -29,7 +29,8 @@
    It is a pure function from an event-stream prefix to an EntityTable."
   (:require
    [clojure.edn :as edn]
-   [clojure.java.io :as io]))
+   [clojure.java.io :as io]
+   [clojure.string :as str]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Helpers
@@ -57,6 +58,73 @@
   "Read `:event/timestamp`, defaulting to wall clock if absent."
   [event]
   (or (:event/timestamp event) (now)))
+
+(defn- append-distinct
+  "Append values from `new-items` onto `existing-items`, preserving order and
+   removing duplicates."
+  [existing-items new-items]
+  (reduce (fn [acc item]
+            (if (some #(= item %) acc)
+              acc
+              (conj acc item)))
+          (vec (or existing-items []))
+          new-items))
+
+(defn- artifact-id
+  "Extract the UUID artifact id from a phase artifact entry.
+
+   Historical emitters have used both bare UUIDs and `{:artifact/id ...}`
+   maps in phase results; supervisory-state accepts either so replay stays
+   robust while the event contract converges."
+  [artifact]
+  (cond
+    (uuid? artifact) artifact
+    (uuid? (:artifact/id artifact)) (:artifact/id artifact)
+    (uuid? (:id artifact)) (:id artifact)
+    :else nil))
+
+(defn- event-artifact-ids
+  "Normalize :phase/artifacts from an event into a vector of UUIDs."
+  [event]
+  (->> (:phase/artifacts event)
+       (keep artifact-id)
+       vec))
+
+(defn- repo-from-pr-url
+  "Extract `owner/repo` from a GitHub pull-request URL."
+  [pr-url]
+  (when (string? pr-url)
+    (let [parts (str/split pr-url #"/")]
+      (when-let [pull-index (first (keep-indexed #(when (= %2 "pull") %1) parts))]
+        (when (>= pull-index 2)
+          (str (nth parts (- pull-index 2)) "/" (nth parts (dec pull-index))))))))
+
+(defn- normalize-workflow-pr
+  "Normalize workflow-owned PR metadata into the shared `:pr/*` shape."
+  [pr]
+  (let [repo   (or (:pr/repo pr) (repo-from-pr-url (or (:pr/url pr) (:pr-url pr))))
+        number (or (:pr/number pr) (:pr-number pr) (:pr/id pr))
+        url    (or (:pr/url pr) (:pr-url pr))]
+    (when (and repo number url)
+      (cond-> {:pr/repo repo
+               :pr/number number
+               :pr/url url
+               :pr/branch (or (:pr/branch pr) (:branch pr) "")}
+        (:pr/title pr) (assoc :pr/title (:pr/title pr))
+        (:title pr)    (assoc :pr/title (:title pr))
+        (:pr/author pr) (assoc :pr/author (:pr/author pr))
+        (:author pr)    (assoc :pr/author (:author pr))
+        (:pr/merge-order pr) (assoc :pr/merge-order (:pr/merge-order pr))
+        (:merge-order pr)    (assoc :pr/merge-order (:merge-order pr))))))
+
+(defn- event-workflow-prs
+  "Collect normalized PRs embedded on workflow lifecycle events."
+  [event]
+  (let [raw-prs (concat (get event :workflow/pr-infos [])
+                        (cond-> [] (:workflow/pr-info event) (conj (:workflow/pr-info event))))]
+    (->> raw-prs
+         (keep normalize-workflow-pr)
+         (append-distinct []))))
 
 (defn- coarse-agent-status
   "Map fine-grained `:agent/status` `status/type` keywords to the coarse
@@ -133,19 +201,32 @@
 
 (defn workflow-phase-completed
   [table {:workflow/keys [id] :as event}]
-  (let [ts (event-instant event)]
+  (let [ts (event-instant event)
+        artifact-ids (event-artifact-ids event)]
     (-> table
         (ensure-workflow id ts)
-        (assoc-in [:workflows id :workflow-run/updated-at] ts))))
+        (update-in [:workflows id]
+                   (fn [run]
+                     (cond-> (assoc run :workflow-run/updated-at ts)
+                       (seq artifact-ids)
+                       (update :workflow-run/artifact-ids append-distinct artifact-ids)))))))
 
 (defn workflow-completed
   [table {:workflow/keys [id] :as event}]
-  (let [ts (event-instant event)]
+  (let [ts (event-instant event)
+        prs (event-workflow-prs event)
+        evidence-bundle-id (:workflow/evidence-bundle-id event)]
     (-> table
         (ensure-workflow id ts)
-        (update-in [:workflows id] merge
-                   {:workflow-run/status     :completed
-                    :workflow-run/updated-at ts}))))
+        (update-in [:workflows id]
+                   (fn [run]
+                     (cond-> (merge run
+                                    {:workflow-run/status     :completed
+                                     :workflow-run/updated-at ts})
+                       (seq prs)
+                       (update :workflow-run/prs append-distinct prs)
+                       evidence-bundle-id
+                       (assoc :workflow-run/evidence-bundle-id evidence-bundle-id)))))))
 
 (defn workflow-failed
   [table {:workflow/keys [id] :as event}]
@@ -224,36 +305,49 @@
   [(:pr/repo event) (:pr/number event)])
 
 (defn pr-created
-  [table {:pr/keys [repo number url branch title author merge-order] :as event}]
-  (assoc-in table [:prs (pr-key event)]
-            {:pr/repo       (or repo "")
-             :pr/number     (or number 0)
-             :pr/url        (or url "")
-             :pr/branch     (or branch "")
-             :pr/title      (or title "")
-             :pr/status     :open
-             :pr/merge-order (or merge-order 0)
-             :pr/depends-on []
-             :pr/blocks     []
-             :pr/ci-status  :pending
-             :pr/author     author}))
+  [table {:pr/keys [repo number url branch title author merge-order] workflow-id :workflow/id :as event}]
+  (let [pr-state (merge (get-in table [:prs (pr-key event)] {})
+                        {:pr/repo        (or repo "")
+                         :pr/number      (or number 0)
+                         :pr/url         (or url "")
+                         :pr/branch      (or branch "")
+                         :pr/title       (or title "")
+                         :pr/status      :open
+                         :pr/merge-order (or merge-order 0)
+                         :pr/depends-on  []
+                         :pr/blocks      []
+                         :pr/ci-status   :pending
+                         :pr/author      author})]
+    (assoc-in table [:prs (pr-key event)]
+              (cond-> pr-state
+                workflow-id (assoc :pr/workflow-run-id workflow-id)))))
 
 (defn pr-merged
   [table event]
   (let [k (pr-key event)
-        ts (event-instant event)]
+        ts (event-instant event)
+        workflow-id (:workflow/id event)]
     (cond-> table
       (get-in table [:prs k])
-      (update-in [:prs k] merge
-                 {:pr/status :merged
-                  :pr/merged-at ts}))))
+      (update-in [:prs k]
+                 (fn [pr]
+                   (cond-> (merge pr
+                                  {:pr/status :merged
+                                   :pr/merged-at ts})
+                     (and workflow-id (nil? (:pr/workflow-run-id pr)))
+                     (assoc :pr/workflow-run-id workflow-id)))))))
 
 (defn pr-closed
   [table event]
-  (let [k (pr-key event)]
+  (let [k (pr-key event)
+        workflow-id (:workflow/id event)]
     (cond-> table
       (get-in table [:prs k])
-      (assoc-in [:prs k :pr/status] :closed))))
+      (update-in [:prs k]
+                 (fn [pr]
+                   (cond-> (assoc pr :pr/status :closed)
+                     (and workflow-id (nil? (:pr/workflow-run-id pr)))
+                     (assoc :pr/workflow-run-id workflow-id)))))))
 
 (defn pr-scored
   "Merge pre-computed readiness/risk/policy/recommendation fields from a
@@ -267,7 +361,7 @@
    `:pr/created`. The stub uses producer-canonical empties for required
    keys; a later `:pr/created` or `:supervisory/pr-upserted` will overwrite
    them while the scored keys are preserved via `merge`."
-  [table {:pr/keys [repo number readiness risk policy recommendation] :as event}]
+  [table {:pr/keys [repo number readiness risk policy recommendation] workflow-id :workflow/id :as event}]
   (let [k       (pr-key event)
         stub    {:pr/repo       (or repo "")
                  :pr/number     (or number 0)
@@ -284,7 +378,9 @@
                    readiness      (assoc :pr/readiness readiness)
                    risk           (assoc :pr/risk risk)
                    policy         (assoc :pr/policy policy)
-                   recommendation (assoc :pr/recommendation recommendation))]
+                   recommendation (assoc :pr/recommendation recommendation)
+                   (and workflow-id (nil? (:pr/workflow-run-id existing)))
+                   (assoc :pr/workflow-run-id workflow-id))]
     (assoc-in table [:prs k] scored)))
 
 ;------------------------------------------------------------------------------ Layer 1

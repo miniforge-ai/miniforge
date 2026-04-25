@@ -107,6 +107,7 @@
 (def intervention-state-changed events/intervention-state-changed)
 
 ;; PR scoring (N5-delta-2 §4.1)
+(def pr-created events/pr-created)
 (def pr-scored events/pr-scored)
 
 ;------------------------------------------------------------------------------ Layer 2

@@ -22,6 +22,7 @@
    Extracted from runner.clj for single-responsibility.
    All functions are safe to call with nil event-stream (no-op)."
   (:require
+   [clojure.string :as str]
    [ai.miniforge.event-stream.interface :as es]
    [ai.miniforge.phase.interface :as phase]
    [ai.miniforge.self-healing.interface :as self-healing]
@@ -84,7 +85,10 @@
     (cond-> {}
       (:tokens metrics)   (assoc :tokens (:tokens metrics))
       (:cost-usd metrics) (assoc :cost-usd (:cost-usd metrics))
-      (:workflow/pr-info context) (assoc :pr-info (:workflow/pr-info context)))))
+      (:workflow/pr-info context) (assoc :pr-info (:workflow/pr-info context))
+      (seq (:execution/dag-pr-infos context)) (assoc :pr-infos (:execution/dag-pr-infos context))
+      (:workflow/evidence-bundle-id context)
+      (assoc :workflow/evidence-bundle-id (:workflow/evidence-bundle-id context)))))
 
 (def ^:private inner-failure-statuses
   #{:error :failed :failure})
@@ -152,6 +156,58 @@
      :workflow-run/trigger-source (get-in context [:execution/opts :trigger-source] :cli)
      :workflow-run/correlation-id (:execution/id context)}))
 
+(defn- repo-from-pr-url
+  "Extract `owner/repo` from a GitHub-style PR URL.
+
+   Returns nil when the URL does not look like a GitHub pull URL."
+  [pr-url]
+  (when (string? pr-url)
+    (let [parts (str/split pr-url #"/")]
+      (when-let [pull-index (some #(when (= "pull" (nth parts % nil)) %) (range (count parts)))]
+        (when (>= pull-index 2)
+          (str (nth parts (- pull-index 2)) "/" (nth parts (dec pull-index))))))))
+
+(defn- normalize-pr-info
+  "Normalize release / DAG PR info into the canonical `:pr/*` event payload."
+  [pr-info]
+  (let [number (or (:pr-number pr-info) (:pr/id pr-info))
+        url    (or (:pr-url pr-info) (:pr/url pr-info))
+        repo   (or (:pr/repo pr-info) (repo-from-pr-url url))]
+    (when (and repo number url)
+      {:pr/repo repo
+       :pr/number number
+       :pr/url url
+       :pr/branch (or (:branch pr-info) (:pr/branch pr-info))
+       :pr/title (or (:title pr-info) (:pr/title pr-info))
+       :pr/author (or (:author pr-info) (:pr/author pr-info))
+       :pr/merge-order (:merge-order pr-info)})))
+
+(defn- completion-prs
+  "Collect normalized PR payloads from workflow context.
+
+   The release phase produces a single `:workflow/pr-info`; DAG runs may also
+   accumulate `:execution/dag-pr-infos`. We preserve order and de-duplicate
+   by repo+number so `workflow/completed` and emitted `pr/created` events are
+   stable even when both sources describe the same PR."
+  [context]
+  (let [raw-prs (concat (get context :execution/dag-pr-infos [])
+                        (cond-> [] (:workflow/pr-info context) (conj (:workflow/pr-info context))))]
+    (->> raw-prs
+         (keep normalize-pr-info)
+         (reduce (fn [acc pr]
+                   (let [pr-key [(:pr/repo pr) (:pr/number pr)]]
+                     (if (some #(= pr-key [(:pr/repo %) (:pr/number %)]) acc)
+                       acc
+                       (conj acc pr))))
+                 []))))
+
+(defn- publish-pr-created-events!
+  "Publish canonical `:pr/created` events for workflow-owned PRs."
+  [event-stream context]
+  (doseq [pr (completion-prs context)]
+    (publish-event! event-stream
+                    (es/pr-created event-stream (:execution/id context) pr))))
+
 ;------------------------------------------------------------------------------ Layer 2
 ;; Lifecycle event publishers
 
@@ -183,12 +239,14 @@
                                                     {:message (messages/t :status/failed)
                                                      :errors (:execution/errors context)})
                                  (workflow-run-fields context :failed last-phase)))
-          (publish-event! event-stream
-                          (merge (es/workflow-completed event-stream wf-id
-                                                       (:execution/status context)
-                                                       (get-in context [:execution/metrics :duration-ms])
-                                                       (when (seq metrics-opts) metrics-opts))
-                                 (workflow-run-fields context :completed last-phase)))))
+          (do
+            (publish-event! event-stream
+                            (merge (es/workflow-completed event-stream wf-id
+                                                         (:execution/status context)
+                                                         (get-in context [:execution/metrics :duration-ms])
+                                                         (when (seq metrics-opts) metrics-opts))
+                                   (workflow-run-fields context :completed last-phase)))
+            (publish-pr-created-events! event-stream context))))
       (catch Exception e
         (println (messages/t :warn/publish-completed {:error (ex-message e)}))))))
 
