@@ -122,14 +122,19 @@ jobs:
     runs-on: windows-latest
     continue-on-error: true
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Configure git for stable line endings
+      # Must come BEFORE actions/checkout — it uses git internally and
+      # honors global config at the time of clone. Without this, Windows'
+      # default core.autocrlf=true converts every text file to CRLF on
+      # checkout, which corrupts the SHA-256 digests that governance
+      # config integrity checks (computed on LF content).
+      - name: Configure git for stable (LF) line endings
         run: |
           git config --global core.autocrlf input
           git config --global core.eol lf
         shell: pwsh
+
+      - name: Checkout code
+        uses: actions/checkout@v4
 
       - name: Set up Java
         uses: actions/setup-java@v4
