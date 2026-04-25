@@ -79,5 +79,7 @@ Results:
 Note:
 - the original Cloverage blocker in `web_dashboard/views.clj` is fixed;
   the CLI web dashboard now has the same helper/localization treatment.
-  `bb ccov` was rerun after that refactor to check whether the next
-  full-repo blocker has moved again.
+  `bb ccov` was rerun after that refactor and still fails in
+  `bases/cli/src/ai/miniforge/cli/web/components.clj`, where the
+  `workflow-status` rendering path continues to exceed Cloverage's JVM
+  method-size limit.
