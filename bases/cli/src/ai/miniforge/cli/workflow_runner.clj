@@ -432,11 +432,10 @@
         (throw e)))))
 
 ;------------------------------------------------------------------------------ Layer 2b
-;; Resume workflow from event file
+;; Resume workflow from checkpointed DAG state
 
 (defn resume-workflow-from-spec!
-  "Resume a previously failed or paused workflow from checkpointed DAG state,
-   falling back to legacy event reconstruction when needed.
+  "Resume a previously failed or paused workflow from checkpointed DAG state.
 
    Arguments:
    - workflow-id: UUID string of the workflow to resume
@@ -445,12 +444,12 @@
   [workflow-id-str spec {:keys [quiet] :or {quiet false} :as opts}]
   (let [resume-ctx (try
                      (let [resume-fn (requiring-resolve
-                                      'ai.miniforge.workflow.dag-resilience/resume-context-from-event-file)]
+                                      'ai.miniforge.workflow.dag-resilience/resume-context)]
                        (resume-fn workflow-id-str))
                      (catch Exception e
                        (when-not quiet
                          (println (display/colorize :red
-                                   (messages/t :workflow-runner/event-file-failed {:error (ex-message e)}))))
+                                   (messages/t :workflow-runner/resume-state-failed {:error (ex-message e)}))))
                        nil))]
     (when-not quiet
       (println (display/colorize :cyan
