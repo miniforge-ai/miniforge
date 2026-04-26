@@ -134,12 +134,10 @@
 (def agent->task-type
   "Fallback task-type mapping for configurable phases whose ids are not task types."
   {:planner :plan
-   :architect :design
    :implementer :implement
    :tester :test
-   :reviewer :review
-   :sre :deploy
-   :release :deploy})
+   :spec-analyzer :plan
+   :designer :design})
 
 (defn- resolved-task-type
   [phase]

@@ -60,10 +60,11 @@
 ;; Pipeline normalization
 
 (defn- append-unvisited-phase
-  [ordered-ids phase-id]
-  (if (contains? (set ordered-ids) phase-id)
-    ordered-ids
-    (conj ordered-ids phase-id)))
+  [{:keys [ordered-ids visited] :as acc} phase-id]
+  (if (contains? visited phase-id)
+    acc
+    {:ordered-ids (conj ordered-ids phase-id)
+     :visited (conj visited phase-id)}))
 
 (defn- walk-primary-path
   [workflow phase-id visited]
@@ -87,10 +88,14 @@
   [workflow]
   (let [phases (:workflow/phases workflow)
         entry-phase (workflow-entry-phase workflow)
-        primary-order (walk-primary-path workflow entry-phase #{})]
-    (reduce append-unvisited-phase
-            primary-order
-            (map :phase/id phases))))
+        primary-order (walk-primary-path workflow entry-phase #{})
+        primary-visited (set primary-order)
+        phase-ids (map :phase/id phases)]
+    (:ordered-ids
+     (reduce append-unvisited-phase
+             {:ordered-ids primary-order
+              :visited primary-visited}
+             phase-ids))))
 
 (defn execution-pipeline
   "Return the canonical execution pipeline for a workflow."

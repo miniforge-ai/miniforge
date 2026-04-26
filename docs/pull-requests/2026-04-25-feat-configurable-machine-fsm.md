@@ -13,18 +13,18 @@ of `workflow.state` to advance phases.
 ## Key Changes
 
 - added workflow-definition normalization in
-  [definition.clj](/private/tmp/mf-configurable-machine-final/components/workflow/src/ai/miniforge/workflow/definition.clj)
+  [definition.clj](components/workflow/src/ai/miniforge/workflow/definition.clj)
 - migrated configurable execution in
-  [configurable.clj](/private/tmp/mf-configurable-machine-final/components/workflow/src/ai/miniforge/workflow/configurable.clj)
+  [configurable.clj](components/workflow/src/ai/miniforge/workflow/configurable.clj)
   to machine-authoritative state transitions
 - fixed configurable task-type inference in
-  [agent_factory.clj](/private/tmp/mf-configurable-machine-final/components/workflow/src/ai/miniforge/workflow/agent_factory.clj)
+  [agent_factory.clj](components/workflow/src/ai/miniforge/workflow/agent_factory.clj)
   so non-task-type phase ids map through agent role
 - made validator and registration normalize legacy phase workflows before
   compiled-machine reachability checks in
-  [validator.clj](/private/tmp/mf-configurable-machine-final/components/workflow/src/ai/miniforge/workflow/validator.clj)
+  [validator.clj](components/workflow/src/ai/miniforge/workflow/validator.clj)
   and
-  [registry.clj](/private/tmp/mf-configurable-machine-final/components/workflow/src/ai/miniforge/workflow/registry.clj)
+  [registry.clj](components/workflow/src/ai/miniforge/workflow/registry.clj)
 
 ## Validation
 

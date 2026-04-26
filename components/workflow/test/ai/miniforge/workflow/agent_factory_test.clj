@@ -169,7 +169,27 @@
                       :execution/artifacts []}
           task (factory/create-task-for-phase phase exec-state {})]
       (is (= :plan (:task/type task))
-          "Planner-backed configurable phases should map to :plan"))))
+          "Planner-backed configurable phases should map to :plan")))
+
+  (testing "Specialized supported agent roles map to the expected task types"
+    (let [exec-state {:execution/input {:task "Test task"}
+                      :execution/artifacts []}
+          spec-task (factory/create-task-for-phase
+                     {:phase/id :analyze-spec
+                      :phase/name "Analyze Spec"
+                      :phase/agent :spec-analyzer}
+                     exec-state
+                     {})
+          design-task (factory/create-task-for-phase
+                       {:phase/id :shape-ui
+                        :phase/name "Shape UI"
+                        :phase/agent :designer}
+                       exec-state
+                       {})]
+      (is (= :plan (:task/type spec-task))
+          "Spec analyzer phases should map to :plan")
+      (is (= :design (:task/type design-task))
+          "Designer phases should map to :design"))))
 
 ;------------------------------------------------------------------------------ Generate function tests
 

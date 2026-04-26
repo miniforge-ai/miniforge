@@ -84,7 +84,9 @@
                        ex))]
         (is (instance? clojure.lang.ExceptionInfo thrown))
         (is (re-find #"failed registration validation"
-                     (.getMessage ^clojure.lang.ExceptionInfo thrown))))
+                     (.getMessage ^clojure.lang.ExceptionInfo thrown)))
+        (is (every? string? (:validation/errors (ex-data thrown)))
+            "Registration errors should be returned as message strings"))
       (is (not (contains? (set (registry/list-workflow-ids))
                           :legacy-invalid-fsm)))))
 

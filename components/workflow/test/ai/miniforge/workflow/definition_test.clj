@@ -56,6 +56,21 @@
           pipeline (definition/execution-pipeline workflow)]
       (is (= [:start :end] (mapv :phase pipeline)))))
 
+  (testing "unvisited phases are appended once without duplicating the primary path"
+    (let [workflow {:workflow/entry :start
+                    :workflow/phases
+                    [{:phase/id :extra
+                      :phase/next []}
+                     {:phase/id :start
+                      :phase/next [{:target :middle}]}
+                     {:phase/id :middle
+                      :phase/next [{:target :done}]}
+                     {:phase/id :done
+                      :phase/next []}]}
+          pipeline (definition/execution-pipeline workflow)]
+      (is (= [:start :middle :done :extra]
+             (mapv :phase pipeline)))))
+
   (testing "existing pipeline is preserved"
     (let [workflow {:workflow/pipeline [{:phase :plan} {:phase :done}]}]
       (is (= (:workflow/pipeline workflow)
