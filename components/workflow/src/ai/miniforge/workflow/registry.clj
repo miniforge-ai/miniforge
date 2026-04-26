@@ -31,6 +31,8 @@
    [clojure.java.io :as io]
    [clojure.string :as str]
    [ai.miniforge.response.interface :as response]
+   [ai.miniforge.workflow.definition :as definition]
+   [ai.miniforge.workflow.fsm :as workflow-fsm]
    [ai.miniforge.workflow.messages :as messages]
    [ai.miniforge.workflow.validator :as validator]
    [ai.miniforge.workflow.schemas :as schemas])
@@ -168,7 +170,12 @@
 
 (defn- registration-errors
   [workflow]
-  (:errors (validator/validate-workflow workflow)))
+  (let [workflow-validation (validator/validate-workflow workflow)
+        execution-workflow (definition/execution-workflow workflow)
+        machine-validation (workflow-fsm/validate-execution-machine
+                            execution-workflow)]
+    (vec (concat (:errors workflow-validation)
+                 (:errors machine-validation)))))
 
 (defn- validate-workflow-registration!
   [workflow]
