@@ -100,8 +100,31 @@ jobs:
           restore-keys: |
             clojure-${{ runner.os }}-
 
+      # scripts/test-changed-bricks.bb shells out to the standalone `poly`
+      # CLI. setup-clojure does not install it, and ubuntu-latest does not
+      # carry it either — so we drop the polylith uberjar onto PATH with a
+      # tiny java -jar wrapper. Pinned version mirrors deps.edn :poly alias.
+      - name: Install polylith CLI
+        run: |
+          POLY_VERSION="0.2.21"
+          sudo curl -sSL -o /usr/local/lib/poly.jar \
+            "https://github.com/polyfy/polylith/releases/download/v${POLY_VERSION}/poly-${POLY_VERSION}.jar"
+          sudo tee /usr/local/bin/poly >/dev/null <<'EOF'
+          #!/bin/sh
+          exec java -jar /usr/local/lib/poly.jar "$@"
+          EOF
+          sudo chmod +x /usr/local/bin/poly
+          poly --help >/dev/null && echo "poly installed at $(command -v poly)"
+
+      # GitHub Actions' default Linux shell is `bash -e {0}` — no pipefail.
+      # Without `set -o pipefail`, `bb test:all 2>&1 | tee` reports the exit
+      # code of `tee` (always 0), masking test failures and turning the
+      # job green even when nothing ran. This caused poly-missing failures
+      # to silently pass for an unknown stretch of time before being
+      # surfaced by the Windows fidelity work.
       - name: Run tests
         run: |
+          set -o pipefail
           echo "::group::Running Tests"
           bb test:all 2>&1 | tee test-output.log
           echo "::endgroup::"
