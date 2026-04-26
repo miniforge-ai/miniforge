@@ -114,6 +114,116 @@ jobs:
           path: test-output.log
           retention-days: 7
 
+  # Windows fidelity job. Validates the bb-platform / bb-proc unit tests
+  # on real Windows, which is what the Windows fidelity pass introduces.
+  # The broader integration suite is deferred until known Windows-specific
+  # bugs are fixed (Java/.git pack files, governance digests on CRLF — see
+  # docs/platform-support.md). Promote scope to bb test:all once those are
+  # resolved by the Windows tester.
+  test-windows:
+    name: Test (Windows, bb-platform unit tests)
+    runs-on: windows-latest
+    steps:
+      # Must come BEFORE actions/checkout — it uses git internally and
+      # honors global config at the time of clone. Without this, Windows'
+      # default core.autocrlf=true converts every text file to CRLF on
+      # checkout, which corrupts the SHA-256 digests that governance
+      # config integrity checks (computed on LF content).
+      - name: Configure git for stable (LF) line endings
+        run: |
+          git config --global core.autocrlf input
+          git config --global core.eol lf
+        shell: pwsh
+
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+
+      - name: Install Clojure + bb (Windows)
+        uses: DeLaGuardo/setup-clojure@12.5
+        with:
+          cli: latest
+          bb: latest
+
+      - name: Cache Clojure dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.m2/repository
+            ~/.gitlibs
+          key: clojure-${{ runner.os }}-${{ hashFiles('deps.edn', '**/deps.edn') }}
+          restore-keys: |
+            clojure-${{ runner.os }}-
+
+      # Two missing pieces on windows-latest after setup-clojure runs:
+      #
+      #   1. polylith — has no scoop manifest in any standard bucket
+      #      (scoop-clojure, Main, Extras), so download the official
+      #      uberjar and shim. Pinned to deps.edn :poly alias version.
+      #
+      #   2. clojure as a binary — setup-clojure on Windows installs
+      #      clojure as a PowerShell module, not clojure.exe. babashka's
+      #      p/process invokes via Java ProcessBuilder which does not
+      #      resolve PowerShell modules, so `bb test:integration`
+      #      (which shells out to `clojure`) fails. Drop deps.clj as
+      #      clojure.exe to provide a real binary clojure on PATH.
+      - name: Install polylith CLI + deps.clj (Windows)
+        shell: pwsh
+        run: |
+          # 1. Polylith uberjar + poly.cmd shim
+          $polyVersion = "0.2.21"
+          $polyDir = "$env:USERPROFILE\.poly"
+          New-Item -ItemType Directory -Force -Path $polyDir | Out-Null
+          Invoke-WebRequest `
+            -Uri "https://github.com/polyfy/polylith/releases/download/v${polyVersion}/poly-${polyVersion}.jar" `
+            -OutFile "$polyDir\poly.jar"
+          @"
+          @echo off
+          java -jar "%USERPROFILE%\.poly\poly.jar" %*
+          "@ | Out-File -Encoding ascii "$polyDir\poly.cmd"
+          "$polyDir" >> $env:GITHUB_PATH
+
+          # 2. deps.clj as clojure.exe / clj.exe
+          $depsVersion = "1.12.4.1618"
+          $depsDir = "$env:USERPROFILE\.deps-clj"
+          New-Item -ItemType Directory -Force -Path $depsDir | Out-Null
+          Invoke-WebRequest `
+            -Uri "https://github.com/borkdude/deps.clj/releases/download/v${depsVersion}/deps.clj-${depsVersion}-windows-amd64.zip" `
+            -OutFile deps.zip
+          Expand-Archive deps.zip -DestinationPath $depsDir -Force
+          # deps.exe is a drop-in replacement for clojure / clj — provide both names.
+          Copy-Item "$depsDir\deps.exe" "$depsDir\clojure.exe"
+          Copy-Item "$depsDir\deps.exe" "$depsDir\clj.exe"
+          "$depsDir" >> $env:GITHUB_PATH
+
+          Write-Host "poly installed at $polyDir\poly.cmd"
+          Write-Host "clojure/clj installed at $depsDir (via deps.clj $depsVersion)"
+
+      - name: Platform check
+        run: bb check:platform
+        shell: pwsh
+
+      # Scope: validate the bb-platform component on real Windows. The
+      # broader integration suite (`bb test:integration`) hits known
+      # Windows-specific bugs (Java cannot delete .git/objects pack files,
+      # see docs/platform-support.md). Those are real product bugs to be
+      # fixed in follow-up PRs by the Windows tester. Until then, this
+      # job exercises the toolchain end-to-end (bb + deps.clj + clojure +
+      # cognitect test-runner) and the platform-detection code itself,
+      # which is exactly what the Windows fidelity pass introduces.
+      - name: Run bb-platform + bb-proc unit tests
+        shell: pwsh
+        working-directory: projects/bb-utils
+        run: |
+          clojure -M:test `
+            --dir ../../components/bb-platform/test `
+            --dir ../../components/bb-proc/test
+
   build:
     name: Build
     runs-on: ubuntu-latest

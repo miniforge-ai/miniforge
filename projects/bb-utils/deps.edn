@@ -12,6 +12,7 @@
  :deps {ai.miniforge/bb-paths          {:local/root "../../components/bb-paths"}
         ai.miniforge/bb-dev-tools      {:local/root "../../components/bb-dev-tools"}
         ai.miniforge/bb-out            {:local/root "../../components/bb-out"}
+        ai.miniforge/bb-platform       {:local/root "../../components/bb-platform"}
         ai.miniforge/bb-proc           {:local/root "../../components/bb-proc"}
         ai.miniforge/bb-test-runner    {:local/root "../../components/bb-test-runner"}
         ai.miniforge/bb-config         {:local/root "../../components/bb-config"}
@@ -24,6 +25,7 @@
  {:test {:extra-paths ["../../components/bb-paths/test"
                        "../../components/bb-dev-tools/test"
                        "../../components/bb-out/test"
+                       "../../components/bb-platform/test"
                        "../../components/bb-proc/test"
                        "../../components/bb-test-runner/test"
                        "../../components/bb-config/test"

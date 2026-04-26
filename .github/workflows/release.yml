@@ -82,9 +82,77 @@ jobs:
             dist/${{ steps.artifact.outputs.name }}.sha256
           retention-days: 5
 
+  # Windows is a preview artifact: packaged as a zip containing the
+  # JVM-portable miniforge.jar + an mf.cmd launcher that defers to bb on
+  # the user's PATH (installed via scoop). continue-on-error keeps the
+  # release pipeline green while the Windows path is still in beta —
+  # see docs/platform-support.md.
+  build-windows:
+    name: Build windows-x86_64 (preview)
+    runs-on: windows-latest
+    continue-on-error: true
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+
+      - name: Install Clojure + bb (Windows)
+        uses: DeLaGuardo/setup-clojure@12.5
+        with:
+          cli: latest
+          bb: latest
+
+      - name: Cache Clojure dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.m2/repository
+            ~/.gitlibs
+          key: clojure-${{ runner.os }}-${{ hashFiles('deps.edn', '**/deps.edn') }}
+          restore-keys: |
+            clojure-${{ runner.os }}-
+
+      - name: Build uberjar
+        run: bb build:cli
+        shell: pwsh
+
+      - name: Package zip with mf.cmd launcher
+        shell: pwsh
+        run: |
+          $name = "miniforge-windows-x86_64"
+          $stage = "dist/$name"
+          New-Item -ItemType Directory -Force -Path $stage | Out-Null
+          Copy-Item dist/miniforge.jar "$stage/miniforge.jar"
+          @"
+          @echo off
+          bb --jar "%~dp0miniforge.jar" -m ai.miniforge.cli.main %*
+          "@ | Out-File -Encoding ascii "$stage/mf.cmd"
+          $zip = "dist/$name.zip"
+          if (Test-Path $zip) { Remove-Item $zip }
+          Compress-Archive -Path "$stage/*" -DestinationPath $zip
+          $sha = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLower()
+          "$sha  $name.zip" | Out-File -Encoding ascii "dist/$name.zip.sha256"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: miniforge-windows-x86_64
+          path: |
+            dist/miniforge-windows-x86_64.zip
+            dist/miniforge-windows-x86_64.zip.sha256
+          retention-days: 5
+
   release:
     name: Create GitHub Release
-    needs: build
+    # Wait on both, but allow release to ship even if the Windows preview
+    # build fails — Mac/Linux builds remain the gating dependency.
+    needs: [build, build-windows]
+    if: always() && needs.build.result == 'success'
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.version.outputs.version }}
@@ -154,6 +222,19 @@ jobs:
             curl -L https://github.com/${{ github.repository }}/releases/download/v${{ steps.version.outputs.version }}/miniforge-linux-x86_64 -o miniforge
             chmod +x miniforge
             sudo mv miniforge /usr/local/bin/
+            ```
+
+            **Windows x86_64 (preview)**
+
+            Requires `bb.exe` on PATH (`scoop install babashka` — see the
+            [Platform Support](https://github.com/${{ github.repository }}/blob/main/docs/platform-support.md)
+            page). The Windows artifact may be missing if the preview build
+            failed — check the assets list below.
+            ```powershell
+            Invoke-WebRequest -Uri https://github.com/${{ github.repository }}/releases/download/v${{ steps.version.outputs.version }}/miniforge-windows-x86_64.zip -OutFile miniforge.zip
+            Expand-Archive miniforge.zip -DestinationPath $env:LOCALAPPDATA\Programs\miniforge
+            $env:PATH += ";$env:LOCALAPPDATA\Programs\miniforge"
+            mf version
             ```
 
             ### Verification

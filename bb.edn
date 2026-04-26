@@ -9,7 +9,7 @@
  {:requires ([babashka.fs :as fs]
              [babashka.process :as p]
              [ai.miniforge.bb-dev-tools.interface :as bb-dev-tools]
-             [clojure.string :as str])
+             [ai.miniforge.bb-platform.interface :as platform])
 
   :init (do
           (defn run! [& args]
@@ -21,20 +21,11 @@
             (let [{:keys [exit]} (deref (apply p/process {:out :inherit :err :inherit} args))]
               exit))
 
-          (defn installed? [cmd]
-            (zero? (:exit (p/sh "which" cmd))))
-
-          (defn brew-install [formula]
-            (let [cmd (last (str/split formula (re-pattern "/")))]
-              (if (installed? cmd)
-                (println "  ✓" formula "already installed")
-                (do
-                  (println "  ⬇️ Installing" formula "...")
-                  (p/shell "brew" "install" formula)))))
-
-          (defn brew-upgrade [formula]
-            (println "  ⬆️ Upgrading" formula "...")
-            (p/shell {:continue true} "brew" "upgrade" formula)))
+          ;; Cross-platform package install routing lives in the
+          ;; ai.miniforge/bb-platform component. Aliased here so the
+          ;; install:* / upgrade:* task bodies stay one-line dispatches.
+          (def brew-install platform/install!)
+          (def brew-upgrade platform/upgrade!))
 
   ;; ──────────────────────────────────────────────────────────────────────────
   ;; Linting & Formatting
@@ -249,9 +240,10 @@
 
   install:java
   {:doc  "Install Java (Temurin 21)"
-   :task (if (installed? "java")
-           (println "  ✓ java already installed")
-           (p/shell "brew" "install" "--cask" "temurin@21"))}
+   :task (platform/execute-plan!
+          (platform/install-plan-java
+           {:os         (platform/os-key)
+            :installed? (platform/installed? "java")}))}
 
   install:clojure
   {:doc  "Install Clojure CLI"
@@ -270,9 +262,11 @@
 
   install:markdownlint
   {:doc  "Install markdownlint-cli"
-   :task (if (installed? "markdownlint")
-           (println "  ✓ markdownlint-cli already installed")
-           (p/shell "brew" "install" "markdownlint-cli"))}
+   :task (platform/execute-plan!
+          (platform/install-plan-markdownlint
+           {:os             (platform/os-key)
+            :installed?     (platform/installed? "markdownlint")
+            :npm-installed? (platform/installed? "npm")}))}
 
   install:poly
   {:doc  "Install Polylith CLI"
@@ -282,6 +276,12 @@
   {:doc     "Install all required dependencies"
    :depends [install:java install:clojure install:clj-kondo install:markdownlint install:poly]
    :task    (println "\n✅ All dependencies installed")}
+
+  check:platform
+  {:doc  "Report OS, shell, and required-tool status"
+   :task (platform/print-check!
+          (platform/check-current
+           ["java" "clojure" "clj-kondo" "poly" "git" "markdownlint"]))}
 
   ;; ──────────────────────────────────────────────────────────────────────────
   ;; Upgraders
