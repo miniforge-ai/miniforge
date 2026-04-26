@@ -46,6 +46,11 @@
                               (assoc-in [:execution/phase-results :done]
                                         {:status :completed
                                          :summary "done"})
+                              (assoc :execution/dag-result
+                                     {:paused? true
+                                      :completed-task-ids [:task-a]
+                                      :artifacts [{:artifact/id "art-1"}]
+                                      :pause-reason :rate-limit})
                               (assoc :execution/current-phase :done
                                      :execution/started-at (java.time.Instant/now)
                                      :execution/output
@@ -60,7 +65,12 @@
                  (get-in checkpoint-data [:machine-snapshot :execution/id])))
           (is (= {:status :completed
                   :summary "done"}
-                 (get-in checkpoint-data [:phase-results :done]))))
+                 (get-in checkpoint-data [:phase-results :done])))
+          (is (= {:paused? true
+                  :completed-task-ids [:task-a]
+                  :artifacts [{:artifact/id "art-1"}]
+                  :pause-reason :rate-limit}
+                 (get-in checkpoint-data [:machine-snapshot :execution/dag-result]))))
         (testing "serializes nested instant values into EDN-readable strings"
           (is (string? (get-in checkpoint-data
                                [:machine-snapshot :execution/started-at])))

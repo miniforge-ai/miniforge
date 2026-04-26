@@ -435,9 +435,8 @@
 ;; Resume workflow from event file
 
 (defn resume-workflow-from-spec!
-  "Resume a previously failed/paused workflow by replaying its event file
-   to determine which DAG tasks already completed, then re-running the spec
-   with those tasks pre-completed.
+  "Resume a previously failed or paused workflow from checkpointed DAG state,
+   falling back to legacy event reconstruction when needed.
 
    Arguments:
    - workflow-id: UUID string of the workflow to resume
@@ -463,8 +462,12 @@
                   (messages/t :workflow-runner/recovered-artifacts {:count (count (:pre-completed-artifacts resume-ctx))})))))
     (if (and resume-ctx (seq (:pre-completed-ids resume-ctx)))
       ;; Re-run with pre-completed task IDs injected
-      (let [opts-with-resume (assoc-in opts [:execution-opts :pre-completed-dag-tasks]
-                                      (:pre-completed-ids resume-ctx))]
+      (let [execution-opts (-> (get opts :execution-opts {})
+                               (assoc :pre-completed-dag-tasks
+                                      (:pre-completed-ids resume-ctx))
+                               (assoc :pre-completed-artifacts
+                                      (:pre-completed-artifacts resume-ctx)))
+            opts-with-resume (assoc opts :execution-opts execution-opts)]
         (run-workflow-from-spec! spec opts-with-resume))
       (do
         (when-not quiet

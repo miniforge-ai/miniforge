@@ -66,7 +66,8 @@
                       plan {:logger logger})]
           (is (not (:success? result)))
           (is (true? (:paused? result)))
-          (is (string? (:pause-reason result))))))))
+          (is (string? (:pause-reason result)))
+          (is (= [] (:completed-task-ids result))))))))
 
 (deftest test-dag-execution-partial-rate-limit
   (testing "DAG pauses when some tasks succeed and others hit rate limits"
@@ -102,7 +103,10 @@
           (is (not (:success? result)))
           (is (true? (:paused? result)))
           ;; One task completed, one rate-limited
-          (is (= 1 (:tasks-completed result))))))))
+          (is (= 1 (:tasks-completed result)))
+          (is (= 1 (count (:completed-task-ids result))))
+          (is (contains? #{task-a task-b}
+                         (first (:completed-task-ids result)))))))))
 
 (deftest test-dag-execution-pre-completed-ids
   (testing "DAG skips tasks in pre-completed-ids set"

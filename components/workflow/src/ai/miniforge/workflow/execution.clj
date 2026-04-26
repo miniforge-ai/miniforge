@@ -517,9 +517,11 @@
   "Apply a failed DAG result to the execution context."
   [ctx dag-result transition-to-failed-fn]
   (transition-to-failed-fn
-   (update ctx :execution/errors conj
-           {:type :dag-execution-failed
-            :dag-result dag-result})))
+   (-> ctx
+       (assoc :execution/dag-result dag-result)
+       (update :execution/errors conj
+               {:type :dag-execution-failed
+                :dag-result dag-result}))))
 
 (defn try-dag-execution
   "After plan phase, execute all plans via the DAG executor.

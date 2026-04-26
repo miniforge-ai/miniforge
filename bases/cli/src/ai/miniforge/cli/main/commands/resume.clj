@@ -135,13 +135,14 @@
                                      {:llm-backend llm-client
                                       :event-stream event-stream
                                       :control-state control-state
-                                      :resume-machine-snapshot machine-snapshot
-                                      :resume-phase-results (:phase-results reconstructed)
-                                      :skip-lifecycle-events false
-                                      :pre-completed-dag-tasks (:completed-dag-tasks reconstructed)
-                                      :on-phase-start (fn [_ctx interceptor]
-                                                        (when-not quiet
-                                                          (display/print-info
+                                     :resume-machine-snapshot machine-snapshot
+                                     :resume-phase-results (:phase-results reconstructed)
+                                     :skip-lifecycle-events false
+                                     :pre-completed-dag-tasks (:completed-dag-tasks reconstructed)
+                                     :pre-completed-artifacts (:completed-dag-artifacts reconstructed)
+                                     :on-phase-start (fn [_ctx interceptor]
+                                                       (when-not quiet
+                                                         (display/print-info
                                                             (messages/t :resume/phase-starting
                                                                         {:phase (get-in interceptor [:config :phase])}))))
                                       :on-phase-complete (fn [_ctx _interceptor _result] nil)})]

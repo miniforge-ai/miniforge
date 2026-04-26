@@ -33,7 +33,8 @@
                                     (:workflow-version identity)))
        (def resumed (wr/trim-pipeline workflow (:completed-phases ctx)))
        ;; adapters call run-pipeline on `resumed` with the ctx's
-       ;; :completed-dag-tasks threaded as :pre-completed-dag-tasks"
+       ;; :completed-dag-tasks / :completed-dag-artifacts threaded into
+       ;; :pre-completed-dag-tasks / :pre-completed-artifacts"
   (:require
    [ai.miniforge.workflow-resume.core :as core]))
 
@@ -44,6 +45,7 @@
 (def failed?                     core/failed?)
 (def paused?                     core/paused?)
 (def extract-completed-dag-tasks core/extract-completed-dag-tasks)
+(def extract-completed-dag-artifacts core/extract-completed-dag-artifacts)
 (def extract-dag-pause-info      core/extract-dag-pause-info)
 (def extract-completed-phases    core/extract-completed-phases)
 (def extract-phase-results       core/extract-phase-results)
