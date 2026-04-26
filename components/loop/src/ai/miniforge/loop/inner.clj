@@ -27,7 +27,9 @@
    [ai.miniforge.fsm.interface :as fsm]
    [ai.miniforge.logging.interface :as log]
    [ai.miniforge.loop.escalation :as escalation]
+   [ai.miniforge.loop.inner-config :as inner-config]
    [ai.miniforge.loop.gates :as gates]
+   [ai.miniforge.loop.messages :as loop-messages]
    [ai.miniforge.loop.repair :as repair]
    [ai.miniforge.response.interface :as response]))
 
@@ -35,42 +37,19 @@
 ;; State machine definition and derived transition helpers
 
 (def default-max-iterations
-  5)
+  (inner-config/default-max-iterations))
 
 (def initial-loop-state
-  :pending)
+  (inner-config/initial-loop-state))
 
 (def default-loop-metrics
-  {:tokens 0
-   :cost-usd 0.0
-   :duration-ms 0
-   :generate-calls 0
-   :repair-calls 0})
+  (inner-config/default-loop-metrics))
 
 (def invalid-transition-message
-  "Invalid state transition")
+  (loop-messages/t :inner/invalid-transition))
 
 (def inner-loop-machine-definition
-  {:fsm/id :loop/inner
-   :fsm/initial initial-loop-state
-   :fsm/states
-   {:pending
-    {:on {:generate-requested :generating}}
-    :generating
-    {:on {:generation-completed :validating
-          :generation-failed :failed}}
-    :validating
-    {:on {:validation-passed :complete
-          :validation-failed :repairing
-          :validation-failed-unrecoverably :failed
-          :validation-escalated :escalated}}
-    :repairing
-    {:on {:repair-succeeded :generating
-          :repair-failed :failed
-          :repair-escalated :escalated}}
-    :complete {:type :final}
-    :failed {:type :final}
-    :escalated {:type :final}}})
+  (inner-config/machine-definition))
 
 (def inner-loop-machine
   (fsm/define-machine inner-loop-machine-definition))
@@ -285,7 +264,7 @@
         start (System/currentTimeMillis)]
     (when logger
       (log/info logger :loop :inner/iteration-started
-                {:message "Starting generation"
+                {:message (loop-messages/t :inner/starting-generation)
                  :data {:iteration (:loop/iteration loop-state)
                         :task-id (get-in loop-state [:loop/task :task/id])}}))
 
@@ -300,7 +279,7 @@
               artifact (:artifact result)]
           (when logger
             (log/debug logger :loop :inner/iteration-started
-                       {:message "Generation complete"
+                       {:message (loop-messages/t :inner/generation-complete)
                         :data {:tokens (:tokens result 0)
                                :duration-ms duration}}))
           (-> loop-state
@@ -312,7 +291,7 @@
         (catch Exception e
           (when logger
             (log/error logger :loop :inner/validation-failed
-                       {:message "Generation failed"
+                       {:message (loop-messages/t :inner/generation-failed)
                         :data {:error (.getMessage e)}}))
           (let [anom (response/from-exception e)]
             (-> loop-state
@@ -337,7 +316,7 @@
         artifact (:loop/artifact loop-state)]
     (when logger
       (log/debug logger :loop :inner/validation-passed
-                 {:message "Starting validation"
+                 {:message (loop-messages/t :inner/starting-validation)
                   :data {:gate-count (count gates)}}))
 
     (let [results (gates/run-gates gates artifact context)
@@ -347,7 +326,7 @@
         (do
           (when logger
             (log/info logger :loop :inner/validation-passed
-                      {:message "All gates passed"
+                      {:message (loop-messages/t :inner/all-gates-passed)
                        :data {:iteration (:loop/iteration loop-state)}}))
           (-> loop-state
               (set-termination :gates-passed)
@@ -356,7 +335,7 @@
         (do
           (when logger
             (log/warn logger :loop :inner/validation-failed
-                      {:message "Validation failed"
+                      {:message (loop-messages/t :inner/validation-failed)
                        :data {:failed-gates (:failed-gates results)
                               :error-count (count (:errors results))}}))
           (-> loop-state
@@ -380,7 +359,7 @@
         iteration (:loop/iteration loop-state)]
     (when logger
       (log/info logger :loop :inner/repair-attempted
-                {:message "Attempting repair"
+                {:message (loop-messages/t :inner/attempting-repair)
                  :data {:iteration iteration
                         :error-count (count errors)}}))
 
@@ -390,7 +369,7 @@
       (do
         (when logger
           (log/warn logger :loop :inner/escalated
-                    {:message "Escalating due to termination condition"
+                    {:message (loop-messages/t :inner/escalating-termination)
                      :data {:reason (:reason termination)}}))
         (-> loop-state
             (set-termination (:reason termination))
@@ -413,7 +392,7 @@
           (do
             (when logger
               (log/info logger :loop :inner/repair-attempted
-                        {:message "Repair successful"
+                        {:message (loop-messages/t :inner/repair-successful)
                          :data {:strategy (:strategy result)}}))
             (-> loop-state
                 (set-artifact (:artifact result))
@@ -424,10 +403,10 @@
           (do
             (when logger
               (log/warn logger :loop :inner/escalated
-                        {:message "Repair requested escalation"}))
+                        {:message (loop-messages/t :inner/repair-requested-escalation)}))
             (-> loop-state
                 (set-termination :max-iterations
-                                 :message "Repair strategies exhausted")
+                                 :message (loop-messages/t :inner/repair-strategies-exhausted))
                 (transition :escalated)))
 
           ;; Repair failed, try again or escalate
@@ -435,7 +414,7 @@
           (do
             (when logger
               (log/warn logger :loop :inner/validation-failed
-                        {:message "Repair failed"
+                        {:message (loop-messages/t :inner/repair-failed)
                          :data {:attempts (:attempts result)}}))
             ;; Check if we should escalate
             (if (max-iterations-exceeded? loop-state)
@@ -457,10 +436,10 @@
     (when logger
       (if success?
         (log/info logger :loop :inner/validation-passed
-                  {:message "Inner loop completed successfully"
+                  {:message (loop-messages/t :inner/completed-successfully)
                    :data {:iterations (:loop/iteration state)}})
         (log/warn logger :loop :inner/escalated
-                  {:message "Inner loop terminated"
+                  {:message (loop-messages/t :inner/terminated)
                    :data {:state current-state
                           :reason (get-in state [:loop/termination :reason])}})))
     {:success success?
@@ -531,7 +510,7 @@
     (if (>= escalation-count 1)
       {:terminal (handle-terminal-state
                   (set-termination state :max-iterations
-                                   :message "Escalation already handled")
+                                   :message (loop-messages/t :inner/escalation-already-handled))
                   logger)}
       (let [result (escalation/handle-escalation state ctx)]
         (if (= :continue (:action result))
@@ -540,7 +519,7 @@
                 next-ctx (assoc ctx :escalation-hints hints)]
             (when logger
               (log/info logger :loop :inner/escalated
-                        {:message "Resuming after escalation"
+                        {:message (loop-messages/t :inner/resuming-after-escalation)
                          :data {:hints-provided? (boolean (seq hints))}}))
             {:next-state resumed-state
              :next-ctx next-ctx})
@@ -576,7 +555,7 @@
   (let [logger (:logger context)]
     (when logger
       (log/info logger :loop :inner/iteration-started
-                {:message "Starting inner loop"
+                {:message (loop-messages/t :inner/starting-loop)
                  :data {:task-id (get-in loop-state [:loop/task :task/id])
                         :max-iterations (get-in loop-state [:loop/config :max-iterations])}}))
 
@@ -622,7 +601,7 @@
 
           ;; Unknown state (shouldn't happen)
           :else
-          (throw (ex-info "Unknown loop state"
+          (throw (ex-info (loop-messages/t :inner/unknown-state)
                           {:state current-state
                            :loop-state state})))))))
 

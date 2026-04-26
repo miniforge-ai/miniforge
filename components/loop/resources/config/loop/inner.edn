@@ -1,0 +1,30 @@
+{:loop/inner
+ {:default-max-iterations 5
+  :initial-loop-state :pending
+  :default-loop-metrics
+  {:tokens 0
+   :cost-usd 0.0
+   :duration-ms 0
+   :generate-calls 0
+   :repair-calls 0}
+  :machine-definition
+  {:fsm/id :loop/inner
+   :fsm/initial :pending
+   :fsm/states
+   {:pending
+    {:on {:generate-requested :generating}}
+    :generating
+    {:on {:generation-completed :validating
+          :generation-failed :failed}}
+    :validating
+    {:on {:validation-passed :complete
+          :validation-failed :repairing
+          :validation-failed-unrecoverably :failed
+          :validation-escalated :escalated}}
+    :repairing
+    {:on {:repair-succeeded :generating
+          :repair-failed :failed
+          :repair-escalated :escalated}}
+    :complete {:type :final}
+    :failed {:type :final}
+    :escalated {:type :final}}}}}

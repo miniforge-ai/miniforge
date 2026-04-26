@@ -15,4 +15,25 @@
   ;; Repair messages
   :repair/max-attempts-exceeded   "Maximum repair attempts exceeded"
   :repair/strategies-exhausted    "All repair strategies exhausted"
-  :repair/escalated               "Repair escalated to outer loop"}}
+  :repair/escalated               "Repair escalated to outer loop"
+
+  ;; Inner loop lifecycle
+  :inner/invalid-transition       "Invalid state transition"
+  :inner/starting-generation      "Starting generation"
+  :inner/generation-complete      "Generation complete"
+  :inner/generation-failed        "Generation failed"
+  :inner/starting-validation      "Starting validation"
+  :inner/all-gates-passed         "All gates passed"
+  :inner/validation-failed        "Validation failed"
+  :inner/attempting-repair        "Attempting repair"
+  :inner/escalating-termination   "Escalating due to termination condition"
+  :inner/repair-successful        "Repair successful"
+  :inner/repair-requested-escalation "Repair requested escalation"
+  :inner/repair-strategies-exhausted "Repair strategies exhausted"
+  :inner/repair-failed            "Repair failed"
+  :inner/completed-successfully   "Inner loop completed successfully"
+  :inner/terminated               "Inner loop terminated"
+  :inner/escalation-already-handled "Escalation already handled"
+  :inner/resuming-after-escalation "Resuming after escalation"
+  :inner/starting-loop            "Starting inner loop"
+  :inner/unknown-state            "Unknown loop state"}}

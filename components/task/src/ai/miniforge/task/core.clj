@@ -23,6 +23,8 @@
    Layer 2: Orchestration (queries, decomposition, state transitions)"
   (:require
    [ai.miniforge.fsm.interface :as fsm]
+   [ai.miniforge.task.lifecycle-config :as lifecycle-config]
+   [ai.miniforge.task.messages :as messages]
    [ai.miniforge.schema.interface :as schema]
    [ai.miniforge.logging.interface :as log]))
 
@@ -30,28 +32,19 @@
 ;; State machine definitions and pure utilities
 
 (def initial-task-status
-  :pending)
+  (lifecycle-config/initial-task-status))
 
 (def invalid-transition-message
-  "Invalid state transition")
+  (messages/t :task/invalid-transition))
 
 (def task-not-found-message
-  "Task not found")
+  (messages/t :task/not-found))
 
 (def parent-task-not-found-message
-  "Parent task not found")
+  (messages/t :task/parent-not-found))
 
 (def task-machine-definition
-  {:fsm/id :task/lifecycle
-   :fsm/initial initial-task-status
-   :fsm/states
-   {:pending {:on {:start :running
-                   :block :blocked}}
-    :running {:on {:complete :completed
-                   :fail :failed}}
-    :blocked {:on {:unblock :pending}}
-    :completed {:type :final}
-    :failed {:type :final}}})
+  (lifecycle-config/machine-definition))
 
 (def task-machine
   (fsm/define-machine task-machine-definition))
@@ -70,6 +63,20 @@
                 (:target target-or-config))))
        set))
 
+(defn- target-state
+  [target-or-config]
+  (if (keyword? target-or-config)
+    target-or-config
+    (:target target-or-config)))
+
+(defn- state-transition-events
+  [state state-definition]
+  (reduce-kv
+   (fn [events event target-or-config]
+     (assoc events [state (target-state target-or-config)] event))
+   {}
+   (get state-definition :on {})))
+
 (defn- derive-valid-transitions
   [machine-definition]
   (reduce-kv
@@ -82,14 +89,7 @@
   [machine-definition]
   (reduce-kv
    (fn [event-map state state-definition]
-     (reduce-kv
-      (fn [state-events event target-or-config]
-        (let [target-state (if (keyword? target-or-config)
-                             target-or-config
-                             (:target target-or-config))]
-          (assoc state-events [state target-state] event)))
-      event-map
-      (get state-definition :on {})))
+     (merge event-map (state-transition-events state state-definition)))
    {}
    (:fsm/states machine-definition)))
 
@@ -139,14 +139,15 @@
 (defn make-task
   "Create a new task map with required fields.
    Generates a UUID if not provided."
-  [{:keys [task/id task/type task/status task/constraints]
+  [{:keys [task/type task/status task/constraints]
     :or {status initial-task-status}
     :as task-data}]
-  (let [task-id (or id (random-uuid))
+  (let [task-id (get task-data :task/id (random-uuid))
         base-task {:task/id task-id
                    :task/type type
                    :task/status status}
-        constraint-data (when constraints {:task/constraints constraints})
+        constraint-data (when constraints
+                          {:task/constraints constraints})
         additional-task-data (dissoc task-data
                                      :task/id
                                      :task/type
@@ -187,7 +188,7 @@
      (swap! task-store assoc (:task/id task) task)
      (when logger
        (log/info logger :agent :task/created
-                 {:message "Task created"
+                 {:message (messages/t :task/created)
                   :data {:task-id (:task/id task)
                          :task-type (:task/type task)}}))
      task)))
@@ -209,7 +210,7 @@
        (swap! task-store assoc task-id validated)
        (when logger
          (log/debug logger :agent :task/updated
-                    {:message "Task updated"
+                    {:message (messages/t :task/updated)
                      :data {:task-id task-id
                             :changes (keys changes)}}))
        validated)
@@ -225,7 +226,7 @@
        (swap! task-store dissoc task-id)
        (when logger
          (log/info logger :agent :task/deleted
-                   {:message "Task deleted"
+                   {:message (messages/t :task/deleted)
                     :data {:task-id task-id}}))
        task)
      (throw (ex-info task-not-found-message {:task-id task-id})))))
@@ -259,7 +260,7 @@
   ([task-id agent-id logger]
    (transition-task! task-id :running
                      {:task/agent agent-id}
-                     logger :task/started "Task started")))
+                     logger :task/started (messages/t :task/started))))
 
 (defn complete-task!
   "Transition a task from :running to :completed.
@@ -269,7 +270,7 @@
    (let [full-result (success-task-result result)]
      (transition-task! task-id :completed
                        {:task/result full-result}
-                       logger :task/completed "Task completed"))))
+                       logger :task/completed (messages/t :task/completed)))))
 
 (defn fail-task!
   "Transition a task from :running to :failed.
@@ -279,7 +280,7 @@
    (let [task-result (failed-task-result error)]
      (transition-task! task-id :failed
                        {:task/result task-result}
-                       logger :task/failed "Task failed"))))
+                       logger :task/failed (messages/t :task/failed)))))
 
 (defn block-task!
   "Transition a task from :pending to :blocked.
@@ -288,7 +289,7 @@
   ([task-id reason logger]
    (transition-task! task-id :blocked
                      {:task/blocked-reason reason}
-                     logger :task/blocked "Task blocked")))
+                     logger :task/blocked (messages/t :task/blocked))))
 
 (defn unblock-task!
   "Transition a task from :blocked to :pending.
@@ -297,7 +298,7 @@
   ([task-id logger]
    (let [updated (transition-task! task-id :pending
                                    {}
-                                   logger :task/unblocked "Task unblocked")]
+                                   logger :task/unblocked (messages/t :task/unblocked))]
      ;; Remove the blocked-reason key
      (update-task! (:task/id updated) (dissoc updated :task/blocked-reason))
      updated)))
@@ -360,7 +361,7 @@
                                         logger)]
        (when logger
          (log/info logger :agent :task/decomposed
-                   {:message "Task decomposed into sub-tasks"
+                   {:message (messages/t :task/decomposed)
                     :data {:parent-id parent-task-id
                            :child-count (count child-ids)
                            :child-ids child-ids}}))

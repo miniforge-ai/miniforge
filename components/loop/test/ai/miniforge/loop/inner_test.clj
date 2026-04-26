@@ -21,6 +21,7 @@
             [ai.miniforge.fsm.interface :as fsm]
             [ai.miniforge.loop.inner :as inner]
             [ai.miniforge.loop.gates :as gates]
+            [ai.miniforge.loop.messages :as loop-messages]
             [ai.miniforge.loop.repair :as repair]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -125,13 +126,15 @@
 
     (testing "invalid transition throws"
       (is (thrown-with-msg? clojure.lang.ExceptionInfo
-                            #"Invalid state transition"
+                            (re-pattern (java.util.regex.Pattern/quote
+                                         (loop-messages/t :inner/invalid-transition)))
                             (inner/transition loop-state :complete))))
 
     (testing "terminal states reject additional transitions"
       (let [terminal-state (assoc loop-state :loop/state :complete)]
         (is (thrown-with-msg? clojure.lang.ExceptionInfo
-                              #"Invalid state transition"
+                              (re-pattern (java.util.regex.Pattern/quote
+                                           (loop-messages/t :inner/invalid-transition)))
                               (inner/transition terminal-state :generating)))))))
 
 ;------------------------------------------------------------------------------ Layer 1
