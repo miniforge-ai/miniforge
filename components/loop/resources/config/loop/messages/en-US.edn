@@ -36,4 +36,30 @@
   :inner/escalation-already-handled "Escalation already handled"
   :inner/resuming-after-escalation "Resuming after escalation"
   :inner/starting-loop            "Starting inner loop"
-  :inner/unknown-state            "Unknown loop state"}}
+  :inner/unknown-state            "Unknown loop state"
+
+  ;; Outer loop descriptions
+  :outer/spec-description         "Specification received and validated"
+  :outer/plan-description         "Create implementation plan from spec"
+  :outer/design-description       "Create architecture and design decisions"
+  :outer/implement-description    "Generate code artifacts"
+  :outer/verify-description       "Run tests and validation"
+  :outer/review-description       "Code review and quality checks"
+  :outer/release-description      "Build and deploy artifacts"
+  :outer/observe-description      "Monitor deployment and collect telemetry"
+
+  ;; Outer loop runtime
+  :outer/entered-via-rollback     "Entered via rollback"
+  :outer/phase-completed          "Phase completed"
+  :outer/phase-entered            "Entering phase"
+  :outer/cannot-advance-phase     "Cannot advance phase"
+  :outer/rolling-back             "Rolling back"
+  :outer/invalid-rollback-target  "Invalid rollback target"
+  :outer/running-phase            "Running phase"
+  :outer/phase-completed-successfully "Phase completed successfully"
+  :outer/phase-failed             "Phase failed"
+  :outer/phase-execution-error    "Phase execution error"
+  :outer/starting-loop            "Starting outer loop"
+  :outer/completed                "Outer loop completed"
+  :outer/failed-to-advance-phase  "Failed to advance phase"
+  :outer/phase-execution-failed   "Phase execution failed"}}

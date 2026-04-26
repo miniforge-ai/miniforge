@@ -2,26 +2,16 @@
 
 (ns ai.miniforge.connector-retry.circuit-breaker
   (:require
+   [ai.miniforge.connector-retry.circuit-breaker-config :as config]
    [ai.miniforge.fsm.interface :as fsm]))
 
 (def default-config
   "Default circuit breaker configuration. Override via create-circuit-breaker opts."
-  {:breaker/failure-threshold 5
-   :breaker/reset-timeout-ms  60000})
+  (config/default-config))
 
 (def ^:private breaker-machine-config
   "Circuit breaker state machine configuration."
-  {:fsm/id :connector-retry-circuit-breaker
-   :fsm/initial :closed
-   :fsm/context {}
-   :fsm/states
-   {:closed {:on {:request-failed :closed
-                  :failure-threshold-reached :open
-                  :request-succeeded :closed}}
-    :open {:on {:reset-timeout-elapsed :half-open
-                :request-failed :open}}
-    :half-open {:on {:request-succeeded :closed
-                     :request-failed :open}}}})
+  (config/machine-config))
 
 (def ^:private breaker-machine
   "Compiled circuit breaker machine."

@@ -36,6 +36,13 @@
     (is (not (outer/valid-phase-transition? :observe :loop/advance)))
     (is (not (outer/valid-phase-transition? :plan :loop/rollback-to-review)))))
 
+(deftest phase-definition-test
+  (testing "phase definitions expose localized descriptions"
+    (is (= "Specification received and validated"
+           (:phase/description (outer/get-phase-definition :spec))))
+    (is (= "Monitor deployment and collect telemetry"
+           (:phase/description (outer/get-phase-definition :observe))))))
+
 (deftest advance-phase-test
   (testing "advancing updates the authoritative phase and history"
     (let [loop-state (outer/create-outer-loop test-spec {})

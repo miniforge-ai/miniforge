@@ -7,6 +7,7 @@
 
    Layer 0: Lifecycle transitions (pure)"
   (:require
+   [ai.miniforge.heuristic.lifecycle-config :as config]
    [ai.miniforge.fsm.interface :as fsm]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -14,22 +15,11 @@
 
 (def statuses
   "All valid heuristic statuses."
-  #{:draft :shadow :canary :active :deprecated})
+  (config/statuses))
 
 (def ^:private lifecycle-machine-config
   "Heuristic lifecycle state machine configuration."
-  {:fsm/id :heuristic-lifecycle
-   :fsm/initial :draft
-   :fsm/context {}
-   :fsm/states
-   {:draft {:on {:promote-to-shadow :shadow
-                 :deprecate :deprecated}}
-    :shadow {:on {:promote-to-canary :canary
-                  :deprecate :deprecated}}
-    :canary {:on {:promote-to-active :active
-                  :deprecate :deprecated}}
-    :active {:on {:deprecate :deprecated}}
-    :deprecated {:type :final}}})
+  (config/machine-config))
 
 (def ^:private lifecycle-machine
   "Compiled heuristic lifecycle machine."
@@ -37,13 +27,7 @@
 
 (def ^:private transition-events
   "Map of [from-status to-status] pairs to lifecycle events."
-  {[:draft :shadow] :promote-to-shadow
-   [:draft :deprecated] :deprecate
-   [:shadow :canary] :promote-to-canary
-   [:shadow :deprecated] :deprecate
-   [:canary :active] :promote-to-active
-   [:canary :deprecated] :deprecate
-   [:active :deprecated] :deprecate})
+  (config/transition-events))
 
 (defn- transition-event
   "Resolve the FSM event for a lifecycle transition."

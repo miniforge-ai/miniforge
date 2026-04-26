@@ -5,6 +5,13 @@
    [clojure.test :refer [deftest is testing]]
    [ai.miniforge.connector-retry.circuit-breaker :as breaker]))
 
+(deftest create-circuit-breaker-test
+  (testing "uses EDN-backed defaults when opts are omitted"
+    (let [created (breaker/create-circuit-breaker {})]
+      (is (= :closed (:breaker/state created)))
+      (is (= 5 (:breaker/failure-threshold created)))
+      (is (= 60000 (:breaker/reset-timeout-ms created))))))
+
 (deftest breaker-state-transition-test
   (testing "closed breakers remain closed until the threshold is reached"
     (let [initial (breaker/create-circuit-breaker {:breaker/failure-threshold 3

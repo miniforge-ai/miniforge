@@ -5,6 +5,11 @@
    [clojure.test :refer [deftest is testing]]
    [ai.miniforge.heuristic.lifecycle :as lifecycle]))
 
+(deftest statuses-test
+  (testing "statuses are loaded from lifecycle config"
+    (is (= #{:draft :shadow :canary :active :deprecated}
+           lifecycle/statuses))))
+
 (deftest valid-transition-test
   (testing "allows forward lifecycle transitions"
     (is (lifecycle/valid-transition? :draft :shadow))
