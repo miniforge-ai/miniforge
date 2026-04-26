@@ -24,6 +24,7 @@
    Layer 1: Step functions (generate, validate, repair)
    Layer 2: Loop runner"
   (:require
+   [ai.miniforge.fsm.interface :as fsm]
    [ai.miniforge.logging.interface :as log]
    [ai.miniforge.loop.escalation :as escalation]
    [ai.miniforge.loop.gates :as gates]
@@ -31,17 +32,113 @@
    [ai.miniforge.response.interface :as response]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; State machine transitions (pure functions)
+;; State machine definition and derived transition helpers
+
+(def default-max-iterations
+  5)
+
+(def initial-loop-state
+  :pending)
+
+(def default-loop-metrics
+  {:tokens 0
+   :cost-usd 0.0
+   :duration-ms 0
+   :generate-calls 0
+   :repair-calls 0})
+
+(def invalid-transition-message
+  "Invalid state transition")
+
+(def inner-loop-machine-definition
+  {:fsm/id :loop/inner
+   :fsm/initial initial-loop-state
+   :fsm/states
+   {:pending
+    {:on {:generate-requested :generating}}
+    :generating
+    {:on {:generation-completed :validating
+          :generation-failed :failed}}
+    :validating
+    {:on {:validation-passed :complete
+          :validation-failed :repairing
+          :validation-failed-unrecoverably :failed
+          :validation-escalated :escalated}}
+    :repairing
+    {:on {:repair-succeeded :generating
+          :repair-failed :failed
+          :repair-escalated :escalated}}
+    :complete {:type :final}
+    :failed {:type :final}
+    :escalated {:type :final}}})
+
+(def inner-loop-machine
+  (fsm/define-machine inner-loop-machine-definition))
+
+(defn- final-state-definition?
+  [[_ state-definition]]
+  (= :final (:type state-definition)))
+
+(defn- transition-targets
+  [state-definition]
+  (->> (get state-definition :on {})
+       vals
+       (map (fn transition-target [target-or-config]
+              (if (keyword? target-or-config)
+                target-or-config
+                (:target target-or-config))))
+       set))
+
+(defn- derive-valid-transitions
+  [machine-definition]
+  (reduce-kv
+   (fn [transitions state state-definition]
+     (assoc transitions state (transition-targets state-definition)))
+   {}
+   (:fsm/states machine-definition)))
+
+(defn- derive-transition-events
+  [machine-definition]
+  (reduce-kv
+   (fn [event-map state state-definition]
+     (reduce-kv
+      (fn [state-events event target-or-config]
+        (let [target-state (if (keyword? target-or-config)
+                             target-or-config
+                             (:target target-or-config))]
+          (assoc state-events [state target-state] event)))
+      event-map
+      (get state-definition :on {})))
+   {}
+   (:fsm/states machine-definition)))
 
 (def valid-transitions
   "Valid state transitions in the inner loop state machine."
-  {:pending     #{:generating}
-   :generating  #{:validating :failed}
-   :validating  #{:complete :repairing :failed :escalated}
-   :repairing   #{:generating :escalated :failed}
-   :complete    #{}  ; terminal state
-   :failed      #{}  ; terminal state
-   :escalated   #{}}) ; terminal state
+  (derive-valid-transitions inner-loop-machine-definition))
+
+(def transition-events
+  (derive-transition-events inner-loop-machine-definition))
+
+(def terminal-states
+  (into #{}
+        (comp (filter final-state-definition?)
+              (map first))
+        (:fsm/states inner-loop-machine-definition)))
+
+(defn- invalid-transition-data
+  [from-state to-state]
+  {:from from-state
+   :to to-state
+   :valid-targets (get valid-transitions from-state #{})})
+
+(defn- add-metric-values
+  [metrics metric-updates]
+  (merge-with (fn sum-metric-values [old new]
+                (if (number? old)
+                  (+ old new)
+                  new))
+              metrics
+              metric-updates))
 
 (defn valid-transition?
   "Check if a state transition is valid."
@@ -51,20 +148,19 @@
 (defn terminal-state?
   "Check if a state is terminal (no further transitions possible)."
   [state]
-  (empty? (get valid-transitions state)))
+  (contains? terminal-states state))
 
 (defn transition
   "Attempt a state transition. Returns updated loop state or throws if invalid."
   [loop-state new-state]
-  (let [current-state (:loop/state loop-state)]
-    (if (valid-transition? current-state new-state)
-      (-> loop-state
-          (assoc :loop/state new-state)
-          (assoc :loop/updated-at (java.util.Date.)))
-      (throw (ex-info "Invalid state transition"
-                      {:from current-state
-                       :to new-state
-                       :valid-targets (get valid-transitions current-state)})))))
+  (let [current-state (:loop/state loop-state)
+        transition-event (get transition-events [current-state new-state])]
+    (when-not transition-event
+      (throw (ex-info invalid-transition-message
+                      (invalid-transition-data current-state new-state))))
+    (assoc loop-state
+           :loop/state new-state
+           :loop/updated-at (java.util.Date.))))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Loop state constructors (pure functions)
@@ -76,40 +172,29 @@
    - task - Map with :task/id and :task/type
    - context - Optional context map
 
-   Options (via context):
-   - :max-iterations - Maximum generate/repair cycles (default 5)
-   - :budget - Budget constraints map"
+  Options (via context):
+  - :max-iterations - Maximum generate/repair cycles (default 5)
+  - :budget - Budget constraints map"
   [task context]
-  (let [max-iterations (get context :max-iterations 5)
+  (let [max-iterations (get context :max-iterations default-max-iterations)
         budget (:budget context)]
     {:loop/id (random-uuid)
      :loop/type :inner
-     :loop/state :pending
+     :loop/state initial-loop-state
      :loop/iteration 0
      :loop/task task
      :loop/config (cond-> {:max-iterations max-iterations}
                     budget (assoc :budget budget))
      :loop/gate-results []
      :loop/repair-history []
-     :loop/metrics {:tokens 0
-                    :cost-usd 0.0
-                    :duration-ms 0
-                    :generate-calls 0
-                    :repair-calls 0}
+     :loop/metrics default-loop-metrics
      :loop/created-at (java.util.Date.)
      :loop/updated-at (java.util.Date.)}))
 
 (defn update-metrics
   "Update loop metrics with new values."
   [loop-state metric-updates]
-  (update loop-state :loop/metrics
-          (fn [metrics]
-            (merge-with (fn [old new]
-                          (if (number? old)
-                            (+ old new)
-                            new))
-                        metrics
-                        metric-updates))))
+  (update loop-state :loop/metrics add-metric-values metric-updates))
 
 (defn add-gate-results
   "Add gate results to loop state."
@@ -149,7 +234,8 @@
 (defn max-iterations-exceeded?
   "Check if maximum iterations have been exceeded."
   [loop-state]
-  (let [max-iter (get-in loop-state [:loop/config :max-iterations] 5)
+  (let [max-iter (get-in loop-state [:loop/config :max-iterations]
+                         default-max-iterations)
         current (get loop-state :loop/iteration 0)]
     (>= current max-iter)))
 
@@ -399,7 +485,8 @@
   "Resume the loop after human escalation with provided hints."
   [state hints]
   (let [current-iter (:loop/iteration state)
-        current-max (get-in state [:loop/config :max-iterations] 5)
+        current-max (get-in state [:loop/config :max-iterations]
+                            default-max-iterations)
         current-count (get-in state [:loop/escalation :count] 0)
         target-max (max (inc current-max) (inc current-iter))]
     (-> state

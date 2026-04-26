@@ -18,6 +18,7 @@
 
 (ns ai.miniforge.task.core-test
   (:require [clojure.test :as test :refer [deftest testing is use-fixtures]]
+            [ai.miniforge.fsm.interface :as fsm]
             [ai.miniforge.task.core :as core]))
 
 ;------------------------------------------------------------------------------ Fixtures
@@ -28,6 +29,18 @@
   (core/reset-store!))
 
 (use-fixtures :each reset-store-fixture)
+
+(defn reachable-states
+  [initial-state transitions]
+  (loop [visited #{}
+         pending [initial-state]]
+    (if-let [state (peek pending)]
+      (if (contains? visited state)
+        (recur visited (pop pending))
+        (let [next-states (seq (get transitions state #{}))]
+          (recur (conj visited state)
+                 (into (pop pending) next-states))))
+      visited)))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; State machine tests
@@ -61,6 +74,17 @@
     (is (thrown-with-msg? clojure.lang.ExceptionInfo
                           #"Invalid state transition"
                           (core/validate-transition :pending :completed)))))
+
+(deftest task-machine-reachability-test
+  (let [reachable (reachable-states core/initial-task-status
+                                    core/valid-transitions)
+        expected-states #{:pending :running :blocked :completed :failed}]
+    (testing "all task machine states are reachable from the initial state"
+      (is (= expected-states reachable)))
+    (testing "shared FSM marks terminal task states as final"
+      (is (true? (fsm/final? core/task-machine {:_state :completed})))
+      (is (true? (fsm/final? core/task-machine {:_state :failed})))
+      (is (false? (fsm/final? core/task-machine {:_state :running}))))))
 
 (deftest make-task-test
   (testing "creates task with required fields"

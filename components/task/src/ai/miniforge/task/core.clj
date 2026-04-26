@@ -22,20 +22,105 @@
    Layer 1: Task store operations (CRUD)
    Layer 2: Orchestration (queries, decomposition, state transitions)"
   (:require
+   [ai.miniforge.fsm.interface :as fsm]
    [ai.miniforge.schema.interface :as schema]
    [ai.miniforge.logging.interface :as log]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; State machine definitions and pure utilities
 
+(def initial-task-status
+  :pending)
+
+(def invalid-transition-message
+  "Invalid state transition")
+
+(def task-not-found-message
+  "Task not found")
+
+(def parent-task-not-found-message
+  "Parent task not found")
+
+(def task-machine-definition
+  {:fsm/id :task/lifecycle
+   :fsm/initial initial-task-status
+   :fsm/states
+   {:pending {:on {:start :running
+                   :block :blocked}}
+    :running {:on {:complete :completed
+                   :fail :failed}}
+    :blocked {:on {:unblock :pending}}
+    :completed {:type :final}
+    :failed {:type :final}}})
+
+(def task-machine
+  (fsm/define-machine task-machine-definition))
+
+(defn- final-state-definition?
+  [[_ state-definition]]
+  (= :final (:type state-definition)))
+
+(defn- transition-targets
+  [state-definition]
+  (->> (get state-definition :on {})
+       vals
+       (map (fn transition-target [target-or-config]
+              (if (keyword? target-or-config)
+                target-or-config
+                (:target target-or-config))))
+       set))
+
+(defn- derive-valid-transitions
+  [machine-definition]
+  (reduce-kv
+   (fn [transitions state state-definition]
+     (assoc transitions state (transition-targets state-definition)))
+   {}
+   (:fsm/states machine-definition)))
+
+(defn- derive-transition-events
+  [machine-definition]
+  (reduce-kv
+   (fn [event-map state state-definition]
+     (reduce-kv
+      (fn [state-events event target-or-config]
+        (let [target-state (if (keyword? target-or-config)
+                             target-or-config
+                             (:target target-or-config))]
+          (assoc state-events [state target-state] event)))
+      event-map
+      (get state-definition :on {})))
+   {}
+   (:fsm/states machine-definition)))
+
 (def valid-transitions
   "Valid state transitions for tasks.
    Maps from-state to set of allowed to-states."
-  {:pending   #{:running :blocked}
-   :running   #{:completed :failed}
-   :blocked   #{:pending}
-   :completed #{}
-   :failed    #{}})
+  (derive-valid-transitions task-machine-definition))
+
+(def transition-events
+  (derive-transition-events task-machine-definition))
+
+(def terminal-task-statuses
+  (into #{}
+        (comp (filter final-state-definition?)
+              (map first))
+        (:fsm/states task-machine-definition)))
+
+(defn- invalid-transition-data
+  [from-state to-state]
+  {:from from-state
+   :to to-state
+   :valid-targets (get valid-transitions from-state #{})})
+
+(defn- success-task-result
+  [result]
+  (merge {:outcome :success} result))
+
+(defn- failed-task-result
+  [error]
+  {:outcome :failure
+   :error (if (string? error) error (str error))})
 
 (defn valid-transition?
   "Check if a state transition is valid according to the state machine."
@@ -45,25 +130,29 @@
 (defn validate-transition
   "Validate a state transition, throwing if invalid."
   [from-state to-state]
-  (when-not (valid-transition? from-state to-state)
-    (throw (ex-info "Invalid state transition"
-                    {:from from-state
-                     :to to-state
-                     :valid-targets (get valid-transitions from-state #{})})))
+  (let [transition-event (get transition-events [from-state to-state])]
+    (when-not transition-event
+      (throw (ex-info invalid-transition-message
+                      (invalid-transition-data from-state to-state)))))
   to-state)
 
 (defn make-task
   "Create a new task map with required fields.
    Generates a UUID if not provided."
   [{:keys [task/id task/type task/status task/constraints]
-    :or {status :pending}
+    :or {status initial-task-status}
     :as task-data}]
   (let [task-id (or id (random-uuid))
-        task (merge {:task/id task-id
-                     :task/type type
-                     :task/status status}
-                    (when constraints {:task/constraints constraints})
-                    (dissoc task-data :task/id :task/type :task/status :task/constraints))]
+        base-task {:task/id task-id
+                   :task/type type
+                   :task/status status}
+        constraint-data (when constraints {:task/constraints constraints})
+        additional-task-data (dissoc task-data
+                                     :task/id
+                                     :task/type
+                                     :task/status
+                                     :task/constraints)
+        task (merge base-task constraint-data additional-task-data)]
     (schema/validate schema/Task task)))
 
 (defn compute-child-tasks
@@ -124,7 +213,7 @@
                      :data {:task-id task-id
                             :changes (keys changes)}}))
        validated)
-     (throw (ex-info "Task not found" {:task-id task-id})))))
+     (throw (ex-info task-not-found-message {:task-id task-id})))))
 
 (defn delete-task!
   "Delete a task by ID.
@@ -139,7 +228,7 @@
                    {:message "Task deleted"
                     :data {:task-id task-id}}))
        task)
-     (throw (ex-info "Task not found" {:task-id task-id})))))
+     (throw (ex-info task-not-found-message {:task-id task-id})))))
 
 ;------------------------------------------------------------------------------ Layer 2
 ;; Orchestration (state transitions, queries, decomposition)
@@ -151,7 +240,7 @@
   [task-id to-state additional-changes logger event-key message]
   (let [task (get-task task-id)]
     (when-not task
-      (throw (ex-info "Task not found" {:task-id task-id})))
+      (throw (ex-info task-not-found-message {:task-id task-id})))
     (validate-transition (:task/status task) to-state)
     (let [changes (merge {:task/status to-state} additional-changes)
           updated (update-task! task-id changes)]
@@ -177,8 +266,7 @@
    Stores the result in :task/result."
   ([task-id result] (complete-task! task-id result nil))
   ([task-id result logger]
-   (let [task-result {:outcome :success}
-         full-result (merge task-result result)]
+   (let [full-result (success-task-result result)]
      (transition-task! task-id :completed
                        {:task/result full-result}
                        logger :task/completed "Task completed"))))
@@ -188,8 +276,7 @@
    Stores the error information in :task/result."
   ([task-id error] (fail-task! task-id error nil))
   ([task-id error logger]
-   (let [task-result {:outcome :failure
-                      :error (if (string? error) error (str error))}]
+   (let [task-result (failed-task-result error)]
      (transition-task! task-id :failed
                        {:task/result task-result}
                        logger :task/failed "Task failed"))))
@@ -259,7 +346,8 @@
   ([parent-task-id sub-tasks logger]
    (let [parent (get-task parent-task-id)]
      (when-not parent
-       (throw (ex-info "Parent task not found" {:task-id parent-task-id})))
+       (throw (ex-info parent-task-not-found-message
+                       {:task-id parent-task-id})))
      ;; Compute child task specs with parent references (pure)
      (let [child-specs (compute-child-tasks parent-task-id sub-tasks)
            ;; Create all child tasks (side effects)
