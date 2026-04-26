@@ -62,6 +62,30 @@ unmodified.
 
 ## Windows — Native (Beta)
 
+### End users (`scoop install miniforge`)
+
+Once `miniforge-ai/scoop-bucket` is provisioned (template lives at
+[`scoop/`](../scoop/) — see its README for bootstrap steps), end users
+install with:
+
+```powershell
+# One-time scoop install (skip if already present)
+# If you hit an execution-policy error first:
+#   Set-ExecutionPolicy RemoteSigned -Scope CurrentUser
+Invoke-Expression (New-Object System.Net.WebClient).DownloadString('https://get.scoop.sh')
+
+# Add buckets and install. Babashka is pulled automatically as a dep.
+scoop bucket add scoop-clojure https://github.com/littleli/scoop-clojure
+scoop bucket add miniforge https://github.com/miniforge-ai/scoop-bucket
+scoop install miniforge
+
+mf version
+```
+
+Upgrade later with `scoop update miniforge`.
+
+### Contributors (cloning and running from source)
+
 ```powershell
 # 1. Install scoop (skip if already installed)
 # If you hit an execution-policy error first:
@@ -100,7 +124,19 @@ bb test
   elevated shell.
 - **Line endings** — set `git config --global core.autocrlf input` before
   cloning to keep LF in checked-in files; mismatched CRLF will fail
-  `bb fmt:md` and pre-commit.
+  `bb fmt:md` and pre-commit. Critically, this also affects the SHA-256
+  digests baked into governance config integrity checks — those are
+  computed on LF content and a CRLF checkout will fail
+  `ai.miniforge.config.governance/verify-and-warn` at startup.
+- **Java cannot delete `.git/objects` pack files** — integration tests
+  that create temp git repos (e.g.
+  `ai.miniforge.workflow.release-integration-test`) fail on Windows
+  with `AccessDeniedException` during cleanup. Git marks pack files
+  read-only; `java.nio.file.Files.delete` does not clear the read-only
+  flag before unlinking. Workaround in test code:
+  `setWritable(true)` recursively before deleting, or use
+  `babashka.fs/delete-tree` (which handles this). The `test-windows`
+  CI job is `continue-on-error: true` until this is fixed.
 
 ## Windows — WSL2 or Git Bash (Works Today)
 

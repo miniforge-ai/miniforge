@@ -1,0 +1,51 @@
+name: Autoupdate
+
+# Refreshes bucket/miniforge.json when miniforge cuts a new release.
+# Three triggers, in priority order:
+#   1. repository_dispatch — fired from miniforge's release.yml on tag push
+#      (instant, ~10s after release publishes the artifact).
+#   2. workflow_dispatch — manual run from the Actions UI.
+#   3. schedule — daily safety net at 06:00 UTC in case (1) is ever missed.
+#
+# Public-repo runners are free, so the daily cron costs nothing.
+
+on:
+  repository_dispatch:
+    types: [miniforge-release]
+  workflow_dispatch:
+  schedule:
+    - cron: '0 6 * * *'
+
+permissions:
+  contents: write
+
+jobs:
+  excavate:
+    name: Refresh manifest from latest miniforge release
+    runs-on: windows-latest
+    steps:
+      - name: Checkout bucket
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Run scoop excavator
+        uses: Ash258/Scoop-GithubActions@stable
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SKIP_UPDATED: '1'
+        with:
+          run: excavator
+
+      - name: Commit and push
+        shell: pwsh
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add bucket/
+          if (git diff --cached --quiet) {
+            Write-Host "No manifest changes — already up to date."
+          } else {
+            git commit -m "chore(autoupdate): refresh miniforge manifest"
+            git push
+          }
