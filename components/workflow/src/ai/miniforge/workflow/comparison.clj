@@ -17,12 +17,16 @@
 ;; limitations under the License.
 
 (ns ai.miniforge.workflow.comparison
-  "Workflow execution comparison utilities."
-  (:require
-   [ai.miniforge.workflow.state :as state]))
+  "Workflow execution comparison utilities.")
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Summary creation
+
+(defn- execution-duration-ms
+  [{:execution/keys [started-at ended-at]
+    :or {started-at 0}}]
+  (let [end-time (or ended-at started-at)]
+    (- end-time started-at)))
 
 (defn execution-summary
   "Create a summary map from an execution state."
@@ -31,7 +35,7 @@
    :execution/workflow-id workflow-id
    :execution/status status
    :execution/metrics metrics
-   :execution/duration-ms (state/get-duration-ms exec-state)
+   :execution/duration-ms (execution-duration-ms exec-state)
    :artifact-count (count artifacts)
    :error-count (count errors)})
 
