@@ -344,3 +344,36 @@ jobs:
           git add Formula/miniforge.rb
           git commit -m "Update miniforge to ${{ needs.release.outputs.version }}"
           git push
+
+  # Trigger the scoop bucket's autoupdate workflow so the manifest picks
+  # up this release within seconds instead of waiting for the bucket's
+  # daily cron. The bucket workflow listens on `repository_dispatch` of
+  # type `miniforge-release`. Reuses the existing GitHub App that the
+  # homebrew job authenticates with — the app already has access to all
+  # repos in the org, so we just point at scoop-bucket here.
+  scoop:
+    name: Trigger Scoop Bucket Autoupdate
+    needs: release
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+
+    steps:
+      - name: Generate GitHub App token
+        id: app-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.HOMEBREW_APP_ID }}
+          private-key: ${{ secrets.HOMEBREW_APP_PRIVATE_KEY }}
+          owner: miniforge-ai
+          repositories: scoop-bucket
+
+      - name: Fire repository_dispatch
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          VERSION: ${{ needs.release.outputs.version }}
+        run: |
+          gh api repos/miniforge-ai/scoop-bucket/dispatches \
+            -f event_type=miniforge-release \
+            -F "client_payload[version]=$VERSION" \
+            -F "client_payload[source]=miniforge-release-${{ github.run_id }}"
+          echo "Dispatched miniforge-release event for v$VERSION"
