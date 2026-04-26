@@ -66,6 +66,14 @@
        (map :dag/task-id)
        set))
 
+(defn extract-completed-dag-artifacts
+  "Artifacts recorded on successful `:dag/task-completed` events."
+  [events]
+  (->> events
+       (filter #(= :dag/task-completed (:event/type %)))
+       (mapcat #(get-in % [:dag/result :data :artifacts] []))
+       vec))
+
 (defn extract-dag-pause-info
   "Find the last `:dag/paused` event and extract completed task IDs + reason."
   [events]
@@ -118,6 +126,10 @@
   [checkpoint-data]
   (get-in checkpoint-data [:machine-snapshot :execution/status]))
 
+(defn- checkpoint-dag-result
+  [checkpoint-data]
+  (get-in checkpoint-data [:machine-snapshot :execution/dag-result]))
+
 (defn- reconstructed-completed?
   [by-type checkpoint-data]
   (or (boolean (seq (get by-type :workflow/completed)))
@@ -140,6 +152,34 @@
     (:phase-results checkpoint-data)
     (extract-phase-results events)))
 
+(defn- restored-dag-pause-info
+  [checkpoint-data events]
+  (let [dag-result (checkpoint-dag-result checkpoint-data)]
+    (or (when (:paused? dag-result)
+          {:completed-task-ids (set (:completed-task-ids dag-result))
+           :pause-reason (:pause-reason dag-result)})
+        (extract-dag-pause-info events))))
+
+(defn- restored-completed-dag-tasks
+  [checkpoint-data events]
+  (let [dag-result (checkpoint-dag-result checkpoint-data)
+        checkpoint-task-ids (set (:completed-task-ids dag-result))
+        event-task-ids (extract-completed-dag-tasks events)
+        pause-task-ids (:completed-task-ids (restored-dag-pause-info checkpoint-data events))]
+    (or (not-empty checkpoint-task-ids)
+        (not-empty event-task-ids)
+        pause-task-ids
+        #{})))
+
+(defn- restored-completed-dag-artifacts
+  [checkpoint-data events]
+  (let [dag-result (checkpoint-dag-result checkpoint-data)
+        checkpoint-artifacts (vec (get dag-result :artifacts []))
+        event-artifacts (extract-completed-dag-artifacts events)]
+    (if (seq checkpoint-artifacts)
+      checkpoint-artifacts
+      event-artifacts)))
+
 ;------------------------------------------------------------------------------ Layer 1
 ;; Context reconstruction
 
@@ -159,6 +199,7 @@
      :failed?              — true if :workflow/failed emitted
      :event-count          — int (count of events that passed shape validation)
      :completed-dag-tasks  — set of DAG task IDs that succeeded
+     :completed-dag-artifacts — recovered artifacts from completed DAG tasks
      :dag-paused?          — boolean
      :dag-pause-reason     — keyword or nil
 
@@ -182,8 +223,9 @@
         machine-snapshot (:machine-snapshot checkpoint-data)
         completed? (reconstructed-completed? by-type checkpoint-data)
         failed? (reconstructed-failed? by-type checkpoint-data)
-        completed-dag-tasks (extract-completed-dag-tasks events)
-        dag-pause-info (extract-dag-pause-info events)]
+        completed-dag-tasks (restored-completed-dag-tasks checkpoint-data events)
+        completed-dag-artifacts (restored-completed-dag-artifacts checkpoint-data events)
+        dag-pause-info (restored-dag-pause-info checkpoint-data events)]
     {:phase-results phase-results
      :completed-phases completed-phases
      :workflow-spec workflow-spec
@@ -193,9 +235,8 @@
      :completed? completed?
      :failed? failed?
      :event-count (count events)
-     :completed-dag-tasks (or (not-empty completed-dag-tasks)
-                              (:completed-task-ids dag-pause-info)
-                              #{})
+     :completed-dag-tasks completed-dag-tasks
+     :completed-dag-artifacts completed-dag-artifacts
      :dag-paused? (boolean dag-pause-info)
      :dag-pause-reason (:pause-reason dag-pause-info)
      :machine-snapshot machine-snapshot

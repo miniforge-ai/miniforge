@@ -72,6 +72,18 @@
                   {:event/type :dag/task-failed    :dag/task-id "t3"}]]
       (is (= #{"t1" "t2"} (core/extract-completed-dag-tasks events))))))
 
+(deftest extract-completed-dag-artifacts-test
+  (testing "collects artifacts from :dag/task-completed events"
+    (let [events [{:event/type :dag/task-completed
+                   :dag/result {:data {:artifacts [{:artifact/id "a"}]}}}
+                  {:event/type :dag/task-completed
+                   :dag/result {:data {:artifacts [{:artifact/id "b"}
+                                                   {:artifact/id "c"}]}}}
+                  {:event/type :dag/task-failed
+                   :dag/result {:data {:artifacts [{:artifact/id "ignored"}]}}}]]
+      (is (= [{:artifact/id "a"} {:artifact/id "b"} {:artifact/id "c"}]
+             (core/extract-completed-dag-artifacts events))))))
+
 (deftest extract-dag-pause-info-last-pause-wins-test
   (testing "multiple pause events — latest one wins"
     (let [events [{:event/type :dag/paused
@@ -227,12 +239,16 @@
              (core/reconstruct-context base-dir (str (random-uuid)))))))))
 
 (deftest reconstruct-context-prefers-machine-snapshot-test
-  (testing "checkpoint data restores without requiring event files"
+  (testing "checkpoint data restores workflow and DAG resume state without requiring event files"
     (let [workflow-id (str (random-uuid))
           checkpoint-data {:machine-snapshot {:execution/id workflow-id
                                              :execution/workflow-id :canonical-sdlc
                                              :execution/workflow-version "1.0.0"
-                                             :execution/status :running}
+                                             :execution/status :running
+                                             :execution/dag-result {:paused? true
+                                                                    :completed-task-ids ["task-1" "task-2"]
+                                                                    :artifacts [{:artifact/id "art-1"}]
+                                                                    :pause-reason :rate-limit}}
                            :manifest {:workflow/phases-completed [:plan]}
                            :phase-results {:plan {:status :completed}}}]
       (with-redefs [workflow/load-checkpoint-data (fn [_workflow-run-id] checkpoint-data)
@@ -243,6 +259,10 @@
           (is (= [:plan] (:completed-phases ctx)))
           (is (= {:status :completed}
                  (get-in ctx [:phase-results :plan])))
+          (is (= #{"task-1" "task-2"} (:completed-dag-tasks ctx)))
+          (is (= [{:artifact/id "art-1"}] (:completed-dag-artifacts ctx)))
+          (is (true? (:dag-paused? ctx)))
+          (is (= :rate-limit (:dag-pause-reason ctx)))
           (is (= 0 (:event-count ctx))))))))
 
 ;------------------------------------------------------------------------------ Layer 3
@@ -253,6 +273,8 @@
     (is (= core/completed? wr/completed?))
     (is (= core/failed? wr/failed?))
     (is (= core/paused? wr/paused?))
+    (is (= core/extract-completed-dag-tasks wr/extract-completed-dag-tasks))
+    (is (= core/extract-completed-dag-artifacts wr/extract-completed-dag-artifacts))
     (is (= core/extract-completed-phases wr/extract-completed-phases))
     (is (= core/reconstruct-context wr/reconstruct-context))
     (is (= core/trim-pipeline wr/trim-pipeline))

@@ -19,6 +19,7 @@
 (ns ai.miniforge.workflow.dag-resilience-resume-test
   "Tests for resume helpers: safe-read-edn, read-event-file, extract functions, and resume context."
   (:require
+   [ai.miniforge.workflow.checkpoint-store :as checkpoint-store]
    [clojure.test :refer [deftest testing is]]
    [clojure.java.io :as io]
    [ai.miniforge.workflow.dag-resilience :as resilience]))
@@ -149,6 +150,19 @@
 ;------------------------------------------------------------------------------ Layer 3: Resume context end-to-end
 
 (deftest test-resume-context-end-to-end
+  (testing "checkpoint data is authoritative when persisted DAG resume state exists"
+    (let [workflow-id (str (random-uuid))
+          checkpoint-data {:machine-snapshot {:execution/dag-result
+                                             {:completed-task-ids [:task-a :task-c]
+                                              :artifacts [{:code/id "art-1"}]
+                                              :pause-reason :rate-limit}}}]
+      (with-redefs [checkpoint-store/load-checkpoint-data
+                    (fn [_workflow-run-id _opts] checkpoint-data)]
+        (let [ctx (resilience/resume-context-from-event-file workflow-id)]
+          (is (= #{:task-a :task-c} (:pre-completed-ids ctx)))
+          (is (= [{:code/id "art-1"}] (:pre-completed-artifacts ctx)))
+          (is (true? (:resumed? ctx)))
+          (is (= :checkpoint (:resume-source ctx)))))))
   (testing "builds full resume context from event file"
     (let [dir (temp-dir)]
       (try
@@ -171,7 +185,8 @@
           (is (= 2 (count artifacts))))
         (finally (cleanup! dir)))))
   (testing "resume-context-from-event-file returns non-resumed for missing file"
-    (let [ctx (resilience/resume-context-from-event-file "nonexistent-workflow-id")]
-      (is (= #{} (:pre-completed-ids ctx)))
-      (is (= [] (:pre-completed-artifacts ctx)))
-      (is (false? (:resumed? ctx))))))
+    (with-redefs [checkpoint-store/load-checkpoint-data (fn [_workflow-run-id _opts] nil)]
+      (let [ctx (resilience/resume-context-from-event-file "nonexistent-workflow-id")]
+        (is (= #{} (:pre-completed-ids ctx)))
+        (is (= [] (:pre-completed-artifacts ctx)))
+        (is (false? (:resumed? ctx)))))))

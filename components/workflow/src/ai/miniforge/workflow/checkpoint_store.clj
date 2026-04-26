@@ -75,6 +75,8 @@
    :execution/response-chain
    :execution/errors
    :execution/artifacts
+   :execution/dag-result
+   :execution/dag-pr-infos
    :execution/metrics
    :execution/output
    :execution/started-at

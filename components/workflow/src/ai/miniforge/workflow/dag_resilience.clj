@@ -29,6 +29,7 @@
    [ai.miniforge.config.interface :as config]
    [ai.miniforge.dag-executor.interface :as dag]
    [ai.miniforge.logging.interface :as log]
+   [ai.miniforge.workflow.checkpoint-store :as checkpoint-store]
    [clojure.edn :as edn]
    [clojure.java.io :as io]
    [clojure.string :as str]))
@@ -463,8 +464,22 @@
   "Default directory for workflow event files."
   (delay (str (config/miniforge-home) "/events")))
 
+(defn checkpoint-resume-context
+  "Build resume context from authoritative checkpoint data when available."
+  [workflow-id opts]
+  (when-let [checkpoint-data (checkpoint-store/load-checkpoint-data workflow-id opts)]
+    (let [dag-result (get-in checkpoint-data [:machine-snapshot :execution/dag-result])
+          completed-task-ids (set (:completed-task-ids dag-result))
+          artifacts (vec (get dag-result :artifacts []))]
+      (when (or (seq completed-task-ids) (seq artifacts))
+        {:pre-completed-ids completed-task-ids
+         :pre-completed-artifacts artifacts
+         :resumed? true
+         :resume-source :checkpoint}))))
+
 (defn resume-context-from-event-file
-  "Build resume context from a workflow's event file.
+  "Build resume context from durable checkpoint data, falling back to
+   legacy event-file reconstruction when checkpoint DAG state is absent.
 
    Arguments:
    - workflow-id: UUID of the workflow to resume
@@ -476,16 +491,17 @@
     :resumed? true}"
   ([workflow-id] (resume-context-from-event-file workflow-id {}))
   ([workflow-id opts]
-   (let [events-dir (or (:events-dir opts) @default-events-dir)
-         file-path (str events-dir "/" workflow-id ".edn")
-         events (read-event-file file-path)]
-     (if (seq events)
-       (let [completed-ids (extract-completed-task-ids events)
-             artifacts (extract-completed-artifacts events)]
-         {:pre-completed-ids completed-ids
-          :pre-completed-artifacts artifacts
-          :resumed? true
-          :resume-source file-path})
-       {:pre-completed-ids #{}
-        :pre-completed-artifacts []
-        :resumed? false}))))
+   (or (checkpoint-resume-context workflow-id opts)
+       (let [events-dir (or (:events-dir opts) @default-events-dir)
+             file-path (str events-dir "/" workflow-id ".edn")
+             events (read-event-file file-path)]
+         (if (seq events)
+           (let [completed-ids (extract-completed-task-ids events)
+                 artifacts (extract-completed-artifacts events)]
+             {:pre-completed-ids completed-ids
+              :pre-completed-artifacts artifacts
+              :resumed? true
+              :resume-source file-path})
+           {:pre-completed-ids #{}
+            :pre-completed-artifacts []
+            :resumed? false})))))

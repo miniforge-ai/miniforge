@@ -21,8 +21,14 @@
    [clojure.test :refer [deftest is testing]]
    [clojure.java.io :as io]
    [cheshire.core :as json]
+   [ai.miniforge.cli.main.display :as main-display]
+   [ai.miniforge.cli.workflow-runner.context :as context]
+   [ai.miniforge.cli.workflow-runner.dashboard :as dashboard]
    [ai.miniforge.cli.main.commands.resume :as sut]
-   [ai.miniforge.cli.workflow-selection-config :as selection-config]))
+   [ai.miniforge.cli.workflow-selection-config :as selection-config]
+   [ai.miniforge.event-stream.interface :as es]
+   [ai.miniforge.supervisory-state.interface :as supervisory]
+   [ai.miniforge.workflow-resume.interface :as wr]))
 
 (deftest resolve-resume-workflow-test
   (testing "recorded workflow spec wins over configured fallback"
@@ -101,3 +107,44 @@
     (fn [base-dir]
       (with-redefs [sut/events-dir (.getPath base-dir)]
         (is (nil? (sut/read-event-file (str (random-uuid)))))))))
+
+(deftest resume-workflow-passes-dag-recovery-data-test
+  (let [workflow-id (random-uuid)
+        run-pipeline-opts (atom nil)
+        reconstructed {:completed-phases [:plan]
+                       :event-count 0
+                       :completed-dag-tasks #{:task-a}
+                       :completed-dag-artifacts [{:artifact/id "art-1"}]
+                       :phase-results {:plan {:status :completed}}
+                       :machine-snapshot {:execution/id workflow-id}
+                       :workflow-spec {:name "canonical-sdlc"
+                                       :version "1.0.0"}}]
+    (with-redefs [wr/reconstruct-context (fn [_events-dir _workflow-id] reconstructed)
+                  sut/resolve-resume-workflow (fn [_] {:workflow-type :canonical-sdlc
+                                                       :workflow-version "1.0.0"})
+                  context/create-llm-client (fn [_workflow _provider _quiet] :llm-client)
+                  es/create-event-stream (fn [] :event-stream)
+                  supervisory/attach! (fn [_event-stream] nil)
+                  dashboard/start-command-poller! (fn [_workflow-id _control-state]
+                                                    (fn [] nil))
+                  main-display/print-info (fn [& _] nil)
+                  main-display/print-error (fn [& _] nil)
+                  clojure.core/requiring-resolve
+                  (fn [sym]
+                    (cond
+                      (= sym 'ai.miniforge.workflow.interface/load-workflow)
+                      (fn [_workflow-type _workflow-version _opts]
+                        {:workflow {:workflow/id :canonical-sdlc
+                                    :workflow/version "1.0.0"
+                                    :workflow/pipeline [{:phase :verify}]}})
+
+                      (= sym 'ai.miniforge.workflow.interface/run-pipeline)
+                      (fn [_workflow _input opts]
+                        (reset! run-pipeline-opts opts)
+                        {:execution/status :completed})))]
+      (let [result (sut/resume-workflow workflow-id {:quiet true})]
+        (is (= :completed (:execution/status result)))
+        (is (= #{:task-a}
+               (:pre-completed-dag-tasks @run-pipeline-opts)))
+        (is (= [{:artifact/id "art-1"}]
+               (:pre-completed-artifacts @run-pipeline-opts)))))))

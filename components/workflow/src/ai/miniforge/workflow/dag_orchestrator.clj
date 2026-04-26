@@ -63,14 +63,22 @@
    :metrics {}
    :error error})
 
-(defn dag-execution-paused [completed failed artifacts reason]
-  {:success? false
-   :paused? true
-   :tasks-completed completed
-   :tasks-failed failed
-   :artifacts (vec artifacts)
-   :pause-reason reason
-   :metrics {}})
+(defn dag-execution-paused
+  [completed-task-ids failed-task-ids artifacts decision]
+  (let [reset-at (:reset-at decision)
+        wait-ms (:wait-ms decision)
+        auto-resume? (= :checkpoint-and-resume (:action decision))]
+    {:success? false
+     :paused? true
+     :tasks-completed (count completed-task-ids)
+     :tasks-failed (count failed-task-ids)
+     :completed-task-ids (vec completed-task-ids)
+     :artifacts (vec artifacts)
+     :pause-reason (:reason decision)
+     :reset-at reset-at
+     :wait-ms wait-ms
+     :auto-resume? auto-resume?
+     :metrics {}}))
 
 ;--- Layer 0: Level Traversal
 
@@ -522,8 +530,8 @@
         (log-checkpoint-info logger auto-resume? reset-at
                              (:wait-ms decision 0) (count new-completed))
         {:action :pause
-         :result (dag-execution-paused (count new-completed) (count failed-ids)
-                                       artifacts (:reason decision))}))))
+         :result (dag-execution-paused new-completed failed-ids
+                                       artifacts decision)}))))
 
 (defn emit-completed-checkpoints!
   "Emit task-completed events for checkpointing."

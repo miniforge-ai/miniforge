@@ -556,7 +556,7 @@
   :workflow-runner/workflow-type-label ":workflow/type {type}"
   :workflow-runner/list-failed "Failed to list workflows: {error}"
   :workflow-runner/spec-execution-failed "\n❌ Workflow execution failed: {error}"
-  :workflow-runner/event-file-failed "Failed to read event file: {error}"
+  :workflow-runner/event-file-failed "Failed to load resume state: {error}"
   :workflow-runner/resuming "\n🔄 Resuming workflow {workflow-id}"
 
   :resume/resuming "Resuming workflow: {workflow-id}"
@@ -574,7 +574,7 @@
   :resume/missing-workflow-id "resume requires a workflow id. Usage: miniforge resume <workflow-id>"
   :workflow-runner/previously-completed "   Previously completed: {count} tasks"
   :workflow-runner/recovered-artifacts "   Recovered artifacts: {count}"
-  :workflow-runner/no-completed-tasks "   No completed tasks found in event file. Starting fresh run."
+  :workflow-runner/no-completed-tasks "   No completed tasks found in checkpointed resume state. Starting fresh run."
   :workflow-runner/chain-header "⛓  Chain: {chain-id}"
   :workflow-runner/chain-description "   {description}"
   :workflow-runner/chain-steps "   Steps: {count}"
