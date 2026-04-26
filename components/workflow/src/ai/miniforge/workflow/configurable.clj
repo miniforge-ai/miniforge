@@ -224,30 +224,47 @@
            %)
         (:artifacts phase-result)))
 
+(defn- pre-completed-dag-task-ids
+  [ctx execution-context]
+  (get-in ctx
+          [:execution/opts :pre-completed-dag-tasks]
+          (get execution-context :pre-completed-dag-tasks #{})))
+
+(defn- notify-dag-task-start
+  [on-phase-start ctx task-id]
+  (when on-phase-start
+    (on-phase-start ctx
+                    {:phase/id :dag-task
+                     :task-id task-id})))
+
+(defn- notify-dag-task-complete
+  [on-phase-complete ctx task-id result]
+  (when on-phase-complete
+    (on-phase-complete ctx
+                       {:phase/id :dag-task
+                        :task-id task-id}
+                       result)))
+
+(defn- build-dag-context
+  [ctx execution-context callbacks]
+  (let [{:keys [on-phase-start on-phase-complete]} callbacks
+        pre-completed-ids (pre-completed-dag-task-ids ctx execution-context)]
+    (assoc execution-context
+           :workflow-id (:execution/id ctx)
+           :execution/workflow (:execution/workflow ctx)
+           :pre-completed-ids pre-completed-ids
+           :on-task-start
+           (fn [task-id]
+             (notify-dag-task-start on-phase-start ctx task-id))
+           :on-task-complete
+           (fn [task-id result]
+             (notify-dag-task-complete on-phase-complete ctx task-id result)))))
+
 (defn execute-dag-for-plan
   "Execute plan tasks via the DAG orchestrator and merge results into context."
   [ctx plan execution-context callbacks]
-  (let [{:keys [on-phase-start on-phase-complete]} callbacks
-        pre-completed-artifacts (get-in ctx [:execution/opts :pre-completed-artifacts] [])
-        dag-context (assoc execution-context
-                           :workflow-id (:execution/id ctx)
-                           :execution/workflow (:execution/workflow ctx)
-                           :pre-completed-ids
-                           (or (get-in ctx [:execution/opts :pre-completed-dag-tasks])
-                               (get-in execution-context [:pre-completed-dag-tasks] #{}))
-                           :on-task-start
-                           (fn [task-id]
-                             (when on-phase-start
-                               (on-phase-start ctx
-                                               {:phase/id :dag-task
-                                                :task-id task-id})))
-                           :on-task-complete
-                           (fn [task-id result]
-                             (when on-phase-complete
-                               (on-phase-complete ctx
-                                                  {:phase/id :dag-task
-                                                   :task-id task-id}
-                                                  result))))
+  (let [pre-completed-artifacts (get-in ctx [:execution/opts :pre-completed-artifacts] [])
+        dag-context (build-dag-context ctx execution-context callbacks)
         dag-result (dag-orch/execute-plan-as-dag plan dag-context)
         pr-infos (:pr-infos dag-result)
         dag-metrics (get dag-result :metrics zero-metrics)
