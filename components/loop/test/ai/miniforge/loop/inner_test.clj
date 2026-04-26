@@ -18,8 +18,10 @@
 
 (ns ai.miniforge.loop.inner-test
   (:require [clojure.test :as test :refer [deftest testing is]]
+            [ai.miniforge.fsm.interface :as fsm]
             [ai.miniforge.loop.inner :as inner]
             [ai.miniforge.loop.gates :as gates]
+            [ai.miniforge.loop.messages :as loop-messages]
             [ai.miniforge.loop.repair :as repair]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -45,6 +47,18 @@
   {:artifact/id (random-uuid)
    :artifact/type :code
    :artifact/content "(defn broken ["})
+
+(defn reachable-states
+  [initial-state transitions]
+  (loop [visited #{}
+         pending [initial-state]]
+    (if-let [state (peek pending)]
+      (if (contains? visited state)
+        (recur visited (pop pending))
+        (let [next-states (seq (get transitions state #{}))]
+          (recur (conj visited state)
+                 (into (pop pending) next-states))))
+      visited)))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; State transition tests
@@ -91,6 +105,19 @@
   (testing ":generating is not terminal"
     (is (not (inner/terminal-state? :generating)))))
 
+(deftest inner-loop-machine-reachability-test
+  (let [reachable (reachable-states inner/initial-loop-state
+                                    inner/valid-transitions)
+        expected-states #{:pending :generating :validating
+                          :repairing :complete :failed :escalated}]
+    (testing "all machine states are reachable from the initial state"
+      (is (= expected-states reachable)))
+    (testing "shared FSM marks terminal states as final"
+      (is (true? (fsm/final? inner/inner-loop-machine {:_state :complete})))
+      (is (true? (fsm/final? inner/inner-loop-machine {:_state :failed})))
+      (is (true? (fsm/final? inner/inner-loop-machine {:_state :escalated})))
+      (is (false? (fsm/final? inner/inner-loop-machine {:_state :generating}))))))
+
 (deftest transition-test
   (let [loop-state (inner/create-inner-loop test-task {})]
     (testing "valid transition updates state"
@@ -99,8 +126,16 @@
 
     (testing "invalid transition throws"
       (is (thrown-with-msg? clojure.lang.ExceptionInfo
-                            #"Invalid state transition"
-                            (inner/transition loop-state :complete))))))
+                            (re-pattern (java.util.regex.Pattern/quote
+                                         (loop-messages/t :inner/invalid-transition)))
+                            (inner/transition loop-state :complete))))
+
+    (testing "terminal states reject additional transitions"
+      (let [terminal-state (assoc loop-state :loop/state :complete)]
+        (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                              (re-pattern (java.util.regex.Pattern/quote
+                                           (loop-messages/t :inner/invalid-transition)))
+                              (inner/transition terminal-state :generating)))))))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Loop state creation tests

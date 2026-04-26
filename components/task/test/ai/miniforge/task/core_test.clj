@@ -18,7 +18,14 @@
 
 (ns ai.miniforge.task.core-test
   (:require [clojure.test :as test :refer [deftest testing is use-fixtures]]
-            [ai.miniforge.task.core :as core]))
+            [ai.miniforge.fsm.interface :as fsm]
+            [ai.miniforge.task.core :as core]
+            [ai.miniforge.task.messages :as task-messages]))
+
+(defn message-pattern
+  [message-key]
+  (re-pattern (java.util.regex.Pattern/quote
+               (task-messages/t message-key))))
 
 ;------------------------------------------------------------------------------ Fixtures
 
@@ -28,6 +35,18 @@
   (core/reset-store!))
 
 (use-fixtures :each reset-store-fixture)
+
+(defn reachable-states
+  [initial-state transitions]
+  (loop [visited #{}
+         pending [initial-state]]
+    (if-let [state (peek pending)]
+      (if (contains? visited state)
+        (recur visited (pop pending))
+        (let [next-states (seq (get transitions state #{}))]
+          (recur (conj visited state)
+                 (into (pop pending) next-states))))
+      visited)))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; State machine tests
@@ -59,8 +78,19 @@
 
   (testing "invalid transition throws"
     (is (thrown-with-msg? clojure.lang.ExceptionInfo
-                          #"Invalid state transition"
+                          (message-pattern :task/invalid-transition)
                           (core/validate-transition :pending :completed)))))
+
+(deftest task-machine-reachability-test
+  (let [reachable (reachable-states core/initial-task-status
+                                    core/valid-transitions)
+        expected-states #{:pending :running :blocked :completed :failed}]
+    (testing "all task machine states are reachable from the initial state"
+      (is (= expected-states reachable)))
+    (testing "shared FSM marks terminal task states as final"
+      (is (true? (fsm/final? core/task-machine {:_state :completed})))
+      (is (true? (fsm/final? core/task-machine {:_state :failed})))
+      (is (false? (fsm/final? core/task-machine {:_state :running}))))))
 
 (deftest make-task-test
   (testing "creates task with required fields"
@@ -113,7 +143,7 @@
 
   (testing "throws for non-existent task"
     (is (thrown-with-msg? clojure.lang.ExceptionInfo
-                          #"Task not found"
+                          (message-pattern :task/not-found)
                           (core/update-task! (random-uuid) {:task/status :running})))))
 
 (deftest delete-task!-test
@@ -125,7 +155,7 @@
 
   (testing "throws for non-existent task"
     (is (thrown-with-msg? clojure.lang.ExceptionInfo
-                          #"Task not found"
+                          (message-pattern :task/not-found)
                           (core/delete-task! (random-uuid))))))
 
 ;------------------------------------------------------------------------------ Layer 2
@@ -144,7 +174,7 @@
           agent-id (random-uuid)]
       (core/start-task! (:task/id task) agent-id)
       (is (thrown-with-msg? clojure.lang.ExceptionInfo
-                            #"Invalid state transition"
+                            (message-pattern :task/invalid-transition)
                             (core/start-task! (:task/id task) agent-id))))))
 
 (deftest complete-task!-test
@@ -158,7 +188,7 @@
   (testing "throws for non-running task"
     (let [task (core/create-task! {:task/type :implement})]
       (is (thrown-with-msg? clojure.lang.ExceptionInfo
-                            #"Invalid state transition"
+                            (message-pattern :task/invalid-transition)
                             (core/complete-task! (:task/id task) {}))))))
 
 (deftest fail-task!-test
@@ -173,7 +203,7 @@
   (testing "throws for non-running task"
     (let [task (core/create-task! {:task/type :implement})]
       (is (thrown-with-msg? clojure.lang.ExceptionInfo
-                            #"Invalid state transition"
+                            (message-pattern :task/invalid-transition)
                             (core/fail-task! (:task/id task) "error"))))))
 
 (deftest block-task!-test
@@ -187,7 +217,7 @@
     (let [task (core/create-task! {:task/type :implement})
           _ (core/start-task! (:task/id task) (random-uuid))]
       (is (thrown-with-msg? clojure.lang.ExceptionInfo
-                            #"Invalid state transition"
+                            (message-pattern :task/invalid-transition)
                             (core/block-task! (:task/id task) "reason"))))))
 
 (deftest unblock-task!-test
@@ -200,7 +230,7 @@
   (testing "throws for non-blocked task"
     (let [task (core/create-task! {:task/type :implement})]
       (is (thrown-with-msg? clojure.lang.ExceptionInfo
-                            #"Invalid state transition"
+                            (message-pattern :task/invalid-transition)
                             (core/unblock-task! (:task/id task)))))))
 
 ;------------------------------------------------------------------------------ Layer 2
@@ -260,7 +290,7 @@
 
   (testing "throws for non-existent parent"
     (is (thrown-with-msg? clojure.lang.ExceptionInfo
-                          #"Parent task not found"
+                          (message-pattern :task/parent-not-found)
                           (core/decompose-task! (random-uuid)
                                                 [{:task/type :test}])))))
 

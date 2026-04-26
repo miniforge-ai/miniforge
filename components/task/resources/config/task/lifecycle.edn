@@ -1,0 +1,13 @@
+{:task/lifecycle
+ {:initial-task-status :pending
+  :machine-definition
+  {:fsm/id :task/lifecycle
+   :fsm/initial :pending
+   :fsm/states
+   {:pending {:on {:start :running
+                   :block :blocked}}
+    :running {:on {:complete :completed
+                   :fail :failed}}
+    :blocked {:on {:unblock :pending}}
+    :completed {:type :final}
+    :failed {:type :final}}}}}

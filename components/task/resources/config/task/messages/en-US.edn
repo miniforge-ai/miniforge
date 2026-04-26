@@ -1,0 +1,13 @@
+{:task/messages
+ {:task/invalid-transition "Invalid state transition"
+  :task/not-found "Task not found"
+  :task/parent-not-found "Parent task not found"
+  :task/created "Task created"
+  :task/updated "Task updated"
+  :task/deleted "Task deleted"
+  :task/started "Task started"
+  :task/completed "Task completed"
+  :task/failed "Task failed"
+  :task/blocked "Task blocked"
+  :task/unblocked "Task unblocked"
+  :task/decomposed "Task decomposed into sub-tasks"}}
