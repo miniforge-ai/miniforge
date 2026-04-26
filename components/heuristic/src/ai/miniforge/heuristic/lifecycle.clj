@@ -5,33 +5,63 @@
 
    Status progression: :draft → :shadow → :canary → :active → :deprecated
 
-   Layer 0: Lifecycle transitions (pure)")
+   Layer 0: Lifecycle transitions (pure)"
+  (:require
+   [ai.miniforge.fsm.interface :as fsm]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Valid transitions
-
-(def ^:private valid-transitions
-  "Valid status transitions for heuristic lifecycle."
-  {:draft      #{:shadow :deprecated}
-   :shadow     #{:canary :deprecated}
-   :canary     #{:active :deprecated}
-   :active     #{:deprecated}
-   :deprecated #{}})
 
 (def statuses
   "All valid heuristic statuses."
   #{:draft :shadow :canary :active :deprecated})
 
+(def ^:private lifecycle-machine-config
+  "Heuristic lifecycle state machine configuration."
+  {:fsm/id :heuristic-lifecycle
+   :fsm/initial :draft
+   :fsm/context {}
+   :fsm/states
+   {:draft {:on {:promote-to-shadow :shadow
+                 :deprecate :deprecated}}
+    :shadow {:on {:promote-to-canary :canary
+                  :deprecate :deprecated}}
+    :canary {:on {:promote-to-active :active
+                  :deprecate :deprecated}}
+    :active {:on {:deprecate :deprecated}}
+    :deprecated {:type :final}}})
+
+(def ^:private lifecycle-machine
+  "Compiled heuristic lifecycle machine."
+  (fsm/define-machine lifecycle-machine-config))
+
+(def ^:private transition-events
+  "Map of [from-status to-status] pairs to lifecycle events."
+  {[:draft :shadow] :promote-to-shadow
+   [:draft :deprecated] :deprecate
+   [:shadow :canary] :promote-to-canary
+   [:shadow :deprecated] :deprecate
+   [:canary :active] :promote-to-active
+   [:canary :deprecated] :deprecate
+   [:active :deprecated] :deprecate})
+
+(defn- transition-event
+  "Resolve the FSM event for a lifecycle transition."
+  [from-status to-status]
+  (get transition-events [from-status to-status]))
+
 (defn valid-transition?
   "Check if a transition from one status to another is valid."
   [from to]
-  (contains? (get valid-transitions from #{}) to))
+  (some? (transition-event from to)))
 
 (defn transition
   "Attempt a status transition. Returns new status or nil if invalid."
   [current-status target-status]
-  (when (valid-transition? current-status target-status)
-    target-status))
+  (when-let [event (transition-event current-status target-status)]
+    (let [state {:_state current-status}
+          transitioned (fsm/transition lifecycle-machine state event)]
+      (fsm/current-state transitioned))))
 
 (defn can-serve-traffic?
   "Returns true if this status serves production traffic."
