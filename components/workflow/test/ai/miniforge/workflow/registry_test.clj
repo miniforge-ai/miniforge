@@ -56,6 +56,38 @@
       (is (= workflow (registry/register-workflow! workflow)))
       (is (contains? (set (registry/list-workflow-ids)) :test-fsm))))
 
+  (testing "legacy phase workflows are validated through the compiled machine path"
+    (let [workflow {:workflow/id :legacy-invalid-fsm
+                    :workflow/version "1.0.0"
+                    :workflow/name "Legacy Invalid FSM"
+                    :workflow/description "Legacy workflow with unreachable phase"
+                    :workflow/phases [{:phase/id :plan
+                                       :phase/name "Plan"
+                                       :phase/agent :planner
+                                       :phase/next [{:target :verify}]}
+                                      {:phase/id :implement
+                                       :phase/name "Implement"
+                                       :phase/agent :implementer
+                                       :phase/next [{:target :done}]}
+                                      {:phase/id :verify
+                                       :phase/name "Verify"
+                                       :phase/agent :tester
+                                       :phase/next [{:target :done}]}
+                                      {:phase/id :done
+                                       :phase/name "Done"
+                                       :phase/agent :none
+                                       :phase/next []}]}]
+      (let [thrown (try
+                     (registry/register-workflow! workflow)
+                     nil
+                     (catch clojure.lang.ExceptionInfo ex
+                       ex))]
+        (is (instance? clojure.lang.ExceptionInfo thrown))
+        (is (re-find #"failed registration validation"
+                     (.getMessage ^clojure.lang.ExceptionInfo thrown))))
+      (is (not (contains? (set (registry/list-workflow-ids))
+                          :legacy-invalid-fsm)))))
+
   (testing "compiled workflows with unreachable phases are rejected at registration"
     (let [workflow {:workflow/id :invalid-fsm
                     :workflow/version "1.0.0"
