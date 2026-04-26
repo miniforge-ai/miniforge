@@ -17,35 +17,115 @@
 ;; limitations under the License.
 
 (ns ai.miniforge.workflow.definition
-  "Workflow-definition normalization helpers shared by execution and validation.")
+  "Workflow-definition normalization for execution-machine compilation.
 
-(defn first-transition-target
-  "Return the first legacy transition target for a phase, when present."
-  [phase]
-  (get-in phase [:phase/next 0 :target]))
+   Legacy configurable workflows still describe control flow via
+   `:workflow/phases` + `:phase/next`. This namespace projects those legacy
+   definitions into the canonical `:workflow/pipeline` form so registration,
+   validation, and execution all compile the same FSM.")
 
-(defn phase->pipeline-entry
-  "Project a legacy phase definition into the compiled-machine pipeline shape."
-  [phase]
-  (let [target-phase (first-transition-target phase)]
-    (cond-> {:phase (:phase/id phase)}
-      target-phase (assoc :on-success target-phase))))
+;------------------------------------------------------------------------------ Layer 0
+;; Legacy workflow helpers
 
-(defn ensure-execution-pipeline
-  "Ensure a workflow has a compiled-machine pipeline projection.
-
-   Pipeline workflows are returned unchanged. Legacy phase workflows are
-   normalized into `:workflow/pipeline` so validation and execution share one
-   compiler path."
+(defn workflow-entry-phase
+  "Resolve the entry phase for a workflow definition."
   [workflow]
-  (if (:workflow/pipeline workflow)
-    workflow
-    (assoc workflow
-           :workflow/pipeline
-           (mapv phase->pipeline-entry
-                 (:workflow/phases workflow)))))
+  (or (:workflow/entry workflow)
+      (:workflow/entry-phase workflow)
+      (some-> workflow :workflow/phases first :phase/id)))
+
+(defn find-phase
+  "Find a legacy phase definition by id."
+  [workflow phase-id]
+  (first
+   (filter #(= phase-id (:phase/id %))
+           (:workflow/phases workflow))))
+
+(defn legacy-transition-target
+  "Return the first configured transition target for a legacy phase."
+  [phase]
+  (some-> phase :phase/next first :target))
+
+(defn legacy-phase->pipeline-entry
+  "Project a legacy phase definition into canonical pipeline form."
+  [phase]
+  (let [target (legacy-transition-target phase)
+        terminal? (empty? (:phase/next phase))]
+    (cond-> {:phase (:phase/id phase)
+             :gates (get phase :phase/gates [])
+             :terminal? terminal?}
+      target (assoc :on-success target))))
+
+;------------------------------------------------------------------------------ Layer 1
+;; Pipeline normalization
+
+(defn- append-unvisited-phase
+  [{:keys [ordered-ids visited] :as acc} phase-id]
+  (if (contains? visited phase-id)
+    acc
+    {:ordered-ids (conj ordered-ids phase-id)
+     :visited (conj visited phase-id)}))
+
+(defn- walk-primary-path
+  [workflow phase-id visited]
+  (if (or (nil? phase-id) (contains? visited phase-id))
+    []
+    (let [phase (find-phase workflow phase-id)
+          next-target (legacy-transition-target phase)
+          next-visited (conj visited phase-id)]
+      (if phase
+        (vec (cons phase-id
+                   (walk-primary-path workflow next-target next-visited)))
+        []))))
+
+(defn legacy-phase-order
+  "Compute stable execution order for legacy workflow phases.
+
+   The primary path follows the declared entry phase and first transition
+   target, matching the legacy configurable runner's semantics. Any remaining
+   phases are appended in declaration order so registration and reachability
+   checks still see the whole graph."
+  [workflow]
+  (let [phases (:workflow/phases workflow)
+        entry-phase (workflow-entry-phase workflow)
+        primary-order (walk-primary-path workflow entry-phase #{})
+        primary-visited (set primary-order)
+        phase-ids (map :phase/id phases)]
+    (:ordered-ids
+     (reduce append-unvisited-phase
+             {:ordered-ids primary-order
+              :visited primary-visited}
+             phase-ids))))
 
 (defn execution-pipeline
-  "Return the normalized execution pipeline for a workflow definition."
+  "Return the canonical execution pipeline for a workflow."
   [workflow]
-  (:workflow/pipeline (ensure-execution-pipeline workflow)))
+  (if-let [pipeline (:workflow/pipeline workflow)]
+    pipeline
+    (let [phase-order (legacy-phase-order workflow)]
+      (->> phase-order
+           (keep #(find-phase workflow %))
+           (mapv legacy-phase->pipeline-entry)))))
+
+(defn execution-workflow
+  "Return a workflow map with authoritative `:workflow/pipeline`."
+  [workflow]
+  (assoc workflow :workflow/pipeline (execution-pipeline workflow)))
+
+(def ensure-execution-pipeline
+  "Backward-compatible alias for callers that need a workflow map with a
+   canonical execution pipeline."
+  execution-workflow)
+
+;------------------------------------------------------------------------------ Rich Comment
+(comment
+  (execution-pipeline
+   {:workflow/entry :plan
+    :workflow/phases [{:phase/id :plan :phase/next [{:target :implement}]}
+                      {:phase/id :implement :phase/next [{:target :done}]}
+                      {:phase/id :done :phase/next []}]})
+  ;; => [{:phase :plan :gates [] :on-success :implement}
+  ;;     {:phase :implement :gates [] :on-success :done}
+  ;;     {:phase :done :gates []}]
+
+  :leave-this-here)

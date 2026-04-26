@@ -22,6 +22,7 @@
   (:require
    [clojure.java.io :as io]
    [clojure.edn :as edn]
+   [ai.miniforge.workflow.definition :as definition]
    [ai.miniforge.workflow.fsm :as workflow-fsm]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -122,7 +123,8 @@
 
 (defn- machine-validation-messages
   [workflow]
-  (let [validation (workflow-fsm/validate-execution-machine workflow)
+  (let [execution-workflow (definition/execution-workflow workflow)
+        validation (workflow-fsm/validate-execution-machine execution-workflow)
         errors (mapv :message (:errors validation))
         warnings (mapv :message (:warnings validation))]
     (validation-result-with-warnings errors warnings)))

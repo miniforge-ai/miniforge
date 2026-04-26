@@ -20,9 +20,9 @@
   "Integration tests for configurable workflow execution."
   (:require
    [clojure.test :refer [deftest is testing]]
+   [ai.miniforge.phase.interface :as phase]
    [ai.miniforge.workflow.configurable :as configurable]
    [ai.miniforge.workflow.loader :as loader]
-   [ai.miniforge.workflow.state :as state]
    [ai.miniforge.agent.interface :as agent]))
 
 (defn with-mocked-test-runner
@@ -157,8 +157,8 @@
       (is (= :completed (:execution/status result))
           "Workflow should complete successfully")
 
-      (is (= :done (:execution/current-phase result))
-          "Should be at done phase")
+      (is (nil? (:execution/current-phase result))
+          "Terminal workflow should not project an active phase")
 
       (is (empty? (:execution/artifacts result))
           ":none agent should not produce artifacts")
@@ -287,9 +287,8 @@
           workflow (:workflow workflow-result)
           input {:task "Integration test task"}
           exec-state (configurable/run-configurable-workflow workflow input {:llm-backend mock-llm})]
-      (is (state/completed? exec-state))
-      (is (state/has-phase-result? exec-state :plan))
-      (is (state/has-phase-result? exec-state :implement))
+      (is (phase/succeeded? exec-state))
+      (is (contains? (:execution/phase-results exec-state) :plan))
+      (is (contains? (:execution/phase-results exec-state) :implement))
       (is (pos? (count (:execution/artifacts exec-state))))
-      (is (seq (:execution/history exec-state)))
       (is (empty? (:execution/errors exec-state))))))

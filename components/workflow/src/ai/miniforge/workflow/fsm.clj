@@ -211,7 +211,9 @@
 
 (defn- build-phase-state
   [phase-entries {:keys [index config state-id paused-state-id]}]
-  (let [next-index (when (< (inc index) (count phase-entries))
+  (let [terminal-phase? (:terminal? config)
+        next-index (when (and (not terminal-phase?)
+                              (< (inc index) (count phase-entries)))
                      (inc index))
         on-success-index (or (when-let [target-phase (:on-success config)]
                                (first-phase-index phase-entries target-phase))

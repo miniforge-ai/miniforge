@@ -127,6 +127,29 @@
 ;------------------------------------------------------------------------------ Layer 2
 ;; Task creation
 
+(def phase-task-types
+  "Supported task types that may be sourced directly from phase ids."
+  #{:plan :design :implement :test :review :deploy})
+
+(def agent->task-type
+  "Fallback task-type mapping for configurable phases whose ids are not task types."
+  {:planner :plan
+   :implementer :implement
+   :tester :test
+   :spec-analyzer :plan
+   :designer :design})
+
+(defn- resolved-task-type
+  [phase]
+  (let [explicit-task-type (:phase/task-type phase)
+        phase-id (:phase/id phase)
+        agent-type (:phase/agent phase)]
+    (or explicit-task-type
+        (when (contains? phase-task-types phase-id)
+          phase-id)
+        (get agent->task-type agent-type)
+        :implement)))
+
 (defn create-task-for-phase
   "Create task for agent from phase config and exec-state.
 
@@ -145,7 +168,7 @@
 
     (task/create-task
      {:task/id (random-uuid)
-      :task/type (or (:phase/task-type phase) phase-id)
+      :task/type (resolved-task-type phase)
       :task/title (str phase-name)
       :task/description (or phase-desc (str "Execute phase: " phase-name))
       :task/status :pending

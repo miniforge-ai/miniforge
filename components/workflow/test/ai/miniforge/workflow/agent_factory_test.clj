@@ -159,7 +159,37 @@
       (is (= "Implementation" (:task/title task))
           "Task title should match phase name")
       (is (= "Implement the feature" (:task/description task))
-          "Task description should match phase description"))))
+          "Task description should match phase description")))
+
+  (testing "Fallback task type is derived from agent when phase id is not a task type"
+    (let [phase {:phase/id :start
+                 :phase/name "Start"
+                 :phase/agent :planner}
+          exec-state {:execution/input {:task "Test task"}
+                      :execution/artifacts []}
+          task (factory/create-task-for-phase phase exec-state {})]
+      (is (= :plan (:task/type task))
+          "Planner-backed configurable phases should map to :plan")))
+
+  (testing "Specialized supported agent roles map to the expected task types"
+    (let [exec-state {:execution/input {:task "Test task"}
+                      :execution/artifacts []}
+          spec-task (factory/create-task-for-phase
+                     {:phase/id :analyze-spec
+                      :phase/name "Analyze Spec"
+                      :phase/agent :spec-analyzer}
+                     exec-state
+                     {})
+          design-task (factory/create-task-for-phase
+                       {:phase/id :shape-ui
+                        :phase/name "Shape UI"
+                        :phase/agent :designer}
+                       exec-state
+                       {})]
+      (is (= :plan (:task/type spec-task))
+          "Spec analyzer phases should map to :plan")
+      (is (= :design (:task/type design-task))
+          "Designer phases should map to :design"))))
 
 ;------------------------------------------------------------------------------ Generate function tests
 
