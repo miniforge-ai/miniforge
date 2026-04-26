@@ -317,50 +317,43 @@
                             ((:enter verify-interceptor) ctx))
           "Verify should throw when no execution environment is available"))))
 
-;; TEMPORARILY DISABLED — surfaced by PR #661 (Linux pipefail + poly install)
-;; once test failures stopped being silently masked by `cmd | tee`.
-;;
-;; The test asserts the release phase tolerates an empty :code/files artifact
-;; when the curator confirms files exist in the environment. The current
-;; phase-software-factory/release/build-release-input code path discovers
-;; files via `git-dirty-files` against the worktree BEFORE invoking the
-;; stubbed executor, and throws :release/zero-files on an empty result.
-;; Either the contract regressed (input building should defer to executor
-;; when one is provided) or this test was written against a prior shape.
-;;
-;; Re-enable once that regression is resolved. The body of the test is
-;; preserved verbatim under (comment …) so a follow-up PR can drop the
-;; comment marker and a single empty-line edit re-enables it. Tracked as
-;; a Windows-fidelity-pass follow-up.
 (deftest test-workflow-empty-artifact-handling
-  (testing "TEMPORARILY DISABLED — see comment above; pending release-phase fix"
-    (is true)))
+  (testing "Release phase accepts an empty :code/files artifact when the worktree has dirty files from earlier phases"
+    ;; Regression target: the release phase discovers files from git state,
+    ;; not from the artifact's :code/files. An implement result with empty
+    ;; :code/files MUST still reach the release executor as long as the
+    ;; environment (worktree) has the work — e.g. the agent wrote design
+    ;; docs / specs / config directly without populating :code/files, or
+    ;; the curator filtered the artifact down to []. The curator is
+    ;; stubbed here because the production implementation reads the
+    ;; worktree itself; this test isolates the release-phase contract.
+    ;;
+    ;; The release phase calls `git-dirty-files` against the worktree, so
+    ;; we simulate the "agent wrote to disk without populating :code/files"
+    ;; case by writing a real file before the pipeline runs.
+    (let [stray-file (io/file *test-worktree-path* "src" "stray.clj")]
+      (io/make-parents stray-file)
+      (spit stray-file "(ns stray)\n;; written outside :code/files — release should still find it via git\n"))
+    (with-redefs [agent/curate-implement-output
+                  (fn [_opts]
+                    (response/success mock-empty-artifact
+                                      {:tokens 0 :duration-ms 0}))]
+      (let [result-ctx (execute-phase-pipeline
+                        {:implement-agent-fn
+                         (fn [_agent _task _ctx]
+                           (response/success mock-empty-artifact
+                                             {:tokens 50 :duration-ms 300}))
 
-(comment
-  ;; Original test body — re-enable when build-release-input defers
-  ;; file discovery in test/stubbed-executor mode.
-  (deftest test-workflow-empty-artifact-handling
-    (testing "Release phase accepts an empty :code/files artifact when the curator confirms files exist in the environment"
-      (with-redefs [agent/curate-implement-output
-                    (fn [_opts]
-                      (response/success mock-empty-artifact
-                                        {:tokens 0 :duration-ms 0}))]
-        (let [result-ctx (execute-phase-pipeline
-                          {:implement-agent-fn
-                           (fn [_agent _task _ctx]
-                             (response/success mock-empty-artifact
-                                               {:tokens 50 :duration-ms 300}))
-
-                           :release-opts
-                           {:executor
-                            (fn [_workflow-state _exec-context _opts]
-                              {:success? true
-                               :artifacts []
-                               :metrics {:files-written 0}})}})]
-          (is (= :completed (get-in result-ctx [:phase :status]))
-              "Release phase should complete when executor returns success")
-          (is (= :success (get-in result-ctx [:phase :result :status]))
-              "Release result should be success"))))))
+                         :release-opts
+                         {:executor
+                          (fn [_workflow-state _exec-context _opts]
+                            {:success? true
+                             :artifacts []
+                             :metrics {:files-written 0}})}})]
+        (is (= :completed (get-in result-ctx [:phase :status]))
+            "Release phase should complete when executor returns success")
+        (is (= :success (get-in result-ctx [:phase :result :status]))
+            "Release result should be success")))))
 
 (deftest test-artifact-content-verification
   (testing "Files written to disk have correct content"
