@@ -1,4 +1,4 @@
 {:paths ["src" "resources"]
- :deps {}
+ :deps {ai.miniforge/fsm {:local/root "../fsm"}}
  :aliases {:test {:extra-paths ["test"]
                   :extra-deps {}}}}

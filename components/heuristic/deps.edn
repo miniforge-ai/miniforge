@@ -1,6 +1,7 @@
 {:paths ["src" "resources"]
 
- :deps {org.clojure/clojure {:mvn/version "1.11.1"}}
+ :deps {org.clojure/clojure {:mvn/version "1.11.1"}
+        ai.miniforge/fsm {:local/root "../fsm"}}
 
  :aliases
  {:test

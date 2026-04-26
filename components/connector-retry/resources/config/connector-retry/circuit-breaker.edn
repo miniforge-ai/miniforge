@@ -1,0 +1,16 @@
+{:connector-retry/circuit-breaker
+ {:default-config
+  {:breaker/failure-threshold 5
+   :breaker/reset-timeout-ms 60000}
+  :machine-config
+  {:fsm/id :connector-retry-circuit-breaker
+   :fsm/initial :closed
+   :fsm/context {}
+   :fsm/states
+   {:closed {:on {:request-failed :closed
+                  :failure-threshold-reached :open
+                  :request-succeeded :closed}}
+    :open {:on {:reset-timeout-elapsed :half-open
+                :request-failed :open}}
+    :half-open {:on {:request-succeeded :closed
+                     :request-failed :open}}}}}}

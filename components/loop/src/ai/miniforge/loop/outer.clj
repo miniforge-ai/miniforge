@@ -26,7 +26,9 @@
    Layer 1: Loop state management
    Layer 2: Phase execution (stub)"
   (:require
+   [ai.miniforge.fsm.interface :as fsm]
    [ai.miniforge.logging.interface :as log]
+   [ai.miniforge.loop.messages :as loop-messages]
    [ai.miniforge.response.interface :as response]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -36,89 +38,133 @@
   "Ordered sequence of outer loop phases."
   [:spec :plan :design :implement :verify :review :release :observe])
 
+(def ^:private initial-phase
+  "Initial outer-loop phase."
+  :spec)
+
+(def ^:private final-phase
+  "Terminal outer-loop phase."
+  :observe)
+
 (def phase-definitions
   "Phase metadata definitions."
   {:spec     {:phase/id :spec
-              :phase/description "Specification received and validated"
+              :phase/description (loop-messages/t :outer/spec-description)
               :phase/agent nil  ; No agent, external input
               :phase/artifacts [:spec]
               :phase/requires []}
 
    :plan     {:phase/id :plan
-              :phase/description "Create implementation plan from spec"
+              :phase/description (loop-messages/t :outer/plan-description)
               :phase/agent :planner
               :phase/artifacts [:plan]
               :phase/requires [:spec]}
 
    :design   {:phase/id :design
-              :phase/description "Create architecture and design decisions"
+              :phase/description (loop-messages/t :outer/design-description)
               :phase/agent :architect
               :phase/artifacts [:adr :design-doc]
               :phase/requires [:plan]}
 
    :implement {:phase/id :implement
-               :phase/description "Generate code artifacts"
+               :phase/description (loop-messages/t :outer/implement-description)
                :phase/agent :implementer
                :phase/artifacts [:code]
                :phase/requires [:design]}
 
    :verify   {:phase/id :verify
-              :phase/description "Run tests and validation"
+              :phase/description (loop-messages/t :outer/verify-description)
               :phase/agent :tester
               :phase/artifacts [:test :test-report]
               :phase/requires [:code]}
 
    :review   {:phase/id :review
-              :phase/description "Code review and quality checks"
+              :phase/description (loop-messages/t :outer/review-description)
               :phase/agent :reviewer
               :phase/artifacts [:review]
               :phase/requires [:code :test-report]}
 
    :release  {:phase/id :release
-              :phase/description "Build and deploy artifacts"
+              :phase/description (loop-messages/t :outer/release-description)
               :phase/agent :release
               :phase/artifacts [:manifest :image]
               :phase/requires [:review]}
 
    :observe  {:phase/id :observe
-              :phase/description "Monitor deployment and collect telemetry"
+              :phase/description (loop-messages/t :outer/observe-description)
               :phase/agent :sre
               :phase/artifacts [:telemetry]
               :phase/requires [:release]}})
 
-(defn phase-index
-  "Get the index of a phase in the sequence."
+(defn- rollback-event
+  "Build the rollback event for a target phase."
+  [target-phase]
+  (keyword "loop" (str "rollback-to-" (name target-phase))))
+
+(defn- rollback-transitions
+  "Build rollback transitions for a phase."
   [phase]
-  (.indexOf phases phase))
+  (->> phases
+       (take-while #(not= % phase))
+       (map (fn [target-phase]
+              [(rollback-event target-phase) target-phase]))
+       (into {})))
 
-(defn next-phase
-  "Get the next phase after the given phase, or nil if at end."
+(defn- phase-transition-map
+  "Build the transition map for a phase state."
   [phase]
-  (let [idx (phase-index phase)]
-    (when (< idx (dec (count phases)))
-      (nth phases (inc idx)))))
+  (let [next-phase (second (drop-while #(not= % phase) phases))
+        advance-transition (when next-phase {:loop/advance next-phase})
+        rollback-transition (rollback-transitions phase)
+        transitions (merge advance-transition rollback-transition)]
+    (cond-> {}
+      (seq transitions) (assoc :on transitions)
+      (= phase final-phase) (assoc :type :final))))
 
-(defn prev-phase
-  "Get the previous phase before the given phase, or nil if at start."
-  [phase]
-  (let [idx (phase-index phase)]
-    (when (pos? idx)
-      (nth phases (dec idx)))))
+(def ^:private phase-machine-config
+  "Outer-loop phase machine configuration."
+  {:fsm/id :outer-loop-phases
+   :fsm/initial initial-phase
+   :fsm/context {}
+   :fsm/states (into {}
+                     (map (fn [phase]
+                            [phase (phase-transition-map phase)]))
+                     phases)})
 
-(defn can-advance?
-  "Check if advancement from current phase is possible.
-   Stub: always returns true for now."
-  [_loop-state]
-  true)
+(def ^:private phase-machine
+  "Compiled outer-loop phase machine."
+  (fsm/define-machine phase-machine-config))
 
-(defn can-rollback?
-  "Check if rollback to target phase is valid."
-  [loop-state target-phase]
-  (let [current (get loop-state :loop/phase :spec)
-        current-idx (phase-index current)
-        target-idx (phase-index target-phase)]
-    (and (>= target-idx 0)
-         (< target-idx current-idx))))
+(defn- phase-fsm-state
+  "Get the authoritative phase machine snapshot."
+  [loop-state]
+  (get loop-state :loop/fsm-state (fsm/initialize phase-machine)))
+
+(defn- current-phase
+  "Get the authoritative phase from the FSM snapshot."
+  [loop-state]
+  (fsm/current-state (phase-fsm-state loop-state)))
+
+(defn- transition-phase
+  "Apply an outer-loop phase transition.
+
+   Returns updated loop state or nil if the transition is forbidden."
+  [loop-state event]
+  (let [current-state (phase-fsm-state loop-state)
+        transitioned (fsm/transition phase-machine current-state event)
+        next-phase (fsm/current-state transitioned)]
+    (when (not= (fsm/current-state current-state) next-phase)
+      (assoc loop-state
+             :loop/fsm-state transitioned
+             :loop/phase next-phase
+             :loop/updated-at (java.util.Date.)))))
+
+(defn valid-phase-transition?
+  "Check whether a phase transition event is allowed."
+  [phase event]
+  (some? (transition-phase {:loop/fsm-state {:_state phase}
+                            :loop/phase phase}
+                           event)))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Outer loop state management
@@ -130,22 +176,26 @@
    - spec - Map with :spec/id and spec content
    - context - Optional context map with :config, :budget, etc."
   [spec context]
-  {:loop/id (random-uuid)
-   :loop/type :outer
-   :loop/phase :spec
-   :loop/spec {:spec/id (or (:spec/id spec) (random-uuid))}
-   :loop/artifacts {}
-   :loop/history [{:phase :spec
-                   :timestamp (java.util.Date.)
-                   :outcome :entered}]
-   :loop/config (get context :config {})
-   :loop/created-at (java.util.Date.)
-   :loop/updated-at (java.util.Date.)})
+  (let [created-at (java.util.Date.)
+        fsm-state (fsm/initialize phase-machine)
+        loop-phase (fsm/current-state fsm-state)]
+    {:loop/id (random-uuid)
+     :loop/type :outer
+     :loop/fsm-state fsm-state
+     :loop/phase loop-phase
+     :loop/spec {:spec/id (or (:spec/id spec) (random-uuid))}
+     :loop/artifacts {}
+     :loop/history [{:phase loop-phase
+                     :timestamp created-at
+                     :outcome :entered}]
+     :loop/config (get context :config {})
+     :loop/created-at created-at
+     :loop/updated-at created-at}))
 
 (defn get-current-phase
   "Get the current phase of the outer loop."
   [loop-state]
-  (:loop/phase loop-state))
+  (current-phase loop-state))
 
 (defn get-phase-definition
   "Get the definition for a phase."
@@ -161,13 +211,6 @@
                    :outcome outcome}
             message (assoc :message message)
             data (assoc :data data))))
-
-(defn set-phase
-  "Set the current phase."
-  [loop-state phase]
-  (-> loop-state
-      (assoc :loop/phase phase)
-      (assoc :loop/updated-at (java.util.Date.))))
 
 (defn add-artifact
   "Add an artifact reference to the loop state."
@@ -206,19 +249,19 @@
    Returns updated loop state or nil if cannot advance."
   [loop-state context]
   (let [logger (:logger context)
-        current (:loop/phase loop-state)
-        next (next-phase current)]
-    (log-phase logger :info :outer/phase-completed current "Phase completed")
-    (if (and next (can-advance? loop-state))
+        current (current-phase loop-state)
+        advanced-state (transition-phase loop-state :loop/advance)
+        next-phase (some-> advanced-state current-phase)]
+    (log-phase logger :info :outer/phase-completed current (loop-messages/t :outer/phase-completed))
+    (if advanced-state
       (do
-        (log-phase logger :info :outer/phase-entered next "Entering phase")
-        (-> loop-state
+        (log-phase logger :info :outer/phase-entered next-phase (loop-messages/t :outer/phase-entered))
+        (-> advanced-state
             (add-history-entry current :completed)
-            (set-phase next)
-            (add-history-entry next :entered)))
+            (add-history-entry next-phase :entered)))
       ;; Cannot advance or at end
-      (log-phase logger :warn :outer/phase-failed current "Cannot advance phase"
-                 {:next next}))))
+      (log-phase logger :warn :outer/phase-failed current (loop-messages/t :outer/cannot-advance-phase)
+                 {:next next-phase}))))
 
 (defn rollback-phase
   "Rollback to a previous phase.
@@ -227,19 +270,19 @@
    Returns updated loop state or nil if invalid rollback."
   [loop-state target-phase context]
   (let [logger (:logger context)
-        current (:loop/phase loop-state)]
-    (if (can-rollback? loop-state target-phase)
+        current (current-phase loop-state)
+        rollback-state (transition-phase loop-state (rollback-event target-phase))]
+    (if rollback-state
       (do
-        (log-phase logger :warn :outer/phase-failed current "Rolling back"
+        (log-phase logger :warn :outer/phase-failed current (loop-messages/t :outer/rolling-back)
                    {:to target-phase})
-        (-> loop-state
+        (-> rollback-state
             (add-history-entry current :rolled-back
                                :data {:target target-phase})
-            (set-phase target-phase)
             (add-history-entry target-phase :entered
-                               :message "Entered via rollback")))
+                               :message (loop-messages/t :outer/entered-via-rollback))))
       (do
-        (log-phase logger :error :outer/phase-failed current "Invalid rollback target"
+        (log-phase logger :error :outer/phase-failed current (loop-messages/t :outer/invalid-rollback-target)
                    {:target target-phase})
         nil))))
 
@@ -261,7 +304,7 @@
   (let [logger (:logger context)
         phase (:loop/phase loop-state)
         definition (get-phase-definition phase)]
-    (log-phase logger :info :outer/phase-entered phase "Running phase"
+    (log-phase logger :info :outer/phase-entered phase (loop-messages/t :outer/running-phase)
                {:agent (:phase/agent definition)})
     (if-let [phase-executor (:phase-executor context)]
       ;; Real execution: delegate to the phase executor
@@ -269,14 +312,14 @@
         (let [result (phase-executor phase loop-state context)]
           (if (phase-succeeded? result)
             (do
-              (log-phase logger :info :outer/phase-completed phase "Phase completed successfully")
+              (log-phase logger :info :outer/phase-completed phase (loop-messages/t :outer/phase-completed-successfully))
               result)
             (do
-              (log-phase logger :warn :outer/phase-failed phase "Phase failed"
+              (log-phase logger :warn :outer/phase-failed phase (loop-messages/t :outer/phase-failed)
                          {:error (:error result)})
               result)))
         (catch Exception e
-          (log-phase logger :error :outer/phase-failed phase "Phase execution error"
+          (log-phase logger :error :outer/phase-failed phase (loop-messages/t :outer/phase-execution-error)
                      {:error (ex-message e)})
           (response/failure (ex-message e) {:data {:phase phase}})))
       ;; No executor: mock success (development/testing)
@@ -287,7 +330,7 @@
 (defn is-complete?
   "Check if the outer loop has completed all phases."
   [loop-state]
-  (= (:loop/phase loop-state) :observe))
+  (fsm/final? phase-machine (phase-fsm-state loop-state)))
 
 (defn run-outer-loop
   "Run the outer loop through all phases.
@@ -300,13 +343,13 @@
     :history [...]}"
   [loop-state context]
   (let [logger (:logger context)]
-    (log-phase logger :info :outer/phase-entered :outer-loop "Starting outer loop"
+    (log-phase logger :info :outer/phase-entered :outer-loop (loop-messages/t :outer/starting-loop)
                {:spec-id (get-in loop-state [:loop/spec :spec/id])})
     (loop [state loop-state]
       (if (is-complete? state)
         ;; Complete
         (do
-          (log-phase logger :info :outer/workflow-completed :outer-loop "Outer loop completed"
+          (log-phase logger :info :outer/workflow-completed :outer-loop (loop-messages/t :outer/completed)
                      {:artifacts (keys (:loop/artifacts state))})
           (response/success {:phase (:loop/phase state)
                             :artifacts (:loop/artifacts state)
@@ -325,12 +368,12 @@
               (if advanced
                 (recur advanced)
                 ;; Couldn't advance
-                (response/failure "Failed to advance phase"
+                (response/failure (loop-messages/t :outer/failed-to-advance-phase)
                                   {:data {:phase (:loop/phase state)
                                           :artifacts (:loop/artifacts state)
                                           :history (:loop/history state)}})))
             ;; Phase failed
-            (response/failure (get result-data :error "Phase execution failed")
+            (response/failure (get result-data :error (loop-messages/t :outer/phase-execution-failed))
                               {:data {:phase (:loop/phase state)
                                       :artifacts (:loop/artifacts state)
                                       :history (:loop/history state)}})))))))
