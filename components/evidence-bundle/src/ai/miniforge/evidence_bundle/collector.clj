@@ -20,7 +20,7 @@
   "Utilities for collecting evidence during workflow execution.
    Provides helpers for gathering phase results, artifacts, and metadata."
   (:require
-   [ai.miniforge.evidence-bundle.hash :as hash]
+   [ai.miniforge.content-hash.interface :as content-hash]
    [ai.miniforge.evidence-bundle.schema :as schema]
    [ai.miniforge.response.interface :as response]))
 
@@ -409,7 +409,7 @@
         ;; Merge compliance metadata
         bundle (cond-> bundle
                  scan-result (merge scan-result))]
-    (assoc bundle :evidence/content-hash (hash/content-hash bundle))))
+    (assoc bundle :evidence/content-hash (content-hash/content-hash bundle))))
 
 ;------------------------------------------------------------------------------ Layer 6
 ;; Workflow Integration Helpers

@@ -26,9 +26,9 @@
    All externals are mocked — no artifact store, no event stream, no network."
   (:require
    [clojure.test :refer [deftest testing is]]
+   [ai.miniforge.content-hash.interface :as hash]
    [ai.miniforge.evidence-bundle.collector :as collector]
-   [ai.miniforge.evidence-bundle.schema :as schema]
-   [ai.miniforge.evidence-bundle.hash :as hash]))
+   [ai.miniforge.evidence-bundle.schema :as schema]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Factory functions

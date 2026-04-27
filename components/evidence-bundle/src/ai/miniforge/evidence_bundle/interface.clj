@@ -20,10 +20,10 @@
   "Public API for the evidence-bundle component.
    Handles evidence collection, storage, and provenance tracing per N6 spec."
   (:require
+   [ai.miniforge.content-hash.interface :as content-hash]
    [ai.miniforge.evidence-bundle.chain-evidence :as chain-evidence]
    [ai.miniforge.evidence-bundle.collector :as collector]
    [ai.miniforge.evidence-bundle.extraction :as extraction]
-   [ai.miniforge.evidence-bundle.hash :as hash]
    [ai.miniforge.evidence-bundle.schema :as schema]
    [ai.miniforge.evidence-bundle.interface.protocols.evidence-bundle :as p]
    [ai.miniforge.evidence-bundle.protocols.records.evidence-bundle :as records]))
@@ -278,11 +278,15 @@
   "Compute SHA-256 digest of artifact content.
    Returns hex-encoded hash string.
 
+   Delegates to the content-hash component, which uses canonical EDN
+   (sorted map keys) so that logically equal data produces equal hashes
+   regardless of insertion order.
+
    Example:
      (content-hash {:type :terraform-plan :body \"resource ...\"})
      ;; => \"a3f2b7c9...\" (64-char hex string)"
   [content]
-  (hash/content-hash content))
+  (content-hash/content-hash content))
 
 ;------------------------------------------------------------------------------ Layer 7b
 ;; Chain Evidence

@@ -9,6 +9,7 @@
                        "components/config/src"
                        "components/config/resources"
                        "components/algorithms/src"
+                       "components/content-hash/src"
                        "components/logging/src"
                        "components/logging/resources"
                        "components/llm/src"
@@ -180,6 +181,7 @@
                       ai.miniforge/config {:local/root "components/config"}
                       ai.miniforge/lsp-mcp-bridge {:local/root "bases/lsp-mcp-bridge"}
                       ai.miniforge/algorithms {:local/root "components/algorithms"}
+                      ai.miniforge/content-hash {:local/root "components/content-hash"}
                       ai.miniforge/logging {:local/root "components/logging"}
                       ai.miniforge/llm {:local/root "components/llm"}
                       ai.miniforge/tool {:local/root "components/tool"}
@@ -290,6 +292,7 @@
                        "components/schema/test"
                        "components/config/test"
                        "components/algorithms/test"
+                       "components/content-hash/test"
                        "components/response/test"
                        "components/fsm/test"
                        "components/logging/test"
@@ -403,6 +406,7 @@
          :extra-deps {ai.miniforge/schema {:local/root "components/schema"}
                       ai.miniforge/config {:local/root "components/config"}
                       ai.miniforge/algorithms {:local/root "components/algorithms"}
+                      ai.miniforge/content-hash {:local/root "components/content-hash"}
                       ai.miniforge/logging {:local/root "components/logging"}
                       ai.miniforge/llm {:local/root "components/llm"}
                       ai.miniforge/tool {:local/root "components/tool"}
@@ -484,6 +488,8 @@
                               "components/schema/test"
                               "components/algorithms/src"
                               "components/algorithms/test"
+                              "components/content-hash/src"
+                              "components/content-hash/test"
                               "components/logging/src"
                               "components/logging/test"
                               "components/llm/src"
@@ -528,6 +534,7 @@
                               "components/tool-registry/test"]
                 :extra-deps {ai.miniforge/schema {:local/root "components/schema"}
                              ai.miniforge/algorithms {:local/root "components/algorithms"}
+                             ai.miniforge/content-hash {:local/root "components/content-hash"}
                              ai.miniforge/logging {:local/root "components/logging"}
                              ai.miniforge/llm {:local/root "components/llm"}
                              ai.miniforge/tool {:local/root "components/tool"}
