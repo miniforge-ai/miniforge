@@ -66,6 +66,33 @@
     (is (false? (sut/installed?
                  "definitely-not-a-real-binary-xyzzy-bb-proc")))))
 
+(deftest test-command-candidates-add-windows-clojure-fallbacks
+  (testing "given clojure on windows → includes executable fallbacks"
+    (is (= ["clojure" "clojure.exe" "clj.exe" "deps.exe"]
+           (sut/command-candidates "clojure" :windows)))))
+
+(deftest test-command-candidates-keep-other-cases-unchanged
+  (testing "given clojure on unix → keeps the canonical command only"
+    (is (= ["clojure"]
+           (sut/command-candidates "clojure" :unix))))
+  (testing "given a non-clojure command on windows → no extra fallbacks"
+    (is (= ["bb"]
+           (sut/command-candidates "bb" :windows)))))
+
+(deftest test-first-resolved-command-prefers-first-hit
+  (testing "given multiple candidates → returns the first resolved path"
+    (let [lookup {"clojure.exe" "C:/tools/clojure.exe"
+                  "deps.exe" "C:/tools/deps.exe"}]
+      (is (= "C:/tools/clojure.exe"
+             (sut/first-resolved-command
+              ["clojure" "clojure.exe" "deps.exe"]
+              lookup))))))
+
+(deftest test-first-resolved-command-falls-back-to-original-command
+  (testing "given no resolved candidates → returns the first candidate"
+    (is (= "clojure"
+           (sut/first-resolved-command ["clojure" "clojure.exe"] (constantly nil))))))
+
 (deftest test-run-bg!-starts-and-destroy!-tears-down
   (testing "given a long-running command → run-bg! returns handle, destroy! tears it down"
     (let [proc (sut/run-bg! {:out :string :err :string} "sleep" "30")]

@@ -18,6 +18,7 @@
 
 (ns standards
   (:require
+   [ai.miniforge.bb-proc.interface :as proc]
    [babashka.process :as p]
    [clojure.string :as str]))
 
@@ -45,9 +46,10 @@
    components/phase/resources/packs/miniforge-standards.pack.edn."
   []
   (println "Compiling standards pack from .standards/ ...")
-  (let [{:keys [exit out err]}
+  (let [clojure-cmd (proc/clojure-command)
+        {:keys [exit out err]}
         (p/sh {:out :string :err :string}
-              "clojure" "-M:dev" "-m" "compile-standards")]
+              clojure-cmd "-M:dev" "-m" "compile-standards")]
     (when-not (str/blank? out) (println out))
     (when-not (str/blank? err)
       (binding [*out* *err*] (println err)))

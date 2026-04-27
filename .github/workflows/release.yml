@@ -107,6 +107,25 @@ jobs:
           cli: latest
           bb: latest
 
+      # `bb build:cli` shells out to `clojure` through Java
+      # ProcessBuilder. On GitHub-hosted Windows runners setup-clojure
+      # exposes the Clojure CLI as a PowerShell module, not a real
+      # executable, so install deps.clj as clojure.exe / clj.exe.
+      - name: Install deps.clj shim (Windows)
+        shell: pwsh
+        run: |
+          $depsVersion = "1.12.4.1618"
+          $depsDir = "$env:USERPROFILE\.deps-clj"
+          New-Item -ItemType Directory -Force -Path $depsDir | Out-Null
+          Invoke-WebRequest `
+            -Uri "https://github.com/borkdude/deps.clj/releases/download/v${depsVersion}/deps.clj-${depsVersion}-windows-amd64.zip" `
+            -OutFile deps.zip
+          Expand-Archive deps.zip -DestinationPath $depsDir -Force
+          Copy-Item "$depsDir\deps.exe" "$depsDir\clojure.exe"
+          Copy-Item "$depsDir\deps.exe" "$depsDir\clj.exe"
+          "$depsDir" >> $env:GITHUB_PATH
+          Write-Host "clojure/clj installed at $depsDir (via deps.clj $depsVersion)"
+
       - name: Cache Clojure dependencies
         uses: actions/cache@v4
         with:

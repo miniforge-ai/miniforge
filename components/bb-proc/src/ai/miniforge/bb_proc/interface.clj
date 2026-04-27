@@ -18,6 +18,7 @@
 
 (ns ai.miniforge.bb-proc.interface
   "Subprocess helpers for Babashka tasks. Pass-through to `core`."
+  (:refer-clojure :exclude [run!])
   (:require [ai.miniforge.bb-proc.core :as core]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -45,6 +46,16 @@
   "True if `cmd` resolves on PATH."
   [cmd]
   (core/installed? cmd))
+
+(defn resolve-command
+  "Resolve `cmd` to an executable path when possible."
+  [cmd]
+  (core/resolve-command cmd))
+
+(defn clojure-command
+  "Resolve the best Clojure executable for the current process."
+  []
+  (core/clojure-command))
 
 (defn destroy!
   "Destroy a background process and wait briefly for it to exit."
