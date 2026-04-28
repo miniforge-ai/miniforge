@@ -276,13 +276,15 @@
                   :agent/last-heartbeat ts}))))
 
 (defn cp-agent-heartbeat
-  [table {:cp/keys [agent-id status] :as event}]
+  [table {:cp/keys [agent-id status task metrics] :as event}]
   (let [ts (event-instant event)]
     (cond-> table
       (get-in table [:agents agent-id])
       (update-in [:agents agent-id] merge
                  (cond-> {:agent/last-heartbeat ts}
-                   status (assoc :agent/status status))))))
+                   status (assoc :agent/status status)
+                   task (assoc :agent/task task)
+                   metrics (assoc :agent/metrics metrics))))))
 
 (defn agent-status
   "Coarse `:agent/status` event: maps status/type to AgentSession status.

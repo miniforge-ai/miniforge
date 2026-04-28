@@ -77,7 +77,8 @@
         (is (= #{:code-generation :test-writing :code-review}
                (:agent/capabilities info)))
         (is (= {:workflow-id "wf-123"
-                :event-type  :agent-started}
+                :event-type  :agent-started
+                :message "Starting agent"}
                (:agent/metadata info)))))
 
     (testing "falls back to :message when :workflow/name is nil"

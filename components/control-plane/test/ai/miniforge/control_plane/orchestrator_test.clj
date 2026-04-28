@@ -455,7 +455,7 @@
           "should have published at least one state-changed event"))))
 
 (deftest run-poll-pass-no-event-when-status-unchanged-test
-  (testing "poll pass does not emit event when status remains the same"
+  (testing "poll pass keeps heartbeats but skips state-changed when status remains the same"
     (let [reg (registry/create-registry)
           es (stream/create-event-stream)
           published (atom [])
@@ -475,9 +475,9 @@
                   :event-stream es}))]
       (#'sut/run-poll-pass orch)
       (Thread/sleep 100)
-      ;; Status didn't change, so no state-changed event expected
-      (is (zero? (count @published))
-          "should not publish event when status is unchanged"))))
+      (let [event-types (map :event/type @published)]
+        (is (= [:control-plane/agent-heartbeat] event-types)
+            "stable polls should publish heartbeat context but not a state change")))))
 
 (deftest run-poll-pass-multiple-vendors-test
   (testing "poll pass routes agents to correct adapters by vendor"

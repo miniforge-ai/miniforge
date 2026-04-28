@@ -106,7 +106,13 @@
                                    workflow-id
                                    (:agent/id registered)
                                    (:agent/vendor registered)
-                                   {:name (:agent/name registered)}))))))))
+                                   {:name (:agent/name registered)
+                                    :external-id (:agent/external-id registered)
+                                    :capabilities (:agent/capabilities registered)
+                                    :metadata (:agent/metadata registered)
+                                    :tags (:agent/tags registered)
+                                    :heartbeat-interval-ms (:agent/heartbeat-interval-ms
+                                                            registered)}))))))))
       (catch Exception _e nil))))
 
 (defn- run-poll-pass
@@ -134,6 +140,15 @@
                                                                (:agent/id agent-record)
                                                                heartbeat)
                       new-status (:agent/status updated-agent)]
+                  (when (and workflow-id event-stream status)
+                    (publish-event! event-stream
+                                    (events/cp-agent-heartbeat
+                                     event-stream
+                                     workflow-id
+                                     (:agent/id agent-record)
+                                     status
+                                     {:task task
+                                      :metrics metrics})))
                   (when (and workflow-id
                              event-stream
                              new-status
@@ -231,7 +246,11 @@
                        agent-id
                        (:decision/id decision)
                        summary
-                       (:decision/priority decision))))
+                       {:priority (:decision/priority decision)
+                        :type (:decision/type decision)
+                        :context (:decision/context decision)
+                        :options (:decision/options decision)
+                        :deadline (:decision/deadline decision)})))
     decision))
 
 (defn resolve-and-deliver!
@@ -267,7 +286,8 @@
                            event-stream
                            workflow-id
                            decision-id
-                           resolution)))
+                           resolution
+                           comment)))
         {:resolved resolved
          :delivered? (get delivery :delivered? false)}))))
 

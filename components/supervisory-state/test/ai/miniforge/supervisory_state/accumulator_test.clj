@@ -429,6 +429,22 @@
     (is (some? (:decision/created-at card)))
     (is (nil? (:decision/resolved-at card)) "not resolved until a resolve event arrives")))
 
+(deftest cp-decision-created-copies-rich-fields
+  (let [did   (random-uuid)
+        aid   (random-uuid)
+        due   (java.util.Date.)
+        table (acc/apply-event schema/empty-table
+                               (decision-created-event did aid "Choose target"
+                                                       {:cp/type :choice
+                                                        :cp/context "Production migration"
+                                                        :cp/options ["blue" "green"]
+                                                        :cp/deadline due}))
+        card  (get-in table [:decisions did])]
+    (is (= :choice (:decision/type card)))
+    (is (= "Production migration" (:decision/context card)))
+    (is (= ["blue" "green"] (:decision/options card)))
+    (is (= due (:decision/deadline card)))))
+
 (deftest cp-decision-created-attaches-workflow-run-id-when-present
   (let [did   (random-uuid)
         wf    (random-uuid)
@@ -456,6 +472,21 @@
     ;; Creation fields must survive the resolve update.
     (is (= aid (:decision/agent-id card)))
     (is (= "Choose target" (:decision/summary card)))))
+
+(deftest cp-agent-heartbeat-updates-task-and-metrics
+  (let [aid (random-uuid)
+        table (-> schema/empty-table
+                  (acc/apply-event (ev :control-plane/agent-registered
+                                       {:cp/agent-id aid
+                                        :cp/vendor :claude-code}))
+                  (acc/apply-event (ev :control-plane/agent-heartbeat
+                                       {:cp/agent-id aid
+                                        :cp/status :running
+                                        :cp/task "Reviewing PR #42"
+                                        :cp/metrics {:tokens 12}})))
+        agent (get-in table [:agents aid])]
+    (is (= "Reviewing PR #42" (:agent/task agent)))
+    (is (= {:tokens 12} (:agent/metrics agent)))))
 
 (deftest cp-decision-resolved-before-created-stubs-minimal-card
   (let [did   (random-uuid)

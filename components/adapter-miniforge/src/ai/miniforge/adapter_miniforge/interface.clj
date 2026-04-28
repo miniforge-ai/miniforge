@@ -49,15 +49,21 @@
 (defn- event->agent-info
   "Extract agent info from a miniforge event."
   [event]
-  (let [wf-id (:workflow/id event)]
+  (let [wf-id (:workflow/id event)
+        metadata (cond-> {:workflow-id wf-id
+                          :event-type (:event/type event)}
+                   (:workflow/spec event) (assoc :workflow-spec (:workflow/spec event))
+                   (:workflow/phase event) (assoc :workflow-phase (:workflow/phase event))
+                   (:agent/context event) (assoc :agent-context (:agent/context event))
+                   (:phase/context event) (assoc :phase-context (:phase/context event))
+                   (:message event) (assoc :message (:message event)))]
     {:agent/vendor :miniforge
      :agent/external-id (str wf-id)
      :agent/name (str (control-plane/t :adapter/miniforge-prefix) (or (:workflow/name event)
                                          (:message event)
                                          wf-id))
      :agent/capabilities #{:code-generation :test-writing :code-review}
-     :agent/metadata {:workflow-id wf-id
-                      :event-type (:event/type event)}}))
+     :agent/metadata metadata}))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Protocol implementation
