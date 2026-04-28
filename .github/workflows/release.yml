@@ -175,6 +175,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.version.outputs.version }}
+      release_tag: ${{ steps.version.outputs.release_tag }}
       upload_url: ${{ steps.create_release.outputs.upload_url }}
 
     steps:
@@ -186,11 +187,15 @@ jobs:
         run: |
           if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
             VERSION="${{ github.event.inputs.version }}"
+            RELEASE_TAG="v${VERSION}"
           else
             VERSION="${GITHUB_REF#refs/tags/v}"
+            RELEASE_TAG="${GITHUB_REF_NAME}"
           fi
           echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "release_tag=$RELEASE_TAG" >> $GITHUB_OUTPUT
           echo "Version: $VERSION"
+          echo "Release tag: $RELEASE_TAG"
 
       - name: Download all artifacts
         uses: actions/download-artifact@v4
@@ -210,7 +215,7 @@ jobs:
         id: create_release
         uses: softprops/action-gh-release@v1
         with:
-          tag_name: ${{ github.ref_name != '' && github.ref_name || format('v{0}', steps.version.outputs.version) }}
+          tag_name: ${{ steps.version.outputs.release_tag }}
           name: Release ${{ steps.version.outputs.version }}
           draft: false
           prerelease: false
