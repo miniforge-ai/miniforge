@@ -307,7 +307,21 @@
     (let [stream (no-op-stream)
           event (core/cp-agent-registered stream (random-uuid) "agent-1" :anthropic
                                           {:name "Implementer"})]
-      (is (= "Implementer" (:cp/agent-name event))))))
+      (is (= "Implementer" (:cp/agent-name event)))))
+
+  (testing "includes richer registration metadata when present"
+    (let [stream (no-op-stream)
+          event (core/cp-agent-registered stream (random-uuid) "agent-1" :anthropic
+                                          {:external-id "ext-1"
+                                           :capabilities #{:code-generation}
+                                           :metadata {:workflow-id "wf-1"}
+                                           :tags #{:native}
+                                           :heartbeat-interval-ms 15000})]
+      (is (= "ext-1" (:cp/external-id event)))
+      (is (= [:code-generation] (:cp/capabilities event)))
+      (is (= {:workflow-id "wf-1"} (:cp/metadata event)))
+      (is (= [:native] (:cp/tags event)))
+      (is (= 15000 (:cp/heartbeat-interval-ms event))))))
 
 (deftest cp-agent-heartbeat-test
   (testing "creates heartbeat event"
@@ -315,7 +329,15 @@
           event (core/cp-agent-heartbeat stream (random-uuid) "agent-1" :active)]
       (is (= :control-plane/agent-heartbeat (:event/type event)))
       (is (= "agent-1" (:cp/agent-id event)))
-      (is (= :active (:cp/status event))))))
+      (is (= :active (:cp/status event)))))
+
+  (testing "includes task and metrics when present"
+    (let [stream (no-op-stream)
+          event (core/cp-agent-heartbeat stream (random-uuid) "agent-1" :active
+                                         {:task "Reviewing PR"
+                                          :metrics {:tokens 42}})]
+      (is (= "Reviewing PR" (:cp/task event)))
+      (is (= {:tokens 42} (:cp/metrics event))))))
 
 (deftest cp-agent-state-changed-test
   (testing "creates state-change event with from/to"
@@ -334,7 +356,23 @@
       (is (= :control-plane/decision-created (:event/type event)))
       (is (= decision-id (:cp/decision-id event)))
       (is (= "Approve budget increase" (:cp/summary event)))
-      (is (= :high (:cp/priority event))))))
+      (is (= :high (:cp/priority event)))))
+
+  (testing "includes richer decision fields when present"
+    (let [stream (no-op-stream)
+          decision-id (random-uuid)
+          deadline (java.util.Date.)
+          event (core/cp-decision-created stream (random-uuid) "agent-1" decision-id
+                                          "Choose release target"
+                                          {:priority :medium
+                                           :type :choice
+                                           :context "Production cutover"
+                                           :options ["blue" "green"]
+                                           :deadline deadline})]
+      (is (= :choice (:cp/type event)))
+      (is (= "Production cutover" (:cp/context event)))
+      (is (= ["blue" "green"] (:cp/options event)))
+      (is (= deadline (:cp/deadline event))))))
 
 (deftest cp-decision-resolved-test
   (testing "creates resolved event"
@@ -343,7 +381,15 @@
           event (core/cp-decision-resolved stream (random-uuid) decision-id "approved")]
       (is (= :control-plane/decision-resolved (:event/type event)))
       (is (= decision-id (:cp/decision-id event)))
-      (is (= "approved" (:cp/resolution event))))))
+      (is (= "approved" (:cp/resolution event)))))
+
+  (testing "includes optional comment"
+    (let [stream (no-op-stream)
+          decision-id (random-uuid)
+          event (core/cp-decision-resolved stream (random-uuid) decision-id
+                                           "approved"
+                                           "Matches rollout plan")]
+      (is (= "Matches rollout plan" (:cp/comment event))))))
 
 (deftest intervention-requested-test
   (testing "creates supervisory intervention requested event"

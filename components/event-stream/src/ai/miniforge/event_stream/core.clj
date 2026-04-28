@@ -573,15 +573,24 @@
       (assoc :cp/agent-id agent-id
              :cp/vendor vendor)
       (cond->
-        (:name opts) (assoc :cp/agent-name (:name opts)))))
+        (:name opts) (assoc :cp/agent-name (:name opts))
+        (:external-id opts) (assoc :cp/external-id (:external-id opts))
+        (:capabilities opts) (assoc :cp/capabilities (vec (:capabilities opts)))
+        (:metadata opts) (assoc :cp/metadata (:metadata opts))
+        (:tags opts) (assoc :cp/tags (vec (:tags opts)))
+        (:heartbeat-interval-ms opts)
+        (assoc :cp/heartbeat-interval-ms (:heartbeat-interval-ms opts)))))
 
 (defn cp-agent-heartbeat
   "Emit when the control plane receives a heartbeat from an agent."
-  [stream workflow-id agent-id status]
+  [stream workflow-id agent-id status & [opts]]
   (-> (create-envelope stream :control-plane/agent-heartbeat workflow-id
                        (str "Heartbeat from " agent-id ": " (name status)))
       (assoc :cp/agent-id agent-id
-             :cp/status status)))
+             :cp/status status)
+      (cond->
+        (:task opts) (assoc :cp/task (:task opts))
+        (:metrics opts) (assoc :cp/metrics (:metrics opts)))))
 
 (defn cp-agent-state-changed
   "Emit when an agent's normalized state changes."
@@ -594,21 +603,30 @@
 
 (defn cp-decision-created
   "Emit when an agent submits a decision request."
-  [stream workflow-id agent-id decision-id summary & [priority]]
+  [stream workflow-id agent-id decision-id summary & [priority-or-opts]]
+  (let [opts (if (map? priority-or-opts)
+               priority-or-opts
+               {:priority priority-or-opts})]
   (-> (create-envelope stream :control-plane/decision-created workflow-id
                        (str "Decision needed from " agent-id ": " summary))
       (assoc :cp/agent-id agent-id
              :cp/decision-id decision-id
              :cp/summary summary)
-      (cond-> priority (assoc :cp/priority priority))))
+      (cond->
+        (:priority opts) (assoc :cp/priority (:priority opts))
+        (:type opts) (assoc :cp/type (:type opts))
+        (:context opts) (assoc :cp/context (:context opts))
+        (:options opts) (assoc :cp/options (vec (:options opts)))
+        (:deadline opts) (assoc :cp/deadline (:deadline opts))))))
 
 (defn cp-decision-resolved
   "Emit when a human resolves a decision."
-  [stream workflow-id decision-id resolution]
+  [stream workflow-id decision-id resolution & [comment]]
   (-> (create-envelope stream :control-plane/decision-resolved workflow-id
                        (str "Decision " decision-id " resolved: " resolution))
       (assoc :cp/decision-id decision-id
-             :cp/resolution resolution)))
+             :cp/resolution resolution)
+      (cond-> comment (assoc :cp/comment comment))))
 
 (defn intervention-requested
   "Emit when a bounded supervisory intervention is created."
