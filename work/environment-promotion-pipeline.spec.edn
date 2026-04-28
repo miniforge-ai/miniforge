@@ -10,7 +10,8 @@
 ;; not serialized code. Like CI/CD promotion — the container moves through
 ;; the pipeline.
 ;;
-;; Discovered during dogfooding: miniforge running M1.3 against risk-dashboard.
+;; Discovered during dogfooding: miniforge running M1.3 against a real
+;; downstream product repo.
 ;; Implement phase generated correct Rust code, gates passed, but artifact
 ;; handoff failed 3x because the LLM never called submit_code_artifact.
 ;;
