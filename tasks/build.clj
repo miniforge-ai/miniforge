@@ -18,47 +18,57 @@
 
 (ns build
   (:require
+   [ai.miniforge.bb-proc.interface :as proc]
    [babashka.fs :as fs]
    [babashka.process :as p]
    [clojure.string :as str]))
 
+(defn- print-command-output!
+  [{:keys [out err]}]
+  (when-not (str/blank? out)
+    (println out))
+  (when-not (str/blank? err)
+    (binding [*out* *err*]
+      (println err))))
+
+(defn- build-command
+  [& args]
+  (into [(proc/clojure-command) "-T:build"] args))
+
+(defn- run-build-command!
+  [command failure-message]
+  (println "Command:" (str/join " " command))
+  (let [{:keys [exit] :as result} (apply p/sh {:out :string :err :string} command)]
+    (print-command-output! result)
+    (when-not (zero? exit)
+      (println failure-message exit)
+      (System/exit exit))))
+
 (defn cli []
   (println "🔨 Building miniforge CLI uberjar...")
-  (println "Command: clojure -T:build bb-uberjar :project miniforge")
-  (let [{:keys [exit out err]} (p/sh {:out :string :err :string}
-                                     "clojure" "-T:build" "bb-uberjar" ":project" "miniforge")]
-    (when-not (str/blank? out) (println out))
-    (when-not (str/blank? err) (binding [*out* *err*] (println err)))
-    (when-not (zero? exit)
-      (println "❌ Build failed with exit code:" exit)
-      (System/exit exit))))
+  (let [command (build-command "bb-uberjar" ":project" "miniforge")]
+    (run-build-command! command "❌ Build failed with exit code:")))
 
 (defn kernel []
   (println "🔨 Building miniforge-core CLI uberjar...")
-  (println "Command: clojure -T:build bb-uberjar :project miniforge-core")
-  (let [{:keys [exit out err]} (p/sh {:out :string :err :string}
-                                     "clojure" "-T:build" "bb-uberjar" ":project" "miniforge-core")]
-    (when-not (str/blank? out) (println out))
-    (when-not (str/blank? err) (binding [*out* *err*] (println err)))
-    (when-not (zero? exit)
-      (println "❌ Build failed with exit code:" exit)
-      (System/exit exit))))
+  (let [command (build-command "bb-uberjar" ":project" "miniforge-core")]
+    (run-build-command! command "❌ Build failed with exit code:")))
 
 (defn tui []
-  (let [jar-file   "dist/miniforge-tui.jar"
-        jlink-dir  "dist/miniforge-tui-runtime"
-        dist-dir   "dist/miniforge-tui"
-        java-home  (or (System/getenv "JAVA_HOME")
-                       "/Library/Java/JavaVirtualMachines/temurin-21.jdk/Contents/Home")]
+  (let [jar-file      "dist/miniforge-tui.jar"
+        jlink-dir     "dist/miniforge-tui-runtime"
+        dist-dir      "dist/miniforge-tui"
+        java-home     (get (System/getenv) "JAVA_HOME"
+                           "/Library/Java/JavaVirtualMachines/temurin-21.jdk/Contents/Home")
+        uber-file-arg (str "\"" jar-file "\"")]
     (println "🔨 Building miniforge-tui JVM uberjar...")
     ;; Step 1: Build JVM uberjar
-    (let [{:keys [exit out err]}
-          (p/sh {:out :string :err :string}
-                "clojure" "-T:build" "uberjar"
-                ":project" "miniforge-tui"
-                ":uber-file" (str "\"" jar-file "\""))]
-      (when-not (str/blank? out) (println out))
-      (when-not (str/blank? err) (binding [*out* *err*] (println err)))
+    (let [command (build-command "uberjar"
+                                 ":project" "miniforge-tui"
+                                 ":uber-file" uber-file-arg)
+          {:keys [exit] :as result} (apply p/sh {:out :string :err :string} command)]
+      (println "Command:" (str/join " " command))
+      (print-command-output! result)
       (when-not (zero? exit)
         (println "❌ Uberjar build failed")
         (System/exit exit)))
@@ -120,11 +130,5 @@
 
 (defn compile-all []
   (println "⚙️  Compiling all code for syntax check...")
-  (println "Command: clojure -T:build compile-all")
-  (let [{:keys [exit out err]} (p/sh {:out :string :err :string}
-                                     "clojure" "-T:build" "compile-all")]
-    (when-not (str/blank? out) (println out))
-    (when-not (str/blank? err) (binding [*out* *err*] (println err)))
-    (when-not (zero? exit)
-      (println "❌ Compilation failed with exit code:" exit)
-      (System/exit exit))))
+  (let [command (build-command "compile-all")]
+    (run-build-command! command "❌ Compilation failed with exit code:")))

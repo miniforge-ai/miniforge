@@ -18,6 +18,7 @@
 
 (ns test-runner
   (:require
+   [ai.miniforge.bb-proc.interface :as proc]
    [babashka.process :as p]
    [clojure.string :as str]))
 
@@ -32,13 +33,14 @@
 (defn- run-project-tests!
   [project test-nses]
   (let [deps (slurp (str "projects/" project "/deps.edn"))
+        clojure-cmd (proc/clojure-command)
         require-expr (apply str (map (fn [ns] (str " '" ns)) test-nses))
         run-expr (apply str (map (fn [ns] (str " '" ns)) test-nses))
         expr (str "(require 'clojure.test" require-expr ") "
                   "(let [r (clojure.test/run-tests" run-expr ")] "
                   "  (System/exit (if (zero? (+ (:fail r 0) (:error r 0))) 0 1)))")]
     (run-stream! {:dir (str "projects/" project)}
-                 "clojure" "-Sdeps" deps "-M" "-e" expr)))
+                 clojure-cmd "-Sdeps" deps "-M" "-e" expr)))
 
 (defn integration []
   (println "🧪 Running project integration tests...")
@@ -89,19 +91,21 @@
                    "conformance.agent_context_handoff_test"
                    "conformance.protocol_conformance_test"
                    "conformance.gate_enforcement_test"]
+        clojure-cmd (proc/clojure-command)
         require-expr (apply str (map (fn [ns] (str " '" ns)) test-nses))
         run-expr (apply str (map (fn [ns] (str " '" ns)) test-nses))
         expr (str "(require 'clojure.test" require-expr ") "
                   "(clojure.test/run-tests" run-expr ")")
-        exit (run-stream! "clojure" "-M:conformance" "-e" expr)]
+        exit (run-stream! clojure-cmd "-M:conformance" "-e" expr)]
     (when-not (zero? exit)
       (println "❌ Conformance tests failed with exit code:" exit)
       (System/exit exit))))
 
 (defn graalvm []
   (println "🧪 Testing GraalVM/Babashka compatibility...")
-  (let [;; Use :dev alias to get full component classpath
-        cp (-> (p/sh {:out :string} "clojure" "-A:dev" "-Spath")
+  (let [clojure-cmd (proc/clojure-command)
+        ;; Use :dev alias to get full component classpath
+        cp (-> (p/sh {:out :string} clojure-cmd "-A:dev" "-Spath")
                :out
                str/trim)
         ;; Add tests directory to classpath

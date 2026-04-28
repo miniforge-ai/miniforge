@@ -21,13 +21,18 @@
    read the same way across the umbrella and so tests can inspect
    exit/capture output uniformly.
 
-   Layer 0: argument normalization (pure).
+   Layer 0: argument normalization and command-resolution planning (pure).
    Layer 1: process invocations on top of Layer 0."
+  (:refer-clojure :exclude [run!])
   (:require [babashka.fs :as fs]
             [babashka.process :as p]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Argument normalization (pure)
+;; Argument normalization and command planning (pure)
+
+(def ^:private windows-clojure-command
+  "Fallback executable names for Clojure tooling on Windows runners."
+  ["clojure.exe" "clj.exe" "deps.exe"])
 
 (defn- split-opts
   "Split `args` into `[opts cmd]` where `opts` is the leading map (or an
@@ -37,8 +42,38 @@
     [(first args) (rest args)]
     [{} args]))
 
+(defn command-candidates
+  "Return candidate executable names for `cmd` on `os`."
+  [cmd os]
+  (let [candidates (if (and (= os :windows) (= cmd "clojure"))
+                     (into [cmd] windows-clojure-command)
+                     [cmd])]
+    (vec (distinct candidates))))
+
+(defn first-resolved-command
+  "Return the first executable path found by `lookup-fn`, else the first
+   candidate name unchanged."
+  [candidates lookup-fn]
+  (or (some (fn [candidate]
+              (some-> (lookup-fn candidate) str))
+            candidates)
+      (first candidates)))
+
 ;------------------------------------------------------------------------------ Layer 1
 ;; Process invocations
+
+(defn resolve-command
+  "Resolve `cmd` to an executable path when possible."
+  [cmd]
+  (let [windows-os? (re-find #"(?i)windows" (System/getProperty "os.name" ""))
+        os          (if windows-os? :windows :unix)
+        candidates  (command-candidates cmd os)]
+    (first-resolved-command candidates fs/which)))
+
+(defn clojure-command
+  "Resolve the best Clojure executable for the current process."
+  []
+  (resolve-command "clojure"))
 
 (defn run!
   "Run a command inheriting stdio. Throws ex-info on non-zero exit.

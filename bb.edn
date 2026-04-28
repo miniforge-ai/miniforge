@@ -9,6 +9,7 @@
  {:requires ([babashka.fs :as fs]
              [babashka.process :as p]
              [ai.miniforge.bb-dev-tools.interface :as bb-dev-tools]
+             [ai.miniforge.bb-proc.interface :as bb-proc]
              [ai.miniforge.bb-platform.interface :as platform])
 
   :init (do
@@ -20,6 +21,12 @@
           (defn run-stream! [& args]
             (let [{:keys [exit]} (deref (apply p/process {:out :inherit :err :inherit} args))]
               exit))
+
+          (defn run-clojure! [& args]
+            (apply run! (bb-proc/clojure-command) args))
+
+          (defn run-clojure-stream! [& args]
+            (apply run-stream! (bb-proc/clojure-command) args))
 
           ;; Cross-platform package install routing lives in the
           ;; ai.miniforge/bb-platform component. Aliased here so the
@@ -67,7 +74,7 @@
    :task (do
            (println "🧪 Running tests via poly test...")
            (println "Command: clojure -M:poly test")
-           (let [exit (run-stream! "clojure" "-M:poly" "test")]
+           (let [exit (run-clojure-stream! "-M:poly" "test")]
              (when-not (zero? exit)
                (println "❌ Tests failed with exit code:" exit)
                (System/exit exit))))}
@@ -141,7 +148,7 @@
   {:doc  "Clean all build artifacts"
    :task (do
            (println "🧹 Cleaning build artifacts...")
-           (run! "clojure" "-T:build" "clean"))}
+           (run-clojure! "-T:build" "clean"))}
 
   build:script
   {:doc  "Build BB dev script for a project (uses absolute paths)"
@@ -149,7 +156,7 @@
            (if project
              (do
                (println "🔨 Building BB script for project:" project)
-               (run! "clojure" "-T:build" "bb-script" (str ":project " project)))
+               (run-clojure! "-T:build" "bb-script" (str ":project " project)))
              (println "Usage: bb build:script <project>")))}
 
   build:cli
@@ -168,14 +175,14 @@
            (if project
              (do
                (println "🔨 Building uberjar for project:" project)
-               (run! "clojure" "-T:build" "uberjar" (str ":project " project)))
+               (run-clojure! "-T:build" "uberjar" (str ":project " project)))
              (println "Usage: bb build:jar <project>")))}
 
   build:all
   {:doc  "Build all changed projects"
    :task (do
            (println "🔨 Building all changed projects...")
-           (run! "clojure" "-T:build" "build-all"))}
+           (run-clojure! "-T:build" "build-all"))}
 
   build:tui
   {:doc  "Build miniforge-tui as JVM uberjar + jlink runtime"
