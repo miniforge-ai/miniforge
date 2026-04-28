@@ -1,5 +1,5 @@
 ;; Aggregator for the shared Babashka task helpers. Consumed by each
-;; miniforge umbrella product (thesium-risk, thesium-career, ...) as a
+;; miniforge umbrella product as a
 ;; single :local/root (during bootstrap) or submodule path (post-PR 1).
 ;;
 ;; Keeping the four helpers as Polylith components rather than a single
