@@ -46,6 +46,16 @@
 (def script-dir "dist")
 (def class-dir "target/classes")
 
+(defn join-classpath-roots
+  "Join classpath roots with the provided platform separator."
+  [separator cp-roots]
+  (str/join separator cp-roots))
+
+(defn classpath-string
+  "Build a platform-correct classpath string for subprocess invocation."
+  [cp-roots]
+  (join-classpath-roots (System/getProperty "path.separator") cp-roots))
+
 (defn today-commit-count
   "Count commits made today (for DateVer patch number)."
   []
@@ -181,14 +191,19 @@
     (binding [b/*project-root* root]
       (:classpath-roots (b/create-basis {:aliases [:poly]})))))
 
+(defn captured-command-result
+  "Run a command and capture stdout/stderr without throwing on non-zero exit."
+  [& args]
+  (apply bp/sh {:out :string :err :string} args))
+
 (defn bb-compatible?
   "Return true if main-ns loads successfully in Babashka.
    Prints stack trace on failure for debugging."
   [main-ns cp-roots]
-  (let [cp            (str/join ":" cp-roots)
+  (let [cp            (classpath-string cp-roots)
         sexpr         (build-prompt-sexpr main-ns)
-        {:keys [exit out err]} (bp/shell {:out :string :err :string}
-                                         "bb" "--classpath" cp "-e" sexpr)]
+        {:keys [exit out err]} (captured-command-result
+                                "bb" "--classpath" cp "-e" sexpr)]
     (when-not (zero? exit)
       (println "BB compatibility check failed:")
       (when (seq out) (println "stdout:" out))
@@ -300,10 +315,10 @@
 
     ;; Use bb uberscript to bundle everything
     (let [{:keys [exit err out]}
-          (bp/shell {:out :string :err :string}
-                    "bb" "uberscript" output
-                    "-cp" (str/join ":" cp-roots)
-                    "-m" (str main-ns))]
+          (captured-command-result
+           "bb" "uberscript" output
+           "-cp" (classpath-string cp-roots)
+           "-m" (str main-ns))]
       (when-not (zero? exit)
         (throw (ex-info "bb uberscript failed" {:exit exit :err err :out out}))))
 
@@ -340,10 +355,10 @@
     ;; Use bb uberjar to bundle everything
     ;; This will fail on its own if the code isn't Babashka-compatible
     (let [{:keys [exit err out]}
-          (bp/shell {:out :string :err :string}
-                    "bb" "uberjar" output
-                    "-cp" (str/join ":" cp-roots)
-                    "-m" (str main-ns))]
+          (captured-command-result
+           "bb" "uberjar" output
+           "-cp" (classpath-string cp-roots)
+           "-m" (str main-ns))]
       (when-not (zero? exit)
         (println "stdout:" out)
         (println "stderr:" err)
