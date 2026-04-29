@@ -17,7 +17,8 @@
 ;; limitations under the License.
 
 (ns ai.miniforge.dag-primitives.result
-  "Result monad — consistent ok/err patterns for pipeline and DAG operations.")
+  "Result monad — consistent ok/err patterns for pipeline and DAG operations."
+  (:require [ai.miniforge.anomaly.interface :as anomaly]))
 
 ;;------------------------------------------------------------------------------ Layer 0
 ;; Constructors
@@ -40,8 +41,32 @@
 ;;------------------------------------------------------------------------------ Layer 1
 ;; Extraction
 
+(defn unwrap-anomaly
+  "Extract data from a result. On ok, return the wrapped data; on err,
+   return a canonical `:fault` anomaly carrying the error code, message,
+   and any error data the result carried.
+
+   Prefer this over [[unwrap]] in non-boundary code: callers can fold the
+   anomaly into a response chain or pattern-match on `:anomaly/type`
+   rather than wrapping every call in try/catch."
+  [result]
+  (if (ok? result)
+    (:data result)
+    (let [error (:error result)]
+      (anomaly/anomaly :fault
+                       (or (:message error) "Unwrap called on error result")
+                       (cond-> {}
+                         (:code error) (assoc :code (:code error))
+                         (:data error) (assoc :error-data (:data error)))))))
+
 (defn unwrap
-  "Extract data from an ok result; throw on error."
+  "Extract data from an ok result; throw on error.
+
+   DEPRECATED: prefer [[unwrap-anomaly]], which returns an anomaly map
+   rather than throwing. This thrower is retained for backward compatibility
+   with existing callsites; new code should consume `unwrap-anomaly` and
+   fold its result into a response chain."
+  {:deprecated "exceptions-as-data — prefer unwrap-anomaly"}
   [result]
   (if (ok? result)
     (:data result)

@@ -50,6 +50,7 @@
 (defn ok?       [r]                 (result/ok? r))
 (defn err?      [r]                 (result/err? r))
 (defn unwrap    [r]                 (result/unwrap r))
+(defn unwrap-anomaly [r]            (result/unwrap-anomaly r))
 (defn unwrap-or [r default]         (result/unwrap-or r default))
 (defn map-ok    [r f]               (result/map-ok r f))
 (defn map-err   [r f]               (result/map-err r f))
