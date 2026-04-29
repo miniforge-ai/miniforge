@@ -208,7 +208,7 @@
     (let [{:keys [release-meta base-branch executor environment-id]} state
           result (sandbox/create-pr! executor environment-id
                                      {:title (:release/pr-title release-meta)
-                                      :body (:release/pr-description release-meta)
+                                      :body (:release/pr-body release-meta)
                                       :base-branch base-branch}
                                      (gh-exec-opts state))]
       (if (result/succeeded? result)
@@ -371,11 +371,16 @@
     (not (:pr-number state)) state
     :else
     (let [{:keys [release-meta pr-number pr-url branch
-                  executor environment-id logger]} state
-          doc-content (render-pr-doc release-meta
-                                    {:pr-number pr-number
-                                     :pr-url pr-url
-                                     :branch branch})]
+                  executor environment-id logger code-artifacts workflow-data
+                  pr-doc-content]} state
+          doc-content (or pr-doc-content
+                          (:release/pr-body release-meta)
+                          (render-pr-doc-full release-meta
+                                              {:pr-number pr-number
+                                               :pr-url pr-url
+                                               :branch branch}
+                                              code-artifacts
+                                              workflow-data))]
       (try
         (sandbox/edit-pr-body! executor environment-id
                                pr-number doc-content
@@ -431,7 +436,9 @@
         (sandbox/exec! executor environment-id
                        "git push --force-with-lease"
                        (gh-exec-opts state))
-        (assoc state :pr-doc-path rel-path)
+        (assoc state
+               :pr-doc-path rel-path
+               :pr-doc-content content)
         (catch Exception e
           (when logger
             (log/warn logger :release-executor :pr-doc-generation-failed

@@ -123,6 +123,7 @@
             :environment-id "env-1"
             :release-meta {:release/pr-title "feat: test"
                            :release/pr-description "## Summary\nChange"
+                           :release/pr-body "## Summary\nChange"
                            :release/commit-message "feat: test"}}
            overrides)))
 
@@ -145,9 +146,10 @@
   (testing "step-update-pr-body calls sandbox/edit-pr-body! and returns state"
     (let [called (atom false)]
       (with-redefs [sandbox/edit-pr-body!
-                    (fn [_exec _env-id pr-number _body _opts]
+                    (fn [_exec _env-id pr-number body _opts]
                       (reset! called true)
                       (is (= 42 pr-number))
+                      (is (= "## Summary\nChange" body))
                       {:success? true})]
         (let [state (make-state {})
               result (core/step-update-pr-body state)]
@@ -155,6 +157,17 @@
           ;; step-update-pr-body returns state (not the edit result)
           (is (= (:pr-number state) (:pr-number result)))
           (is (not (contains? result :failure))))))))
+
+(deftest step-update-pr-body-prefers-generated-doc-content-test
+  (testing "generated PR doc content overrides the initial fallback body"
+    (let [seen-body (atom nil)]
+      (with-redefs [sandbox/edit-pr-body!
+                    (fn [_exec _env-id _pr-number body _opts]
+                      (reset! seen-body body)
+                      {:success? true})]
+        (core/step-update-pr-body
+         (make-state {:pr-doc-content "# Rich Doc\n\n## Summary\nGenerated"}))
+        (is (= "# Rich Doc\n\n## Summary\nGenerated" @seen-body))))))
 
 (deftest step-update-pr-body-survives-exception-test
   (testing "step-update-pr-body catches exceptions and returns state (non-fatal)"

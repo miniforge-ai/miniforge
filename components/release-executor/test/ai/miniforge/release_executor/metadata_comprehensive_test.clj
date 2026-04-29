@@ -561,5 +561,7 @@
       (is (contains? result :release/pr-title))
       (is (contains? result :release/pr-body))
       (is (contains? result :release/pr-description))
-      ;; pr-body and pr-description should be identical
-      (is (= (:release/pr-body result) (:release/pr-description result))))))
+      (is (string? (:release/pr-description result)))
+      (is (not= (:release/pr-body result) (:release/pr-description result)))
+      (is (not (str/includes? (:release/pr-description result) "## Changes")))
+      (is (str/includes? (:release/pr-body result) "## Changes")))))
