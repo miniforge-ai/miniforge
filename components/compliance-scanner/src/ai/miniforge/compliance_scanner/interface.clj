@@ -24,13 +24,14 @@
    Layer 0: Schema re-exports
    Layer 1: Phase entry points
    Layer 2: Convenience run! orchestrator"
-  (:require [ai.miniforge.compliance-scanner.schema   :as schema]
-            [ai.miniforge.compliance-scanner.factory  :as factory]
-            [ai.miniforge.compliance-scanner.scan     :as scan]
-            [ai.miniforge.compliance-scanner.classify :as classify]
-            [ai.miniforge.compliance-scanner.plan     :as plan]
-            [ai.miniforge.compliance-scanner.report   :as report]
-            [ai.miniforge.compliance-scanner.execute  :as execute]))
+  (:require [ai.miniforge.compliance-scanner.schema             :as schema]
+            [ai.miniforge.compliance-scanner.factory            :as factory]
+            [ai.miniforge.compliance-scanner.scan               :as scan]
+            [ai.miniforge.compliance-scanner.classify           :as classify]
+            [ai.miniforge.compliance-scanner.plan               :as plan]
+            [ai.miniforge.compliance-scanner.report             :as report]
+            [ai.miniforge.compliance-scanner.execute            :as execute]
+            [ai.miniforge.compliance-scanner.exceptions-as-data :as exc-data]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Schema re-exports
@@ -51,6 +52,22 @@
 (def ->plan factory/->plan)
 (def ->delta-report factory/->delta-report)
 (def DeltaReport schema/DeltaReport)
+
+;------------------------------------------------------------------------------ Layer 0
+;; Built-in linter re-exports
+;;
+;; Standalone Clojure-AST linters that the compliance scanner runs in
+;; addition to the regex-driven pack rules.
+
+(def exceptions-as-data-rule-id
+  "Stable rule id for the exceptions-as-data linter."
+  exc-data/rule-id)
+
+(defn scan-exceptions-as-data
+  "Run the exceptions-as-data linter against `repo-root`. Returns a map
+   with `:violations`, `:files-scanned`, `:counts`, and `:rule/id`."
+  [repo-root]
+  (exc-data/scan-repo repo-root))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Phase entry points
