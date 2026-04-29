@@ -20,7 +20,8 @@
   "Tests for the :behavioral gate."
   (:require [clojure.test :refer [deftest is testing]]
             [ai.miniforge.gate.behavioral :as behavioral]
-            [ai.miniforge.gate.registry   :as registry]))
+            [ai.miniforge.gate.registry   :as registry]
+            [ai.miniforge.response.interface :as response]))
 
 ;;------------------------------------------------------------------------------ Fixtures
 
@@ -151,7 +152,8 @@
                   sample-artifact
                   [{:type :behavioral-violation :message "bad"}]
                   {:phase :observe})]
-      (is (false? (:success? result)))
+      (is (response/error? result))
+      (is (false? (:success result)))
       (is (= sample-artifact (:artifact result)))
       (is (string? (:message result)))
       (is (seq (:message result))))))
@@ -159,7 +161,8 @@
 (deftest repair-behavioral-empty-errors-test
   (testing "repair-behavioral with empty errors still returns failure"
     (let [result (behavioral/repair-behavioral {} [] {})]
-      (is (false? (:success? result))))))
+      (is (response/error? result))
+      (is (false? (:success result))))))
 
 ;;------------------------------------------------------------------------------ Registry
 

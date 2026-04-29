@@ -31,10 +31,43 @@
                          violations cannot be fixed in-place; the caller
                          must redirect to :implement."
   (:require [ai.miniforge.gate.policy   :as policy]
-            [ai.miniforge.gate.registry :as registry]))
+            [ai.miniforge.gate.registry :as registry]
+            [ai.miniforge.response.interface :as response]))
 
 ;;------------------------------------------------------------------------------ Layer 1
 ;; Gate implementation
+
+(def ^:private no-policy-packs-warning
+  {:type :no-policy-packs
+   :message "No policy packs loaded — behavioral check skipped"})
+
+(def ^:private behavioral-check-error-prefix
+  "Behavioral check failed, skipping: ")
+
+(def ^:private repair-required-message
+  "Behavioral violations require redirect to :implement phase — no in-place repair")
+
+(defn- passed-cascade?
+  [{:keys [blocking approval-required]}]
+  (and (empty? blocking)
+       (empty? approval-required)))
+
+(defn- violation-results
+  [result-type violations]
+  (mapv #(policy/violation->gate-result result-type %)
+        violations))
+
+(defn- behavioral-check-error-warning
+  [message]
+  {:type :behavioral-check-error
+   :message (str behavioral-check-error-prefix message)})
+
+(defn- repair-required-result
+  [artifact errors]
+  (assoc (response/failure repair-required-message)
+         :artifact artifact
+         :errors errors
+         :message repair-required-message))
 
 (defn check-behavioral
   "Check a telemetry artifact against loaded policy packs for behavioral violations.
@@ -56,23 +89,21 @@
           packs    (get ctx :policy-packs [])]
       (if (empty? packs)
         {:passed?  true
-         :warnings [{:type    :no-policy-packs
-                     :message "No policy packs loaded — behavioral check skipped"}]}
+         :warnings [no-policy-packs-warning]}
         (let [result   (check-fn packs artifact {:phase :observe :task-type :modify})
-              cascade  (policy/evaluate-severity-cascade (:violations result []))
-              blocking          (:blocking cascade)
-              approval-required (:approval-required cascade)
-              warnings          (:warnings cascade)
-              audits            (:audits cascade)]
-          {:passed?  (and (empty? blocking) (empty? approval-required))
-           :errors   (mapv #(policy/violation->gate-result :behavioral-violation %)
-                           (concat blocking approval-required))
-           :warnings (mapv #(policy/violation->gate-result :behavioral-warning %)
-                           (concat warnings audits))})))
+              cascade  (policy/evaluate-severity-cascade (get result :violations []))
+              blocking (get cascade :blocking [])
+              approval-required (get cascade :approval-required [])
+              warnings (get cascade :warnings [])
+              audits (get cascade :audits [])]
+          {:passed?  (passed-cascade? cascade)
+           :errors   (violation-results :behavioral-violation
+                                        (concat blocking approval-required))
+           :warnings (violation-results :behavioral-warning
+                                        (concat warnings audits))})))
     (catch Exception e
       {:passed?  true
-       :warnings [{:type    :behavioral-check-error
-                   :message (str "Behavioral check failed, skipping: " (ex-message e))}]})))
+       :warnings [(behavioral-check-error-warning (ex-message e))]})))
 
 (defn repair-behavioral
   "Behavioral violations cannot be fixed in-place.
@@ -80,16 +111,13 @@
    The caller must redirect the workflow to the :implement phase for an LLM
    agent to address the root cause.
 
-   Returns:
+  Returns:
      {:success? false
       :artifact artifact
       :errors   errors
       :message  string}"
   [artifact errors _ctx]
-  {:success? false
-   :artifact artifact
-   :errors   errors
-   :message  "Behavioral violations require redirect to :implement phase — no in-place repair"})
+  (repair-required-result artifact errors))
 
 ;;------------------------------------------------------------------------------ Layer 1
 ;; Registry
