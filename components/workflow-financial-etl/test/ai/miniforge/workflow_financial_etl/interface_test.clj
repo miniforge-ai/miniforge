@@ -61,3 +61,55 @@
       (is (= :etl/failed (:event/type failed)))
       (is (= :validation (:etl/failure-stage failed)))
       (is (= {:field :issuer} (:etl/error-details failed))))))
+
+(deftest etl-completed-event-conforms-to-n3-schema
+  (testing "N3 §3.4: etl/completed event carries the required envelope and payload"
+    (let [wf-id   (random-uuid)
+          summary {:packs-generated     5
+                   :packs-promoted      3
+                   :high-risk-findings  2
+                   :sources-processed  10}
+          event   (etl/etl-completed-event wf-id 1500 summary)]
+      (testing "envelope"
+        (is (= :etl/completed     (:event/type event)))
+        (is (uuid? (:event/id event)))
+        (is (inst? (:event/timestamp event)))
+        (is (= "1.0.0"            (:event/version event)))
+        (is (= wf-id              (:workflow/id event))))
+      (testing "payload"
+        (is (= 1500               (:etl/duration-ms event)))
+        (is (= summary            (:etl/summary event)))))))
+
+(deftest etl-failed-event-conforms-to-n3-schema
+  (testing "N3 §3.4: etl/failed event carries the required envelope, payload, and optional error-details"
+    (let [wf-id         (random-uuid)
+          error-details {:file              "untrusted/config.md"
+                         :scanner           :prompt-injection-tripwire
+                         :severity          :critical}
+          event         (etl/etl-failed-event wf-id :scanning
+                                              "Prompt injection detected in source file"
+                                              error-details)]
+      (testing "envelope"
+        (is (= :etl/failed        (:event/type event)))
+        (is (uuid? (:event/id event)))
+        (is (inst? (:event/timestamp event)))
+        (is (= "1.0.0"            (:event/version event)))
+        (is (= wf-id              (:workflow/id event))))
+      (testing "payload"
+        (is (= :scanning          (:etl/failure-stage event)))
+        (is (= "Prompt injection detected in source file"
+                                  (:etl/failure-reason event)))
+        (is (= error-details      (:etl/error-details event)))))))
+
+(deftest etl-failed-event-supports-all-failure-stages
+  (testing "N3 §3.4: etl/failed accepts all four required failure stages"
+    (doseq [stage [:classification :scanning :extraction :validation]]
+      (let [event (etl/etl-failed-event (random-uuid) stage
+                                        (str "Failure in " (name stage) " stage"))]
+        (is (= stage (:etl/failure-stage event))
+            (str "stage " stage " must be preserved"))))))
+
+(deftest etl-failed-event-omits-error-details-when-absent
+  (testing "N3 §3.4: etl/error-details is optional"
+    (let [event (etl/etl-failed-event (random-uuid) :validation "no details given")]
+      (is (not (contains? event :etl/error-details))))))

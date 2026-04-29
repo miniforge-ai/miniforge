@@ -54,6 +54,7 @@
                          "ai.miniforge.dag-executor.executor-test"
                          "ai.miniforge.orchestrator.interface-test"
                          "ai.miniforge.llm.progress-monitor-test"
+                         "ai.miniforge.llm.interface-integration-test"
                          "ai.miniforge.phase.handoff-test"
                          "ai.miniforge.tool-registry.integration-test"
                          "ai.miniforge.self-healing.backend-health-test"

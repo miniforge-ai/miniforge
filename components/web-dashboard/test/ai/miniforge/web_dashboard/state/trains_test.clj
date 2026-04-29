@@ -548,59 +548,50 @@
 ;; Error classification tests
 ;; ============================================================================
 
-;; TODO: classify-sync-error tests commented out — function not yet implemented.
-;; Uncomment when classify-sync-error is added to trains.clj.
-(comment
+;; classify-error-category — direct unit tests for the category-classifier.
+;; Action-string mapping is tested separately via the actionable-error-hint family.
 
-  #_(deftest classify-sync-error-auth-test
-    (testing "Auth errors are classified deterministically"
-      (is (= :auth (:error/category (sut/classify-sync-error "authentication required"))))
-      (is (= :auth (:error/category (sut/classify-sync-error "not logged in to any GitHub hosts"))))
-      (is (string? (:error/action (sut/classify-sync-error "auth failure"))))))
+(deftest classify-error-category-auth-test
+  (testing "Auth-related messages classify as :auth"
+    (is (= :auth (sut/classify-error-category "authentication required")))
+    (is (= :auth (sut/classify-error-category "not logged in to any GitHub hosts")))
+    (is (= :auth (sut/classify-error-category "auth failure")))))
 
-  #_(deftest classify-sync-error-access-test
-    (testing "Access/permission errors"
-      (is (= :access (:error/category (sut/classify-sync-error "repository not found"))))
-      (is (= :access (:error/category (sut/classify-sync-error "403 Forbidden"))))
-      (is (= :access (:error/category (sut/classify-sync-error "permission denied"))))
-      (is (= :access (:error/category (sut/classify-sync-error "access denied for repo"))))))
+(deftest classify-error-category-access-test
+  (testing "Access/permission errors classify as :access"
+    (is (= :access (sut/classify-error-category "repository not found")))
+    (is (= :access (sut/classify-error-category "403 Forbidden")))
+    (is (= :access (sut/classify-error-category "permission denied")))
+    (is (= :access (sut/classify-error-category "access denied for repo")))))
 
-  #_(deftest classify-sync-error-rate-limit-test
-    (testing "Rate limit errors"
-      (is (= :rate-limit (:error/category (sut/classify-sync-error "API rate limit exceeded"))))
-      (is (= :rate-limit (:error/category (sut/classify-sync-error "secondary rate limit hit"))))))
+(deftest classify-error-category-rate-limit-test
+  (testing "Rate-limit errors classify as :rate-limit"
+    (is (= :rate-limit (sut/classify-error-category "API rate limit exceeded")))
+    (is (= :rate-limit (sut/classify-error-category "secondary rate limit hit")))))
 
-  #_(deftest classify-sync-error-parse-test
-    (testing "Parse errors"
-      (is (= :parse (:error/category (sut/classify-sync-error "failed to parse JSON"))))
-      (is (= :parse (:error/category (sut/classify-sync-error "malformed response body"))))
-      (is (= :parse (:error/category (sut/classify-sync-error "invalid json token"))))))
+(deftest classify-error-category-parse-test
+  (testing "Parse errors classify as :parse"
+    (is (= :parse (sut/classify-error-category "failed to parse JSON")))
+    (is (= :parse (sut/classify-error-category "malformed response body")))
+    (is (= :parse (sut/classify-error-category "invalid json token")))))
 
-  #_(deftest classify-sync-error-network-test
-    (testing "Network/timeout errors"
-      (is (= :network (:error/category (sut/classify-sync-error "connection timed out"))))
-      (is (= :network (:error/category (sut/classify-sync-error "network unreachable"))))
-      (is (= :network (:error/category (sut/classify-sync-error "connection refused"))))
-      (is (= :network (:error/category (sut/classify-sync-error "request timeout"))))))
+(deftest classify-error-category-network-test
+  (testing "Network/timeout errors classify as :network"
+    (is (= :network (sut/classify-error-category "connection timed out")))
+    (is (= :network (sut/classify-error-category "network unreachable")))
+    (is (= :network (sut/classify-error-category "connection refused")))
+    (is (= :network (sut/classify-error-category "request timeout")))))
 
-  #_(deftest classify-sync-error-unknown-test
-    (testing "Unknown errors get classified with a generic action"
-      (let [result (sut/classify-sync-error "some weird error we haven't seen")]
-        (is (= :unknown (:error/category result)))
-        (is (string? (:error/action result))))))
+(deftest classify-error-category-unknown-test
+  (testing "Unrecognized messages classify as :unknown"
+    (is (= :unknown (sut/classify-error-category "some weird error we haven't seen")))
+    (is (= :unknown (sut/classify-error-category nil)))
+    (is (= :unknown (sut/classify-error-category "")))))
 
-  #_(deftest classify-sync-error-nil-test
-    (testing "Nil input returns unknown gracefully"
-      (is (= :unknown (:error/category (sut/classify-sync-error nil))))))
-
-  #_(deftest classify-sync-error-empty-string-test
-    (testing "Empty string returns unknown"
-      (is (= :unknown (:error/category (sut/classify-sync-error ""))))))
-
-  #_(deftest classify-sync-error-case-insensitive-test
-    (testing "Classification is case-insensitive"
-      (is (= :auth (:error/category (sut/classify-sync-error "AUTHENTICATION REQUIRED"))))
-      (is (= :network (:error/category (sut/classify-sync-error "CONNECTION TIMED OUT"))))))) ;; end comment — classify-sync-error
+(deftest classify-error-category-case-insensitive-test
+  (testing "Classification is case-insensitive"
+    (is (= :auth    (sut/classify-error-category "AUTHENTICATION REQUIRED")))
+    (is (= :network (sut/classify-error-category "CONNECTION TIMED OUT")))))
 
 (deftest with-actionable-error-test
   (testing "Adds action to failure result"
