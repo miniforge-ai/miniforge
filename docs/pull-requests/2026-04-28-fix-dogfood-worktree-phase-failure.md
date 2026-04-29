@@ -20,30 +20,30 @@ This PR fixes those runtime seams and adds regression coverage around them.
 ## Key Changes
 
 - preserved CLI `--worktree` into runtime execution opts in
-  [run.clj](/private/tmp/mf-dogfood-fixes/bases/cli/src/ai/miniforge/cli/main/commands/run.clj)
+  [run.clj](../../bases/cli/src/ai/miniforge/cli/main/commands/run.clj)
 - made workflow context prefer explicit execution worktree authority in
-  [context.clj](/private/tmp/mf-dogfood-fixes/bases/cli/src/ai/miniforge/cli/workflow_runner/context.clj)
+  [context.clj](../../bases/cli/src/ai/miniforge/cli/workflow_runner/context.clj)
 - replaced the hot-path CLI git metadata lookups with `clojure.java.shell`
-  in [worktree.clj](/private/tmp/mf-dogfood-fixes/bases/cli/src/ai/miniforge/cli/worktree.clj)
+  in [worktree.clj](../../bases/cli/src/ai/miniforge/cli/worktree.clj)
 - normalized phase status extraction so inner `:result {:status :error|:failed|:failure}`
   overrides outer `:status :completed` in
-  [registry.clj](/private/tmp/mf-dogfood-fixes/components/phase/src/ai/miniforge/phase/registry.clj)
+  [registry.clj](../../components/phase/src/ai/miniforge/phase/registry.clj)
 - hardened event file writes with parent-dir creation at write time in
-  [sinks.clj](/private/tmp/mf-dogfood-fixes/components/event-stream/src/ai/miniforge/event_stream/sinks.clj)
+  [sinks.clj](../../components/event-stream/src/ai/miniforge/event_stream/sinks.clj)
 - added missing lifecycle resource paths for the dev CLI in
-  [bb.edn](/private/tmp/mf-dogfood-fixes/bb.edn) and
-  [deps.edn](/private/tmp/mf-dogfood-fixes/deps.edn)
+  [bb.edn](../../bb.edn) and
+  [deps.edn](../../deps.edn)
 
 ## Tests
 
 - added CLI worktree propagation coverage in
-  [run_test.clj](/private/tmp/mf-dogfood-fixes/bases/cli/test/ai/miniforge/cli/main/commands/run_test.clj)
+  [run_test.clj](../../bases/cli/test/ai/miniforge/cli/main/commands/run_test.clj)
 - added workflow-context worktree authority coverage in
-  [context_test.clj](/private/tmp/mf-dogfood-fixes/bases/cli/test/ai/miniforge/cli/workflow_runner/context_test.clj)
+  [context_test.clj](../../bases/cli/test/ai/miniforge/cli/workflow_runner/context_test.clj)
 - added phase predicate regression coverage in
-  [interface_test.clj](/private/tmp/mf-dogfood-fixes/components/phase/test/ai/miniforge/phase/interface_test.clj)
+  [interface_test.clj](../../components/phase/test/ai/miniforge/phase/interface_test.clj)
 - added event sink parent-dir recreation coverage in
-  [sinks_test.clj](/private/tmp/mf-dogfood-fixes/components/event-stream/test/ai/miniforge/event_stream/sinks_test.clj)
+  [sinks_test.clj](../../components/event-stream/test/ai/miniforge/event_stream/sinks_test.clj)
 
 ## Validation
 

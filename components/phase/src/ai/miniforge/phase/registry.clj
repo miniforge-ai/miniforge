@@ -167,14 +167,21 @@
     (when (contains? inner-failure-statuses status)
       :failed)))
 
+(defn- completed-with-inner-failure?
+  [m]
+  (and (= :completed (outer-status m))
+       (failure-status m)))
+
 (defn extract-status
   "Extract a normalized phase status keyword from a map.
 
    Inner agent failures take precedence over an outer interceptor status of
    :completed so the workflow machine cannot advance on agent errors."
   [m]
-  (or (failure-status m)
-      (outer-status m)))
+  (let [status (outer-status m)]
+    (if (completed-with-inner-failure? m)
+      :failed
+      status)))
 
 (defn succeeded?
   "Check if a result map indicates success.

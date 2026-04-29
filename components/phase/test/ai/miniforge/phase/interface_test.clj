@@ -142,3 +142,11 @@
                         :result {:status :success}}]
       (is (phase/succeeded? phase-result))
       (is (not (phase/failed? phase-result))))))
+
+(deftest retrying-phase-preserves-retrying-outer-status-test
+  (testing "inner agent failures do not overwrite an explicit retrying status"
+    (let [phase-result {:status :retrying
+                        :result {:status :error
+                                 :error {:message "planner exploded"}}}]
+      (is (phase/retrying? phase-result))
+      (is (not (phase/failed? phase-result))))))      

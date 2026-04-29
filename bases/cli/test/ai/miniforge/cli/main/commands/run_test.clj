@@ -42,3 +42,17 @@
         (#'sut/run-spec-workflow "/tmp/behavioral.md" {:worktree "/tmp/custom-worktree"})
         (is (= {:worktree-path "/tmp/custom-worktree"}
                (:execution-opts @captured-opts)))))))
+
+(deftest detect-input-type-and-markdown-spec-regression-test
+  (testing "markdown-spec? recognizes markdown spec files"
+    (is (true? (#'sut/markdown-spec? "/tmp/behavioral.md")))
+    (is (true? (#'sut/markdown-spec? "/tmp/behavioral.markdown")))
+    (is (false? (#'sut/markdown-spec? "/tmp/behavioral.yaml"))))
+
+  (testing "detect-input-type classifies markdown and workflow inputs consistently"
+    (let [spec-type (#'sut/detect-input-type {:spec/title "Behavioral Verification"})
+          dag-type (#'sut/detect-input-type {:dag-id :behavioral-monitor})
+          plan-type (#'sut/detect-input-type {:plan/id :behavioral-plan})]
+      (is (= :spec spec-type))
+      (is (= :dag dag-type))
+      (is (= :plan plan-type)))))
