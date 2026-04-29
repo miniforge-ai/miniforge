@@ -156,7 +156,21 @@
                 content (slurp (first files))
                 parsed (read-transit-json content)]
             (is (map? parsed))
-            (is (some? (:execution/started-at parsed)))))))))
+            (is (some? (:execution/started-at parsed))))))))
+
+  (testing "recreates missing parent directories at write time"
+    (with-temp-dir
+      (fn [dir]
+        (let [sink (sinks/file-sink {:base-dir dir})
+              wf-id (random-uuid)
+              event (sample-event {:workflow/id wf-id})]
+          (with-redefs [sinks/event-file-path (fn [_ _]
+                                                (io/file dir "nested" "workflow" "event.json"))]
+            (sink event))
+          (let [event-file (io/file dir "nested" "workflow" "event.json")]
+            (is (.exists event-file))
+            (is (= :workflow/started
+                   (:event/type (read-transit-json (slurp event-file)))))))))))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; stdout-sink

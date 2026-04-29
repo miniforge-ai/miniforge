@@ -79,6 +79,10 @@
     (.mkdirs dir)
     (io/file dir (str (now-sortable-str) "-" (random-uuid) ".json"))))
 
+(defn- ensure-parent-dir!
+  [file-path]
+  (some-> file-path .getParentFile .mkdirs))
+
 ;;------------------------------------------------------------------------------ Layer 0: File Sink paths
 
 (defn event-file-path
@@ -159,6 +163,7 @@
             file-path (if-let [workflow-id (:workflow/id event)]
                         (event-file-path base-dir workflow-id)
                         (operator-event-file-path base-dir))]
+        (ensure-parent-dir! file-path)
         (spit file-path (write-transit-json event)))
       (catch Exception e
         ;; Log to stderr so failures are visible without breaking the event stream
