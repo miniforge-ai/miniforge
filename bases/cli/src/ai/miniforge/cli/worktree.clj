@@ -20,11 +20,11 @@
   "Resolve the nearest checkout root, preferring the nearest .git marker.
 
    This makes nested linked worktrees safe: if an agent is launched inside a
-   child worktree under a larger repository, we bind tooling to the child
-   checkout instead of accidentally drifting up to the parent repo."
+  child worktree under a larger repository, we bind tooling to the child
+  checkout instead of accidentally drifting up to the parent repo."
   (:require
    [babashka.fs :as fs]
-   [babashka.process :as process]
+   [clojure.java.shell :as shell]
    [clojure.string :as str]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -72,11 +72,9 @@
    (or (nearest-git-root start-path)
        (let [dir (or (canonical-dir start-path)
                      (System/getProperty "user.dir"))
-             result (process/shell {:out :string :err :string :continue true :dir dir}
-                                   "git" "rev-parse" "--show-toplevel")
-             exit (get result :exit 1)]
+             {:keys [exit out]} (shell/sh "git" "rev-parse" "--show-toplevel" :dir dir)]
          (when (zero? exit)
-           (some-> result :out str/trim not-empty))))))
+           (some-> out str/trim not-empty))))))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Git metadata
@@ -88,15 +86,12 @@
   ([] (git-info (System/getProperty "user.dir")))
   ([start-path]
    (when-let [root (worktree-root start-path)]
-     (let [branch-result (process/shell {:out :string :err :string :continue true :dir root}
-                                        "git" "rev-parse" "--abbrev-ref" "HEAD")
-           commit-result (process/shell {:out :string :err :string :continue true :dir root}
-                                        "git" "rev-parse" "--short" "HEAD")
-           git-dir-result (process/shell {:out :string :err :string :continue true :dir root}
-                                         "git" "rev-parse" "--absolute-git-dir")
-           branch (some-> branch-result :out str/trim not-empty)
-           commit (some-> commit-result :out str/trim not-empty)
-           git-dir (some-> git-dir-result :out str/trim not-empty)]
+     (let [{branch-out :out} (shell/sh "git" "rev-parse" "--abbrev-ref" "HEAD" :dir root)
+           {commit-out :out} (shell/sh "git" "rev-parse" "--short" "HEAD" :dir root)
+           {git-dir-out :out} (shell/sh "git" "rev-parse" "--absolute-git-dir" :dir root)
+           branch (some-> branch-out str/trim not-empty)
+           commit (some-> commit-out str/trim not-empty)
+           git-dir (some-> git-dir-out str/trim not-empty)]
        {:worktree-path root
         :git-branch branch
         :git-commit commit

@@ -20,9 +20,9 @@
   "Workflow input resolution and runtime context creation."
   (:require
    [clojure.edn :as edn]
+   [clojure.java.shell :as shell]
    [clojure.string :as str]
    [babashka.fs :as fs]
-   [babashka.process :as p]
    [cheshire.core :as json]
    [ai.miniforge.cli.config :as config]
    [ai.miniforge.cli.worktree :as worktree]
@@ -64,22 +64,27 @@
     input (read-input-file input)
     :else {}))
 
-(defn get-git-info []
-  (try
-    (when-let [root (worktree/worktree-root)]
-      (let [branch-result (p/shell {:out :string :err :string :continue true :dir root}
-                                   "git" "rev-parse" "--abbrev-ref" "HEAD")
-            commit-result (p/shell {:out :string :err :string :continue true :dir root}
-                                   "git" "rev-parse" "--short" "HEAD")
-            branch (some-> branch-result :out str/trim not-empty)
-            commit (some-> commit-result :out str/trim not-empty)
-            branch-exit (get branch-result :exit 1)
-            commit-exit (get commit-result :exit 1)]
-        (when (and (zero? branch-exit)
-                   (zero? commit-exit))
-          {:git-branch branch
-           :git-commit commit})))
-    (catch Exception _ nil)))
+(defn- resolve-git-field
+  [dir & args]
+  (let [{:keys [exit out]} (apply shell/sh (concat ["git"] args [:dir dir]))]
+    (when (zero? exit)
+      (some-> out str/trim not-empty))))
+
+(defn get-git-info
+  ([] (get-git-info nil))
+  ([start-path]
+   (try
+     (when-let [root (worktree/worktree-root start-path)]
+       (let [branch (resolve-git-field root "rev-parse" "--abbrev-ref" "HEAD")
+             commit (resolve-git-field root "rev-parse" "--short" "HEAD")]
+         (when (and branch commit)
+           {:git-branch branch
+            :git-commit commit})))
+     (catch Exception _ nil))))
+
+(defn- execution-worktree-path
+  [execution-opts]
+  (get execution-opts :worktree-path))
 
 (defn get-files-in-scope
   "Resolve scope paths to actual file paths.
@@ -125,7 +130,7 @@
 
 (defn decorate-spec-with-runtime-context [spec {:keys [iteration parent-task-id] :or {iteration 1}}]
   (let [cwd (or (worktree/worktree-root) (str (fs/cwd)))
-        git-info (get-git-info)
+        git-info (get-git-info cwd)
         files-in-scope (get-files-in-scope (:spec/intent spec))]
     (assoc spec
            :spec/context
@@ -143,19 +148,19 @@
 (defn create-llm-client
   ([workflow spec quiet] (create-llm-client workflow spec quiet nil))
   ([workflow spec quiet backend-override]
-  (try
-    (let [cfg (config/load-config)
-          llm-backend (config/get-llm-backend
-                       cfg
-                       (or backend-override
-                           (get-in workflow [:workflow/config :llm-backend])
-                           (:spec/llm-backend spec)))]
-      (when-let [create-client (requiring-resolve 'ai.miniforge.llm.interface/create-client)]
-        (create-client {:backend llm-backend})))
-    (catch Exception e
-      (when-not quiet
-        (println (display/colorize :yellow (str "Warning: Could not create LLM client (" (ex-message e) "), agents will use fallback mode"))))
-      nil))))
+   (try
+     (let [cfg (config/load-config)
+           llm-backend (config/get-llm-backend
+                        cfg
+                        (or backend-override
+                            (get-in workflow [:workflow/config :llm-backend])
+                            (:spec/llm-backend spec)))]
+       (when-let [create-client (requiring-resolve 'ai.miniforge.llm.interface/create-client)]
+         (create-client {:backend llm-backend})))
+     (catch Exception e
+       (when-not quiet
+         (println (display/colorize :yellow (str "Warning: Could not create LLM client (" (ex-message e) "), agents will use fallback mode"))))
+       nil))))
 
 ;------------------------------------------------------------------------------ Layer 2
 ;; Workflow context assembly
@@ -165,7 +170,10 @@
                                        spec-title control-state skip-lifecycle-events
                                        execution-opts]}]
   (let [on-chunk (es/create-streaming-callback event-stream workflow-id :agent
-                                                {:print? (not quiet) :quiet? quiet})]
+                                               {:print? (not quiet) :quiet? quiet})
+        worktree-path (or (execution-worktree-path execution-opts)
+                          (worktree/worktree-root)
+                          (System/getProperty "user.dir"))]
     (es/publish! event-stream
                  (es/workflow-started event-stream workflow-id
                                       {:name (or spec-title (name workflow-type))
@@ -178,5 +186,4 @@
       control-state (assoc :control-state control-state)
       skip-lifecycle-events (assoc :skip-lifecycle-events true)
       execution-opts (assoc :execution/opts execution-opts)
-      true (assoc :worktree-path (or (worktree/worktree-root)
-                                     (System/getProperty "user.dir"))))))
+      true (assoc :worktree-path worktree-path))))

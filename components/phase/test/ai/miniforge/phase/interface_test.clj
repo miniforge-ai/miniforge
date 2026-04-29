@@ -123,3 +123,30 @@
     (let [result (phase/validate-pipeline
                   {:workflow/pipeline [{:not-phase :plan}]})]
       (is (not (:valid? result))))))
+
+;; ============================================================================
+;; Status predicate tests
+;; ============================================================================
+
+(deftest inner-agent-failure-overrides-outer-completed-status-test
+  (testing "outer interceptor completion does not hide an inner agent failure"
+    (let [phase-result {:status :completed
+                        :result {:status :error
+                                 :error {:message "planner exploded"}}}]
+      (is (phase/failed? phase-result))
+      (is (not (phase/succeeded? phase-result))))))
+
+(deftest completed-phase-still-succeeds-when-inner-result-succeeds-test
+  (testing "healthy inner results preserve successful outer completion"
+    (let [phase-result {:status :completed
+                        :result {:status :success}}]
+      (is (phase/succeeded? phase-result))
+      (is (not (phase/failed? phase-result))))))
+
+(deftest retrying-phase-preserves-retrying-outer-status-test
+  (testing "inner agent failures do not overwrite an explicit retrying status"
+    (let [phase-result {:status :retrying
+                        :result {:status :error
+                                 :error {:message "planner exploded"}}}]
+      (is (phase/retrying? phase-result))
+      (is (not (phase/failed? phase-result))))))      

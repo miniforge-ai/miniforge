@@ -55,8 +55,17 @@
                     :workflow/version "1.0.0"
                     :workflow/pipeline [{:phase :plan}
                                         {:phase :done}]}
-          result (runner/run-pipeline workflow {:task "Test"} {})
+          result (runner/run-pipeline
+                  workflow
+                  {:task "Test"
+                   :title "Test"
+                   :plan/tasks [{:task/type :implement
+                                 :task/title "Draft the change"
+                                 :task/description "Create a plan artifact without invoking the LLM"}]}
+                  {})
           chain (:execution/response-chain result)]
       (is (= :completed (:execution/status result)))
-      (is (>= (count (:response-chain chain)) 2))
+      (is (= 1 (count (:response-chain chain))))
+      (is (= :plan (get-in chain [:response-chain 0 :operation])))
+      (is (= :completed (get-in result [:execution/phase-results :implement :status])))
       (is (true? (:succeeded? chain))))))
