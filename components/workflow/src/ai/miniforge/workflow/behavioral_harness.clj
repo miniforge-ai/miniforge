@@ -30,7 +30,8 @@
   (:require
    [clojure.java.shell :as shell]
    [ai.miniforge.gate.interface :as gate]
-   [ai.miniforge.event-stream.interface :as event-stream]))
+   [ai.miniforge.event-stream.interface :as event-stream]
+   [ai.miniforge.response.interface :as response]))
 
 ;;------------------------------------------------------------------------------ Layer 0: Context helpers
 
@@ -47,6 +48,43 @@
    Avoids collisions when multiple harness runs overlap."
   []
   (keyword (str "behavioral-harness-" (random-uuid))))
+
+(defn- error-details
+  [error-response error-type details]
+  (merge {:type error-type}
+         (:error error-response)
+         details))
+
+(defn- harness-error
+  ([error-type message]
+   (harness-error error-type message nil nil))
+  ([error-type message details]
+   (harness-error error-type message details nil))
+  ([error-type message details data]
+   (let [error-response (response/failure message {:data data})]
+     {:status :error
+      :error  (assoc (error-details error-response error-type details)
+                     :anomaly (response/make-anomaly :anomalies/fault message))})))
+
+(defn- completed-result
+  [output]
+  {:status :ok
+   :output output})
+
+(defn- behavioral-harness-result
+  [collected-events harness-config elapsed-ms status]
+  {:behavioral/events         collected-events
+   :behavioral/harness-config harness-config
+   :behavioral/duration-ms    elapsed-ms
+   :behavioral/status         status})
+
+(defn- errored-behavioral-harness-result
+  [collected-events harness-config elapsed-ms error]
+  (assoc (behavioral-harness-result collected-events
+                                    harness-config
+                                    elapsed-ms
+                                    :error)
+         :behavioral/error error))
 
 ;;------------------------------------------------------------------------------ Layer 0: Public API
 
@@ -80,26 +118,25 @@
         workdir  (or (get ctx :execution/worktree-path)
                      (System/getProperty "user.dir"))]
     (if (nil? command)
-      {:status :error
-       :error  {:type    :missing-command
-                :message ":harness/command is required for :command harness type"
-                :data    {:harness-config harness-config}}}
+      (harness-error :missing-command
+                     ":harness/command is required for :command harness type"
+                     nil
+                     {:harness-config harness-config})
       (try
         (let [sh-args  (into [command] (concat args [:dir workdir]))
               result   (apply shell/sh sh-args)]
           (if (zero? (:exit result))
-            {:status :ok
-             :output (:out result)}
-            {:status :error
-             :error  {:type   :command-failed
-                      :exit   (:exit result)
-                      :stdout (:out result)
-                      :stderr (:err result)}}))
+            (completed-result (:out result))
+            (harness-error :command-failed
+                           "Behavioral command harness failed"
+                           {:exit (:exit result)
+                            :stdout (:out result)
+                            :stderr (:err result)})))
         (catch Exception ex
-          {:status :error
-           :error  {:type    :execution-error
-                    :message (ex-message ex)
-                    :data    (ex-data ex)}})))))
+          (harness-error :execution-error
+                         (ex-message ex)
+                         nil
+                         (ex-data ex)))))))
 
 (defn- execute-workflow-harness
   "Execute a :workflow harness via the execution context's generate-fn.
@@ -111,21 +148,20 @@
   [harness-config ctx]
   (let [generate-fn (get ctx :generate-fn)]
     (if (nil? generate-fn)
-      {:status :error
-       :error  {:type    :missing-generate-fn
-                :message ":generate-fn is required on ctx for :workflow harness type"
-                :data    {:harness-config harness-config}}}
+      (harness-error :missing-generate-fn
+                     ":generate-fn is required on ctx for :workflow harness type"
+                     nil
+                     {:harness-config harness-config})
       (try
         (let [harness-input (get harness-config :harness/input {})
               result        (generate-fn (merge harness-input
                                                 {:harness/config harness-config}))]
-          {:status :ok
-           :output result})
+          (completed-result result))
         (catch Exception ex
-          {:status :error
-           :error  {:type    :execution-error
-                    :message (ex-message ex)
-                    :data    (ex-data ex)}})))))
+          (harness-error :execution-error
+                         (ex-message ex)
+                         nil
+                         (ex-data ex)))))))
 
 (defn- dispatch-harness-execution
   "Route harness execution based on :harness/type.
@@ -140,11 +176,10 @@
     (case harness-type
       :command  (execute-command-harness harness-config ctx)
       :workflow (execute-workflow-harness harness-config ctx)
-      {:status :error
-       :error  {:type         :unknown-harness-type
-                :harness/type harness-type
-                :message      (str "Unknown harness type: " (pr-str harness-type)
-                                   ". Supported: :command, :workflow")}})))
+      (harness-error :unknown-harness-type
+                     (str "Unknown harness type: " (pr-str harness-type)
+                          ". Supported: :command, :workflow")
+                     {:harness/type harness-type}))))
 
 ;;------------------------------------------------------------------------------ Layer 1: Observation window
 
@@ -168,13 +203,14 @@
       :behavioral/status         :completed | :error
       :behavioral/error          anomaly-map}   ; only when :error"
   [harness-config event-stream ctx]
-  (let [collected-events (atom [])
+  (let [active-event-stream (or event-stream (resolve-event-stream ctx))
+        collected-events (atom [])
         subscriber-id    (harness-subscriber-id)
         start-ms         (System/currentTimeMillis)]
     ;; Open observation window — subscribe before harness starts
-    (when event-stream
+    (when active-event-stream
       (event-stream/subscribe!
-       event-stream
+       active-event-stream
        subscriber-id
        (fn [event]
          (swap! collected-events conj event))))
@@ -182,26 +218,31 @@
       (let [exec-result (dispatch-harness-execution harness-config ctx)
             elapsed-ms  (- (System/currentTimeMillis) start-ms)
             error?      (= :error (:status exec-result))]
-        (cond-> {:behavioral/events         @collected-events
-                 :behavioral/harness-config harness-config
-                 :behavioral/duration-ms    elapsed-ms
-                 :behavioral/status         (if error? :error :completed)}
-          error? (assoc :behavioral/error (:error exec-result))))
+        (if error?
+          (errored-behavioral-harness-result @collected-events
+                                             harness-config
+                                             elapsed-ms
+                                             (:error exec-result))
+          (behavioral-harness-result @collected-events
+                                     harness-config
+                                     elapsed-ms
+                                     :completed)))
       (catch Exception ex
         ;; Defensive catch — dispatch-harness-execution should not throw,
         ;; but we guard here so callers always receive data, not an exception.
         (let [elapsed-ms (- (System/currentTimeMillis) start-ms)]
-          {:behavioral/events         @collected-events
-           :behavioral/harness-config harness-config
-           :behavioral/duration-ms    elapsed-ms
-           :behavioral/status         :error
-           :behavioral/error          {:type    :harness-orchestration-error
-                                       :message (ex-message ex)
-                                       :data    (ex-data ex)}}))
+          (errored-behavioral-harness-result
+           @collected-events
+           harness-config
+           elapsed-ms
+           (:error (harness-error :harness-orchestration-error
+                                  (ex-message ex)
+                                  nil
+                                  (ex-data ex))))))
       (finally
         ;; Close observation window — always unsubscribe after harness finishes
-        (when event-stream
-          (event-stream/unsubscribe! event-stream subscriber-id))))))
+        (when active-event-stream
+          (event-stream/unsubscribe! active-event-stream subscriber-id))))))
 
 ;;------------------------------------------------------------------------------ Layer 2: Gate evaluation
 

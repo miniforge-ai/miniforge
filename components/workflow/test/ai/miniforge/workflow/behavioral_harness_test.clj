@@ -23,6 +23,7 @@
    [clojure.test :refer [deftest is testing]]
    [ai.miniforge.event-stream.interface :as event-stream]
    [ai.miniforge.gate.interface :as gate]
+   [ai.miniforge.response.interface :as response]
    [ai.miniforge.workflow.behavioral-harness :as sut]))
 
 ;;------------------------------------------------------------------------------ Helpers
@@ -98,7 +99,10 @@
           result (sut/run-behavioral-harness config nil {})]
       (is (= :error (:behavioral/status result)))
       (is (contains? result :behavioral/error))
-      (is (= :command-failed (get-in result [:behavioral/error :type]))))))
+      (is (= :command-failed (get-in result [:behavioral/error :type])))
+      (is (= "Behavioral command harness failed"
+             (get-in result [:behavioral/error :message])))
+      (is (map? (get-in result [:behavioral/error :data]))))))
 
 (deftest run-behavioral-harness-command-missing
   (testing "missing :harness/command returns :error status"
@@ -150,6 +154,16 @@
       (is (= :unknown-harness-type (get-in result [:behavioral/error :type])))
       (is (= :telekinesis (get-in result [:behavioral/error :harness/type]))))))
 
+(deftest run-behavioral-harness-errors-use-canonical-failure-shape
+  (testing "error results carry canonical response failure details"
+    (let [result (sut/run-behavioral-harness {:harness/type :command} nil {})]
+      (is (= :error (:behavioral/status result)))
+      (is (= :missing-command (get-in result [:behavioral/error :type])))
+      (is (string? (get-in result [:behavioral/error :message])))
+      (is (= {:harness-config {:harness/type :command}}
+             (get-in result [:behavioral/error :data])))
+      (is (response/anomaly-map? (get-in result [:behavioral/error :anomaly]))))))
+
 ;;------------------------------------------------------------------------------ run-behavioral-harness — event stream
 
 (deftest run-behavioral-harness-collects-events-from-stream
@@ -180,6 +194,20 @@
           result (sut/run-behavioral-harness config nil {})]
       (is (= :completed (:behavioral/status result)))
       (is (= [] (:behavioral/events result))))))
+
+(deftest run-behavioral-harness-falls-back-to-context-event-stream
+  (testing "nil event-stream argument falls back to the stream stored on ctx"
+    (let [stream      (make-stream)
+          generate-fn (fn [_]
+                        (publish-test-event! stream :test/event-from-ctx)
+                        {:result :done})
+          config      {:harness/type :workflow}
+          ctx         {:generate-fn generate-fn
+                       :event-stream stream}
+          result      (sut/run-behavioral-harness config nil ctx)]
+      (is (= :completed (:behavioral/status result)))
+      (is (= [:test/event-from-ctx]
+             (mapv :event/type (:behavioral/events result)))))))
 
 (deftest run-behavioral-harness-unsubscribes-even-on-error
   (testing "subscriber is cleaned up even when harness errors"
