@@ -150,10 +150,31 @@
   "Keys to try when extracting status from a map, in priority order."
   [:status :execution/status :step/status :chain/status])
 
-(defn extract-status
-  "Extract a status keyword from a map by trying known status keys."
+(def ^:private inner-failure-statuses
+  #{:error :failed :failure})
+
+(defn- result-status
+  [m]
+  (get-in m [:result :status]))
+
+(defn- outer-status
   [m]
   (when m (some m status-keys)))
+
+(defn- failure-status
+  [m]
+  (let [status (result-status m)]
+    (when (contains? inner-failure-statuses status)
+      :failed)))
+
+(defn extract-status
+  "Extract a normalized phase status keyword from a map.
+
+   Inner agent failures take precedence over an outer interceptor status of
+   :completed so the workflow machine cannot advance on agent errors."
+  [m]
+  (or (failure-status m)
+      (outer-status m)))
 
 (defn succeeded?
   "Check if a result map indicates success.

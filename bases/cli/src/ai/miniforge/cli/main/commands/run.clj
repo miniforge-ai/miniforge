@@ -89,9 +89,15 @@
   (let [;; Resolve source-dir: --worktree flag > spec file's parent directory
         source-dir (or (:worktree opts)
                        (str (fs/parent (fs/absolutize spec-path))))
+        execution-opts (cond-> {}
+                         (:worktree opts) (assoc :worktree-path (:worktree opts)))
         parsed-spec (-> (spec-parser/parse-spec-file spec-path)
                         (assoc :spec/source-dir source-dir))
-        validation  (spec-parser/validate-spec parsed-spec)]
+        validation  (spec-parser/validate-spec parsed-spec)
+        runner-opts (cond-> {:output :pretty :quiet false}
+                      (:backend opts)         (assoc :backend (:backend opts))
+                      (:execution-mode opts)  (assoc :execution-mode (keyword (:execution-mode opts)))
+                      (seq execution-opts)    (assoc :execution-opts execution-opts))]
     (if-not (:valid? validation)
       (do
         (display/print-error (messages/t :run/invalid-spec))
@@ -100,11 +106,7 @@
         nil)
       (do
         (display/print-info (messages/t :run/running-workflow {:title (:spec/title parsed-spec)}))
-        (workflow-runner/run-workflow-from-spec!
-         parsed-spec
-         (cond-> {:output :pretty :quiet false}
-           (:backend opts)         (assoc :backend (:backend opts))
-           (:execution-mode opts)  (assoc :execution-mode (keyword (:execution-mode opts)))))))))
+        (workflow-runner/run-workflow-from-spec! parsed-spec runner-opts)))))
 
 ;------------------------------------------------------------------------------ Layer 2
 ;; Run command
@@ -143,7 +145,7 @@
       (markdown-spec? spec)
       (try+
         (run-spec-workflow spec opts)
-        (catch Object e (print-run-error-and-exit! (:throwable &throw-context))))
+        (catch Object _ (print-run-error-and-exit! (:throwable &throw-context))))
 
       ;; EDN/JSON — dispatch based on file content
       :else
@@ -155,4 +157,4 @@
             (:dag :plan) (do (display/print-info (messages/t :run/detected-format {:format (name input-type) :path spec}))
                              (plan-executor/execute-plan parsed opts))
             (display/print-error (messages/t :run/unrecognized-format {:path spec}))))
-        (catch Object e (print-run-error-and-exit! (:throwable &throw-context)))))))
+        (catch Object _ (print-run-error-and-exit! (:throwable &throw-context)))))))
