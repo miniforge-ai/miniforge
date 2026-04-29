@@ -104,10 +104,9 @@
             (is (try
                   (let [_parsed (read-string code)]
                     true)
-                  (catch Exception _e
-                    (println "Failed to parse:" code)
-                    false))
-                "Generated code should be valid Clojure")))))))
+                  (catch Exception _e false))
+                (str "Generated code should be valid Clojure, got: "
+                     (subs code 0 (min 200 (count code)))))))))))
 
 ;; ============================================================================
 ;; Error Handling Tests

@@ -111,12 +111,7 @@
               (is (some #(= :progress-monitor (:id %)) (:agents stats))
                   "Should have progress monitor agent configured")
 
-              ;; Print diagnostic info
-              (println "\n📊 E2E Test Diagnostics:")
-              (println "  Status:" (:execution/status result))
-              (println "  Health checks performed:" (count history))
-              (println "  Meta-agents configured:" (count (:agents stats)))
-              (println "  Duration:" (get-in result [:execution/metrics :duration-ms] 0) "ms"))))
+              history)))
 
         ;; Just verify the infrastructure ran - don't require specific outputs
         ;; (real LLM execution may vary)
@@ -142,11 +137,8 @@
                          coordinator
                          {:agent-id :progress-monitor :limit 100})]
 
-            (println "\n📡 CLI Backend Integration Test:")
-            (println "  Status:" (:execution/status result))
-            (println "  Progress monitor checks:" (count history))
-
             ;; Infrastructure should be present
+            history
             (is (some? coordinator)
                 "Meta-coordinator should exist")))))))
 
@@ -168,10 +160,7 @@
           (is (map? metrics)
               "Should have metrics map")
 
-          (println "\n📈 CLI Backend Metrics:")
-          (println "  Status:" (:execution/status result))
-          (println "  Duration:" (:duration-ms metrics) "ms")
-          (println "  ✓ Metrics tracking infrastructure present"))))))
+          metrics)))))
 
 (defn create-iterating-mock-llm
   "Create a mock LLM that returns multiple responses for multiple iterations.
@@ -223,12 +212,6 @@
             history (agent/get-meta-check-history coordinator {:limit 100})
             stats (agent/get-meta-agent-stats coordinator)]
 
-        (println "\n🔍 Meta-Agent Monitoring Test (Mocked Workflow):")
-        (println "  Status:" (:execution/status result))
-        (println "  Health checks performed:" (count history))
-        (println "  Meta-agents active:" (count (:agents stats)))
-        (println "  Coordinator:" (some? coordinator))
-
         ;; Core test: Verify meta-agent infrastructure is properly integrated
         (is (some? coordinator)
             "Should have meta-coordinator instance")
@@ -237,13 +220,9 @@
             "Should have progress monitor configured in coordinator")
 
         ;; Health checks depend on timing - if workflow completes quickly,
-        ;; checks may not fire. Just verify infrastructure is wired.
-        (println "  ✓ Real meta-agent infrastructure with mocked workflow validated")
-
-        ;; If checks did run, verify they returned valid results
+        ;; checks may not fire. If checks did run, verify they returned valid results.
         (when (seq history)
           (let [statuses (map #(get-in % [:result :status]) history)]
-            (println "  Check statuses:" statuses)
             (is (every? keyword? statuses)
                 "All checks should return status keywords")
             (is (every? #(#{:healthy :warning :halt} %) statuses)

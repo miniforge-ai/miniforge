@@ -165,7 +165,7 @@
               (is success? "document-symbols request failed")
               ;; Should find at least the namespace and function
               (when success?
-                (println "Document symbols found:" (count result))))))))))
+                (is (pos? (count result)) "Expected at least one document symbol")))))))))
 
 (deftest ^:integration lsp-hover-test
   (if-not (clojure-lsp-available?)
@@ -195,7 +195,6 @@
               (let [{:keys [success? result]} (lsp-client/hover client (file-uri file) 2 1)]
                 (is success? "hover request failed")
                 (when (and success? result)
-                  (println "Hover result:" (pr-str (take 100 (str result))))
                   (is (some? result) "Expected hover info for defn")))))))))
 
 (deftest ^:integration lsp-format-test
@@ -226,7 +225,6 @@
               (let [{:keys [success? result]} (lsp-client/format-document client (file-uri file) nil)]
                 (is success? "format request failed")
                 (when success?
-                  (println "Format edits:" (count result))
                   ;; Should return text edits to fix formatting
                   (is (or (nil? result) (seq result)) "Expected format edits or nil for already-formatted")))))))))
 
