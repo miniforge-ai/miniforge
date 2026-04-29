@@ -115,12 +115,13 @@
 
 (deftest streaming-timeout-test
   (when-not skip-integration-tests?
-    (testing "streaming with invalid command times out gracefully"
-      ;; Use a backend with a fake exec-fn that returns immediately with a non-zero
-      ;; exit, ensuring failure is reported rather than hung indefinitely.
+    (testing "streaming over a non-streaming backend reports complete-path failures"
+      ;; Use the :echo backend (streaming? false). complete-stream falls back to
+      ;; the complete codepath, which uses :exec-fn. A failing exec-fn must
+      ;; surface as a failed response rather than hanging.
       (let [chunks (atom [])
             client (records/create-client
-                    {:backend :claude
+                    {:backend :echo
                      :exec-fn (fn [_cmd]
                                 {:out "" :err "Command not found" :exit 127})})
             resp (llm/complete-stream
