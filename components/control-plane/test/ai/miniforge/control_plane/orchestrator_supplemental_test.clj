@@ -14,6 +14,25 @@
    [ai.miniforge.control-plane-adapter.protocol :as adapter]
    [ai.miniforge.event-stream.interface.stream :as stream]))
 
+(def ^:private default-wait-timeout-ms 2000)
+
+(defn- wait-until-count
+  "Block until `(count @items-atom) >= n` or `timeout-ms` elapses.
+   Uses add-watch + promise — no fixed sleep. Returns true if reached, false on timeout."
+  ([items-atom n] (wait-until-count items-atom n default-wait-timeout-ms))
+  ([items-atom n timeout-ms]
+   (let [done (promise)
+         k    (gensym "wait-count-")]
+     (when (>= (count @items-atom) n)
+       (deliver done :immediate))
+     (add-watch items-atom k
+                (fn [_ _ _ new-val]
+                  (when (>= (count new-val) n)
+                    (deliver done :reached))))
+     (let [result (deref done timeout-ms ::timeout)]
+       (remove-watch items-atom k)
+       (not= result ::timeout)))))
+
 ;; ---------------------------------------------------------------------------
 ;; Test helpers
 ;; ---------------------------------------------------------------------------
@@ -142,9 +161,8 @@
                             :adapters [adapter]
                             :event-stream es}))]
       (#'sut/run-poll-pass orch)
-      (Thread/sleep 100)
       ;; Verify at least one event was published with state change
-      (is (pos? (count @published))
+      (is (wait-until-count published 1)
           "should emit event for status change"))))
 
 ;; ---------------------------------------------------------------------------
@@ -246,8 +264,7 @@
                             :event-stream es}))
           decision (sut/submit-decision-from-agent!
                     orch (:agent/id agent-rec) "Event field test")]
-      (Thread/sleep 100)
-      (is (pos? (count @published))
+      (is (wait-until-count published 1)
           "should have published decision-created event")
       ;; Verify the returned decision is well-formed
       (is (= (:agent/id agent-rec) (:decision/agent-id decision))))))
@@ -292,10 +309,9 @@
                 (base-opts {:adapters [adapter]
                             :discovery-interval-ms 10
                             :poll-interval-ms 10}))]
-      ;; Rapid cycle 3 times
+      ;; Rapid cycle 3 times — the test is the hygiene of start/stop, not loop firing.
       (dotimes [_ 3]
         (let [started (sut/start! orch)]
-          (Thread/sleep 30)
           (sut/stop! started)))
       (is (false? @(:running orch))
           "should be stopped after cycling")

@@ -154,12 +154,9 @@
           run-atom (create-mock-run-atom task-defs)
           context (create-mock-context run-atom {} execution-tracker)]
 
-      ;; Execute task
+      ;; Execute task (synchronous — work and tracker updates complete before return)
       (update-task-status! run-atom "a" :implementing)
       ((:execute-task-fn context) "a" context)
-
-      ;; Wait for completion
-      (Thread/sleep 200)
 
       (is (= ["a"] (:started @execution-tracker))
           "Task should be started")
@@ -175,22 +172,17 @@
                                        {:task-delay-ms 50}
                                        execution-tracker)]
 
-      ;; Execute A
+      ;; Execute A → B → C synchronously; each call returns once the work is done.
       (update-task-status! run-atom "a" :implementing)
       ((:execute-task-fn context) "a" context)
-      (Thread/sleep 100)
       (update-task-status! run-atom "a" :merged)
 
-      ;; Execute B (depends on A)
       (update-task-status! run-atom "b" :implementing)
       ((:execute-task-fn context) "b" context)
-      (Thread/sleep 100)
       (update-task-status! run-atom "b" :merged)
 
-      ;; Execute C (depends on B)
       (update-task-status! run-atom "c" :implementing)
       ((:execute-task-fn context) "c" context)
-      (Thread/sleep 100)
 
       (is (= ["a" "b" "c"] (:started @execution-tracker))
           "Tasks should execute in order: A → B → C"))))
@@ -202,22 +194,17 @@
           run-atom (create-mock-run-atom mock-parallel-dag)
           context (create-mock-context run-atom
                                        {:task-delay-ms 100}
-                                       execution-tracker)]
-
-      ;; Launch all tasks in parallel
-      (doseq [task-id ["a" "b" "c"]]
-        (update-task-status! run-atom task-id :implementing)
-        (future ((:execute-task-fn context) task-id context)))
-
-      ;; Wait for all to start
-      (Thread/sleep 50)
-
+                                       execution-tracker)
+          ;; Launch all tasks in parallel and capture the futures.
+          futs (doall
+                 (for [task-id ["a" "b" "c"]]
+                   (do
+                     (update-task-status! run-atom task-id :implementing)
+                     (future ((:execute-task-fn context) task-id context)))))]
+      ;; Deterministically wait for each task to finish.
+      (doseq [f futs] @f)
       (is (= 3 (count (:started @execution-tracker)))
           "All 3 tasks should start")
-
-      ;; Wait for completion
-      (Thread/sleep 150)
-
       (is (= 3 (count (:completed @execution-tracker)))
           "All 3 tasks should complete"))))
 
@@ -233,22 +220,20 @@
       ;; Execute A
       (update-task-status! run-atom "a" :implementing)
       ((:execute-task-fn context) "a" context)
-      (Thread/sleep 100)
       (update-task-status! run-atom "a" :merged)
 
-      ;; Execute B and C in parallel (both depend on A)
+      ;; Execute B and C in parallel (both depend on A); deref to wait.
       (update-task-status! run-atom "b" :implementing)
       (update-task-status! run-atom "c" :implementing)
-      (future ((:execute-task-fn context) "b" context))
-      (future ((:execute-task-fn context) "c" context))
-      (Thread/sleep 150)
+      (let [bc-futs [(future ((:execute-task-fn context) "b" context))
+                     (future ((:execute-task-fn context) "c" context))]]
+        (doseq [f bc-futs] @f))
       (update-task-status! run-atom "b" :merged)
       (update-task-status! run-atom "c" :merged)
 
       ;; Execute D (depends on B and C)
       (update-task-status! run-atom "d" :implementing)
       ((:execute-task-fn context) "d" context)
-      (Thread/sleep 100)
 
       (is (= ["a" "b" "c" "d"] (sort (:completed @execution-tracker)))
           "All tasks should complete")
@@ -303,13 +288,11 @@
       ;; Execute A (succeeds)
       (update-task-status! run-atom "a" :implementing)
       ((:execute-task-fn context) "a" context)
-      (Thread/sleep 100)
       (update-task-status! run-atom "a" :merged)
 
       ;; Execute B (fails)
       (update-task-status! run-atom "b" :implementing)
       (let [result ((:execute-task-fn context) "b" context)]
-        (Thread/sleep 100)
         (is (false? (:success? result))
             "Task B should fail")
         (update-task-status! run-atom "b" :failed))
@@ -358,13 +341,11 @@
       ;; Execute first task (1000 tokens)
       (update-task-status! run-atom "a" :implementing)
       ((:execute-task-fn context) "a" context)
-      (Thread/sleep 100)
       (swap! run-atom update-in [:metrics :tokens] + 1000)
 
       ;; Execute second task (1000 tokens)
       (update-task-status! run-atom "b" :implementing)
       ((:execute-task-fn context) "b" context)
-      (Thread/sleep 100)
       (swap! run-atom update-in [:metrics :tokens] + 1000)
 
       ;; Check if budget would be exceeded
@@ -384,17 +365,15 @@
                                        execution-tracker)]
 
       ;; Execute all tasks sequentially
-      (doseq [_task-id ["a" "b" "c"]]
-        (let [tid _task-id]
-          (update-task-status! run-atom tid :implementing)
-          ((:execute-task-fn context) tid context)
-          (Thread/sleep 100)
+      (doseq [tid ["a" "b" "c"]]
+        (update-task-status! run-atom tid :implementing)
+        ((:execute-task-fn context) tid context)
 
-          ;; Accumulate metrics
-          (swap! run-atom update-in [:metrics :tokens] + 1000)
-          (swap! run-atom update-in [:metrics :cost-usd] + 0.05)
+        ;; Accumulate metrics
+        (swap! run-atom update-in [:metrics :tokens] + 1000)
+        (swap! run-atom update-in [:metrics :cost-usd] + 0.05)
 
-          (update-task-status! run-atom tid :merged)))
+        (update-task-status! run-atom tid :merged))
 
       (is (= 3000 (get-in @run-atom [:metrics :tokens]))
           "Should accumulate 3000 tokens total")
@@ -475,7 +454,6 @@
       ;; Execute task
       (update-task-status! run-atom "a" :implementing)
       ((:execute-task-fn context) "a" context)
-      (Thread/sleep 100)
 
       (is (= :running (:status @run-atom))
           "Run should remain :running during execution")

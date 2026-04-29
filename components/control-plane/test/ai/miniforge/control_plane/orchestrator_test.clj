@@ -47,6 +47,38 @@
     {:stream (stream/create-event-stream)
      :published events-atom}))
 
+(def ^:private default-wait-timeout-ms 2000)
+
+(defn- wait-until-count
+  "Block until `(count @items-atom) >= n` or `timeout-ms` elapses.
+   Uses add-watch + promise — no fixed sleep. Returns true if reached, false on timeout."
+  ([items-atom n] (wait-until-count items-atom n default-wait-timeout-ms))
+  ([items-atom n timeout-ms]
+   (let [done (promise)
+         k    (gensym "wait-count-")]
+     (when (>= (count @items-atom) n)
+       (deliver done :immediate))
+     (add-watch items-atom k
+                (fn [_ _ _ new-val]
+                  (when (>= (count new-val) n)
+                    (deliver done :reached))))
+     (let [result (deref done timeout-ms ::timeout)]
+       (remove-watch items-atom k)
+       (not= result ::timeout)))))
+
+(defn- wait-until
+  "Block until `(pred)` returns truthy or `timeout-ms` elapses.
+   Returns true if pred satisfied, false on timeout."
+  ([pred] (wait-until pred default-wait-timeout-ms))
+  ([pred timeout-ms]
+   (let [deadline (+ (System/currentTimeMillis) timeout-ms)]
+     (loop []
+       (cond
+         (pred) true
+         (> (System/currentTimeMillis) deadline) false
+         :else (do (java.util.concurrent.locks.LockSupport/parkNanos 1000000)
+                   (recur)))))))
+
 (def test-workflow-id (java.util.UUID/fromString "00000000-0000-0000-0000-000000000001"))
 
 (defn base-orchestrator-opts
@@ -258,9 +290,7 @@
                   :adapters [adapter]
                   :event-stream es}))]
       (#'sut/run-discovery-pass orch)
-      ;; Give async publish a moment
-      (Thread/sleep 50)
-      (is (>= (count @published) 1)
+      (is (wait-until-count published 1)
           "should have published at least one event"))))
 
 (deftest run-discovery-pass-empty-results-test
@@ -449,9 +479,8 @@
                   :adapters [adapter]
                   :event-stream es}))]
       (#'sut/run-poll-pass orch)
-      (Thread/sleep 100)
       ;; Should have emitted a state-changed event since status went from :initializing to :running
-      (is (>= (count @published) 1)
+      (is (wait-until-count published 1)
           "should have published at least one state-changed event"))))
 
 (deftest run-poll-pass-no-event-when-status-unchanged-test
@@ -474,7 +503,7 @@
                   :adapters [adapter]
                   :event-stream es}))]
       (#'sut/run-poll-pass orch)
-      (Thread/sleep 100)
+      (wait-until-count published 1)
       (let [event-types (map :event/type @published)]
         (is (= [:control-plane/agent-heartbeat] event-types)
             "stable polls should publish heartbeat context but not a state change")))))
@@ -560,8 +589,8 @@
                   :discovery-interval-ms 50
                   :poll-interval-ms 50}))]
       (sut/start! orch)
-      ;; Wait for at least one discovery cycle
-      (Thread/sleep 200)
+      ;; Wait for at least one discovery cycle to register an agent.
+      (wait-until #(pos? (registry/count-agents reg)))
       (sut/stop! orch)
       (is (pos? (registry/count-agents reg))
           "discovery loop should have registered agents")
@@ -695,8 +724,7 @@
                   :event-stream es}))]
       (sut/submit-decision-from-agent!
        orch (:agent/id agent-rec) "Event decision?")
-      (Thread/sleep 100)
-      (is (>= (count @published) 1)
+      (is (wait-until-count published 1)
           "should have published a decision-created event"))))
 
 (deftest submit-multiple-decisions-same-agent-test
@@ -816,9 +844,8 @@
                     orch (:agent/id agent-rec) "Event test?")
           _ (sut/resolve-and-deliver!
              orch (:decision/id decision) "approved")]
-      (Thread/sleep 100)
       ;; Should have events for: decision-created, decision-resolved
-      (is (>= (count @published) 2)
+      (is (wait-until-count published 2)
           "should have published decision-created and decision-resolved events"))))
 
 (deftest resolve-and-deliver-without-comment-test
@@ -912,10 +939,9 @@
                   :discovery-interval-ms 50
                   :poll-interval-ms 50}))]
 
-      ;; Start orchestrator
+      ;; Start orchestrator and wait for discovery to register the agent.
       (sut/start! orch)
-      ;; Wait for discovery
-      (Thread/sleep 200)
+      (wait-until #(pos? (registry/count-agents reg)))
 
       (let [agents (registry/list-agents reg)]
         (is (= 1 (count agents)) "should have discovered one agent")
@@ -959,7 +985,7 @@
                   :discovery-interval-ms 50
                   :poll-interval-ms 50}))]
       (sut/start! orch)
-      (Thread/sleep 200)
+      (wait-until #(pos? (registry/count-agents reg)))
 
       (let [agents (registry/list-agents reg)
             agent-id (:agent/id (first agents))
@@ -969,9 +995,8 @@
                       orch agent-id "Full lifecycle event test")
             _ (sut/resolve-and-deliver!
                orch (:decision/id decision) "yes")]
-        (Thread/sleep 100)
         ;; Should have: agent-registered, possibly state-changed, decision-created, decision-resolved
-        (is (>= (count @published) 3)
+        (is (wait-until-count published 3)
             "should have published multiple events throughout lifecycle"))
 
       (sut/stop! orch))))

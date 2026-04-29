@@ -511,11 +511,14 @@
 
 (deftest cursor-advance-updates-timestamp-test
   (testing "Advancing cursor updates last-retrieved-at"
-    (let [cursor (conn/create-cursor :offset 0)
-          t1 (:cursor/last-retrieved-at cursor)
-          _ (Thread/sleep 5)
+    ;; Backdate the cursor's timestamp so advance-cursor's new timestamp
+    ;; is unambiguously later, regardless of clock resolution.
+    (let [cursor   (-> (conn/create-cursor :offset 0)
+                       (assoc :cursor/last-retrieved-at
+                              (.minusSeconds (java.time.Instant/now) 1)))
+          t1       (:cursor/last-retrieved-at cursor)
           advanced (conn/advance-cursor cursor 1)
-          t2 (:cursor/last-retrieved-at advanced)]
+          t2       (:cursor/last-retrieved-at advanced)]
       (is (.isAfter t2 t1)))))
 
 (deftest cursor-empty-map-test

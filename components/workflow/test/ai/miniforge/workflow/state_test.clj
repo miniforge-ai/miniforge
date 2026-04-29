@@ -229,16 +229,18 @@
           "Should return accumulated metrics")))
 
   (testing "get-duration-ms"
-    ;; Must first transition to running before completing
-    (let [exec-state (state/create-execution-state sample-workflow {})
-          exec-state-running (state/transition-status exec-state :start)]
-      (Thread/sleep 10)  ; Wait a bit
-      (let [exec-state2 (state/mark-completed exec-state-running)
-            duration (state/get-duration-ms exec-state2)]
-        (is (pos? duration)
-            "Duration should be positive")
-        (is (>= duration 10)
-            "Duration should be at least 10ms")))))
+    ;; Backdate :execution/created-at instead of waiting for wall-clock
+    ;; time to advance, so the test is deterministic.
+    (let [exec-state (-> (state/create-execution-state sample-workflow {})
+                         (assoc :execution/created-at
+                                (- (System/currentTimeMillis) 50)))
+          exec-state-running (state/transition-status exec-state :start)
+          exec-state2 (state/mark-completed exec-state-running)
+          duration (state/get-duration-ms exec-state2)]
+      (is (pos? duration)
+          "Duration should be positive")
+      (is (>= duration 10)
+          "Duration should be at least 10ms"))))
 
 (deftest state-transitions-flow-test
   (testing "Complete workflow execution flow"
