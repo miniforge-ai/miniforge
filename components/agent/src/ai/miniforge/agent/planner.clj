@@ -138,6 +138,14 @@
                      "\n```\n" content "\n```")))
          (str/join "\n"))))
 
+(defn- existing-files->cache-map
+  "Build the artifact-session context cache map from existing files."
+  [existing-files]
+  (into {}
+        (map (fn [{:keys [path content]}]
+               [path content]))
+        existing-files))
+
 (defn spec->text
   "Convert a spec to text for the LLM."
   [spec]
@@ -347,7 +355,11 @@
 
 (defn- invoke-planner-session
   "Session body for the planner: build mcp-opts with model hint, call LLM."
-  [session llm-client user-prompt config context on-chunk]
+  [session llm-client user-prompt config context on-chunk existing-files]
+  (when (seq existing-files)
+    (artifact-session/write-context-cache-for-session!
+     session
+     (existing-files->cache-map existing-files)))
   (let [budget-usd (budget/resolve-cost-budget-usd :planner config context)
         ;; Turn cap: read from prompt EDN (:prompt/max-turns) with a safe
         ;; fallback. 80 was observed empirically as the smallest value that
@@ -372,6 +384,34 @@
                        (merge {:system @planner-system-prompt} mcp-opts))
       (llm/chat llm-client user-prompt
                 (merge {:system @planner-system-prompt} mcp-opts)))))
+
+(defn- planner-plan-artifact
+  "Select the planner artifact authority for the session."
+  [worktree-artifacts artifact]
+  {:worktree-plan (get worktree-artifacts :plan)
+   :artifact artifact})
+
+(defn- effective-plan
+  "Return the authoritative submitted plan when one exists."
+  [{:keys [worktree-plan artifact]}]
+  (or worktree-plan artifact))
+
+(defn- planner-log-data
+  "Build planner invocation telemetry data."
+  [llm-response on-chunk plan-artifact]
+  (let [plan-source (cond
+                      (:worktree-plan plan-artifact) :worktree
+                      (:artifact plan-artifact) :mcp-artifact
+                      :else :final-message)]
+    (cond-> {:success (llm/success? llm-response)
+             :tokens (get llm-response :tokens 0)
+             :streaming? (boolean on-chunk)
+             :plan-source plan-source}
+      (:stop-reason llm-response)
+      (assoc :stop-reason (:stop-reason llm-response))
+
+      (:num-turns llm-response)
+      (assoc :num-turns (:num-turns llm-response)))))
 
 (defn create-planner
   "Create a Planner agent with optional configuration overrides.
@@ -427,42 +467,34 @@
                                "Use (random-uuid) for all IDs - just write #uuid \"<any-uuid>\" placeholders that I'll fill in.")]
           (if llm-client
             ;; Use the real LLM with artifact session for MCP tool support
-            (let [{:keys [llm-result artifact worktree-artifacts]}
+            (let [{:keys [llm-result artifact worktree-artifacts context-misses]}
                   (artifact-session/with-session context
-                    #(invoke-planner-session % llm-client user-prompt config context on-chunk))
+                    #(invoke-planner-session % llm-client user-prompt config context
+                                             on-chunk existing-files))
                   llm-response llm-result
                   tokens (get llm-response :tokens 0)
-                  ;; Container promotion: prefer the plan the agent wrote into
-                  ;; the worktree at .miniforge/plan.edn — that is how the
-                  ;; implementer already submits, now the planner too.
-                  ;; Fallbacks preserved so backend-specific regressions
-                  ;; don't block the migration window.
-                  worktree-plan (get worktree-artifacts :plan)]
+                  plan-artifact (planner-plan-artifact worktree-artifacts artifact)
+                  submitted-plan (effective-plan plan-artifact)]
+              (when (seq context-misses)
+                (log/info logger :planner :planner/context-cache-misses
+                          {:data {:miss-count (count context-misses)
+                                  :misses context-misses}}))
               (log/info logger :planner :planner/llm-called
-                        {:data (cond-> {:success (llm/success? llm-response)
-                                        :tokens tokens
-                                        :streaming? (boolean on-chunk)
-                                        :plan-source (cond worktree-plan :worktree
-                                                           artifact      :mcp-artifact
-                                                           :else         :final-message)}
-                                 (:stop-reason llm-response)
-                                 (assoc :stop-reason (:stop-reason llm-response))
-                                 (:num-turns llm-response)
-                                 (assoc :num-turns (:num-turns llm-response)))})
+                        {:data (planner-log-data llm-response on-chunk plan-artifact)})
               ;; Container-promotion preempts CLI error classification:
               ;; if the agent wrote a valid plan.edn into the worktree,
+              ;; or submitted a plan through the MCP artifact path,
               ;; that IS the submission and we honor it regardless of
               ;; whether Claude CLI emitted a clean result event
               ;; afterwards. Iter 18 hit a stream-idle timeout AFTER a
               ;; successful Write — the plan existed, but the old
               ;; success-branch-only logic ignored it because the LLM
               ;; response was classified as failure.
-              (if (or worktree-plan (llm/success? llm-response))
+              (if (or submitted-plan (llm/success? llm-response))
                 (let [content (or (llm/get-content llm-response) "")
                       stop-reason (:stop-reason llm-response)
                       num-turns   (:num-turns llm-response)
-                      plan (or worktree-plan
-                               artifact
+                      plan (or submitted-plan
                                (parse-plan-response content)
                                (response/throw-anomaly! :anomalies.agent/invoke-failed
                                                        "Plan generation failed: EDN parse did not succeed"

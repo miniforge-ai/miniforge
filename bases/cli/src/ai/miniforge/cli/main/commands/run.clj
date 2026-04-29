@@ -25,6 +25,7 @@
    [ai.miniforge.cli.main.display :as display]
    [ai.miniforge.cli.messages :as messages]
    [ai.miniforge.cli.spec-parser :as spec-parser]
+   [ai.miniforge.cli.worktree :as worktree]
    [ai.miniforge.cli.workflow-runner :as workflow-runner]
    [ai.miniforge.cli.main.commands.plan-executor :as plan-executor]
    [ai.miniforge.cli.main.commands.resume :as resume]
@@ -86,11 +87,13 @@
    Returns the workflow result map, or nil on validation failure."
   [spec-path opts]
   (display/print-info (messages/t :run/parsing-spec {:path spec-path}))
-  (let [;; Resolve source-dir: --worktree flag > spec file's parent directory
-        source-dir (or (:worktree opts)
-                       (str (fs/parent (fs/absolutize spec-path))))
+  (let [source-dir (str (fs/parent (fs/absolutize spec-path)))
+        worktree-path (when-let [requested-worktree (:worktree opts)]
+                        (worktree/materialize-execution-worktree!
+                         source-dir
+                         requested-worktree))
         execution-opts (cond-> {}
-                         (:worktree opts) (assoc :worktree-path (:worktree opts)))
+                         worktree-path (assoc :worktree-path worktree-path))
         parsed-spec (-> (spec-parser/parse-spec-file spec-path)
                         (assoc :spec/source-dir source-dir))
         validation  (spec-parser/validate-spec parsed-spec)

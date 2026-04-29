@@ -118,12 +118,13 @@
           :code-artifact (:spec/code-artifact enriched-spec)
           :plan-tasks (:spec/plan-tasks enriched-spec)
           :repo-url (:spec/repo-url enriched-spec)
-          :branch (:spec/branch enriched-spec)
-          :llm-backend (:spec/llm-backend enriched-spec)
-          :sandbox (:spec/sandbox enriched-spec)
-          :context (:spec/context enriched-spec)
-          :metadata (:spec/metadata enriched-spec)
-          :provenance (:spec/provenance enriched-spec)}))
+         :branch (:spec/branch enriched-spec)
+         :llm-backend (:spec/llm-backend enriched-spec)
+         :sandbox (:spec/sandbox enriched-spec)
+         :files-in-scope (get-in enriched-spec [:spec/context :files-in-scope])
+         :context (:spec/context enriched-spec)
+         :metadata (:spec/metadata enriched-spec)
+         :provenance (:spec/provenance enriched-spec)}))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Context decoration

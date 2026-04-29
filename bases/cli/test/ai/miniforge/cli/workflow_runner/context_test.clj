@@ -53,3 +53,12 @@
                       :workflow-type :canonical-sdlc
                       :workflow-version "1.0.0"})]
         (is (= "/tmp/repo-root" (:worktree-path context)))))))
+
+(deftest spec->workflow-input-promotes-files-in-scope-test
+  (testing "files-in-scope is promoted to the workflow input boundary"
+    (let [workflow-input (sut/spec->workflow-input
+                          {:spec/raw-data {}
+                           :spec/title "Behavioral Verification"
+                           :spec/context {:files-in-scope ["components/workflow/src/foo.clj"]}})]
+      (is (= ["components/workflow/src/foo.clj"]
+             (:files-in-scope workflow-input))))))

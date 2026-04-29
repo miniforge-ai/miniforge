@@ -96,3 +96,61 @@
         :git-branch branch
         :git-commit commit
         :git-dir git-dir}))))
+
+;------------------------------------------------------------------------------ Layer 2
+;; Execution worktree materialization
+
+(defn- git-checkout?
+  [path]
+  (fs/exists? (fs/path path git-marker-name)))
+
+(defn- empty-directory?
+  [path]
+  (and (fs/directory? path)
+       (empty? (seq (fs/list-dir path)))))
+
+(defn- materialization-error
+  [message data]
+  (throw (ex-info message data)))
+
+(defn materialize-execution-worktree!
+  "Ensure target-path is a real git checkout for workflow execution.
+
+   Reuses an existing checkout target. Otherwise creates a detached git
+   worktree from source-path."
+  [source-path target-path]
+  (let [source-root (or (worktree-root source-path)
+                        (worktree-root))
+        target-root (str (fs/absolutize target-path))
+        target-file (fs/file target-root)]
+    (cond
+      (nil? source-root)
+      (materialization-error
+       "Cannot materialize execution worktree outside a git checkout"
+       {:source-path source-path
+        :target-path target-root})
+
+      (git-checkout? target-file)
+      target-root
+
+      (and (fs/exists? target-file) (not (empty-directory? target-file)))
+      (materialization-error
+       "Execution worktree target must be absent, empty, or an existing checkout"
+       {:source-root source-root
+        :target-path target-root})
+
+      :else
+      (let [parent-dir (some-> target-file fs/parent str)
+            _ (when parent-dir
+                (fs/create-dirs parent-dir))
+            {:keys [exit err out]}
+            (shell/sh "git" "-C" source-root "worktree" "add" "--detach" target-root)]
+        (if (zero? exit)
+          target-root
+          (materialization-error
+           "Failed to create execution worktree"
+           {:source-root source-root
+            :target-path target-root
+            :stderr err
+            :stdout out
+            :exit exit}))))))

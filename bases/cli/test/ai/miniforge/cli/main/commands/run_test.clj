@@ -23,15 +23,19 @@
    [ai.miniforge.cli.main.display :as display]
    [ai.miniforge.cli.messages :as messages]
    [ai.miniforge.cli.spec-parser :as spec-parser]
+   [ai.miniforge.cli.worktree :as worktree]
    [ai.miniforge.cli.workflow-runner :as workflow-runner]))
 
 (deftest run-spec-workflow-propagates-worktree-into-execution-opts-test
-  (testing "--worktree becomes authoritative execution worktree metadata"
+  (testing "--worktree is materialized and passed as authoritative execution metadata"
     (let [captured-opts (atom nil)]
       (with-redefs [display/print-info (fn [& _])
                     messages/t (fn
                                  ([k] (name k))
                                  ([k _] (name k)))
+                    worktree/materialize-execution-worktree!
+                    (fn [_source-dir requested-worktree]
+                      (str requested-worktree "-materialized"))
                     spec-parser/parse-spec-file (fn [_]
                                                   {:spec/title "Behavioral Verification"})
                     spec-parser/validate-spec (fn [_]
@@ -40,5 +44,5 @@
                                                               (reset! captured-opts opts)
                                                               :ok)]
         (#'sut/run-spec-workflow "/tmp/behavioral.md" {:worktree "/tmp/custom-worktree"})
-        (is (= {:worktree-path "/tmp/custom-worktree"}
+        (is (= {:worktree-path "/tmp/custom-worktree-materialized"}
                (:execution-opts @captured-opts)))))))

@@ -19,7 +19,8 @@
 (ns ai.miniforge.cli.worktree-test
   (:require
    [babashka.fs :as fs]
-   [clojure.test :refer [deftest is testing]]
+   [clojure.java.shell :as shell]
+   [clojure.test :refer [deftest is]]
    [ai.miniforge.cli.worktree :as sut]))
 
 (defn- delete-tree!
@@ -53,5 +54,39 @@
       (spit (str (fs/path repo-root ".git")) "gitdir: /tmp/repo.git\n")
       (is (= (str (fs/canonicalize repo-root))
              (sut/worktree-root (str nested-src))))
+      (finally
+        (delete-tree! tmp)))))
+
+(deftest materialize-execution-worktree-reuses-existing-checkout-test
+  (let [tmp (fs/create-temp-dir {:prefix "miniforge-worktree-materialized-"})
+        target (fs/path tmp "target")]
+    (try
+      (fs/create-dirs target)
+      (spit (str (fs/path target ".git")) "gitdir: /tmp/reused.git\n")
+      (is (= (str (fs/absolutize target))
+             (sut/materialize-execution-worktree! "/tmp/source" (str target))))
+      (finally
+        (delete-tree! tmp)))))
+
+(deftest materialize-execution-worktree-creates-detached-worktree-test
+  (let [tmp (fs/create-temp-dir {:prefix "miniforge-worktree-create-"})
+        target (fs/path tmp "target")
+        calls (atom [])]
+    (try
+      (with-redefs [sut/worktree-root (fn [_] "/tmp/source-repo")
+                    shell/sh
+                    (fn [& args]
+                      (reset! calls args)
+                      {:exit 0 :out "" :err ""})]
+        (is (= (str (fs/absolutize target))
+               (sut/materialize-execution-worktree! "/tmp/spec-dir" (str target))))
+        (is (= ["git"
+                "-C"
+                "/tmp/source-repo"
+                "worktree"
+                "add"
+                "--detach"
+                (str (fs/absolutize target))]
+               @calls)))
       (finally
         (delete-tree! tmp)))))
