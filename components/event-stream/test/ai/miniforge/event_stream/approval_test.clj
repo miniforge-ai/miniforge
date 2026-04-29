@@ -71,10 +71,12 @@
 
 (deftest expiry-test
   (testing "check-approval-status detects expiry"
-    (let [req (es/create-approval-request (random-uuid) ["alice"] 1
-                                          {:expires-in-hours 0})]
-      ;; With 0 hours, it should be expired immediately (or very soon)
-      (Thread/sleep 10) ; ensure time passes
+    ;; Backdate :approval/expires-at into the past so it is unambiguously
+    ;; expired without waiting for wall-clock time to advance.
+    (let [req (-> (es/create-approval-request (random-uuid) ["alice"] 1
+                                              {:expires-in-hours 1})
+                  (assoc :approval/expires-at
+                         (java.util.Date. (- (System/currentTimeMillis) 1000))))]
       (is (= :expired (es/check-approval-status req)))))
 
   (testing "non-expired request shows correct status"

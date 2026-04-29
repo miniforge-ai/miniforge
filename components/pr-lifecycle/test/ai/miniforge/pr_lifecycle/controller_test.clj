@@ -234,14 +234,16 @@
   (testing "update-status! updates the :updated-at timestamp"
     (let [ctrl (controller/create-controller
                  "dag" "run" "task" test-task
-                 :worktree-path "/tmp")
-          before-ts (:updated-at @ctrl)]
-      ;; Small sleep to ensure timestamp differs
-      (Thread/sleep 5)
-      (controller/update-status! ctrl :monitoring-ci)
-      (let [after-ts (:updated-at @ctrl)]
-        (is (not= before-ts after-ts))
-        (is (.after ^java.util.Date after-ts ^java.util.Date before-ts))))))
+                 :worktree-path "/tmp")]
+      ;; Backdate the initial :updated-at so the post-update timestamp is
+      ;; unambiguously later, regardless of clock resolution.
+      (swap! ctrl assoc :updated-at
+             (java.util.Date. (- (System/currentTimeMillis) 1000)))
+      (let [before-ts (:updated-at @ctrl)]
+        (controller/update-status! ctrl :monitoring-ci)
+        (let [after-ts (:updated-at @ctrl)]
+          (is (not= before-ts after-ts))
+          (is (.after ^java.util.Date after-ts ^java.util.Date before-ts)))))))
 
 (deftest state-machine-full-happy-path-test
   (testing "State transitions through the full happy path: pending -> creating-pr -> monitoring-ci -> monitoring-review -> ready-to-merge -> merging -> merged"

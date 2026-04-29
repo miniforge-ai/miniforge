@@ -112,8 +112,11 @@
                  :to-agent :implementer
                  :workflow-id test-workflow-id
                  :content "Msg 2"})]
-      (agent/route-message router msg1)
-      (Thread/sleep 10) ;; Ensure different timestamps
+      ;; Backdate msg1 so its timestamp is unambiguously earlier than msg2's,
+      ;; regardless of clock resolution.
+      (agent/route-message router
+                           (assoc msg1 :message/timestamp
+                                  (java.util.Date. (- (System/currentTimeMillis) 1000))))
       (agent/route-message router msg2)
 
       (let [all-msgs (agent/get-messages-by-workflow router test-workflow-id)]

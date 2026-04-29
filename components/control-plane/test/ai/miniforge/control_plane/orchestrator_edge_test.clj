@@ -14,6 +14,25 @@
    [ai.miniforge.control-plane-adapter.protocol :as adapter]
    [ai.miniforge.event-stream.interface.stream :as stream]))
 
+(def ^:private default-wait-timeout-ms 2000)
+
+(defn- wait-until-count
+  "Block until `(count @items-atom) >= n` or `timeout-ms` elapses.
+   Uses add-watch + promise — no fixed sleep. Returns true if reached, false on timeout."
+  ([items-atom n] (wait-until-count items-atom n default-wait-timeout-ms))
+  ([items-atom n timeout-ms]
+   (let [done (promise)
+         k    (gensym "wait-count-")]
+     (when (>= (count @items-atom) n)
+       (deliver done :immediate))
+     (add-watch items-atom k
+                (fn [_ _ _ new-val]
+                  (when (>= (count new-val) n)
+                    (deliver done :reached))))
+     (let [result (deref done timeout-ms ::timeout)]
+       (remove-watch items-atom k)
+       (not= result ::timeout)))))
+
 ;; ---------------------------------------------------------------------------
 ;; Test helpers
 ;; ---------------------------------------------------------------------------
@@ -131,13 +150,12 @@
                             :event-stream es}))
           decision (sut/submit-decision-from-agent!
                     orch (:agent/id agent-rec) "Resolve event test")
-          ;; Clear events from submit
-          _ (Thread/sleep 50)
+          ;; Wait for submit-emitted events, then clear before resolve.
+          _ (wait-until-count published 1)
           _ (reset! published [])
           _ (sut/resolve-and-deliver!
              orch (:decision/id decision) "approved")]
-      (Thread/sleep 100)
-      (is (pos? (count @published))
+      (is (wait-until-count published 1)
           "should have published decision-resolved event"))))
 
 ;; ---------------------------------------------------------------------------
@@ -304,10 +322,9 @@
                             :adapters [adapter]
                             :event-stream es}))]
       (#'sut/run-poll-pass orch)
-      (Thread/sleep 100)
       ;; Agent was :initializing, poll returned :status :running
       ;; This should trigger a state-changed event
-      (is (pos? (count @published))
+      (is (wait-until-count published 1)
           "should emit state-changed when :status key differs from current"))))
 
 ;; ---------------------------------------------------------------------------

@@ -217,12 +217,13 @@
                                      {:priority :high})
         d-blocked (cp/create-decision blocked-agent "Blocked agent, high"
                                       {:priority :high})]
-    ;; Submit normal first so it's older
     (cp/submit-decision! mgr d-normal)
-    (Thread/sleep 10)
     (cp/submit-decision! mgr d-blocked)
 
-    (testing "Blocked agent's decision appears first at same priority"
+    (testing "Filtering by agent set returns the blocked agent's decision"
+      ;; pending-decisions filters by the supplied agent set, so timestamp
+      ;; ordering between submissions is irrelevant — only blocked-agent's
+      ;; decision is returned.
       (let [pending (cp/pending-decisions mgr #{blocked-agent})]
         (is (= blocked-agent (:decision/agent-id (first pending))))))))
 
@@ -253,12 +254,15 @@
   (let [reg (cp/create-registry)
         agent (cp/register-agent! reg {:agent/vendor :test
                                         :agent/name "Stale"
-                                        :agent/heartbeat-interval-ms 1})]
-    ;; Transition to running first
-    (cp/transition-agent! reg (:agent/id agent) :running)
-    ;; Wait for heartbeat to be stale (3 * 1ms)
-    (Thread/sleep 50)
+                                        :agent/heartbeat-interval-ms 1000})
+        agent-id (:agent/id agent)]
+    ;; Transition to running first.
+    (cp/transition-agent! reg agent-id :running)
+    ;; Backdate the heartbeat far past the staleness threshold instead of waiting
+    ;; for wall-clock time to elapse. Threshold is heartbeat-interval-ms * 3.
+    (let [past (java.util.Date. (- (System/currentTimeMillis) 60000))]
+      (swap! reg assoc-in [:agents agent-id :agent/last-heartbeat] past))
     (testing "Stale agent detected and marked unreachable"
       (let [transitioned (cp/check-stale-agents reg)]
         (is (= 1 (count transitioned)))
-        (is (= :unreachable (:agent/status (cp/get-agent reg (:agent/id agent)))))))))
+        (is (= :unreachable (:agent/status (cp/get-agent reg agent-id))))))))
