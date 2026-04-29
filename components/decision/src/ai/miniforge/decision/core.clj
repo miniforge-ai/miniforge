@@ -51,13 +51,19 @@
    :summary (str option)})
 
 (defn- summarize-loop-errors
+  "Return a joined summary of the first two non-blank error messages, or nil
+   when the error list yields nothing usable. Returning nil (rather than the
+   empty string) lets callers fall back via `or` and keeps :uncertainty/:reason
+   schema-valid (it requires :string {:min 1})."
   [errors]
-  (->> errors
-       (keep #(or (get-in % [:anomaly :anomaly/message])
-                  (:message %)))
-       (remove str/blank?)
-       (take 2)
-       (str/join "; ")))
+  (let [joined (->> errors
+                    (keep #(or (get-in % [:anomaly :anomaly/message])
+                               (:message %)))
+                    (remove str/blank?)
+                    (take 2)
+                    (str/join "; "))]
+    (when-not (str/blank? joined)
+      joined)))
 
 (defn- control-plane-proposal
   [summary options decision-type]
