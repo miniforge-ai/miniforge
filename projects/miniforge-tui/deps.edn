@@ -11,6 +11,7 @@
         ;; Core domain components needed by CLI
         ai.miniforge/schema {:local/root "../../components/schema"}
         ai.miniforge/algorithms {:local/root "../../components/algorithms"}
+        ai.miniforge/content-hash {:local/root "../../components/content-hash"}
         ai.miniforge/logging {:local/root "../../components/logging"}
         ai.miniforge/config {:local/root "../../components/config"}
         ai.miniforge/response {:local/root "../../components/response"}
