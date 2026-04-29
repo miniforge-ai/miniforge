@@ -77,54 +77,39 @@
       (let [flat (flatten (tree-seq coll? seq result))]
         (is (some #(and (string? %) (str/includes? % "failed")) flat))))))
 
-;; TODO: Tests for unimplemented badge/label helper functions.
-;; Uncomment when error-category-badge-variant, error-category-label,
-;; readiness-state-badge-variant, and readiness-state-label are added to fleet.clj.
-(comment
+;; ============================================================================
+;; readiness-state-variant + error-category-label + readiness-state-label
+;; full mapping coverage (edge cases live in fleet_view_gaps_test.clj)
+;; ============================================================================
 
-#_(deftest error-category-badge-variant-test
-  (testing "Maps error categories to badge variants"
-    (is (= :error (sut/error-category-badge-variant :auth)))
-    (is (= :error (sut/error-category-badge-variant :access)))
-    (is (= :warning (sut/error-category-badge-variant :rate-limit)))
-    (is (= :warning (sut/error-category-badge-variant :parse)))
-    (is (= :warning (sut/error-category-badge-variant :network)))
-    (is (= :neutral (sut/error-category-badge-variant :unknown)))
-    (is (= :neutral (sut/error-category-badge-variant :something-else)))))
-
-#_(deftest error-category-label-test
-  (testing "Maps error categories to human-readable labels"
-    (is (= "Auth" (sut/error-category-label :auth)))
-    (is (= "Access" (sut/error-category-label :access)))
-    (is (= "Rate Limit" (sut/error-category-label :rate-limit)))
-    (is (= "Parse Error" (sut/error-category-label :parse)))
-    (is (= "Network" (sut/error-category-label :network)))
-    (is (= "Error" (sut/error-category-label :unknown)))
-    (is (= "Error" (sut/error-category-label :something-else)))))
-
-#_(deftest readiness-state-badge-variant-test
+(deftest readiness-state-variant-mapping-test
   (testing "Maps readiness states to badge variants"
-    (is (= :success (sut/readiness-state-badge-variant :merge-ready)))
-    (is (= :error (sut/readiness-state-badge-variant :ci-failing)))
-    (is (= :warning (sut/readiness-state-badge-variant :changes-requested)))
-    (is (= :warning (sut/readiness-state-badge-variant :merge-conflicts)))
-    (is (= :warning (sut/readiness-state-badge-variant :policy-failing)))
-    (is (= :neutral (sut/readiness-state-badge-variant :dep-blocked)))
-    (is (= :info (sut/readiness-state-badge-variant :needs-review)))
-    (is (= :neutral (sut/readiness-state-badge-variant :something-else)))))
+    (is (= :success (sut/readiness-state-variant :merge-ready)))
+    (is (= :error   (sut/readiness-state-variant :ci-failing)))
+    (is (= :warning (sut/readiness-state-variant :changes-requested)))
+    (is (= :error   (sut/readiness-state-variant :merge-conflicts)))
+    (is (= :error   (sut/readiness-state-variant :policy-failing)))
+    (is (= :neutral (sut/readiness-state-variant :dep-blocked)))
+    (is (= :info    (sut/readiness-state-variant :needs-review)))))
 
-#_(deftest readiness-state-label-test
+(deftest error-category-label-mapping-test
+  (testing "Maps error categories to human-readable labels"
+    (is (= "Auth"       (sut/error-category-label :auth)))
+    (is (= "Access"     (sut/error-category-label :access)))
+    (is (= "Not Found"  (sut/error-category-label :not-found)))
+    (is (= "Rate Limit" (sut/error-category-label :rate-limit)))
+    (is (= "Parse"      (sut/error-category-label :parse)))
+    (is (= "Network"    (sut/error-category-label :network)))))
+
+(deftest readiness-state-label-mapping-test
   (testing "Maps readiness states to human-readable labels"
-    (is (= "Ready" (sut/readiness-state-label :merge-ready)))
-    (is (= "CI Failing" (sut/readiness-state-label :ci-failing)))
+    (is (= "Ready"             (sut/readiness-state-label :merge-ready)))
+    (is (= "CI Failing"        (sut/readiness-state-label :ci-failing)))
     (is (= "Changes Requested" (sut/readiness-state-label :changes-requested)))
-    (is (= "Merge Conflicts" (sut/readiness-state-label :merge-conflicts)))
-    (is (= "Policy Failing" (sut/readiness-state-label :policy-failing)))
-    (is (= "Dep Blocked" (sut/readiness-state-label :dep-blocked)))
-    (is (= "Needs Review" (sut/readiness-state-label :needs-review)))
-    (is (= "Unknown" (sut/readiness-state-label :something-else)))))
-
-) ;; end comment — unimplemented badge/label helpers
+    (is (= "Merge Conflicts"   (sut/readiness-state-label :merge-conflicts)))
+    (is (= "Policy Failing"    (sut/readiness-state-label :policy-failing)))
+    (is (= "Dep Blocked"       (sut/readiness-state-label :dep-blocked)))
+    (is (= "Needs Review"      (sut/readiness-state-label :needs-review)))))
 
 ;; ============================================================================
 ;; train-list-fragment tests

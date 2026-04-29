@@ -24,8 +24,9 @@
    - claude (optional - tests will skip if not available)
 
    Set MINIFORGE_SKIP_LLM_INTEGRATION=true to skip these tests."
-  (:require [clojure.test :as test]
-            [ai.miniforge.llm.interface :as llm]))
+  (:require [clojure.test :refer [deftest is testing]]
+            [ai.miniforge.llm.interface :as llm]
+            [ai.miniforge.llm.protocols.records.llm-client :as records]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Test configuration
@@ -34,20 +35,16 @@
   "Skip integration tests if env var is set."
   (= "true" (System/getenv "MINIFORGE_SKIP_LLM_INTEGRATION")))
 
-(defn claude-available?
-  "Check if claude CLI is available."
-  []
-  (try
-    ;; Just check if the client can be created, don't call it
-    (some? (llm/create-client {:backend :claude}))
-    (catch Exception _e false)))
+(def run-claude-network-tests?
+  "Tests that hit the real claude CLI (and therefore the network) only run
+   when MINIFORGE_INTEGRATION_LLM_CLAUDE=true. They are skipped in CI to
+   avoid flake from upstream latency or rate limits."
+  (= "true" (System/getenv "MINIFORGE_INTEGRATION_LLM_CLAUDE")))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Echo backend integration tests (uses actual echo CLI)
-;; DISABLED: These tests hang when run directly due to namespace loading issues
-;; TODO: Fix test setup so they can run properly
 
-#_(deftest echo-backend-integration-test
+(deftest echo-backend-integration-test
   (when-not skip-integration-tests?
     (testing "echo backend returns prompt using real echo command"
       (let [client (llm/create-client {:backend :echo})
@@ -63,7 +60,7 @@
 
 ;; Streaming integration tests
 
-#_(deftest complete-stream-integration-test
+(deftest complete-stream-integration-test
   (when-not skip-integration-tests?
     (testing "streaming with non-streaming backend (echo) falls back to complete"
       (let [chunks (atom [])
@@ -80,7 +77,7 @@
         (is (:done? (first @chunks)))
         (is (= "Stream test" (:content (first @chunks))))))))
 
-#_(deftest chat-stream-integration-test
+(deftest chat-stream-integration-test
   (when-not skip-integration-tests?
     (testing "chat-stream with non-streaming backend works"
       (let [chunks (atom [])
@@ -96,8 +93,8 @@
 
 ;; Claude CLI streaming tests (only run if claude is available)
 
-#_(deftest claude-streaming-integration-test
-  (when (and (not skip-integration-tests?) (claude-available?))
+(deftest claude-streaming-integration-test
+  (when (and (not skip-integration-tests?) run-claude-network-tests?)
     (testing "claude CLI supports actual streaming"
       (let [chunks (atom [])
             client (llm/create-client {:backend :claude})
@@ -116,18 +113,16 @@
 
 ;; Timeout verification tests
 
-#_(deftest streaming-timeout-test
+(deftest streaming-timeout-test
   (when-not skip-integration-tests?
-    (testing "streaming with invalid command times out gracefully"
-      ;; Create a client with a non-existent command that will hang/fail
+    (testing "streaming over a non-streaming backend reports complete-path failures"
+      ;; Use the :echo backend (streaming? false). complete-stream falls back to
+      ;; the complete codepath, which uses :exec-fn. A failing exec-fn must
+      ;; surface as a failed response rather than hanging.
       (let [chunks (atom [])
-            ;; Use a command that doesn't exist to trigger timeout behavior
-            client (ai.miniforge.llm.protocols.records.llm-client/create-client
-                    {:backend :claude
+            client (records/create-client
+                    {:backend :echo
                      :exec-fn (fn [_cmd]
-                                ;; Simulate a command that never completes
-                                ;; by returning immediately with empty output
-                                ;; The actual timeout is in stream-exec-fn
                                 {:out "" :err "Command not found" :exit 127})})
             resp (llm/complete-stream
                   client
@@ -140,7 +135,7 @@
 
 ;; Backend configuration tests
 
-#_(deftest backends-integration-test
+(deftest backends-integration-test
   (when-not skip-integration-tests?
     (testing "backends registry is accessible"
       (is (contains? llm/backends :claude))
@@ -161,11 +156,5 @@
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
-  (test/run-tests 'ai.miniforge.llm.interface-integration-test)
-
-  ;; Tests are currently disabled with #_ - fix test setup first
-  ;; (echo-backend-integration-test)
-  ;; (complete-stream-integration-test)
-  ;; (claude-streaming-integration-test)
-
+  (clojure.test/run-tests 'ai.miniforge.llm.interface-integration-test)
   :leave-this-here)
