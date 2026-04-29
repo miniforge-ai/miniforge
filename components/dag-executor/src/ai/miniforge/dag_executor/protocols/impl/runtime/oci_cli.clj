@@ -16,20 +16,26 @@
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
 
-(ns ai.miniforge.dag-executor.protocols.impl.docker
-  "Docker executor implementation.
+(ns ai.miniforge.dag-executor.protocols.impl.runtime.oci-cli
+  "OCI-CLI executor — generalized container executor parameterized by a
+   runtime descriptor.
 
-   Provides task isolation via Docker containers. Each task gets its own
-   container with configurable resource limits and environment variables.
+   Phase 1 of N11-delta: a pure refactor of the previous Docker-only
+   implementation. The CLI shellouts now take a descriptor instead of a
+   `docker-path`, and the defrecord is `OciCliExecutor` rather than
+   `DockerExecutor`. Behavior with `:runtime-kind :docker` is identical to
+   the prior implementation.
 
-   Pre-built task runner images are available at:
-   - resources/executor/docker/Dockerfile.task-runner       (minimal Alpine)
-   - resources/executor/docker/Dockerfile.task-runner-clojure (with Clojure tooling)"
+   Phase 2 will land Podman support by adding entries to
+   protocols.impl.runtime.flags and broadening the supported-kinds set in
+   protocols.impl.runtime.descriptor."
   (:require
    [ai.miniforge.config.interface :as config]
    [ai.miniforge.dag-executor.result :as result]
    [ai.miniforge.dag-executor.workspace :as workspace]
    [ai.miniforge.dag-executor.protocols.executor :as proto]
+   [ai.miniforge.dag-executor.protocols.impl.runtime.descriptor :as descriptor]
+   [ai.miniforge.dag-executor.protocols.impl.runtime.flags :as flags]
    [ai.miniforge.response.interface :as response]
    [clojure.java.io]
    [clojure.java.shell :as shell]
@@ -48,7 +54,9 @@
   {:memory "512m"
    :cpu 0.5})
 
-;; Resource paths for Dockerfiles (for documentation/building images)
+;; Resource paths for Dockerfiles (for documentation/building images).
+;; The Dockerfile syntax is OCI-standard; "docker/" in the resource path is
+;; historical and stays unchanged in Phase 1.
 (def dockerfile-resources
   {:minimal "executor/docker/Dockerfile.task-runner"
    :clojure "executor/docker/Dockerfile.task-runner-clojure"})
@@ -57,24 +65,24 @@
 ;; Helper Functions
 ;; ============================================================================
 
-(defn docker-cmd
-  "Build docker command with optional custom path."
-  [docker-path & args]
-  (apply vector (or docker-path "docker") args))
+(defn runtime-cmd
+  "Build a runtime CLI invocation vector for the given descriptor."
+  [descriptor & args]
+  (apply vector (descriptor/executable descriptor) args))
 
-(defn run-docker
-  "Execute a docker command and return the result."
-  [docker-path & args]
+(defn run-runtime
+  "Execute a runtime CLI command and return the result."
+  [descriptor & args]
   (try
-    (apply shell/sh (apply docker-cmd docker-path args))
+    (apply shell/sh (apply runtime-cmd descriptor args))
     (catch Exception e
       {:exit 1 :err (.getMessage e) :out ""})))
 
-(defn run-docker-process
-  "Execute a docker command with optional stdin bytes."
-  [docker-path args & {:keys [stdin-bytes]}]
+(defn run-runtime-process
+  "Execute a runtime CLI command with optional stdin bytes."
+  [descriptor args & {:keys [stdin-bytes]}]
   (try
-    (let [pb (ProcessBuilder. (into-array String (apply docker-cmd docker-path args)))
+    (let [pb (ProcessBuilder. (into-array String (apply runtime-cmd descriptor args)))
           process (.start pb)]
       (when stdin-bytes
         (with-open [stdin (.getOutputStream process)]
@@ -149,13 +157,13 @@
       (into ["--cpus" (str (:cpu merged))]))))
 
 (defn build-security-args
-  "Build security-hardening docker args from an optional execution plan map.
+  "Build security-hardening runtime args from an optional execution plan map.
 
    Applies a fixed set of hardening flags to every container plus
    network restrictions and memory limits derived from the plan:
 
    - :memory-limit-mb  RSS ceiling in mebibytes  (overrides default-resources)
-   - :time-limit-ms    Not enforced at docker level (handled by executor logic)
+   - :time-limit-ms    Not enforced at runtime level (handled by executor logic)
    - :network-profile  :none/:restricted -> --network=none
                        :standard/:full   -> no extra network arg
    - :trust-level      Not used here; enforced at scheduling layer
@@ -184,8 +192,13 @@
    Containers always run with `--read-only`, so common scratch paths must be
    provided explicitly. We keep `/tmp` writable and also provide a writable
    workdir scratch mount when the workdir is not already covered by caller
-   mounts."
-  [workdir execution-plan]
+   mounts.
+
+   The tmpfs option string comes from the runtime/flags dialect so a future
+   runtime that diverges (e.g. does not accept `uid=`/`gid=` on tmpfs) can
+   be papered over by adding an entry to the dialect map rather than
+   branching on `:runtime/kind` here."
+  [descriptor workdir execution-plan]
   (let [mounted-paths (into #{}
                             (map :container-path)
                             (get execution-plan :mounts []))
@@ -193,27 +206,18 @@
                         (and workdir
                              (not (contains? mounted-paths workdir))
                              (not= workdir "/tmp"))
-                        (conj workdir))]
+                        (conj workdir))
+        opts          (flags/flag (descriptor/kind descriptor) :tmpfs-mount-options)]
     (mapcat (fn [path]
-              ["--tmpfs" (str path ":rw,nosuid,nodev,exec,size=512m,uid=1000,gid=1000")])
+              ["--tmpfs" (str path ":" opts)])
             scratch-paths)))
 
 ;; ============================================================================
-;; Docker Operations
+;; Container Operations
 ;; ============================================================================
 
-(defn docker-info
-  "Get Docker server version."
-  [docker-path]
-  (let [result (run-docker docker-path "info" "--format" "{{.ServerVersion}}")]
-    (if (zero? (:exit result))
-      {:available? true
-       :docker-version (str/trim (:out result))}
-      {:available? false
-       :reason (:err result)})))
-
 (defn create-container
-  "Create and start a Docker container.
+  "Create and start a container.
 
    execution-plan (optional) is a map conforming to
    ai.miniforge.dag-executor.execution-plan/ExecutionPlanSchema.  When
@@ -223,12 +227,12 @@
    `build-security-args`.
 
    Returns {:container-id string :container-name string} on success."
-  [docker-path container-name image workdir env-map resources network
+  [descriptor container-name image workdir env-map resources network
    & {:keys [execution-plan]}]
   (let [env-args      (build-env-args env-map)
         resource-args (build-resource-args resources)
         security-args (build-security-args execution-plan)
-        runtime-fs-args (build-runtime-fs-args workdir execution-plan)
+        runtime-fs-args (build-runtime-fs-args descriptor workdir execution-plan)
         mount-args    (when (some? execution-plan)
                         (build-mount-args execution-plan))
         ;; When an execution plan is present its network-profile drives the
@@ -236,7 +240,7 @@
         network-args  (if (some? execution-plan)
                         [] ; network handled inside build-security-args
                         (when network ["--network" network]))
-        ;; N11 §2.2: Set Docker stop-timeout from execution plan time limit
+        ;; N11 §2.2: Set runtime stop-timeout from execution plan time limit
         stop-timeout  (when-let [ms (get-in execution-plan [:time-limit-ms])]
                         (max 5 (quot ms 1000)))
         cmd-args      (concat ["run" "-d"
@@ -251,7 +255,7 @@
                               env-args
                               resource-args
                               [image "sleep" "infinity"])
-        result        (apply run-docker docker-path cmd-args)]
+        result        (apply run-runtime descriptor cmd-args)]
     (if (zero? (:exit result))
       (result/ok {:container-id (str/trim (:out result))
                   :container-name container-name})
@@ -259,7 +263,7 @@
 
 (defn exec-in-container
   "Execute a command in a running container."
-  [docker-path container-id command opts]
+  [descriptor container-id command opts]
   (let [cmd-args (if (string? command)
                    ["sh" "-c" command]
                    command)
@@ -271,7 +275,7 @@
                           [container-id]
                           cmd-args)
         start-time (System/currentTimeMillis)
-        result (apply run-docker docker-path full-args)]
+        result (apply run-runtime descriptor full-args)]
     (result/ok {:exit-code (:exit result)
                 :stdout (:out result)
                 :stderr (:err result)
@@ -279,26 +283,26 @@
 
 (defn copy-to-container
   "Copy files from host to container."
-  [docker-path container-id local-path remote-path]
+  [descriptor container-id local-path remote-path]
   (let [source (clojure.java.io/file local-path)
         parent (.getParent (clojure.java.io/file remote-path))
         mkdir-cmd (when (seq parent)
                     (str "mkdir -p " (shell-quote parent) " && "))
         write-cmd (str (or mkdir-cmd "")
                        "cat > " (shell-quote remote-path))
-        result (run-docker-process docker-path
-                                   ["exec" "-i" container-id "sh" "-c" write-cmd]
-                                   :stdin-bytes (java.nio.file.Files/readAllBytes (.toPath source)))]
+        result (run-runtime-process descriptor
+                                    ["exec" "-i" container-id "sh" "-c" write-cmd]
+                                    :stdin-bytes (java.nio.file.Files/readAllBytes (.toPath source)))]
     (if (zero? (:exit result))
       (result/ok {:copied-bytes (.length source)})
       (result/err :copy-failed (:err result)))))
 
 (defn copy-from-container
   "Copy files from container to host."
-  [docker-path container-id remote-path local-path]
-  (let [result (run-docker-process docker-path
-                                   ["exec" container-id "sh" "-c"
-                                    (str "cat " (shell-quote remote-path))])
+  [descriptor container-id remote-path local-path]
+  (let [result (run-runtime-process descriptor
+                                    ["exec" container-id "sh" "-c"
+                                     (str "cat " (shell-quote remote-path))])
         dest (clojure.java.io/file local-path)]
     (if (zero? (:exit result))
       (do
@@ -311,20 +315,20 @@
 
 (defn stop-container
   "Stop a running container."
-  [docker-path container-id timeout]
-  (run-docker docker-path "stop" "-t" (str timeout) container-id))
+  [descriptor container-id timeout]
+  (run-runtime descriptor "stop" "-t" (str timeout) container-id))
 
 (defn remove-container
   "Remove a container (force)."
-  [docker-path container-id]
-  (let [result (run-docker docker-path "rm" "-f" container-id)]
+  [descriptor container-id]
+  (let [result (run-runtime descriptor "rm" "-f" container-id)]
     (result/ok {:released? (zero? (:exit result))})))
 
 (defn inspect-container
   "Get container status."
-  [docker-path container-id]
-  (let [result (run-docker docker-path "inspect" container-id
-                           "--format" "{{.State.Status}}")]
+  [descriptor container-id]
+  (let [result (run-runtime descriptor "inspect" container-id
+                            "--format" "{{.State.Status}}")]
     (if (zero? (:exit result))
       (result/ok {:status (case (str/trim (:out result))
                             "running" :running
@@ -335,11 +339,11 @@
 
 (defn container-image-digest
   "Return the SHA256 image digest for a container, or nil on failure."
-  [docker-path container-name]
+  [descriptor container-name]
   (try
-    (let [inspect-result (run-docker docker-path
-                                     "inspect" container-name
-                                     "--format" "{{.Image}}")]
+    (let [inspect-result (run-runtime descriptor
+                                      "inspect" container-name
+                                      "--format" "{{.Image}}")]
       (when (zero? (:exit inspect-result))
         (let [digest (str/trim (:out inspect-result))]
           (when (seq digest) digest))))
@@ -359,19 +363,19 @@
              :description "Full Clojure image with clj, bb, clj-kondo, node"}})
 
 (defn image-exists?
-  "Check if a Docker image exists locally."
-  [docker-path image]
-  (let [result (run-docker docker-path "image" "inspect" image)]
+  "Check if a container image exists locally."
+  [descriptor image]
+  (let [result (run-runtime descriptor "image" "inspect" image)]
     (zero? (:exit result))))
 
 (defn image-repo-digest
-  "Return the repo-digest (sha256:…) string for a local Docker image,
-   or nil when the image is not found or Docker is unavailable."
-  [docker-path image]
+  "Return the repo-digest (sha256:…) string for a local image,
+   or nil when the image is not found or the runtime is unavailable."
+  [descriptor image]
   (try
-    (let [result (run-docker docker-path
-                             "image" "inspect" image
-                             "--format" "{{index .RepoDigests 0}}")]
+    (let [result (run-runtime descriptor
+                              "image" "inspect" image
+                              "--format" "{{index .RepoDigests 0}}")]
       (when (zero? (:exit result))
         (some-> (:out result) clojure.string/trim not-empty)))
     (catch Exception _e
@@ -402,22 +406,22 @@
           (.getAbsolutePath f))))))
 
 (defn build-image!
-  "Build a Docker image from a Dockerfile.
+  "Build a container image from a Dockerfile.
 
    Arguments:
-   - docker-path: Path to docker binary (nil for default)
+   - descriptor: Runtime descriptor (use the same exe to build that runs)
    - image-name: Name:tag for the image
    - dockerfile-path: Resource path to Dockerfile
 
    Returns result monad with build info or error."
-  [docker-path image-name dockerfile-path]
+  [descriptor image-name dockerfile-path]
   (if-let [abs-path (find-dockerfile-path dockerfile-path)]
     (let [context-dir (.getParent (clojure.java.io/file abs-path))
           _dockerfile-name (.getName (clojure.java.io/file abs-path))
-          result (run-docker docker-path "build"
-                             "-t" image-name
-                             "-f" abs-path
-                             context-dir)]
+          result (run-runtime descriptor "build"
+                              "-t" image-name
+                              "-f" abs-path
+                              context-dir)]
       (if (zero? (:exit result))
         (result/ok {:image image-name
                     :dockerfile dockerfile-path
@@ -428,23 +432,23 @@
     (result/err :dockerfile-not-found {:path dockerfile-path})))
 
 (defn ensure-image!
-  "Ensure a Docker image exists, building if necessary.
+  "Ensure a container image exists, building if necessary.
 
    Arguments:
-   - docker-path: Path to docker binary
+   - descriptor: Runtime descriptor
    - image-key: Key from task-runner-images (:minimal or :clojure)
    - opts: {:force? bool} - force rebuild even if exists
 
    Returns result monad with image info."
-  [docker-path image-key & {:keys [force?] :or {force? false}}]
+  [descriptor image-key & {:keys [force?] :or {force? false}}]
   (if-let [image-spec (get task-runner-images image-key)]
     (let [{:keys [image dockerfile]} image-spec]
-      (if (and (not force?) (image-exists? docker-path image))
+      (if (and (not force?) (image-exists? descriptor image))
         (result/ok {:image image
                     :dockerfile dockerfile
                     :built? false
                     :existed? true})
-        (build-image! docker-path image dockerfile)))
+        (build-image! descriptor image dockerfile)))
     (result/err :unknown-image-key {:key image-key
                                     :available (keys task-runner-images)})))
 
@@ -452,14 +456,14 @@
   "Ensure all task runner images are available.
 
    Arguments:
-   - docker-path: Path to docker binary
+   - descriptor: Runtime descriptor
    - opts: {:force? bool} - force rebuild all
 
    Returns map of image-key -> result."
-  [docker-path & {:keys [force?] :or {force? false}}]
+  [descriptor & {:keys [force?] :or {force? false}}]
   (into {}
         (for [image-key (keys task-runner-images)]
-          [image-key (ensure-image! docker-path image-key :force? force?)])))
+          [image-key (ensure-image! descriptor image-key :force? force?)])))
 
 ;; ============================================================================
 ;; Container command execution helper
@@ -481,11 +485,11 @@
    - :throw-on-error? — throw ex-info on non-zero exit (default false)
    - :error-prefix — prefix for thrown error messages
    - :sanitize? — sanitize tokens in error messages (default false)"
-  [docker-path container-id workdir
+  [descriptor container-id workdir
    & {:keys [throw-on-error? error-prefix sanitize?]
       :or {throw-on-error? false error-prefix "Command failed" sanitize? false}}]
   (fn [cmd]
-    (let [r (exec-in-container docker-path container-id cmd {:workdir workdir})]
+    (let [r (exec-in-container descriptor container-id cmd {:workdir workdir})]
       (when (and throw-on-error?
                  (not (zero? (get-in r [:data :exit-code] 1))))
         (let [safe-cmd (if sanitize? (sanitize-token (str cmd)) (str cmd))
@@ -537,7 +541,7 @@
    Uses config-based token resolution (profile + env fallback) rather than
    URL-guessing. Converts SSH URLs to HTTPS for containers where SSH agents
    are not available."
-  [docker-path container-name workdir env-config]
+  [descriptor container-name workdir env-config]
   (when-let [repo-url (:repo-url env-config)]
     (let [branch    (get env-config :branch "main")
           host-kind (or (:host-kind env-config)
@@ -550,7 +554,7 @@
           clone-url (if token
                       (authenticated-https-url https-url token host-kind)
                       repo-url)
-          exec!  (container-exec-fn docker-path container-name "/"
+          exec!  (container-exec-fn descriptor container-name "/"
                                     :throw-on-error? true
                                     :error-prefix "Workspace bootstrap failed"
                                     :sanitize? true)
@@ -566,30 +570,33 @@
                     (authenticated-https-url https-url token host-kind)))))))
 
 ;; ============================================================================
-;; DockerExecutor Record
+;; OciCliExecutor Record
 ;; ============================================================================
 
-(defrecord DockerExecutor [config image network docker-path]
+(defrecord OciCliExecutor [config descriptor image network]
   proto/TaskExecutor
 
-  (executor-type [_this] :docker)
+  (executor-type [_this]
+    ;; Phase 1: only :docker is supported, so this always returns :docker.
+    ;; Phase 2 will return :podman / :nerdctl as descriptor/kind dictates.
+    (descriptor/kind descriptor))
 
   (available? [_this]
     (try
-      (result/ok (docker-info docker-path))
+      (result/ok (descriptor/runtime-info descriptor))
       (catch Exception e
         (result/ok {:available? false :reason (.getMessage e)}))))
 
   (acquire-environment! [_this task-id env-config]
     ;; Lazy image build: ensure the image exists locally before creating the container.
     ;; Looks up image in task-runner-images by name; builds from bundled Dockerfile if missing.
-    (when-not (image-exists? docker-path image)
+    (when-not (image-exists? descriptor image)
       (when-let [image-key (->> task-runner-images
                                 (some (fn [[k v]] (when (= image (:image v)) k))))]
-        (ensure-image! docker-path image-key)))
+        (ensure-image! descriptor image-key)))
     (let [container-name (str "miniforge-task-" (subs (str task-id) 0 8))
           workdir (get env-config :workdir default-workdir)
-          create-result (create-container docker-path
+          create-result (create-container descriptor
                                           container-name
                                           image
                                           workdir
@@ -599,71 +606,89 @@
       (if (result/ok? create-result)
         (do
           ;; Bootstrap workspace: clone repo into container if repo-url provided (N11 §4.2)
-          (bootstrap-workspace! docker-path container-name workdir env-config)
+          (bootstrap-workspace! descriptor container-name workdir env-config)
           ;; Capture image SHA256 digest for evidence record (N11 §11 SHOULD)
-          (let [image-digest (container-image-digest docker-path container-name)
+          (let [image-digest (container-image-digest descriptor container-name)
                 metadata (cond-> (get create-result :data {})
                            image-digest (assoc :image-digest image-digest))]
             (result/ok (proto/create-environment-record
-                        container-name :docker task-id workdir
+                        container-name (descriptor/kind descriptor) task-id workdir
                         (assoc env-config :metadata metadata)))))
         create-result)))
 
   (execute! [_this environment-id command opts]
     (try
-      (exec-in-container docker-path environment-id command opts)
+      (exec-in-container descriptor environment-id command opts)
       (catch Exception e
         (result/err :exec-failed (.getMessage e)))))
 
   (copy-to! [_this environment-id local-path remote-path]
     (try
-      (copy-to-container docker-path environment-id local-path remote-path)
+      (copy-to-container descriptor environment-id local-path remote-path)
       (catch Exception e
         (result/err :copy-failed (.getMessage e)))))
 
   (copy-from! [_this environment-id remote-path local-path]
     (try
-      (copy-from-container docker-path environment-id remote-path local-path)
+      (copy-from-container descriptor environment-id remote-path local-path)
       (catch Exception e
         (result/err :copy-failed (.getMessage e)))))
 
   (release-environment! [_this environment-id]
     (try
-      (stop-container docker-path environment-id default-stop-timeout)
-      (remove-container docker-path environment-id)
+      (stop-container descriptor environment-id default-stop-timeout)
+      (remove-container descriptor environment-id)
       (catch Exception e
         (result/err :release-failed (.getMessage e)))))
 
   (environment-status [_this environment-id]
     (try
-      (inspect-container docker-path environment-id)
+      (inspect-container descriptor environment-id)
       (catch Exception e
         (result/ok {:status :unknown :error (.getMessage e)}))))
 
   (persist-workspace! [_this environment-id opts]
-    (let [exec! (container-exec-fn docker-path environment-id
-                                    (get opts :workdir default-workdir))]
+    (let [exec! (container-exec-fn descriptor environment-id
+                                   (get opts :workdir default-workdir))]
       (workspace/git-persist! exec! opts)))
 
   (restore-workspace! [_this environment-id opts]
-    (let [exec! (container-exec-fn docker-path environment-id
-                                    (get opts :workdir default-workdir))]
+    (let [exec! (container-exec-fn descriptor environment-id
+                                   (get opts :workdir default-workdir))]
       (workspace/git-restore! exec! opts))))
 
 ;; ============================================================================
 ;; Factory
 ;; ============================================================================
 
-(defn create-docker-executor
-  "Create a Docker executor.
+(defn create-oci-cli-executor
+  "Create an OCI-CLI executor for the runtime kind named by `:runtime-kind`
+   on the config map.
 
    Config:
-   - :image - Container image for tasks (default: alpine:latest)
-   - :network - Docker network to attach to
-   - :docker-path - Path to docker binary"
+   - :runtime-kind — :docker (default in Phase 1). :podman lands in Phase 2.
+   - :executable   — explicit path to the runtime CLI binary
+   - :image        — container image for tasks (default: alpine:latest)
+   - :network      — network name to attach to (legacy; execution-plan
+                     network-profile takes precedence when present)"
   [config]
-  (map->DockerExecutor
-   {:config config
-    :image (get config :image default-image)
-    :network (:network config)
-    :docker-path (:docker-path config)}))
+  (let [descriptor (descriptor/make-descriptor config)]
+    (map->OciCliExecutor
+     {:config     config
+      :descriptor descriptor
+      :image      (get config :image default-image)
+      :network    (:network config)})))
+
+(defn create-docker-executor
+  "Create a Docker-backed OCI-CLI executor.
+
+   Preserved as the back-compat factory name for callers that predate
+   N11-delta. Equivalent to `create-oci-cli-executor` with
+   `{:runtime-kind :docker}`.
+
+   Config:
+   - :image       — container image for tasks (default: alpine:latest)
+   - :network     — network to attach to
+   - :docker-path — path to the docker binary (legacy alias for :executable)"
+  [config]
+  (create-oci-cli-executor (assoc config :runtime-kind :docker)))
