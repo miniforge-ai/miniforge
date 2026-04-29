@@ -90,3 +90,32 @@
                @calls)))
       (finally
         (delete-tree! tmp)))))
+
+(deftest materialize-execution-worktree-removes-empty-target-before-creating-test
+  (let [tmp (fs/create-temp-dir {:prefix "miniforge-worktree-empty-target-"})
+        target (fs/path tmp "target")
+        calls (atom [])]
+    (try
+      (fs/create-dirs target)
+      (spit (str (fs/path target ".keep")) "")
+      (fs/delete (fs/path target ".keep"))
+      (is (fs/exists? target))
+      (with-redefs [sut/worktree-root (fn [_] "/tmp/source-repo")
+                    shell/sh
+                    (fn [& args]
+                      (reset! calls args)
+                      {:exit 0 :out "" :err ""})]
+        (is (= (str (fs/absolutize target))
+               (sut/materialize-execution-worktree! "/tmp/spec-dir" (str target))))
+        (is (= ["git"
+                "-C"
+                "/tmp/source-repo"
+                "worktree"
+                "add"
+                "--detach"
+                (str (fs/absolutize target))]
+               @calls))
+        (is (not (fs/exists? target))
+            "empty target directory is removed before git worktree add runs"))
+      (finally
+        (delete-tree! tmp)))))

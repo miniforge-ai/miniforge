@@ -46,3 +46,21 @@
         (#'sut/run-spec-workflow "/tmp/behavioral.md" {:worktree "/tmp/custom-worktree"})
         (is (= {:worktree-path "/tmp/custom-worktree-materialized"}
                (:execution-opts @captured-opts)))))))
+
+(deftest detect-input-type-test
+  (testing "spec-shaped inputs are classified as specs"
+    (is (= :spec (sut/detect-input-type {:spec/title "Behavioral Verification"}))))
+  (testing "dag-shaped inputs are classified as dags"
+    (is (= :dag (sut/detect-input-type {:dag-id (random-uuid)}))))
+  (testing "plan-shaped inputs are classified as plans"
+    (is (= :plan (sut/detect-input-type {:plan/id (random-uuid)}))))
+  (testing "unrecognized shapes return nil"
+    (is (nil? (sut/detect-input-type {:foo :bar})))))
+
+(deftest markdown-spec?-test
+  (testing "markdown extensions are recognized"
+    (is (true? (sut/markdown-spec? "spec.md")))
+    (is (true? (sut/markdown-spec? "spec.markdown"))))
+  (testing "non-markdown extensions are rejected"
+    (is (false? (sut/markdown-spec? "spec.edn")))
+    (is (false? (sut/markdown-spec? "spec.json")))))

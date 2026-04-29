@@ -321,7 +321,15 @@
       (is (= [:code-generation] (:cp/capabilities event)))
       (is (= {:workflow-id "wf-1"} (:cp/metadata event)))
       (is (= [:native] (:cp/tags event)))
-      (is (= 15000 (:cp/heartbeat-interval-ms event))))))
+      (is (= 15000 (:cp/heartbeat-interval-ms event)))))
+
+  (testing "normalizes set-backed capabilities and tags deterministically"
+    (let [stream (no-op-stream)
+          event (core/cp-agent-registered stream (random-uuid) "agent-1" :anthropic
+                                          {:capabilities #{:zeta :alpha}
+                                           :tags #{"zeta" "alpha"}})]
+      (is (= [:alpha :zeta] (:cp/capabilities event)))
+      (is (= ["alpha" "zeta"] (:cp/tags event))))))
 
 (deftest cp-agent-heartbeat-test
   (testing "creates heartbeat event"

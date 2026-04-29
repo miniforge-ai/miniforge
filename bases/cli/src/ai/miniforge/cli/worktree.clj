@@ -109,6 +109,14 @@
   (and (fs/directory? path)
        (empty? (seq (fs/list-dir path)))))
 
+(defn- prepare-worktree-target!
+  [target-file]
+  (cond
+    (nil? target-file) nil
+    (and (fs/exists? target-file) (empty-directory? target-file))
+    (fs/delete-tree target-file)
+    :else nil))
+
 (defn- materialization-error
   [message data]
   (throw (ex-info message data)))
@@ -143,6 +151,7 @@
       (let [parent-dir (some-> target-file fs/parent str)
             _ (when parent-dir
                 (fs/create-dirs parent-dir))
+            _ (prepare-worktree-target! target-file)
             {:keys [exit err out]}
             (shell/sh "git" "-C" source-root "worktree" "add" "--detach" target-root)]
         (if (zero? exit)

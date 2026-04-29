@@ -33,6 +33,16 @@
 (def ^:private redirect-transition-type
   :transition/redirect)
 
+(defn- ordered-coll->vec
+  "Preserve the original order for sequential inputs; sort set-like inputs into
+   a deterministic vector for stable event payloads."
+  [value]
+  (cond
+    (nil? value) nil
+    (sequential? value) (vec value)
+    (set? value) (->> value (sort-by pr-str) vec)
+    :else (vec value)))
+
 (defn- redirect-target
   "Project a redirect target for legacy consumers.
 
@@ -575,9 +585,9 @@
       (cond->
         (:name opts) (assoc :cp/agent-name (:name opts))
         (:external-id opts) (assoc :cp/external-id (:external-id opts))
-        (:capabilities opts) (assoc :cp/capabilities (vec (:capabilities opts)))
+        (:capabilities opts) (assoc :cp/capabilities (ordered-coll->vec (:capabilities opts)))
         (:metadata opts) (assoc :cp/metadata (:metadata opts))
-        (:tags opts) (assoc :cp/tags (vec (:tags opts)))
+        (:tags opts) (assoc :cp/tags (ordered-coll->vec (:tags opts)))
         (:heartbeat-interval-ms opts)
         (assoc :cp/heartbeat-interval-ms (:heartbeat-interval-ms opts)))))
 
