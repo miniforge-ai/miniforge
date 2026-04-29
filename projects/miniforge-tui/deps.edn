@@ -11,10 +11,12 @@
         ;; Core domain components needed by CLI
         ai.miniforge/schema {:local/root "../../components/schema"}
         ai.miniforge/algorithms {:local/root "../../components/algorithms"}
+        ai.miniforge/anomaly {:local/root "../../components/anomaly"}
         ai.miniforge/content-hash {:local/root "../../components/content-hash"}
         ai.miniforge/logging {:local/root "../../components/logging"}
         ai.miniforge/config {:local/root "../../components/config"}
         ai.miniforge/response {:local/root "../../components/response"}
+        ai.miniforge/response-chain {:local/root "../../components/response-chain"}
         ai.miniforge/fsm {:local/root "../../components/fsm"}
         ;; Workflow and orchestration
         ai.miniforge/workflow {:local/root "../../components/workflow"}
