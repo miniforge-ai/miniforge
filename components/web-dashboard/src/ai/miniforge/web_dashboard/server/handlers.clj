@@ -18,6 +18,8 @@
    [clojure.string :as str]
    [clojure.java.io :as io]
    [cheshire.core :as json]
+   [ai.miniforge.event-stream.interface :as event-stream]
+   [ai.miniforge.response.interface :as response]
    [ai.miniforge.web-dashboard.server.responses :as responses]
    [ai.miniforge.web-dashboard.server.filters :as filters]
    [ai.miniforge.web-dashboard.views :as views]
@@ -26,30 +28,28 @@
    [ai.miniforge.web-dashboard.server.websocket :as ws]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Anomaly/response helpers (via requiring-resolve, no hard dep on response component)
+;; Anomaly/response helpers
 
 (defn make-anomaly
-  "Create an anomaly map via response/make-anomaly."
+  "Create an anomaly map."
   [category message & [context]]
-  ((requiring-resolve 'ai.miniforge.response.interface/make-anomaly)
-   category message (or context {})))
+  (response/make-anomaly category message (or context {})))
 
 (defn from-exception
-  "Convert an exception to an anomaly map via response/from-exception."
+  "Convert an exception to an anomaly map."
   [^Throwable e]
-  ((requiring-resolve 'ai.miniforge.response.interface/from-exception) e))
+  (response/from-exception e))
 
 (defn response-success?
-  "Check if a response builder result represents success.
-   Wraps response/success? via requiring-resolve to keep the soft dep."
+  "Check if a response builder result represents success."
   [response]
-  ((requiring-resolve 'ai.miniforge.response.interface/success?) response))
+  (response/success? response))
 
 (defn anomaly-http-response
   "Translate an anomaly map to a Ring HTTP response.
    Body is JSON-encoded for wire transport."
   [anomaly-map]
-  (let [raw ((requiring-resolve 'ai.miniforge.response.interface/anomaly->http-response) anomaly-map)]
+  (let [raw (response/anomaly->http-response anomaly-map)]
     (update raw :body json/generate-string)))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -598,17 +598,15 @@
           action-id (parse-uuid (str (:action-id data)))
           signers (vec (:required-signers data))
           quorum (get data :quorum (count signers))
-          create-fn (requiring-resolve 'ai.miniforge.event-stream.interface/create-approval-request)
-          store-fn (requiring-resolve 'ai.miniforge.event-stream.interface/store-approval!)
-          mgr-fn (requiring-resolve 'ai.miniforge.event-stream.interface/create-approval-manager)
           ;; Get or create approval manager from state
           mgr (or (:approval-manager @state)
-                  (let [m (mgr-fn)]
+                  (let [m (event-stream/create-approval-manager)]
                     (swap! state assoc :approval-manager m)
                     m))
-          approval (create-fn action-id signers quorum
-                              {:expires-in-hours (get data :expires-in-hours 24)})]
-      (store-fn mgr approval)
+          approval (event-stream/create-approval-request
+                    action-id signers quorum
+                    {:expires-in-hours (get data :expires-in-hours 24)})]
+      (event-stream/store-approval! mgr approval)
       (responses/json-response
        {:status "created"
         :approval-id (str (:approval/id approval))
@@ -622,13 +620,11 @@
   [state approval-id-str]
   (try
     (let [approval-id (parse-uuid approval-id-str)
-          get-fn (requiring-resolve 'ai.miniforge.event-stream.interface/get-approval)
-          status-fn (requiring-resolve 'ai.miniforge.event-stream.interface/check-approval-status)
           mgr (:approval-manager @state)]
-      (if-let [approval (and mgr (get-fn mgr approval-id))]
+      (if-let [approval (and mgr (event-stream/get-approval mgr approval-id))]
         (responses/json-response
          {:approval-id (str (:approval/id approval))
-          :status (name (status-fn approval))
+          :status (name (event-stream/check-approval-status approval))
           :quorum (:approval/quorum approval)
           :signatures (count (:approval/signatures approval))
           :required-signers (:approval/required-signers approval)
@@ -647,23 +643,21 @@
   (try
     (let [data (json/parse-string body true)
           approval-id (parse-uuid approval-id-str)
-          get-fn (requiring-resolve 'ai.miniforge.event-stream.interface/get-approval)
-          submit-fn (requiring-resolve 'ai.miniforge.event-stream.interface/submit-approval)
-          update-fn (requiring-resolve 'ai.miniforge.event-stream.interface/update-approval!)
           mgr (:approval-manager @state)
-          approval (and mgr (get-fn mgr approval-id))]
+          approval (and mgr (event-stream/get-approval mgr approval-id))]
       (if-not approval
         (anomaly-http-response
          (make-anomaly :anomalies/not-found
                        "Approval not found"
                        {:approval-id approval-id-str}))
-        (let [result (submit-fn approval
-                                (:signer data)
-                                (keyword (:decision data))
-                                {:reason (:reason data)})]
+        (let [result (event-stream/submit-approval
+                      approval
+                      (:signer data)
+                      (keyword (:decision data))
+                      {:reason (:reason data)})]
           (if (response-success? result)
             (do
-              (update-fn mgr (:output result))
+              (event-stream/update-approval! mgr (:output result))
               (responses/json-response
                {:status "signed"
                 :approval-status (name (:approval/status (:output result)))}))
