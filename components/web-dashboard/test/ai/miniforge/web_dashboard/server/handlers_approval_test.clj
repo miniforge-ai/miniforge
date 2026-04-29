@@ -207,3 +207,11 @@
           after-two (parse-body (sut/handle-api-approval-get state approval-id))]
       (is (= "approved" (:status after-two)))
       (is (= 2 (:signatures after-two))))))
+
+(deftest create-approval-exception-returns-anomaly-test
+  (testing "POST /api/approvals returns an anomaly response for invalid request bodies"
+    (let [state (fresh-state)
+          response (sut/handle-api-approval-create state "{not-json")
+          data (parse-body response)]
+      (is (= 500 (:status response)))
+      (is (= "fault" (get-in data [:error :code]))))))
