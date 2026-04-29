@@ -37,6 +37,7 @@
    [ai.miniforge.gate.test]
    [ai.miniforge.gate.policy]
    [ai.miniforge.gate.precommit-discipline]
+   [ai.miniforge.gate.behavioral]
    [ai.miniforge.gate.registry :as registry]
    [ai.miniforge.response.interface :as response]
    [ai.miniforge.schema.interface :as schema]))
@@ -221,16 +222,18 @@
 (comment
   ;; List available gates
   (list-gates)
-  ;; => #{:syntax :lint :tests-pass :coverage :no-secrets :precommit-discipline ...}
+  ;; => #{:syntax :lint :tests-pass :coverage :no-secrets :precommit-discipline :behavioral ...}
 
   ;; Get a gate
-  (get-gate :syntax)
+  (get-gate :behavioral)
 
   ;; Check a gate
-  (check-gate :syntax {:content "(defn foo [])"} {})
+  (check-gate :behavioral
+              {:event-stream/events [{:event/type :tool-call :tool "Write"}]}
+              {:policy-packs [] :phase :observe})
 
   ;; Check multiple gates
-  (check-gates [:syntax :lint] {:content "(defn foo [])"} {})
+  (check-gates [:syntax :behavioral] {:content "(defn foo [])"} {})
 
   ;; Check gates with response chain
   (def chain (check-gates-chain [:syntax :lint] {:content "(defn foo [])"} {}))
