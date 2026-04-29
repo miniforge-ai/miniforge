@@ -322,6 +322,7 @@
     (let [[exec _cmds] (create-mock-executor
                         :default-response {:exit-code 1 :stdout "" :stderr "signing failed"})
           result (sandbox/push-branch! exec "env-1" "feat/test")]
-      (is (dag/ok? result))
-      (is (= 1 (get-in result [:data :exit-code]))))))
-
+      (is (= {:success? false
+              :error "signing failed"
+              :output ""}
+             result)))))

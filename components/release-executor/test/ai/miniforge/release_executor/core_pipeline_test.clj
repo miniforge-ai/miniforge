@@ -25,6 +25,7 @@
   (:require
    [ai.miniforge.dag-executor.interface :as dag]
    [ai.miniforge.release-executor.core :as sut]
+   [ai.miniforge.release-executor.sandbox :as sandbox]
    [clojure.string :as str]
    [clojure.test :refer [deftest is testing]]))
 
@@ -402,6 +403,26 @@
     (let [state {:create-pr? false}
           result (sut/step-create-pr state)]
       (is (not (sut/failed? result))))))
+
+(deftest step-create-pr-uses-rich-pr-body-test
+  (testing "PR creation uses :release/pr-body instead of the short description"
+    (let [seen-payload (atom nil)]
+      (with-redefs [sandbox/create-pr!
+                    (fn [_exec _env-id payload _opts]
+                      (reset! seen-payload payload)
+                      {:success? true
+                       :pr-number 42
+                       :pr-url "https://github.com/org/repo/pull/42"})]
+        (sut/step-create-pr
+         {:create-pr? true
+          :base-branch "main"
+          :executor :mock
+          :environment-id "env-1"
+          :release-meta {:release/pr-title "feat: test"
+                         :release/pr-description "Short summary"
+                         :release/pr-body "# Rich Body\n\n## Summary\nDetailed"}})
+        (is (= "# Rich Body\n\n## Summary\nDetailed"
+               (:body @seen-payload)))))))
 
 ;; ============================================================================
 ;; step-build-artifact

@@ -230,6 +230,7 @@
   ([task-description code-artifacts workflow-data]
    (let [desc (or task-description (default-task-description))
          title (first-sentence desc 70)
+         summary (first-sentence desc 200)
          slug (slugify title)
          branch (str "mf/" slug "-" (subs (str (random-uuid)) 0 8))
          file-list (format-file-list code-artifacts)
@@ -239,14 +240,14 @@
                           (format-review-summary review-artifacts))
          gate-summary (when (seq review-artifacts)
                         (format-gate-results review-artifacts))
-         body (render-pr-body (first-sentence desc 200)
+         body (render-pr-body summary
                               file-list file-count
                               review-summary gate-summary)]
      {:release/branch-name branch
       :release/commit-message title
       :release/pr-title title
       :release/pr-body body
-      :release/pr-description body})))
+      :release/pr-description summary})))
 
 (defn generate-release-metadata
   "Generate release metadata using releaser agent, falling back to deterministic
