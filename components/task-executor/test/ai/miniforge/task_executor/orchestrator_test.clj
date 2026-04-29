@@ -238,14 +238,17 @@
       (is (= ["a" "b" "c" "d"] (sort (:completed @execution-tracker)))
           "All tasks should complete")
 
-      ;; Verify A completed before B and C
+      ;; Verify A completed before B and C started. We assert <= rather than <
+      ;; because once the explicit Thread/sleep waits were removed the mock work
+      ;; and the next future-launch can land in the same wall-clock millisecond.
+      ;; The invariant is "B/C did not begin until A finished".
       (let [a-end (get-in @execution-tracker [:end-times "a"])
             b-start (get-in @execution-tracker [:start-times "b"])
             c-start (get-in @execution-tracker [:start-times "c"])]
-        (is (< a-end b-start)
-            "A should complete before B starts")
-        (is (< a-end c-start)
-            "A should complete before C starts"))
+        (is (<= a-end b-start)
+            "A should complete before (or in same ms as) B starts")
+        (is (<= a-end c-start)
+            "A should complete before (or in same ms as) C starts"))
 
       ;; Verify B and C completed before D started
       (let [b-end (get-in @execution-tracker [:end-times "b"])
