@@ -11,9 +11,9 @@ truth for shared engineering rules), bumping the `.standards` pointer
 in this repo to that branch, and recompiling
 `miniforge-standards.pack.edn` so the active scanner picks them up.
 
-The MDC sources land in
-[miniforge-standards#14](https://github.com/miniforge-ai/miniforge-standards/pull/14);
-this PR is the consumer wire-up.
+The MDC sources landed in
+[miniforge-standards#14](https://github.com/miniforge-ai/miniforge-standards/pull/14)
+(merged); this PR is the consumer wire-up.
 
 ## Motivation
 
@@ -55,11 +55,9 @@ This PR is the second step.
 
 ### 1. `.standards` submodule pointer bumped
 
-Points at the head of
-[`miniforge-standards/claude/runtime-policies`](https://github.com/miniforge-ai/miniforge-standards/tree/claude/runtime-
-policies)
-(commit `6f536a0`). Once miniforge-standards#14 merges to main, this
-branch will rebase to point at the merged commit.
+Points at `miniforge-standards` main at
+[`164d143`](https://github.com/miniforge-ai/miniforge-standards/commit/164d143)
+— the merge commit for #14.
 
 ### 2. `components/phase/resources/packs/miniforge-standards.pack.edn` regenerated
 
@@ -100,7 +98,7 @@ regen.
 
 ## Files
 
-- `.standards` — submodule pointer bumped to `miniforge-standards/claude/runtime-policies`
+- `.standards` — submodule pointer bumped to `miniforge-standards` main (commit `164d143`)
 - `components/phase/resources/packs/miniforge-standards.pack.edn` — regenerated; 39 rules
 - `.cursor/rules/foundations/runtime/*.mdc` — removed (the orphan tree)
 - `.cursor/rules/index.mdc` — reverted to main
@@ -125,8 +123,6 @@ regen.
 
 ## Open follow-ups (not gated on the runtime adapter)
 
-- After miniforge-standards#14 merges, rebase this branch to point
-  `.standards` at the merged commit (drops the branch-pointer hack).
 - Pin default images in `runtime/images.edn` to `@sha256:` digests
   when `docker.io/miniforge/task-runner*` are published with stable
   digests.
