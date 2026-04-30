@@ -33,6 +33,27 @@
     (spit f content)
     (.getAbsolutePath f)))
 
+(defn- delete-recursively!
+  "Recursively delete `f`. JVM File/deleteOnExit cannot remove non-empty
+   directories, so register an explicit shutdown hook for each temp dir."
+  [^java.io.File f]
+  (when (.exists f)
+    (when (.isDirectory f)
+      (doseq [child (.listFiles f)]
+        (delete-recursively! child)))
+    (.delete f)))
+
+(defn- temp-dir!
+  "Create a temp directory and register a shutdown hook to delete it
+   recursively on JVM exit. Returns the File."
+  [prefix]
+  (let [dir (.toFile (java.nio.file.Files/createTempDirectory
+                      prefix
+                      (make-array java.nio.file.attribute.FileAttribute 0)))]
+    (.addShutdownHook (Runtime/getRuntime)
+                      (Thread. ^Runnable #(delete-recursively! dir)))
+    dir))
+
 (defn- sarif-result
   "Build a SARIF result object for tests."
   [rule-id message & {:keys [level file line column]
@@ -263,10 +284,7 @@
 
 (deftest list-scan-files-directory-filters-by-extension-test
   (testing "A directory yields only .sarif and .csv files; other extensions skipped"
-    (let [tmp (.toFile (java.nio.file.Files/createTempDirectory
-                        "sarif-list-test"
-                        (make-array java.nio.file.attribute.FileAttribute 0)))
-          _ (.deleteOnExit tmp)
+    (let [tmp (temp-dir! "sarif-list-test")
           sarif-f (io/file tmp "scan.sarif")
           csv-f   (io/file tmp "results.csv")
           xml-f   (io/file tmp "data.xml")]
@@ -281,10 +299,7 @@
 
 (deftest list-scan-files-empty-directory-test
   (testing "Empty directory yields an empty vector"
-    (let [tmp (.toFile (java.nio.file.Files/createTempDirectory
-                        "sarif-list-empty"
-                        (make-array java.nio.file.attribute.FileAttribute 0)))
-          _ (.deleteOnExit tmp)]
+    (let [tmp (temp-dir! "sarif-list-empty")]
       (is (= [] (sut/list-scan-files (.getAbsolutePath tmp)))))))
 
 ;------------------------------------------------------------------------------ Layer 1

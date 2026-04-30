@@ -36,7 +36,10 @@
 
 (defn- valid-config
   [& {:as overrides}]
-  (merge {:sarif/source-path "/tmp/scan"} overrides))
+  ;; The schema validates only that :sarif/source-path is a string. Use the
+  ;; platform-neutral java.io.tmpdir rather than a hard-coded Unix path so
+  ;; the test isn't a Unix-only fixture by accident.
+  (merge {:sarif/source-path (System/getProperty "java.io.tmpdir")} overrides))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Enum exposure

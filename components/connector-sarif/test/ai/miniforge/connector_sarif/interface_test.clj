@@ -55,7 +55,10 @@
 
 (deftest validate-config-passthrough-test
   (testing "validate-config delegates to schema"
-    (is (true?  (:valid? (sut/validate-config {:sarif/source-path "/tmp/x"}))))
+    ;; Schema validates only that :sarif/source-path is a string —
+    ;; use a platform-neutral source rather than a hard-coded Unix path.
+    (is (true?  (:valid? (sut/validate-config
+                          {:sarif/source-path (System/getProperty "java.io.tmpdir")}))))
     (is (false? (:valid? (sut/validate-config {}))))))
 
 (deftest validate-violation-passthrough-test
