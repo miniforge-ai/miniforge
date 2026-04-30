@@ -134,10 +134,14 @@
 (defn ensure-attached!
   "Attach supervisory-state to `stream` exactly once.
 
+   The check-and-attach sequence is synchronized per stream so concurrent
+   callers cannot create multiple attachments for the same stream.
+
    Returns a component when a new attachment is created; otherwise nil."
   [stream]
-  (when-not (attached? stream)
-    (attach! stream)))
+  (locking stream
+    (when-not (attached? stream)
+      (attach! stream))))
 
 ;------------------------------------------------------------------------------ Layer 4
 ;; Query API
