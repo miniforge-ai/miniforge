@@ -191,10 +191,17 @@ wired into the existing standards pack.
     documented as Mac-only convenience).
   - Extend the `check:platform` tool list (line 291) to include `"podman"`,
     relying on the warn-only semantics added in `bb-platform`.
-- Standards pack (`bb standards:pack` per `project_standards_compilation_path`)
-  — add the four spec §6 policy rules: `:runtime/no-host-docker-socket`,
-  `:runtime/require-rootless`, `:runtime/restrict-host-mounts`,
-  `:runtime/require-image-digest-pin`.
+- Standards pack — author the four spec §6 policy rules as MDC files
+  in the `miniforge-ai/miniforge-standards` repository (consumed here
+  as the `.standards/` submodule):
+  `foundations/runtime-no-host-docker-socket.mdc` (`:hard-stop`),
+  `foundations/runtime-require-rootless.mdc` (`:warn` OSS /
+  `:hard-stop` fleet),
+  `foundations/runtime-restrict-host-mounts.mdc` (`:review`),
+  `foundations/runtime-require-image-digest-pin.mdc` (`:hard-stop`).
+  Consumer wire-up here: bump the `.standards` submodule pointer +
+  rerun `bb standards:pack` to regenerate
+  `components/phase/resources/packs/miniforge-standards.pack.edn`.
 - `Dockerfile.task-runner*` — rename references in build instructions to be
   runtime-neutral (`<exe> build -t ...`). The Dockerfile syntax itself is
   OCI-standard; the build command is the only thing that changes.
