@@ -1,5 +1,5 @@
 ---
-dewey: "020"
+dewey: "030"
 description: Reject bind mounts of host container-runtime sockets into the capsule
 alwaysApply: true
 ---

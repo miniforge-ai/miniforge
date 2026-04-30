@@ -32,7 +32,12 @@ Dewey codes live in frontmatter (`dewey: "NNN"`), not filenames or paths.
 ├── foundations/
 │   ├── stratified-design.mdc       # dewey: "001"
 │   ├── simple-made-easy.mdc        # dewey: "010"
-│   └── specification-standards.mdc # dewey: "020"
+│   ├── specification-standards.mdc # dewey: "020"
+│   └── runtime/
+│       ├── no-host-docker-socket.mdc      # dewey: "030"
+│       ├── require-rootless.mdc           # dewey: "031"
+│       ├── restrict-host-mounts.mdc       # dewey: "032"
+│       └── require-image-digest-pin.mdc   # dewey: "033"
 ├── languages/
 │   ├── clojure.mdc                 # dewey: "210"
 │   └── python.mdc                  # dewey: "220"
@@ -61,6 +66,10 @@ Dewey codes live in frontmatter (`dewey: "NNN"`), not filenames or paths.
 | 001 | `stratified-design` | One-way DAG dependencies, layered architecture |
 | 010 | `simple-made-easy` | Simplicity over familiarity, uncomplected artifacts |
 | 020 | `specification-standards` | Normative specs (N1-N6), spec governance, conformance |
+| 030 | `runtime/no-host-docker-socket` | Reject bind mounts of `/var/run/docker.sock` and equivalents (N11-delta §6) |
+| 031 | `runtime/require-rootless` | Warn / hard-stop based on the runtime's `:rootless` capability (N11-delta §6) |
+| 032 | `runtime/restrict-host-mounts` | Review host bind mounts outside an allowlist (N11-delta §6) |
+| 033 | `runtime/require-image-digest-pin` | Reject execution plans whose `:image-digest` is not `sha256:<64-hex>` (N11-delta §6) |
 
 ### languages/
 

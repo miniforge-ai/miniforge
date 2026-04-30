@@ -1,36 +1,45 @@
 ---
-dewey: "023"
-description: Reject execution plans whose :image-digest is a tag rather than a content-addressed digest
+dewey: "033"
+description: Reject execution plans whose :image-digest is anything other than a sha256:<64-hex> content digest
 alwaysApply: true
 ---
 
 # Runtime: require image digest pin
 
-Container image tags are mutable. `docker.io/miniforge/task-runner:latest`
-on Monday is not the same image as Tuesday. A workflow that runs against
-a tag has no reproducibility story — re-running the same execution plan
-produces different artifacts; evidence bundles point at content that
-might no longer exist.
+Container image tags are mutable. `task-runner-clojure:latest` on
+Monday is not the same image as Tuesday. A workflow that runs against
+a tag has no reproducibility story — re-running the same execution
+plan produces different artifacts; evidence bundles point at content
+that might no longer exist.
 
-Per N6 (Evidence & Provenance), execution plans MUST carry a
-content-addressed image reference. Reject any plan whose
-`:image-digest` is a tag-style reference instead of a `sha256:` digest.
+Per N6 (Evidence & Provenance) and N11-delta §5, execution plans MUST
+carry a content-addressed image digest in the plan's `:image-digest`
+field. The schema (`ExecutionPlanSchema` in
+`components/dag-executor/.../execution_plan.clj`) types `:image-digest`
+as `:string`; the **value** convention — enforced by this rule — is
+`sha256:<64 hex chars>`.
+
+This rule fires on the digest field, not on image references in
+general. Image references with their registry/repo path (e.g.
+`docker.io/miniforge/task-runner-clojure@sha256:...`) are passed
+separately to the runtime CLI as the image to pull/run. The
+`:image-digest` field is the bare digest captured for evidence and
+reproducibility.
 
 ## Detection
 
-Inspect the execution plan's `:image-digest`. Match against the
-fully-qualified reference patterns:
+Inspect the execution plan's `:image-digest`. The acceptable value is
+exactly a `sha256:` digest with 64 hex chars:
 
-- `:pass` — `<registry>/<repo>@sha256:<64-hex>` (digest-pinned)
-- `:violation` — `<registry>/<repo>:<tag>` (tag-pinned)
-- `:violation` — short-name reference without a registry segment
+- `:pass` — `sha256:<64 hex chars>`
+- `:violation` — anything else (tag, full image reference, blank, malformed)
 
 ```clojure
-(let [ref (:image-digest plan)]
-  (cond
-    (re-matches #".+@sha256:[a-f0-9]{64}$" ref)        :pass
-    (re-matches #"[a-z0-9.-]+\.[a-z0-9.-]+/[^/]+:.+" ref) :violation/tag
-    :else                                              :violation/short-name))
+(let [d (:image-digest plan)]
+  (if (and (string? d)
+           (re-matches #"^sha256:[a-f0-9]{64}$" d))
+    :pass
+    :violation))
 ```
 
 ## Enforcement
@@ -44,18 +53,18 @@ fully-qualified reference patterns:
 Reproducibility and the evidence-bundle audit trail are non-negotiable
 for governed execution. A workflow that legitimately needs the latest
 build of an image should resolve the tag to a digest at plan-build
-time and record the resolution; running against the tag itself defeats
-the audit story.
+time and write the digest into `:image-digest`; running with anything
+other than a digest defeats the audit story.
 
 ## Interaction with `runtime/images.edn`
 
-The default image references in `runtime/images.edn` use tags today
-(e.g. `docker.io/miniforge/task-runner-clojure:latest`) because the
-images aren't yet published with stable digests. This rule does NOT
-fire on those defaults — it fires on the resolved `:image-digest` that
-miniforge writes into the execution plan. The plan-build phase is
-responsible for resolving the tag to a digest before the executor sees
-it.
+The default image references in `runtime/images.edn`
+(e.g. `docker.io/miniforge/task-runner-clojure:latest`) are image
+references, not `:image-digest` values. This rule does NOT fire on
+them. It fires on the `:image-digest` that the plan-build phase writes
+into the execution plan after resolving the reference; the
+plan-builder is responsible for performing that resolution before the
+executor sees the plan.
 
 ## Spec reference
 

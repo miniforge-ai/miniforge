@@ -49,10 +49,10 @@ enforcement (action + phases), the rationale, and spec references.
 
 | File | Dewey | Action | Notes |
 |------|-------|--------|-------|
-| `no-host-docker-socket.mdc` | 020 | `:hard-stop` | No opt-out; matches `*.sock` patterns plus the canonical socket paths. |
-| `require-rootless.mdc` | 021 | `:warn` (OSS) / `:hard-stop` (fleet) | Reads `:runtime/capabilities` from the descriptor — pure data check. |
-| `restrict-host-mounts.mdc` | 022 | `:review` | Allowlist (workspace, secret mounts, model cache). Mounts outside allowlist surface to a human via control-plane decision card. |
-| `require-image-digest-pin.mdc` | 023 | `:hard-stop` | Pattern: `<registry>/<repo>@sha256:<64-hex>` passes; tag references and short-names violate. |
+| `no-host-docker-socket.mdc` | 030 | `:hard-stop` | No opt-out; matches `*.sock` patterns plus the canonical socket paths. |
+| `require-rootless.mdc` | 031 | `:warn` (OSS) / `:hard-stop` (fleet) | Reads `:runtime/capabilities` from the descriptor — pure data check. |
+| `restrict-host-mounts.mdc` | 032 | `:review` | Allowlist (workspace, secret mounts, model cache). Mounts outside allowlist surface to a human via control-plane decision card. |
+| `require-image-digest-pin.mdc` | 033 | `:hard-stop` | Pattern: `sha256:<64-hex>` passes; tag-like or other non-digest values in `:image-digest` violate. |
 
 Each rule explicitly cites the spec section (N11-delta §6, plus the
 relevant N11/N6 cross-references) and explains the threat model for

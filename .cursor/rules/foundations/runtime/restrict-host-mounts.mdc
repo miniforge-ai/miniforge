@@ -1,5 +1,5 @@
 ---
-dewey: "022"
+dewey: "032"
 description: Restrict bind mounts of host paths to an explicit allowlist; flag everything outside for review
 alwaysApply: true
 ---
@@ -12,8 +12,9 @@ directory; mounting `/` exposes the whole filesystem. Even mounts
 intended as read-only often turn out to be writable in practice via
 inode-level operations the runtime doesn't catch.
 
-Default to refusing host mounts that aren't on a small allowlist; let
-the user opt back in deliberately for the cases that need it.
+Default to requiring human review for host mounts that aren't on a
+small allowlist; let the user opt in deliberately for the cases that
+need it.
 
 ## Allowlist
 

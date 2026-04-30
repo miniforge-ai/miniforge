@@ -1,5 +1,5 @@
 ---
-dewey: "021"
+dewey: "031"
 description: Prefer rootless container runtimes; warn or hard-stop when the resolved runtime advertises no :rootless capability
 alwaysApply: true
 ---
