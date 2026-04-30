@@ -1,0 +1,64 @@
+---
+dewey: "023"
+description: Reject execution plans whose :image-digest is a tag rather than a content-addressed digest
+alwaysApply: true
+---
+
+# Runtime: require image digest pin
+
+Container image tags are mutable. `docker.io/miniforge/task-runner:latest`
+on Monday is not the same image as Tuesday. A workflow that runs against
+a tag has no reproducibility story — re-running the same execution plan
+produces different artifacts; evidence bundles point at content that
+might no longer exist.
+
+Per N6 (Evidence & Provenance), execution plans MUST carry a
+content-addressed image reference. Reject any plan whose
+`:image-digest` is a tag-style reference instead of a `sha256:` digest.
+
+## Detection
+
+Inspect the execution plan's `:image-digest`. Match against the
+fully-qualified reference patterns:
+
+- `:pass` — `<registry>/<repo>@sha256:<64-hex>` (digest-pinned)
+- `:violation` — `<registry>/<repo>:<tag>` (tag-pinned)
+- `:violation` — short-name reference without a registry segment
+
+```clojure
+(let [ref (:image-digest plan)]
+  (cond
+    (re-matches #".+@sha256:[a-f0-9]{64}$" ref)        :pass
+    (re-matches #"[a-z0-9.-]+\.[a-z0-9.-]+/[^/]+:.+" ref) :violation/tag
+    :else                                              :violation/short-name))
+```
+
+## Enforcement
+
+- **Action:** `:hard-stop`
+- **Phases:** `:plan`, `:release`
+- **Scope:** every execution plan; no opt-out
+
+## Why no opt-out
+
+Reproducibility and the evidence-bundle audit trail are non-negotiable
+for governed execution. A workflow that legitimately needs the latest
+build of an image should resolve the tag to a digest at plan-build
+time and record the resolution; running against the tag itself defeats
+the audit story.
+
+## Interaction with `runtime/images.edn`
+
+The default image references in `runtime/images.edn` use tags today
+(e.g. `docker.io/miniforge/task-runner-clojure:latest`) because the
+images aren't yet published with stable digests. This rule does NOT
+fire on those defaults — it fires on the resolved `:image-digest` that
+miniforge writes into the execution plan. The plan-build phase is
+responsible for resolving the tag to a digest before the executor sees
+it.
+
+## Spec reference
+
+- N11-delta §5 (image references must be fully qualified)
+- N11-delta §6 `:runtime/require-image-digest-pin`
+- N6 (evidence & provenance — digest pinning is the audit primitive)
