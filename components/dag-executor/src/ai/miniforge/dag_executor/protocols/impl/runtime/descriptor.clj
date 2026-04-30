@@ -20,7 +20,8 @@
   "Runtime descriptor for the OCI-CLI executor.
 
    A descriptor fully specifies the local container runtime used by the
-   executor. Phase 1 supports only :docker. Phase 2 adds :podman.
+   executor. Per-kind data lives in `runtime/registry.edn`; this namespace
+   owns construction, the boundary schema, and the runtime probe.
 
    Per N11-delta §2:
      {:runtime/kind         keyword     ; :docker | :podman | :nerdctl
@@ -29,68 +30,68 @@
       :runtime/rootless?    boolean
       :runtime/capabilities #{keyword}}"
   (:require
-   [ai.miniforge.dag-executor.protocols.impl.runtime.flags :as flags]
+   [ai.miniforge.dag-executor.protocols.impl.runtime.messages :as messages]
+   [ai.miniforge.dag-executor.protocols.impl.runtime.registry :as registry]
    [clojure.java.shell :as shell]
-   [clojure.string :as str]))
+   [clojure.string :as str]
+   [malli.core :as m]))
 
-;; ============================================================================
-;; Supported runtime kinds (Phase 1)
-;; ============================================================================
+;------------------------------------------------------------------------------ Layer 0
+;; Boundary schema
 
-(def supported-kinds
-  "Runtime kinds the executor supports today.
-   Phase 1 ships :docker only. Phase 2 adds :podman."
-  #{:docker})
+(def DescriptorSchema
+  "Schema for a runtime descriptor — the parameterization of the OCI-CLI
+   executor. Validated at the descriptor-construction boundary; consumers
+   inside the component trust the shape."
+  [:map
+   [:runtime/kind         :keyword]
+   [:runtime/executable   :string]
+   [:runtime/version      [:maybe :string]]
+   [:runtime/rootless?    :boolean]
+   [:runtime/capabilities [:set :keyword]]])
 
-(def known-kinds
-  "Runtime kinds the executor knows how to construct a descriptor for, even
-   if not yet runnable. Used to give a helpful error for :podman before
-   Phase 2 lands."
-  #{:docker :podman :nerdctl})
+;------------------------------------------------------------------------------ Layer 1
+;; Error factories
 
-;; ============================================================================
-;; Default capability sets per kind
-;; ============================================================================
-
-(def docker-capabilities
-  "Capabilities advertised by the Docker runtime per N11-delta §4.
-   These are what we rely on in the OCI-CLI executor; runtime probing
-   refines them at startup."
-  #{:oci-images
-    :run :exec :build
-    :bind-mounts :tmpfs-mounts
-    :env-vars :working-dir :user-mapping
-    :resource-limits
-    :network-modes/none :network-modes/bridge
-    :image-digest-pinning
-    :graceful-stop
-    :no-new-privileges :read-only-root :cap-drop-all
-    :tmpfs-uid-gid-options})
-
-(defn- default-capabilities
+(defn- unknown-kind-error
+  "Return an ex-info anomaly for an unrecognized runtime kind."
   [kind]
-  (case kind
-    :docker docker-capabilities
-    ;; Other kinds: empty until Phase 2 introduces them.
-    #{}))
+  (ex-info (messages/t :descriptor/unknown-kind
+                       {:kind  kind
+                        :known (registry/known-kinds)})
+           {:runtime/unknown-kind kind
+            :runtime/known-kinds  (registry/known-kinds)}))
 
-(defn- default-executable
+(defn- unsupported-kind-error
+  "Return an ex-info anomaly for a known-but-not-yet-supported runtime kind."
   [kind]
-  (case kind
-    :docker  "docker"
-    :podman  "podman"
-    :nerdctl "nerdctl"
-    nil))
+  (ex-info (messages/t :descriptor/unsupported-kind {:kind kind})
+           {:runtime/unsupported     kind
+            :runtime/supported-kinds (registry/supported-kinds)}))
 
-;; ============================================================================
-;; Descriptor construction
-;; ============================================================================
+;------------------------------------------------------------------------------ Layer 2
+;; Resolvers
+
+(defn- resolve-executable
+  "Pick the CLI binary path for a descriptor.
+
+   Priority:
+   1. Explicit `:executable` on the config map.
+   2. Legacy `:docker-path` alias (only when constructing a :docker descriptor).
+   3. Registry default for the kind."
+  [kind config]
+  (or (:executable config)
+      (when (= kind :docker) (:docker-path config))
+      (registry/executable kind)))
+
+;------------------------------------------------------------------------------ Layer 3
+;; Construction
 
 (defn make-descriptor
   "Build a runtime descriptor from a config map.
 
-   Config keys (all optional unless noted):
-     :runtime-kind   - one of #{:docker :podman :nerdctl}; default :docker
+   Config keys (all optional):
+     :runtime-kind   - one of registry's known kinds; default :docker
      :executable     - explicit CLI path; defaults to the kind's binary name
                        (resolved via PATH at invocation time)
      :docker-path    - legacy alias for :executable when :runtime-kind is
@@ -98,54 +99,55 @@
 
    Throws ex-info with :runtime/unsupported when called with a known but
    not-yet-implemented kind (e.g. :podman in Phase 1). Throws with
-   :runtime/unknown-kind for anything outside known-kinds."
+   :runtime/unknown-kind for anything outside the registry."
   [config]
   (let [kind (get config :runtime-kind :docker)]
-    (cond
-      (not (contains? known-kinds kind))
-      (throw (ex-info (str "Unknown runtime kind: " kind)
-                      {:runtime/unknown-kind kind
-                       :runtime/known-kinds known-kinds}))
+    (when-not (registry/known? kind)
+      (throw (unknown-kind-error kind)))
+    (when-not (registry/supported? kind)
+      (throw (unsupported-kind-error kind)))
+    (let [exe          (resolve-executable kind config)
+          capabilities (registry/capabilities kind)
+          descriptor   {:runtime/kind         kind
+                        :runtime/executable   exe
+                        :runtime/version      nil
+                        :runtime/rootless?    false
+                        :runtime/capabilities capabilities}]
+      (when-not (m/validate DescriptorSchema descriptor)
+        (throw (ex-info "Constructed descriptor failed schema validation"
+                        {:runtime/invalid-descriptor descriptor})))
+      descriptor)))
 
-      (not (contains? supported-kinds kind))
-      (throw (ex-info (str "Runtime kind " kind " is not yet supported. "
-                           "Phase 1 of N11-delta ships :docker only; "
-                           ":podman lands in Phase 2.")
-                      {:runtime/unsupported kind
-                       :runtime/supported-kinds supported-kinds}))
+;------------------------------------------------------------------------------ Layer 4
+;; Accessors
 
-      :else
-      {:runtime/kind         kind
-       :runtime/executable   (or (:executable config)
-                                 (when (= kind :docker) (:docker-path config))
-                                 (default-executable kind))
-       :runtime/version      nil
-       :runtime/rootless?    false
-       :runtime/capabilities (default-capabilities kind)})))
-
-(defn executable
-  "Return the resolved CLI binary path/name for a descriptor."
-  [descriptor]
-  (or (:runtime/executable descriptor) "docker"))
+(def ^:private default-executable-fallback
+  "Used only when callers pass a nil descriptor (legacy nil-path back-compat).
+   Real descriptors always carry an explicit executable."
+  "docker")
 
 (defn kind
   "Return the runtime kind keyword (:docker, :podman, ...)."
   [descriptor]
   (:runtime/kind descriptor))
 
+(defn executable
+  "Return the resolved CLI binary path/name for a descriptor."
+  [descriptor]
+  (get descriptor :runtime/executable default-executable-fallback))
+
 (defn capabilities
   "Return the descriptor's capability set."
   [descriptor]
-  (or (:runtime/capabilities descriptor) #{}))
+  (get descriptor :runtime/capabilities #{}))
 
 (defn capable?
   "True when the descriptor advertises capability `cap`."
   [descriptor cap]
   (contains? (capabilities descriptor) cap))
 
-;; ============================================================================
+;------------------------------------------------------------------------------ Layer 5
 ;; Probe
-;; ============================================================================
 
 (defn- run-probe
   "Invoke `<exe> info --format <template>` and return the shell result.
@@ -162,13 +164,13 @@
    Returns {:available? true :runtime-version <string>} on success,
    {:available? false :reason <string>} on failure.
 
-   Consults runtime/flags for the per-kind `<exe> info --format` template
-   so Phase 2 can override the Docker default for Podman without touching
-   this function."
+   Reads the `<exe> info --format` template from the registry so a future
+   runtime that needs a different probe template just adds an entry."
   [descriptor]
-  (let [exe      (executable descriptor)
-        template (flags/flag (kind descriptor) :info-format-template)
-        result   (run-probe exe template)]
+  (let [runtime-kind (kind descriptor)
+        exe          (executable descriptor)
+        template     (registry/flag runtime-kind :info-format-template)
+        result       (run-probe exe template)]
     (if (zero? (:exit result))
       {:available?      true
        :runtime-version (str/trim (:out result))}

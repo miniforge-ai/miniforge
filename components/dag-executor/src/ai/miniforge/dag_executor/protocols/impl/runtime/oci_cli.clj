@@ -27,15 +27,15 @@
    the prior implementation.
 
    Phase 2 will land Podman support by adding entries to
-   protocols.impl.runtime.flags and broadening the supported-kinds set in
-   protocols.impl.runtime.descriptor."
+   the runtime registry (`runtime/registry.edn`) and flipping
+   `:supported?` for that kind."
   (:require
    [ai.miniforge.config.interface :as config]
    [ai.miniforge.dag-executor.result :as result]
    [ai.miniforge.dag-executor.workspace :as workspace]
    [ai.miniforge.dag-executor.protocols.executor :as proto]
    [ai.miniforge.dag-executor.protocols.impl.runtime.descriptor :as descriptor]
-   [ai.miniforge.dag-executor.protocols.impl.runtime.flags :as flags]
+   [ai.miniforge.dag-executor.protocols.impl.runtime.registry :as registry]
    [ai.miniforge.response.interface :as response]
    [clojure.java.io]
    [clojure.java.shell :as shell]
@@ -194,7 +194,7 @@
    workdir scratch mount when the workdir is not already covered by caller
    mounts.
 
-   The tmpfs option string comes from the runtime/flags dialect so a future
+   The tmpfs option string comes from the runtime registry so a future
    runtime that diverges (e.g. does not accept `uid=`/`gid=` on tmpfs) can
    be papered over by adding an entry to the dialect map rather than
    branching on `:runtime/kind` here."
@@ -207,7 +207,7 @@
                              (not (contains? mounted-paths workdir))
                              (not= workdir "/tmp"))
                         (conj workdir))
-        opts          (flags/flag (descriptor/kind descriptor) :tmpfs-mount-options)]
+        opts          (registry/flag (descriptor/kind descriptor) :tmpfs-mount-options)]
     (mapcat (fn [path]
               ["--tmpfs" (str path ":" opts)])
             scratch-paths)))
@@ -242,7 +242,7 @@
                         (when network ["--network" network]))
         ;; N11 §2.2: Set runtime stop-timeout from execution plan time limit
         stop-timeout  (when-let [ms (get-in execution-plan [:time-limit-ms])]
-                        (max 5 (quot ms 1000)))
+                        (max default-stop-timeout (quot ms 1000)))
         cmd-args      (concat ["run" "-d"
                                "--name" container-name
                                "-w" workdir]
