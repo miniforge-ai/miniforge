@@ -12,10 +12,16 @@
 ;;                 add capabilities incrementally without changing code.
 ;;   :capabilities Set of capability keywords advertised by this runtime
 ;;                 (see N11-delta §4 for the canonical list).
+;;   :defaults     Per-runtime container defaults. Single source of truth so
+;;                 Phase 2 can declare different values for Podman without
+;;                 code changes:
+;;                   :uid          Numeric UID for `--user` and tmpfs uid=
+;;                   :gid          Numeric GID for `--user` and tmpfs gid=
+;;                   :memory       Default RSS limit for `--memory`
+;;                   :cpu          Default fractional CPU count for `--cpus`
+;;                   :tmpfs-size   Tmpfs size for `--tmpfs <path>:size=`
 ;;   :flags        CLI flag dialect map keyed by capability:
 ;;                   :info-format-template  Go template for `<exe> info --format`
-;;                   :tmpfs-mount-options   Comma-separated options string
-;;                                          appended to `--tmpfs <path>:<opts>`
 {:docker  {:executable   "docker"
            :supported?   true
            :capabilities #{:oci-images
@@ -28,15 +34,21 @@
                            :graceful-stop
                            :no-new-privileges :read-only-root :cap-drop-all
                            :tmpfs-uid-gid-options}
-           :flags        {:info-format-template "{{.ServerVersion}}"
-                          :tmpfs-mount-options  "rw,nosuid,nodev,exec,size=512m,uid=1000,gid=1000"}}
+           :defaults     {:uid        1000
+                          :gid        1000
+                          :memory     "512m"
+                          :cpu        0.5
+                          :tmpfs-size "512m"}
+           :flags        {:info-format-template "{{.ServerVersion}}"}}
 
  :podman  {:executable   "podman"
            :supported?   false
            :capabilities #{}
+           :defaults     {}
            :flags        {}}
 
  :nerdctl {:executable   "nerdctl"
            :supported?   false
            :capabilities #{}
+           :defaults     {}
            :flags        {}}}

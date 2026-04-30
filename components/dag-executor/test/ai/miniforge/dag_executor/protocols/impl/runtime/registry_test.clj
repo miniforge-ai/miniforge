@@ -19,6 +19,7 @@
 (ns ai.miniforge.dag-executor.protocols.impl.runtime.registry-test
   "Tests for the runtime registry — EDN load, kind lookups, flag fallback."
   (:require
+   [clojure.string]
    [clojure.test :refer [deftest is testing]]
    [ai.miniforge.dag-executor.protocols.impl.runtime.registry :as registry]))
 
@@ -71,6 +72,30 @@
       ;; so existing call sites keep working until Phase 2 declares overrides.
       (is (= docker-template (registry/flag :podman :info-format-template)))
       (is (= docker-template (registry/flag :nerdctl :info-format-template))))))
+
+(deftest registry-default-test
+  (testing "default lookup returns per-kind container defaults"
+    (is (= 1000 (registry/default :docker :uid)))
+    (is (= 1000 (registry/default :docker :gid)))
+    (is (= "512m" (registry/default :docker :memory)))
+    (is (= 0.5 (registry/default :docker :cpu)))
+    (is (= "512m" (registry/default :docker :tmpfs-size))))
+
+  (testing "default lookup falls back to Docker for kinds with no override"
+    (is (= 1000 (registry/default :podman :uid)))
+    (is (= "512m" (registry/default :nerdctl :memory)))))
+
+(deftest registry-user-spec-test
+  (testing "user-spec stitches uid:gid from the registry defaults"
+    (is (= "1000:1000" (registry/user-spec :docker)))))
+
+(deftest registry-tmpfs-mount-options-test
+  (testing "tmpfs-mount-options builds the comma-separated string from defaults"
+    (let [opts (registry/tmpfs-mount-options :docker)]
+      (is (clojure.string/includes? opts "size=512m"))
+      (is (clojure.string/includes? opts "uid=1000"))
+      (is (clojure.string/includes? opts "gid=1000"))
+      (is (clojure.string/includes? opts "rw,nosuid,nodev,exec")))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

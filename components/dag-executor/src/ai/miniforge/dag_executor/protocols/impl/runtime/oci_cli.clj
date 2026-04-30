@@ -47,12 +47,22 @@
 
 (def default-image "alpine:latest")
 (def default-workdir "/workspace")
-(def default-stop-timeout 5)
 
-;; Default resource limits
-(def default-resources
-  {:memory "512m"
-   :cpu 0.5})
+(def default-stop-timeout
+  "Minimum graceful-stop timeout (seconds). Also the floor for the timeout
+   computed from an execution plan's :time-limit-ms — `--stop-timeout`
+   never goes below this."
+  5)
+
+(def container-name-prefix
+  "Prefix for generated container names: <prefix><task-id-slice>."
+  "miniforge-task-")
+
+(def container-name-uuid-slice
+  "Number of characters to take from the task UUID when constructing the
+   container name. Eight is enough collision space for a single-host
+   workflow."
+  8)
 
 ;; Resource paths for Dockerfiles (for documentation/building images).
 ;; The Dockerfile syntax is OCI-standard; "docker/" in the resource path is
@@ -60,6 +70,15 @@
 (def dockerfile-resources
   {:minimal "executor/docker/Dockerfile.task-runner"
    :clojure "executor/docker/Dockerfile.task-runner-clojure"})
+
+(defn- runtime-default-resources
+  "Per-runtime memory/cpu defaults sourced from the registry. Wrapping the
+   two lookups in a tiny constructor keeps the resource-arg builder a flat
+   key-value map."
+  [descriptor]
+  (let [k (descriptor/kind descriptor)]
+    {:memory (registry/default k :memory)
+     :cpu    (registry/default k :cpu)}))
 
 ;; ============================================================================
 ;; Helper Functions
@@ -146,9 +165,10 @@
 
 (defn build-resource-args
   "Build resource limit arguments.
-   Merges provided resources with defaults."
-  [resources]
-  (let [merged (merge default-resources resources)]
+   Merges provided resources with the runtime's per-kind defaults from the
+   registry."
+  [descriptor resources]
+  (let [merged (merge (runtime-default-resources descriptor) resources)]
     (cond-> []
       (:memory merged)
       (into ["--memory" (:memory merged)])
@@ -162,7 +182,7 @@
    Applies a fixed set of hardening flags to every container plus
    network restrictions and memory limits derived from the plan:
 
-   - :memory-limit-mb  RSS ceiling in mebibytes  (overrides default-resources)
+   - :memory-limit-mb  RSS ceiling in mebibytes  (overrides registry default)
    - :time-limit-ms    Not enforced at runtime level (handled by executor logic)
    - :network-profile  :none/:restricted -> --network=none
                        :standard/:full   -> no extra network arg
@@ -172,13 +192,14 @@
    - --security-opt=no-new-privileges
    - --cap-drop=ALL
    - --read-only
-   - --user 1000:1000"
-  [execution-plan]
+   - --user <uid>:<gid> from the runtime registry's :uid / :gid defaults"
+  [descriptor execution-plan]
   (let [{:keys [memory-limit-mb network-profile]} execution-plan
+        user-spec (registry/user-spec (descriptor/kind descriptor))
         base ["--security-opt=no-new-privileges"
               "--cap-drop=ALL"
               "--read-only"
-              "--user" "1000:1000"]]
+              "--user" user-spec]]
     (cond-> base
       (some? memory-limit-mb)
       (into ["--memory" (str memory-limit-mb "m")])
@@ -194,10 +215,11 @@
    workdir scratch mount when the workdir is not already covered by caller
    mounts.
 
-   The tmpfs option string comes from the runtime registry so a future
-   runtime that diverges (e.g. does not accept `uid=`/`gid=` on tmpfs) can
-   be papered over by adding an entry to the dialect map rather than
-   branching on `:runtime/kind` here."
+   The tmpfs option string is built by `registry/tmpfs-mount-options` from
+   the runtime's `:defaults` (`:uid`, `:gid`, `:tmpfs-size`) so a future
+   runtime that diverges (e.g. does not accept `uid=`/`gid=` on tmpfs) is
+   papered over by adjusting that helper or its registry inputs rather
+   than branching on `:runtime/kind` here."
   [descriptor workdir execution-plan]
   (let [mounted-paths (into #{}
                             (map :container-path)
@@ -207,7 +229,7 @@
                              (not (contains? mounted-paths workdir))
                              (not= workdir "/tmp"))
                         (conj workdir))
-        opts          (registry/flag (descriptor/kind descriptor) :tmpfs-mount-options)]
+        opts          (registry/tmpfs-mount-options (descriptor/kind descriptor))]
     (mapcat (fn [path]
               ["--tmpfs" (str path ":" opts)])
             scratch-paths)))
@@ -230,8 +252,8 @@
   [descriptor container-name image workdir env-map resources network
    & {:keys [execution-plan]}]
   (let [env-args      (build-env-args env-map)
-        resource-args (build-resource-args resources)
-        security-args (build-security-args execution-plan)
+        resource-args (build-resource-args descriptor resources)
+        security-args (build-security-args descriptor execution-plan)
         runtime-fs-args (build-runtime-fs-args descriptor workdir execution-plan)
         mount-args    (when (some? execution-plan)
                         (build-mount-args execution-plan))
@@ -594,7 +616,8 @@
       (when-let [image-key (->> task-runner-images
                                 (some (fn [[k v]] (when (= image (:image v)) k))))]
         (ensure-image! descriptor image-key)))
-    (let [container-name (str "miniforge-task-" (subs (str task-id) 0 8))
+    (let [container-name (str container-name-prefix
+                               (subs (str task-id) 0 container-name-uuid-slice))
           workdir (get env-config :workdir default-workdir)
           create-result (create-container descriptor
                                           container-name
