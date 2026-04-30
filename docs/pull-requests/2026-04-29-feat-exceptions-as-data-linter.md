@@ -41,7 +41,7 @@ Tools / self-review. Lives inside the `compliance-scanner` component; reuses the
 Scans `components/*/src/**/*.clj` and `bases/*/src/**/*.clj`. For each `(throw ...)`, `(ex-info ...)`, `IllegalArgumentException.`, `RuntimeException.`, `(throw+ ...)`:
 
 1. **Boundary-namespace exemption** — skip when the file's namespace matches: `*.cli.*`, `*-main`, `*.boundary.*`, `*.http.*`, `*.web.*`, `*.mcp.*`, `*.consumer.*`, `*.listener.*`, or files containing fns like `execute-with-exception-handling`.
-2. **Programmer-error-guard classification** — if the form is the default branch of `case` / `condp` and the message contains "unknown" or "unsupported", classify as `:fatal-only` (informational only).
+2. **Programmer-error-guard classification** — if any string, keyword, or symbol name inside the throw expression matches one of the inventory's `:fatal-only` markers (e.g. `unknown`, `unsupported`, `must be`, `required`, `invariant`, `missing-resource`, `classpath`, …), classify as `:fatal-only` (informational only). The standards rule originally specified `case` / `condp` default-branch detection in addition to the marker check; this implementation matches markers anywhere in the expression and does not yet check whether the form is a `case` / `condp` default branch. Tightening to require both is a follow-on refinement; current behavior is conservative-leaning.
 3. **Otherwise** — emit `:warning` with file:line:col, the offending form's first line, and a one-sentence pointer to the suggested anomaly-return rewrite (link to the rule's example).
 
 Parsing uses `tools.reader` — no regex. Clojure syntax has too many edge cases (`throw` inside a string, inside a `(comment …)` form, inside reader-conditional branches) for regex-based matching to be safe.

@@ -139,12 +139,17 @@
               (boolean (some #(str/ends-with? s %) throw-class-suffixes))))))
 
 (defn- ex-info-call?
-  "True when `head` is `ex-info` or a namespaced alias for it.
-   Matches bare `ex-info` only — `ex-info` is not throw on its own,
-   but the inventory counts it as a throw-marker for callers that
-   just construct then propagate. We require the `ex-info` to be
-   unwrapped (i.e. not the body of a docstring); the AST guarantees
-   that for us."
+  "True when `head` is a symbol whose unqualified `name` is `ex-info`.
+
+   This matches:
+   - bare `ex-info`
+   - namespaced calls like `clojure.core/ex-info`
+   - any local rename whose final segment is `ex-info`
+
+   `ex-info` on its own is not a throw, but the inventory counts it as a
+   throw-marker for callers that just construct then propagate. The AST
+   read guarantees we are looking at code (not a docstring or string
+   literal containing the word)."
   [head]
   (and (symbol? head)
        (= "ex-info" (name head))))
@@ -197,7 +202,9 @@
    (cond
      (zero? depth)        []
      (string? form)       [form]
-     (keyword? form)      [(str (namespace form) "/" (name form))]
+     (keyword? form)      [(if-let [ns (namespace form)]
+                             (str ns "/" (name form))
+                             (name form))]
      (symbol? form)       [(name form)]
      (or (seq? form)
          (vector? form)
@@ -230,12 +237,14 @@
                                  (java.io.StringReader. content))))
 
 (defn- read-all-forms
-  "Read every top-level form from the file content. Returns a vector of
-   `[form meta]` pairs where `meta` carries `:line` and `:column`. On
-   reader error, returns whatever was read up to the error site rather
-   than throwing — the linter is best-effort and refuses to fail loudly
-   on tokenizer surprises (per the rule itself: linter eats its own
-   dog food)."
+  "Read every top-level form from the file content.
+
+   Returns a vector of forms. The indexing reader attaches `:line` and
+   `:column` to each form's metadata, accessible via `clojure.core/meta`
+   (see `form-line` / `form-column`). On reader error, returns whatever
+   was read up to the error site rather than throwing — the linter is
+   best-effort and refuses to fail loudly on tokenizer surprises (per
+   the rule itself: linter eats its own dog food)."
   [^String content]
   (let [eof    (Object.)
         rdr    (indexing-pushback content)
@@ -337,15 +346,16 @@
     acc!
 
     (seq? form)
-    (let [head (first form)]
+    (let [head (first form)
+          kind (throw-shaped-form? head)]
       (cond
         (and (symbol? head) (contains? skip-walk-heads head))
         acc!
 
-        (throw-shaped-form? head)
+        kind
         (conj! acc! (->violation-record file-path form
                                         (classify-throw-site form)
-                                        (throw-shaped-form? head)))
+                                        kind))
 
         :else
         (reduce (fn [a child] (visit-form a file-path boundary? child))
@@ -402,12 +412,26 @@
            (str/ends-with? relative-path ".cljc"))
        (str/includes? relative-path "/src/")))
 
+(defn- normalize-separators
+  "Convert platform path separators to forward slash. `target-file?`
+   matches against forward-slash-delimited segments (`components/`,
+   `/src/`), which is the canonical Polylith convention. On Windows,
+   `getAbsolutePath` returns backslashes; without normalization the
+   linter would scan zero files. On Linux/macOS this is a no-op."
+  [^String path]
+  (if (= "\\" java.io.File/separator)
+    (str/replace path "\\" "/")
+    path))
+
 (defn- list-target-files
   "Walk the repo root and return repo-relative paths for every Clojure
    source file under components/*/src or bases/*/src. Test files are
-   intentionally excluded — the rule is about production source."
+   intentionally excluded — the rule is about production source.
+
+   Paths are normalized to forward-slash separators so `target-file?`
+   matches consistently on Windows and POSIX hosts."
   [repo-root]
-  (let [root (io/file repo-root)
+  (let [root     (io/file repo-root)
         root-len (inc (count (.getAbsolutePath root)))]
     (->> (file-seq root)
          (filter #(.isFile ^java.io.File %))
@@ -416,7 +440,7 @@
                       rel (if (>= (count abs) root-len)
                             (subs abs root-len)
                             abs)]
-                  rel)))
+                  (normalize-separators rel))))
          (filter target-file?)
          vec)))
 
@@ -439,7 +463,12 @@
                          "consider returning an anomaly map"))]
     (-> (factory/->violation
          rule-id rule-category rule-title
-         file (or line 1)
+         file
+         ;; Clamp line to a positive integer. `(or line 1)` does not
+         ;; suffice — a literal 0 from `form-line`'s default is truthy
+         ;; and would propagate through, producing invalid `file:0:col`
+         ;; locations in output.
+         (max 1 (long (or line 1)))
          snippet
          suggestion
          false             ; never auto-fixable; cleanup is a human pass
@@ -467,7 +496,12 @@
   "Scan a repository for exceptions-as-data violations.
 
    Arguments:
-   - repo-root - absolute or relative path to the repo root.
+   - repo-root        - absolute or relative path to the repo root
+   - changed-files    - (optional) set of repo-relative path strings;
+                        when present, restricts the scan to that set.
+                        Used by `bb review --since` for incremental
+                        runs so the linter doesn't full-scan when other
+                        rules are diff-limited.
 
    Returns a map:
      :violations    - vector of Violation maps (severity :warning)
@@ -477,17 +511,20 @@
 
    Pure data. The function does not write reports, does not throw, and
    does not call System/exit — this is the linter, not a gate."
-  [repo-root]
-  (let [files       (list-target-files repo-root)
-        per-file    (mapv (fn [rel] (analyze-file repo-root rel)) files)
-        violations  (vec (apply concat per-file))
-        cleanup     (count (filter #(= :cleanup-needed (:classification %)) violations))
-        fatal       (count (filter #(= :fatal-only (:classification %)) violations))]
-    {:violations    violations
-     :files-scanned (count files)
-     :rule/id       rule-id
-     :counts        {:cleanup-needed cleanup
-                     :fatal-only     fatal}}))
+  ([repo-root] (scan-repo repo-root nil))
+  ([repo-root changed-files]
+   (let [all-files   (list-target-files repo-root)
+         files       (cond->> all-files
+                       changed-files (filterv (set changed-files)))
+         per-file    (mapv (fn [rel] (analyze-file repo-root rel)) files)
+         violations  (vec (apply concat per-file))
+         cleanup     (count (filter #(= :cleanup-needed (:classification %)) violations))
+         fatal       (count (filter #(= :fatal-only (:classification %)) violations))]
+     {:violations    violations
+      :files-scanned (count files)
+      :rule/id       rule-id
+      :counts        {:cleanup-needed cleanup
+                      :fatal-only     fatal}})))
 
 ;------------------------------------------------------------------------------ Rich Comment
 
