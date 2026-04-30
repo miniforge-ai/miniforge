@@ -16,17 +16,62 @@
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
 
-(ns ai.miniforge.dag-executor.protocols.impl.docker-test
-  "Tests for Docker executor: token sanitization, URL auth, image management."
+(ns ai.miniforge.dag-executor.protocols.impl.runtime.oci-cli-test
+  "Tests for OCI-CLI executor: token sanitization, URL auth, image
+   management, descriptor wiring."
   (:require
    [clojure.test :refer [deftest is testing]]
    [clojure.string]
    [ai.miniforge.dag-executor.protocols.executor :as proto]
-   [ai.miniforge.dag-executor.protocols.impl.docker :as docker]))
+   [ai.miniforge.dag-executor.protocols.impl.runtime.descriptor :as descriptor]
+   [ai.miniforge.dag-executor.protocols.impl.runtime.oci-cli :as oci-cli]))
 
 ;; Private fn accessor helper
 (defn- private-fn [sym]
-  (var-get (ns-resolve 'ai.miniforge.dag-executor.protocols.impl.docker sym)))
+  (var-get (ns-resolve 'ai.miniforge.dag-executor.protocols.impl.runtime.oci-cli sym)))
+
+;; Default descriptor used by tests that exercise CLI argument shaping
+;; rather than runtime selection. `make-descriptor` defaults to :docker
+;; which matches Phase 1 supported-kinds.
+(defn- docker-descriptor
+  ([] (descriptor/make-descriptor {}))
+  ([opts] (descriptor/make-descriptor opts)))
+
+;; ============================================================================
+;; descriptor — basic construction
+;; ============================================================================
+
+(deftest descriptor-defaults-to-docker-test
+  (testing "make-descriptor defaults to :docker"
+    (let [d (descriptor/make-descriptor {})]
+      (is (= :docker (descriptor/kind d)))
+      (is (= "docker" (descriptor/executable d))))))
+
+(deftest descriptor-honors-explicit-executable-test
+  (testing "make-descriptor uses :executable when provided"
+    (let [d (descriptor/make-descriptor {:executable "/opt/homebrew/bin/docker"})]
+      (is (= "/opt/homebrew/bin/docker" (descriptor/executable d))))))
+
+(deftest descriptor-honors-legacy-docker-path-test
+  (testing "make-descriptor falls back to :docker-path for :docker kind"
+    (let [d (descriptor/make-descriptor {:docker-path "/usr/bin/docker"})]
+      (is (= "/usr/bin/docker" (descriptor/executable d))))))
+
+(deftest descriptor-rejects-podman-in-phase-1-test
+  (testing "make-descriptor throws :runtime/unsupported for :podman in Phase 1"
+    (try
+      (descriptor/make-descriptor {:runtime-kind :podman})
+      (is false "expected ex-info")
+      (catch clojure.lang.ExceptionInfo e
+        (is (= :podman (-> e ex-data :runtime/unsupported)))))))
+
+(deftest descriptor-rejects-unknown-kind-test
+  (testing "make-descriptor throws :runtime/unknown-kind for unknown kinds"
+    (try
+      (descriptor/make-descriptor {:runtime-kind :unknown-runtime})
+      (is false "expected ex-info")
+      (catch clojure.lang.ExceptionInfo e
+        (is (= :unknown-runtime (-> e ex-data :runtime/unknown-kind)))))))
 
 ;; ============================================================================
 ;; sanitize-token
@@ -72,40 +117,44 @@
 
 (deftest image-exists-nonexistent-test
   (testing "image-exists? returns false for nonexistent image"
-    (is (false? (docker/image-exists? nil "nonexistent/image:never")))))
+    (with-redefs [oci-cli/run-runtime
+                  (fn [_d & _args]
+                    {:exit 1 :out "" :err "No such image"})]
+      (is (false? (oci-cli/image-exists? (docker-descriptor)
+                                         "nonexistent/image:never"))))))
 
 ;; ============================================================================
 ;; container-image-digest
 ;; ============================================================================
 
 (deftest container-image-digest-returns-sha-on-success-test
-  (testing "returns trimmed digest string when docker inspect succeeds"
-    (with-redefs [docker/run-docker
-                  (fn [_docker-path & _args]
+  (testing "returns trimmed digest string when inspect succeeds"
+    (with-redefs [oci-cli/run-runtime
+                  (fn [_d & _args]
                     {:exit 0 :out "sha256:abc123def456\n" :err ""})]
       (is (= "sha256:abc123def456"
-             (docker/container-image-digest "/usr/bin/docker" "my-container"))))))
+             (oci-cli/container-image-digest (docker-descriptor) "my-container"))))))
 
 (deftest container-image-digest-returns-nil-on-nonzero-exit-test
-  (testing "returns nil when docker inspect exits non-zero"
-    (with-redefs [docker/run-docker
-                  (fn [_docker-path & _args]
+  (testing "returns nil when inspect exits non-zero"
+    (with-redefs [oci-cli/run-runtime
+                  (fn [_d & _args]
                     {:exit 1 :out "" :err "No such container"})]
-      (is (nil? (docker/container-image-digest "/usr/bin/docker" "missing"))))))
+      (is (nil? (oci-cli/container-image-digest (docker-descriptor) "missing"))))))
 
 (deftest container-image-digest-returns-nil-on-empty-output-test
   (testing "returns nil when inspect output is blank"
-    (with-redefs [docker/run-docker
-                  (fn [_docker-path & _args]
+    (with-redefs [oci-cli/run-runtime
+                  (fn [_d & _args]
                     {:exit 0 :out "  \n" :err ""})]
-      (is (nil? (docker/container-image-digest "/usr/bin/docker" "empty-out"))))))
+      (is (nil? (oci-cli/container-image-digest (docker-descriptor) "empty-out"))))))
 
 (deftest container-image-digest-returns-nil-on-exception-test
-  (testing "returns nil when run-docker throws"
-    (with-redefs [docker/run-docker
-                  (fn [_docker-path & _args]
-                    (throw (ex-info "Docker not found" {})))]
-      (is (nil? (docker/container-image-digest nil "any-container"))))))
+  (testing "returns nil when run-runtime throws"
+    (with-redefs [oci-cli/run-runtime
+                  (fn [_d & _args]
+                    (throw (ex-info "Runtime not found" {})))]
+      (is (nil? (oci-cli/container-image-digest (docker-descriptor) "any-container"))))))
 
 ;; ============================================================================
 ;; persist-workspace!
@@ -114,9 +163,9 @@
 (deftest persist-workspace-with-changes-test
   (testing "persist-workspace! commits and pushes when there are dirty files"
     (let [commands (atom [])
-          executor (docker/create-docker-executor {:image "test:latest"})]
-      (with-redefs [docker/exec-in-container
-                    (fn [_docker-path _env-id cmd _opts]
+          executor (oci-cli/create-docker-executor {:image "test:latest"})]
+      (with-redefs [oci-cli/exec-in-container
+                    (fn [_descriptor _env-id cmd _opts]
                       (swap! commands conj cmd)
                       (cond
                         (= cmd "git status --porcelain")
@@ -139,9 +188,9 @@
 
 (deftest persist-workspace-no-changes-test
   (testing "persist-workspace! returns {:persisted? false} when no dirty files"
-    (let [executor (docker/create-docker-executor {:image "test:latest"})]
-      (with-redefs [docker/exec-in-container
-                    (fn [_docker-path _env-id cmd _opts]
+    (let [executor (oci-cli/create-docker-executor {:image "test:latest"})]
+      (with-redefs [oci-cli/exec-in-container
+                    (fn [_descriptor _env-id cmd _opts]
                       (if (= cmd "git status --porcelain")
                         {:data {:exit-code 0 :stdout ""}}
                         {:data {:exit-code 0 :stdout "" :stderr ""}}))]
@@ -158,9 +207,9 @@
 (deftest restore-workspace-test
   (testing "restore-workspace! fetches and checks out task branch"
     (let [commands (atom [])
-          executor (docker/create-docker-executor {:image "test:latest"})]
-      (with-redefs [docker/exec-in-container
-                    (fn [_docker-path _env-id cmd _opts]
+          executor (oci-cli/create-docker-executor {:image "test:latest"})]
+      (with-redefs [oci-cli/exec-in-container
+                    (fn [_descriptor _env-id cmd _opts]
                       (swap! commands conj cmd)
                       (if (= cmd "git rev-parse HEAD")
                         {:data {:exit-code 0 :stdout "def456\n"}}
@@ -174,64 +223,53 @@
           (is (some #(clojure.string/includes? % "git checkout") @commands)))))))
 
 ;; ============================================================================
-;; container-image-digest
-;; ============================================================================
-
-(deftest container-image-digest-success-test
-  (testing "returns trimmed digest when docker inspect succeeds"
-    (with-redefs [docker/run-docker (fn [_docker-path & _args]
-                                      {:exit 0 :out "sha256:abc123\n"})]
-      (is (= "sha256:abc123"
-             (docker/container-image-digest nil "myimage:latest"))))))
-
-(deftest container-image-digest-failure-test
-  (testing "returns nil when docker inspect fails (non-zero exit)"
-    (with-redefs [docker/run-docker (fn [_docker-path & _args]
-                                      {:exit 1 :out "" :err "not found"})]
-      (is (nil? (docker/container-image-digest nil "nonexistent:latest"))))))
-
-(deftest container-image-digest-exception-test
-  (testing "returns nil when docker/run-docker throws an exception"
-    (with-redefs [docker/run-docker (fn [_docker-path & _args]
-                                      (throw (ex-info "docker not installed" {})))]
-      (is (nil? (docker/container-image-digest nil "myimage:latest"))))))
-
-;; ============================================================================
 ;; create-container --stop-timeout (N11 §2.2)
 ;; ============================================================================
 
 (deftest create-container-stop-timeout-test
   (testing "includes --stop-timeout when execution-plan has :time-limit-ms"
     (let [captured-args (atom nil)]
-      (with-redefs [docker/run-docker (fn [_docker-path & args]
-                                        (reset! captured-args (vec args))
-                                        {:exit 0 :out "container-id-123\n" :err ""})]
-        (docker/create-container nil "test-ctr" "alpine" "/workspace" nil nil nil
-                                :execution-plan {:time-limit-ms 120000})
+      (with-redefs [oci-cli/run-runtime (fn [_descriptor & args]
+                                          (reset! captured-args (vec args))
+                                          {:exit 0 :out "container-id-123\n" :err ""})]
+        (oci-cli/create-container (docker-descriptor) "test-ctr" "alpine"
+                                  "/workspace" nil nil nil
+                                  :execution-plan {:time-limit-ms 120000})
         (let [args @captured-args]
           (is (some #(= "--stop-timeout" %) args))
           (is (some #(= "120" %) args))))))
 
   (testing "omits --stop-timeout when no execution-plan"
     (let [captured-args (atom nil)]
-      (with-redefs [docker/run-docker (fn [_docker-path & args]
-                                        (reset! captured-args (vec args))
-                                        {:exit 0 :out "container-id-123\n" :err ""})]
-        (docker/create-container nil "test-ctr" "alpine" "/workspace" nil nil nil)
+      (with-redefs [oci-cli/run-runtime (fn [_descriptor & args]
+                                          (reset! captured-args (vec args))
+                                          {:exit 0 :out "container-id-123\n" :err ""})]
+        (oci-cli/create-container (docker-descriptor) "test-ctr" "alpine"
+                                  "/workspace" nil nil nil)
         (let [args @captured-args]
           (is (not (some #(= "--stop-timeout" %) args)))))))
 
   (testing "enforces minimum 5s stop-timeout"
     (let [captured-args (atom nil)]
-      (with-redefs [docker/run-docker (fn [_docker-path & args]
-                                        (reset! captured-args (vec args))
-                                        {:exit 0 :out "container-id-123\n" :err ""})]
-        (docker/create-container nil "test-ctr" "alpine" "/workspace" nil nil nil
-                                :execution-plan {:time-limit-ms 2000})
+      (with-redefs [oci-cli/run-runtime (fn [_descriptor & args]
+                                          (reset! captured-args (vec args))
+                                          {:exit 0 :out "container-id-123\n" :err ""})]
+        (oci-cli/create-container (docker-descriptor) "test-ctr" "alpine"
+                                  "/workspace" nil nil nil
+                                  :execution-plan {:time-limit-ms 2000})
         (let [args @captured-args]
           (is (some #(= "5" %) args)))))))
 
+;; ============================================================================
+;; executor-type reflects descriptor kind
+;; ============================================================================
+
+(deftest executor-type-from-descriptor-test
+  (testing "OciCliExecutor reports its descriptor's runtime kind"
+    (let [exec (oci-cli/create-docker-executor {:image "alpine:latest"})]
+      (is (= :docker (proto/executor-type exec))))))
+
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
-  (clojure.test/run-tests 'ai.miniforge.dag-executor.protocols.impl.docker-test)
+  (clojure.test/run-tests 'ai.miniforge.dag-executor.protocols.impl.runtime.oci-cli-test)
   :leave-this-here)

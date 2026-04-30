@@ -1,0 +1,42 @@
+;; Runtime registry for the OCI-CLI executor.
+;;
+;; Per-kind data driving descriptor construction, capability advertisement,
+;; and CLI flag dialects. Loaded by
+;; `ai.miniforge.dag-executor.protocols.impl.runtime.registry`.
+;;
+;; Each entry:
+;;   :executable   Default CLI binary name (resolved via PATH at invocation).
+;;   :supported?   True when the executor knows how to run this kind today.
+;;                 False entries throw :runtime/unsupported on construction
+;;                 with a helpful message; they exist so future phases can
+;;                 add capabilities incrementally without changing code.
+;;   :capabilities Set of capability keywords advertised by this runtime
+;;                 (see N11-delta §4 for the canonical list).
+;;   :flags        CLI flag dialect map keyed by capability:
+;;                   :info-format-template  Go template for `<exe> info --format`
+;;                   :tmpfs-mount-options   Comma-separated options string
+;;                                          appended to `--tmpfs <path>:<opts>`
+{:docker  {:executable   "docker"
+           :supported?   true
+           :capabilities #{:oci-images
+                           :run :exec :build
+                           :bind-mounts :tmpfs-mounts
+                           :env-vars :working-dir :user-mapping
+                           :resource-limits
+                           :network-modes/none :network-modes/bridge
+                           :image-digest-pinning
+                           :graceful-stop
+                           :no-new-privileges :read-only-root :cap-drop-all
+                           :tmpfs-uid-gid-options}
+           :flags        {:info-format-template "{{.ServerVersion}}"
+                          :tmpfs-mount-options  "rw,nosuid,nodev,exec,size=512m,uid=1000,gid=1000"}}
+
+ :podman  {:executable   "podman"
+           :supported?   false
+           :capabilities #{}
+           :flags        {}}
+
+ :nerdctl {:executable   "nerdctl"
+           :supported?   false
+           :capabilities #{}
+           :flags        {}}}
