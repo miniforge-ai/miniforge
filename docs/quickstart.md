@@ -10,6 +10,8 @@ Get from zero to a miniforge-generated pull request in under 5 minutes.
   - [Claude Code](https://claude.ai/claude-code) CLI (recommended)
   - [Codex](https://openai.com/codex) CLI
   - An API key (Anthropic or OpenAI)
+- An OCI-compatible local container runtime — see "Container runtime" below.
+  [Podman](https://podman.io/) is the recommended default; Docker is supported.
 
 Install Babashka:
 
@@ -47,8 +49,36 @@ cd miniforge
 bb bootstrap
 ```
 
-This installs Java, Clojure, linters, prefetches the coverage tool used
-by `bb ccov`, and configures the project.
+This installs Java, Clojure, linters, Polylith, prefetches the coverage
+tool used by `bb ccov`, and (on macOS) brew-installs Podman and
+initializes a default `podman machine`. Linux users install Podman via
+their distro package manager (`apt install podman`, `dnf install
+podman`, `pacman -S podman`); Docker users can stay on Docker by setting
+`MINIFORGE_RUNTIME=docker` or `:runtime-kind :docker` in config.
+
+## Container runtime
+
+Miniforge runs every task inside an isolated OCI container. Any
+OCI-compatible local runtime works; Podman is the recommended default.
+
+```bash
+# Verify the resolved runtime
+mf doctor                # full system check, includes runtime block
+mf runtime info          # descriptor as data
+
+# Pass-through to the runtime CLI for ad-hoc use
+mf runtime run --rm hello-world
+
+# Pin to Docker explicitly (otherwise auto-probed: Podman → Docker)
+export MINIFORGE_RUNTIME=docker
+```
+
+Auto-probe picks the first runtime whose `info` succeeds in this order:
+Podman, then Docker. If you set `MINIFORGE_RUNTIME=podman` and Podman
+isn't installed, miniforge fails loud rather than falling back — the
+whole point of explicit configuration is honoring your choice. See the
+[configuration docs](configuration.md#container-runtime) for the full
+config block.
 
 ## 2. LLM Backend
 
