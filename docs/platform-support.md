@@ -28,6 +28,33 @@ script, and a handful of `bb` tasks that still assume a Unix shell.
 regressions. "Beta" means the path runs end-to-end for at least one tester
 but isn't yet a release blocker — please report issues.
 
+## Container Runtime Matrix
+
+Miniforge runs each task inside an OCI container. Any OCI-compatible
+local runtime works; Podman is the recommended default per N11-delta §3.
+
+| Runtime    | macOS arm64 | macOS x86_64 | Linux x86_64 | Linux arm64 | Windows |
+|------------|-------------|--------------|--------------|-------------|---------|
+| Podman     | Stable      | Stable       | Stable       | Stable      | Beta    |
+| Docker     | Stable      | Stable       | Stable       | Stable      | Beta    |
+| nerdctl    | Future      | Future       | Future       | Future      | N/A     |
+
+Notes:
+
+- **macOS** runs Podman inside a Linux VM (`podman machine`). `bb
+  bootstrap` initializes a default machine for you. Bind mounts cross
+  the VM boundary via virtiofs/9p — performance differs from Docker
+  Desktop's virtio. For large worktrees, watch for slow first-cold-cache
+  reads.
+- **Linux** Podman is daemonless and rootless by default; no machine
+  setup needed. Install via your distro package manager.
+- **Windows** Podman runs on top of WSL2 (same as Docker Desktop).
+  Status is Beta to match the rest of native-Windows support.
+- **Other Docker-CLI hosts** — Colima, OrbStack, Rancher Desktop with
+  the Docker engine — work as `:runtime-kind :docker`. They are not
+  separate runtimes from miniforge's perspective; they are alternate
+  ways to install the Docker CLI.
+
 ## macOS
 
 ```bash
