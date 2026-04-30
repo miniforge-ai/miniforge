@@ -472,6 +472,8 @@
                  "components/config/src"
                  "components/config/resources"
                  "components/algorithms/src"
+                 "components/anomaly/src"
+                 "components/anomaly/resources"
                  "components/schema/src"
                  "components/schema/resources"
                  "components/logging/src"
