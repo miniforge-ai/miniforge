@@ -237,15 +237,18 @@
 (defn init-podman-machine!
   "Mac-only courtesy: ensure a Podman machine is initialised and running.
 
-   Linux Podman is daemonless and needs no machine. On macOS Podman runs
-   inside a Linux VM (`podman machine`); without one, `podman run` fails.
+   On macOS Podman runs inside a Linux VM (`podman machine`); without
+   one, `podman run` fails. On Linux, Podman is daemonless and needs no
+   machine. On Windows, Podman runs on top of WSL2; machine setup
+   differs and is owned by the Windows-native install path
+   (docs/platform-support.md), not this helper.
 
    No-op when Podman is not installed (caller already failed earlier),
    when not on macOS, or when a machine is already running."
   []
   (cond
     (not= :macos (os-key))
-    (println "  ✓ podman machine: skipping (not macOS — Podman is daemonless on Linux)")
+    (println "  ✓ podman machine: skipping (only required on macOS)")
 
     (not (installed? "podman"))
     (println "  ⚠️  podman machine: skipping (podman not on PATH)")

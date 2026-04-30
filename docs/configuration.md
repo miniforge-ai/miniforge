@@ -69,45 +69,66 @@ All configuration values can be overridden with environment variables using Aero
 
 ## Container runtime
 
-Per [N11-delta](../specs/normative/N11-delta-runtime-adapter.md), miniforge runs
-each task inside an OCI container. Configure the runtime under
-`:miniforge/runtime`:
+Per [N11-delta](../specs/normative/N11-delta-runtime-adapter.md),
+miniforge runs each task inside an OCI container. Two layers configure
+the runtime today; the third (file config) is a documented follow-up.
+
+### Today: env var + descriptor config map
+
+The runtime selector reads its config from a flat map with three keys
+that the descriptor consumes directly:
 
 ```clojure
-;; .miniforge/config.edn
-{:miniforge/runtime
- {:kind :podman}}
-```
-
-Or with overrides:
-
-```clojure
-{:miniforge/runtime
- {:kind       :docker
-  :executable "/usr/local/bin/docker"}}
+;; Shape consumed by ai.miniforge.dag-executor.protocols.impl.runtime.descriptor/make-descriptor
+{:runtime-kind :podman
+ :executable   "/opt/homebrew/bin/podman"
+ :docker-path  "/usr/local/bin/docker"}  ; legacy alias for :executable when :runtime-kind is :docker
 ```
 
 Keys:
 
-- `:kind` — `:docker` or `:podman` (Phase 2). `:nerdctl` is known but not
-  yet supported.
-- `:executable` — explicit CLI path; defaults to the kind's binary name
-  resolved via `PATH`.
-- `:docker-path` — legacy alias for `:executable` when `:kind` is
-  `:docker`. Preserved for the pre-N11-delta config shape.
+- `:runtime-kind` — `:docker` or `:podman` (Phase 2 supported).
+  `:nerdctl` is known but not yet supported.
+- `:executable` — explicit CLI path; defaults to the kind's binary
+  name resolved via `PATH`.
+- `:docker-path` — legacy alias for `:executable` when `:runtime-kind`
+  is `:docker`. Preserved for the pre-N11-delta config shape.
 
-When no kind is configured, miniforge auto-probes Podman, then Docker.
-First whose `info` command succeeds wins. Set
-`MINIFORGE_RUNTIME=docker|podman` to override.
-
-If you set an explicit kind and that runtime is unavailable, miniforge
-fails loud rather than falling back — the whole point of explicit
-configuration is honoring your choice.
-
-Inspect the resolved runtime with:
+The CLI exposes one source today: the `MINIFORGE_RUNTIME` environment
+variable, which sets `:runtime-kind`:
 
 ```bash
-mf runtime info       # descriptor as data
+MINIFORGE_RUNTIME=podman mf runtime info
+MINIFORGE_RUNTIME=docker mf doctor
+```
+
+When no kind is set, miniforge auto-probes Podman, then Docker. First
+whose `info` command succeeds wins. If `MINIFORGE_RUNTIME` names a
+runtime that isn't available, miniforge fails loud rather than falling
+back — the whole point of explicit configuration is honoring your
+choice.
+
+### Forthcoming: `miniforge.edn` file-config block
+
+Per N11-delta §2.1 the canonical config block lives under
+`:miniforge/runtime` in the user/repo profile:
+
+```clojure
+;; .miniforge/config.edn — wire-up tracked as a follow-up
+{:miniforge/runtime
+ {:kind       :podman
+  :executable "/opt/homebrew/bin/podman"}}
+```
+
+The selector accepts the flat map today; the loader that strips the
+`:miniforge/runtime` namespace and threads it into the selector lands
+in a follow-up alongside the broader Aero file-config integration.
+Until then, use `MINIFORGE_RUNTIME=...`.
+
+### Inspecting the resolved runtime
+
+```bash
+mf runtime info       # descriptor as data (kind, exec, version, capabilities)
 mf doctor             # full system check, includes runtime block
 ```
 
