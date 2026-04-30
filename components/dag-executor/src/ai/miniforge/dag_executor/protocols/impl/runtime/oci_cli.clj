@@ -215,10 +215,11 @@
    workdir scratch mount when the workdir is not already covered by caller
    mounts.
 
-   The tmpfs option string comes from the runtime registry so a future
-   runtime that diverges (e.g. does not accept `uid=`/`gid=` on tmpfs) can
-   be papered over by adding an entry to the dialect map rather than
-   branching on `:runtime/kind` here."
+   The tmpfs option string is built by `registry/tmpfs-mount-options` from
+   the runtime's `:defaults` (`:uid`, `:gid`, `:tmpfs-size`) so a future
+   runtime that diverges (e.g. does not accept `uid=`/`gid=` on tmpfs) is
+   papered over by adjusting that helper or its registry inputs rather
+   than branching on `:runtime/kind` here."
   [descriptor workdir execution-plan]
   (let [mounted-paths (into #{}
                             (map :container-path)
