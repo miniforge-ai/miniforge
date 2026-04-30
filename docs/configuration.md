@@ -67,6 +67,50 @@ All configuration values can be overridden with environment variables using Aero
 - `MINIFORGE_META_MAX_ITERATIONS` - Maximum iterations for convergence (default: `10`)
 - `MINIFORGE_META_THRESHOLD` - Convergence threshold (default: `0.95`)
 
+## Container runtime
+
+Per [N11-delta](../specs/normative/N11-delta-runtime-adapter.md), miniforge runs
+each task inside an OCI container. Configure the runtime under
+`:miniforge/runtime`:
+
+```clojure
+;; .miniforge/config.edn
+{:miniforge/runtime
+ {:kind :podman}}
+```
+
+Or with overrides:
+
+```clojure
+{:miniforge/runtime
+ {:kind       :docker
+  :executable "/usr/local/bin/docker"}}
+```
+
+Keys:
+
+- `:kind` — `:docker` or `:podman` (Phase 2). `:nerdctl` is known but not
+  yet supported.
+- `:executable` — explicit CLI path; defaults to the kind's binary name
+  resolved via `PATH`.
+- `:docker-path` — legacy alias for `:executable` when `:kind` is
+  `:docker`. Preserved for the pre-N11-delta config shape.
+
+When no kind is configured, miniforge auto-probes Podman, then Docker.
+First whose `info` command succeeds wins. Set
+`MINIFORGE_RUNTIME=docker|podman` to override.
+
+If you set an explicit kind and that runtime is unavailable, miniforge
+fails loud rather than falling back — the whole point of explicit
+configuration is honoring your choice.
+
+Inspect the resolved runtime with:
+
+```bash
+mf runtime info       # descriptor as data
+mf doctor             # full system check, includes runtime block
+```
+
 ## Usage Examples
 
 ### Using Default Configuration

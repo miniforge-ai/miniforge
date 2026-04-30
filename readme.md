@@ -129,6 +129,9 @@ enforce hard stops. All decisions produce evidence bundles for traceability.
   Homebrew or `bash <(curl …) --static`; Windows: `scoop install babashka`)
 - An LLM backend: [Claude Code](https://claude.ai/claude-code) CLI,
   [Codex](https://openai.com/codex) CLI, or an API key (Anthropic/OpenAI)
+- An OCI-compatible local container runtime (see below). [Podman](https://podman.io/)
+  is the recommended default; [Docker](https://www.docker.com/) is supported.
+  Other Docker-CLI hosts (Colima, OrbStack) work as `:runtime-kind :docker`.
 
 ### Install and Run
 
@@ -144,8 +147,17 @@ bb bootstrap
 mf run examples/workflows/simple-refactor.edn
 ```
 
-`bb bootstrap` installs the runtime dependencies, configures the repo,
-and prefetches the coverage tool used by `bb ccov`.
+`bb bootstrap` installs the development dependencies (Java, Clojure CLI,
+clj-kondo, Polylith, markdownlint), configures the repo, prefetches the
+coverage tool used by `bb ccov`, and on macOS brew-installs Podman and
+initializes a default `podman machine`. Linux users install Podman via
+their distro package manager (`apt install podman`, `dnf install podman`,
+etc.); Docker users can stay on Docker by setting
+`MINIFORGE_RUNTIME=docker` or `:runtime-kind :docker` in config.
+
+To check the resolved runtime: `mf doctor` (which now reports the
+selected runtime + version + override hint) or `mf runtime info`
+(prints the descriptor as data).
 
 See the [Quickstart Guide](docs/quickstart.md) for a detailed walkthrough.
 
