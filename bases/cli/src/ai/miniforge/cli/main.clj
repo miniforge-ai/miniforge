@@ -58,6 +58,7 @@
    [ai.miniforge.cli.main.commands.scan :as cmd-scan]
    [ai.miniforge.cli.main.commands.init :as cmd-init]
    [ai.miniforge.cli.main.commands.worktree :as cmd-worktree]
+   [ai.miniforge.cli.main.commands.runtime :as cmd-runtime]
    ;; N5 command modules
    [ai.miniforge.cli.main.commands.workflow-commands :as cmd-workflow]
    [ai.miniforge.cli.main.commands.policy :as cmd-policy]
@@ -174,6 +175,12 @@
 
     (println)
 
+    ;; Container runtime (N11-delta Phase 3)
+    (println (display/style (messages/t :runtime/doctor-section-title)
+                            :foreground :cyan :bold true))
+    (cmd-runtime/print-doctor-runtime-section)
+    (println)
+
     ;; Check config
     (if (fs/exists? config/default-user-config-path)
       (println (display/style "✓" :foreground :green)
@@ -288,6 +295,8 @@
 (defn scan-cmd [m] (cmd-scan/scan-cmd (get-opts m)))
 (defn init-cmd [m] (cmd-init/init-cmd (get-opts m)))
 (defn worktree-cmd [m] (cmd-worktree/worktree-cmd m))
+(defn runtime-info-cmd [m] (cmd-runtime/runtime-info-cmd m))
+(defn runtime-run-cmd [m] (cmd-runtime/runtime-run-cmd m))
 (defn web-cmd [m] (cmd-monitoring/web-cmd (get-opts m)))
 (defn tui-cmd [m] (cmd-monitoring/tui-cmd (get-opts m)))
 (defn fleet-start-cmd [m] (cmd-fleet/fleet-start-cmd (get-opts m)))
@@ -427,6 +436,11 @@
    {:cmds ["worktree"]
     :fn worktree-cmd
     :spec {:path {:alias :p}}}
+
+   ;; Runtime adapter (N11-delta Phase 3) — info / pass-through run
+   {:cmds ["runtime"]      :fn help-cmd}
+   {:cmds ["runtime" "info"] :fn runtime-info-cmd}
+   {:cmds ["runtime" "run"]  :fn runtime-run-cmd}
 
    ;; Scan command — compliance scanner
    {:cmds ["scan"]

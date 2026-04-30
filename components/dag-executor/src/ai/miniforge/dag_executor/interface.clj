@@ -34,7 +34,10 @@
    [ai.miniforge.dag-executor.state :as state]
    [ai.miniforge.dag-executor.parallel :as parallel]
    [ai.miniforge.dag-executor.scheduler :as scheduler]
-   [ai.miniforge.dag-executor.executor :as executor]))
+   [ai.miniforge.dag-executor.executor :as executor]
+   [ai.miniforge.dag-executor.protocols.impl.runtime.descriptor :as descriptor]
+   [ai.miniforge.dag-executor.protocols.impl.runtime.registry :as registry]
+   [ai.miniforge.dag-executor.protocols.impl.runtime.selector :as selector]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Result helpers (re-exports)
@@ -481,6 +484,55 @@
 (def task-runner-images
   "Pre-defined task runner images (:minimal :clojure)."
   executor/task-runner-images)
+
+;------------------------------------------------------------------------------ Layer 6.5
+;; Runtime adapter (N11-delta) — descriptor / registry / selection
+
+(def select-runtime
+  "Resolve a runtime descriptor from config + host state per N11-delta §3.
+
+   Returns a result map. On success, :data carries:
+     {:descriptor       <runtime descriptor>
+      :kind             <:docker | :podman | ...>
+      :selection        :explicit | :auto-probe
+      :runtime-version  <string>
+      :probed           [<per-kind summary>] (auto-probe only)}
+
+   On failure, :error :code is one of:
+     :runtime/explicit-unsupported   (the named kind is not :supported?)
+     :runtime/explicit-unavailable   (named kind probe failed)
+     :runtime/none-available         (auto-probe found nothing)"
+  selector/select-runtime)
+
+(def runtime-probe-order
+  "Auto-probe order applied when :runtime-kind is not configured."
+  selector/probe-order)
+
+(defn runtime-known-kinds
+  "Set of all runtime kinds the registry knows about."
+  []
+  (registry/known-kinds))
+
+(defn runtime-supported-kinds
+  "Set of runtime kinds the executor can construct a working descriptor for."
+  []
+  (registry/supported-kinds))
+
+(defn runtime-info
+  "Probe a descriptor for availability and version. Returns
+   {:available? bool :runtime-version str | :reason str}."
+  [descriptor]
+  (descriptor/runtime-info descriptor))
+
+(defn runtime-executable
+  "Return the resolved CLI binary for a descriptor."
+  [descriptor]
+  (descriptor/executable descriptor))
+
+(defn runtime-kind
+  "Return the runtime kind keyword for a descriptor."
+  [descriptor]
+  (descriptor/kind descriptor))
 
 ;------------------------------------------------------------------------------ Layer 7
 ;; Convenience functions
