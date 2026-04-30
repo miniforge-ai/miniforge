@@ -1,5 +1,6 @@
 {:paths ["src" "resources"]
  :deps {ai.miniforge/connector-linter {:local/root "../connector-linter"}
+        ai.miniforge/messages {:local/root "../messages"}
         ai.miniforge/response {:local/root "../response"}}
  :aliases
  {:test {:extra-paths ["test"]
