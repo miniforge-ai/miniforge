@@ -22,6 +22,7 @@
   (:require
    [malli.core :as m]
    [malli.error :as me]
+   [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.schema.core :as core]
    [ai.miniforge.schema.logging :as logging]
    [ai.miniforge.schema.supervisory :as supervisory]
@@ -76,15 +77,41 @@
   [schema value]
   (m/validate schema value))
 
-(defn validate
-  "Returns value if valid, throws ex-info with explanation if invalid."
+(defn validate-anomaly
+  "Validate `value` against `schema`. Return `value` on success, or an
+   `:invalid-input` anomaly map describing the validation failure.
+
+   The anomaly's `:anomaly/data` carries:
+   - `:errors` — humanized malli error map
+   - `:value`  — the offending value, for diagnostic context
+
+   Prefer this over [[validate]] in non-boundary code: callers can fold the
+   anomaly into a response chain or pattern-match on `:anomaly/type` rather
+   than wrapping every call in try/catch."
   [schema value]
   (if (m/validate schema value)
     value
-    (throw (ex-info "Schema validation failed"
-                    {:schema schema
-                     :value value
-                     :errors (me/humanize (m/explain schema value))}))))
+    (anomaly/anomaly :invalid-input
+                     "Schema validation failed"
+                     {:errors (me/humanize (m/explain schema value))
+                      :value  value})))
+
+(defn validate
+  "Returns value if valid, throws ex-info with explanation if invalid.
+
+   DEPRECATED: prefer [[validate-anomaly]], which returns an anomaly map
+   rather than throwing. This thrower is retained for backward compatibility
+   with existing callsites; new code should consume `validate-anomaly` and
+   fold its result into a response chain."
+  {:deprecated "exceptions-as-data — prefer validate-anomaly"}
+  [schema value]
+  (let [result (validate-anomaly schema value)]
+    (if (anomaly/anomaly? result)
+      (throw (ex-info "Schema validation failed"
+                      {:schema schema
+                       :value  value
+                       :errors (get-in result [:anomaly/data :errors])}))
+      result)))
 
 (defn explain
   "Returns human-readable explanation of validation errors, or nil if valid."

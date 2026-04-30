@@ -5,7 +5,8 @@
             [ai.miniforge.connector.protocol :as protocol]
             [ai.miniforge.connector.result :as result]
             [ai.miniforge.connector.retry :as retry]
-            [ai.miniforge.connector.state :as state]))
+            [ai.miniforge.connector.state :as state]
+            [ai.miniforge.connector.validation :as validation]))
 
 ;; -- Handle registry (per-connector instance state) --
 (def create-handle-registry handles/create)
@@ -121,3 +122,12 @@
 (def extract-result result/extract-result)
 (def checkpoint-result result/checkpoint-result)
 (def publish-result result/publish-result)
+
+;; -- Shared Validation Helpers --
+;;
+;; Anomaly-returning variants (preferred):
+(def require-handle  validation/require-handle)
+(def validate-auth   validation/validate-auth)
+;; Throwing variants (deprecated; kept for incremental per-connector migration):
+(def require-handle! validation/require-handle!)
+(def validate-auth!  validation/validate-auth!)
