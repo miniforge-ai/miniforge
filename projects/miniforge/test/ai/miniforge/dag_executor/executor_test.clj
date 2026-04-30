@@ -75,7 +75,9 @@
       (is (result/ok? result))
       (is (contains? (:data result) :available?))
       (when (:available? (:data result))
-        (is (contains? (:data result) :docker-version))))))
+        ;; N11-delta: descriptor probe returns :runtime-version (kind-agnostic)
+        ;; rather than the prior :docker-version key.
+        (is (contains? (:data result) :runtime-version))))))
 
 (deftest docker-executor-type-test
   (testing "Docker executor returns correct type"
