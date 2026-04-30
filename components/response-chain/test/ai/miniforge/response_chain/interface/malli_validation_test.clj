@@ -66,3 +66,24 @@
                      (chain/append-step :b "not-an-anomaly" 2))]
       (is (m/validate chain/Chain result))
       (is (false? (chain/succeeded? result))))))
+
+(deftest non-keyword-operation-on-append-step-records-invalid-input
+  (testing "append-step coerces non-keyword operation to the sentinel"
+    (let [result    (chain/append-step (chain/create-chain :x) "op" {:any "thing"})
+          last-step (last (chain/steps result))]
+      (is (m/validate chain/Chain result))
+      (is (false? (chain/succeeded? result)))
+      (is (keyword? (:operation last-step)))
+      (is (= :invalid-input (some-> last-step :anomaly :anomaly/type)))
+      (is (= "op" (some-> last-step :anomaly :anomaly/data :operation))))))
+
+(deftest non-keyword-operation-on-create-chain-records-invalid-input
+  (testing "create-chain coerces non-keyword operation to the sentinel and seeds an :invalid-input step"
+    (let [result    (chain/create-chain "not-a-keyword")
+          first-step (first (chain/steps result))]
+      (is (m/validate chain/Chain result))
+      (is (false? (chain/succeeded? result)))
+      (is (keyword? (:operation result)))
+      (is (= :invalid-input (some-> first-step :anomaly :anomaly/type)))
+      (is (= "not-a-keyword"
+             (some-> first-step :anomaly :anomaly/data :operation))))))

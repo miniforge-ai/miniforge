@@ -41,18 +41,56 @@
    :anomaly    an
    :response   response})
 
+;------------------------------------------------------------------------------ Layer 0
+;; Operation-key coercion
+;;
+;; The Chain and Step schemas require `:operation` to be a keyword. The
+;; component is a non-throwing boundary helper, so we coerce non-keyword
+;; operations to a sentinel and surface the bad input as an anomaly
+;; rather than producing a chain that fails its own schema.
+
+(def ^:private invalid-operation-sentinel
+  "Sentinel operation key used when caller supplies a non-keyword
+   operation. Keeps the chain/step schema invariant intact even when
+   input is malformed."
+  :response-chain/invalid)
+
+(defn- coerce-operation
+  "Return `operation` when it is already a keyword; otherwise return
+   the canonical sentinel. Callers use this to ensure the chain/step
+   schema is preserved even when input is malformed."
+  [operation]
+  (if (keyword? operation)
+    operation
+    invalid-operation-sentinel))
+
 ;------------------------------------------------------------------------------ Layer 1
 ;; Chain construction
 
 (defn create-chain
   "Return a fresh chain for the named `operation`.
 
-   An empty chain has no steps; its `:succeeded?` is true by vacuous
-   truth (every step in the empty set succeeded)."
+   When `operation` is a keyword, the chain is empty and vacuously
+   successful. When `operation` is non-keyword, the chain is created
+   with the sentinel operation `:response-chain/invalid` and seeded
+   with an `:invalid-input` step recording the bad input — preserving
+   the schema invariant that every chain/step `:operation` is a
+   keyword."
   [operation]
-  {:operation      operation
-   :succeeded?     true
-   :response-chain []})
+  (let [op (coerce-operation operation)]
+    (if (= op operation)
+      {:operation      op
+       :succeeded?     true
+       :response-chain []}
+      (let [step (build-step op
+                             (anomaly/anomaly
+                              :invalid-input
+                              "response-chain/create-chain received non-keyword operation"
+                              {:operation operation})
+                             operation)]
+        {:operation      op
+         :succeeded?     false
+         :response-chain [step]}))))
 
 ;------------------------------------------------------------------------------ Layer 2
 ;; Append
@@ -105,12 +143,21 @@
    `response`. When `anomaly` is non-nil, the step's `:succeeded?` is
    false and the chain's `:succeeded?` is recomputed accordingly.
 
-   Returns the updated chain. Never throws: malformed inputs are
-   recorded as `:invalid-input` anomaly steps."
+   Returns the updated chain. Never throws: malformed inputs (including
+   a non-keyword `operation`) are recorded as `:invalid-input` anomaly
+   steps and the chain stays well-formed."
   ([chain operation response]
    (append-step chain operation nil response))
   ([chain operation an response]
-   (guarded-append chain operation (build-step operation an response))))
+   (let [op (coerce-operation operation)
+         eff-anomaly (if (keyword? operation)
+                       an
+                       (anomaly/anomaly
+                        :invalid-input
+                        "response-chain/append-step received non-keyword operation"
+                        {:operation         operation
+                         :original-anomaly  an}))]
+     (guarded-append chain op (build-step op eff-anomaly response)))))
 
 ;------------------------------------------------------------------------------ Layer 3
 ;; Predicate
