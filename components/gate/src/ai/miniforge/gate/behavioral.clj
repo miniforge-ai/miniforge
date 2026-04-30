@@ -69,6 +69,20 @@
          :errors errors
          :message repair-required-message))
 
+(defn- default-check-fn
+  "Lazily resolve policy-pack.core/check-artifact at call time.
+
+   policy-pack is a soft dependency of gate (not on gate's deps.edn classpath
+   in isolation), so the resolution must happen at runtime rather than via
+   `:require`.  When policy-pack is unavailable, throws ex-info; the caller
+   surfaces this via the `:behavioral-check-error` warning branch."
+  [packs artifact opts]
+  (let [resolved (requiring-resolve 'ai.miniforge.policy-pack.core/check-artifact)]
+    (when-not resolved
+      (throw (ex-info "policy-pack.core/check-artifact unavailable"
+                      {:sym 'ai.miniforge.policy-pack.core/check-artifact})))
+    (resolved packs artifact opts)))
+
 (defn check-behavioral
   "Check a telemetry artifact against loaded policy packs for behavioral violations.
 
@@ -78,6 +92,12 @@
                   :policy-packs  - Vector of loaded policy-pack maps
                   :phase         - Expected :observe (used for logging; gate
                                    always runs with {:phase :observe})
+                  :check-fn      - Optional override for the policy-pack
+                                   check function.  Tests inject a stub here
+                                   instead of redefining clojure.core fns
+                                   globally (which races with parallel tests).
+                                   Signature: (fn [packs artifact opts]) ->
+                                   {:violations [...]}.
 
    Returns:
      {:passed? bool
@@ -85,7 +105,7 @@
       :warnings [{:type :behavioral-warning :severity … :message … …}]}"
   [artifact ctx]
   (try
-    (let [check-fn (requiring-resolve 'ai.miniforge.policy-pack.core/check-artifact)
+    (let [check-fn (get ctx :check-fn default-check-fn)
           packs    (get ctx :policy-packs [])]
       (if (empty? packs)
         {:passed?  true

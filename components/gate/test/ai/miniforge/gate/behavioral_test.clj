@@ -50,99 +50,103 @@
       (is (true? (:passed? result)))
       (is (= :no-policy-packs (-> result :warnings first :type))))))
 
+;; Tests inject a `:check-fn` via the ctx map rather than redefining
+;; `clojure.core/requiring-resolve`.  The previous `with-redefs` approach
+;; mutated a global var root and races with any other parallel test that
+;; transitively calls `requiring-resolve` (e.g. dag-executor.state-test
+;; before the soft-dep was removed there).  Local DI keeps the stub scoped
+;; to the call site and removes the cross-brick hazard.
+
+(defn- stub-check-fn
+  "Build a stub policy-pack check fn that returns the given violations."
+  [violations]
+  (fn [_packs _artifact _opts] {:violations violations}))
+
+(defn- throwing-check-fn
+  "Build a stub policy-pack check fn that throws with the given message."
+  [message]
+  (fn [_packs _artifact _opts] (throw (ex-info message {}))))
+
 (deftest check-behavioral-clean-result-test
   (testing "Passes with no errors when policy-pack reports no violations"
-    (with-redefs [clojure.core/requiring-resolve
-                  (fn [sym]
-                    (when (= sym 'ai.miniforge.policy-pack.core/check-artifact)
-                      (fn [_packs _artifact _opts] {:violations []})))]
-      (let [result (behavioral/check-behavioral
-                    sample-artifact
-                    {:policy-packs [{:id :test-pack}] :phase :observe})]
-        (is (true? (:passed? result)))
-        (is (empty? (:errors result)))
-        (is (empty? (:warnings result)))))))
+    (let [result (behavioral/check-behavioral
+                  sample-artifact
+                  {:policy-packs [{:id :test-pack}]
+                   :phase        :observe
+                   :check-fn     (stub-check-fn [])})]
+      (is (true? (:passed? result)))
+      (is (empty? (:errors result)))
+      (is (empty? (:warnings result))))))
 
 (deftest check-behavioral-blocking-violations-test
   (testing "Fails with errors when :critical violations are returned"
-    (with-redefs [clojure.core/requiring-resolve
-                  (fn [sym]
-                    (when (= sym 'ai.miniforge.policy-pack.core/check-artifact)
-                      (fn [_packs _artifact _opts]
-                        {:violations [{:violation/severity   :critical
-                                       :violation/rule-id    :no-file-deletion
-                                       :violation/message    "Deleted a protected file"
-                                       :violation/remediation "Restore the file"}]})))]
-      (let [result (behavioral/check-behavioral
-                    sample-artifact
-                    {:policy-packs [{:id :test-pack}] :phase :observe})]
-        (is (false? (:passed? result)))
-        (is (= 1 (count (:errors result))))
-        (is (= :behavioral-violation (-> result :errors first :type)))
-        (is (= :critical (-> result :errors first :severity)))
-        (is (empty? (:warnings result)))))))
+    (let [result (behavioral/check-behavioral
+                  sample-artifact
+                  {:policy-packs [{:id :test-pack}]
+                   :phase        :observe
+                   :check-fn     (stub-check-fn
+                                  [{:violation/severity    :critical
+                                    :violation/rule-id     :no-file-deletion
+                                    :violation/message     "Deleted a protected file"
+                                    :violation/remediation "Restore the file"}])})]
+      (is (false? (:passed? result)))
+      (is (= 1 (count (:errors result))))
+      (is (= :behavioral-violation (-> result :errors first :type)))
+      (is (= :critical (-> result :errors first :severity)))
+      (is (empty? (:warnings result))))))
 
 (deftest check-behavioral-high-severity-test
   (testing "Fails when :high violations are returned (approval-required bucket)"
-    (with-redefs [clojure.core/requiring-resolve
-                  (fn [sym]
-                    (when (= sym 'ai.miniforge.policy-pack.core/check-artifact)
-                      (fn [_packs _artifact _opts]
-                        {:violations [{:violation/severity :high
-                                       :violation/rule-id  :sensitive-path
-                                       :violation/message  "Wrote to sensitive path"}]})))]
-      (let [result (behavioral/check-behavioral
-                    sample-artifact
-                    {:policy-packs [{:id :test-pack}] :phase :observe})]
-        (is (false? (:passed? result)))
-        (is (= 1 (count (:errors result))))
-        (is (= :behavioral-violation (-> result :errors first :type)))))))
+    (let [result (behavioral/check-behavioral
+                  sample-artifact
+                  {:policy-packs [{:id :test-pack}]
+                   :phase        :observe
+                   :check-fn     (stub-check-fn
+                                  [{:violation/severity :high
+                                    :violation/rule-id  :sensitive-path
+                                    :violation/message  "Wrote to sensitive path"}])})]
+      (is (false? (:passed? result)))
+      (is (= 1 (count (:errors result))))
+      (is (= :behavioral-violation (-> result :errors first :type))))))
 
 (deftest check-behavioral-warning-violations-test
   (testing "Passes with warnings when only :medium violations are returned"
-    (with-redefs [clojure.core/requiring-resolve
-                  (fn [sym]
-                    (when (= sym 'ai.miniforge.policy-pack.core/check-artifact)
-                      (fn [_packs _artifact _opts]
-                        {:violations [{:violation/severity :medium
-                                       :violation/message  "Consider using a helper fn"}]})))]
-      (let [result (behavioral/check-behavioral
-                    sample-artifact
-                    {:policy-packs [{:id :test-pack}] :phase :observe})]
-        (is (true? (:passed? result)))
-        (is (empty? (:errors result)))
-        (is (= 1 (count (:warnings result))))
-        (is (= :behavioral-warning (-> result :warnings first :type)))))))
+    (let [result (behavioral/check-behavioral
+                  sample-artifact
+                  {:policy-packs [{:id :test-pack}]
+                   :phase        :observe
+                   :check-fn     (stub-check-fn
+                                  [{:violation/severity :medium
+                                    :violation/message  "Consider using a helper fn"}])})]
+      (is (true? (:passed? result)))
+      (is (empty? (:errors result)))
+      (is (= 1 (count (:warnings result))))
+      (is (= :behavioral-warning (-> result :warnings first :type))))))
 
 (deftest check-behavioral-audit-violations-test
   (testing "Passes silently (warnings) when only :low/:info violations are returned"
-    (with-redefs [clojure.core/requiring-resolve
-                  (fn [sym]
-                    (when (= sym 'ai.miniforge.policy-pack.core/check-artifact)
-                      (fn [_packs _artifact _opts]
-                        {:violations [{:violation/severity :low
-                                       :violation/message  "Audit: read an extra file"}
-                                      {:violation/severity :info
-                                       :violation/message  "Info: large diff"}]})))]
-      (let [result (behavioral/check-behavioral
-                    sample-artifact
-                    {:policy-packs [{:id :test-pack}] :phase :observe})]
-        (is (true? (:passed? result)))
-        (is (empty? (:errors result)))
-        (is (= 2 (count (:warnings result))))))))
+    (let [result (behavioral/check-behavioral
+                  sample-artifact
+                  {:policy-packs [{:id :test-pack}]
+                   :phase        :observe
+                   :check-fn     (stub-check-fn
+                                  [{:violation/severity :low
+                                    :violation/message  "Audit: read an extra file"}
+                                   {:violation/severity :info
+                                    :violation/message  "Info: large diff"}])})]
+      (is (true? (:passed? result)))
+      (is (empty? (:errors result)))
+      (is (= 2 (count (:warnings result)))))))
 
 (deftest check-behavioral-exception-test
   (testing "Returns passing result with warning when policy-pack throws"
-    (with-redefs [clojure.core/requiring-resolve
-                  (fn [sym]
-                    (when (= sym 'ai.miniforge.policy-pack.core/check-artifact)
-                      (fn [_packs _artifact _opts]
-                        (throw (ex-info "policy-pack unavailable" {})))))]
-      (let [result (behavioral/check-behavioral
-                    sample-artifact
-                    {:policy-packs [{:id :test-pack}] :phase :observe})]
-        (is (true? (:passed? result)))
-        (is (= :behavioral-check-error (-> result :warnings first :type)))))))
+    (let [result (behavioral/check-behavioral
+                  sample-artifact
+                  {:policy-packs [{:id :test-pack}]
+                   :phase        :observe
+                   :check-fn     (throwing-check-fn "policy-pack unavailable")})]
+      (is (true? (:passed? result)))
+      (is (= :behavioral-check-error (-> result :warnings first :type))))))
 
 ;;------------------------------------------------------------------------------ repair-behavioral
 
