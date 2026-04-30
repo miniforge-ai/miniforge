@@ -29,6 +29,7 @@
    - Rendering is serialized via a lock to prevent concurrent screen writes"
   (:require
    [ai.miniforge.tui-engine.log :as log]
+   [ai.miniforge.tui-engine.messages :as msg]
    [ai.miniforge.tui-engine.screen :as screen]
    [ai.miniforge.tui-engine.layout :as layout]))
 
@@ -177,7 +178,8 @@
                  (try
                    (do-render! app-state new-model)
                    (catch Exception e
-                     (log/error (str "render failed view=" (:view new-model)) e)
+                     (log/error (msg/t :render/render-failed
+                                       {:view (:view new-model)}) e)
                      (paint-error-banner! scr e)))))
     (atom app-state)))
 
