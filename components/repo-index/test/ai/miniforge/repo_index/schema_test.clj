@@ -114,6 +114,21 @@
                      :truncated? false
                      :token-estimate 50}))))
 
+(deftest repo-map-slice-allows-text-key-test
+  (testing "factory/->repo-map-slice and repo-map/generate both populate a
+            :text key (the rendered markdown). The schema doesn't list it,
+            but Malli's :map is open by default — so values that include
+            :text validate just like the schema-listed keys. This test
+            locks down that compatibility."
+    (is (m/validate sut/RepoMapSlice
+                    {:tree-sha "abc1234"
+                     :entries []
+                     :text "## Repo map\n"
+                     :total-files 0
+                     :shown-files 0
+                     :truncated? false
+                     :token-estimate 0}))))
+
 (deftest repo-map-slice-empty-entries-valid-test
   (testing "Empty :entries vector is allowed"
     (is (m/validate sut/RepoMapSlice

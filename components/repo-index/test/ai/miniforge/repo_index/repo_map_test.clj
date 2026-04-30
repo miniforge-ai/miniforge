@@ -92,8 +92,10 @@
       ;; The slice's :entries should be exactly :shown-files long.
       (is (= (:shown-files r) (count (:entries r)))))))
 
-(deftest generate-larger-budget-shows-strictly-more-files-test
-  (testing "Increasing the budget never reduces the number of shown files"
+(deftest generate-larger-budget-never-reduces-shown-files-test
+  (testing "Increasing the budget never reduces the number of shown files
+            (monotone, not strictly increasing — when both budgets fit
+            everything, both will report the same shown-files count)"
     (let [idx (big-index "src" 100)
           small (sut/generate idx {:token-budget 80})
           large (sut/generate idx {:token-budget 5000})]
