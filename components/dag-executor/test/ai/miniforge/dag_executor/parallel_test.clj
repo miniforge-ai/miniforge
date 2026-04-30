@@ -407,3 +407,89 @@
       (is (result/ok? ret))
       (is (nil? (get-in @pool [:locks hid])))
       (is (nil? (get-in @pool [:file-locks hid]))))))
+
+;------------------------------------------------------------------------------ Layer 2
+;; Mixed-resource acquisition — :locks[hid] is now a map keyed by resource type.
+;; These tests document and lock down the multi-resource cleanup behavior.
+
+(deftest mixed-acquisition-coexists-test
+  (testing "A single holder can hold repo-write + file-locks + worktree at the
+            same time without any of them clobbering the others (the fix to the
+            previous single-lock-per-holder design)"
+    (let [pool (sut/create-lock-pool :max-repo-writes 1 :max-worktrees 1)
+          hid  (random-uuid)]
+      (is (result/ok? (sut/acquire-repo-write!  pool hid 1000 no-logger)))
+      (is (result/ok? (sut/acquire-file-locks!  pool hid ["src/a.clj"] no-logger)))
+      (is (result/ok? (sut/acquire-worktree!    pool hid 1000 no-logger)))
+      ;; All three resources are recorded distinctly under :locks[hid].
+      (let [holder-locks (get-in @pool [:locks hid])]
+        (is (some? (:repo-write       holder-locks)))
+        (is (some? (:exclusive-files  holder-locks)))
+        (is (some? (:worktree         holder-locks))))
+      ;; All three permits / file-lock entries reflect the holdings.
+      (let [{:keys [repo-write-available worktree-available current-file-locks]}
+            (sut/available-capacity pool)]
+        (is (= 0 repo-write-available))
+        (is (= 0 worktree-available))
+        (is (= 1 current-file-locks))))))
+
+(deftest mixed-acquisition-individual-release-leaves-others-intact-test
+  (testing "Releasing one resource type does not affect the holder's other
+            recorded locks. Repo-write and file-locks are independent paths."
+    (let [pool (sut/create-lock-pool :max-repo-writes 1)
+          hid  (random-uuid)
+          _ (sut/acquire-repo-write! pool hid 1000 no-logger)
+          _ (sut/acquire-file-locks! pool hid ["src/x.clj"] no-logger)]
+      ;; Release repo-write only.
+      (is (result/ok? (sut/release-repo-write! pool hid no-logger)))
+      (is (= 1 (:repo-write-available (sut/available-capacity pool))))
+      ;; File lock is still recorded.
+      (is (some? (get-in @pool [:locks hid :exclusive-files])))
+      (is (= #{"src/x.clj"} (get-in @pool [:file-locks hid])))
+      ;; Now release file locks — :locks[hid] becomes empty and gets pruned.
+      (is (result/ok? (sut/release-file-locks! pool hid no-logger)))
+      (is (nil? (get-in @pool [:locks hid])))
+      (is (nil? (get-in @pool [:file-locks hid]))))))
+
+(deftest mixed-acquisition-release-all-clears-everything-test
+  (testing "release-all-locks! returns BOTH the repo-write permit AND the
+            worktree permit when a holder is recorded for both, and clears
+            file-lock state too. This is the bug class fixed by switching
+            :locks[hid] to a multi-resource map — under the old design,
+            acquire-file-locks! would clobber :locks[hid] with the file-lock
+            entry, so release-all-locks! could not see that the holder still
+            owed a repo-write permit, and the semaphore would be orphaned."
+    (let [pool (sut/create-lock-pool :max-repo-writes 1 :max-worktrees 1)
+          hid  (random-uuid)
+          _ (sut/acquire-repo-write!  pool hid 1000 no-logger)
+          _ (sut/acquire-file-locks!  pool hid ["src/a.clj"] no-logger)
+          _ (sut/acquire-worktree!    pool hid 1000 no-logger)
+          ret (sut/release-all-locks! pool hid no-logger)]
+      (is (result/ok? ret))
+      (is (true? (-> ret :data :released-all)))
+      ;; Both semaphores returned to full capacity.
+      (let [{:keys [repo-write-available worktree-available current-file-locks]}
+            (sut/available-capacity pool)]
+        (is (= 1 repo-write-available))
+        (is (= 1 worktree-available))
+        (is (= 0 current-file-locks)))
+      (is (nil? (get-in @pool [:locks hid])))
+      (is (nil? (get-in @pool [:file-locks hid]))))))
+
+(deftest mixed-acquisition-acquire-order-independence-test
+  (testing "Acquisition order does not matter: repo-write→files vs files→repo-write
+            both leave the holder with both lock entries"
+    (let [pool-a (sut/create-lock-pool :max-repo-writes 1)
+          pool-b (sut/create-lock-pool :max-repo-writes 1)
+          hid    (random-uuid)]
+      ;; pool-a: repo-write first, then files.
+      (sut/acquire-repo-write!  pool-a hid 1000 no-logger)
+      (sut/acquire-file-locks!  pool-a hid ["src/x.clj"] no-logger)
+      ;; pool-b: files first, then repo-write.
+      (sut/acquire-file-locks!  pool-b hid ["src/x.clj"] no-logger)
+      (sut/acquire-repo-write!  pool-b hid 1000 no-logger)
+      ;; Both pools end up with both keys recorded under :locks[hid].
+      (doseq [pool [pool-a pool-b]]
+        (let [holder-locks (get-in @pool [:locks hid])]
+          (is (some? (:repo-write      holder-locks)))
+          (is (some? (:exclusive-files holder-locks))))))))

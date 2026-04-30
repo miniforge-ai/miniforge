@@ -79,6 +79,14 @@
   [^Semaphore sem]
   (.release sem))
 
+(defn- prune-empty-holder
+  "Remove [:locks holder-id] when it becomes empty so the post-release world
+   matches the pre-acquire world (no orphan empty maps under :locks)."
+  [pool holder-id]
+  (if (empty? (get-in pool [:locks holder-id]))
+    (update pool :locks dissoc holder-id)
+    pool))
+
 (defn acquire-repo-write!
   "Acquire exclusive repo write lock.
    Blocks until lock is available or timeout.
@@ -92,7 +100,9 @@
                   :data {:holder-id holder-id}}))
     (if (try-acquire-semaphore sem timeout-ms)
       (let [lock (create-lock :repo-write holder-id)]
-        (swap! lock-pool assoc-in [:locks holder-id] lock)
+        ;; Nested under :repo-write so file/worktree locks held by the same
+        ;; holder are not clobbered.
+        (swap! lock-pool assoc-in [:locks holder-id :repo-write] lock)
         (when logger
           (log/info logger :dag-executor :lock/acquired
                     {:message "Repo write lock acquired"
@@ -110,12 +120,16 @@
 (defn release-repo-write!
   "Release repo write lock."
   [lock-pool holder-id logger]
-  (let [lock (get-in @lock-pool [:locks holder-id])
+  (let [lock (get-in @lock-pool [:locks holder-id :repo-write])
         sem (get-in @lock-pool [:semaphores :repo-write])]
-    (if (and lock (= :repo-write (:lock/resource-type lock)))
+    (if lock
       (do
         (release-semaphore sem)
-        (swap! lock-pool update :locks dissoc holder-id)
+        (swap! lock-pool
+               (fn [pool]
+                 (-> pool
+                     (update-in [:locks holder-id] dissoc :repo-write)
+                     (prune-empty-holder holder-id))))
         (when logger
           (log/info logger :dag-executor :lock/released
                     {:message "Repo write lock released"
@@ -157,10 +171,12 @@
                     {:holder-id holder-id
                      :conflicts conflicts}))
       (let [lock (create-lock :exclusive-files holder-id :files files)]
+        ;; Nested under :exclusive-files so repo-write/worktree locks held by
+        ;; the same holder are not clobbered.
         (swap! lock-pool
                (fn [pool]
                  (-> pool
-                     (assoc-in [:locks holder-id] lock)
+                     (assoc-in [:locks holder-id :exclusive-files] lock)
                      (assoc-in [:file-locks holder-id] file-set))))
         (when logger
           (log/info logger :dag-executor :lock/acquired
@@ -171,13 +187,14 @@
 (defn release-file-locks!
   "Release file locks for a holder."
   [lock-pool holder-id logger]
-  (let [lock (get-in @lock-pool [:locks holder-id])]
-    (if (and lock (= :exclusive-files (:lock/resource-type lock)))
+  (let [lock (get-in @lock-pool [:locks holder-id :exclusive-files])]
+    (if lock
       (do
         (swap! lock-pool
                (fn [pool]
                  (-> pool
-                     (update :locks dissoc holder-id)
+                     (update-in [:locks holder-id] dissoc :exclusive-files)
+                     (prune-empty-holder holder-id)
                      (update :file-locks dissoc holder-id))))
         (when logger
           (log/info logger :dag-executor :lock/released
@@ -225,7 +242,11 @@
     (if lock
       (do
         (release-semaphore sem)
-        (swap! lock-pool update-in [:locks holder-id] dissoc :worktree)
+        (swap! lock-pool
+               (fn [pool]
+                 (-> pool
+                     (update-in [:locks holder-id] dissoc :worktree)
+                     (prune-empty-holder holder-id))))
         (when logger
           (log/info logger :dag-executor :worktree/released
                     {:message "Worktree slot released"
@@ -292,19 +313,22 @@
      :current-file-locks (count (:file-locks @lock-pool))}))
 
 (defn release-all-locks!
-  "Release all locks held by a task (cleanup on completion/failure)."
+  "Release all locks held by a task (cleanup on completion/failure).
+
+   Reads :locks[holder-id] as a map keyed by resource type and returns each
+   relevant semaphore permit for the resource types present. File locks are
+   atom-only state, so no semaphore is involved for them."
   [lock-pool holder-id logger]
   (let [locks (get-in @lock-pool [:locks holder-id])
         repo-sem (get-in @lock-pool [:semaphores :repo-write])
         worktree-sem (get-in @lock-pool [:semaphores :worktree])]
-    ;; Release repo write if held
-    (when (and (:lock/resource-type locks)
-               (= :repo-write (:lock/resource-type locks)))
+    ;; Release repo write if held by this holder.
+    (when (:repo-write locks)
       (release-semaphore repo-sem))
-    ;; Release worktree if held
+    ;; Release worktree if held by this holder.
     (when (:worktree locks)
       (release-semaphore worktree-sem))
-    ;; Clear all lock state
+    ;; Clear all lock state for the holder.
     (swap! lock-pool
            (fn [pool]
              (-> pool
