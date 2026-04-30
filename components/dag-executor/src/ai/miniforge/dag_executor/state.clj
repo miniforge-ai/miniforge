@@ -420,6 +420,22 @@
   [run-state]
   (atom run-state))
 
+(def resolved-publish-event!
+  "Cached reference to event-stream publish! fn."
+  (delay
+    (try
+      (require 'ai.miniforge.event-stream.interface)
+      (ns-resolve (find-ns 'ai.miniforge.event-stream.interface) 'publish!)
+      (catch Exception _ nil))))
+
+(def resolved-task-state-changed
+  "Cached reference to event-stream task-state-changed constructor."
+  (delay
+    (try
+      (require 'ai.miniforge.event-stream.interface)
+      (ns-resolve (find-ns 'ai.miniforge.event-stream.interface) 'task-state-changed)
+      (catch Exception _ nil))))
+
 (defn update-task!
   "Atomically update a task within a run atom."
   [run-atom task-id update-fn logger]
@@ -434,12 +450,12 @@
     result))
 
 (defn emit-task-state-event!
-  "Emit task/state-changed event via requiring-resolve (no hard dep on event-stream)."
+  "Emit task/state-changed event via cached soft-dep resolution."
   [run-state task-id from-status to-status]
   (try
     (when-let [stream (get-in run-state [:run/config :event-stream])]
-      (when-let [publish-fn (requiring-resolve 'ai.miniforge.event-stream.interface/publish!)]
-        (when-let [constructor (requiring-resolve 'ai.miniforge.event-stream.interface/task-state-changed)]
+      (when-let [publish-fn @resolved-publish-event!]
+        (when-let [constructor @resolved-task-state-changed]
           (let [workflow-id (get-in run-state [:run/config :workflow-id])
                 dag-id (:dag/id run-state)]
             (publish-fn stream (constructor stream workflow-id dag-id task-id from-status to-status))))))
