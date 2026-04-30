@@ -54,11 +54,18 @@
      type - Error type keyword
      vendor - Vendor name string
 
-   Returns: Pattern map with compiled :regex"
+  Returns: Pattern map with compiled :regex"
   [pattern type vendor]
-  (-> pattern
-      (assoc :type type :vendor vendor)
-      (update :regex re-pattern)))
+  (let [pattern-vendor (or (:vendor pattern)
+                           (:failure/vendor pattern)
+                           vendor)
+        rate-limit? (or (:rate-limit? pattern)
+                        (= (:dependency/class pattern) :rate-limit))]
+    (-> pattern
+        (assoc :type type
+               :vendor pattern-vendor
+               :rate-limit? rate-limit?)
+        (update :regex re-pattern))))
 
 (defn load-patterns
   "Load and compile patterns from a config file.

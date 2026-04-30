@@ -14,6 +14,7 @@
    Layer 1: Classification strategies (pure)
    Layer 2: Orchestration (pure)"
   (:require
+   [ai.miniforge.failure-classifier.taxonomy :as taxonomy]
    [clojure.edn :as edn]
    [clojure.java.io :as io]
    [clojure.string :as str]))
@@ -21,9 +22,19 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Config loading and compilation
 
+(defn- load-edn-resource
+  "Load an EDN resource by path."
+  [resource-path]
+  (-> (io/resource resource-path) slurp edn/read-string))
+
 (def ^:private rules-config
   "Classification rules loaded from EDN config."
-  (-> (io/resource "config/failure-classifier/rules.edn") slurp edn/read-string))
+  (load-edn-resource "config/failure-classifier/rules.edn"))
+
+(def ^:private dependency-pattern-configs
+  "Ordered dependency pattern sources. Earlier files take priority."
+  [(load-edn-resource "error-patterns/backend-setup.edn")
+   (load-edn-resource "error-patterns/external.edn")])
 
 (defn- compile-pattern
   "Compile a string pattern into a case-insensitive regex."
@@ -35,6 +46,11 @@
   [{:keys [patterns class]}]
   {:patterns (mapv compile-pattern patterns)
    :class class})
+
+(defn- compile-dependency-pattern
+  "Compile a dependency pattern rule into a canonical matcher map."
+  [{:keys [regex] :as pattern}]
+  (assoc pattern :pattern (compile-pattern regex)))
 
 (def ^:private classification-rules
   "Compiled ordered list of [{:patterns [regex...] :class keyword}].
@@ -49,6 +65,12 @@
   "Maps anomaly category keywords to failure classes."
   (:anomaly-map rules-config))
 
+(def ^:private dependency-patterns
+  "Ordered dependency-specific matchers compiled from external/setup resources."
+  (->> dependency-pattern-configs
+       (mapcat :patterns)
+       (mapv compile-dependency-pattern)))
+
 ;------------------------------------------------------------------------------ Layer 1
 ;; Classification strategies
 
@@ -57,6 +79,12 @@
   [text patterns]
   (when (and text (seq patterns))
     (some #(re-find % text) patterns)))
+
+(defn- matches-pattern?
+  "Returns true if text matches the compiled dependency pattern."
+  [text pattern]
+  (when text
+    (re-find pattern text)))
 
 (defn- classify-by-message
   "Classify failure by matching error message against ordered pattern rules."
@@ -94,6 +122,71 @@
   [anomaly-category]
   (get anomaly-category-map anomaly-category))
 
+(defn- remove-nil-entries
+  "Return map entries whose values are non-nil."
+  [m]
+  (into {}
+        (remove (fn [[_ value]] (nil? value)))
+        m))
+
+(defn- failure-message
+  "Resolve the canonical failure message from failure context."
+  [{message :error/message}]
+  (or message ""))
+
+(defn- failure-record-context
+  "Project context fields into the canonical record context."
+  [failure-context]
+  (-> failure-context
+      (dissoc :error/message)
+      remove-nil-entries
+      not-empty))
+
+(defn- match-dependency-pattern
+  "Return the first matching dependency pattern for a failure message."
+  [message]
+  (some (fn [{compiled-pattern :pattern :as dependency-pattern}]
+          (when (matches-pattern? message compiled-pattern)
+            dependency-pattern))
+        dependency-patterns))
+
+(defn- dependency-attribution
+  "Build canonical dependency attribution from a matched dependency pattern."
+  [{source :failure/source
+    vendor :failure/vendor
+    dependency-class :dependency/class
+    retryability :dependency/retryability}]
+  (taxonomy/make-dependency-attribution
+   {:failure/source source
+    :failure/vendor vendor
+    :dependency/class dependency-class
+    :dependency/retryability retryability}))
+
+(defn- classify-dependency-record
+  "Construct canonical classified dependency failure from a matched pattern."
+  [failure-context failure-class dependency-pattern]
+  (let [message (failure-message failure-context)
+        context (failure-record-context failure-context)
+        attribution (dependency-attribution dependency-pattern)]
+    (taxonomy/make-classified-dependency-failure
+     {:failure/class failure-class
+      :failure/message message
+      :failure/source (:failure/source attribution)
+      :failure/vendor (:failure/vendor attribution)
+      :dependency/class (:dependency/class attribution)
+      :dependency/retryability (:dependency/retryability attribution)
+      :failure/context context})))
+
+(defn- classify-standard-record
+  "Construct canonical classified failure without dependency attribution."
+  [failure-context failure-class]
+  (let [message (failure-message failure-context)
+        context (failure-record-context failure-context)]
+    (taxonomy/make-classified-failure
+     {:failure/class failure-class
+      :failure/message message
+      :failure/context context})))
+
 ;------------------------------------------------------------------------------ Layer 2
 ;; Orchestration
 
@@ -123,6 +216,26 @@
   "Convenience: classify a Throwable directly."
   [^Throwable ex]
   (classify-failure
+   {:anomaly/category  nil
+    :exception/class   (str (type ex))
+    :error/message     (.getMessage ex)}))
+
+(defn classify-failure-record
+  "Classify a failure into a canonical record with optional dependency
+   attribution."
+  [failure-context]
+  (let [resolved-context (or failure-context {})
+        message (failure-message resolved-context)
+        failure-class (classify-failure resolved-context)
+        dependency-pattern (match-dependency-pattern message)]
+    (if dependency-pattern
+      (classify-dependency-record resolved-context failure-class dependency-pattern)
+      (classify-standard-record resolved-context failure-class))))
+
+(defn classify-exception-record
+  "Convenience: classify a Throwable into a canonical record."
+  [^Throwable ex]
+  (classify-failure-record
    {:anomaly/category  nil
     :exception/class   (str (type ex))
     :error/message     (.getMessage ex)}))

@@ -120,7 +120,16 @@
              :failure/vendor :anthropic
              :dependency/class :rate-limit
              :dependency/retryability :retryable
-             :failure/context {:backend :anthropic}})))))
+             :failure/context {:backend :anthropic}}))))
+
+  (testing "classified failure constructor composes the canonical shape"
+    (is (= {:failure/class :failure.class/timeout
+            :failure/message "deadline exceeded"
+            :failure/context {:phase :plan}}
+           (fc/make-classified-failure
+            {:failure/class :failure.class/timeout
+             :failure/message "deadline exceeded"
+             :failure/context {:phase :plan}})))))
 
 (deftest dependency-constructor-validation-test
   (testing "dependency attribution constructor rejects missing required fields"
@@ -290,6 +299,79 @@
            (fc/classify-exception (java.net.ConnectException. "Connection refused"))))
     (is (= :failure.class/external
            (fc/classify-exception (java.net.UnknownHostException. "host.invalid"))))))
+
+;; ---------------------------------------------------------------------------- Rich dependency attribution records
+
+(deftest classify-record-standard-failure-test
+  (let [record (fc/classify-record {:anomaly/category :anomalies/timeout
+                                    :phase :plan
+                                    :tool/id :planner})]
+    (is (= :failure.class/timeout (:failure/class record)))
+    (is (= "" (:failure/message record)))
+    (is (= {:anomaly/category :anomalies/timeout
+            :phase :plan
+            :tool/id :planner}
+           (:failure/context record)))
+    (is (not (fc/dependency-failure? record)))))
+
+(deftest classify-record-dependency-failure-test
+  (let [test-cases [{:name "Anthropic provider outage"
+                     :input {:error/message "Anthropic API service unavailable"}
+                     :expected {:failure/class :failure.class/external
+                                :failure/source :external-provider
+                                :dependency/class :outage
+                                :dependency/retryability :retryable}}
+                    {:name "Codex unsupported model"
+                     :input {:error/message "Codex account cannot use model gpt-5.2-codex"}
+                     :expected {:failure/class :failure.class/unknown
+                                :failure/source :external-provider
+                                :failure/vendor :codex
+                                :dependency/class :account-limitation
+                                :dependency/retryability :operator-action}}
+                    {:name "Codex session permission"
+                     :input {:error/message "Codex cannot access session files: permission denied"}
+                     :expected {:failure/class :failure.class/unknown
+                                :failure/source :user-env
+                                :failure/vendor :codex
+                                :dependency/class :permission
+                                :dependency/retryability :operator-action}}
+                    {:name "Missing Anthropic key"
+                     :input {:error/message "ANTHROPIC_API_KEY is not set"}
+                     :expected {:failure/class :failure.class/unknown
+                                :failure/source :user-env
+                                :failure/vendor :anthropic
+                                :dependency/class :misconfiguration
+                                :dependency/retryability :operator-action}}
+                    {:name "GitHub platform unavailable"
+                     :input {:error/message "GitHub 503 Service Unavailable"}
+                     :expected {:failure/class :failure.class/external
+                                :failure/source :external-platform
+                                :failure/vendor :github
+                                :dependency/class :outage
+                                :dependency/retryability :retryable}}
+                    {:name "Kubernetes authentication failed"
+                     :input {:error/message "Kubernetes 401 unauthorized"}
+                     :expected {:failure/class :failure.class/policy
+                                :failure/source :external-platform
+                                :failure/vendor :kubernetes
+                                :dependency/class :auth
+                                :dependency/retryability :operator-action}}]]
+    (doseq [{:keys [name input expected]} test-cases]
+      (testing name
+        (let [record (fc/classify-record input)]
+          (is (= expected
+                 (select-keys record (keys expected))))
+          (is (= (:error/message input) (:failure/message record)))
+          (is (fc/dependency-failure? record)))))))
+
+(deftest classify-exception-record-test
+  (let [record (fc/classify-exception-record
+                (java.net.ConnectException. "GitHub 503 Service Unavailable"))]
+    (is (= :failure.class/external (:failure/class record)))
+    (is (= :external-platform (:failure/source record)))
+    (is (= :github (:failure/vendor record)))
+    (is (= :outage (:dependency/class record)))
+    (is (= :retryable (:dependency/retryability record)))))
 
 ;; ---------------------------------------------------------------------------- Fallback to unknown
 
