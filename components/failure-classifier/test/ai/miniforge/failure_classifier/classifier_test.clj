@@ -35,9 +35,86 @@
     (is (not (fc/valid-failure-class? :something-else)))
     (is (not (fc/valid-failure-class? nil)))))
 
+(deftest dependency-taxonomy-predicates-test
+  (testing "all canonical dependency enums are valid"
+    (doseq [source [:miniforge :user-env :external-provider :external-platform]]
+      (is (fc/valid-failure-source? source)))
+    (doseq [vendor [:anthropic :openai :github :kubernetes]]
+      (is (fc/valid-dependency-vendor? vendor)))
+    (doseq [dependency-class [:outage :rate-limit :permission :unsupported-feature]]
+      (is (fc/valid-dependency-class? dependency-class)))
+    (doseq [retryability [:retryable :non-retryable :operator-action]]
+      (is (fc/valid-dependency-retryability? retryability))))
+
+  (testing "bogus dependency enum values are invalid"
+    (is (not (fc/valid-failure-source? :bogus)))
+    (is (not (fc/valid-dependency-vendor? :bogus)))
+    (is (not (fc/valid-dependency-class? :bogus)))
+    (is (not (fc/valid-dependency-retryability? :bogus)))))
+
 (deftest unknown-class-test
   (is (fc/unknown-class? :failure.class/unknown))
   (is (not (fc/unknown-class? :failure.class/timeout))))
+
+(deftest dependency-failure-predicates-test
+  (testing "dependency-failure? distinguishes product failures from dependency failures"
+    (is (fc/dependency-failure? {:failure/source :user-env}))
+    (is (fc/dependency-failure? {:failure/source :external-provider}))
+    (is (fc/dependency-failure? {:failure/source :external-platform}))
+    (is (not (fc/dependency-failure? {:failure/source :miniforge}))))
+
+  (testing "retryable-dependency-failure? only accepts retryable dependency failures"
+    (is (fc/retryable-dependency-failure?
+         {:failure/source :external-provider
+          :dependency/retryability :retryable}))
+    (is (not (fc/retryable-dependency-failure?
+              {:failure/source :external-provider
+               :dependency/retryability :non-retryable})))
+    (is (not (fc/retryable-dependency-failure?
+              {:failure/source :miniforge
+               :dependency/retryability :retryable}))))
+
+  (testing "operator-action-required? reflects the retryability contract"
+    (is (fc/operator-action-required?
+         {:dependency/retryability :operator-action}))
+    (is (not (fc/operator-action-required?
+              {:dependency/retryability :retryable})))))
+
+(deftest dependency-constructors-test
+  (testing "dependency attribution constructor applies defaults"
+    (is (= {:failure/source :external-provider
+            :dependency/class :unknown
+            :dependency/retryability :non-retryable}
+           (fc/make-dependency-attribution
+            {:failure/source :external-provider}))))
+
+  (testing "dependency attribution constructor preserves explicit fields"
+    (is (= {:failure/source :external-provider
+            :failure/vendor :anthropic
+            :dependency/class :rate-limit
+            :dependency/retryability :retryable}
+           (fc/make-dependency-attribution
+            {:failure/source :external-provider
+             :failure/vendor :anthropic
+             :dependency/class :rate-limit
+             :dependency/retryability :retryable}))))
+
+  (testing "classified dependency failure constructor composes the canonical shape"
+    (is (= {:failure/class :failure.class/external
+            :failure/message "Provider rate limit"
+            :failure/source :external-provider
+            :failure/vendor :anthropic
+            :dependency/class :rate-limit
+            :dependency/retryability :retryable
+            :failure/context {:backend :anthropic}}
+           (fc/make-classified-dependency-failure
+            {:failure/class :failure.class/external
+             :failure/message "Provider rate limit"
+             :failure/source :external-provider
+             :failure/vendor :anthropic
+             :dependency/class :rate-limit
+             :dependency/retryability :retryable
+             :failure/context {:backend :anthropic}})))))
 
 ;; ---------------------------------------------------------------------------- Classification by anomaly category
 
