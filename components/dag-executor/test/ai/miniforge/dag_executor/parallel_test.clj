@@ -436,10 +436,13 @@
 (deftest mixed-acquisition-individual-release-leaves-others-intact-test
   (testing "Releasing one resource type does not affect the holder's other
             recorded locks. Repo-write and file-locks are independent paths."
-    (let [pool (sut/create-lock-pool :max-repo-writes 1)
-          hid  (random-uuid)
-          _ (sut/acquire-repo-write! pool hid 1000 no-logger)
-          _ (sut/acquire-file-locks! pool hid ["src/x.clj"] no-logger)]
+    (let [pool         (sut/create-lock-pool :max-repo-writes 1)
+          hid          (random-uuid)
+          repo-ret     (sut/acquire-repo-write! pool hid 1000 no-logger)
+          files-ret    (sut/acquire-file-locks! pool hid ["src/x.clj"] no-logger)]
+      ;; Verify both preconditions hold before exercising release semantics.
+      (is (result/ok? repo-ret))
+      (is (result/ok? files-ret))
       ;; Release repo-write only.
       (is (result/ok? (sut/release-repo-write! pool hid no-logger)))
       (is (= 1 (:repo-write-available (sut/available-capacity pool))))
@@ -459,12 +462,16 @@
             acquire-file-locks! would clobber :locks[hid] with the file-lock
             entry, so release-all-locks! could not see that the holder still
             owed a repo-write permit, and the semaphore would be orphaned."
-    (let [pool (sut/create-lock-pool :max-repo-writes 1 :max-worktrees 1)
-          hid  (random-uuid)
-          _ (sut/acquire-repo-write!  pool hid 1000 no-logger)
-          _ (sut/acquire-file-locks!  pool hid ["src/a.clj"] no-logger)
-          _ (sut/acquire-worktree!    pool hid 1000 no-logger)
-          ret (sut/release-all-locks! pool hid no-logger)]
+    (let [pool         (sut/create-lock-pool :max-repo-writes 1 :max-worktrees 1)
+          hid          (random-uuid)
+          repo-ret     (sut/acquire-repo-write!  pool hid 1000 no-logger)
+          files-ret    (sut/acquire-file-locks!  pool hid ["src/a.clj"] no-logger)
+          worktree-ret (sut/acquire-worktree!    pool hid 1000 no-logger)
+          ret          (sut/release-all-locks! pool hid no-logger)]
+      ;; Verify the preconditions actually held before exercising release.
+      (is (result/ok? repo-ret))
+      (is (result/ok? files-ret))
+      (is (result/ok? worktree-ret))
       (is (result/ok? ret))
       (is (true? (-> ret :data :released-all)))
       ;; Both semaphores returned to full capacity.
@@ -483,11 +490,11 @@
           pool-b (sut/create-lock-pool :max-repo-writes 1)
           hid    (random-uuid)]
       ;; pool-a: repo-write first, then files.
-      (sut/acquire-repo-write!  pool-a hid 1000 no-logger)
-      (sut/acquire-file-locks!  pool-a hid ["src/x.clj"] no-logger)
+      (is (result/ok? (sut/acquire-repo-write! pool-a hid 1000 no-logger)))
+      (is (result/ok? (sut/acquire-file-locks! pool-a hid ["src/x.clj"] no-logger)))
       ;; pool-b: files first, then repo-write.
-      (sut/acquire-file-locks!  pool-b hid ["src/x.clj"] no-logger)
-      (sut/acquire-repo-write!  pool-b hid 1000 no-logger)
+      (is (result/ok? (sut/acquire-file-locks! pool-b hid ["src/x.clj"] no-logger)))
+      (is (result/ok? (sut/acquire-repo-write! pool-b hid 1000 no-logger)))
       ;; Both pools end up with both keys recorded under :locks[hid].
       (doseq [pool [pool-a pool-b]]
         (let [holder-locks (get-in @pool [:locks hid])]

@@ -284,7 +284,7 @@
       (is (= :unknown-event (-> ret :error :code))))))
 
 (deftest handle-task-event-started-transitions-to-running-test
-  (testing "Kernel profile maps :started → :transition :running"
+  (testing "Test profile (dag-task-profile) maps :started → :transition :running"
     (let [tid (random-uuid)
           run-atom (run-atom-with [(task-def tid)])
           _ (state/transition-task! run-atom tid :ready nil)
@@ -295,7 +295,7 @@
       (is (= :running (get-in @run-atom [:run/tasks tid :task/status]))))))
 
 (deftest handle-task-event-completed-marks-completed-test
-  (testing "Kernel profile maps :completed → :complete :completed (success terminal)"
+  (testing "Test profile maps :completed → :complete :completed (success terminal)"
     (let [tid (random-uuid)
           run-atom (run-atom-with [(task-def tid)])
           _ (state/transition-task! run-atom tid :ready nil)
@@ -307,7 +307,7 @@
       (is (= :completed (get-in @run-atom [:run/tasks tid :task/status]))))))
 
 (deftest handle-task-event-failed-marks-failed-test
-  (testing "Kernel profile maps :failed → :fail with reason :failed"
+  (testing "Test profile maps :failed → :fail with reason :failed"
     (let [tid (random-uuid)
           run-atom (run-atom-with [(task-def tid)])
           _ (state/transition-task! run-atom tid :ready nil)
