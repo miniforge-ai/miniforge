@@ -13,7 +13,6 @@
    Layer 2: Gate check/repair + registration"
   (:require
    [ai.miniforge.gate.registry :as registry]
-   [ai.miniforge.response.interface :as response]
    [clojure.edn :as edn]
    [clojure.java.io :as io]
    [clojure.string :as str]))
@@ -96,8 +95,9 @@
   "Check which files can be formatted. Always passes — formatting is repair."
   [artifact _ctx]
   (let [formattable (filterv formattable-file? (get artifact :code/files []))]
-    (response/success {:formattable-files (mapv :path formattable)
-                       :message (str (count formattable) " file(s) support LSP formatting")})))
+    {:passed? true
+     :formattable-files (mapv :path formattable)
+     :message (str (count formattable) " file(s) support LSP formatting")}))
 
 (defn repair-format
   "Format files via LSP."
@@ -107,7 +107,9 @@
         formattable (filterv formattable-file? (get artifact :code/files []))
         results     (mapv #(format-single-file manager (:path %) worktree) formattable)
         formatted   (mapv :path (filter :formatted? results))]
-    (response/success {:artifact artifact :formatted formatted})))
+    {:success? true
+     :artifact artifact
+     :formatted formatted}))
 
 ;------------------------------------------------------------------------------ Layer 2
 ;; Gate registration
