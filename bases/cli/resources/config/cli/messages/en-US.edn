@@ -97,6 +97,21 @@
    ["claude" "Claude CLI" "Required for LLM backend"]]
   :doctor/config-exists "Config file exists at {config-path}"
   :doctor/no-config "No config file. Run '{command}'"
+
+  ;; Runtime adapter (N11-delta Phase 3)
+  :runtime/doctor-section-title "Container runtime"
+  :runtime/doctor-line "Runtime: {kind} {runtime-version} (selected by {selection})"
+  :runtime/doctor-error-line "No usable container runtime: {code} — {message}"
+  :runtime/doctor-probed-line "Probed: {probed}"
+  :runtime/doctor-override-hint "Override with :runtime-kind in config or {env-var}=docker|podman"
+  :runtime/probed-available "{kind} ({runtime-version})"
+  :runtime/probed-unavailable "{kind} — {reason}"
+  :runtime/info-kind "Runtime:        {kind}"
+  :runtime/info-executable "Executable:     {executable}"
+  :runtime/info-runtime-version "Version:        {runtime-version}"
+  :runtime/info-selection "Selected by:    {selection}"
+  :runtime/info-probed "Probed:         {probed}"
+  :runtime/error-no-runtime "No usable container runtime: {code} — {message}"
   :status/workflow "Status for workflow: {workflow-id}"
   :status/workflow-todo "TODO: Query workflow component"
   :status/all-workflows "All workflows:"
