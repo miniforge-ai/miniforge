@@ -37,11 +37,27 @@
            sut/improvement-types))))
 
 ;------------------------------------------------------------------------------ Layer 1
-;; Protocol vars are present (defprotocol generates these as classes)
+;; Protocol vars are present.
+;;
+;; defprotocol creates a Clojure *var* (the value here) bound to a map that
+;; describes the protocol's methods. It also generates a Java interface as a
+;; class side-effect, but the var is the canonical entry point for callers
+;; using satisfies? / extend-protocol. We assert the var is defined and that
+;; its protocol map declares the documented methods.
 
 (deftest protocols-defined-test
-  (testing "All four documented protocols exist as defprotocol classes"
-    (is (some? sut/Operator))
-    (is (some? sut/PatternDetector))
-    (is (some? sut/ImprovementGenerator))
-    (is (some? sut/Governance))))
+  (testing "All four documented protocols are defined as protocol vars
+            and declare the documented methods on each."
+    (is (map? sut/Operator))
+    (is (= #{:observe-signal :get-signals :analyze-patterns :propose-improvement
+             :get-proposals :apply-improvement :reject-improvement}
+           (set (keys (:sigs sut/Operator)))))
+    (is (map? sut/PatternDetector))
+    (is (= #{:detect :get-pattern-types}
+           (set (keys (:sigs sut/PatternDetector)))))
+    (is (map? sut/ImprovementGenerator))
+    (is (= #{:generate-improvements :get-supported-patterns}
+           (set (keys (:sigs sut/ImprovementGenerator)))))
+    (is (map? sut/Governance))
+    (is (= #{:requires-approval? :can-auto-apply? :get-approval-policy}
+           (set (keys (:sigs sut/Governance)))))))
