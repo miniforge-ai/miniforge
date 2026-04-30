@@ -25,6 +25,7 @@
         ai.miniforge/heuristic {:local/root "../../components/heuristic"}
         ai.miniforge/response {:local/root "../../components/response"}
         ai.miniforge/response-chain {:local/root "../../components/response-chain"}
+        ai.miniforge/boundary {:local/root "../../components/boundary"}
         ai.miniforge/fsm {:local/root "../../components/fsm"}
         ai.miniforge/phase {:local/root "../../components/phase"}
         ai.miniforge/gate {:local/root "../../components/gate"}
