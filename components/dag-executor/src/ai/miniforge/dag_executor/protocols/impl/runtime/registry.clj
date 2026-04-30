@@ -87,3 +87,29 @@
   [k flag-key]
   (or (get-in (entry k) [:flags flag-key])
       (get-in (entry :docker) [:flags flag-key])))
+
+(defn default
+  "Look up per-runtime container default `default-key` for kind `k`.
+   Falls back to the Docker default when `k` has no override; this lets
+   future kinds inherit Docker's defaults until they declare their own."
+  [k default-key]
+  (or (get-in (entry k) [:defaults default-key])
+      (get-in (entry :docker) [:defaults default-key])))
+
+(defn user-spec
+  "Return the `<uid>:<gid>` string for runtime kind `k`, derived from the
+   numeric :uid and :gid defaults so the user spec and tmpfs uid=/gid=
+   options stay in lockstep."
+  [k]
+  (str (default k :uid) ":" (default k :gid)))
+
+(defn tmpfs-mount-options
+  "Build the comma-separated options string appended to `--tmpfs <path>:`
+   from the runtime's defaults. Uses the runtime's :uid / :gid / :tmpfs-size
+   so changing one of those defaults flows through the user spec and the
+   tmpfs options together."
+  [k]
+  (let [uid  (default k :uid)
+        gid  (default k :gid)
+        size (default k :tmpfs-size)]
+    (str "rw,nosuid,nodev,exec,size=" size ",uid=" uid ",gid=" gid)))
