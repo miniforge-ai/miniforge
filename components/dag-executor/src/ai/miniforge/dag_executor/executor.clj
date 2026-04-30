@@ -21,7 +21,7 @@
 
    Provides a unified interface for task isolation using:
    - Kubernetes (K8s Jobs)
-   - Docker containers
+   - OCI containers (Docker today; Podman lands in N11-delta Phase 2)
    - Local worktree with semaphores (fallback)
 
    The executor contract abstracts how tasks get isolated environments
@@ -29,13 +29,14 @@
 
    See:
    - protocols/executor.clj - Protocol definition
-   - protocols/impl/docker.clj - Docker implementation
+   - protocols/impl/runtime/oci_cli.clj - OCI-CLI implementation (Docker / Podman)
    - protocols/impl/kubernetes.clj - Kubernetes implementation
    - protocols/impl/worktree.clj - Worktree fallback implementation"
   (:require
    [ai.miniforge.dag-executor.result :as result]
    [ai.miniforge.dag-executor.protocols.executor :as proto]
-   [ai.miniforge.dag-executor.protocols.impl.docker :as docker]
+   [ai.miniforge.dag-executor.protocols.impl.runtime.descriptor :as descriptor]
+   [ai.miniforge.dag-executor.protocols.impl.runtime.oci-cli :as oci-cli]
    [ai.miniforge.dag-executor.protocols.impl.kubernetes :as k8s]
    [ai.miniforge.dag-executor.protocols.impl.worktree :as worktree]))
 
@@ -67,13 +68,23 @@
 ;; ============================================================================
 
 (def create-docker-executor
-  "Create a Docker executor.
+  "Create a Docker-backed OCI-CLI executor.
 
    Config:
    - :image - Container image for tasks (default: alpine:latest)
    - :network - Docker network to attach to
-   - :docker-path - Path to docker binary"
-  docker/create-docker-executor)
+   - :docker-path - Path to docker binary (legacy alias for :executable)"
+  oci-cli/create-docker-executor)
+
+(def create-oci-cli-executor
+  "Create an OCI-CLI executor for the runtime kind named on the config.
+
+   Config:
+   - :runtime-kind - :docker (default; only kind supported in Phase 1)
+   - :executable - explicit path to the runtime CLI binary
+   - :image - container image for tasks (default: alpine:latest)
+   - :network - network to attach to"
+  oci-cli/create-oci-cli-executor)
 
 (def create-kubernetes-executor
   "Create a Kubernetes executor.
@@ -93,35 +104,40 @@
   worktree/create-worktree-executor)
 
 ;; ============================================================================
-;; Docker Image Management
+;; OCI Image Management
 ;; ============================================================================
 
 (def task-runner-images
   "Pre-defined task runner images that can be built from bundled Dockerfiles.
    Keys: :minimal (Alpine), :clojure (full tooling)"
-  docker/task-runner-images)
+  oci-cli/task-runner-images)
 
 (def image-exists?
-  "Check if a Docker image exists locally.
-   (image-exists? docker-path image-name) -> boolean"
-  docker/image-exists?)
+  "Check if a container image exists locally.
+   (image-exists? descriptor image-name) -> boolean
+
+   The descriptor argument is a runtime descriptor as produced by
+   protocols.impl.runtime.descriptor/make-descriptor. nil falls back to
+   the default Docker executable name (preserving the pre-N11-delta call
+   sites that pass nil)."
+  oci-cli/image-exists?)
 
 (def build-image!
-  "Build a Docker image from a Dockerfile resource.
-   (build-image! docker-path image-name dockerfile-resource-path) -> Result"
-  docker/build-image!)
+  "Build a container image from a Dockerfile resource.
+   (build-image! descriptor image-name dockerfile-resource-path) -> Result"
+  oci-cli/build-image!)
 
 (def ensure-image!
   "Ensure a task runner image exists, building if necessary.
-   (ensure-image! docker-path :minimal) -> Result
-   (ensure-image! docker-path :clojure :force? true) -> Result"
-  docker/ensure-image!)
+   (ensure-image! descriptor :minimal) -> Result
+   (ensure-image! descriptor :clojure :force? true) -> Result"
+  oci-cli/ensure-image!)
 
 (def ensure-all-images!
   "Ensure all task runner images are available.
-   (ensure-all-images! docker-path) -> {:minimal Result :clojure Result}
-   (ensure-all-images! docker-path :force? true) -> rebuilds all"
-  docker/ensure-all-images!)
+   (ensure-all-images! descriptor) -> {:minimal Result :clojure Result}
+   (ensure-all-images! descriptor :force? true) -> rebuilds all"
+  oci-cli/ensure-all-images!)
 
 ;; ============================================================================
 ;; Executor Selection
@@ -184,18 +200,21 @@
      {:image - image to use for tasks (default: miniforge/task-runner:latest)
       :image-type - which bundled image to ensure (:minimal or :clojure)
       :ensure-image? - whether to build image if missing (default: true)
-      :docker-path - path to docker binary}
+      :docker-path - path to docker binary (legacy alias for :executable)}
 
-   Returns {:executor DockerExecutor :image-result Result} or error Result."
+   Returns {:executor OciCliExecutor :image-result Result} or error Result."
   [config]
-  (let [docker-path (:docker-path config)
-        image-type (get config :image-type :minimal)
-        ensure? (get config :ensure-image? true)
+  (let [image-type    (get config :image-type :minimal)
+        ensure?       (get config :ensure-image? true)
         default-image (get-in task-runner-images [image-type :image])
-        image (or (:image config) default-image)]
+        image         (or (:image config) default-image)
+        ;; Build a descriptor once so image-side operations and the executor
+        ;; see the same runtime configuration (executable, kind, etc.).
+        runtime       (descriptor/make-descriptor
+                       (assoc config :runtime-kind :docker))]
     ;; Ensure image exists if requested
     (if ensure?
-      (let [image-result (ensure-image! docker-path image-type)]
+      (let [image-result (ensure-image! runtime image-type)]
         (if (result/ok? image-result)
           (result/ok {:executor (create-docker-executor (assoc config :image image))
                       :image-result image-result})

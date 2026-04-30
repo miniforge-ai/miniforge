@@ -32,6 +32,7 @@
             [ai.miniforge.logging.interface :as log]
             [ai.miniforge.phase.interface :as phase]
             [ai.miniforge.response.interface :as response]
+            [ai.miniforge.supervisory-state.interface :as supervisory]
             [ai.miniforge.workflow.checkpoint-store :as checkpoint-store]
             [ai.miniforge.workflow.context :as ctx]
             [ai.miniforge.workflow.execution :as exec]
@@ -373,6 +374,9 @@
          initial-ctx         (build-initial-context workflow input opts)
          output-ctx-vol      (volatile! nil)
          exception-vol       (volatile! nil)]
+
+     (when event-stream
+       (supervisory/ensure-attached! event-stream))
 
      (checkpoint-store/persist-execution-state! initial-ctx)
 

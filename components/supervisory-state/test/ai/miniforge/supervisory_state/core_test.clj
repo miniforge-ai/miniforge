@@ -76,6 +76,28 @@
         "attach! registers the stream subscription identically to create+start!")
     (iface/stop! comp)))
 
+(deftest ensure-attached!-is-idempotent
+  (let [stream (no-sink-stream)]
+    (is (false? (iface/attached? stream)))
+    (let [created (iface/ensure-attached! stream)]
+      (is (some? created))
+      (is (true? (iface/attached? stream)))
+      (is (= 1 (count (:subscribers @stream)))))
+    (is (nil? (iface/ensure-attached! stream)))
+    (is (= 1 (count (:subscribers @stream))))))
+
+(deftest ensure-attached!-is-atomic-per-stream
+  (let [stream (no-sink-stream)
+        attempts 8
+        results (->> (range attempts)
+                     (mapv (fn [_]
+                             (future (iface/ensure-attached! stream))))
+                     (mapv deref))
+        created-count (count (filter some? results))]
+    (is (= 1 created-count))
+    (is (true? (iface/attached? stream)))
+    (is (= 1 (count (:subscribers @stream))))))
+
 ;------------------------------------------------------------------------------ Emission
 
 (deftest live-workflow-events-produce-supervisory-snapshots
