@@ -21,6 +21,44 @@
    :failure.class/data-integrity    ; Hash mismatch, stale context, schema violation
    :failure.class/unknown}          ; Unclassified — treat as SLI incident
 
+ :failure-sources
+ #{:miniforge                       ; Product/runtime defect in Miniforge itself
+   :user-env                        ; Local setup, config, permission, account env
+   :external-provider               ; LLM or SaaS provider dependency
+   :external-platform}              ; Platform dependency like GitHub or Kubernetes
+
+ :dependency-vendors
+ #{:anthropic
+   :openai
+   :codex
+   :github
+   :gitlab
+   :kubernetes
+   :jira
+   :ollama
+   :google
+   :docker
+   :podman}
+
+ :dependency-classes
+ #{:outage
+   :degraded
+   :rate-limit
+   :auth
+   :account-limitation
+   :permission
+   :misconfiguration
+   :unsupported-feature
+   :timeout
+   :network
+   :quota
+   :unknown}
+
+ :dependency-retryabilities
+ #{:retryable
+   :non-retryable
+   :operator-action}
+
  :message-rules
  [;; Timeout
   {:patterns ["timeout" "timed?\\s*out" "deadline\\s*exceeded"

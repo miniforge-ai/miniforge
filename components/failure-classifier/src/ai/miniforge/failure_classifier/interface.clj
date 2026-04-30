@@ -26,18 +26,78 @@
   "Malli schema for a failure class keyword."
   taxonomy/FailureClass)
 
+(def FailureSource
+  "Malli schema for a failure source keyword."
+  taxonomy/FailureSource)
+
+(def DependencyVendor
+  "Malli schema for a dependency vendor keyword."
+  taxonomy/DependencyVendor)
+
+(def DependencyClass
+  "Malli schema for a dependency class keyword."
+  taxonomy/DependencyClass)
+
+(def DependencyRetryability
+  "Malli schema for a dependency retryability keyword."
+  taxonomy/DependencyRetryability)
+
+(def DependencyAttribution
+  "Malli schema for canonical dependency attribution."
+  taxonomy/DependencyAttribution)
+
 (def ClassifiedFailure
   "Malli schema: [:map [:failure/class FailureClass] [:failure/message :string] ...]"
   taxonomy/ClassifiedFailure)
+
+(def ClassifiedDependencyFailure
+  "Malli schema for a classified failure with dependency attribution."
+  taxonomy/ClassifiedDependencyFailure)
 
 (def valid-failure-class?
   "Returns true if the keyword is a valid canonical failure class."
   taxonomy/valid-failure-class?)
 
+(def valid-failure-source?
+  "Returns true if the keyword is a valid canonical failure source."
+  taxonomy/valid-failure-source?)
+
+(def valid-dependency-vendor?
+  "Returns true if the keyword is a known dependency vendor."
+  taxonomy/valid-dependency-vendor?)
+
+(def valid-dependency-class?
+  "Returns true if the keyword is a valid canonical dependency class."
+  taxonomy/valid-dependency-class?)
+
+(def valid-dependency-retryability?
+  "Returns true if the keyword is a valid dependency retryability state."
+  taxonomy/valid-dependency-retryability?)
+
 (def unknown-class?
   "Returns true if the failure class is :failure.class/unknown.
    Unknown failures MUST be treated as SLI incidents (N1 §5.3.3)."
   taxonomy/unknown-class?)
+
+(def dependency-failure?
+  "Returns true if the failure is dependency- or environment-driven."
+  taxonomy/dependency-failure?)
+
+(def retryable-dependency-failure?
+  "Returns true if the dependency failure is safe to retry automatically."
+  taxonomy/retryable-dependency-failure?)
+
+(def operator-action-required?
+  "Returns true if the dependency failure requires operator intervention."
+  taxonomy/operator-action-required?)
+
+(def make-dependency-attribution
+  "Construct canonical dependency attribution."
+  taxonomy/make-dependency-attribution)
+
+(def make-classified-dependency-failure
+  "Construct canonical classified dependency failure."
+  taxonomy/make-classified-dependency-failure)
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Classification
@@ -87,5 +147,15 @@
 
   (classify {:error/message "Something mysterious happened"})
   ;; => :failure.class/unknown
+
+  (make-dependency-attribution
+   {:failure/source :external-provider
+    :failure/vendor :anthropic
+    :dependency/class :rate-limit
+    :dependency/retryability :retryable})
+  ;; => {:failure/source :external-provider
+  ;;     :failure/vendor :anthropic
+  ;;     :dependency/class :rate-limit
+  ;;     :dependency/retryability :retryable}
 
   :leave-this-here)
