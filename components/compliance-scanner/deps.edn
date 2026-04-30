@@ -2,6 +2,10 @@
  :deps {ai.miniforge/logging    {:local/root "../logging"}
         ai.miniforge/messages   {:local/root "../messages"}
         ai.miniforge/repo-index {:local/root "../repo-index"}
-        ai.miniforge/policy-pack {:local/root "../policy-pack"}}
+        ai.miniforge/policy-pack {:local/root "../policy-pack"}
+        ;; tools.reader powers the AST-aware exceptions-as-data linter
+        ;; (regex-based detection cannot disambiguate `throw` inside
+        ;; strings, comments, or `#_` reader macros).
+        org.clojure/tools.reader {:mvn/version "1.5.2"}}
  :aliases {:test {:extra-paths ["test"]
                   :extra-deps  {}}}}

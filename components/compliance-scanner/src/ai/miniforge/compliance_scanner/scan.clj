@@ -24,12 +24,13 @@
    Layer 0.6: Diff/plan detection helpers
    Layer 1: Per-rule scanning
    Layer 2: Top-level scan-repo entry point"
-  (:require [ai.miniforge.compliance-scanner.factory  :as factory]
-            [ai.miniforge.compliance-scanner.messages :as msg]
-            [ai.miniforge.policy-pack.interface       :as policy-pack]
-            [ai.miniforge.repo-index.interface        :as repo-index]
-            [clojure.java.io                          :as io]
-            [clojure.string                           :as str])
+  (:require [ai.miniforge.compliance-scanner.factory             :as factory]
+            [ai.miniforge.compliance-scanner.messages            :as msg]
+            [ai.miniforge.compliance-scanner.exceptions-as-data  :as exc-data]
+            [ai.miniforge.policy-pack.interface                  :as policy-pack]
+            [ai.miniforge.repo-index.interface                   :as repo-index]
+            [clojure.java.io                                     :as io]
+            [clojure.string                                      :as str])
   (:import [java.nio.file FileSystems Paths]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -391,6 +392,37 @@
             (vec (keep pack-rule->detection-config filtered)))))
       (load-pack-detection-configs standards-path opts)))
 
+;------------------------------------------------------------------------------ Layer 1.5
+;; Built-in Clojure-AST linters
+;;
+;; These linters do not flow through pack-rule detection configs because
+;; their analysis is structural, not regex-driven. They are first-class
+;; rules of the scanner and run alongside content/diff/plan rules.
+
+(defn- exceptions-as-data-selected?
+  "True when the rules selector resolves the exceptions-as-data linter on.
+   Defaults on for `:all` / `:always-apply`; opts in for explicit selectors."
+  [opts]
+  (let [raw       (get opts :rules :always-apply)
+        requested (if (string? raw) (keyword (subs raw 1)) raw)]
+    (cond
+      (contains? #{:all :always-apply} requested) true
+      (= exc-data/rule-id requested)              true
+      (and (set? requested)
+           (contains? requested exc-data/rule-id)) true
+      :else false)))
+
+(defn- run-exceptions-as-data
+  "Run the AST-based exceptions-as-data linter against the repo. Returns
+   a vector of Violation maps (already in the canonical scanner shape).
+
+   When `changed-files` is non-nil (incremental mode via `:since`), the
+   linter restricts its file walk to the changed set — matching the
+   behavior of content rules so `bb review --since` stays fast."
+  [repo-path changed-files opts]
+  (when (exceptions-as-data-selected? opts)
+    (:violations (exc-data/scan-repo repo-path changed-files))))
+
 ;------------------------------------------------------------------------------ Layer 2
 ;; Top-level entry point
 
@@ -486,14 +518,18 @@
         content-violations (scan-content-rules content-cfgs index changed-files)
         diff-violations    (scan-diff-rules diff-rules diff-content)
         plan-violations    (scan-plan-rules plan-rules plan-text)
+        exc-violations     (run-exceptions-as-data repo-path changed-files opts)
 
         all-violations (vec (concat content-violations
                                     (or diff-violations [])
-                                    (or plan-violations [])))
+                                    (or plan-violations [])
+                                    (or exc-violations [])))
         end-ms     (System/currentTimeMillis)
         file-count (get index :file-count 0)
-        rule-ids   (into (mapv :rule/id content-cfgs)
-                         (map :rule/id (concat diff-rules plan-rules)))]
+        rule-ids   (cond-> (into (mapv :rule/id content-cfgs)
+                                 (map :rule/id (concat diff-rules plan-rules)))
+                     (exceptions-as-data-selected? opts)
+                     (conj exc-data/rule-id))]
     (factory/->scan-result
      all-violations
      rule-ids
