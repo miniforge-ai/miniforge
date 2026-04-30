@@ -261,7 +261,10 @@
            selected []
            selected-files #{}]
       (cond
-        (nil? remaining)
+        ;; (rest seq) returns an empty seq (), not nil — `empty?` covers both
+        ;; the initial nil case (no ready tasks) and the post-iteration empty
+        ;; case (otherwise we'd append nils until max-parallel fires).
+        (empty? remaining)
         selected
 
         (>= (count selected) max-parallel)
