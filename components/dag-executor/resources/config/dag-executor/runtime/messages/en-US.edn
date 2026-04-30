@@ -3,4 +3,4 @@
   "Unknown runtime kind: {kind}. Known kinds: {known}."
 
   :descriptor/unsupported-kind
-  "Runtime kind {kind} is not yet supported. Phase 1 of N11-delta ships :docker only; :podman lands in Phase 2."}}
+  "Runtime kind {kind} is not yet supported. Supported runtimes: {supported}."}}

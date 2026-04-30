@@ -20,21 +20,24 @@
   "OCI-CLI executor — generalized container executor parameterized by a
    runtime descriptor.
 
-   Phase 1 of N11-delta: a pure refactor of the previous Docker-only
-   implementation. The CLI shellouts now take a descriptor instead of a
-   `docker-path`, and the defrecord is `OciCliExecutor` rather than
-   `DockerExecutor`. Behavior with `:runtime-kind :docker` is identical to
-   the prior implementation.
+   Per-kind data (executable, capability set, container defaults, CLI flag
+   dialect) lives in `runtime/registry.edn`. Default OCI image references
+   live in `runtime/images.edn` (fully qualified per N11-delta §5).
 
-   Phase 2 will land Podman support by adding entries to
-   the runtime registry (`runtime/registry.edn`) and flipping
-   `:supported?` for that kind."
+   Currently supported runtime kinds: `:docker` (Phase 1) and `:podman`
+   (Phase 2). `:nerdctl` is known but not supported; constructing a
+   descriptor for it raises `:runtime/unsupported`.
+
+   Adding a runtime is an EDN edit — flip the kind's `:supported?` to true,
+   declare its `:capabilities`, `:defaults`, and any `:flags` overrides,
+   and the executor picks it up without code changes."
   (:require
    [ai.miniforge.config.interface :as config]
    [ai.miniforge.dag-executor.result :as result]
    [ai.miniforge.dag-executor.workspace :as workspace]
    [ai.miniforge.dag-executor.protocols.executor :as proto]
    [ai.miniforge.dag-executor.protocols.impl.runtime.descriptor :as descriptor]
+   [ai.miniforge.dag-executor.protocols.impl.runtime.images :as images]
    [ai.miniforge.dag-executor.protocols.impl.runtime.registry :as registry]
    [ai.miniforge.response.interface :as response]
    [clojure.java.io]
@@ -45,7 +48,6 @@
 ;; Configuration
 ;; ============================================================================
 
-(def default-image "alpine:latest")
 (def default-workdir "/workspace")
 
 (def default-stop-timeout
@@ -376,13 +378,11 @@
 ;; ============================================================================
 
 (def task-runner-images
-  "Pre-defined task runner images that can be built from bundled Dockerfiles."
-  {:minimal {:image "miniforge/task-runner:latest"
-             :dockerfile "executor/docker/Dockerfile.task-runner"
-             :description "Minimal Alpine image with git, bash, curl, jq"}
-   :clojure {:image "miniforge/task-runner-clojure:latest"
-             :dockerfile "executor/docker/Dockerfile.task-runner-clojure"
-             :description "Full Clojure image with clj, bb, clj-kondo, node"}})
+  "Pre-defined task runner images that can be built from bundled Dockerfiles.
+   Sourced from `runtime/images.edn` so image references stay
+   configuration-not-code. Resolved at namespace load and exposed as a map
+   for callers that expect map semantics."
+  (images/task-runner-images))
 
 (defn image-exists?
   "Check if a container image exists locally."
@@ -691,7 +691,7 @@
    Config:
    - :runtime-kind — :docker (default in Phase 1). :podman lands in Phase 2.
    - :executable   — explicit path to the runtime CLI binary
-   - :image        — container image for tasks (default: alpine:latest)
+   - :image        — container image for tasks (default from images.edn :default entry)
    - :network      — network name to attach to (legacy; execution-plan
                      network-profile takes precedence when present)"
   [config]
@@ -699,7 +699,7 @@
     (map->OciCliExecutor
      {:config     config
       :descriptor descriptor
-      :image      (get config :image default-image)
+      :image      (get config :image (images/default-image))
       :network    (:network config)})))
 
 (defn create-docker-executor
@@ -710,7 +710,7 @@
    `{:runtime-kind :docker}`.
 
    Config:
-   - :image       — container image for tasks (default: alpine:latest)
+   - :image       — container image for tasks (default from images.edn :default entry)
    - :network     — network to attach to
    - :docker-path — path to the docker binary (legacy alias for :executable)"
   [config]

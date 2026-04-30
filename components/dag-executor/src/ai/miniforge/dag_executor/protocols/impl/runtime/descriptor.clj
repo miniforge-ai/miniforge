@@ -53,21 +53,37 @@
 ;------------------------------------------------------------------------------ Layer 1
 ;; Error factories
 
+(defn- format-kind-set
+  "Render a set of runtime-kind keywords as a stable, human-readable string
+   for embedding in error messages — `:docker, :podman` rather than the raw
+   `#{:docker :podman}` printed form."
+  [kinds]
+  (->> kinds
+       (map (fn [k] (str ":" (name k))))
+       sort
+       (str/join ", ")))
+
 (defn- unknown-kind-error
   "Return an ex-info anomaly for an unrecognized runtime kind."
   [kind]
-  (ex-info (messages/t :descriptor/unknown-kind
-                       {:kind  kind
-                        :known (registry/known-kinds)})
-           {:runtime/unknown-kind kind
-            :runtime/known-kinds  (registry/known-kinds)}))
+  (let [known     (registry/known-kinds)
+        known-str (format-kind-set known)]
+    (ex-info (messages/t :descriptor/unknown-kind
+                         {:kind  kind
+                          :known known-str})
+             {:runtime/unknown-kind kind
+              :runtime/known-kinds  known})))
 
 (defn- unsupported-kind-error
   "Return an ex-info anomaly for a known-but-not-yet-supported runtime kind."
   [kind]
-  (ex-info (messages/t :descriptor/unsupported-kind {:kind kind})
-           {:runtime/unsupported     kind
-            :runtime/supported-kinds (registry/supported-kinds)}))
+  (let [supported     (registry/supported-kinds)
+        supported-str (format-kind-set supported)]
+    (ex-info (messages/t :descriptor/unsupported-kind
+                         {:kind      kind
+                          :supported supported-str})
+             {:runtime/unsupported     kind
+              :runtime/supported-kinds supported})))
 
 ;------------------------------------------------------------------------------ Layer 2
 ;; Resolvers

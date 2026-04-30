@@ -31,11 +31,19 @@
   (var-get (ns-resolve 'ai.miniforge.dag-executor.protocols.impl.runtime.oci-cli sym)))
 
 ;; Default descriptor used by tests that exercise CLI argument shaping
-;; rather than runtime selection. `make-descriptor` defaults to :docker
-;; which matches Phase 1 supported-kinds.
+;; rather than runtime selection. `make-descriptor` defaults to :docker.
 (defn- docker-descriptor
   ([] (descriptor/make-descriptor {}))
   ([opts] (descriptor/make-descriptor opts)))
+
+;; Phase 2: argument-construction tests run against every supported kind so
+;; a Podman regression in flag shaping shows up at unit-test time.
+(def ^:private supported-kinds-under-test
+  [:docker :podman])
+
+(defn- descriptor-for-kind
+  [kind]
+  (descriptor/make-descriptor {:runtime-kind kind}))
 
 ;; ============================================================================
 ;; descriptor — basic construction
@@ -57,13 +65,23 @@
     (let [d (descriptor/make-descriptor {:docker-path "/usr/bin/docker"})]
       (is (= "/usr/bin/docker" (descriptor/executable d))))))
 
-(deftest descriptor-rejects-podman-in-phase-1-test
-  (testing "make-descriptor throws :runtime/unsupported for :podman in Phase 1"
+(deftest descriptor-accepts-podman-test
+  (testing "make-descriptor builds a :podman descriptor in Phase 2"
+    (let [d (descriptor/make-descriptor {:runtime-kind :podman})]
+      (is (= :podman (descriptor/kind d)))
+      (is (= "podman" (descriptor/executable d)))
+      (is (descriptor/capable? d :rootless))
+      (is (descriptor/capable? d :oci-images)))))
+
+(deftest descriptor-rejects-nerdctl-as-unsupported-test
+  (testing "make-descriptor throws :runtime/unsupported for :nerdctl (Future)"
     (try
-      (descriptor/make-descriptor {:runtime-kind :podman})
+      (descriptor/make-descriptor {:runtime-kind :nerdctl})
       (is false "expected ex-info")
       (catch clojure.lang.ExceptionInfo e
-        (is (= :podman (-> e ex-data :runtime/unsupported)))))))
+        (is (= :nerdctl (-> e ex-data :runtime/unsupported)))
+        (is (contains? (-> e ex-data :runtime/supported-kinds) :docker))
+        (is (contains? (-> e ex-data :runtime/supported-kinds) :podman))))))
 
 (deftest descriptor-rejects-unknown-kind-test
   (testing "make-descriptor throws :runtime/unknown-kind for unknown kinds"
@@ -226,38 +244,39 @@
 ;; create-container --stop-timeout (N11 §2.2)
 ;; ============================================================================
 
+(defn- capture-create-container-args
+  "Run create-container with `oci-cli/run-runtime` stubbed and return the
+   captured argv. Keeps the parameterized stop-timeout tests focused on
+   the assertions rather than mock plumbing."
+  [descriptor & {:as create-opts}]
+  (let [captured-args (atom nil)
+        stub          (fn [_descriptor & args]
+                        (reset! captured-args (vec args))
+                        {:exit 0 :out "container-id-123\n" :err ""})]
+    (with-redefs [oci-cli/run-runtime stub]
+      (apply oci-cli/create-container
+             descriptor "test-ctr" "alpine" "/workspace" nil nil nil
+             (mapcat identity create-opts))
+      @captured-args)))
+
 (deftest create-container-stop-timeout-test
-  (testing "includes --stop-timeout when execution-plan has :time-limit-ms"
-    (let [captured-args (atom nil)]
-      (with-redefs [oci-cli/run-runtime (fn [_descriptor & args]
-                                          (reset! captured-args (vec args))
-                                          {:exit 0 :out "container-id-123\n" :err ""})]
-        (oci-cli/create-container (docker-descriptor) "test-ctr" "alpine"
-                                  "/workspace" nil nil nil
-                                  :execution-plan {:time-limit-ms 120000})
-        (let [args @captured-args]
+  (doseq [kind supported-kinds-under-test]
+    (testing (str "runtime " kind)
+      (testing "  includes --stop-timeout when execution-plan has :time-limit-ms"
+        (let [args (capture-create-container-args
+                    (descriptor-for-kind kind)
+                    :execution-plan {:time-limit-ms 120000})]
           (is (some #(= "--stop-timeout" %) args))
-          (is (some #(= "120" %) args))))))
+          (is (some #(= "120" %) args))))
 
-  (testing "omits --stop-timeout when no execution-plan"
-    (let [captured-args (atom nil)]
-      (with-redefs [oci-cli/run-runtime (fn [_descriptor & args]
-                                          (reset! captured-args (vec args))
-                                          {:exit 0 :out "container-id-123\n" :err ""})]
-        (oci-cli/create-container (docker-descriptor) "test-ctr" "alpine"
-                                  "/workspace" nil nil nil)
-        (let [args @captured-args]
-          (is (not (some #(= "--stop-timeout" %) args)))))))
+      (testing "  omits --stop-timeout when no execution-plan"
+        (let [args (capture-create-container-args (descriptor-for-kind kind))]
+          (is (not (some #(= "--stop-timeout" %) args)))))
 
-  (testing "enforces minimum 5s stop-timeout"
-    (let [captured-args (atom nil)]
-      (with-redefs [oci-cli/run-runtime (fn [_descriptor & args]
-                                          (reset! captured-args (vec args))
-                                          {:exit 0 :out "container-id-123\n" :err ""})]
-        (oci-cli/create-container (docker-descriptor) "test-ctr" "alpine"
-                                  "/workspace" nil nil nil
-                                  :execution-plan {:time-limit-ms 2000})
-        (let [args @captured-args]
+      (testing "  enforces minimum 5s stop-timeout"
+        (let [args (capture-create-container-args
+                    (descriptor-for-kind kind)
+                    :execution-plan {:time-limit-ms 2000})]
           (is (some #(= "5" %) args)))))))
 
 ;; ============================================================================
@@ -266,8 +285,11 @@
 
 (deftest executor-type-from-descriptor-test
   (testing "OciCliExecutor reports its descriptor's runtime kind"
-    (let [exec (oci-cli/create-docker-executor {:image "alpine:latest"})]
-      (is (= :docker (proto/executor-type exec))))))
+    (doseq [kind supported-kinds-under-test]
+      (testing (str "kind " kind)
+        (let [exec (oci-cli/create-oci-cli-executor
+                    {:runtime-kind kind :image "test:latest"})]
+          (is (= kind (proto/executor-type exec))))))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

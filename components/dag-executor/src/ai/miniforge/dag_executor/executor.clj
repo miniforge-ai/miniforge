@@ -71,7 +71,7 @@
   "Create a Docker-backed OCI-CLI executor.
 
    Config:
-   - :image - Container image for tasks (default: alpine:latest)
+   - :image - Container image for tasks (default from images.edn :default entry)
    - :network - Docker network to attach to
    - :docker-path - Path to docker binary (legacy alias for :executable)"
   oci-cli/create-docker-executor)
@@ -80,9 +80,10 @@
   "Create an OCI-CLI executor for the runtime kind named on the config.
 
    Config:
-   - :runtime-kind - :docker (default; only kind supported in Phase 1)
+   - :runtime-kind - :docker (default) or :podman (Phase 2). :nerdctl is
+                     known but not yet supported.
    - :executable - explicit path to the runtime CLI binary
-   - :image - container image for tasks (default: alpine:latest)
+   - :image - container image for tasks (default from images.edn :default entry)
    - :network - network to attach to"
   oci-cli/create-oci-cli-executor)
 
