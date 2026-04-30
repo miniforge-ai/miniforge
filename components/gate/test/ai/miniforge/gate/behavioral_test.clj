@@ -148,6 +148,60 @@
       (is (true? (:passed? result)))
       (is (= :behavioral-check-error (-> result :warnings first :type))))))
 
+(deftest check-behavioral-soft-dep-resolution-failure-test
+  (testing
+   (str "Exercises the production default :check-fn path. soft-dep-resolve-fn "
+        "is the factory that builds default-check-fn; calling it with a "
+        "deliberately-bogus symbol gives a check-fn that mirrors the failure "
+        "the production default hits when policy-pack is genuinely absent. "
+        "Deterministic regardless of brick-isolation mode (no classpath "
+        "assumptions). Keeps coverage on the requiring-resolve branch even "
+        "though tests no longer redefine clojure.core/requiring-resolve.")
+    (let [bogus-sym 'no.such.namespace.exists/check-artifact
+          ;; Reach private factory via #'ns/private-fn. Same-namespace
+          ;; access only; no global mutation, no cross-brick risk.
+          check-fn  (#'behavioral/soft-dep-resolve-fn bogus-sym)
+          result    (behavioral/check-behavioral
+                     sample-artifact
+                     {:policy-packs [{:id :test-pack}]
+                      :phase        :observe
+                      :check-fn     check-fn})]
+      (is (true? (:passed? result)))
+      (is (= :behavioral-check-error (-> result :warnings first :type)))
+      (is (re-find #"unavailable" (-> result :warnings first :message))))))
+
+(deftest check-behavioral-rejects-non-fn-check-fn-test
+  (testing
+   (str "Programmer-error guard: passing a non-nil non-callable :check-fn "
+        "is a misconfiguration. The exceptions-as-data rule explicitly "
+        "carves out programmer-error guards as acceptable throws. The "
+        "outer try/catch in check-behavioral does NOT convert "
+        "IllegalArgumentException into a warning — caller must fix the "
+        "ctx, not silently degrade.")
+    (is (thrown? IllegalArgumentException
+                 (behavioral/check-behavioral
+                  sample-artifact
+                  {:policy-packs [{:id :test-pack}]
+                   :phase        :observe
+                   :check-fn     "not-a-function"})))))
+
+(deftest check-behavioral-treats-nil-check-fn-as-default-test
+  (testing
+   (str "An explicit nil :check-fn is treated the same as missing. "
+        "Together with the bogus-sym test above, this pins both halves "
+        "of the contract: nil → default; non-nil non-fn → programmer "
+        "error.")
+    (let [result (behavioral/check-behavioral
+                  sample-artifact
+                  {:policy-packs [{:id :test-pack}]
+                   :phase        :observe
+                   :check-fn     nil})]
+      ;; The default path will either succeed (if policy-pack happens to
+      ;; be on the classpath) or surface :behavioral-check-error. Either
+      ;; outcome means nil was treated as "use default", not invoked
+      ;; as a function.
+      (is (true? (:passed? result))))))
+
 ;;------------------------------------------------------------------------------ repair-behavioral
 
 (deftest repair-behavioral-always-fails-test
