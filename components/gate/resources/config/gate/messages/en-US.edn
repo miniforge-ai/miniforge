@@ -1,0 +1,25 @@
+{:gate/messages
+ {;; Behavioral gate — registry description
+  :behavioral/description
+  "Validates harness telemetry event stream against policy packs (phase: observe)"
+
+  ;; Behavioral gate — no-packs warning
+  :behavioral/no-policy-packs
+  "No policy packs loaded — behavioral check skipped"
+
+  ;; Behavioral gate — check-error warning prefix
+  :behavioral/check-error-prefix
+  "Behavioral check failed, skipping: "
+
+  ;; Behavioral gate — repair-required result message
+  :behavioral/repair-required
+  "Behavioral violations require redirect to :implement phase — no in-place repair"
+
+  ;; Behavioral gate — soft-dep resolve failed (sym is the fully-qualified
+  ;; symbol that requiring-resolve could not produce a callable for).
+  :behavioral/soft-dep-unavailable
+  "{sym} unavailable"
+
+  ;; Behavioral gate — programmer-error guard for non-callable :check-fn.
+  :behavioral/check-fn-not-function
+  ":check-fn must be a function, got: {class}"}}
