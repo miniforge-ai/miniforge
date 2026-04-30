@@ -8,6 +8,7 @@
    [babashka.fs :as fs]
    [clojure.pprint :as pprint]
    [ai.miniforge.cli.main.display :as display]
+   [ai.miniforge.cli.messages :as messages]
    [ai.miniforge.cli.repo-analyzer :as analyzer]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -39,9 +40,13 @@
 (defn- print-analysis
   "Print the analysis results to the user."
   [analysis]
-  (display/print-info (str "  Technologies: " (pr-str (:technologies analysis))))
-  (display/print-info (str "  Git host:     " (get analysis :git-host "unknown")))
-  (display/print-info (str "  Packs:        " (pr-str (:packs analysis)))))
+  (display/print-info (messages/t :init/analysis-technologies
+                                  {:value (pr-str (:technologies analysis))}))
+  (display/print-info (messages/t :init/analysis-git-host
+                                  {:value (or (:git-host analysis)
+                                              (messages/t :init/git-host-unknown))}))
+  (display/print-info (messages/t :init/analysis-packs
+                                  {:value (pr-str (:packs analysis))})))
 
 (defn- write-config!
   "Write the config file. Returns the path written."
@@ -61,11 +66,11 @@
   (let [repo-path (get opts :repo (str (fs/cwd)))]
     (cond
       (not (fs/exists? repo-path))
-      (display/print-error (str "Repository not found: " repo-path))
+      (display/print-error (messages/t :init/repo-not-found {:path repo-path}))
 
       :else
       (do
-        (display/print-info (str "Analyzing " repo-path " ..."))
+        (display/print-info (messages/t :init/analyzing {:path repo-path}))
         (let [analysis (analyzer/analyze-repo repo-path)
               config   (build-config analysis)
               exists?  (fs/exists? (fs/path repo-path config-path))]
@@ -73,7 +78,8 @@
           (print-analysis analysis)
 
           (when exists?
-            (display/print-info (str "  Existing config at " config-path " will be overwritten.")))
+            (display/print-info (messages/t :init/existing-overwritten
+                                            {:path config-path})))
 
           (let [written (write-config! repo-path config)]
-            (display/print-info (str "Wrote " written))))))))
+            (display/print-info (messages/t :init/wrote {:path written}))))))))

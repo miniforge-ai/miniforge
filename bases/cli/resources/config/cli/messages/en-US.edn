@@ -632,4 +632,14 @@
   ;; control-plane CLI color scheme (keyword values, not strings)
   :cp/status-colors  {:running :blue :blocked :yellow :failed :red
                        :unreachable :red :completed :green}
-  :cp/priority-colors {:critical :red :high :yellow :medium :blue :low :white}}}
+  :cp/priority-colors {:critical :red :high :yellow :medium :blue :low :white}
+
+  ;; ---------- `mf init` — repo analysis + config-file generation ----------
+  :init/repo-not-found        "Repository not found: {path}"
+  :init/analyzing             "Analyzing {path} ..."
+  :init/analysis-technologies "  Technologies: {value}"
+  :init/analysis-git-host     "  Git host:     {value}"
+  :init/analysis-packs        "  Packs:        {value}"
+  :init/git-host-unknown      "unknown"
+  :init/existing-overwritten  "  Existing config at {path} will be overwritten."
+  :init/wrote                 "Wrote {path}"}}
