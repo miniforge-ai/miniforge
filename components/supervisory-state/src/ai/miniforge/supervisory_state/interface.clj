@@ -46,6 +46,8 @@
 (def start!  core/start!)
 (def stop!   core/stop!)
 (def attach! core/attach!)
+(def attached? core/attached?)
+(def ensure-attached! core/ensure-attached!)
 
 ;------------------------------------------------------------------------------ Layer 2
 ;; Query API (reads only; consumers should prefer subscribing to
