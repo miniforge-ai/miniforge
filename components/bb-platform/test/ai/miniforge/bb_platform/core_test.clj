@@ -104,6 +104,19 @@
       (is (= "some-obscure-formula"  (:package plan)))
       (is (string? (:hint plan))))))
 
+(deftest test-install-plan-podman-on-macos-uses-brew
+  (testing "macOS install:podman dispatches to brew (parallels other formulas)"
+    (is (= {:action :run :package "podman" :command ["brew" "install" "podman"]}
+           (sut/install-plan {:formula "podman" :os :macos :installed? false})))))
+
+(deftest test-install-plan-podman-on-linux-returns-distro-hint
+  (testing "Linux install:podman returns a distro-package-manager hint"
+    (let [plan (sut/install-plan {:formula "podman"
+                                  :os :linux :installed? false})]
+      (is (= :hint   (:action plan)))
+      (is (= "podman" (:package plan)))
+      (is (re-find #"apt install podman|dnf install podman|pacman" (:hint plan))))))
+
 ;------------------------------------------------------------------------------ Layer 0
 ;; Pure: upgrade plans
 

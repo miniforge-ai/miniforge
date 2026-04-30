@@ -106,3 +106,27 @@ existing work — which leads to syntax errors and broken commits.
 
 Bad: `In enter-verify (line 116): remove artifact retrieval (lines 139-148).`
 Good: `In the enter-verify function: remove artifact retrieval from [:execution/phase-results :implement].`
+
+## Container Runtime (N11-delta)
+
+Miniforge runs every task inside an OCI container. The runtime adapter
+(see `components/dag-executor/src/.../runtime/`) treats Docker, Podman,
+and nerdctl as interchangeable providers of the same OCI surface.
+
+**Rules for agents:**
+
+- **Do not branch on `:runtime/kind` in code.** Per-runtime differences
+  (CLI dialect, capabilities, container defaults) live in
+  `runtime/registry.edn`. If a runtime needs a different flag than
+  Docker, declare an override in its `:flags` map; do not add a
+  `(case kind ...)` in the executor.
+- **Do not introduce daemon-API integration.** The executor shells out
+  via the resolved runtime CLI. Adding HTTP-API code re-couples
+  miniforge to one runtime.
+- **Image references must be fully qualified** (`docker.io/<repo>:<tag>`
+  or `@sha256:<digest>`). Short-name references behave differently
+  across runtimes; Podman's first-run prompt is a recurring footgun.
+  See `runtime/images.edn` for the live default set.
+- **Selection algorithm is settled** — explicit `:runtime-kind` config
+  wins, then auto-probe `[:podman :docker :nerdctl]`. Never silently
+  fall back from an explicit kind.
