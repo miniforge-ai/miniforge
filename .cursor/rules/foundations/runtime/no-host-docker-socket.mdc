@@ -1,0 +1,52 @@
+---
+dewey: "020"
+description: Reject bind mounts of host container-runtime sockets into the capsule
+alwaysApply: true
+---
+
+# Runtime: no host docker socket (HARD-STOP)
+
+Bind-mounting `/var/run/docker.sock` (or an equivalent runtime socket)
+into a capsule grants the container full control over the host's
+container daemon. A task that escapes its capsule via the socket can
+launch arbitrary containers, read every other capsule's filesystem, and
+ignore every other isolation control miniforge applies.
+
+This is the single most catastrophic capsule-isolation failure mode.
+Reject it on sight.
+
+## Detection
+
+Reject any execution-plan `:mounts` entry whose `:host-path` matches:
+
+- `/var/run/docker.sock`
+- `/run/docker.sock`
+- `/var/run/podman/podman.sock`
+- `/run/podman/podman.sock`
+- `/var/run/containerd/containerd.sock`
+- `/run/containerd/containerd.sock`
+- Any path ending in `docker.sock`, `podman.sock`, or `containerd.sock`
+
+The check is host-path-based; bind-mount target inside the capsule does
+not matter. A user who renames the mount target to `/etc/passwd` is
+still mounting the host socket.
+
+## Enforcement
+
+- **Action:** `:hard-stop`
+- **Phases:** `:plan`, `:implement`, `:verify`, `:release`
+- **Scope:** every execution plan; no opt-out, no exceptions
+
+## Why no opt-out
+
+If a workflow legitimately needs to control the host's runtime, the
+runtime adapter is the wrong layer for that. Add a host-side capability
+explicitly (e.g. an `:executor :host-runtime-broker` with its own
+authentication and audit trail). Mounting the socket bypasses every
+audit point miniforge has.
+
+## Spec reference
+
+- N11-delta §6 `:runtime/no-host-docker-socket`
+- N11 §2.2 (capsule filesystem boundary)
+- N6 (evidence & provenance — host-socket access has no provenance story)

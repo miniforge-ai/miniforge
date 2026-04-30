@@ -58,6 +58,10 @@ dist/
 # Tool config (local)
 .codex/
 .cursor/
+# Standards-rule MDC sources are tracked (compiled into the
+# miniforge-standards.pack.edn); only local Cursor cache is ignored.
+!.cursor/rules/
+!.cursor/rules/**
 
 # Checkpoints (local development snapshots)
 docs/checkpoints/
