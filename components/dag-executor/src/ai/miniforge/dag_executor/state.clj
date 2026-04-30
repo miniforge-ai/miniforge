@@ -26,6 +26,7 @@
   (:require
    [ai.miniforge.dag-executor.result :as result]
    [ai.miniforge.dag-executor.state-profile :as profiles]
+   [ai.miniforge.event-stream.interface :as es]
    [ai.miniforge.logging.interface :as log]
    [clojure.set :as set]))
 
@@ -434,15 +435,16 @@
     result))
 
 (defn emit-task-state-event!
-  "Emit task/state-changed event via requiring-resolve (no hard dep on event-stream)."
+  "Emit task/state-changed event when an event-stream is configured under
+   :run/config :event-stream."
   [run-state task-id from-status to-status]
   (try
     (when-let [stream (get-in run-state [:run/config :event-stream])]
-      (when-let [publish-fn (requiring-resolve 'ai.miniforge.event-stream.interface/publish!)]
-        (when-let [constructor (requiring-resolve 'ai.miniforge.event-stream.interface/task-state-changed)]
-          (let [workflow-id (get-in run-state [:run/config :workflow-id])
-                dag-id (:dag/id run-state)]
-            (publish-fn stream (constructor stream workflow-id dag-id task-id from-status to-status))))))
+      (let [workflow-id (get-in run-state [:run/config :workflow-id])
+            dag-id      (:dag/id run-state)]
+        (es/publish! stream
+                     (es/task-state-changed stream workflow-id dag-id
+                                            task-id from-status to-status))))
     (catch Exception _ nil)))
 
 (defn transition-task!
