@@ -126,6 +126,19 @@
   [stream]
   (start! (create stream)))
 
+(defn attached?
+  "True when supervisory-state is already subscribed to `stream`."
+  [stream]
+  (contains? (:subscribers @stream) subscriber-id))
+
+(defn ensure-attached!
+  "Attach supervisory-state to `stream` exactly once.
+
+   Returns a component when a new attachment is created; otherwise nil."
+  [stream]
+  (when-not (attached? stream)
+    (attach! stream)))
+
 ;------------------------------------------------------------------------------ Layer 4
 ;; Query API
 

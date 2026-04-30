@@ -23,6 +23,8 @@
   (:require
    [clojure.java.io :as io]
    [clojure.test :refer [deftest is testing]]
+   [ai.miniforge.event-stream.interface :as es]
+   [ai.miniforge.supervisory-state.interface :as supervisory]
    [ai.miniforge.workflow.checkpoint-store :as checkpoint-store]
    [ai.miniforge.workflow.runner :as runner]
    [ai.miniforge.workflow.context :as ctx]
@@ -126,6 +128,19 @@
           result (runner/run-pipeline workflow {:task "Test"} {})]
       (is (= :completed (:execution/status result)))
       (is (number? (:execution/ended-at result))))))
+
+(deftest run-pipeline-ensures-supervisory-attachment-test
+  (testing "run-pipeline auto-attaches supervisory-state for event-stream callers"
+    (let [workflow {:workflow/id :test
+                    :workflow/version "1.0.0"
+                    :workflow/pipeline [{:phase :done}]}
+          stream (es/create-event-stream {:sinks []})]
+      (is (false? (supervisory/attached? stream)))
+      (let [result (runner/run-pipeline workflow {:task "Test"} {:event-stream stream})
+            event-types (map :event/type (es/get-events stream))]
+        (is (= :completed (:execution/status result)))
+        (is (true? (supervisory/attached? stream)))
+        (is (some #{:supervisory/workflow-upserted} event-types))))))
 
 (deftest run-pipeline-persists-machine-snapshot-test
   (with-temp-checkpoint-root
