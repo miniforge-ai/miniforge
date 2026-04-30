@@ -1,0 +1,114 @@
+{:description "Patterns that indicate external provider and platform failures"
+ :type :external
+ :patterns
+ [{:id :anthropic-rate-limit
+   :regex "(anthropic|claude).*(rate limit|429|too many requests)"
+   :vendor "Anthropic"
+   :description "Anthropic provider rate limit"
+   :failure/source :external-provider
+   :failure/vendor :anthropic
+   :dependency/class :rate-limit
+   :dependency/retryability :retryable}
+
+  {:id :openai-rate-limit
+   :regex "(openai|codex).*(rate limit|429|too many requests)"
+   :vendor "OpenAI"
+   :description "OpenAI or Codex provider rate limit"
+   :failure/source :external-provider
+   :dependency/class :rate-limit
+   :dependency/retryability :retryable}
+
+  {:id :github-rate-limit
+   :regex "GitHub API rate limit exceeded|GitHub.*(rate limit|429|too many requests)"
+   :vendor "GitHub"
+   :description "GitHub platform rate limit"
+   :failure/source :external-platform
+   :failure/vendor :github
+   :dependency/class :rate-limit
+   :dependency/retryability :retryable}
+
+  {:id :provider-rate-limit
+   :regex "API rate limit exceeded|rate limit exceeded|Rate limit reached|rate-limit error|429|Too Many Requests|too many requests|Quota exceeded|You've hit your limit|resets \\d|resets in \\d+"
+   :vendor "External Service"
+   :description "Provider or platform rate limit"
+   :failure/source :external-provider
+   :dependency/class :rate-limit
+   :dependency/retryability :retryable}
+
+  {:id :github-auth-failed
+   :regex "GitHub.*(401|403|authentication failed|bad credentials|forbidden)"
+   :vendor "GitHub"
+   :description "GitHub authentication failed"
+   :failure/source :external-platform
+   :failure/vendor :github
+   :dependency/class :auth
+   :dependency/retryability :operator-action}
+
+  {:id :github-platform-unavailable
+   :regex "GitHub.*(502|503|service unavailable|temporarily unavailable)"
+   :vendor "GitHub"
+   :description "GitHub platform unavailable"
+   :failure/source :external-platform
+   :failure/vendor :github
+   :dependency/class :outage
+   :dependency/retryability :retryable}
+
+  {:id :github-network-failure
+   :regex "GitHub.*(connection refused|connection reset|dns lookup failed|dns resolution failed|network error)"
+   :vendor "GitHub"
+   :description "GitHub platform network failure"
+   :failure/source :external-platform
+   :failure/vendor :github
+   :dependency/class :network
+   :dependency/retryability :retryable}
+
+  {:id :kubernetes-auth-failed
+   :regex "Kubernetes.*(401|403|forbidden|unauthorized|authentication failed)"
+   :vendor "Kubernetes"
+   :description "Kubernetes authentication failed"
+   :failure/source :external-platform
+   :failure/vendor :kubernetes
+   :dependency/class :auth
+   :dependency/retryability :operator-action}
+
+  {:id :kubernetes-platform-unavailable
+   :regex "Kubernetes.*(connection refused|service unavailable|i/o timeout|dial tcp)"
+   :vendor "Kubernetes"
+   :description "Kubernetes platform unavailable"
+   :failure/source :external-platform
+   :failure/vendor :kubernetes
+   :dependency/class :outage
+   :dependency/retryability :retryable}
+
+  {:id :codex-account-limitation
+   :regex "Codex account cannot use model|model .* unsupported|unsupported model|does not have access to model|model .* not available for your account"
+   :vendor "Codex"
+   :description "Codex or provider account limitation"
+   :failure/source :external-provider
+   :failure/vendor :codex
+   :dependency/class :account-limitation
+   :dependency/retryability :operator-action}
+
+  {:id :provider-service-unavailable
+   :regex "API service unavailable|503 Service Unavailable|502 Bad Gateway|overloaded_error"
+   :vendor "External Service"
+   :description "Provider service unavailable"
+   :failure/source :external-provider
+   :dependency/class :outage
+   :dependency/retryability :retryable}
+
+  {:id :provider-request-timeout
+   :regex "Request timeout|timed out waiting for response|deadline exceeded"
+   :vendor "External Service"
+   :description "Provider request timeout"
+   :failure/source :external-provider
+   :dependency/class :timeout
+   :dependency/retryability :retryable}
+
+  {:id :provider-network-failure
+   :regex "ECONNREFUSED|Connection refused|connection reset|DNS lookup failed|DNS resolution failed|Network error"
+   :vendor "External Service"
+   :description "Provider network failure"
+   :failure/source :external-provider
+   :dependency/class :network
+   :dependency/retryability :retryable}]}

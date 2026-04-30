@@ -47,7 +47,7 @@
         nil))))
 
 (defn compile-pattern
-  "Compile a pattern map with regex string to regex object.
+  "Compile a pattern map with regex string to a case-insensitive regex.
 
    Arguments:
      pattern - Map with :regex string
@@ -65,7 +65,7 @@
         (assoc :type type
                :vendor pattern-vendor
                :rate-limit? rate-limit?)
-        (update :regex re-pattern))))
+        (update :regex #(re-pattern (str "(?i)" %))))))
 
 (defn load-patterns
   "Load and compile patterns from a config file.

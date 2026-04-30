@@ -22,19 +22,35 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Config loading and compilation
 
-(defn- load-edn-resource
-  "Load an EDN resource by path."
+(defn- missing-resource
+  "Create a canonical missing-resource exception."
   [resource-path]
-  (-> (io/resource resource-path) slurp edn/read-string))
+  (ex-info (str "Missing EDN resource: " resource-path)
+           {:resource/path resource-path
+            :anomaly/category :anomalies/not-found}))
+
+(defn- load-edn-resource
+  "Load a required EDN resource by path."
+  [resource-path]
+  (when-let [resource (io/resource resource-path)]
+    (-> resource slurp edn/read-string)))
+
+(defn- require-edn-resource
+  "Load a required EDN resource or throw ex-info when missing."
+  [resource-path]
+  (or (load-edn-resource resource-path)
+      (throw (missing-resource resource-path))))
 
 (def ^:private rules-config
   "Classification rules loaded from EDN config."
-  (load-edn-resource "config/failure-classifier/rules.edn"))
+  (require-edn-resource "config/failure-classifier/rules.edn"))
 
 (def ^:private dependency-pattern-configs
   "Ordered dependency pattern sources. Earlier files take priority."
-  [(load-edn-resource "error-patterns/backend-setup.edn")
-   (load-edn-resource "error-patterns/external.edn")])
+  (->> [(load-edn-resource "error-patterns/backend-setup.edn")
+        (load-edn-resource "error-patterns/external.edn")]
+       (keep identity)
+       vec))
 
 (defn- compile-pattern
   "Compile a string pattern into a case-insensitive regex."
@@ -84,7 +100,7 @@
   "Returns true if text matches the compiled dependency pattern."
   [text pattern]
   (when text
-    (re-find pattern text)))
+    (boolean (re-find pattern text))))
 
 (defn- classify-by-message
   "Classify failure by matching error message against ordered pattern rules."
