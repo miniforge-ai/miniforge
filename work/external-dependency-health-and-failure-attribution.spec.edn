@@ -1,0 +1,330 @@
+;; =============================================================================
+;; Spec: External Dependency Health and Failure Attribution
+;; =============================================================================
+;;
+;; Goal: Distinguish Miniforge product failures from dependency failures and
+;; make that distinction first-class in classification, supervision,
+;; degradation, evidence, and user-facing output.
+;;
+;; Motivation:
+;;   Dogfood runs surfaced multiple failure modes that are materially different:
+;;   - Claude backend unavailable / non-responsive
+;;   - Codex session-path permission failure in the executor environment
+;;   - Codex account/model incompatibility for gpt-5.2-codex
+;;   - Future external platforms like GitHub, Kubernetes, Jira, cloud APIs
+;;
+;;   Today these are often surfaced as generic workflow failures. That is
+;;   operationally wrong. We need the system to say whether a failure came from:
+;;   - Miniforge itself
+;;   - the user's environment or account setup
+;;   - an external provider like Anthropic/OpenAI
+;;   - an external platform like GitHub/Kubernetes
+;;
+;;   This must be modeled as canonical data, not ad hoc string handling.
+
+{:spec/title "External dependency health and failure attribution"
+ :spec/description
+ "Introduce a canonical dependency attribution model and provider/platform
+  health model so Miniforge can correctly distinguish product failures from
+  external dependency outages, auth/account limitations, permissions, and
+  platform unavailability. Wire the model into failure-classifier,
+  reliability/degradation, supervisory-state, workflow evidence, and user-
+  facing CLI/dashboard output."
+
+ :spec/intent
+ {:type :feature
+  :scope ["components/failure-classifier/src"
+          "components/reliability/src"
+          "components/supervisory-state/src"
+          "components/workflow/src"
+          "components/event-stream/src"
+          "components/llm/src"
+          "components/web-dashboard/src"
+          "bases/cli/src"
+          "resources/error-patterns"]}
+
+ :spec/constraints
+ ["Do NOT collapse dependency attribution into :failure/class alone; keep product failure class and dependency attribution as distinct dimensions"
+  "Do NOT infer provider outages from one failed call without evidence thresholds; rolling health must be derived from repeated classified incidents or explicit provider-unavailable signals"
+  "User-facing failure output must attribute vendor/platform issues explicitly instead of reporting a generic Miniforge failure"
+  "Auth/account/model-support errors must fail fast; do not retry them as transient outages"
+  "Transient provider/platform failures may retry or degrade, but policy must be data-driven from config rather than hardcoded branching"
+  "Dependency health state must be modeled separately from workflow execution state"
+  "All new emitted event types and attention projections must be test-covered"
+  "Boundary validation belongs at classifiers, event constructors, and external ingress points; do not add redundant internal validation to pure domain helpers"]
+
+ :workflow-type :canonical-sdlc
+ :workflow/version "2.0.0"
+
+ :context
+ {:existing-infrastructure
+  ["failure-classifier already classifies canonical failure classes and loads rules from config/failure-classifier/rules.edn"
+   "resources/error-patterns/external.edn and backend-setup.edn already contain external/provider/setup-specific pattern knowledge"
+   "reliability/degradation.clj already models global degradation mode as an FSM"
+   "supervisory-state already projects workflow attention and intervention state"
+   "workflow/supervision.clj already formalizes per-run supervision state"
+   "CLI and dashboard already surface workflow failures, but not with reliable provider/platform attribution"]
+
+  :gap
+  "There is no canonical model for dependency blame assignment, rolling
+   provider/platform health, or user-facing vendor/platform diagnosis. Similar
+   errors are currently surfaced inconsistently as workflow failure strings,
+   setup anomalies, or generic external failures."}
+
+ :tasks
+ [{:task/id :dependency-taxonomy
+   :task/title "Define canonical dependency attribution model"
+   :task/phase :implement
+   :task/description
+   "Create a canonical dependency attribution model in the failure-classifier
+    layer and load its enums/defaults from config. The model must be separate
+    from :failure/class and must capture:
+
+    - :failure/source
+      one of #{:miniforge :user-env :external-provider :external-platform}
+    - :failure/vendor
+      a keyword like :anthropic, :openai, :github, :kubernetes, :jira
+    - :failure/class
+      the existing product failure class from the canonical taxonomy
+    - :dependency/class
+      one of #{:outage :degraded :rate-limit :auth :account-limitation
+               :permission :misconfiguration :unsupported-feature :timeout
+               :network :quota :unknown}
+    - :dependency/retryability
+      one of #{:retryable :non-retryable :operator-action}
+
+    The model should live beside the existing failure taxonomy, not inside the
+    workflow or CLI layers. Add predicates and schemas in the taxonomy-facing
+    namespaces and load the enum definitions from EDN config.
+
+    Files to modify:
+    - components/failure-classifier/resources/config/failure-classifier/rules.edn
+    - components/failure-classifier/src/ai/miniforge/failure_classifier/taxonomy.clj
+    - components/failure-classifier/src/ai/miniforge/failure_classifier/interface.clj
+
+    Acceptance:
+    - Dependency attribution is a first-class data shape, not a free-form map
+    - Enums/predicates are driven from config
+    - Existing failure-class behavior remains backward compatible"
+
+   :task/constraints
+   ["Keep the existing :failure/class contract intact"
+    "Add helper predicates like dependency-failure? retryable-dependency-failure? operator-action-required? instead of repeated keyword checks"]} 
+
+  {:task/id :classifier-integration
+   :task/title "Classify provider/platform/setup failures into the canonical attribution model"
+   :task/phase :implement
+   :task/description
+   "Extend the classifier and pattern-loading path so dependency-related
+    failures are normalized into the new attribution model. Reuse existing
+    pattern knowledge in external.edn and backend-setup.edn instead of creating
+    a second pattern system.
+
+    The classifier must distinguish cases like:
+    - Anthropic/OpenAI provider unavailable or rate-limited
+    - unsupported model for account / account-limitation
+    - local permission failures like unwritable Codex session directory
+    - missing API keys / user environment misconfiguration
+    - GitHub/Kubernetes platform unavailable or auth failures
+
+    The output should let callers say:
+    - this is a Miniforge bug
+    - this is user environment/setup
+    - this is provider outage/degradation
+    - this is platform outage/degradation
+
+    Files to modify:
+    - resources/error-patterns/external.edn
+    - resources/error-patterns/backend-setup.edn
+    - components/failure-classifier/src/ai/miniforge/failure_classifier/classifier.clj
+    - components/failure-classifier/src/ai/miniforge/failure_classifier/interface.clj
+
+    Acceptance:
+    - Classifier returns dependency attribution for representative Anthropic,
+      OpenAI/Codex, GitHub, and Kubernetes failures
+    - Unsupported-model/account-limit errors classify as non-retryable
+      dependency failures, not transient outages
+    - Existing failure-class callers continue to work, with richer attribution
+      available through the interface"
+
+   :task/constraints
+   ["Do not duplicate pattern matching logic in CLI or workflow layers"
+    "Prefer factory constructors for classified dependency results over hand-built maps"]} 
+
+  {:task/id :dependency-health-state
+   :task/title "Model rolling dependency health separately from workflow state"
+   :task/phase :implement
+   :task/description
+   "Introduce a canonical dependency health projection and rolling status model.
+    This belongs in the reliability/supervisory stack, not in individual phase
+    code. The model should track health for providers and platforms separately.
+
+    Example states:
+    - :healthy
+    - :degraded
+    - :unavailable
+    - :misconfigured
+    - :operator-action-required
+
+    The health projection should be updated from classified dependency failure
+    events and explicit provider/platform recovery signals. It should support
+    thresholds or rolling windows from EDN config rather than hardcoded counts.
+
+    Files to modify:
+    - components/reliability/resources/config/reliability/defaults.edn
+    - components/reliability/src/ai/miniforge/reliability/schema.clj
+    - components/reliability/src/ai/miniforge/reliability/engine.clj
+    - components/supervisory-state/src/ai/miniforge/supervisory_state/schema.clj
+    - components/supervisory-state/src/ai/miniforge/supervisory_state/accumulator.clj
+
+    Acceptance:
+    - Dependency health can be derived without reading workflow execution state
+    - Provider/platform health transitions are driven from canonical classified
+      incidents
+    - Thresholds and windows come from config data"
+
+   :task/constraints
+   ["Do not overload the existing workflow supervision FSM with provider health state"
+    "Keep provider/platform health projections queryable without replaying ad hoc strings"]} 
+
+  {:task/id :events-and-degradation
+   :task/title "Emit dependency health events and integrate them with degradation policy"
+   :task/phase :implement
+   :task/description
+   "Add explicit dependency-health events and wire them into the degradation and
+    supervision flows. Example event families:
+    - :dependency/health-degraded
+    - :dependency/unavailable
+    - :dependency/auth-failed
+    - :dependency/account-limited
+    - :dependency/platform-unavailable
+    - :dependency/recovered
+
+    Use these events to inform degradation policy. For example:
+    - repeated unknown or outage-class provider failures may drive the global
+      degradation FSM toward :degraded or :safe-mode
+    - auth/account/misconfiguration failures should create attention and halt or
+      fail fast, not burn through retries
+    - unsupported-model/account-limit conditions should suggest backend or
+      workflow fallback only if policy/config explicitly allows it
+
+    Files to modify:
+    - components/event-stream/src/ai/miniforge/event_stream/schema.clj
+    - components/event-stream/src/ai/miniforge/event_stream/core.clj
+    - components/reliability/src/ai/miniforge/reliability/degradation.clj
+    - components/workflow/src/ai/miniforge/workflow/supervision.clj
+    - components/supervisory-state/src/ai/miniforge/supervisory_state/attention.clj
+
+    Acceptance:
+    - Dependency events are typed, schema-validated, and emitted through the
+      event stream
+    - Degradation policy consumes canonical dependency signals instead of raw
+      exception strings
+    - Attention items distinguish provider/platform outages from product bugs"
+
+   :task/constraints
+   ["Do not introduce nested conditional logic in event emission sites; use canonical constructors and predicates"
+    "Separate retryable outages from fail-fast auth/account issues in policy"]} 
+
+  {:task/id :user-facing-attribution
+   :task/title "Surface dependency attribution cleanly in CLI and dashboard"
+   :task/phase :implement
+   :task/description
+   "Update user-facing output so workflow failures name the real source of the
+    problem. The CLI and dashboard should be able to say things like:
+    - Workflow blocked by Anthropic provider outage
+    - Codex account cannot use model gpt-5.2-codex
+    - GitHub platform unavailable
+    - Kubernetes authentication failed
+
+    Use localized message catalogs and structured inputs rather than formatting
+    free-form strings in workflow code. The UI should consume the canonical
+    attribution data and dependency health projection.
+
+    Files to modify:
+    - bases/cli/src/ai/miniforge/cli/...
+    - components/web-dashboard/src/ai/miniforge/web_dashboard/...
+    - relevant en-US.edn catalogs under components/workflow, bases/cli,
+      components/web-dashboard, or components/reliability
+
+    Acceptance:
+    - User-facing output distinguishes product failures from dependency issues
+    - No new raw emitted English strings are introduced
+    - Dashboard/CLI can show vendor, dependency class, and retry guidance"
+
+   :task/constraints
+   ["All user-facing strings must be localized, starting with en-US.edn"
+    "Do not reach directly into low-level maps in UI formatting paths; expose small projection helpers"]} 
+
+  {:task/id :evidence-and-observe
+   :task/title "Capture dependency attribution in workflow evidence and behavioral observation"
+   :task/phase :implement
+   :task/description
+   "Wire dependency attribution into workflow evidence, monitor/observe outputs,
+    and behavioral verification artifacts so dogfood runs can explain whether a
+    failed run was a product bug or an external dependency problem.
+
+    Extend the relevant evidence bundle or telemetry artifacts so they carry:
+    - classified dependency incidents
+    - current provider/platform health projection at failure time
+    - retry/fail-fast/operator-action guidance derived from the canonical model
+
+    Files to modify:
+    - components/workflow/src/ai/miniforge/workflow/behavioral_harness.clj
+    - components/workflow/src/ai/miniforge/workflow/observe_phase.clj
+    - components/workflow/src/ai/miniforge/workflow/runner_events.clj
+    - components/evidence-bundle/src/ai/miniforge/evidence_bundle/...
+
+    Acceptance:
+    - Dogfood and monitor outputs can explain external dependency attribution
+    - Evidence records canonical dependency data instead of only raw messages
+    - A failed behavioral run can be diagnosed as provider/platform/setup vs
+      Miniforge behavior"
+
+   :task/constraints
+   ["Do not create a second evidence format just for dependency issues"
+    "Prefer factory functions for evidence fragments over hand-built maps"]} 
+
+  {:task/id :tests
+   :task/title "Add boundary and projection tests for dependency attribution and health"
+   :task/phase :verify
+   :task/description
+   "Add tests across the affected components.
+
+    Required coverage:
+    - failure-classifier unit tests for representative vendor/platform/setup
+      failures and retryability classification
+    - reliability/supervisory-state tests for provider/platform health
+      transitions and attention creation
+    - event-stream schema/constructor tests for the new dependency event family
+    - CLI/dashboard tests for localized, correctly attributed user-facing output
+    - behavioral/observe tests proving dependency attribution appears in
+      evidence and run summaries
+
+    Files to create or modify:
+    - components/failure-classifier/test/...
+    - components/reliability/test/...
+    - components/supervisory-state/test/...
+    - components/event-stream/test/...
+    - bases/cli/test/...
+    - components/web-dashboard/test/...
+    - components/workflow/test/...
+
+    Acceptance:
+    - Representative provider outage, rate-limit, auth, permission, account,
+      unsupported-model, and platform-unavailable cases are covered
+    - Tests assert canonical predicates and constructors, not duplicated raw maps
+    - New user-facing messages are localized and covered"
+
+   :task/constraints
+   ["Test files must follow the same standards as production code"
+    "Prefer table-driven tests and shared fixture factories over duplicated literal maps"]}]
+
+ :dependencies
+ {:dependency-taxonomy []
+  :classifier-integration [:dependency-taxonomy]
+  :dependency-health-state [:classifier-integration]
+  :events-and-degradation [:dependency-health-state]
+  :user-facing-attribution [:classifier-integration :dependency-health-state]
+  :evidence-and-observe [:classifier-integration :dependency-health-state]
+  :tests [:events-and-degradation :user-facing-attribution :evidence-and-observe]}}
