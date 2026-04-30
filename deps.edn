@@ -23,6 +23,7 @@
                        "components/agent-runtime/src"
                        "components/agent-runtime/resources"
                        "components/anomaly/src"
+                       "components/response-chain/src"
                        "components/task/src"
                        "components/task/resources"
                        "components/task-executor/src"
@@ -192,6 +193,7 @@
                       ai.miniforge/agent {:local/root "components/agent"}
                       ai.miniforge/agent-runtime {:local/root "components/agent-runtime"}
                       ai.miniforge/anomaly {:local/root "components/anomaly"}
+                      ai.miniforge/response-chain {:local/root "components/response-chain"}
                       ai.miniforge/task {:local/root "components/task"}
                       ai.miniforge/task-executor {:local/root "components/task-executor"}
                       ai.miniforge/decision {:local/root "components/decision"}
@@ -305,6 +307,7 @@
                        "components/agent/test"
                        "components/agent-runtime/test"
                        "components/anomaly/test"
+                       "components/response-chain/test"
                        "components/task/test"
                        "components/decision/test"
                        "components/loop/test"
@@ -421,6 +424,7 @@
                       ai.miniforge/agent {:local/root "components/agent"}
                       ai.miniforge/agent-runtime {:local/root "components/agent-runtime"}
                       ai.miniforge/anomaly {:local/root "components/anomaly"}
+                      ai.miniforge/response-chain {:local/root "components/response-chain"}
                       ai.miniforge/task {:local/root "components/task"}
                       ai.miniforge/decision {:local/root "components/decision"}
                       ai.miniforge/loop {:local/root "components/loop"}
