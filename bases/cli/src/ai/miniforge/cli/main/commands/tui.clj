@@ -20,7 +20,8 @@
   "TUI command — launch standalone TUI monitor."
   (:require
    [ai.miniforge.cli.app-config :as app-config]
-   [ai.miniforge.cli.main.display :as display]))
+   [ai.miniforge.cli.main.display :as display]
+   [ai.miniforge.cli.messages :as messages]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; TUI command
@@ -29,7 +30,7 @@
   "Launch standalone TUI that monitors workflow event files.
    Tail-follows app event files for live workflow state."
   [opts]
-  (display/print-info "Starting TUI monitor...")
-  (display/print-info (str "Watching " (app-config/events-dir) " for workflow activity"))
+  (display/print-info (messages/t :tui/starting))
+  (display/print-info (messages/t :tui/watching {:events-dir (app-config/events-dir)}))
   (let [start-tui! (requiring-resolve 'ai.miniforge.tui-views.interface/start-standalone-tui!)]
     (start-tui! opts)))

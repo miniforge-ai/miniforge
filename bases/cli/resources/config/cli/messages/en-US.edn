@@ -686,5 +686,21 @@
   :init/analysis-packs        "  Packs:        {value}"
   :init/git-host-unknown      "unknown"
   :init/existing-overwritten  "  Existing config at {path} will be overwritten."
-  :init/wrote                 "Wrote {path}"}}
+  :init/wrote                 "Wrote {path}"
 
+  ;; ---------- `mf pr respond` ----------
+  :pr/respond-bad-url         "Could not parse PR number from URL"
+  :pr/respond-checkout        "Checking out PR #{number}..."
+  :pr/respond-checkout-failed "Failed to checkout PR branch"
+  :pr/respond-on-branch       "On branch: {branch}"
+  :pr/respond-done            "\nDone: {comments} comment(s), {files} file(s) processed, {fixed} fixed{pushed}"
+  :pr/respond-pushed          ", pushed"
+
+  ;; ---------- `mf pr list` row format ----------
+  :pr/list-row                "  #{number} {state-badge} {title} ({author})"
+  :pr/list-state-badge        "[{state}]"
+  :pr/list-author-unknown     "unknown"
+
+  ;; ---------- `mf etl` (cli wrapper) ----------
+  :etl/run-requires-checkout
+  "mf etl run/list/validate currently requires running from inside a miniforge checkout (walks up looking for workspace.edn + bases/etl/deps.edn). The etl base is dev-alias-only until we publish an installable artifact."}}

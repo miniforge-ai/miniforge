@@ -68,11 +68,16 @@
                                          "OPEN" :green
                                          "MERGED" :magenta
                                          "CLOSED" :red
-                                         :white)]
-                      (println (str "  #" number " "
-                                    (display/style (str "[" state "]") :foreground status-style)
-                                    " " title
-                                    " (" (:login author "unknown") ")"))))))
+                                         :white)
+                          state-badge (display/style
+                                       (messages/t :pr/list-state-badge {:state state})
+                                       :foreground status-style)]
+                      (println (messages/t :pr/list-row
+                                           {:number      number
+                                            :state-badge state-badge
+                                            :title       title
+                                            :author      (:login author
+                                                                 (messages/t :pr/list-author-unknown))}))))))
               (catch Exception _
                 (let [result2 (process/sh "gh" "pr" "list" "--repo" r "--limit" "10")]
                   (if (zero? (:exit result2))
@@ -99,24 +104,27 @@
             run-spec  (requiring-resolve 'ai.miniforge.cli.workflow-runner/run-workflow-from-spec!)
             {:keys [number]} (parse-url url)]
         (when-not number
-          (display/print-error "Could not parse PR number from URL")
+          (display/print-error (messages/t :pr/respond-bad-url))
           (System/exit 1))
-        (display/print-info (str "Checking out PR #" number "..."))
+        (display/print-info (messages/t :pr/respond-checkout {:number number}))
         (let [branch (checkout-pr! number)]
           (when-not branch
-            (display/print-error "Failed to checkout PR branch")
+            (display/print-error (messages/t :pr/respond-checkout-failed))
             (System/exit 1))
-          (display/print-info (str "On branch: " branch))
+          (display/print-info (messages/t :pr/respond-on-branch {:branch branch}))
           (let [cwd (System/getProperty "user.dir")
                 result (respond! url cwd
                                  (fn [spec run-opts] (run-spec spec (merge {:quiet true} run-opts)))
                                  push!
                                  opts)]
             (display/print-info
-             (str "\nDone: " (:comments-found result) " comment(s), "
-                  (:files-processed result) " file(s) processed, "
-                  (count (filter :succeeded? (:fixes result))) " fixed"
-                  (when (:pushed? result) ", pushed")))))))))
+             (messages/t :pr/respond-done
+                         {:comments (:comments-found result)
+                          :files    (:files-processed result)
+                          :fixed    (count (filter :succeeded? (:fixes result)))
+                          :pushed   (if (:pushed? result)
+                                      (messages/t :pr/respond-pushed)
+                                      "")}))))))))
 
 (defn pr-merge-cmd
   [opts]
