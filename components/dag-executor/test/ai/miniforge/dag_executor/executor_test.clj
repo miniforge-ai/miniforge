@@ -201,8 +201,11 @@
       (is (= :docker             (:provenance/executor-type rec)))
       (is (= "sha256:abc"        (:provenance/image-digest rec)))
       (is (= ["git status"]      (:provenance/commands-executed rec)))
-      (is (inst? (:provenance/started-at rec)))
-      (is (inst? (:provenance/completed-at rec)))
+      ;; capture-provenance preserves whatever inst-like type the caller
+      ;; supplied. We pass java.time.Instant in this test, so assert that
+      ;; specific type to keep intent obvious.
+      (is (instance? java.time.Instant (:provenance/started-at rec)))
+      (is (instance? java.time.Instant (:provenance/completed-at rec)))
       (is (= 1000                (:provenance/duration-ms rec)))
       (is (= 0                   (:provenance/exit-code rec)))
       (is (= "ok"                (:provenance/stdout-summary rec)))
