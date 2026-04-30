@@ -100,9 +100,10 @@
   "Print scan result summary. Returns the scan result."
   [scan-result]
   (display/print-info
-   (str "Found " (count (:violations scan-result)) " violation(s) across "
-        (:files-scanned scan-result) " files ("
-        (:scan-duration-ms scan-result) "ms)"))
+   (messages/t :scan/policy-summary
+               {:count       (count (:violations scan-result))
+                :files       (:files-scanned scan-result)
+                :duration-ms (:scan-duration-ms scan-result)}))
   scan-result)
 
 (defn- classify-and-report
@@ -112,7 +113,8 @@
         auto-count (count (filter :auto-fixable? classified))
         review-count (count (remove :auto-fixable? classified))]
     (display/print-info
-     (str "  Auto-fixable: " auto-count "  Needs review: " review-count))
+     (messages/t :scan/classification
+                 {:auto-count auto-count :review-count review-count}))
     classified))
 
 (defn- plan-and-print
@@ -128,12 +130,12 @@
   "Apply auto-fixes if --execute flag is set."
   [plan-result repo-path execute?]
   (when (and execute? (seq (filter :auto-fixable? (mapcat :task/violations (:dag-tasks plan-result)))))
-    (display/print-info "Executing auto-fixes...")
+    (display/print-info (messages/t :scan/exec-banner))
     (let [exec-result (scanner/execute! plan-result repo-path)]
       (display/print-info
-       (str "Fixed " (get exec-result :violations-fixed 0)
-            " violation(s) across "
-            (get exec-result :files-changed 0) " file(s)")))))
+       (messages/t :scan/exec-summary
+                   {:fixed (get exec-result :violations-fixed 0)
+                    :files (get exec-result :files-changed 0)})))))
 
 (defn- run-linters
   "Run language-specific linters for detected technologies.
@@ -146,14 +148,17 @@
         (doseq [{:keys [tech available? violations duration-ms]} (:linter-results result)]
           (cond
             (not available?)
-            (display/print-info (str "  " (name tech) ": linter not installed (skipped)"))
+            (display/print-info (messages/t :scan/linter-skipped {:tech (name tech)}))
 
             (seq violations)
-            (display/print-info (str "  " (name tech) ": " (count violations)
-                                     " finding(s) (" duration-ms "ms)"))
+            (display/print-info (messages/t :scan/linter-findings
+                                            {:tech        (name tech)
+                                             :count       (count violations)
+                                             :duration-ms duration-ms}))
 
             :else
-            (display/print-info (str "  " (name tech) ": clean (" duration-ms "ms)"))))
+            (display/print-info (messages/t :scan/linter-clean
+                                            {:tech (name tech) :duration-ms duration-ms}))))
         (:violations result)))))
 
 (defn- run-linter-fixes!
@@ -163,7 +168,12 @@
         fps      @analyzer/fingerprints
         result   (linter/run-fixes repo-path fps detected)]
     (doseq [{:keys [tech exit]} (:fixed result)]
-      (display/print-info (str "  " (name tech) ": fix " (if (zero? exit) "applied" "failed"))))))
+      (display/print-info
+       (messages/t :scan/linter-fix-result
+                   {:tech   (name tech)
+                    :result (messages/t (if (zero? exit)
+                                          :scan/linter-fix-applied
+                                          :scan/linter-fix-failed))})))))
 
 (defn- print-rule-result
   "Print a single rule's analysis result."
@@ -171,13 +181,16 @@
   (let [rule-name (name (get result :rule/id :unknown))
         status    (get result :status :completed)]
     (case status
-      :timeout  (display/print-info (str "  " rule-name ": timeout (skipped)"))
-      :error    (display/print-info (str "  " rule-name ": error — " (get result :error)))
+      :timeout  (display/print-info (messages/t :scan/rule-timeout {:rule rule-name}))
+      :error    (display/print-info (messages/t :scan/rule-error
+                                                {:rule rule-name
+                                                 :message (get result :error)}))
       (display/print-info
-       (str "  " rule-name ": "
-            (count (:violations result)) " finding(s) ("
-            (:files-analyzed result) " files, "
-            (:duration-ms result) "ms)")))))
+       (messages/t :scan/rule-findings
+                   {:rule        rule-name
+                    :count       (count (:violations result))
+                    :files       (:files-analyzed result)
+                    :duration-ms (:duration-ms result)})))))
 
 (defn- rule-has-matching-files?
   "True when a rule's file globs match at least one file in the repo."
@@ -200,19 +213,19 @@
               rules       (filterv #(rule-has-matching-files? repo-path %) all-rules)
               skipped     (- (count all-rules) (count rules))]
           (when (pos? skipped)
-            (display/print-info (str "  Skipped " skipped " rule(s) with no matching files")))
+            (display/print-info (messages/t :scan/semantic-skipped {:count skipped})))
           (when (seq rules)
             (let [client  (llm/create-client)
                   _       (display/print-info
-                           (str "  Analyzing " (count rules)
-                                " behavioral rule(s) in parallel..."))
+                           (messages/t :scan/semantic-analyzing {:count (count rules)}))
                   results (semantic/analyze-rules-parallel
                            client llm/complete repo-path rules
                            {:timeout-ms 120000 :max-parallel 4})]
               (doseq [r results] (print-rule-result r))
               (vec (mapcat :violations results)))))))
     (catch Exception e
-      (display/print-info (str "  Semantic analysis unavailable: " (.getMessage e)))
+      (display/print-info (messages/t :scan/semantic-unavailable
+                                      {:message (.getMessage e)}))
       [])))
 
 (defn- run-scan
@@ -227,7 +240,7 @@
         repo-config (load-repo-config repo-path)]
 
     ;; Phase 1: Policy pack scan
-    (display/print-info (str "Scanning " repo-path " ..."))
+    (display/print-info (messages/t :scan/banner {:path repo-path}))
     (let [scan-result     (-> (scanner/scan repo-path standards scan-opts)
                               print-scan-summary)
           policy-viols    (:violations scan-result)
@@ -235,26 +248,34 @@
           ;; Phase 1b: Linter scan
           linter-viols    (when-not no-lint?
                             (when repo-config
-                              (display/print-info "Running linters...")
+                              (display/print-info (messages/t :scan/running-linters))
                               (run-linters repo-path repo-config)))
 
           ;; Phase 1c: Semantic analysis (LLM-as-judge)
           semantic-viols  (when semantic?
-                            (display/print-info "Running semantic analysis...")
+                            (display/print-info (messages/t :scan/semantic-banner))
                             (run-semantic-analysis repo-path standards))
 
           ;; Merge violations
           all-violations  (vec (concat policy-viols
                                        (or linter-viols [])
-                                       (or semantic-viols [])))]
+                                       (or semantic-viols [])))
+          breakdown       (if (or (seq linter-viols) (seq semantic-viols))
+                            (messages/t :scan/total-breakdown
+                                        {:policy   (count policy-viols)
+                                         :linter   (if (seq linter-viols)
+                                                     (messages/t :scan/total-linter
+                                                                 {:count (count linter-viols)})
+                                                     "")
+                                         :semantic (if (seq semantic-viols)
+                                                     (messages/t :scan/total-semantic
+                                                                 {:count (count semantic-viols)})
+                                                     "")})
+                            "")]
 
       (display/print-info
-       (str "Total: " (count all-violations) " violation(s)"
-            (when (or (seq linter-viols) (seq semantic-viols))
-              (str " (" (count policy-viols) " policy"
-                   (when (seq linter-viols) (str " + " (count linter-viols) " linter"))
-                   (when (seq semantic-viols) (str " + " (count semantic-viols) " semantic"))
-                   ")"))))
+       (messages/t :scan/total-line
+                   {:count (count all-violations) :breakdown breakdown}))
 
       (when (seq all-violations)
         (let [classified  (classify-and-report all-violations)
@@ -263,7 +284,7 @@
           ;; Execute: run both linter fixes and policy auto-fixes
           (when execute?
             (when (and repo-config (not no-lint?))
-              (display/print-info "Running linter fixes...")
+              (display/print-info (messages/t :scan/linter-fix-banner))
               (run-linter-fixes! repo-path repo-config))
             (execute-if-requested plan-result repo-path true)))))))
 
@@ -276,10 +297,11 @@
   (let [repo-path (get opts :repo (str (fs/cwd)))]
     (cond
       (not (fs/exists? repo-path))
-      (display/print-error (str "Repository not found: " repo-path))
+      (display/print-error (messages/t :scan/repo-not-found {:path repo-path}))
 
       :else
       (try
         (run-scan repo-path opts)
         (catch Exception e
-          (display/print-error (str "Scan failed: " (ex-message e))))))))
+          (display/print-error (messages/t :scan/scan-failed
+                                           {:message (ex-message e)})))))))
