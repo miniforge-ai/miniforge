@@ -77,6 +77,12 @@
   (testing "operator-action-required? reflects the retryability contract"
     (is (fc/operator-action-required?
          {:dependency/retryability :operator-action}))
+    (is (fc/operator-action-required?
+         {:failure/source :external-provider
+          :dependency/retryability :operator-action}))
+    (is (not (fc/operator-action-required?
+              {:failure/source :miniforge
+               :dependency/retryability :operator-action})))
     (is (not (fc/operator-action-required?
               {:dependency/retryability :retryable})))))
 
@@ -115,6 +121,42 @@
              :dependency/class :rate-limit
              :dependency/retryability :retryable
              :failure/context {:backend :anthropic}})))))
+
+(deftest dependency-constructor-validation-test
+  (testing "dependency attribution constructor rejects missing required fields"
+    (is (thrown-with-msg?
+         clojure.lang.ExceptionInfo
+         #"Missing required field :failure/source"
+         (fc/make-dependency-attribution {}))))
+
+  (testing "dependency attribution constructor rejects invalid enum values"
+    (is (thrown-with-msg?
+         clojure.lang.ExceptionInfo
+         #"Invalid value for :dependency/class"
+         (fc/make-dependency-attribution
+          {:failure/source :external-provider
+           :dependency/class :bogus})))
+    (is (thrown-with-msg?
+         clojure.lang.ExceptionInfo
+         #"Invalid value for :failure/vendor"
+         (fc/make-dependency-attribution
+          {:failure/source :external-provider
+           :failure/vendor :bogus}))))
+
+  (testing "classified dependency failure constructor rejects invalid required fields"
+    (is (thrown-with-msg?
+         clojure.lang.ExceptionInfo
+         #"Missing required field :failure/class"
+         (fc/make-classified-dependency-failure
+          {:failure/message "oops"
+           :failure/source :external-provider})))
+    (is (thrown-with-msg?
+         clojure.lang.ExceptionInfo
+         #"Invalid value for :failure/class"
+         (fc/make-classified-dependency-failure
+          {:failure/class :bogus
+           :failure/message "oops"
+           :failure/source :external-provider})))))
 
 ;; ---------------------------------------------------------------------------- Classification by anomaly category
 

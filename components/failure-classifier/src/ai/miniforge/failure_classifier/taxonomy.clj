@@ -39,6 +39,11 @@
   "The complete set of canonical dependency retryability states."
   (:dependency-retryabilities config))
 
+(def dependency-failure-sources
+  "Failure sources that represent dependency or environment issues rather than
+   Miniforge-internal failures."
+  (disj failure-sources :miniforge))
+
 ;------------------------------------------------------------------------------ Layer 1
 ;; Schemas and predicates
 
@@ -123,7 +128,7 @@
   "Returns true if the classified failure is caused by an external dependency
    or user environment condition rather than a Miniforge-internal failure."
   [{source :failure/source}]
-  (contains? #{:user-env :external-provider :external-platform} source))
+  (contains? dependency-failure-sources source))
 
 (defn retryable-dependency-failure?
   "Returns true if the dependency failure is safe to retry automatically."
@@ -132,9 +137,14 @@
        (= retryability :retryable)))
 
 (defn operator-action-required?
-  "Returns true if the dependency failure requires human or operator action."
-  [{retryability :dependency/retryability}]
-  (= retryability :operator-action))
+  "Returns true if the dependency failure requires human or operator action.
+   When :failure/source is present, it must also be a dependency failure."
+  [{source :failure/source retryability :dependency/retryability :as failure}]
+  (let [operator-action? (= retryability :operator-action)
+        source-present? (contains? failure :failure/source)]
+    (if source-present?
+      (and (dependency-failure? {:failure/source source}) operator-action?)
+      operator-action?)))
 
 (defn- value-or-default
   "Return value when non-nil, otherwise return default-value."
@@ -142,6 +152,29 @@
   (if (nil? value)
     default-value
     value))
+
+(defn- invalid-constructor-input
+  "Create a canonical ex-info payload for invalid constructor inputs."
+  [message data]
+  (ex-info message (assoc data :anomaly/category :anomalies/incorrect)))
+
+(defn- require-field!
+  "Require a non-nil field and throw ex-info when missing."
+  [field-name value data]
+  (when (nil? value)
+    (throw (invalid-constructor-input
+            (str "Missing required field " field-name)
+            (assoc data :field field-name))))
+  value)
+
+(defn- validate-enum!
+  "Validate an enum field when present and throw ex-info when invalid."
+  [field-name value valid-fn data]
+  (when (and (some? value) (not (valid-fn value)))
+    (throw (invalid-constructor-input
+            (str "Invalid value for " field-name)
+            (assoc data :field field-name :value value))))
+  value)
 
 (defn make-dependency-attribution
   "Construct canonical dependency attribution.
@@ -153,6 +186,15 @@
     vendor :failure/vendor
     dependency-class :dependency/class
     retryability :dependency/retryability}]
+  (require-field! :failure/source source {:constructor :dependency-attribution})
+  (validate-enum! :failure/source source valid-failure-source?
+                  {:constructor :dependency-attribution})
+  (validate-enum! :failure/vendor vendor valid-dependency-vendor?
+                  {:constructor :dependency-attribution})
+  (validate-enum! :dependency/class dependency-class valid-dependency-class?
+                  {:constructor :dependency-attribution})
+  (validate-enum! :dependency/retryability retryability valid-dependency-retryability?
+                  {:constructor :dependency-attribution})
   (let [resolved-class (value-or-default dependency-class :unknown)
         resolved-retryability (value-or-default retryability :non-retryable)]
     (cond-> {:failure/source source
@@ -166,6 +208,12 @@
     message :failure/message
     context :failure/context
     :as dependency-attribution}]
+  (require-field! :failure/class failure-class
+                  {:constructor :classified-dependency-failure})
+  (require-field! :failure/message message
+                  {:constructor :classified-dependency-failure})
+  (validate-enum! :failure/class failure-class valid-failure-class?
+                  {:constructor :classified-dependency-failure})
   (let [attribution (make-dependency-attribution dependency-attribution)]
     (cond-> {:failure/class failure-class
              :failure/message message
