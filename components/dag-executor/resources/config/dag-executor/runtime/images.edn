@@ -1,0 +1,31 @@
+;; Default OCI image references for the runtime adapter.
+;;
+;; Loaded by `ai.miniforge.dag-executor.protocols.impl.runtime.images`.
+;;
+;; Per N11-delta §5: image references MUST be fully qualified
+;; (`<registry>/<repo>:<tag>` or `<registry>/<repo>@sha256:<digest>`).
+;; Short-name references rely on per-host resolution which Podman prompts
+;; for interactively on first run; fully-qualified references behave the
+;; same on every supported runtime.
+;;
+;; Until pinned digests are published, tags are used; Phase 3 or a
+;; subsequent change can replace tags with @sha256: digests once images
+;; are pushed.
+;;
+;; Each entry:
+;;   :image       Fully qualified image reference.
+;;   :dockerfile  Classpath resource path to the Dockerfile that builds
+;;                this image (used by `build-image!` / `ensure-image!`).
+;;   :description Human-readable summary of what the image contains.
+;;
+;; The :default entry is used when an executor config omits :image.
+{:default {:image       "docker.io/library/alpine:latest"
+           :description "Bare Alpine Linux — used when no task-runner image is selected."}
+
+ :minimal {:image       "docker.io/miniforge/task-runner:latest"
+           :dockerfile  "executor/docker/Dockerfile.task-runner"
+           :description "Minimal Alpine image with git, bash, curl, jq."}
+
+ :clojure {:image       "docker.io/miniforge/task-runner-clojure:latest"
+           :dockerfile  "executor/docker/Dockerfile.task-runner-clojure"
+           :description "Full Clojure image with clj, bb, clj-kondo, node."}}

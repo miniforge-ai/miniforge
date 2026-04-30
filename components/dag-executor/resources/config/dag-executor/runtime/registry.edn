@@ -42,10 +42,34 @@
            :flags        {:info-format-template "{{.ServerVersion}}"}}
 
  :podman  {:executable   "podman"
-           :supported?   false
-           :capabilities #{}
-           :defaults     {}
-           :flags        {}}
+           :supported?   true
+           ;; Same OCI surface as Docker plus :rootless. Podman's tmpfs
+           ;; mount accepts the same uid=/gid= options Docker does, so the
+           ;; capability set carries through unchanged.
+           :capabilities #{:oci-images
+                           :run :exec :build
+                           :bind-mounts :tmpfs-mounts
+                           :env-vars :working-dir :user-mapping
+                           :resource-limits
+                           :network-modes/none :network-modes/bridge
+                           :image-digest-pinning
+                           :graceful-stop
+                           :no-new-privileges :read-only-root :cap-drop-all
+                           :tmpfs-uid-gid-options
+                           :rootless}
+           ;; Container-process UID/GID stays 1000:1000 — under rootless
+           ;; Podman that maps to the host user via subuid/subgid, but the
+           ;; in-container value is the same. Memory / CPU / tmpfs sizes
+           ;; match Docker; Phase 3 (auto-probe) can revisit per host.
+           :defaults     {:uid        1000
+                          :gid        1000
+                          :memory     "512m"
+                          :cpu        0.5
+                          :tmpfs-size "512m"}
+           ;; Podman's `info` structure differs from Docker's: server
+           ;; version lives under .Version.Version rather than top-level
+           ;; .ServerVersion.
+           :flags        {:info-format-template "{{.Version.Version}}"}}
 
  :nerdctl {:executable   "nerdctl"
            :supported?   false

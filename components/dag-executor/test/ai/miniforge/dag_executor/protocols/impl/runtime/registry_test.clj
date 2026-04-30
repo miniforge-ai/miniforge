@@ -30,11 +30,11 @@
       (is (contains? known :podman))
       (is (contains? known :nerdctl)))))
 
-(deftest registry-supported-kinds-phase-1-test
-  (testing "Phase 1 supports :docker only"
+(deftest registry-supported-kinds-phase-2-test
+  (testing "Phase 2 supports :docker and :podman; :nerdctl is future"
     (let [supported (registry/supported-kinds)]
       (is (contains? supported :docker))
-      (is (not (contains? supported :podman)))
+      (is (contains? supported :podman))
       (is (not (contains? supported :nerdctl))))))
 
 (deftest registry-known?-test
@@ -45,9 +45,9 @@
     (is (not (registry/known? :unknown-runtime)))))
 
 (deftest registry-supported?-test
-  (testing "supported? gates Phase 1 :docker only"
+  (testing "Phase 2: :docker and :podman supported; :nerdctl and unknowns not"
     (is (registry/supported? :docker))
-    (is (not (registry/supported? :podman)))
+    (is (registry/supported? :podman))
     (is (not (registry/supported? :nerdctl)))
     (is (not (registry/supported? :unknown-runtime)))))
 
@@ -62,15 +62,25 @@
   (testing "Docker advertises the OCI capability set; unknown kinds get empty"
     (is (contains? (registry/capabilities :docker) :oci-images))
     (is (contains? (registry/capabilities :docker) :graceful-stop))
-    (is (= #{} (registry/capabilities :unknown-runtime)))))
+    (is (= #{} (registry/capabilities :unknown-runtime))))
+
+  (testing "Podman matches Docker's OCI surface and adds :rootless"
+    (is (contains? (registry/capabilities :podman) :oci-images))
+    (is (contains? (registry/capabilities :podman) :tmpfs-uid-gid-options))
+    (is (contains? (registry/capabilities :podman) :rootless))
+    (is (not (contains? (registry/capabilities :docker) :rootless)))))
+
+(deftest registry-flag-podman-info-template-test
+  (testing "Podman declares its own :info-format-template (Podman info shape)"
+    (is (= "{{.Version.Version}}" (registry/flag :podman :info-format-template)))
+    (is (= "{{.ServerVersion}}" (registry/flag :docker :info-format-template)))))
 
 (deftest registry-flag-fallback-test
-  (testing "flag lookup falls back to the Docker dialect when the kind has no entry"
+  (testing "flag lookup falls back to the Docker dialect when the kind has no override"
     (let [docker-template (registry/flag :docker :info-format-template)]
       (is (some? docker-template))
-      ;; Phase 1 has empty flags for podman/nerdctl; lookups fall back to Docker
-      ;; so existing call sites keep working until Phase 2 declares overrides.
-      (is (= docker-template (registry/flag :podman :info-format-template)))
+      ;; :nerdctl has empty :flags so it inherits from Docker. :podman now
+      ;; declares its own override, so it does NOT fall back.
       (is (= docker-template (registry/flag :nerdctl :info-format-template))))))
 
 (deftest registry-default-test
@@ -81,21 +91,30 @@
     (is (= 0.5 (registry/default :docker :cpu)))
     (is (= "512m" (registry/default :docker :tmpfs-size))))
 
-  (testing "default lookup falls back to Docker for kinds with no override"
+  (testing "Podman declares its own defaults (matching Docker's values today)"
     (is (= 1000 (registry/default :podman :uid)))
+    (is (= 1000 (registry/default :podman :gid)))
+    (is (= "512m" (registry/default :podman :memory)))
+    (is (= 0.5 (registry/default :podman :cpu)))
+    (is (= "512m" (registry/default :podman :tmpfs-size))))
+
+  (testing "default lookup falls back to Docker for kinds with no override"
     (is (= "512m" (registry/default :nerdctl :memory)))))
 
 (deftest registry-user-spec-test
   (testing "user-spec stitches uid:gid from the registry defaults"
-    (is (= "1000:1000" (registry/user-spec :docker)))))
+    (is (= "1000:1000" (registry/user-spec :docker)))
+    (is (= "1000:1000" (registry/user-spec :podman)))))
 
 (deftest registry-tmpfs-mount-options-test
   (testing "tmpfs-mount-options builds the comma-separated string from defaults"
-    (let [opts (registry/tmpfs-mount-options :docker)]
-      (is (clojure.string/includes? opts "size=512m"))
-      (is (clojure.string/includes? opts "uid=1000"))
-      (is (clojure.string/includes? opts "gid=1000"))
-      (is (clojure.string/includes? opts "rw,nosuid,nodev,exec")))))
+    (doseq [kind [:docker :podman]]
+      (testing (str "kind " kind)
+        (let [opts (registry/tmpfs-mount-options kind)]
+          (is (clojure.string/includes? opts "size=512m"))
+          (is (clojure.string/includes? opts "uid=1000"))
+          (is (clojure.string/includes? opts "gid=1000"))
+          (is (clojure.string/includes? opts "rw,nosuid,nodev,exec")))))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
