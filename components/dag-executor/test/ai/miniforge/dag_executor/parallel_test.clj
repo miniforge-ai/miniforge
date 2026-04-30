@@ -358,21 +358,25 @@
 ;------------------------------------------------------------------------------ Layer 2
 ;; release-all-locks!
 
-(deftest release-all-locks!-clears-repo-write-and-files-test
-  (testing "Holder with both repo-write and file locks has all of them cleared"
+(deftest release-all-locks!-clears-repo-write-only-test
+  (testing "Holder with only a recorded repo-write permit has it cleared"
+    ;; This test intentionally covers only the repo-write-recorded case.
+    ;; Calling acquire-file-locks! here would overwrite :locks[hid] with a
+    ;; file-lock entry, changing the scenario under test (and exposing a
+    ;; latent leak: release-all-locks! reads :lock/resource-type from
+    ;; :locks[hid] to decide whether to release the repo-write semaphore,
+    ;; so a clobbered entry would orphan the permit). Mixed-acquisition
+    ;; behavior is its own concern and not covered here.
     (let [pool (sut/create-lock-pool :max-repo-writes 1)
           hid  (random-uuid)
           _ (sut/acquire-repo-write! pool hid 1000 no-logger)
-          ;; acquire-file-locks! overwrites :locks[hid] with the file lock,
-          ;; but the repo-write semaphore is still held — release-all-locks!
-          ;; only releases the repo-write permit when the recorded :locks[hid]
-          ;; type is :repo-write, so we need to test the case where the holder
-          ;; only has the repo-write recorded.
           ret (sut/release-all-locks! pool hid no-logger)]
       (is (result/ok? ret))
       (is (true? (-> ret :data :released-all)))
       (is (= 1 (:repo-write-available (sut/available-capacity pool))))
       (is (nil? (get-in @pool [:locks hid])))
+      ;; No file-lock state was ever set; assertion confirms the cleanup
+      ;; path leaves :file-locks empty for this holder regardless.
       (is (nil? (get-in @pool [:file-locks hid]))))))
 
 (deftest release-all-locks!-clears-worktree-test
