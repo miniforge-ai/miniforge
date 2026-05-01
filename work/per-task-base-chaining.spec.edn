@@ -12,7 +12,9 @@
  :spec/priority
  {:tier :high
   :axes [:workflow-orchestration :dag-execution :local-mode-fidelity]
-  :theme :dag-execution
+  ;; :dag-execution wasn't in work/themes.edn; :dag-orchestration is the
+  ;; cataloged theme this work belongs to.
+  :theme :dag-orchestration
   :rationale
   ["DAG dependencies currently affect scheduling order but not the base state each task sees."
    "This causes downstream tasks to rebuild upstream work instead of composing on persisted outputs."
@@ -247,4 +249,7 @@
  ;; the implementation matches the spec's intent. :canonical-sdlc adds
  ;; explore → verify → review → release → observe — five additional
  ;; phases that catch the issues a thin workflow can't.
- :workflow/type :canonical-sdlc}
+ ;;
+ ;; Uses :spec/workflow-type — the canonical key — rather than the
+ ;; legacy :workflow/type fallback.
+ :spec/workflow-type :canonical-sdlc}
