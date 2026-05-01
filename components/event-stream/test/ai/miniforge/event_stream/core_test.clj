@@ -481,3 +481,46 @@
                                                 :line 42}})]
       (is (= :failure (:phase/outcome event)))
       (is (= {:message "compile error" :line 42} (:phase/error event))))))
+
+;------------------------------------------------------------------------------ Layer 3
+;; Dependency health event constructors
+
+(defn- dependency-health-entity
+  [overrides]
+  (merge {:dependency/id :anthropic
+          :dependency/source :external-provider
+          :dependency/kind :provider
+          :dependency/status :degraded
+          :dependency/failure-count 1
+          :dependency/window-size 5
+          :dependency/incident-counts {:degraded 1}}
+         overrides))
+
+(deftest dependency-health-updated-test
+  (testing "dependency-health-updated carries dependency projection and prior status"
+    (let [stream (no-op-stream)
+          dependency (dependency-health-entity {})
+          event (core/dependency-health-updated stream dependency :healthy)]
+      (is (= :dependency/health-updated (:event/type event)))
+      (is (= :anthropic (:dependency/id event)))
+      (is (= :degraded (:dependency/status event)))
+      (is (= :healthy (:dependency/previous-status event)))
+      (is (= (messages/t :dependency/health-updated
+                         {:dependency-id "anthropic"
+                          :status "degraded"})
+             (:message event))))))
+
+(deftest dependency-recovered-test
+  (testing "dependency-recovered carries healthy projection and prior status"
+    (let [stream (no-op-stream)
+          dependency (dependency-health-entity {:dependency/status :healthy
+                                                :dependency/failure-count 0
+                                                :dependency/incident-counts {}})
+          event (core/dependency-recovered stream dependency :degraded)]
+      (is (= :dependency/recovered (:event/type event)))
+      (is (= :healthy (:dependency/status event)))
+      (is (= :degraded (:dependency/previous-status event)))
+      (is (= (messages/t :dependency/recovered
+                         {:dependency-id "anthropic"
+                          :status "healthy"})
+             (:message event))))))

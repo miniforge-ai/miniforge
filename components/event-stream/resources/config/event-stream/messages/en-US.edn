@@ -4,4 +4,10 @@
   "Intervention {type} requested"
 
   :supervisory/intervention-state-changed
-  "Intervention {intervention-id} -> {state}"}}
+  "Intervention {intervention-id} -> {state}"
+
+  :dependency/health-updated
+  "Dependency {dependency-id} health -> {status}"
+
+  :dependency/recovered
+  "Dependency {dependency-id} recovered"}}
