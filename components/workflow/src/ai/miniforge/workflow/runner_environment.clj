@@ -172,15 +172,32 @@
           phase    (boundary-phase phase-ctx)]
       (when env-id
         (try
-          (dag/persist-workspace!
-           executor env-id
-           (cond-> {:message     (messages/t :env/persist-message
-                                             {:phase (name phase)})
-                    :workdir     (get context :execution/worktree-path)
-                    :workflow-id (get context :execution/id)
-                    :task-id     env-id}
-             branch                  (assoc :branch branch)
-             (:base-branch metadata) (assoc :base-branch (:base-branch metadata))))
+          (let [result (dag/persist-workspace!
+                        executor env-id
+                        (cond-> {:message     (messages/t :env/persist-message
+                                                          {:phase (name phase)})
+                                 :workdir     (get context :execution/worktree-path)
+                                 :workflow-id (get context :execution/id)
+                                 :task-id     env-id}
+                          branch                  (assoc :branch branch)
+                          (:base-branch metadata) (assoc :base-branch
+                                                         (:base-branch metadata))))
+                data   (when (dag/ok? result) (dag/unwrap result))]
+            ;; Surface the persisted archive's location so it's grep-able in
+            ;; run logs and reachable from evidence bundles. A future change
+            ;; should promote this to a first-class :workspace/persisted event
+            ;; in event_type_registry so the dashboard can link it.
+            (when (:persisted? data)
+              (log/info env-logger :workflow :workflow/workspace-persisted
+                        {:message  (str "Workspace persisted: "
+                                        (or (:bundle-path data)
+                                            (:commit-sha data)))
+                         :data     {:phase       phase
+                                    :env-id      env-id
+                                    :branch      (:branch data)
+                                    :commit-sha  (:commit-sha data)
+                                    :bundle-path (:bundle-path data)}}))
+            result)
           (catch Exception e
             (log/warn env-logger :workflow :workflow/persist-failed
                       {:message (messages/t :env/persist-failed
