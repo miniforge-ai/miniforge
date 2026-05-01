@@ -693,6 +693,82 @@
     (cond-> table
       entity (assoc-in [:interventions (:intervention/id entity)] entity))))
 
+(defn- dependency-entity
+  [event]
+  (or (:supervisory/entity event)
+      (:dependency/entity event)
+      (select-keys event
+                   [:dependency/id
+                    :dependency/source
+                    :dependency/kind
+                    :dependency/status
+                    :dependency/failure-count
+                    :dependency/window-size
+                    :dependency/incident-counts
+                    :dependency/vendor
+                    :dependency/class
+                    :dependency/retryability
+                    :failure/class
+                    :dependency/last-observed-at
+                    :dependency/last-recovered-at])))
+
+(defn- resolved-dependency-source
+  [event existing]
+  (or (:dependency/source event)
+      (:dependency/source existing)))
+
+(defn- resolved-dependency-kind
+  [event existing]
+  (or (:dependency/kind event)
+      (:dependency/kind existing)))
+
+(defn- recovered-dependency-entity
+  [event existing recovered-at]
+  (let [dependency-id (:dependency/id event)
+        source (resolved-dependency-source event existing)
+        kind (resolved-dependency-kind event existing)
+        vendor (or (:dependency/vendor event)
+                   (:dependency/vendor existing))
+        window-size (or (:dependency/window-size event)
+                        (:dependency/window-size existing)
+                        0)
+        last-observed-at (:dependency/last-observed-at existing)
+        dependency-class (:dependency/class existing)
+        retryability (:dependency/retryability existing)
+        failure-class (:failure/class existing)]
+    (when dependency-id
+      (cond-> {:dependency/id dependency-id
+               :dependency/source source
+               :dependency/kind kind
+               :dependency/status :healthy
+               :dependency/failure-count 0
+               :dependency/window-size window-size
+               :dependency/incident-counts {}}
+        vendor (assoc :dependency/vendor vendor)
+        dependency-class (assoc :dependency/class dependency-class)
+        retryability (assoc :dependency/retryability retryability)
+        failure-class (assoc :failure/class failure-class)
+        last-observed-at (assoc :dependency/last-observed-at last-observed-at)
+        recovered-at (assoc :dependency/last-recovered-at recovered-at)))))
+
+(defn dependency-health-updated
+  [table event]
+  (let [entity (dependency-entity event)
+        dependency-id (:dependency/id entity)]
+    (cond-> table
+      dependency-id (assoc-in [:dependencies dependency-id] entity))))
+
+(defn dependency-recovered
+  [table event]
+  (let [dependency-id (:dependency/id event)
+        existing (get-in table [:dependencies dependency-id])
+        recovered-at (or (:dependency/last-recovered-at event)
+                         (:dependency/recovered-at event)
+                         (event-instant event))
+        updated (recovered-dependency-entity event existing recovered-at)]
+    (cond-> table
+      updated (assoc-in [:dependencies dependency-id] updated))))
+
 ;------------------------------------------------------------------------------ Layer 3
 ;; Dispatch table — events not listed are no-ops at the entity-state level
 
@@ -727,6 +803,9 @@
    :supervisory/task-node-upserted         supervisory-task-node-upserted
    :supervisory/decision-upserted          supervisory-decision-upserted
    :supervisory/intervention-upserted      supervisory-intervention-upserted
+   :supervisory/dependency-upserted        dependency-health-updated
+   :dependency/health-updated              dependency-health-updated
+   :dependency/recovered                   dependency-recovered
    :supervisory/policy-evaluated           supervisory-policy-evaluated
    :supervisory/attention-derived          supervisory-attention-derived})
 

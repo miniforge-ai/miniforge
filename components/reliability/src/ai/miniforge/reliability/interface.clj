@@ -16,6 +16,7 @@
    [ai.miniforge.reliability.sli :as sli]
    [ai.miniforge.reliability.slo :as slo]
    [ai.miniforge.reliability.budget :as budget]
+   [ai.miniforge.reliability.dependency-health :as dependency-health]
    [ai.miniforge.reliability.engine :as engine]
    [ai.miniforge.reliability.degradation :as degradation]))
 
@@ -29,6 +30,9 @@
 (def SliResult schema/SliResult)
 (def SloCheck schema/SloCheck)
 (def ErrorBudget schema/ErrorBudget)
+(def DependencyKind schema/DependencyKind)
+(def DependencyHealthStatus schema/DependencyHealthStatus)
+(def DependencyHealth schema/DependencyHealth)
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; SLI computation (pure)
@@ -64,6 +68,23 @@
 (def budget-exhausted? budget/budget-exhausted?)
 (def budget-critical? budget/budget-critical?)
 
+;------------------------------------------------------------------------------ Layer 3b
+;; Dependency health projection (pure)
+
+(def dependency-incident?
+  "Returns true when the classified failure contributes to dependency-health
+   projection."
+  dependency-health/dependency-incident?)
+
+(def apply-dependency-signals
+  "Apply classified dependency incidents and recovery signals to rolling
+   dependency-health state."
+  dependency-health/apply-signals)
+
+(def project-dependency-health
+  "Project rolling dependency-health state into canonical dependency entities."
+  dependency-health/project-health)
+
 ;------------------------------------------------------------------------------ Layer 4
 ;; Engine (stateful)
 
@@ -79,7 +100,13 @@
   "Execute one reliability computation cycle.
    Computes SLIs, checks SLOs, updates budgets, emits events.
 
-   Returns: {:slis :slo-checks :budgets :breaches :recommendation}"
+   Returns:
+   {:slis
+    :slo-checks
+    :budgets
+    :dependency-health
+    :breaches
+    :recommendation}"
   engine/compute-cycle!)
 
 (def current-state

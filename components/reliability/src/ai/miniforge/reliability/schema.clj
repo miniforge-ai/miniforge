@@ -19,6 +19,12 @@
 (def DegradationMode
   [:enum :nominal :degraded :safe-mode])
 
+(def DependencyKind
+  [:enum :provider :platform :environment])
+
+(def DependencyHealthStatus
+  [:enum :healthy :degraded :unavailable :misconfigured :operator-action-required])
+
 ;------------------------------------------------------------------------------ Layer 0
 ;; Records
 
@@ -47,3 +53,19 @@
    [:error-budget/remaining :double]
    [:error-budget/burn-rate :double]
    [:error-budget/computed-at inst?]])
+
+(def DependencyHealth
+  [:map
+   [:dependency/id keyword?]
+   [:dependency/source keyword?]
+   [:dependency/kind DependencyKind]
+   [:dependency/status DependencyHealthStatus]
+   [:dependency/failure-count :int]
+   [:dependency/window-size :int]
+   [:dependency/incident-counts [:map-of DependencyHealthStatus :int]]
+   [:dependency/vendor {:optional true} keyword?]
+   [:dependency/class {:optional true} keyword?]
+   [:dependency/retryability {:optional true} keyword?]
+   [:failure/class {:optional true} keyword?]
+   [:dependency/last-observed-at {:optional true} inst?]
+   [:dependency/last-recovered-at {:optional true} inst?]])

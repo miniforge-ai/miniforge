@@ -170,12 +170,20 @@
     (let [stream (stream/create-event-stream {:sinks []})
           eng (rel/create-engine stream {:windows [:7d] :tiers [:standard]})
           metrics {:workflow-metrics [{:status :completed :timestamp now}
-                                     {:status :completed :timestamp now}
-                                     {:status :failed :timestamp now}]}
+                                      {:status :completed :timestamp now}
+                                      {:status :failed :timestamp now}]
+                   :dependency/incidents [{:failure/class :failure.class/external
+                                           :failure/source :external-provider
+                                           :failure/vendor :anthropic
+                                           :dependency/class :rate-limit
+                                           :dependency/retryability :retryable
+                                           :failure/message "rate limit"}]}
           result (rel/compute-cycle! eng metrics)]
       (is (vector? (:slis result)))
       (is (vector? (:slo-checks result)))
       (is (map? (:budgets result)))
+      (is (map? (:dependency-health result)))
+      (is (= :degraded (get-in result [:dependency-health :anthropic :dependency/status])))
       (is (contains? #{:nominal :degraded :safe-mode} (:recommendation result)))
       ;; Events should have been emitted
       (is (pos? (count (:events @stream)))))))

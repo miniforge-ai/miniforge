@@ -104,6 +104,12 @@
    N5-delta-supervisory-control-plane §3.3."
   [:proposed :pending-human :approved :rejected :dispatched :applied :verified :failed])
 
+(def dependency-kinds
+  [:provider :platform :environment])
+
+(def dependency-statuses
+  [:healthy :degraded :unavailable :misconfigured :operator-action-required])
+
 ;------------------------------------------------------------------------------ Layer 0a
 ;; Registry extensions for supervisory v1
 
@@ -168,7 +174,12 @@
 
    ;; InterventionRequest (N5 supervisory delta §3.1 / §3.3)
    :intervention/id              :id/uuid
-   :intervention/state           (into [:enum] intervention-states)})
+   :intervention/state           (into [:enum] intervention-states)
+
+   ;; DependencyHealth
+   :dependency/id                keyword?
+   :dependency/kind              (into [:enum] dependency-kinds)
+   :dependency/status            (into [:enum] dependency-statuses)})
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Entity schemas — open maps, mirror N5-delta-1 §3.1
@@ -423,6 +434,23 @@
    [:intervention/reason {:optional true} [:maybe string?]]
    [:intervention/outcome {:optional true} any?]])
 
+(def DependencyHealth
+  "Projected health for an external provider, platform, or user environment."
+  [:map {:registry registry}
+   [:dependency/id :dependency/id]
+   [:dependency/source keyword?]
+   [:dependency/kind :dependency/kind]
+   [:dependency/status :dependency/status]
+   [:dependency/failure-count :common/non-neg-int]
+   [:dependency/window-size :common/non-neg-int]
+   [:dependency/incident-counts [:map-of :dependency/status :common/non-neg-int]]
+   [:dependency/vendor {:optional true} [:maybe keyword?]]
+   [:dependency/class {:optional true} [:maybe keyword?]]
+   [:dependency/retryability {:optional true} [:maybe keyword?]]
+   [:failure/class {:optional true} [:maybe keyword?]]
+   [:dependency/last-observed-at {:optional true} [:maybe :common/timestamp]]
+   [:dependency/last-recovered-at {:optional true} [:maybe :common/timestamp]]])
+
 ;------------------------------------------------------------------------------ Layer 2
 ;; Component-internal entity table
 
@@ -436,7 +464,8 @@
    [:attention     [:map-of :id/uuid AttentionItem]]
    [:tasks         [:map-of :id/uuid TaskNode]]
    [:decisions     [:map-of :id/uuid DecisionCard]]
-   [:interventions [:map-of :id/uuid InterventionRequest]]])
+   [:interventions [:map-of :id/uuid InterventionRequest]]
+   [:dependencies  [:map-of :dependency/id DependencyHealth]]])
 
 (def empty-table
   "Initial empty entity table."
@@ -447,4 +476,5 @@
    :attention {}
    :tasks {}
    :decisions {}
-   :interventions {}})
+   :interventions {}
+   :dependencies {}})
