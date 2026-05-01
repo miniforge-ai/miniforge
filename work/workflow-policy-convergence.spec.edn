@@ -22,19 +22,31 @@
  :spec/priority
  {:tier :medium
   :axes [:workflow-orchestration :governance :reliability]
-  :theme :workflow-orchestration
+  ;; :operational-policy-synthesis is the cataloged theme for OPSV-style
+  ;; convergence work in work/themes.edn. Workflow Policy Convergence is
+  ;; OPSV's CONVERGE/VERIFY/ACTUATE pattern applied to the
+  ;; workflow-selection axis — same theme.
+  :theme :operational-policy-synthesis
   :rationale
   ["Workflow selection rules are hand-coded today and require re-derivation every time we configure a new repo or team."
    "We have evidence that 'wrong workflow chosen' is a real failure mode (PR #729 dogfood ran on :simple, would have skipped review/verify entirely)."
    "Same convergence-then-actuate pattern is already used for operational policy (OPSV); the workflow-selection axis is missing the same treatment."
-   "Closes the loop with N2-workflows §'selection MAY be later learned by convergence logic'."]
+   "Closes the loop with N2-workflows clause: 'selection MAY be ... later learned by convergence logic'."]
   :blocks [:adaptive-workflow-selection :workflow-synthesis-from-policy]
-  :blocked-by [:reliable-outcome-evidence :workflow-outcome-rubric]}
+  ;; :blocked-by takes spec filenames per the work-spec authoring
+  ;; standard's queue-readiness check. rn-06 is the existing outcome-
+  ;; evidence work this convergence reads from. The "outcome rubric"
+  ;; piece doesn't have a spec yet — Step 1 of this spec is itself
+  ;; where the rubric schema is defined, so there's no external
+  ;; blocker to list for it.
+  :blocked-by ["rn-06-outcome-evidence.spec.edn"]}
 
  :normative-refs
- ["specs/normative/N2-workflows.md#selection-policy"
-  "specs/normative/N1-architecture.md#workflow-execution"
-  "components/phase/resources/packs/miniforge-standards.pack.edn#:std/work-spec-authoring"]
+ ;; Section anchors removed — the source files don't have stable
+ ;; anchors that resolve, and Copilot's #section links wouldn't render.
+ ["specs/normative/N2-workflows.md"
+  "specs/normative/N1-architecture.md"
+  "components/phase/resources/packs/miniforge-standards.pack.edn"]
 
  :spec/description
  "Build a meta-workflow that, for a given (task-shape, context) pair,
@@ -97,8 +109,14 @@
  :handoff-ref "Verbal design discussion 2026-05-01 during dogfood of per-task-base-chaining"
 
  :dag/id :workflow-policy-convergence
+ ;; :n07-opsv-converge-verify-actuate provides the CONVERGE/VERIFY/ACTUATE
+ ;; skeleton this spec reuses. :rn-06 is the outcome-evidence work this
+ ;; spec aggregates over. The earlier draft listed
+ ;; :outcome-evidence-rubric, but no spec declares that :dag/id —
+ ;; the rubric is defined inside Step 1 of this spec, not as a separate
+ ;; prerequisite.
  :dag/depends-on [:n07-opsv-converge-verify-actuate
-                  :outcome-evidence-rubric]
+                  :rn-06]
  :dag/blocks [:workflow-synthesis-v2]
 
  :current-state
