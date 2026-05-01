@@ -23,6 +23,7 @@
    workspace persistence at phase boundaries. Extracted from runner.clj."
   (:require
    [ai.miniforge.dag-executor.interface :as dag]
+   [ai.miniforge.event-stream.interface :as es]
    [ai.miniforge.logging.interface :as log]
    [ai.miniforge.response.interface :as response]
    [ai.miniforge.workflow.context :as context]
@@ -183,11 +184,8 @@
                           (:base-branch metadata) (assoc :base-branch
                                                          (:base-branch metadata))))
                 data   (when (dag/ok? result) (dag/unwrap result))]
-            ;; Surface the persisted archive's location so it's grep-able in
-            ;; run logs and reachable from evidence bundles. A future change
-            ;; should promote this to a first-class :workspace/persisted event
-            ;; in event_type_registry so the dashboard can link it.
             (when (:persisted? data)
+              ;; Log line — grep-able from run logs.
               (log/info env-logger :workflow :workflow/workspace-persisted
                         {:message  (str "Workspace persisted: "
                                         (or (:bundle-path data)
@@ -196,7 +194,23 @@
                                     :env-id      env-id
                                     :branch      (:branch data)
                                     :commit-sha  (:commit-sha data)
-                                    :bundle-path (:bundle-path data)}}))
+                                    :bundle-path (:bundle-path data)}})
+              ;; First-class event — picked up by evidence-bundle and the
+              ;; dashboard so 'inspect/resume from this checkpoint' has a
+              ;; structured surface, not just a log line.
+              (when-let [stream (get context :event-stream)]
+                (try
+                  (es/publish! stream
+                               (es/workspace-persisted
+                                stream
+                                (get context :execution/id)
+                                {:phase        phase
+                                 :env-id       env-id
+                                 :branch       (:branch data)
+                                 :commit-sha   (:commit-sha data)
+                                 :bundle-path  (:bundle-path data)
+                                 :persist-tier :worktree}))
+                  (catch Exception _e nil))))
             result)
           (catch Exception e
             (log/warn env-logger :workflow :workflow/persist-failed

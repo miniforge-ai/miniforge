@@ -27,6 +27,7 @@
 (def workflow-started core/workflow-started)
 (def phase-started core/phase-started)
 (def phase-completed core/phase-completed)
+(def workspace-persisted core/workspace-persisted)
 (def agent-chunk core/agent-chunk)
 (def agent-status core/agent-status)
 (def agent-tool-call core/agent-tool-call)

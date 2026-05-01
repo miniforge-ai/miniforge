@@ -98,6 +98,27 @@
    [:phase/cost-usd {:optional true} number?]
    [:message string?]])
 
+(def WorkspacePersisted
+  "Schema for workspace/persisted event.
+
+   Emitted at phase boundaries when persist-workspace! has captured a
+   checkpoint. Carries enough provenance for the dashboard / evidence
+   bundle to surface 'inspect or resume from this archive'."
+  [:map
+   [:event/type [:= :workspace/persisted]]
+   [:event/id uuid?]
+   [:event/timestamp inst?]
+   [:event/version string?]
+   [:event/sequence-number int?]
+   [:workflow/id uuid?]
+   [:workspace/phase {:optional true} keyword?]
+   [:workspace/env-id {:optional true} string?]
+   [:workspace/branch {:optional true} string?]
+   [:workspace/commit-sha {:optional true} string?]
+   [:workspace/bundle-path {:optional true} string?]
+   [:workspace/tier {:optional true} [:enum :worktree :remote]]
+   [:message string?]])
+
 (def WorkflowCompleted
   "Schema for workflow/completed event."
   [:map
@@ -308,6 +329,7 @@
    :workflow/phase-started   :public
    :workflow/phase-completed :public
    :workflow/milestone-reached :public
+   :workspace/persisted :public
    :agent/started    :internal
    :agent/completed  :internal
    :agent/failed     :internal
