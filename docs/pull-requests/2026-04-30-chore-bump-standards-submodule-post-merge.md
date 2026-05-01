@@ -4,8 +4,7 @@
 
 Small follow-up to [miniforge#713](https://github.com/miniforge-ai/miniforge/pull/713). The Phase 4b PR shipped with the
 `.standards` submodule pointing at the head of
-[`miniforge-standards/claude/runtime-policies`](https://github.com/miniforge-ai/miniforge-standards/tree/claude/runtime-
-policies) (`6f536a0`) — the branch HEAD before the standards repo's PR landed. miniforge-standards#14 merged in the
+[`miniforge-standards/claude/runtime-policies`](https://github.com/miniforge-ai/miniforge-standards/tree/claude/runtime-policies) (`6f536a0`) — the branch HEAD before the standards repo's PR landed. miniforge-standards#14 merged in the
 meantime; this PR rebases the submodule pointer onto the merge commit on main
 ([`164d143`](https://github.com/miniforge-ai/miniforge-standards/commit/164d143)) so the consumer is tracking main
 rather than a now-orphan branch.
