@@ -1,4 +1,4 @@
-#:pack{:created-at #inst "2026-04-30T22:17:42.503-00:00",
+#:pack{:created-at #inst "2026-04-30T22:30:06.529-00:00",
        :version "2026.04",
        :rules
        [#:rule{:title
@@ -855,7 +855,7 @@
                     :std/pr-layering
                     :std/pre-commit-discipline]}],
        :trust-level :trusted,
-       :updated-at #inst "2026-04-30T22:17:42.503-00:00",
+       :updated-at #inst "2026-04-30T22:30:06.529-00:00",
        :author "miniforge.ai",
        :taxonomy-ref
        #:taxonomy{:id :miniforge/dewey, :min-version "1.0.0"},
