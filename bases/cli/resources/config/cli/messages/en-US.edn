@@ -647,6 +647,37 @@
                        :unreachable :red :completed :green}
   :cp/priority-colors {:critical :red :high :yellow :medium :blue :low :white}
 
+  ;; ---------- `mf scan` — compliance scanner pipeline ----------
+  :scan/repo-not-found       "Repository not found: {path}"
+  :scan/scan-failed          "Scan failed: {message}"
+  :scan/banner               "Scanning {path} ..."
+  :scan/policy-summary       "Found {count} violation(s) across {files} files ({duration-ms}ms)"
+  :scan/classification       "  Auto-fixable: {auto-count}  Needs review: {review-count}"
+  :scan/total-line           "Total: {count} violation(s){breakdown}"
+  :scan/total-breakdown      " ({policy} policy{linter}{semantic})"
+  :scan/total-linter         " + {count} linter"
+  :scan/total-semantic       " + {count} semantic"
+
+  :scan/running-linters      "Running linters..."
+  :scan/linter-skipped       "  {tech}: linter not installed (skipped)"
+  :scan/linter-findings      "  {tech}: {count} finding(s) ({duration-ms}ms)"
+  :scan/linter-clean         "  {tech}: clean ({duration-ms}ms)"
+  :scan/linter-fix-banner    "Running linter fixes..."
+  :scan/linter-fix-result    "  {tech}: fix {result}"
+  :scan/linter-fix-applied   "applied"
+  :scan/linter-fix-failed    "failed"
+
+  :scan/semantic-banner      "Running semantic analysis..."
+  :scan/semantic-skipped     "  Skipped {count} rule(s) with no matching files"
+  :scan/semantic-analyzing   "  Analyzing {count} behavioral rule(s) in parallel..."
+  :scan/semantic-unavailable "  Semantic analysis unavailable: {message}"
+  :scan/rule-timeout         "  {rule}: timeout (skipped)"
+  :scan/rule-error           "  {rule}: error — {message}"
+  :scan/rule-findings        "  {rule}: {count} finding(s) ({files} files, {duration-ms}ms)"
+
+  :scan/exec-banner          "Executing auto-fixes..."
+  :scan/exec-summary         "Fixed {fixed} violation(s) across {files} file(s)"
+
   ;; ---------- `mf init` — repo analysis + config-file generation ----------
   :init/repo-not-found        "Repository not found: {path}"
   :init/analyzing             "Analyzing {path} ..."
@@ -656,3 +687,4 @@
   :init/git-host-unknown      "unknown"
   :init/existing-overwritten  "  Existing config at {path} will be overwritten."
   :init/wrote                 "Wrote {path}"}}
+
