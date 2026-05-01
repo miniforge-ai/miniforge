@@ -294,12 +294,34 @@
       true                         (conj prompt))))
 
 (defn- codex-args
-  "Build CLI arguments for the Codex backend."
+  "Build CLI arguments for the Codex backend.
+
+   Tool / approval surface (mirrors Claude's --allowedTools intent within
+   Codex's different tool model — see PR notes):
+
+   - --sandbox=workspace-write  — explicit sandbox; agent can edit files
+                                  in the workspace. Replaces the deprecated
+                                  --full-auto alias for clarity.
+   - -c approval_policy=never   — no human-in-the-loop pings. Codex's exec
+                                  mode honors this.
+   - -c mcp_servers.artifact.required=true
+                                — fail loudly if the artifact MCP server
+                                  doesn't initialize, instead of silently
+                                  proceeding without it. Matches Claude's
+                                  behavior when --mcp-config can't load.
+
+   What we cannot do (per Codex config-reference): allow-list individual
+   built-in tools. apply_patch / shell are governed by sandbox_mode
+   categorically. The implementer prompt + the artifact MCP server's own
+   `enabled_tools` list are the per-tool surface."
   [{:keys [prompt model system]}]
   (cond-> ["exec"
            "--json"
-           "--full-auto"
-           "--skip-git-repo-check"]
+           "--sandbox=workspace-write"
+           "--ask-for-approval=never"
+           "--skip-git-repo-check"
+           "-c" "approval_policy=\"never\""
+           "-c" "mcp_servers.artifact.required=true"]
     model  (into ["-m" model])
     system (into ["-c" (str "system_prompt=" (json/generate-string system))])
     true   (conj prompt)))
