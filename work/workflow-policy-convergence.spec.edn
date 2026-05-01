@@ -1,0 +1,335 @@
+;; Workflow Policy Convergence — learned workflow selection (and, eventually,
+;; learned workflow synthesis) for a (task-shape, context) pair.
+;;
+;; Background:
+;; - N2-workflows already says workflow selection "MAY be static,
+;;   policy-driven, or later learned by convergence logic". This spec
+;;   captures the work that operationalizes the third option.
+;; - The same convergence pattern is already in flight for operational
+;;   policy in `work/n07-opsv-converge-verify-actuate.spec.edn` (OPSV).
+;;   Workflow Policy Convergence reuses that pattern — CONVERGE / VERIFY /
+;;   ACTUATE — applied to the workflow-selection axis instead of capacity
+;;   or operational tuning.
+;; - Today the fast-path runtime selectors (cli/workflow_selector.clj
+;;   heuristics + cli/workflow_recommender.clj LLM recommender) decide
+;;   which workflow to run for a given spec. Their rules are hand-coded.
+;;   This spec produces the *data* the fast path should be reading from.
+
+{:spec/title "Workflow Policy Convergence: learned workflow selection"
+ :version "1.0.0"
+ :type :feature
+
+ :spec/priority
+ {:tier :medium
+  :axes [:workflow-orchestration :governance :reliability]
+  ;; :operational-policy-synthesis is the cataloged theme for OPSV-style
+  ;; convergence work in work/themes.edn. Workflow Policy Convergence is
+  ;; OPSV's CONVERGE/VERIFY/ACTUATE pattern applied to the
+  ;; workflow-selection axis — same theme.
+  :theme :operational-policy-synthesis
+  :rationale
+  ["Workflow selection rules are hand-coded today and require re-derivation every time we configure a new repo or team."
+   "We have evidence that 'wrong workflow chosen' is a real failure mode (PR #729 dogfood ran on :simple, would have skipped review/verify entirely)."
+   "Same convergence-then-actuate pattern is already used for operational policy (OPSV); the workflow-selection axis is missing the same treatment."
+   "Closes the loop with N2-workflows clause: 'selection MAY be ... later learned by convergence logic'."]
+  :blocks [:adaptive-workflow-selection :workflow-synthesis-from-policy]
+  ;; :blocked-by takes spec filenames per the work-spec authoring
+  ;; standard's queue-readiness check. rn-06 is the existing outcome-
+  ;; evidence work this convergence reads from. The "outcome rubric"
+  ;; piece doesn't have a spec yet — Step 1 of this spec is itself
+  ;; where the rubric schema is defined, so there's no external
+  ;; blocker to list for it.
+  :blocked-by ["rn-06-outcome-evidence.spec.edn"]}
+
+ :normative-refs
+ ;; Section anchors removed — the source files don't have stable
+ ;; anchors that resolve, and Copilot's #section links wouldn't render.
+ ["specs/normative/N2-workflows.md"
+  "specs/normative/N1-architecture.md"
+  "components/phase/resources/packs/miniforge-standards.pack.edn"]
+
+ :spec/description
+ "Build a meta-workflow that, for a given (task-shape, context) pair,
+  converges on the best workflow to run. \"Best\" is defined by a
+  governed outcome rubric (tests pass rate, scope adherence, token cost,
+  wall time, downstream review churn — all configurable per
+  organization or team). The result is a *workflow-selection policy
+  pack* that the runtime fast-path selectors read from.
+
+  Sits one layer above today's runtime selection. Today:
+
+    spec ──► workflow_selector / workflow_recommender ──► registered workflow
+
+  After this spec lands:
+
+    workflow corpus + context ──► workflow-policy-convergence ──► policy pack
+                                                                       │
+    spec ──► workflow_selector ◄──────────────────────────────────────┘
+        ──► registered workflow
+
+  Convergence is the slow path; selection is the fast path.
+
+  Two phases of capability:
+
+  v1 — SELECT FROM REGISTERED. The convergence run picks among the
+       registered workflows (`:simple`, `:canonical-sdlc`, `:quick-fix`,
+       and any domain-specific ones) based on observed outcome metrics
+       across a representative task corpus. Output is a policy pack
+       mapping `(task-shape, context) → registered workflow id`.
+
+  v2 — SYNTHESIZE NEW WORKFLOW. The convergence run treats workflow
+       definitions themselves as data — phase pipeline, gates, budgets,
+       agent assignments, retry strategy — and searches that space
+       under policy guards. Output includes a custom-synthesized
+       workflow definition. Still governed: must respect policy packs
+       (no skipping :verify, no relaxing :approval_policy below the
+       org floor, evidence-bundle requirements honored, etc.).
+
+  Both phases reuse the OPSV convergence-then-actuate skeleton from
+  `work/n07-opsv-converge-verify-actuate.spec.edn` — same governance
+  contract (APPLY_ALLOWED gating, abort conditions, evidence bundles)
+  applied to a different domain.
+
+  Out of scope:
+  - Online learning during a single workflow run. Convergence operates
+    over a corpus of completed runs; mid-run replanning stays an
+    explicit machine transition per N2.
+  - Cross-organization policy sharing. Each org/team owns its own
+    convergence run; cross-org synthesis is a follow-on.
+  - Replacing the heuristic selector. The heuristic stays as a fallback
+    for orgs that haven't run convergence yet, or for spec types the
+    convergence policy hasn't covered."
+
+ :spec/intent
+ {:type :feature
+  :scope ["components/workflow/src/**"
+          "components/workflow-policy-convergence/** (NEW)"
+          "components/policy-pack/src/**"]}
+
+ :handoff-ref "Verbal design discussion 2026-05-01 during dogfood of per-task-base-chaining"
+
+ :dag/id :workflow-policy-convergence
+ ;; :n07-opsv-converge-verify-actuate provides the CONVERGE/VERIFY/ACTUATE
+ ;; skeleton this spec reuses. :rn-06 is the outcome-evidence work this
+ ;; spec aggregates over. The earlier draft listed
+ ;; :outcome-evidence-rubric, but no spec declares that :dag/id —
+ ;; the rubric is defined inside Step 1 of this spec, not as a separate
+ ;; prerequisite.
+ :dag/depends-on [:n07-opsv-converge-verify-actuate
+                  :rn-06]
+ :dag/blocks [:workflow-synthesis-v2]
+
+ :current-state
+ {:selection
+  ["bases/cli/src/.../workflow_selector.clj — hand-coded heuristic rules
+    keyed off :pr-count, :type, :keywords, :size"
+   "bases/cli/src/.../workflow_recommender.clj — LLM-based recommender
+    with deterministic fallback"
+   "Both consult only the spec; no historical outcome data is read"]
+  :outcome-evidence
+  ["Evidence bundles (components/evidence-bundle) capture per-run
+    artifacts and metrics — already structured, already governed"
+   "No aggregator that turns N evidence bundles into a workflow-outcome
+    distribution per (task-shape, context)"]
+  :convergence-pattern
+  ["OPSV (work/n07-opsv-converge-verify-actuate.spec.edn) implements
+    CONVERGE → VERIFY → ACTUATE for operational policy with abort
+    conditions and dry-run gating"
+   "Pattern is reusable; no library extraction yet"]
+  :gap "No mechanism converts past run evidence into selection policy.
+        Selection rules are derived by humans and rot as the agent /
+        prompt / model landscape shifts under them."}
+
+ :target-state
+ {:meta-workflow
+  "A registered workflow `:workflow-policy-convergence` whose pipeline
+   is CONVERGE → VERIFY → ACTUATE (mirrors OPSV). Run inputs are a task
+   corpus, a context descriptor, and an outcome rubric. Output is a
+   workflow-selection policy pack."
+
+  :outcome-rubric
+  "Schema for the per-(task, workflow) outcome metrics that drive
+   selection. Default rubric covers: tests-pass-rate,
+   scope-deviation-count, tokens-spent, wall-time-seconds,
+   pr-review-churn-count, escalation-count. Orgs can extend with their
+   own axes via a rubric pack (data, not code)."
+
+  :convergence-engine
+  "Pure search procedure given (corpus, candidates, rubric) → policy.
+   v1 candidates are the set of registered workflows. v2 candidates
+   include synthesized workflow definitions (phase pipelines + gates
+   + budgets, all data, all schema-validated and policy-checked
+   before execution)."
+
+  :selection-policy-pack
+  "A policy pack file (EDN) that maps `(task-shape, context-tag) →
+   workflow-id-or-definition`. Read by workflow_selector at the
+   runtime fast path. Versioned and audit-logged like any other
+   policy pack."
+
+  :synthesis-guard
+  "When v2 emits a synthesized workflow definition, it MUST pass the
+   same governance pipeline as a hand-authored workflow: standards
+   pack, no-skip-verify check, evidence-bundle requirements,
+   approval-policy floor. Synthesis without governance guards is
+   explicitly forbidden in this spec."}
+
+ :implementation
+ {:step-1-outcome-rubric
+  {:title "Outcome rubric schema + default rubric"
+   :scope ["components/policy-pack/resources/rubrics/workflow-outcome.edn"
+           "components/policy-pack/src/.../rubric.clj"]
+   :changes
+   ["Define `:rubric/workflow-outcome` schema: ordered axes, weight per
+     axis, aggregation (mean / p50 / p95), and a tie-breaker."
+    "Ship a default rubric covering tests-pass-rate, scope-deviation,
+     tokens-spent, wall-time, review-churn, escalations."
+    "Schema-validate at load."
+    "Tests: malformed rubric → anomaly; valid rubric round-trips through
+     load + score."]}
+
+  :step-2-evidence-aggregator
+  {:title "Aggregate evidence bundles into per-(task, workflow) metric distributions"
+   :scope ["components/evidence-bundle/src/.../aggregator.clj"]
+   :changes
+   ["Walk a directory of evidence bundles for a given workflow-id range."
+    "Group by (task-shape, workflow-id). Task-shape is a hash of
+     `:spec/intent :type` + `:dag/id` family + scope-glob bucket."
+    "Emit a metrics distribution per group."
+    "No I/O outside the evidence-bundle path; pure function over file
+     handles otherwise."]}
+
+  :step-3-convergence-engine
+  {:title "Pure search: (corpus-distributions, candidates, rubric) → policy"
+   :scope ["components/workflow-policy-convergence/src/.../engine.clj (NEW)"]
+   :changes
+   ["v1: rank registered workflows for each (task-shape) bucket via
+     rubric score; emit policy entries `(task-shape → best workflow-id)`.
+     Tie-break by stability of metrics across runs (lower variance wins
+     when scores are within rubric tolerance)."
+    "Function is pure: takes the aggregated metrics map and the rubric
+     map, returns the policy map. No reads or writes."
+    "Tests cover: single-bucket-single-candidate, multi-bucket
+     multi-candidate, ties broken by variance, empty corpus → identity
+     policy (defer to heuristic)."]}
+
+  :step-4-meta-workflow-pipeline
+  {:title "Register the :workflow-policy-convergence workflow"
+   :scope ["components/workflow-policy-convergence/resources/workflows/workflow-policy-convergence-v1.edn (NEW)"]
+   :changes
+   ["Three phases: CONVERGE (run engine over corpus), VERIFY (replay
+     a holdout slice through the proposed policy and check outcomes
+     don't regress), ACTUATE (write policy pack — gated on
+     APPLY_ALLOWED env var per the OPSV pattern)."
+    "Each phase has its own gates. CONVERGE has a budget cap (max
+     iterations, max wall time). VERIFY has an abort condition: if
+     proposed policy underperforms current heuristic on the holdout,
+     abort with an evidence bundle and don't write the pack."
+    "ACTUATE dry-run prints the proposed policy diff against the
+     current pack without mutating disk."]}
+
+  :step-5-selector-reads-policy-pack
+  {:title "workflow_selector reads the policy pack first, falls back to heuristic"
+   :scope ["bases/cli/src/.../workflow_selector.clj"]
+   :changes
+   ["At selection time: load the workflow-selection policy pack (if
+     present), look up `(task-shape, context-tag)`, return that
+     workflow-id."
+    "If no pack OR no match for the bucket, fall through to the
+     existing heuristic + LLM-recommender chain."
+    "Backward-compatible: orgs without a converged pack see today's
+     behavior unchanged."]}
+
+  :step-6-synthesis-deferred
+  {:title "v2: synthesized workflow definitions"
+   :scope ["DEFERRED — separate spec"]
+   :changes
+   ["Treat workflow definitions as data: phase pipeline + gate set +
+     budget envelope + agent assignment, all schema-driven."
+    "Convergence engine emits candidate definitions; each must pass the
+     governance pipeline (standards pack scan, no-skip-verify check,
+     approval floor) before becoming a candidate at all."
+    "v2 lands as its own spec once v1 produces enough corpus signal to
+     learn from."]}}
+
+ :spec/constraints
+ ["Stratified design: outcome rubric, aggregator, and convergence engine
+   are pure data + pure functions. The meta-workflow pipeline is the
+   only place with I/O."
+  "Configuration is data — rubrics, candidate sets, abort conditions
+   all live in EDN packs."
+  "Same governance contract as OPSV: APPLY_ALLOWED env gate, dry-run
+   ACTUATE, abort-on-regression VERIFY, evidence bundles for every
+   convergence run."
+  "Synthesis without governance guards is explicitly forbidden."
+  "No online learning during a single run. Convergence is over a
+   completed-runs corpus only."
+  "Backward-compatible: orgs without a converged pack run today's
+   selection unchanged."
+  "Apache 2.0 header on all sources."]
+
+ :testing-strategy
+ {:unit-tests
+  ["Outcome rubric: schema validation, score computation, tie-breaking"
+   "Evidence aggregator: bundle grouping by task-shape, metric
+    distribution shape, empty-corpus handling"
+   "Convergence engine: single/multi-bucket cases, ties, empty-corpus
+    no-op, deterministic output for equal inputs"]
+  :integration-tests
+  ["End-to-end: stub corpus of evidence bundles → convergence run →
+    proposed policy pack → workflow_selector resolves a known spec
+    against the new pack to the expected workflow id"
+   "Governance gate: convergence run with APPLY_ALLOWED unset
+    produces a dry-run diff and does NOT mutate the on-disk pack"
+   "Regression abort: convergence proposes a worse policy on the
+    holdout slice → VERIFY phase aborts with anomaly, no pack written"]}
+
+ :spec/acceptance-criteria
+ [{:criterion "A convergence run over a stub corpus produces a
+                workflow-selection policy pack scored against a
+                governable rubric"
+   :verification "Integration test asserts a generated pack and that
+                   workflow_selector resolves a known spec to the
+                   expected workflow-id from the pack"}
+  {:criterion "ACTUATE is gated on APPLY_ALLOWED — dry-run is the
+                default behavior"
+   :verification "Test runs convergence with APPLY_ALLOWED unset and
+                   asserts no pack file is written; with APPLY_ALLOWED=true
+                   asserts the pack file lands at the expected path"}
+  {:criterion "Regression on a holdout slice aborts ACTUATE"
+   :verification "Test seeds a corpus where the proposed policy
+                   underperforms current heuristic on holdout; assert
+                   anomaly emitted, no pack written, evidence bundle
+                   captured"}
+  {:criterion "workflow_selector reads the pack before the heuristic"
+   :verification "Test with a converged pack present asserts the
+                   pack-driven choice wins; remove the pack and assert
+                   the heuristic chain takes over"}
+  {:criterion "v1 ships without synthesis"
+   :verification "Spec scope is registered-workflow selection only;
+                   synthesis features are explicitly DEFERRED to a
+                   follow-on spec"}]
+
+ :follow-on-specs
+ [{:id :workflow-synthesis-v2
+   :title "Synthesized workflow definitions (v2)"
+   :description "Treat workflow definitions as data and let convergence
+                  emit custom workflows. Each candidate must pass the
+                  governance pipeline before scoring. Lands once v1
+                  produces enough corpus signal to make synthesis
+                  meaningful."}
+  {:id :cross-org-policy-sharing
+   :title "Cross-organization workflow-selection policy sharing"
+   :description "Convergence today is per-org. A registry/marketplace
+                  for workflow-selection packs (with provenance and
+                  trust signals) is a follow-on once v1+v2 stabilize."}
+  {:id :selector-heuristic-from-pack
+   :title "Replace the hand-coded heuristic with the converged pack output"
+   :description "Once converged packs are reliable for the common
+                  cases, retire the hand-coded selection-rules in
+                  workflow_selector.clj. Heuristic becomes pure
+                  fallback, then optional."}]
+
+ :estimated-effort "5-7 days for v1; v2 is its own multi-week spec"
+
+ :workflow/type :canonical-sdlc}
