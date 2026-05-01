@@ -21,14 +21,19 @@
    read the same way across the umbrella and so tests can inspect
    exit/capture output uniformly.
 
-   Layer 0: argument normalization and command-resolution planning (pure).
-   Layer 1: process invocations on top of Layer 0."
+   Stratification (intra-namespace):
+   Layer 0 — pure data + helpers with no in-ns deps.
+   Layer 1 — composes Layer 0 (`command-candidates`, `run!`,
+             `run-bg!`, `sh`).
+   Layer 2 — `resolve-command` composes `command-candidates` + the L0
+             `first-resolved-command`.
+   Layer 3 — `clojure-command` (public single-purpose entry over L2)."
   (:refer-clojure :exclude [run!])
   (:require [babashka.fs :as fs]
             [babashka.process :as p]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Argument normalization and command planning (pure)
+;; No in-namespace dependencies.
 
 (def ^:private windows-clojure-command
   "Fallback executable names for Clojure tooling on Windows runners."
@@ -42,14 +47,6 @@
     [(first args) (rest args)]
     [{} args]))
 
-(defn command-candidates
-  "Return candidate executable names for `cmd` on `os`."
-  [cmd os]
-  (let [candidates (if (and (= os :windows) (= cmd "clojure"))
-                     (into [cmd] windows-clojure-command)
-                     [cmd])]
-    (vec (distinct candidates))))
-
 (defn first-resolved-command
   "Return the first executable path found by `lookup-fn`, else the first
    candidate name unchanged."
@@ -59,21 +56,29 @@
             candidates)
       (first candidates)))
 
-;------------------------------------------------------------------------------ Layer 1
-;; Process invocations
-
-(defn resolve-command
-  "Resolve `cmd` to an executable path when possible."
+(defn installed?
+  "True if `cmd` resolves on PATH. Uses `babashka.fs/which`, which is
+   portable: invokes `which` on Unix shells and `where` on Windows."
   [cmd]
-  (let [windows-os? (re-find #"(?i)windows" (System/getProperty "os.name" ""))
-        os          (if windows-os? :windows :unix)
-        candidates  (command-candidates cmd os)]
-    (first-resolved-command candidates fs/which)))
+  (some? (fs/which cmd)))
 
-(defn clojure-command
-  "Resolve the best Clojure executable for the current process."
-  []
-  (resolve-command "clojure"))
+(defn destroy!
+  "Destroy a background process and wait briefly for it to exit."
+  [proc]
+  (when proc
+    (p/destroy proc)
+    (try (deref proc 5000 nil) (catch Exception _ nil))))
+
+;------------------------------------------------------------------------------ Layer 1
+;; Composes Layer 0.
+
+(defn command-candidates
+  "Return candidate executable names for `cmd` on `os`."
+  [cmd os]
+  (let [candidates (if (and (= os :windows) (= cmd "clojure"))
+                     (into [cmd] windows-clojure-command)
+                     [cmd])]
+    (vec (distinct candidates))))
 
 (defn run!
   "Run a command inheriting stdio. Throws ex-info on non-zero exit.
@@ -100,18 +105,24 @@
   (let [[opts cmd] (split-opts args)]
     (apply p/sh opts cmd)))
 
-(defn installed?
-  "True if `cmd` resolves on PATH. Uses `babashka.fs/which`, which is
-   portable: invokes `which` on Unix shells and `where` on Windows."
-  [cmd]
-  (some? (fs/which cmd)))
+;------------------------------------------------------------------------------ Layer 2
+;; Composes Layer 1.
 
-(defn destroy!
-  "Destroy a background process and wait briefly for it to exit."
-  [proc]
-  (when proc
-    (p/destroy proc)
-    (try (deref proc 5000 nil) (catch Exception _ nil))))
+(defn resolve-command
+  "Resolve `cmd` to an executable path when possible."
+  [cmd]
+  (let [windows-os? (re-find #"(?i)windows" (System/getProperty "os.name" ""))
+        os          (if windows-os? :windows :unix)
+        candidates  (command-candidates cmd os)]
+    (first-resolved-command candidates fs/which)))
+
+;------------------------------------------------------------------------------ Layer 3
+;; Composes Layer 2.
+
+(defn clojure-command
+  "Resolve the best Clojure executable for the current process."
+  []
+  (resolve-command "clojure"))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

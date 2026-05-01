@@ -22,8 +22,11 @@
    Computes SHA-256 digests of governance EDN files and verifies them
    against a manifest to detect tampering.
 
-   Layer 0: SHA-256 computation
-   Layer 1: Manifest loading and verification"
+   Stratification (intra-namespace):
+   Layer 0 — `bytes->hex` and `load-digest-manifest` (no in-ns deps).
+   Layer 1 — `sha256-hex` (composes `bytes->hex`).
+   Layer 2 — `verify-governance-file` (composes the L0 manifest + L1
+             digest helper)."
   (:require
    [clojure.edn :as edn]
    [clojure.java.io :as io])
@@ -31,7 +34,7 @@
    [java.security MessageDigest]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; SHA-256 computation
+;; No in-namespace dependencies.
 
 (defn bytes->hex
   "Convert byte array to lowercase hex string. Babashka/GraalVM compatible."
@@ -40,17 +43,6 @@
     (dotimes [i (alength ba)]
       (.append sb (format "%02x" (aget ba i))))
     (.toString sb)))
-
-(defn sha256-hex
-  "Compute SHA-256 hex digest of a string.
-   Returns a prefixed string like \"sha256:a1b2c3d4...\"."
-  [^String content]
-  (let [digest (MessageDigest/getInstance "SHA-256")
-        hash-bytes (.digest digest (.getBytes content "UTF-8"))]
-    (str "sha256:" (bytes->hex hash-bytes))))
-
-;------------------------------------------------------------------------------ Layer 1
-;; Manifest loading and verification
 
 (defn load-digest-manifest
   "Load governance/digests.edn from classpath.
@@ -61,6 +53,20 @@
       (edn/read-string (slurp resource))
       (catch Exception _e
         nil))))
+
+;------------------------------------------------------------------------------ Layer 1
+;; Composes Layer 0.
+
+(defn sha256-hex
+  "Compute SHA-256 hex digest of a string.
+   Returns a prefixed string like \"sha256:a1b2c3d4...\"."
+  [^String content]
+  (let [digest (MessageDigest/getInstance "SHA-256")
+        hash-bytes (.digest digest (.getBytes content "UTF-8"))]
+    (str "sha256:" (bytes->hex hash-bytes))))
+
+;------------------------------------------------------------------------------ Layer 2
+;; Composes Layer 0 (`load-digest-manifest`) + Layer 1 (`sha256-hex`).
 
 (defn verify-governance-file
   "Verify content against the digest manifest.

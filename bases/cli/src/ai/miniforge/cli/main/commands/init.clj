@@ -3,7 +3,13 @@
 ;; Licensed under the Apache License, Version 2.0
 
 (ns ai.miniforge.cli.main.commands.init
-  "Init command — analyze a repository and write .miniforge/config.edn."
+  "Init command — analyze a repository and write .miniforge/config.edn.
+
+   Stratification (intra-namespace):
+   Layer 0 — pure data + helpers with no in-ns deps.
+   Layer 1 — `config-path` composes the L0 path constants.
+   Layer 2 — `write-config!` composes Layer 1.
+   Layer 3 — `init-cmd` (public CLI entry)."
   (:require
    [babashka.fs :as fs]
    [clojure.pprint :as pprint]
@@ -12,11 +18,10 @@
    [ai.miniforge.cli.repo-analyzer :as analyzer]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Config file generation
+;; Pure data + helpers with no in-namespace dependencies.
 
 (def ^:private config-dir ".miniforge")
 (def ^:private config-file "config.edn")
-(def ^:private config-path (str config-dir "/" config-file))
 
 (defn- format-config
   "Format a repo config map as pretty-printed EDN with a header comment."
@@ -34,9 +39,6 @@
     (:git-host analysis)
     (assoc :repo/host (:git-host analysis))))
 
-;------------------------------------------------------------------------------ Layer 1
-;; Init execution
-
 (defn- print-analysis
   "Print the analysis results to the user."
   [analysis]
@@ -48,6 +50,14 @@
   (display/print-info (messages/t :init/analysis-packs
                                   {:value (pr-str (:packs analysis))})))
 
+;------------------------------------------------------------------------------ Layer 1
+;; Composes Layer 0 path constants.
+
+(def ^:private config-path (str config-dir "/" config-file))
+
+;------------------------------------------------------------------------------ Layer 2
+;; Composes Layer 1.
+
 (defn- write-config!
   "Write the config file. Returns the path written."
   [repo-path config]
@@ -57,7 +67,7 @@
     (spit (str path) (format-config config))
     (str path)))
 
-;------------------------------------------------------------------------------ Layer 2
+;------------------------------------------------------------------------------ Layer 3
 ;; Command entry point
 
 (defn init-cmd
