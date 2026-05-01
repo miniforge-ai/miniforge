@@ -15,10 +15,19 @@
 ;; ---------------------------------------------------------------- Layer 0
 ;; pure helpers, no in-namespace dependencies
 
-(def layer-marker-pattern #"(?i);+\s*(?:-+\s*)?Layer\s+(\d+)")
+;; The miniforge convention writes layer headers as
+;;   `;------------------------------------------------------------------------------ Layer N`
+;; or  `;; --- Layer N ---`. Both have at least one dash separating the
+;; comment marker from the word `Layer`. The regex requires that — a
+;; bare `;; Layer 1` mention in prose or a docstring will not be treated
+;; as a section marker.
+(def layer-marker-pattern #"(?i);+\s*-+\s*Layer\s+(\d+)\b")
 
 (defn parse-layer-markers
-  "Return [[line layer] …] for every `;-- Layer N` comment in `lines`."
+  "Return [[line layer] …] for every `;------ Layer N` section header
+   in `lines`. Match requires at least one dash between the comment
+   marker and the word `Layer` so prose and docstring mentions are not
+   picked up."
   [lines]
   (->> lines
        (map-indexed vector)
@@ -35,8 +44,17 @@
        last
        second))
 
+(defn- normalize-path
+  "Return `path` with platform path separators flipped to forward
+   slashes. Lets path-segment substring tests work uniformly on Unix
+   and Windows."
+  [^String path]
+  (str/replace path "\\" "/"))
+
 (defn read-clj-files
-  "Walk `roots` and return every .clj/.cljc file path under */src trees."
+  "Walk `roots` and return every .clj/.cljc file path under */src trees.
+   Path comparisons use forward slashes so the filter is portable to
+   Windows (where `File/getPath` returns backslash-separated paths)."
   [roots]
   (->> roots
        (mapcat (fn [r] (file-seq (io/file r))))
@@ -48,30 +66,94 @@
                         (not (str/ends-with? n "_test.clj"))
                         (not (str/ends-with? n "_test.cljc"))))))
        (filter (fn [f]
-                 (let [p (.getPath ^java.io.File f)]
-                   (str/includes? p "/src/"))))
+                 (str/includes? (normalize-path (.getPath ^java.io.File f))
+                                "/src/")))
        (map #(.getPath ^java.io.File %))))
 
 ;; ---------------------------------------------------------------- Layer 1
 ;; clj-kondo wrapper — depends only on Layer 0 helpers and built-ins
 
-(defn analyse-file
-  "Run clj-kondo on `path` and return the parsed `:analysis` map (or nil
-   if kondo blew up).
+(defn- warn-analysis-failure!
+  "Emit an explicit warning when clj-kondo analysis could not be
+   produced. Goes to stderr so it doesn't pollute the EDN report on
+   stdout."
+  [paths message]
+  (binding [*out* *err*]
+    (println (str "WARNING: strata-audit could not analyse "
+                  (count paths) " file(s): " message))
+    (doseq [p (take 5 paths)]
+      (println (str "  - " p)))
+    (when (> (count paths) 5)
+      (println (str "  … and " (- (count paths) 5) " more")))))
+
+(defn analyse-paths
+  "Run clj-kondo once over every path in `paths` and return the parsed
+   analysis map (`:namespace-definitions`/`:var-definitions`/
+   `:var-usages`).
+
+   Bundles every file into a single kondo invocation rather than one
+   process per file — typical 100×+ speed-up on a repo of this size.
 
    Uses `:skip-comments true` so var-definitions and var-usages inside
-   `(comment …)` rich-comment blocks are excluded from the call graph.
+   `(comment …)` rich-comment blocks are excluded from the call graph;
    REPL-only experiments under `;;-- Rich Comment` are otherwise
-   reported as production violations."
-  [path]
+   reported as production violations.
+
+   On failure, emits a warning to stderr (so the EDN report stays
+   parseable) and returns nil."
+  [paths]
   (try
-    (let [{:keys [out exit]}
-          (p/sh ["clj-kondo" "--lint" path
-                 "--config" "{:output {:analysis true :format :edn} :skip-comments true}"]
-                {:out :string})]
-      (when (and (zero? exit) (not (str/blank? out)))
-        (-> out edn/read-string :analysis)))
-    (catch Exception _ nil)))
+    (let [{:keys [out exit err]}
+          (p/sh (into ["clj-kondo"
+                       "--config"
+                       "{:output {:analysis true :format :edn} :skip-comments true}"
+                       "--lint"]
+                      paths)
+                {:out :string :err :string})]
+      (cond
+        (str/blank? out)
+        (do (warn-analysis-failure!
+             paths
+             (str "kondo produced no analysis output (exit " exit
+                  (when-not (str/blank? err)
+                    (str " — " (str/trim err)))
+                  ")"))
+            nil)
+
+        ;; kondo exits 2 when it found lint warnings/errors; exit 3 when
+        ;; the analysis itself crashed. We trust the analysis output as
+        ;; long as there is some.
+        (#{0 2 3} exit)
+        (-> out edn/read-string :analysis)
+
+        :else
+        (do (warn-analysis-failure!
+             paths
+             (str "kondo exited with status " exit
+                  (when-not (str/blank? err)
+                    (str " — " (str/trim err)))))
+            nil)))
+    (catch Exception e
+      (warn-analysis-failure! paths (.getMessage e))
+      nil)))
+
+(defn- index-by-filename
+  "Group items in `analysis-vec` by their `:filename` (relative path
+   string from kondo)."
+  [analysis-vec]
+  (group-by :filename analysis-vec))
+
+(defn file-analysis
+  "Carve a per-file slice out of the bulk analysis map. Returns a map
+   shaped like the single-file `(p/sh \"clj-kondo …\")` output for the
+   downstream `file-violations` consumer."
+  [bulk path]
+  {:namespace-definitions (get (index-by-filename (:namespace-definitions bulk))
+                               path [])
+   :var-definitions       (get (index-by-filename (:var-definitions bulk))
+                               path [])
+   :var-usages            (get (index-by-filename (:var-usages bulk))
+                               path [])})
 
 (defn file-violations
   "Compute the violations for a single file, given its analysis map and
@@ -110,16 +192,18 @@
 
 (defn audit-tree
   [roots]
-  (->> (read-clj-files roots)
-       (sort)
-       (keep (fn [path]
-               (when-let [analysis (analyse-file path)]
-                 (let [lines (str/split-lines (slurp path))
-                       violations (file-violations path analysis lines)]
-                   (when (seq violations)
-                     {:file path
-                      :violations violations
-                      :count (count violations)})))))))
+  (let [paths (vec (sort (read-clj-files roots)))
+        bulk  (analyse-paths paths)]
+    (->> paths
+         (keep (fn [path]
+                 (let [analysis (file-analysis bulk path)]
+                   (when (seq (:namespace-definitions analysis))
+                     (let [lines (str/split-lines (slurp path))
+                           violations (file-violations path analysis lines)]
+                       (when (seq violations)
+                         {:file path
+                          :violations violations
+                          :count (count violations)})))))))))
 
 (defn rank-by-violations
   [reports]
