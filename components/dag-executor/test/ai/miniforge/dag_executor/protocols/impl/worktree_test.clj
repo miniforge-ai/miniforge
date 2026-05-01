@@ -43,15 +43,20 @@
     (let [add-args (atom nil)]
       (with-redefs [worktree/run-git
                     (fn [& args]
-                      (cond
-                        (= ["rev-parse" "main"] (drop 2 args))
-                        {:exit 0 :out "abc1234deadbeef\n" :err ""}
+                      (let [tail (drop 2 args)]
+                        (cond
+                          (= ["rev-parse" "main"] tail)
+                          {:exit 0 :out "abc1234deadbeef\n" :err ""}
 
-                        (some #{"worktree" "add"} args)
-                        (do (reset! add-args (vec args))
-                            {:exit 0 :out "" :err ""})
+                          ;; Tight match on `worktree add` specifically —
+                          ;; `(some #{"worktree" "add"} args)` would also
+                          ;; trigger on `worktree prune` from the cleanup
+                          ;; path and read the wrong call's args.
+                          (= ["worktree" "add"] (take 2 tail))
+                          (do (reset! add-args (vec args))
+                              {:exit 0 :out "" :err ""})
 
-                        :else {:exit 0 :out "" :err ""}))
+                          :else {:exit 0 :out "" :err ""})))
                     worktree/run-shell        (fn [& _] {:exit 0 :out "" :err ""})
                     worktree/ensure-directory (fn [_] nil)]
         (worktree/create-worktree "/tmp/base" "/tmp/repo" "task-abc" "main")
@@ -147,9 +152,12 @@
                           (= ["rev-parse" "--abbrev-ref" "HEAD"] tail)
                           {:exit 0 :out "HEAD\n" :err ""}
 
-                          ;; ensure-named-branch! runs `checkout -b task-<id>`
+                          ;; ensure-named-branch! runs `checkout -B <name>`
+                          ;; (-B, not -b — idempotent across reruns, doesn't
+                          ;; fail if the branch name already exists from a
+                          ;; previous run with the same task-id)
                           (and (= "checkout" (first tail))
-                               (= "-b" (second tail)))
+                               (= "-B" (second tail)))
                           (do (reset! checkout-args (vec tail))
                               {:exit 0 :out "" :err ""})
 
@@ -176,8 +184,10 @@
                                            :task-id     "abc"
                                            :base-ref    "main"})]
           (is (result/ok? r))
-          ;; Real branch name was created
-          (is (= ["checkout" "-b" "task-abc"] @checkout-args))
+          ;; Real branch name was created via `checkout -B` (force-reset)
+          ;; rather than `-b` (create-only) so reruns with the same task-id
+          ;; don't fail on a leftover ref from an earlier run.
+          (is (= ["checkout" "-B" "task-abc"] @checkout-args))
           ;; Bundle uses the new branch name, not "HEAD"
           (is (= ["bundle" "create" "/tmp/test-archive/abc.bundle"
                   "task-abc" "--not" "main"]
@@ -185,6 +195,34 @@
           (is (= "task-abc" (get-in r [:data :branch]))
               "result reports the materialized branch name so callers know
                which ref name to fetch"))))))
+
+(deftest archive-bundle-recovery-branch-no-double-prefix-test
+  (testing "recovery branch name is not double-prefixed when task-id already
+            starts with `task-`"
+    ;; persist-workspace! defaults :task-id to environment-id, which the
+    ;; executor names `task-<8-char-uuid>`. Naively prepending `task-` here
+    ;; would yield `task-task-<id>` — verbose and hard to grep for in logs.
+    (let [checkout-args (atom nil)]
+      (with-redefs [worktree/run-git
+                    (fn [& args]
+                      (let [tail (drop 2 args)]
+                        (cond
+                          (= ["rev-parse" "--abbrev-ref" "HEAD"] tail)
+                          {:exit 0 :out "HEAD\n" :err ""}
+
+                          (and (= "checkout" (first tail))
+                               (= "-B" (second tail)))
+                          (do (reset! checkout-args (vec tail))
+                              {:exit 0 :out "" :err ""})
+
+                          :else {:exit 0 :out "" :err ""})))
+                    worktree/ensure-archive-dir (fn [d] d)]
+        (worktree/archive-bundle! "/tmp/scratch"
+                                  {:archive-dir "/tmp/test-archive"
+                                   :task-id     "task-already-prefixed"
+                                   :base-ref    "main"})
+        (is (= ["checkout" "-B" "task-already-prefixed"] @checkout-args)
+            "task-id already starts with `task-` so the prefix is not added again")))))
 
 (deftest persist-workspace-clean-worktree-no-changes-test
   (testing "persist-workspace! reports no-changes when the scratch worktree is clean"

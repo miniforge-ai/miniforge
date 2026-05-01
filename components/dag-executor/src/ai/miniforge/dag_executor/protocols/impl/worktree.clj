@@ -116,10 +116,16 @@
    simultaneously.
 
    Attempts in order:
-   1. git worktree add -b <name> <path> <sha>      — new branch from branch's
-                                                     resolved sha (works even
-                                                     when <branch> is checked
-                                                     out in another worktree)
+   1. git worktree add -b <name> <path> <sha-or-ref>
+                                                   — new branch from the
+                                                     branch's resolved sha
+                                                     (or the original ref
+                                                     name on lookup
+                                                     failure). The sha form
+                                                     works even when
+                                                     <branch> is checked
+                                                     out in another
+                                                     worktree.
    2. Clean up stale branch/directory and retry step 1
    3. git worktree add --detach <path>             — detached HEAD (last resort)
 
@@ -218,12 +224,33 @@
       (result/ok (str/trim (or (:out r) "")))
       (result/err :archive-no-branch (or (:err r) "could not resolve HEAD")))))
 
+(def ^:private detached-branch-prefix
+  "Prefix prepended to a `task-id` to derive the recovery branch name in
+   `ensure-named-branch!`. Skipped when the task-id already starts with
+   the prefix (the common path: persist-workspace! defaults task-id to
+   the environment-id, which is itself shaped like `task-<id>`)."
+  "task-")
+
+(defn- recovery-branch-name
+  "Branch name to materialize when recovering from a detached scratch.
+   Avoids a `task-task-` double-prefix when task-id already carries it."
+  [task-id]
+  (let [s (str task-id)]
+    (if (str/starts-with? s detached-branch-prefix)
+      s
+      (str detached-branch-prefix s))))
+
 (defn- ensure-named-branch!
   "If the worktree is in detached-HEAD state, create a real branch at HEAD
    so the bundle records `refs/heads/<name>` (not just bare HEAD).
 
    Returns result/ok with the branch name to use for bundling. Pass-through
    when the worktree is already on a named branch.
+
+   Uses `git checkout -B` (force-reset to HEAD) so recovery is idempotent
+   across reruns with the same task-id and across leftover local refs from
+   prior runs. The branch is task-namespaced internal infrastructure, not
+   a user-curated ref; resetting it is the right semantics.
 
    The bundle's ref namespace is what the harvest CLI fetches by name —
    without a real branch, harvest correctly diagnoses the bundle as the
@@ -232,13 +259,13 @@
   [worktree-path branch task-id]
   (if-not (detached? branch)
     (result/ok branch)
-    (let [name (str "task-" task-id)
-          r    (run-git "-C" worktree-path "checkout" "-b" name)]
+    (let [name (recovery-branch-name task-id)
+          r    (run-git "-C" worktree-path "checkout" "-B" name)]
       (if (zero? (:exit r))
         (result/ok name)
         (result/err :archive-detach-recovery-failed
                     (or (:err r)
-                        "could not create branch from detached HEAD"))))))
+                        "could not create or reset branch from detached HEAD"))))))
 
 (defn- dirty?
   [worktree-path]
