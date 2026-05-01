@@ -693,6 +693,56 @@
     (cond-> table
       entity (assoc-in [:interventions (:intervention/id entity)] entity))))
 
+(defn- dependency-entity
+  [event]
+  (or (:supervisory/entity event)
+      (:dependency/entity event)
+      (select-keys event
+                   [:dependency/id
+                    :dependency/source
+                    :dependency/kind
+                    :dependency/status
+                    :dependency/failure-count
+                    :dependency/window-size
+                    :dependency/incident-counts
+                    :dependency/vendor
+                    :dependency/class
+                    :dependency/retryability
+                    :failure/class
+                    :dependency/last-observed-at
+                    :dependency/last-recovered-at])))
+
+(defn dependency-health-updated
+  [table event]
+  (let [entity (dependency-entity event)
+        dependency-id (:dependency/id entity)]
+    (cond-> table
+      dependency-id (assoc-in [:dependencies dependency-id] entity))))
+
+(defn dependency-recovered
+  [table event]
+  (let [dependency-id (:dependency/id event)
+        existing (get-in table [:dependencies dependency-id])
+        recovered-at (or (:dependency/last-recovered-at event)
+                         (:dependency/recovered-at event)
+                         (event-instant event))
+        updated (cond-> (merge existing
+                               {:dependency/id dependency-id
+                                :dependency/source (:dependency/source event)
+                                :dependency/kind (:dependency/kind event)
+                                :dependency/status :healthy
+                                :dependency/failure-count 0
+                                :dependency/window-size (or (:dependency/window-size event)
+                                                            (:dependency/window-size existing)
+                                                            0)
+                                :dependency/incident-counts {}})
+                  recovered-at (assoc :dependency/last-recovered-at recovered-at)
+                  (:dependency/source event) (assoc :dependency/source (:dependency/source event))
+                  (:dependency/kind event) (assoc :dependency/kind (:dependency/kind event))
+                  (:dependency/vendor event) (assoc :dependency/vendor (:dependency/vendor event)))]
+    (cond-> table
+      dependency-id (assoc-in [:dependencies dependency-id] updated))))
+
 ;------------------------------------------------------------------------------ Layer 3
 ;; Dispatch table — events not listed are no-ops at the entity-state level
 
@@ -727,6 +777,9 @@
    :supervisory/task-node-upserted         supervisory-task-node-upserted
    :supervisory/decision-upserted          supervisory-decision-upserted
    :supervisory/intervention-upserted      supervisory-intervention-upserted
+   :supervisory/dependency-upserted        dependency-health-updated
+   :dependency/health-updated              dependency-health-updated
+   :dependency/recovered                   dependency-recovered
    :supervisory/policy-evaluated           supervisory-policy-evaluated
    :supervisory/attention-derived          supervisory-attention-derived})
 

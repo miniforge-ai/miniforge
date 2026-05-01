@@ -2,4 +2,27 @@
 {:budget-critical-threshold 0.25
  :inverted-slis #{:SLI-6}
  :default-windows [:7d]
- :default-tiers [:standard :critical]}
+ :default-tiers [:standard :critical]
+ :dependency-health
+ {:window-size 5
+  :status-precedence [:operator-action-required
+                      :misconfigured
+                      :unavailable
+                      :degraded
+                      :healthy]
+  :status-thresholds {:operator-action-required 1
+                      :misconfigured 1
+                      :unavailable 3
+                      :degraded 1}
+  :class->status {:outage :unavailable
+                  :degraded :degraded
+                  :rate-limit :degraded
+                  :timeout :degraded
+                  :network :degraded
+                  :quota :degraded
+                  :auth :operator-action-required
+                  :account-limitation :operator-action-required
+                  :permission :misconfigured
+                  :misconfiguration :misconfigured
+                  :unsupported-feature :operator-action-required
+                  :unknown :degraded}}}
