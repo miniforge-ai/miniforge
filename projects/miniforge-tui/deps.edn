@@ -17,6 +17,7 @@
         ai.miniforge/config {:local/root "../../components/config"}
         ai.miniforge/response {:local/root "../../components/response"}
         ai.miniforge/response-chain {:local/root "../../components/response-chain"}
+        ai.miniforge/boundary {:local/root "../../components/boundary"}
         ai.miniforge/fsm {:local/root "../../components/fsm"}
         ;; Workflow and orchestration
         ai.miniforge/workflow {:local/root "../../components/workflow"}
