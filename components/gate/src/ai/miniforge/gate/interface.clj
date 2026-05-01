@@ -72,22 +72,28 @@
 (defn passed?
   "Check if a gate result passed.
 
-   Arguments:
-     result - Gate result map from check-gate
+   Accepts either of two canonical result shapes:
+   1. Hand-shaped gate result with explicit `:passed?` key
+      (legacy gate convention — syntax, lint, etc.).
+   2. Canonical response shape from `response/success` /
+      `response/error` (what format and any new gate should return).
+      `response/success?` recognizes the `:status :success` form.
+
+   Bridging both lets gates return the project-wide success/anomaly
+   factories without each one re-establishing its own ad-hoc shape.
 
    Returns: boolean"
   [result]
-  (boolean (:passed? result)))
+  (cond
+    (contains? result :passed?) (boolean (:passed? result))
+    (response/success? result)  true
+    (response/error? result)    false
+    :else                       false))
 
 (defn failed?
-  "Check if a gate result failed.
-
-   Arguments:
-     result - Gate result map from check-gate
-
-   Returns: boolean"
+  "Check if a gate result failed. See `passed?` for accepted shapes."
   [result]
-  (not (:passed? result)))
+  (not (passed? result)))
 
 ;;------------------------------------------------------------------------------ Layer 1
 ;; Gate operations
@@ -135,6 +141,15 @@
           (emit-gate-event! ctx gate-kw :failed (:errors result))
           result)))))
 
+(defn- repair-succeeded?
+  "True when a repair result indicates success in either accepted shape:
+   the legacy `:success? bool` or the canonical `response/success`."
+  [result]
+  (cond
+    (contains? result :success?) (boolean (:success? result))
+    (response/success? result)   true
+    :else                        false))
+
 (defn repair-gate
   "Attempt to repair gate failures.
 
@@ -144,15 +159,15 @@
      errors   - Errors from check
      ctx      - Execution context
 
-   Returns:
-     {:success? bool :artifact ... :gate gate-kw}"
+   Returns the gate's repair result (either `{:success? bool :artifact ...}`
+   or a `response/success` map) with `:gate gate-kw` assoc'd on top."
   [gate-kw artifact errors ctx]
   (let [{:keys [repair]} (get-gate gate-kw)]
     (if repair
       (try
-        (let [result (repair artifact errors ctx)
-              result (assoc result :gate gate-kw)]
-          (if (:success? result)
+        (let [result (-> (repair artifact errors ctx)
+                         (assoc :gate gate-kw))]
+          (if (repair-succeeded? result)
             (emit-gate-event! ctx gate-kw :passed)
             (emit-gate-event! ctx gate-kw :failed (:errors result)))
           result)

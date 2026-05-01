@@ -19,33 +19,37 @@
 (ns ai.miniforge.gate.format-test
   "Tests for the LSP format gate.
 
-   Regression coverage: check-format must return the gate-protocol shape
-   {:passed? true ...} so the gate-interface passed? predicate accepts it.
-   Earlier returns of (response/success {...}) silently produced {:status
-   :success ...} with no :passed? key, so every implement phase tripped a
-   spurious :format gate failure even when nothing was wrong."
+   Regression coverage: `check-format` must return the canonical
+   `response/success` shape AND `gate/passed?` must accept it.
+   Earlier the gate machinery only checked `(:passed? result)` and
+   `response/success` produces `{:status :success}` with no `:passed?`
+   key, so every implement phase tripped a spurious :format failure
+   even when nothing was wrong. Both halves of that contract are
+   exercised here."
   (:require
    [ai.miniforge.gate.format :as format-gate]
    [ai.miniforge.gate.interface :as gate]
+   [ai.miniforge.response.interface :as response]
    [clojure.test :refer [deftest is testing]]))
 
-(deftest check-format-returns-passed-true
-  (testing "check-format returns the gate-protocol shape with :passed? true"
+(deftest check-format-returns-canonical-success
+  (testing "check-format returns response/success and gate/passed? accepts it"
     (let [artifact {:code/files [{:path "src/foo.clj"}]}
           result (format-gate/check-format artifact {})]
-      (is (true? (:passed? result))
-          "check-format must set :passed? true so gate/passed? accepts it")
+      (is (response/success? result)
+          "check-format must return the canonical response/success shape")
       (is (gate/passed? (assoc result :gate :format))
-          "gate/passed? must accept the shape returned by check-format")))
+          "gate/passed? must accept the canonical shape returned by check-format")))
 
   (testing "check-format passes even when no files are formattable"
     (let [result (format-gate/check-format {:code/files []} {})]
-      (is (true? (:passed? result)))
-      (is (= [] (:formattable-files result))))))
+      (is (response/success? result))
+      (is (gate/passed? (assoc result :gate :format)))
+      (is (= [] (get-in result [:output :formattable-files]))))))
 
 (deftest check-format-reports-formattable-files
-  (testing "Formattable files are listed in the result"
+  (testing "Formattable files are listed in the result output"
     (let [artifact {:code/files [{:path "a.clj"} {:path "b.md"}]}
           result (format-gate/check-format artifact {})]
-      (is (true? (:passed? result)))
-      (is (vector? (:formattable-files result))))))
+      (is (response/success? result))
+      (is (vector? (get-in result [:output :formattable-files]))))))
