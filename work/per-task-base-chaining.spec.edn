@@ -59,8 +59,8 @@
 
  :spec/intent
  {:type :feature
-  :scope ["components/dag-executor (task-branch registry + acquire wiring)"
-          "components/workflow/dag_orchestrator (lookup + opts threading)"]}
+  :scope ["components/dag-executor/src/**"
+          "components/workflow/src/**/dag_orchestrator.clj"]}
 
  :handoff-ref "https://github.com/miniforge-ai/miniforge/pull/729"
  :dag/id :per-task-base-chaining
