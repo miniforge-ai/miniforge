@@ -197,16 +197,15 @@
 
 (defn status-cmd
   [m]
-  (let [{:keys [workflow-id]} (get-opts m)
-        unknown (messages/t :status/value-unknown)
-        none    (messages/t :status/value-none)]
+  (let [{:keys [workflow-id]} (get-opts m)]
     (if workflow-id
       (try
         (print-workflow-status (workflow-status-summary (str workflow-id)))
         (catch Exception e
           (display/print-error (messages/t :status/read-failed
                                            {:message (ex-message e)}))))
-      (do
+      (let [unknown (messages/t :status/value-unknown)
+            none    (messages/t :status/value-none)]
         (display/print-info (messages/t :status/all-workflows))
         (if-let [summaries (seq (take 10 (all-workflow-summaries)))]
           (doseq [{:keys [workflow-id status spec-name last-updated]} summaries]
