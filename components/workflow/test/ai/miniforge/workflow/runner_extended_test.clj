@@ -311,18 +311,25 @@
           phase-ctx {:execution/current-phase :implement}]
       (is (nil? (persist-fn context phase-ctx))))))
 
-(deftest persist-workspace-noop-when-not-governed-test
-  (testing "returns nil when execution mode is :local (not :governed)"
-    (let [called (atom false)
+(deftest persist-workspace-fires-in-local-mode-test
+  (testing "persist fires in :local mode (parity with :governed) so worktree-tier work survives release"
+    (let [call-args (atom nil)
           context {:execution/executor :stub
                    :execution/mode :local
                    :execution/environment-id "env-1"
-                   :execution/task-branch "task/branch"}
+                   :execution/environment-metadata {:base-branch "feat/foo"}
+                   :execution/worktree-path "/tmp/scratch"}
           phase-ctx {:execution/current-phase :implement}]
       (with-redefs [dag-exec/persist-workspace!
-                    (fn [& _] (reset! called true))]
+                    (fn [executor env-id opts]
+                      (reset! call-args {:executor executor :env-id env-id :opts opts}))]
         (persist-fn context phase-ctx)
-        (is (false? @called))))))
+        (is (some? @call-args))
+        (is (= "env-1" (:env-id @call-args)))
+        ;; base-branch comes from environment-metadata so the worktree tier
+        ;; can bundle the right base..HEAD range
+        (is (= "feat/foo" (get-in @call-args [:opts :base-branch])))
+        (is (= "env-1" (get-in @call-args [:opts :task-id])))))))
 
 (deftest persist-workspace-calls-executor-in-governed-mode-test
   (testing "calls dag-exec/persist-workspace! with correct args in governed mode"

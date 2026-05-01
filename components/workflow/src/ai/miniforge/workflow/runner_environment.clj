@@ -152,19 +152,37 @@
       :unknown)))
 
 (defn persist-workspace-at-phase-boundary!
-  "Persist workspace to task branch after phase completes (governed mode only)."
+  "Persist workspace at phase completion.
+
+   Both modes (:governed and :local) participate. :governed pushes to a
+   remote via the docker/k8s tier's git-persist!. :local writes a git bundle
+   via the worktree tier's archive-bundle! so work survives
+   release-environment!.
+
+   Earlier this was guarded on :governed only, which combined with the
+   worktree tier's no-op `persist-workspace!` meant local-mode tasks lost
+   their work the moment the scratch worktree was torn down. Per the
+   fidelity goal in N11 §7.4, local should match governed in not destroying
+   work on failure."
   [context phase-ctx]
   (when-let [executor (get context :execution/executor)]
-    (when (= :governed (get context :execution/mode))
-      (let [env-id (get context :execution/environment-id)
-            branch (get context :execution/task-branch)
-            phase  (boundary-phase phase-ctx)]
+    (let [env-id   (get context :execution/environment-id)
+          metadata (get context :execution/environment-metadata)
+          branch   (get context :execution/task-branch)
+          phase    (boundary-phase phase-ctx)]
+      (when env-id
         (try
-          (dag/persist-workspace! executor env-id
-                                       {:branch  branch
-                                        :message (messages/t :env/persist-message {:phase (name phase)})
-                                        :workdir (get context :execution/worktree-path)})
+          (dag/persist-workspace!
+           executor env-id
+           (cond-> {:message     (messages/t :env/persist-message
+                                             {:phase (name phase)})
+                    :workdir     (get context :execution/worktree-path)
+                    :workflow-id (get context :execution/id)
+                    :task-id     env-id}
+             branch                  (assoc :branch branch)
+             (:base-branch metadata) (assoc :base-branch (:base-branch metadata))))
           (catch Exception e
             (log/warn env-logger :workflow :workflow/persist-failed
-                      {:message (messages/t :env/persist-failed {:error (ex-message e)})})
+                      {:message (messages/t :env/persist-failed
+                                            {:error (ex-message e)})})
             nil))))))
