@@ -54,7 +54,7 @@
     (:data result)
     (let [error (:error result)]
       (anomaly/anomaly :fault
-                       (or (:message error) "Unwrap called on error result")
+                       (get error :message "Unwrap called on error result")
                        (cond-> {}
                          (:code error) (assoc :code (:code error))
                          (:data error) (assoc :error-data (:data error)))))))

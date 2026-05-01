@@ -386,11 +386,11 @@
       [(trees/tree-node "  No active workflows" 0 false trees/status-info)]
       (vec (mapcat (fn [row]
                      (let [[glyph color] (status->glyph-color (:status row))
-                           k             (or (:key row) "")
+                           k             (get row :key "")
                            key-str       (if (> (count k) 12) (subs k 0 12) k)
                            label         (str glyph " " key-str "  "
                                              (when-let [ph (:phase row)] (str ph "  "))
-                                             (or (:duration row) ""))
+                                             (get row :duration ""))
                            main-node     (trees/tree-node label 0 false color)
                            msg           (:agent-msg row)]
                        (if (and msg (not (str/blank? msg)))
