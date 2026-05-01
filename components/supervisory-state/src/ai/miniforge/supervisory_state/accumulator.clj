@@ -712,6 +712,45 @@
                     :dependency/last-observed-at
                     :dependency/last-recovered-at])))
 
+(defn- resolved-dependency-source
+  [event existing]
+  (or (:dependency/source event)
+      (:dependency/source existing)))
+
+(defn- resolved-dependency-kind
+  [event existing]
+  (or (:dependency/kind event)
+      (:dependency/kind existing)))
+
+(defn- recovered-dependency-entity
+  [event existing recovered-at]
+  (let [dependency-id (:dependency/id event)
+        source (resolved-dependency-source event existing)
+        kind (resolved-dependency-kind event existing)
+        vendor (or (:dependency/vendor event)
+                   (:dependency/vendor existing))
+        window-size (or (:dependency/window-size event)
+                        (:dependency/window-size existing)
+                        0)
+        last-observed-at (:dependency/last-observed-at existing)
+        dependency-class (:dependency/class existing)
+        retryability (:dependency/retryability existing)
+        failure-class (:failure/class existing)]
+    (when dependency-id
+      (cond-> {:dependency/id dependency-id
+               :dependency/source source
+               :dependency/kind kind
+               :dependency/status :healthy
+               :dependency/failure-count 0
+               :dependency/window-size window-size
+               :dependency/incident-counts {}}
+        vendor (assoc :dependency/vendor vendor)
+        dependency-class (assoc :dependency/class dependency-class)
+        retryability (assoc :dependency/retryability retryability)
+        failure-class (assoc :failure/class failure-class)
+        last-observed-at (assoc :dependency/last-observed-at last-observed-at)
+        recovered-at (assoc :dependency/last-recovered-at recovered-at)))))
+
 (defn dependency-health-updated
   [table event]
   (let [entity (dependency-entity event)
@@ -723,29 +762,12 @@
   [table event]
   (let [dependency-id (:dependency/id event)
         existing (get-in table [:dependencies dependency-id])
-        source (or (:dependency/source event)
-                   (:dependency/source existing))
-        kind (or (:dependency/kind event)
-                 (:dependency/kind existing))
         recovered-at (or (:dependency/last-recovered-at event)
                          (:dependency/recovered-at event)
                          (event-instant event))
-        updated (cond-> (merge existing
-                               {:dependency/id dependency-id
-                                :dependency/source source
-                                :dependency/kind kind
-                                :dependency/status :healthy
-                                :dependency/failure-count 0
-                                :dependency/window-size (or (:dependency/window-size event)
-                                                            (:dependency/window-size existing)
-                                                            0)
-                                :dependency/incident-counts {}})
-                  recovered-at (assoc :dependency/last-recovered-at recovered-at)
-                  (:dependency/source event) (assoc :dependency/source (:dependency/source event))
-                  (:dependency/kind event) (assoc :dependency/kind (:dependency/kind event))
-                  (:dependency/vendor event) (assoc :dependency/vendor (:dependency/vendor event)))]
+        updated (recovered-dependency-entity event existing recovered-at)]
     (cond-> table
-      dependency-id (assoc-in [:dependencies dependency-id] updated))))
+      updated (assoc-in [:dependencies dependency-id] updated))))
 
 ;------------------------------------------------------------------------------ Layer 3
 ;; Dispatch table — events not listed are no-ops at the entity-state level

@@ -126,16 +126,22 @@
 
 ;------------------------------------------------------------------------------ DependencyHealth
 
+(defn- dependency-health-attrs
+  [attrs]
+  (merge {:dependency/id :anthropic
+          :dependency/source :external-provider
+          :dependency/kind :provider
+          :dependency/vendor :anthropic
+          :dependency/window-size 5}
+         attrs))
+
 (deftest dependency-health-updated-inserts-projection
   (let [table (acc/apply-event schema/empty-table
                                (ev :dependency/health-updated
-                                   {:dependency/id :anthropic
-                                    :dependency/source :external-provider
-                                    :dependency/kind :provider
-                                    :dependency/status :degraded
-                                    :dependency/failure-count 1
-                                    :dependency/window-size 5
-                                    :dependency/incident-counts {:degraded 1}}))
+                                   (dependency-health-attrs
+                                    {:dependency/status :degraded
+                                     :dependency/failure-count 1
+                                     :dependency/incident-counts {:degraded 1}})))
         dependency (get-in table [:dependencies :anthropic])]
     (is (= :degraded (:dependency/status dependency)))
     (is (= :provider (:dependency/kind dependency)))))
@@ -143,18 +149,12 @@
 (deftest dependency-recovered-resets-entity-to-healthy
   (let [table (-> schema/empty-table
                   (acc/apply-event (ev :dependency/health-updated
-                                       {:dependency/id :anthropic
-                                        :dependency/source :external-provider
-                                        :dependency/kind :provider
-                                        :dependency/status :unavailable
-                                        :dependency/failure-count 3
-                                        :dependency/window-size 5
-                                        :dependency/incident-counts {:unavailable 3}}))
+                                       (dependency-health-attrs
+                                        {:dependency/status :unavailable
+                                         :dependency/failure-count 3
+                                         :dependency/incident-counts {:unavailable 3}})))
                   (acc/apply-event (ev :dependency/recovered
-                                       {:dependency/id :anthropic
-                                        :dependency/source :external-provider
-                                        :dependency/kind :provider
-                                        :dependency/vendor :anthropic})))]
+                                       (dependency-health-attrs {}))))]
     (is (= :healthy (get-in table [:dependencies :anthropic :dependency/status])))
     (is (= 0 (get-in table [:dependencies :anthropic :dependency/failure-count])))))
 
