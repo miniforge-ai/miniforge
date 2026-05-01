@@ -41,7 +41,7 @@
    [ai.miniforge.anomaly.contract :as contract]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Schema/vocabulary re-exports + in-namespace-pure helpers (no in-ns deps).
+;; Schema/vocabulary re-exports + helpers with no in-namespace deps.
 
 (def Anomaly
   "Malli schema for the canonical anomaly map. See
@@ -59,7 +59,9 @@
   (java.time.Instant/now))
 
 ;------------------------------------------------------------------------------ Layer 1
-;; Construction — composes Layer 0 (`now`) and the contract namespace.
+;; Construction — composes Layer 0 (`now`). Cross-namespace use of the
+;; `contract` namespace doesn't participate in the intra-namespace
+;; layering model.
 
 (defn anomaly
   "Construct a canonical anomaly map.

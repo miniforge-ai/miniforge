@@ -7,11 +7,14 @@
    They are stored as N6 evidence artifacts.
 
    Stratification (intra-namespace):
-   Layer 0 — pure CRUD + per-entry evaluation (no in-ns deps).
+   Layer 0 — CRUD + per-entry evaluation; no in-namespace deps.
+             (\"Pure\" in the stratification sense, not the
+             referential-transparency sense — `create-golden-set`
+             pulls `random-uuid`/`Date.` for ID and timestamp.)
    Layer 1 — `run-golden-set` (composes `evaluate-entry`).")
 
 ;------------------------------------------------------------------------------ Layer 0
-;; No in-namespace dependencies — pure data construction and per-entry checks.
+;; No in-namespace dependencies — data construction and per-entry checks.
 
 (defn create-golden-set
   "Create a golden set from curated entries.
