@@ -32,7 +32,7 @@
   "550e8400-e29b-41d4-a716-446655440000")
 
 (defn- code-artifact
-  "Factory for code-artifact EDN maps written to `(:artifact-path session)`.
+  "Factory for code-artifact EDN maps written to a session's `:artifact-path`.
    Defaults exercise the parser's UUID/instant coercion paths; pass any
    subset of overrides to vary individual fields per test."
   [& {:as overrides}]
