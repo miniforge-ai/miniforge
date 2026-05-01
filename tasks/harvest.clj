@@ -85,13 +85,47 @@
 (defn- in-git-repo? []
   (zero? (:exit (run-git "rev-parse" "--git-dir"))))
 
-(defn- fetch-bundle!
-  "git fetch <bundle> HEAD:<ref>. Returns {:ok? :ref :err}."
-  [bundle-path ref]
-  (let [r (run-git "fetch" bundle-path (str "HEAD:" ref))]
+(defn- parse-list-heads-line
+  "Parse one line of `git bundle list-heads` output.
+
+   Lines look like:
+     <40-hex-sha> refs/heads/<branch>
+     <40-hex-sha> HEAD
+     <40-hex-sha> refs/tags/<tag>
+
+   We only want branch refs — fetching the HEAD pseudo-ref or tag refs
+   into a host repo branch isn't what `bb harvest` is for. Returns the
+   bare branch name when the line names a refs/heads/* ref, otherwise nil."
+  [line]
+  (let [parts (str/split (str/trim line) #"\s+")
+        ref   (second parts)]
+    (when (and ref (str/starts-with? ref "refs/heads/"))
+      (subs ref (count "refs/heads/")))))
+
+(defn- bundle-branches
+  "List the branch names recorded as heads in a bundle.
+
+   Bundles created via `git bundle create FILE BRANCH --not BASE` advertise
+   `refs/heads/BRANCH`. Bundles created via the older `BASE..HEAD` form
+   advertise only `HEAD` and we filter those out — fetching `HEAD:<ref>`
+   blindly was the original PR #729 bug Copilot caught: it works on
+   recent bundles but fails on any bundle whose only head is the
+   pseudo-HEAD ref. Surface that as an empty list so the caller can
+   report 'no branches in bundle' instead of an opaque fetch failure."
+  [bundle-path]
+  (let [r (run-git "bundle" "list-heads" bundle-path)]
+    (when (zero? (:exit r))
+      (->> (str/split-lines (:out r))
+           (keep parse-list-heads-line)
+           vec))))
+
+(defn- fetch-branch!
+  "git fetch <bundle> <branch>:<ref>. Returns {:ok? :ref :branch :err}."
+  [bundle-path branch ref]
+  (let [r (run-git "fetch" bundle-path (str branch ":" ref))]
     (if (zero? (:exit r))
-      {:ok? true :ref ref}
-      {:ok? false :ref ref :err (str/trim (:err r))})))
+      {:ok? true :ref ref :branch branch}
+      {:ok? false :ref ref :branch branch :err (str/trim (:err r))})))
 
 ;; ──────────────────────────────────────────────────────────────────────
 ;; Layer 3 — commands
@@ -124,11 +158,38 @@
         (println "Or pull everything:")
         (println "  bb harvest --all")))))
 
+(defn- ref-for
+  "Compose the harvest ref name for one task's branch."
+  [workflow-id task-id]
+  (str "harvest/" workflow-id "/" task-id))
+
+(defn- harvest-bundle!
+  "Fetch every branch advertised by one bundle. Reports per-branch
+   ok/err lines so users see which fetches succeeded. Returns nil —
+   stdout-driven CLI helper."
+  [workflow-id task-id bundle-path]
+  (let [branches (bundle-branches bundle-path)]
+    (cond
+      (nil? branches)
+      (println (format "  ✗ %s  (could not list bundle heads)" bundle-path))
+
+      (empty? branches)
+      (println (format "  ✗ %s  (bundle advertises no refs/heads/* — likely the legacy `base..HEAD` shape that only recorded HEAD; re-create with the post-PR#729 archive-bundle!)"
+                       bundle-path))
+
+      :else
+      (doseq [branch branches
+              :let [ref (ref-for workflow-id task-id)
+                    r   (fetch-branch! bundle-path branch ref)]]
+        (if (:ok? r)
+          (println (format "  ✓ %s  ← %s (branch %s)" ref bundle-path branch))
+          (println (format "  ✗ %s  (%s)" ref (:err r))))))))
+
 (defn- harvest-workflow!
-  "Fetch every bundle for one workflow-id into refs/harvest/<workflow-id>/<task-id>."
+  "Fetch every bundle for one workflow-id into harvest/<workflow-id>/<task-id>."
   [workflow-id]
-  (let [root         (checkpoint-dir)
-        wf-path      (str root "/" workflow-id)]
+  (let [root    (checkpoint-dir)
+        wf-path (str root "/" workflow-id)]
     (cond
       (not (fs/exists? wf-path))
       (do
@@ -147,12 +208,8 @@
           (System/exit 1))
         (println (format "Harvesting %d bundle(s) from workflow %s → refs/heads/harvest/%s/<task-id>"
                          (count bundles) workflow-id workflow-id))
-        (doseq [[task-id bundle-path] bundles
-                :let [ref (str "harvest/" workflow-id "/" task-id)
-                      r   (fetch-bundle! bundle-path ref)]]
-          (if (:ok? r)
-            (println (format "  ✓ %s  ← %s" ref bundle-path))
-            (println (format "  ✗ %s  (%s)" ref (:err r)))))
+        (doseq [[task-id bundle-path] bundles]
+          (harvest-bundle! workflow-id task-id bundle-path))
         (println)
         (println "Inspect a task's work:")
         (println (format "  git log harvest/%s/<task-id>" workflow-id))
