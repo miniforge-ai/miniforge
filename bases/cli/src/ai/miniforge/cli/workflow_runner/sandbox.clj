@@ -17,7 +17,14 @@
 ;; limitations under the License.
 
 (ns ai.miniforge.cli.workflow-runner.sandbox
-  "Docker sandbox setup for isolated workflow execution."
+  "Docker sandbox setup for isolated workflow execution.
+
+   Stratification (intra-namespace):
+   Layer 0 — `sandbox-release-fn`, `git-remote-url`, `infer-branch`
+             (no in-ns deps).
+   Layer 1 — `infer-repo-url` (composes `git-remote-url`).
+   Layer 2 — `prepare-sandbox` (composes Layer 1).
+   Layer 3 — `setup-sandbox-context` (composes Layer 2)."
   (:require
    [clojure.string :as str]
    [babashka.process :as p]
@@ -25,7 +32,7 @@
    [ai.miniforge.dag-executor.interface :as dag]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Sandbox helpers
+;; No in-namespace dependencies.
 
 (defn sandbox-release-fn [executor environment-id]
   (fn []
@@ -43,6 +50,14 @@
         (str/trim (:out result))))
     (catch Exception _ nil)))
 
+(defn infer-branch [spec enriched-spec]
+  (or (:spec/branch spec)
+      (get-in enriched-spec [:spec/context :git-branch])
+      "main"))
+
+;------------------------------------------------------------------------------ Layer 1
+;; Composes Layer 0.
+
 (defn infer-repo-url [spec enriched-spec]
   (or (:spec/repo-url spec)
       (get-in enriched-spec [:spec/context :repo-url])
@@ -53,13 +68,8 @@
       ;; Final fallback: cwd's repo
       (git-remote-url ".")))
 
-(defn infer-branch [spec enriched-spec]
-  (or (:spec/branch spec)
-      (get-in enriched-spec [:spec/context :git-branch])
-      "main"))
-
-;------------------------------------------------------------------------------ Layer 1
-;; Sandbox preparation
+;------------------------------------------------------------------------------ Layer 2
+;; Sandbox preparation — composes Layer 1.
 
 (defn prepare-sandbox [spec enriched-spec]
   (let [prep-result (dag/prepare-docker-executor! {:image-type :clojure})]
@@ -80,8 +90,8 @@
                      :environment-id env-id
                      :sandbox-workdir "/workspace"})))))))
 
-;------------------------------------------------------------------------------ Layer 2
-;; Sandbox context setup
+;------------------------------------------------------------------------------ Layer 3
+;; Composes Layer 2.
 
 (defn setup-sandbox-context [base-context sandbox? spec enriched-spec quiet]
   (if-not sandbox?
