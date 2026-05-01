@@ -4,23 +4,26 @@
 **Date:** 2026-05-01
 
 ---
+
 ```yaml
 generated-by: miniforge-compliance-scanner
 rule-id: 210
 rule-title: "Clojure Polylith + per-file stratified design"
 fix-type: mechanical
-violations-fixed: 20
-files-changed: 7
+violations-fixed: 15
+files-changed: 5
 date: 2026-05-01
+note: "5 sites reverted from the auto-fix because (or (:k m) default) was load-bearing — see PR description."
 ```
+
 ---
 
 ## Summary
 
 Automated compliance pass applying mechanical fixes for **Clojure Polylith + per-file stratified design** (Dewey 210).
-20 violations fixed across 7 files.
+15 violations applied; 5 reverted (see PR description).
 
-## Files Changed
+## Files Changed (kept)
 
 | File | Line | Current | Suggested |
 |------|------|---------|-----------|
@@ -38,12 +41,16 @@ Automated compliance pass applying mechanical fixes for **Clojure Polylith + per
 | `components/dag-executor/src/ai/miniforge/dag_executor/protocols/impl/worktree.clj` | 243 | `(or (:err r) "git bundle create failed")` | `(get r :err "git bundle create failed")` |
 | `components/dag-executor/src/ai/miniforge/dag_executor/protocols/impl/worktree.clj` | 358 | `(or (:err r) "git fetch from bundle failed")` | `(get r :err "git fetch from bundle failed")` |
 | `bases/cli/src/ai/miniforge/cli/main/commands/etl.clj` | 262 | `(or (:paths opts) ".")` | `(get opts :paths ".")` |
-| `components/agent/src/ai/miniforge/agent/planner.clj` | 510 | `(or (:message llm-err) "LLM call failed")` | `(get llm-err :message "LLM call failed")` |
-| `components/tool/src/ai/miniforge/tool/core.clj` | 195 | `(or (:name info) "")` | `(get info :name "")` |
-| `components/tool/src/ai/miniforge/tool/core.clj` | 196 | `(or (:description info) "")` | `(get info :description "")` |
-| `components/dag-primitives/src/ai/miniforge/dag_primitives/result.clj` | 57 | `(or (:message error) "Unwrap called on error result")` | `(get error :message "Unwrap called on error result")` |
 | `components/tui-views/src/ai/miniforge/tui_views/view/project.clj` | 389 | `(or (:key row) "")` | `(get row :key "")` |
 | `components/tui-views/src/ai/miniforge/tui_views/view/project.clj` | 393 | `(or (:duration row) "")` | `(get row :duration "")` |
+
+## Reverted (see PR description for rationale)
+
+| File | Line | Why |
+|------|------|------|
+| `components/agent/src/ai/miniforge/agent/planner.clj` | 510 | `:message` from `(llm/get-error …)` can be explicit nil; `(get …)` would drop the fallback string |
+| `components/dag-primitives/src/ai/miniforge/dag_primitives/result.clj` | 57 | `:message` can be `(.getMessage e)` returning nil; `(get …)` would produce a nil-message anomaly |
+| `components/tool/src/ai/miniforge/tool/core.clj` | 195–196 | `:name` / `:description` can be explicit nil; `(get …)` returns nil and `str/lower-case nil` NPEs |
 
 ## Verification
 

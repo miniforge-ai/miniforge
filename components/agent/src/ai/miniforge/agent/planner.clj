@@ -507,7 +507,7 @@
                 ;; produced undiagnosable \"Unknown error\" / bare
                 ;; \"Process timed out\" phase errors.
                 (let [llm-err (llm/get-error llm-response)
-                      error-msg (get llm-err :message "LLM call failed")
+                      error-msg (or (:message llm-err) "LLM call failed")
                       stop-reason (:stop-reason llm-response)
                       num-turns   (:num-turns llm-response)]
                   (response/error error-msg
