@@ -1,3 +1,4 @@
+<!--\n  Title: Miniforge.ai\n  Author: Christopher Lester (christopher@miniforge.ai)\n  Copyright 2025-2026 Christopher Lester. Licensed under Apache 2.0.\n-->
 # feat(dag-executor): generalize Docker executor into OCI-CLI executor (N11-delta Phase 1)
 
 ## Overview

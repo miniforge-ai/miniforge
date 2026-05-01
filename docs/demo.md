@@ -1,3 +1,4 @@
+<!--\n  Title: Miniforge.ai\n  Author: Christopher Lester (christopher@miniforge.ai)\n  Copyright 2025-2026 Christopher Lester. Licensed under Apache 2.0.\n-->
 # Miniforge Demo: Spec to PR in 5 Minutes
 
 Watch miniforge plan, implement, test, review, and open a pull request —
