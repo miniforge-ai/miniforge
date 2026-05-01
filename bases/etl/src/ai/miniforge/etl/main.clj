@@ -55,7 +55,8 @@
           (when-let [stages (:pipeline-run/stage-runs run)]
             (println (msg/t :run/stages {:value (count stages)}))))
       (do (println (msg/t :run/failed))
-          (some->> (:error result) (#(println (msg/t :run/error {:value %}))))))))
+          (when-let [error (:error result)]
+            (println (msg/t :run/error {:value error})))))))
 
 (defn- emit-result!
   "Write the pipeline-runner result to `out-path`. Writes JSON when the

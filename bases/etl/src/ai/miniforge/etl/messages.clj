@@ -26,4 +26,6 @@
   (:require [ai.miniforge.messages.interface :as messages]))
 
 (def t
+  "Translate an ETL message key. `(t k)` returns the localized string;
+   `(t k params)` interpolates `{placeholder}` markers from `params`."
   (messages/create-translator "config/etl/messages/en-US.edn" :etl/messages))
