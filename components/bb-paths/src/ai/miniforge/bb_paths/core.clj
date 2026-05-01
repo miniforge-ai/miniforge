@@ -22,13 +22,16 @@
    tasks and their tests see the same root regardless of where `bb` was
    invoked.
 
-   Layer 0: pure path walking.
-   Layer 1: repo-root resolution on top of Layer 0.
-   Layer 2: filesystem side-effects (create/delete)."
+   Stratification (intra-namespace dependencies only):
+   Layer 0 — no in-namespace deps. `find-up` and the side-effect
+             helpers (`ensure-dir!`, `tmp-dir!`, `delete-tree!`) only
+             call out to `babashka.fs`.
+   Layer 1 — composes Layer 0. `repo-root` drives `find-up`.
+   Layer 2 — composes Layer 1. `under-root` rests on `repo-root`."
   (:require [babashka.fs :as fs]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Pure path walking
+;; No in-namespace dependencies — only `babashka.fs` and built-ins.
 
 (defn- find-up
   "Walk up from `start` until a directory containing `marker` is found.
@@ -39,26 +42,6 @@
       (nil? dir)                        nil
       (fs/exists? (fs/path dir marker)) (str dir)
       :else                             (recur (fs/parent dir)))))
-
-;------------------------------------------------------------------------------ Layer 1
-;; Repo-root resolution
-
-(defn repo-root
-  "Absolute path to the repo root (nearest `bb.edn` above the cwd).
-   Throws ex-info if no `bb.edn` is found walking up from cwd."
-  []
-  (or (find-up (fs/cwd) "bb.edn")
-      (throw (ex-info "Could not locate bb.edn from cwd"
-                      {:cwd (str (fs/cwd))}))))
-
-(defn under-root
-  "Resolve `segments` beneath the repo root. Returns an absolute path
-   string."
-  [& segments]
-  (str (apply fs/path (repo-root) segments)))
-
-;------------------------------------------------------------------------------ Layer 2
-;; Filesystem side-effects
 
 (defn ensure-dir!
   "Create `path` (and parents) if it does not exist. Returns the path
@@ -78,6 +61,26 @@
   [path]
   (when (and path (fs/exists? path))
     (fs/delete-tree path)))
+
+;------------------------------------------------------------------------------ Layer 1
+;; Composes Layer 0.
+
+(defn repo-root
+  "Absolute path to the repo root (nearest `bb.edn` above the cwd).
+   Throws ex-info if no `bb.edn` is found walking up from cwd."
+  []
+  (or (find-up (fs/cwd) "bb.edn")
+      (throw (ex-info "Could not locate bb.edn from cwd"
+                      {:cwd (str (fs/cwd))}))))
+
+;------------------------------------------------------------------------------ Layer 2
+;; Composes Layer 1.
+
+(defn under-root
+  "Resolve `segments` beneath the repo root. Returns an absolute path
+   string."
+  [& segments]
+  (str (apply fs/path (repo-root) segments)))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

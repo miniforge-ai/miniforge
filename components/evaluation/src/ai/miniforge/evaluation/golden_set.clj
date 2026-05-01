@@ -6,11 +6,12 @@
    Golden sets are curated workflow inputs paired with known-good outcomes.
    They are stored as N6 evidence artifacts.
 
-   Layer 0: Golden set CRUD (pure data)
-   Layer 1: Golden set evaluation")
+   Stratification (intra-namespace):
+   Layer 0 — pure CRUD + per-entry evaluation (no in-ns deps).
+   Layer 1 — `run-golden-set` (composes `evaluate-entry`).")
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Golden set management
+;; No in-namespace dependencies — pure data construction and per-entry checks.
 
 (defn create-golden-set
   "Create a golden set from curated entries.
@@ -35,9 +36,6 @@
 (defn entry-count [golden-set]
   (count (:golden-set/entries golden-set)))
 
-;------------------------------------------------------------------------------ Layer 1
-;; Evaluation
-
 (defn evaluate-entry
   "Evaluate a single golden set entry against actual output.
 
@@ -56,6 +54,9 @@
     {:entry/id (:entry/id entry)
      :passed? all-passed?
      :criteria-results results}))
+
+;------------------------------------------------------------------------------ Layer 1
+;; Composes Layer 0 (`evaluate-entry`).
 
 (defn run-golden-set
   "Run a golden set and compare actual vs expected outcomes.
