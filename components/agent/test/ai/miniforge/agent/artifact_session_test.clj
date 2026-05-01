@@ -24,6 +24,34 @@
             [ai.miniforge.agent.artifact-session :as session]))
 
 ;------------------------------------------------------------------------------ Layer 0
+;; Test fixtures and factories
+
+(def ^:private default-uuid-str
+  "Stable UUID literal used across artifact fixtures. Real values are random;
+   tests pin a constant so assertions can compare against a known UUID."
+  "550e8400-e29b-41d4-a716-446655440000")
+
+(defn- code-artifact
+  "Factory for code-artifact EDN maps written to a session's `:artifact-path`.
+   Defaults exercise the parser's UUID/instant coercion paths; pass any
+   subset of overrides to vary individual fields per test."
+  [& {:as overrides}]
+  (merge {:code/id           default-uuid-str
+          :code/summary      "test artifact"
+          :code/created-at   "2026-02-28T12:00:00Z"}
+         overrides))
+
+(defn- plan-artifact
+  "Factory for plan-artifact EDN maps written to `.miniforge/plan.edn` in
+   the worktree. Defaults yield an empty task vector; override `:plan/tasks`
+   to exercise nested-vector UUID parsing."
+  [& {:as overrides}]
+  (merge {:plan/id    default-uuid-str
+          :plan/name  "t"
+          :plan/tasks []}
+         overrides))
+
+;------------------------------------------------------------------------------ Layer 1
 ;; Session lifecycle tests
 
 (deftest create-session-test
@@ -102,9 +130,7 @@
 (deftest read-artifact-valid-edn-test
   (testing "reads and parses valid artifact EDN"
     (let [s (session/create-session!)
-          artifact {:code/id "550e8400-e29b-41d4-a716-446655440000"
-                    :code/summary "test artifact"
-                    :code/created-at "2026-02-28T12:00:00Z"}]
+          artifact (code-artifact)]
       (try
         (spit (:artifact-path s) (pr-str artifact))
         (let [result (session/read-artifact s)]
@@ -145,10 +171,7 @@
 
 (deftest read-worktree-artifact-reads-plan-edn-test
   (testing "reads .miniforge/<role>.edn from the worktree"
-    (let [wt (make-worktree-with-plan
-              (pr-str {:plan/id "550e8400-e29b-41d4-a716-446655440000"
-                       :plan/name "t"
-                       :plan/tasks []}))]
+    (let [wt (make-worktree-with-plan (pr-str (plan-artifact)))]
       (try
         (let [result (session/read-worktree-artifact wt :plan)]
           (is (map? result))
@@ -191,21 +214,18 @@
 (deftest parse-uuid-strings-test
   (testing "UUID string keys converted to java.util.UUID"
     (let [s (session/create-session!)
-          uuid-str "550e8400-e29b-41d4-a716-446655440000"
-          artifact {:code/id uuid-str
-                    :code/summary "test"}]
+          artifact (code-artifact :code/summary "test")]
       (try
         (spit (:artifact-path s) (pr-str artifact))
         (let [result (session/read-artifact s)]
           (is (instance? java.util.UUID (:code/id result)))
-          (is (= (java.util.UUID/fromString uuid-str) (:code/id result))))
+          (is (= (java.util.UUID/fromString default-uuid-str) (:code/id result))))
         (finally
           (session/cleanup-session! s)))))
 
   (testing "created-at string converted to java.util.Date"
     (let [s (session/create-session!)
-          artifact {:code/id "550e8400-e29b-41d4-a716-446655440000"
-                    :code/created-at "2026-02-28T12:00:00Z"}]
+          artifact (code-artifact)]
       (try
         (spit (:artifact-path s) (pr-str artifact))
         (let [result (session/read-artifact s)]
@@ -215,9 +235,8 @@
 
   (testing "non-UUID/instant values are preserved"
     (let [s (session/create-session!)
-          artifact {:code/id "550e8400-e29b-41d4-a716-446655440000"
-                    :code/summary "unchanged"
-                    :code/language "clojure"}]
+          artifact (code-artifact :code/summary "unchanged"
+                                  :code/language "clojure")]
       (try
         (spit (:artifact-path s) (pr-str artifact))
         (let [result (session/read-artifact s)]
@@ -231,11 +250,11 @@
     (let [s (session/create-session!)
           uuid1 "550e8400-e29b-41d4-a716-446655440001"
           uuid2 "550e8400-e29b-41d4-a716-446655440002"
-          artifact {:plan/id "550e8400-e29b-41d4-a716-446655440000"
+          artifact (plan-artifact
                     :plan/tasks [{:task/id uuid1
                                   :task/description "First task"}
                                  {:task/id uuid2
-                                  :task/description "Second task"}]}]
+                                  :task/description "Second task"}])]
       (try
         (spit (:artifact-path s) (pr-str artifact))
         (let [result (session/read-artifact s)]
@@ -383,8 +402,7 @@
                    (reset! captured-dir (:dir sess))
                    ;; Simulate MCP server writing artifact
                    (spit (:artifact-path sess)
-                          (pr-str {:code/id "550e8400-e29b-41d4-a716-446655440000"
-                                   :code/summary "from macro test"}))
+                          (pr-str (code-artifact :code/summary "from macro test")))
                    :body-return-value)]
       (is (= :body-return-value (:llm-result result)))
       (is (map? (:artifact result)))
