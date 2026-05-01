@@ -1,0 +1,230 @@
+;; Per-Task Base Chaining — DAG dependencies as scratch-worktree base
+;;
+;; Source: dogfooding observation in PR #729 (local-mode fidelity work).
+;; The orchestrator schedules tasks in dependency order but every task's
+;; scratch worktree is acquired off the same parent base. Tasks declared
+;; as dependencies do not see each other's intermediate output, so they
+;; reproduce parts of upstream tasks rather than building on them.
+
+{:spec/title "Per-Task Base Chaining for DAG Sub-Workflows"
+ :version "1.0.0"
+ :type :feature
+ :priority :high
+
+ :spec/description
+ "Make a DAG task's `:dependencies` actually shape the work, not just the
+  execution order. Today the orchestrator respects scheduling order
+  (task N+1 doesn't start until task N completes), but every sub-workflow
+  acquires its scratch worktree off the same parent base — so task N+1's
+  agent sees the parent base, not task N's committed work.
+
+  Verified in the 2026-04-30 dogfood of generalized-classification-runtime:
+  6 tasks ran with declared dependencies; 4 of them independently rewrote
+  components/classification/engine.clj because each agent was looking at
+  a clean base. Persist captures the work, but consumers downstream of a
+  multi-task plan can't integrate it without manual cherry-picking.
+
+  Target shape: when the orchestrator spawns a sub-workflow for task T
+  whose dependencies are [D1, D2, ...], the sub-workflow's scratch
+  worktree is acquired off D's persisted branch — not the spec branch.
+  Task T's agent sees D's files and builds on them. Persist on T then
+  produces a branch that contains D's work + T's work cumulatively. The
+  terminal tasks in each chain hold the integrated result; bb harvest
+  on those terminals is enough to land the full plan.
+
+  Multi-dependency case (task T depends on D1 and D2): out of scope for
+  v1. Plans whose dependency graph is not a forest will return an error
+  asking the planner to either linearize or split the multi-dep node.
+  Single-parent dependencies are the dominant case in the dogfood plans
+  observed so far.
+
+  Out of scope:
+  - Auto-merge of terminal task branches into the spec branch.
+    `bb harvest` (PR #729) remains the explicit recovery path.
+  - PR-per-task on remote (governed-tier already does this via
+    git-persist!; this spec adds equivalent semantics for :local).
+  - Multi-parent merge strategy. Returns `:anomalies/dag-non-forest`
+    until a follow-up adds octo-merge or merge-base resolution."
+
+ :spec/intent
+ {:type :feature
+  :scope ["components/dag-executor (task-branch registry + acquire wiring)"
+          "components/workflow/dag_orchestrator (lookup + opts threading)"]}
+
+ :handoff-ref "https://github.com/miniforge-ai/miniforge/pull/729"
+ :dag/id :per-task-base-chaining
+ :dag/depends-on []
+ :dag/blocks []
+
+ :current-state
+ {:scheduling
+  ["DAG orchestrator schedules tasks in dependency order (correct)"
+   "task-sub-opts in dag_orchestrator.clj does NOT pass per-task branch info"
+   "acquire-execution-environment! defaults env-config :branch to opts :branch
+    or input :branch or 'main'"
+   "Every task acquires off the same base"]
+  :persistence
+  ["Worktree-tier persist-workspace! creates a real branch task-<env-id>
+    in the host repo (PR #729)"
+   "Branch is reachable from the parent repo even after worktree teardown"
+   "Bundle is also written under ~/.miniforge/checkpoints/<wf-id>/<task-id>.bundle"]
+  :gap "Persisted task branches exist as a side effect; nothing
+        connects them to downstream tasks' acquire calls."}
+
+ :target-state
+ {:registry
+  "Per-workflow `task-id → branch-name` map populated as each task's
+   persist completes. Lives in the dag-orchestrator's run-state
+   (not global) so concurrent workflow runs don't collide."
+  :acquire-flow
+  "When spawning sub-workflow for task T:
+   1. Resolve T's dependencies via :task/dependencies in plan output
+   2. If single dependency D: env-config :branch = registry[D]
+   3. If no dependencies: env-config :branch = parent (spec) branch
+   4. If multiple dependencies: return :anomalies/dag-non-forest"
+  :persist-callback
+  "After task T's persist returns :persisted? true, register
+   {T-id → branch} in the workflow's registry before unblocking T's
+   downstream tasks in the dag scheduler."}
+
+ :implementation
+ {:step-1-task-branch-registry
+  {:title "Per-workflow task→branch registry"
+   :files-to-create
+   ["components/dag-executor/src/ai/miniforge/dag_executor/task_branches.clj"]
+   :changes
+   ["Define `create-registry!` returning `(atom {})`"
+    "Define `register-branch! [registry task-id branch-name]` —
+     idempotent assoc"
+    "Define `resolve-base-branch [registry task-deps default-branch]` —
+     - 0 deps  → default-branch
+     - 1 dep   → (get registry dep)
+     - >1 deps → :anomalies/dag-non-forest with the dep set"
+    "Pure data + atom — no I/O, no side effects beyond the atom"
+    "Unit-test all three branches of resolve-base-branch"]}
+
+  :step-2-thread-registry-into-orchestrator
+  {:title "Thread the registry through dag_orchestrator"
+   :files-to-modify
+   ["components/workflow/src/ai/miniforge/workflow/dag_orchestrator.clj"]
+   :changes
+   ["In the dag-orchestrator entry point, create a registry once per
+     workflow and store it on context (e.g. :execution/task-branches)"
+    "In task-sub-opts, look up dependencies for the current task and
+     resolve the base branch via `resolve-base-branch`"
+    "Pass the resolved branch as :branch in the sub-opts so
+     run-pipeline → acquire-execution-environment! consumes it"
+    "If resolve returns an anomaly, fail the sub-workflow with that
+     anomaly rather than silently falling back to the parent branch"]}
+
+  :step-3-register-on-persist-completion
+  {:title "Register the persisted branch when a task completes"
+   :files-to-modify
+   ["components/workflow/src/ai/miniforge/workflow/dag_orchestrator.clj"
+    "components/workflow/src/ai/miniforge/workflow/runner_environment.clj"]
+   :changes
+   ["After persist-workspace-at-phase-boundary! returns successfully
+     (i.e. :persisted? true), call task-branches/register-branch!
+     with the task-id and the persisted branch name"
+    "The branch name comes from the persist result's :branch field
+     (already populated by archive-bundle!)"
+    "Register at the LAST persist boundary of the sub-workflow (the
+     :done or :release phase) so the registry holds the cumulative
+     branch, not an intermediate"]}
+
+  :step-4-anomaly-on-non-forest
+  {:title "Fail-loud on multi-parent dependency graphs"
+   :changes
+   ["When the planner emits a task with >1 :task/dependencies, the
+     resolve step returns :anomalies/dag-non-forest"
+    "The orchestrator surfaces this anomaly in the plan-validation
+     gate so it fires BEFORE any task starts"
+    "The error message names the offending task and its dep set,
+     suggesting either linearizing or splitting the node"
+    "Existing single-parent or zero-dep plans (the common case)
+     remain unaffected"]}
+
+  :step-5-tests
+  {:title "Unit + integration tests"
+   :changes
+   ["task_branches_test.clj — covers all three resolve branches and
+     concurrent register-branch! calls"
+    "dag_orchestrator_test.clj — adds 'two-task chain' test:
+     - mock executor records env-config :branch per acquire call
+     - run a 2-task plan with task-2 depending on task-1
+     - assert task-2's acquire saw task-1's persisted branch"
+    "Add a 'multi-parent rejected' test that asserts the anomaly
+     fires and no tasks acquire environments"]}
+
+  :step-6-dogfood-verification
+  {:title "Re-run the generalized-classification-runtime spec"
+   :changes
+   ["Run bb dogfood work/generalized-classification-runtime.spec.edn"
+    "Inspect the harvested terminal task's branch — it should
+     contain ALL components/classification/* files (schema +
+     engine + loader + tests + interface), not just one task's slice"
+    "Verify no duplicate engine.clj implementations across task
+     branches"]}}
+
+ :spec/constraints
+ ["Stratified design: registry in dag-executor (no upward deps);
+   orchestrator wiring in workflow component"
+  "Pure data registry. Mutation only via register-branch!"
+  "No global state — registry is per-workflow, lives on context"
+  "Anomalies as data at the orchestrator boundary, not exceptions"
+  "Backward-compatible: zero-dependency plans behave exactly as
+   before (no registry lookups, default branch is the spec branch)"
+  "No changes to the persist contract from PR #729 — this spec
+   only consumes its outputs"
+  "Apache 2.0 header on every Clojure source per project rule"]
+
+ :testing-strategy
+ {:unit-tests
+  ["task_branches: register, resolve (0/1/many deps), concurrent
+    register safety"
+   "dag_orchestrator: opts include resolved branch when deps resolve;
+    anomaly path when they don't"]
+  :integration-tests
+  ["Two-task chain: task 2's scratch contains task 1's committed work
+    (verified by reading a file task 1 wrote)"
+   "Multi-parent: orchestrator returns dag-non-forest anomaly without
+    spawning any task"]
+  :dogfood
+  ["Re-run generalized-classification-runtime spec; harvest terminal
+    branch; assert no duplicate file implementations across tasks"]}
+
+ :spec/acceptance-criteria
+ [{:criterion "Single-parent task acquires its scratch worktree from
+                its dependency's persisted branch, not the spec branch"
+   :verification "Integration test reads a file written by task 1 from
+                   task 2's scratch worktree"}
+  {:criterion "Multi-parent dependency graphs fail with
+                :anomalies/dag-non-forest before any task starts"
+   :verification "Unit test on a plan with task-3 depending on
+                   task-1 + task-2 asserts the anomaly"}
+  {:criterion "Zero-dependency tasks behave identically to today —
+                they acquire off the spec branch"
+   :verification "Existing dag_orchestrator tests pass without
+                   modification"}
+  {:criterion "Re-running the generalized-classification-runtime
+                spec produces a single chained branch with the full
+                classification component, not 6 conflicting cuts"
+   :verification "Dogfood verification step in implementation"}]
+
+ :follow-on-specs
+ [{:id :multi-parent-octo-merge
+   :title "Multi-parent dependency merging"
+   :description "Once single-parent chaining is stable, decide on a
+                  strategy for tasks with multiple dependencies: octo-merge
+                  the parent branches before acquire, take the merge-base,
+                  or require an explicit user-supplied merge task in the
+                  plan. Defer until we have real plans that need it."}
+  {:id :per-task-base-chaining-governed-mode
+   :title "Same model for :governed mode"
+   :description "Governed mode pushes to remote branches via git-persist!
+                  rather than local bundles. The same registry approach
+                  applies; the env-config :branch lookup just resolves
+                  to a remote branch ref instead of a local one."}]
+
+ :estimated-effort "1-2 days"
+ :workflow/type :simple}
