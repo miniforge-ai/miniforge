@@ -87,6 +87,11 @@
                                        (str " (" (format-duration d) ")")))
       :workflow/milestone-reached (colorize :green (messages/t :workflow-runner/milestone
                                                                 {:message (:message event)}))
+      :workspace/persisted (colorize :cyan (messages/t :workflow-runner/workspace-persisted
+                                                       {:phase       (some-> (:workspace/phase event) name)
+                                                        :bundle-path (or (:workspace/bundle-path event)
+                                                                         (:workspace/commit-sha event)
+                                                                         "(no archive path)")}))
       :agent/started (colorize :cyan (messages/t :workflow-runner/agent-started
                                                  {:agent agent}))
       :agent/completed (colorize :green (messages/t :workflow-runner/agent-completed

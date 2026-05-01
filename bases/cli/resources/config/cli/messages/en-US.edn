@@ -167,6 +167,7 @@
   :workflow-runner/phase-started "→ Phase {phase} started"
   :workflow-runner/phase-completed "✓ Phase {phase} {outcome}"
   :workflow-runner/milestone "★ Milestone: {message}"
+  :workflow-runner/workspace-persisted "  ↳ Persisted ({phase}): {bundle-path}"
   :workflow-runner/agent-started "  • Agent {agent} started"
   :workflow-runner/agent-completed "  • Agent {agent} completed"
   :workflow-runner/agent-failed "  • Agent {agent} failed"
