@@ -165,7 +165,7 @@
                                                        :out  :inherit
                                                        :err  :inherit}))]
       exit)
-    (do (display/print-error "mf etl run/list/validate currently requires running from inside a miniforge checkout (walks up looking for workspace.edn + bases/etl/deps.edn). The etl base is dev-alias-only until we publish an installable artifact.")
+    (do (display/print-error (messages/t :etl/run-requires-checkout))
         1)))
 
 ;------------------------------------------------------------------------------ Layer 3
