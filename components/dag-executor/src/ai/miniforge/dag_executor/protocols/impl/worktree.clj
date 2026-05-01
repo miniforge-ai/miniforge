@@ -207,11 +207,22 @@
         (result/ok {:persisted? false :no-changes? true :branch branch})
 
         :else
-        (let [;; Stage and commit any pending dirty changes (idempotent if clean)
+        (let [;; Stage and commit any pending dirty changes (idempotent if clean).
+              ;; --no-verify because the host repo may have a pre-commit hook
+              ;; (bb pre-commit, lint, tests) that fails inside a scratch
+              ;; worktree where deps aren't installed. Persist is internal
+              ;; infrastructure that preserves agent work as-is — validation
+              ;; is the gate's job upstream, not the archive step's.
               _ (run-git "-C" worktree-path "add" "-A")
-              _ (when (has-dirty-changes? worktree-path)
-                  (run-git "-C" worktree-path "commit"
-                           "--allow-empty-message" "-m" message))
+              commit-r (when (has-dirty-changes? worktree-path)
+                         (run-git "-C" worktree-path "commit"
+                                  "--no-verify"
+                                  "--allow-empty-message" "-m" message))
+              _ (when (and commit-r (not (zero? (:exit commit-r))))
+                  (throw (ex-info "git commit failed during persist"
+                                  {:exit (:exit commit-r)
+                                   :err  (:err commit-r)
+                                   :out  (:out commit-r)})))
               ahead (count-commits-ahead worktree-path base-ref)]
           (if (zero? ahead)
             ;; Commit produced nothing new vs base-ref — caller treats as no-op
