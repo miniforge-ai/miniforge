@@ -68,6 +68,16 @@
   {:success? false
    :reason reason})
 
+(defn- pr-info
+  "Factory for the `pr-lifecycle` PR-info map stored on `(:pr @controller)`.
+   Defaults exercise the fix-loop's expected shape (id/branch/head-sha);
+   pass overrides to vary individual fields per test."
+  [& {:as overrides}]
+  (merge {:pr/id       123
+          :pr/branch   "feat/x"
+          :pr/head-sha "abc"}
+         overrides))
+
 (defn make-event-collector
   "Create a minimal event bus that collects published events."
   []
@@ -460,7 +470,7 @@
       ;; We need to set up PR info for the fix loop
       (swap! ctrl assoc
              :status :monitoring-ci
-             :pr {:pr/id 123 :pr/branch "feat/x" :pr/head-sha "abc"}
+             :pr (pr-info)
              :fix-iterations 0)
       ;; The actual fix-ci-failure call will fail because generate-fn
       ;; returns nil, but we can verify the state transitions happened
@@ -516,7 +526,7 @@
                  :generate-fn (fn [& _] nil))]
       (swap! ctrl assoc
              :status :monitoring-ci
-             :pr {:pr/id 123 :pr/branch "feat/x" :pr/head-sha "abc"}
+             :pr (pr-info)
              :fix-iterations 0)
       (with-redefs [fix/fix-ci-failure (fn [& _]
                                          (fix-success {:commit-sha "abc123"}))]
@@ -532,7 +542,7 @@
                  :generate-fn (fn [& _] nil))]
       (swap! ctrl assoc
              :status :monitoring-review
-             :pr {:pr/id 123 :pr/branch "feat/x" :pr/head-sha "abc"}
+             :pr (pr-info)
              :fix-iterations 0)
       (with-redefs [fix/fix-review-feedback (fn [& _]
                                               (fix-failure :fix-failed))]
@@ -569,11 +579,11 @@
     (let [ctrl (controller/create-controller
                  "dag" "run" "task" test-task
                  :worktree-path "/tmp")
-          pr-info {:pr/id 42
-                   :pr/url "https://github.com/org/repo/pull/42"
-                   :pr/branch "feat/bar"
-                   :pr/head-sha "def456"}]
-      (swap! ctrl assoc :pr pr-info)
+          pr      (pr-info :pr/id 42
+                           :pr/url "https://github.com/org/repo/pull/42"
+                           :pr/branch "feat/bar"
+                           :pr/head-sha "def456")]
+      (swap! ctrl assoc :pr pr)
       (is (= 42 (get-in @ctrl [:pr :pr/id])))
       (is (= "feat/bar" (get-in @ctrl [:pr :pr/branch]))))))
 
@@ -766,8 +776,8 @@
 (deftest finalize-pr-creation-records-pr-and-returns-ok
   (testing "Stores PR on controller, adds history, returns dag/ok"
     (let [ctrl (make-controller)
-          pr-info {:pr/id 42 :pr/url "url" :pr/branch "feat/x" :pr/head-sha "abc"}
-          result (controller/finalize-pr-creation! ctrl pr-info "dag" "run" "task" nil nil)]
+          pr     (pr-info :pr/id 42 :pr/url "url")
+          result (controller/finalize-pr-creation! ctrl pr "dag" "run" "task" nil nil)]
       (is (dag/ok? result))
       (is (= 42 (get-in @ctrl [:pr :pr/id])))
       (is (some #(= :pr-created (:type %)) (:history @ctrl))))))
@@ -777,8 +787,8 @@
     (let [ctrl (make-controller)
           published (atom [])
           mock-bus (reify Object)
-          pr-info {:pr/id 42 :pr/url "url" :pr/branch "feat/x" :pr/head-sha "abc"}]
+          pr     (pr-info :pr/id 42 :pr/url "url")]
       (with-redefs [events/publish! (fn [_bus event _logger]
                                        (swap! published conj event))]
-        (controller/finalize-pr-creation! ctrl pr-info "dag" "run" "task" mock-bus nil)
+        (controller/finalize-pr-creation! ctrl pr "dag" "run" "task" mock-bus nil)
         (is (= 1 (count @published)))))))
