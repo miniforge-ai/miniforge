@@ -1,8 +1,6 @@
 (ns ai.miniforge.connector-github.impl
   "Implementation functions for the GitHub REST API connector."
   (:require [ai.miniforge.connector.interface :as connector]
-            [ai.miniforge.connector.interface :as connector]
-            [ai.miniforge.connector-auth.interface :as auth]
             [ai.miniforge.connector-github.messages :as msg]
             [ai.miniforge.connector-github.resources :as resources]
             [ai.miniforge.connector-github.schema :as gh-schema]
@@ -160,11 +158,10 @@
 ;; -- Helpers --
 
 (defn- require-handle!
-  "Retrieve handle state or throw."
+  "Retrieve handle state or throw, delegating to the shared helper."
   [handle]
-  (or (get-handle handle)
-      (throw (ex-info (msg/t :github/handle-not-found {:handle handle})
-                      {:handle handle}))))
+  (connector/require-handle! handles handle
+                             {:message (msg/t :github/handle-not-found {:handle handle})}))
 
 (defn- require-resource!
   "Look up resource def or throw."
@@ -179,10 +176,11 @@
   (:errors result))
 
 (defn- validate-connect!
-  "Validate config and auth sequentially, throwing on first failure."
+  "Validate config and auth sequentially, throwing on first failure.
+   Auth validation delegates to the shared connector helper, then re-throws
+   with the localized message that interpolates the actual validation errors."
   [config auth]
-  (let [config-result (gh-schema/validate-config config)
-        auth-result   (when auth (auth/validate-credential-ref auth))]
+  (let [config-result (gh-schema/validate-config config)]
     (cond
       (gh-schema/invalid? config-result)
       (let [errs (validation-errors config-result)]
@@ -191,9 +189,10 @@
       (and (nil? (:github/org config)) (nil? (:github/owner config)))
       (throw (ex-info (msg/t :github/owner-or-org-required) {:config config}))
 
-      (and auth-result (not (:success? auth-result)))
-      (let [errs (validation-errors auth-result)]
-        (throw (ex-info (msg/t :github/auth-invalid {:errors errs}) {:errors errs}))))))
+      :else
+      (when-let [a (connector/validate-auth auth {:connector :github})]
+        (let [errs (:errors (:anomaly/data a))]
+          (throw (ex-info (msg/t :github/auth-invalid {:errors errs}) {:errors errs})))))))
 
 ;; -- Lifecycle --
 (defn do-connect

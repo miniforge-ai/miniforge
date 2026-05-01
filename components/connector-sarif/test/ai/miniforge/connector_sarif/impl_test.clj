@@ -98,3 +98,23 @@
           result (impl/do-extract handle :sarif-result {})]
       (is (empty? (:records result)))
       (impl/do-close handle))))
+
+;; --------------------------------------------------------------------------
+;; Migrated handle-lookup helper — confirm the shared connector helper
+;; preserves the legacy ex-info shape at the protocol boundary.
+
+(deftest discover-throws-on-unknown-handle-test
+  (testing "do-discover throws ex-info with :handle key when handle missing"
+    (try
+      (impl/do-discover "no-such-handle" {})
+      (is false "expected ex-info")
+      (catch clojure.lang.ExceptionInfo e
+        (is (= "no-such-handle" (:handle (ex-data e))))))))
+
+(deftest extract-throws-on-unknown-handle-test
+  (testing "do-extract throws ex-info with :handle key when handle missing"
+    (try
+      (impl/do-extract "no-such-handle" :sarif-result {})
+      (is false "expected ex-info")
+      (catch clojure.lang.ExceptionInfo e
+        (is (= "no-such-handle" (:handle (ex-data e))))))))

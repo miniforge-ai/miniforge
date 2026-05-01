@@ -2,8 +2,6 @@
   "Implementation functions for the Jira Cloud REST API connector.
    Small composable functions organized in a stratified DAG."
   (:require [ai.miniforge.connector.interface :as connector]
-            [ai.miniforge.connector.interface :as connector]
-            [ai.miniforge.connector-auth.interface :as auth]
             [ai.miniforge.connector-jira.messages :as msg]
             [ai.miniforge.connector-jira.resources :as resources]
             [ai.miniforge.connector-jira.schema :as schema]
@@ -15,17 +13,15 @@
 
 (def ^:private handles (connector/create-handle-registry))
 
-(defn- get-handle    [handle] (connector/get-handle handles handle))
 (defn- store-handle! [handle state] (connector/store-handle! handles handle state))
 (defn- remove-handle! [handle] (connector/remove-handle! handles handle))
 (defn- touch-handle! [handle] (connector/touch-handle! handles handle))
 
 (defn- require-handle!
-  "Retrieve handle state or throw."
+  "Retrieve handle state or throw, delegating to the shared helper."
   [handle]
-  (or (get-handle handle)
-      (throw (ex-info (msg/t :jira/handle-not-found {:handle handle})
-                      {:handle handle}))))
+  (connector/require-handle! handles handle
+                             {:message (msg/t :jira/handle-not-found {:handle handle})}))
 
 ;; Auth — Jira Cloud uses Basic auth (email:api-token)
 
@@ -48,13 +44,13 @@
     {}))
 
 (defn- validate-auth!
-  "Validate auth credential reference, throwing on failure."
+  "Validate auth credential reference, throwing on failure.
+   Delegates to the shared connector helper, then re-throws with the
+   localized message that interpolates the actual validation errors."
   [auth]
-  (when auth
-    (let [result (auth/validate-credential-ref auth)]
-      (when-not (:success? result)
-        (throw (ex-info (msg/t :jira/auth-invalid {:errors (:errors result)})
-                        {:errors (:errors result)}))))))
+  (when-let [a (connector/validate-auth auth {:connector :jira})]
+    (throw (ex-info (msg/t :jira/auth-invalid {:errors (:errors (:anomaly/data a))})
+                    (:anomaly/data a)))))
 
 ;;------------------------------------------------------------------------------ Layer 1
 ;; HTTP — Jira uses offset pagination (startAt + maxResults), not Link headers.
