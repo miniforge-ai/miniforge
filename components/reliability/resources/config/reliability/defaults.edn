@@ -3,6 +3,20 @@
  :inverted-slis #{:SLI-6}
  :default-windows [:7d]
  :default-tiers [:standard :critical]
+ :degradation-policy
+ {:unknown-failure-threshold 3
+  :dependency-status-precedence [:operator-action-required
+                                 :misconfigured
+                                 :unavailable
+                                 :degraded]
+  :dependency-status->mode {:operator-action-required :safe-mode
+                            :misconfigured :safe-mode
+                            :unavailable :safe-mode
+                            :degraded :degraded}
+  :dependency-status->event {:operator-action-required :dependency-operator-action
+                             :misconfigured :dependency-operator-action
+                             :unavailable :dependency-unavailable
+                             :degraded :dependency-degraded}}
  :dependency-health
  {:window-size 5
   :status-precedence [:operator-action-required

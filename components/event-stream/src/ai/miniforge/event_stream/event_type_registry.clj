@@ -316,6 +316,16 @@
    {:constructor "pr-scored"
     :event-type  :pr/scored
     :json-string "pr/scored"
+    :browser?    false}
+
+   {:constructor "dependency-health-updated"
+    :event-type  :dependency/health-updated
+    :json-string "dependency/health-updated"
+    :browser?    false}
+
+   {:constructor "dependency-recovered"
+    :event-type  :dependency/recovered
+    :json-string "dependency/recovered"
     :browser?    false}])
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -331,7 +341,7 @@
 ;;     "workflow/completed" "workflow/failed" "agent/chunk"]
 
 (def browser-unhandled-events
-  "39 event types emitted server-side that the browser switch silently ignores.
+  "Event types emitted server-side that the browser switch silently ignores.
    These are the gap items for Tasks 1–7."
   (->> event-type-registry
        (remove :browser?)
@@ -383,7 +393,7 @@
    ;; The 6 handled events are a correct, strict subset of server events.
 
    :coverage-gaps browser-unhandled-events
-   ;; ^ 39 events silently ignored by the browser. Adding cases for these
+   ;; ^ Events silently ignored by the browser. Adding cases for these
    ;;   is the primary work of Tasks 1–7.
 
    :asymmetries naming-asymmetries

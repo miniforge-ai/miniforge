@@ -20,12 +20,24 @@
 
 (ns ai.miniforge.reliability.degradation-test
   (:require
-   [clojure.test :refer [deftest is testing]]
+   [clojure.test :refer [deftest is]]
    [ai.miniforge.reliability.interface :as rel]
    [ai.miniforge.event-stream.interface.stream :as stream]))
 
 (defn- make-stream []
   (stream/create-event-stream {:sinks []}))
+
+(defn- dependency-health-entry
+  [status]
+  {:anthropic {:dependency/id :anthropic
+               :dependency/source :external-provider
+               :dependency/kind :provider
+               :dependency/status status
+               :dependency/failure-count (if (= status :healthy) 0 1)
+               :dependency/window-size 5
+               :dependency/incident-counts (if (= status :healthy)
+                                            {}
+                                            {status 1})}})
 
 ;; ---------------------------------------------------------------------------- Basic lifecycle
 
@@ -85,6 +97,23 @@
     (rel/evaluate-degradation! mgr exhausted)
     (is (= :safe-mode (rel/degradation-mode mgr)))))
 
+(deftest nominal-to-degraded-on-dependency-health-test
+  (let [mgr (rel/create-degradation-manager (make-stream))]
+    (rel/evaluate-degradation! mgr {} (dependency-health-entry :degraded))
+    (is (= :degraded (rel/degradation-mode mgr)))))
+
+(deftest nominal-to-safe-mode-on-operator-action-dependency-test
+  (let [mgr (rel/create-degradation-manager (make-stream))]
+    (rel/evaluate-degradation! mgr {} (dependency-health-entry :operator-action-required))
+    (is (= :safe-mode (rel/degradation-mode mgr)))))
+
+(deftest degraded-to-nominal-on-dependency-recovery-test
+  (let [mgr (rel/create-degradation-manager (make-stream))]
+    (rel/evaluate-degradation! mgr {} (dependency-health-entry :degraded))
+    (is (= :degraded (rel/degradation-mode mgr)))
+    (rel/evaluate-degradation! mgr {} (dependency-health-entry :healthy))
+    (is (= :nominal (rel/degradation-mode mgr)))))
+
 ;; ---------------------------------------------------------------------------- Emergency stop
 
 (deftest emergency-stop-from-nominal-test
@@ -132,6 +161,16 @@
       (is (= 1 (count mode-events)))
       (is (= :nominal (:degradation/from (first mode-events))))
       (is (= :degraded (:degradation/to (first mode-events)))))))
+
+(deftest dependency-safe-mode-transition-emits-safe-mode-entered-test
+  (let [stream (make-stream)
+        mgr (rel/create-degradation-manager stream)]
+    (rel/evaluate-degradation! mgr {} (dependency-health-entry :operator-action-required))
+    (let [events (:events @stream)
+          entered-events (filter #(= :safe-mode/entered (:event/type %)) events)]
+      (is (= 1 (count entered-events)))
+      (is (= :dependency-operator-action
+             (:safe-mode/trigger (first entered-events)))))))
 
 ;; ---------------------------------------------------------------------------- Standard tier budgets don't trigger degradation
 

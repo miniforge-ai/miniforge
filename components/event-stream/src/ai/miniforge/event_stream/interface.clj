@@ -144,6 +144,8 @@
 (def sli-computed events/sli-computed)
 (def slo-breach events/slo-breach)
 (def error-budget-update events/error-budget-update)
+(def dependency-health-updated events/dependency-health-updated)
+(def dependency-recovered events/dependency-recovered)
 (def degradation-mode-changed events/degradation-mode-changed)
 (def safe-mode-entered events/safe-mode-entered)
 (def safe-mode-exited events/safe-mode-exited)

@@ -6,6 +6,7 @@
    Layer 0: Engine record and creation
    Layer 1: Compute cycle (stateful, emits events)"
   (:require
+   [ai.miniforge.reliability.degradation :as degradation]
    [ai.miniforge.reliability.dependency-health :as dependency-health]
    [ai.miniforge.reliability.sli :as sli]
    [ai.miniforge.reliability.slo :as slo]
@@ -25,10 +26,14 @@
   [config]
   (let [base-config {:windows (:default-windows defaults)
                      :tiers (:default-tiers defaults)
+                     :degradation-policy (:degradation-policy defaults)
                      :dependency-health dependency-health/default-config
                      :slo-targets slo/default-targets}
         merged-config (merge base-config config)]
     (assoc merged-config
+           :degradation-policy
+           (merge (:degradation-policy base-config)
+                  (:degradation-policy config))
            :dependency-health
            (merge (:dependency-health base-config)
                   (:dependency-health config)))))
@@ -88,6 +93,29 @@
           [[name tier window]
            (budget/error-budget remaining burn-rate tier name window)])))
 
+(defn- dependency-health-delta
+  [prior-projection current-projection]
+  (keep (fn [[dependency-id projection]]
+          (let [prior (get prior-projection dependency-id)]
+            (when (not= prior projection)
+              {:dependency/id dependency-id
+               :previous prior
+               :current projection})))
+        current-projection))
+
+(defn- emit-dependency-health-events!
+  [event-stream prior-projection current-projection]
+  (doseq [{:keys [previous current]} (dependency-health-delta prior-projection current-projection)]
+    (let [previous-status (:dependency/status previous)
+          current-status (:dependency/status current)]
+      (stream/publish! event-stream
+                       (if (and previous-status
+                                (not= :healthy previous-status)
+                                (= :healthy current-status))
+                         (events/dependency-recovered event-stream current previous-status)
+                         (events/dependency-health-updated event-stream current previous-status)))))
+  )
+
 ;------------------------------------------------------------------------------ Layer 2
 ;; Compute cycle
 
@@ -113,23 +141,16 @@
       :recommendation :nominal | :degraded | :safe-mode}"
   [engine metrics]
   (let [{:keys [event-stream state config]} engine
-        {:keys [windows tiers slo-targets dependency-health]} config
+        {:keys [windows tiers slo-targets dependency-health degradation-policy]} config
         prior-dependency-state (:dependency-health-state @state)
+        prior-dependency-health (:dependency-health @state)
         dependency-incidents (:dependency/incidents metrics)
         dependency-recoveries (:dependency/recoveries metrics)
         computed-at (java.util.Date.)
-
-        ;; 1. Compute SLIs for each window
         all-slis (vec (mapcat #(sli/compute-all-slis metrics %) windows))
-
-        ;; 2. Check SLOs for each tier
         all-slo-checks (check-all-slos-across-tiers all-slis tiers windows slo-targets)
         breaches (slo/breached-slos all-slo-checks)
-
-        ;; 3. Compute error budgets for enforced SLOs
         budgets (compute-budgets all-slo-checks)
-
-        ;; 3b. Update rolling dependency-health projection
         next-dependency-state (dependency-health/apply-signals
                                prior-dependency-state
                                dependency-incidents
@@ -139,41 +160,31 @@
         dependency-health-projection (dependency-health/project-health
                                       next-dependency-state
                                       dependency-health)
-
-        ;; 4. Determine degradation recommendation
-        any-critical-exhausted? (budget/critical-budget-exhausted? budgets)
-        any-critical-low? (budget/critical-budget-low? budgets)
-        recommendation (cond
-                         any-critical-exhausted? :safe-mode
-                         any-critical-low?       :degraded
-                         :else                   :nominal)]
-
-    ;; 5. Emit events
+        recommendation (:mode (degradation/recommendation
+                               budgets
+                               dependency-health-projection
+                               degradation-policy))]
     (when event-stream
-      ;; SLI computed events
       (doseq [sli-result all-slis]
         (stream/publish! event-stream
                          (events/sli-computed event-stream
-                                             (:sli/name sli-result)
-                                             (:sli/value sli-result)
-                                             (:sli/window sli-result))))
-
-      ;; SLO breach events
+                                              (:sli/name sli-result)
+                                              (:sli/value sli-result)
+                                              (:sli/window sli-result))))
       (doseq [{:keys [sli/name slo/target slo/actual slo/tier slo/window]} breaches]
         (stream/publish! event-stream
                          (events/slo-breach event-stream name target actual tier window)))
-
-      ;; Error budget updates
       (doseq [[_ b] budgets]
         (stream/publish! event-stream
                          (events/error-budget-update event-stream
-                                                    (:error-budget/tier b)
-                                                    (:error-budget/sli b)
-                                                    (:error-budget/remaining b)
-                                                    (:error-budget/burn-rate b)
-                                                    (:error-budget/window b)))))
-
-    ;; 6. Update engine state
+                                                     (:error-budget/tier b)
+                                                     (:error-budget/sli b)
+                                                     (:error-budget/remaining b)
+                                                     (:error-budget/burn-rate b)
+                                                     (:error-budget/window b))))
+      (emit-dependency-health-events! event-stream
+                                      prior-dependency-health
+                                      dependency-health-projection))
     (reset! state {:slis all-slis
                    :slo-checks all-slo-checks
                    :budgets budgets
@@ -181,8 +192,6 @@
                    :dependency-health-state next-dependency-state
                    :mode recommendation
                    :last-computed-at computed-at})
-
-    ;; 7. Return result
     {:slis all-slis
      :slo-checks all-slo-checks
      :budgets budgets

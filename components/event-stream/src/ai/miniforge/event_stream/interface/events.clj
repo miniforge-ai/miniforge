@@ -97,6 +97,8 @@
 (def sli-computed core/sli-computed)
 (def slo-breach core/slo-breach)
 (def error-budget-update core/error-budget-update)
+(def dependency-health-updated core/dependency-health-updated)
+(def dependency-recovered core/dependency-recovered)
 (def degradation-mode-changed core/degradation-mode-changed)
 (def safe-mode-entered core/safe-mode-entered)
 (def safe-mode-exited core/safe-mode-exited)

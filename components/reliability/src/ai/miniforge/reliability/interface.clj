@@ -93,7 +93,10 @@
 
    Arguments:
      event-stream - event stream atom
-     config       - optional {:windows [:7d] :tiers [:standard :critical]}"
+     config       - optional {:windows [:7d]
+                              :tiers [:standard :critical]
+                              :dependency-health {...}
+                              :degradation-policy {...}}"
   engine/create-engine)
 
 (def compute-cycle!
@@ -138,6 +141,7 @@
    Arguments:
      manager      - DegradationManager
      budget-state - map of budgets from compute-cycle!
+     dependency-health - optional dependency health projection
 
    Returns: current degradation mode."
   degradation/evaluate-and-transition!)
