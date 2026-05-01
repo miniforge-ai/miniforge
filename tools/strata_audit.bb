@@ -57,12 +57,17 @@
 
 (defn analyse-file
   "Run clj-kondo on `path` and return the parsed `:analysis` map (or nil
-   if kondo blew up)."
+   if kondo blew up).
+
+   Uses `:skip-comments true` so var-definitions and var-usages inside
+   `(comment …)` rich-comment blocks are excluded from the call graph.
+   REPL-only experiments under `;;-- Rich Comment` are otherwise
+   reported as production violations."
   [path]
   (try
     (let [{:keys [out exit]}
           (p/sh ["clj-kondo" "--lint" path
-                 "--config" "{:output {:analysis true :format :edn}}"]
+                 "--config" "{:output {:analysis true :format :edn} :skip-comments true}"]
                 {:out :string})]
       (when (and (zero? exit) (not (str/blank? out)))
         (-> out edn/read-string :analysis)))
