@@ -138,23 +138,26 @@
   (let [source (or (:dependency/source entry) (:failure/source recovery))
         vendor (or (:dependency/vendor entry) (:failure/vendor recovery))
         resolved-id (or (recovery-id recovery) (:dependency/id entry))]
-    (cond-> {:dependency/id resolved-id
-             :dependency/source source
-             :dependency/kind (dependency-kind source)
-             :dependency/observations []
-             :dependency/last-recovered-at recovered-at}
-      vendor (assoc :dependency/vendor vendor)
-      (:dependency/last-observed-at entry)
-      (assoc :dependency/last-observed-at (:dependency/last-observed-at entry)))))
+    (when source
+      (cond-> {:dependency/id resolved-id
+               :dependency/source source
+               :dependency/kind (dependency-kind source)
+               :dependency/observations []
+               :dependency/last-recovered-at recovered-at}
+        vendor (assoc :dependency/vendor vendor)
+        (:dependency/last-observed-at entry)
+        (assoc :dependency/last-observed-at (:dependency/last-observed-at entry))))))
 
 (defn- register-recovery
   [state recovery default-instant]
   (let [entry-id (recovery-id recovery)
         recovered-at (recovery-observed-at recovery default-instant)]
     (if entry-id
-      (update state entry-id
-              (fn [entry]
-                (recovery-entry entry recovery recovered-at)))
+      (let [entry (get state entry-id)
+            updated-entry (recovery-entry entry recovery recovered-at)]
+        (if updated-entry
+          (assoc state entry-id updated-entry)
+          state))
       state)))
 
 (defn- project-entry
@@ -218,4 +221,3 @@
            (map (fn [[entry-id entry]]
                   [entry-id (project-entry entry effective-config)]))
            dependency-state))))
-

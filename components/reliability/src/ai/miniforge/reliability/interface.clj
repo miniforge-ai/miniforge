@@ -100,7 +100,13 @@
   "Execute one reliability computation cycle.
    Computes SLIs, checks SLOs, updates budgets, emits events.
 
-   Returns: {:slis :slo-checks :budgets :breaches :recommendation}"
+   Returns:
+   {:slis
+    :slo-checks
+    :budgets
+    :dependency-health
+    :breaches
+    :recommendation}"
   engine/compute-cycle!)
 
 (def current-state

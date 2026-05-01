@@ -108,6 +108,7 @@
      {:slis [...]
       :slo-checks [...]
       :budgets {...}
+      :dependency-health {...}
       :breaches [...]
       :recommendation :nominal | :degraded | :safe-mode}"
   [engine metrics]

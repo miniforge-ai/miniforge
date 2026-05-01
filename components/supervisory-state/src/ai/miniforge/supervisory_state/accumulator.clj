@@ -723,13 +723,17 @@
   [table event]
   (let [dependency-id (:dependency/id event)
         existing (get-in table [:dependencies dependency-id])
+        source (or (:dependency/source event)
+                   (:dependency/source existing))
+        kind (or (:dependency/kind event)
+                 (:dependency/kind existing))
         recovered-at (or (:dependency/last-recovered-at event)
                          (:dependency/recovered-at event)
                          (event-instant event))
         updated (cond-> (merge existing
                                {:dependency/id dependency-id
-                                :dependency/source (:dependency/source event)
-                                :dependency/kind (:dependency/kind event)
+                                :dependency/source source
+                                :dependency/kind kind
                                 :dependency/status :healthy
                                 :dependency/failure-count 0
                                 :dependency/window-size (or (:dependency/window-size event)
