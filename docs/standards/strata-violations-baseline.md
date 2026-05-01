@@ -1,7 +1,7 @@
 # Stratified-Design Violations — Baseline (2026-05-01)
 
 Audit of `components/**/src` and `bases/**/src` for within-namespace stratified-design violations. Run via `bb
-tools/strata-audit.bb`.
+tools/strata_audit.bb`.
 
 ## Summary
 
