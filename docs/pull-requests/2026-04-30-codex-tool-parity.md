@@ -10,9 +10,9 @@ instructions alone to keep the agent inside our intended capability surface.
 
 The PR #729 dogfood verified that the implementer prompt's tool-first delivery framing dramatically improved Codex's
 behavior, but Codex still ran with permissive defaults: `--full-auto` set the sandbox but nothing forced our artifact
-MCP server to be loaded, and any default in `~/.codex/config.toml` could override the approval policy. The earlier
-dogfood saw 1 of 5 runs trip a planner flake (15.7-min plan-phase no-op) where the agent presumably ran into approval
-friction with no clear failure mode.
+MCP server to be loaded, and any default in `<config-root>/.codex/config.toml` (or `~/.codex/config.toml` if Codex's
+search picked it up) could override the approval policy. The earlier dogfood saw 1 of 5 runs trip a planner flake
+(15.7-min plan-phase no-op) where the agent presumably ran into approval friction with no clear failure mode.
 
 Reading the Codex config-reference established the actual shape of the problem:
 
@@ -60,7 +60,12 @@ the implementer prompt picks up the slack.
 
 `components/agent/src/ai/miniforge/agent/artifact_session.clj`
 
-The artifact block written to `~/.codex/config.toml` now includes `required = true`:
+`write-codex-mcp-config!` writes to `<config-root>/.codex/config.toml`, where `config-root` defaults to the agent's
+working directory (the scratch worktree at runtime, not the user's home). Each session gets its own
+`.codex/config.toml` and the file is cleaned up at session teardown via `cleanup-codex-mcp-config!`. Codex's CLI
+search picks up the project-local config from the cwd at invocation time.
+
+The artifact block written there now includes `required = true`:
 
 ```toml
 [mcp_servers.artifact]

@@ -299,19 +299,25 @@
    Tool / approval surface (mirrors Claude's --allowedTools intent within
    Codex's different tool model — see PR notes):
 
-   - --sandbox=workspace-write  — explicit sandbox; agent can edit files
-                                  in the workspace. Replaces the deprecated
-                                  --full-auto alias for clarity.
-   - -c approval_policy=never   — no human-in-the-loop pings. Codex's exec
-                                  mode honors this.
-   - -c mcp_servers.artifact.required=true
-                                — fail loudly if the artifact MCP server
-                                  doesn't initialize, instead of silently
-                                  proceeding without it. Matches Claude's
-                                  behavior when --mcp-config can't load.
+   - `--sandbox=workspace-write`     — explicit sandbox; agent can edit
+                                       files in the workspace. Replaces
+                                       the deprecated `--full-auto` alias
+                                       for clarity.
+   - `--ask-for-approval=never`      — CLI flag: no human-in-the-loop
+                                       pings during exec.
+   - `-c approval_policy=\"never\"`    — TOML override pinning the same
+                                       approval policy at the config
+                                       layer so any `~/.codex/config.toml`
+                                       default cannot relax it.
+   - `-c mcp_servers.artifact.required=true`
+                                     — TOML override: fail loudly if the
+                                       artifact MCP server doesn't
+                                       initialize. Matches Claude's
+                                       behavior when --mcp-config fails
+                                       to load.
 
    What we cannot do (per Codex config-reference): allow-list individual
-   built-in tools. apply_patch / shell are governed by sandbox_mode
+   built-in tools. `apply_patch` / `shell` are governed by `sandbox_mode`
    categorically. The implementer prompt + the artifact MCP server's own
    `enabled_tools` list are the per-tool surface."
   [{:keys [prompt model system]}]

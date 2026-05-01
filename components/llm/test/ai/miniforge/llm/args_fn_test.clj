@@ -173,8 +173,10 @@
       ;; mcp_servers.artifact.required=true makes Codex fail loudly if our
       ;; MCP server doesn't initialize, instead of running without it.
       (is (some #(= "mcp_servers.artifact.required=true" %) args))
-      ;; approval_policy=never is set both via the CLI flag and the -c
-      ;; override so it survives any config.toml defaults.
+      ;; --ask-for-approval=never sets the policy via the CLI flag, and
+      ;; approval_policy=never sets it via -c so any config.toml default
+      ;; cannot relax it. Two different knobs, both pinned to never.
+      (is (some #(= "--ask-for-approval=never" %) args))
       (is (some #(re-matches #"approval_policy=\"?never\"?" %) args)))))
 
 (deftest codex-args-model-test
