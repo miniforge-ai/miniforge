@@ -238,4 +238,13 @@
                   to a remote branch ref instead of a local one."}]
 
  :estimated-effort "1-2 days"
- :workflow/type :simple}
+
+ ;; Multi-step feature touching dag-executor + workflow components, with
+ ;; explicit acceptance criteria including "all tests pass" and a dogfood
+ ;; verification step. :simple only runs plan → implement → done
+ ;; (planner + implementer agents, no verify, no review), which would
+ ;; land code without any agent-driven validation that tests pass or
+ ;; the implementation matches the spec's intent. :canonical-sdlc adds
+ ;; explore → verify → review → release → observe — five additional
+ ;; phases that catch the issues a thin workflow can't.
+ :workflow/type :canonical-sdlc}
