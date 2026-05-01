@@ -55,6 +55,55 @@
   (when (number? cost-usd)
     (format "$%.4f" (double cost-usd))))
 
+(defn- humanize-keyword
+  [kw]
+  (-> (name kw)
+      (str/replace "-" " ")
+      (str/replace "_" " ")))
+
+(defn dependency-display-name
+  [dependency]
+  (let [dependency-id (:dependency/id dependency)
+        vendor (:dependency/vendor dependency)]
+    (cond
+      vendor (str/capitalize (humanize-keyword vendor))
+      (keyword? dependency-id) (str/capitalize (humanize-keyword dependency-id))
+      (string? dependency-id) dependency-id
+      dependency-id (str dependency-id)
+      :else (msg/t :time/none))))
+
+(defn dependency-kind-label
+  [dependency]
+  (msg/t (keyword "workflow.dependency-kind" (name (or (:dependency/kind dependency)
+                                                       :environment)))))
+
+(defn dependency-status-label
+  [dependency]
+  (msg/t (keyword "workflow.dependency-status" (name (or (:dependency/status dependency)
+                                                         :healthy)))))
+
+(defn dependency-badge-variant
+  [dependency]
+  (case (:dependency/status dependency)
+    (:operator-action-required :misconfigured :unavailable) :error
+    :degraded :warning
+    :success))
+
+(defn dependency-summary
+  [dependency]
+  (msg/t :workflow/dependency-summary
+         {:dependency (dependency-display-name dependency)
+          :status (dependency-status-label dependency)}))
+
+(defn dependency-detail-items
+  [dependency]
+  (cond-> [(dependency-kind-label dependency)]
+    (:dependency/class dependency)
+    (conj (humanize-keyword (:dependency/class dependency)))
+
+    (:dependency/retryability dependency)
+    (conj (humanize-keyword (:dependency/retryability dependency)))))
+
 (defn event-message
   "Return the best human-readable message string for an event, or nil.
 
@@ -139,6 +188,10 @@
    [:span.wf-name (:name wf)]
    [:span.wf-badge {:class (str "badge-" (name status))}
     (status-label status)]
+   (when-let [dependency-issues (seq (:dependency-issues wf))]
+     (c/badge (msg/t :workflow/dependency-issue-count
+                     {:count (count dependency-issues)})
+              {:variant (or (:dependency-severity wf) :warning)}))
    [:span.wf-phase (or (some-> (:phase wf) name) (msg/t :time/none))]
    [:div.wf-progress-inline
     [:div.wf-progress-track
@@ -219,8 +272,30 @@
                                :neutral)})]
    [:span.workflow-phase    (str "Phase: "    (get workflow :phase (msg/t :time/none)))]
    [:span.workflow-progress (str "Progress: " (get workflow :progress 0) "%")]
+   (when-let [failure-attribution (:failure-attribution workflow)]
+     [:span.workflow-dependency-attribution
+      (dependency-summary failure-attribution)])
    (for [[css-class label value] (workflow-metric-fields workflow)]
      [:span {:class (name css-class)} (str label value)])])
+
+(defn- workflow-dependency-section
+  [workflow]
+  (let [dependency-issues (:dependency-issues workflow)]
+    [:div.workflow-panel-dependencies
+     [:h4.section-title (msg/t :workflow/dependency-section)]
+     (if (seq dependency-issues)
+       [:div.workflow-dependency-list
+        (for [dependency dependency-issues]
+          [:div.workflow-dependency-item
+           [:div.workflow-dependency-header
+            (c/badge (dependency-status-label dependency)
+                     {:variant (dependency-badge-variant dependency)})
+            [:span.workflow-dependency-name (dependency-display-name dependency)]]
+           [:div.workflow-dependency-details
+            (str/join " • " (dependency-detail-items dependency))]
+           (when-let [message (:dependency/message dependency)]
+             [:div.workflow-dependency-message message])])]
+       [:div.workflow-dependency-empty (msg/t :workflow/dependency-none)])]))
 
 (defn workflow-detail-panel
   "Inline detail panel loaded on card expand."
@@ -229,6 +304,7 @@
    [:div.workflow-panel
     {:data-workflow-id (str (:id workflow))}
     (workflow-panel-meta workflow)
+    (workflow-dependency-section workflow)
 
     ;; Streaming output — always rendered so JS can update it in real-time
     [:div.workflow-panel-output

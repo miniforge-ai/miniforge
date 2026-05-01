@@ -286,6 +286,27 @@
       (is (string? line))
       (is (not (str/includes? line "("))))))
 
+(deftest format-event-line-dependency-health-updated-test
+  (testing "dependency/health-updated surfaces dependency blame"
+    (let [line (display/format-event-line {:event/type :dependency/health-updated
+                                           :dependency/id :anthropic
+                                           :dependency/vendor :anthropic
+                                           :dependency/kind :provider
+                                           :dependency/status :unavailable})]
+      (is (string? line))
+      (is (str/includes? line "Anthropic"))
+      (is (str/includes? line "unavailable")))))
+
+(deftest format-event-line-dependency-recovered-test
+  (testing "dependency/recovered surfaces recovery attribution"
+    (let [line (display/format-event-line {:event/type :dependency/recovered
+                                           :dependency/id :anthropic
+                                           :dependency/vendor :anthropic
+                                           :dependency/kind :provider
+                                           :dependency/status :healthy})]
+      (is (string? line))
+      (is (str/includes? line "recovered")))))
+
 ;------------------------------------------------------------------------------ Layer 6
 ;; format-demo-line edge cases
 
@@ -344,7 +365,15 @@
                   {:event/type :agent/completed :agent/id :planner}
                   {:event/type :agent/failed :agent/id :planner}
                   {:event/type :gate/passed :gate/id :lint}
-                  {:event/type :gate/failed :gate/id :lint}]]
+                  {:event/type :gate/failed :gate/id :lint}
+                  {:event/type :dependency/health-updated
+                   :dependency/id :anthropic
+                   :dependency/kind :provider
+                   :dependency/status :degraded}
+                  {:event/type :dependency/recovered
+                   :dependency/id :anthropic
+                   :dependency/kind :provider
+                   :dependency/status :healthy}]]
       (doseq [e events]
         (let [line (display/format-demo-line e)]
           (when line
