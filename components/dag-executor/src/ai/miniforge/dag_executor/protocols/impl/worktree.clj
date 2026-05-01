@@ -147,6 +147,18 @@
 ;; Archive-based persistence (local-tier fidelity for :governed parity)
 ;; ============================================================================
 
+(def ^:private default-commit-message
+  "Commit message for the per-phase persist commit when the caller didn't
+   override `:message`. Internal infrastructure; not user-visible at
+   commit time."
+  "phase checkpoint")
+
+(def ^:private default-base-ref
+  "Final fallback base ref when neither :base-branch nor :base-ref was
+   passed by the caller. Used only by direct callers of `archive-bundle!`;
+   the runner threads the real base from environment metadata."
+  "main")
+
 (defn- ensure-archive-dir
   "Create the archive directory if it doesn't exist. Returns the absolute path."
   [archive-dir]
@@ -154,102 +166,174 @@
     (.mkdirs d)
     (.getAbsolutePath d)))
 
-(defn- has-dirty-changes?
-  "True when `git status --porcelain` in the worktree returns any lines."
+;; Each git helper below does exactly one operation, returns a result/ok
+;; on exit 0 with the parsed output, or a result/err carrying the git
+;; stderr. Persist treats all errors as diagnosable failures rather than
+;; silent zeros — Copilot review on PR #729 caught the original "treat
+;; non-zero exit as no-changes" pattern as a silent-failure vector.
+
+(defn- current-branch
+  [worktree-path]
+  (let [r (run-git "-C" worktree-path "rev-parse" "--abbrev-ref" "HEAD")]
+    (if (zero? (:exit r))
+      (result/ok (str/trim (or (:out r) "")))
+      (result/err :archive-no-branch (or (:err r) "could not resolve HEAD")))))
+
+(defn- dirty?
   [worktree-path]
   (let [r (run-git "-C" worktree-path "status" "--porcelain")]
-    (and (zero? (:exit r))
-         (-> (or (:out r) "") str/trim seq boolean))))
-
-(defn- count-commits-ahead
-  "Count commits on HEAD that are not reachable from base-ref. Returns 0 on error."
-  [worktree-path base-ref]
-  (let [r (run-git "-C" worktree-path
-                   "rev-list" "--count" (str base-ref "..HEAD"))]
     (if (zero? (:exit r))
-      (try (Integer/parseInt (str/trim (or (:out r) "0")))
-           (catch NumberFormatException _ 0))
-      0)))
+      (result/ok (-> (or (:out r) "") str/trim seq boolean))
+      (result/err :archive-status-failed
+                  (or (:err r) "git status --porcelain failed")))))
+
+(defn- commits-ahead
+  "Count commits on HEAD not reachable from base-ref."
+  [worktree-path base-ref]
+  (let [r (run-git "-C" worktree-path "rev-list" "--count"
+                   (str base-ref "..HEAD"))]
+    (if (zero? (:exit r))
+      (try
+        (result/ok (Integer/parseInt (str/trim (or (:out r) "0"))))
+        (catch NumberFormatException _
+          (result/err :archive-rev-list-parse-failed
+                      (str "could not parse rev-list output: " (:out r)))))
+      (result/err :archive-rev-list-failed
+                  (or (:err r) "git rev-list --count failed")))))
+
+(defn- stage-all!
+  [worktree-path]
+  (let [r (run-git "-C" worktree-path "add" "-A")]
+    (if (zero? (:exit r))
+      (result/ok :staged)
+      (result/err :archive-stage-failed (or (:err r) "git add -A failed")))))
+
+(defn- commit-staged!
+  "Commit staged changes with --no-verify. Persist runs inside a scratch
+   worktree where the host's pre-commit hook (bb pre-commit) fails because
+   deps aren't installed. Persist is infrastructure preservation, not a
+   validated commit — the gate layer upstream owns validation."
+  [worktree-path message]
+  (let [r (run-git "-C" worktree-path "commit"
+                   "--no-verify" "--allow-empty-message" "-m" message)]
+    (if (zero? (:exit r))
+      (result/ok :committed)
+      (result/err :archive-commit-failed
+                  (or (:err r) "git commit --no-verify failed")))))
+
+(defn- head-sha
+  [worktree-path]
+  (let [r (run-git "-C" worktree-path "rev-parse" "HEAD")]
+    (if (zero? (:exit r))
+      (result/ok (str/trim (or (:out r) "")))
+      (result/err :archive-rev-parse-failed
+                  (or (:err r) "git rev-parse HEAD failed")))))
+
+(defn- write-bundle!
+  "Run `git bundle create FILE BRANCH --not BASE`. The `BRANCH --not BASE`
+   form records `refs/heads/BRANCH` in the bundle, which is what
+   `git fetch <bundle> BRANCH:BRANCH` consumes when the harvest CLI pulls
+   the work back into the host repo."
+  [worktree-path bundle-path branch base-ref]
+  (let [r (run-git "-C" worktree-path "bundle" "create"
+                   bundle-path branch "--not" base-ref)]
+    (if (zero? (:exit r))
+      (result/ok bundle-path)
+      (result/err :archive-bundle-failed
+                  (or (:err r) "git bundle create failed")))))
+
+(defn- maybe-commit
+  "Commit only when the worktree has dirty changes. `git add -A` already
+   ran — if no paths were staged (e.g. all changes were gitignored),
+   commit-staged! would fail with `nothing to commit`, which is not an
+   archive error."
+  [worktree-path message]
+  (-> (dirty? worktree-path)
+      (result/and-then
+       (fn [is-dirty]
+         (if is-dirty
+           (commit-staged! worktree-path message)
+           (result/ok :clean))))))
+
+(defn- bundle-result
+  "Final step of the persist pipeline once we know the worktree is ahead
+   of base-ref. Reads HEAD, writes the bundle, and packages the persist
+   result map."
+  [worktree-path branch base-ref archive-dir task-id ahead]
+  (let [bundle-path (str (ensure-archive-dir archive-dir) "/" task-id ".bundle")]
+    (-> (head-sha worktree-path)
+        (result/and-then
+         (fn [sha]
+           (-> (write-bundle! worktree-path bundle-path branch base-ref)
+               (result/map-ok
+                (fn [_]
+                  {:persisted?    true
+                   :bundle-path   bundle-path
+                   :commit-sha    sha
+                   :branch        branch
+                   :commits-ahead ahead}))))))))
+
+(defn- commit-and-bundle!
+  "Pipeline: stage → commit-if-dirty → recompute ahead → bundle-or-noop."
+  [worktree-path branch base-ref archive-dir task-id message]
+  (-> (stage-all! worktree-path)
+      (result/and-then (fn [_] (maybe-commit worktree-path message)))
+      (result/and-then (fn [_] (commits-ahead worktree-path base-ref)))
+      (result/and-then
+       (fn [ahead]
+         (if (zero? ahead)
+           (result/ok {:persisted? false :no-changes? true :branch branch})
+           (bundle-result worktree-path branch base-ref archive-dir task-id ahead))))))
+
+(defn- already-clean?
+  "True when the worktree has no dirty paths AND no commits ahead of
+   base-ref — there's nothing to bundle. Returns a result so callers see
+   git failures rather than treating them as a clean state."
+  [worktree-path base-ref]
+  (-> (dirty? worktree-path)
+      (result/and-then
+       (fn [is-dirty]
+         (if is-dirty
+           (result/ok false)
+           (-> (commits-ahead worktree-path base-ref)
+               (result/map-ok zero?)))))))
 
 (defn archive-bundle!
   "Persist a worktree's task work as a git bundle.
 
-   Stages all dirty paths, commits them on the worktree's current branch,
-   then writes a bundle of `base-ref..HEAD` to <archive-dir>/<task-id>.bundle.
-   The bundle preserves the new commits' git objects in a single durable
-   file; a later `git fetch <bundle> <branch>:<branch>` from the host repo
-   restores the work without touching the live worktree.
+   Pipeline: resolve current branch → check for dirty changes or commits
+   ahead of base-ref → if clean, return no-changes; otherwise stage,
+   commit on the task branch with --no-verify, and write a bundle of
+   `base-ref..HEAD` to <archive-dir>/<task-id>.bundle. A later
+   `git fetch <bundle> <branch>:<branch>` round-trips the work into the
+   host repo without touching the live worktree.
 
    Arguments:
    - worktree-path: absolute path to the scratch worktree
    - opts: {:archive-dir string  — destination dir for bundles
            :task-id      string  — identifier used as the bundle filename
            :base-ref     string  — base branch the worktree was forked from
-           :message      string  — commit message for any pending changes}
+                                   (NEVER the task branch — that would make
+                                   commits-ahead always 0)
+           :message      string  — commit message for the persist commit}
 
    Returns result/ok with one of:
    - {:persisted? true  :bundle-path str :commit-sha str :branch str}
    - {:persisted? false :no-changes? true :branch str}
-   Returns result/err on git failure or filesystem failure."
+   Returns result/err on any git failure (no silent fallbacks)."
   [worktree-path {:keys [archive-dir task-id base-ref message]
-                  :or   {message  "phase checkpoint"
-                         base-ref "main"}}]
-  (try
-    (let [branch-r (run-git "-C" worktree-path "rev-parse" "--abbrev-ref" "HEAD")
-          branch   (str/trim (or (:out branch-r) ""))]
-      (cond
-        (not (zero? (:exit branch-r)))
-        (result/err :archive-no-branch (or (:err branch-r) "could not resolve HEAD"))
-
-        ;; Nothing dirty AND nothing already-committed-but-unpushed → no-op
-        (and (not (has-dirty-changes? worktree-path))
-             (zero? (count-commits-ahead worktree-path base-ref)))
-        (result/ok {:persisted? false :no-changes? true :branch branch})
-
-        :else
-        (let [;; Stage and commit any pending dirty changes (idempotent if clean).
-              ;; --no-verify because the host repo may have a pre-commit hook
-              ;; (bb pre-commit, lint, tests) that fails inside a scratch
-              ;; worktree where deps aren't installed. Persist is internal
-              ;; infrastructure that preserves agent work as-is — validation
-              ;; is the gate's job upstream, not the archive step's.
-              _ (run-git "-C" worktree-path "add" "-A")
-              commit-r (when (has-dirty-changes? worktree-path)
-                         (run-git "-C" worktree-path "commit"
-                                  "--no-verify"
-                                  "--allow-empty-message" "-m" message))
-              _ (when (and commit-r (not (zero? (:exit commit-r))))
-                  (throw (ex-info "git commit failed during persist"
-                                  {:exit (:exit commit-r)
-                                   :err  (:err commit-r)
-                                   :out  (:out commit-r)})))
-              ahead (count-commits-ahead worktree-path base-ref)]
-          (if (zero? ahead)
-            ;; Commit produced nothing new vs base-ref — caller treats as no-op
-            (result/ok {:persisted? false :no-changes? true :branch branch})
-            (let [sha-r (run-git "-C" worktree-path "rev-parse" "HEAD")
-                  sha   (str/trim (or (:out sha-r) ""))
-                  abs-archive-dir (ensure-archive-dir archive-dir)
-                  bundle-path (str abs-archive-dir "/" task-id ".bundle")
-                  ;; `BRANCH --not BASE` creates a bundle with refs/heads/BRANCH
-                  ;; recorded as a head — `git fetch <bundle> BRANCH:BRANCH`
-                  ;; round-trips the work into the host repo. The shorter
-                  ;; `base-ref..HEAD` form bundles the same commits but only
-                  ;; records HEAD, leaving fetch unable to resolve the branch
-                  ;; by name.
-                  bundle-r (run-git "-C" worktree-path "bundle" "create"
-                                    bundle-path
-                                    branch "--not" base-ref)]
-              (if (zero? (:exit bundle-r))
-                (result/ok {:persisted?  true
-                            :bundle-path bundle-path
-                            :commit-sha  sha
-                            :branch      branch
-                            :commits-ahead ahead})
-                (result/err :archive-bundle-failed
-                            (or (:err bundle-r) "git bundle create failed"))))))))
-    (catch Exception e
-      (result/err :archive-persist-failed (.getMessage e)))))
+                  :or   {message  default-commit-message
+                         base-ref default-base-ref}}]
+  (-> (current-branch worktree-path)
+      (result/and-then
+       (fn [branch]
+         (-> (already-clean? worktree-path base-ref)
+             (result/and-then
+              (fn [clean?]
+                (if clean?
+                  (result/ok {:persisted? false :no-changes? true :branch branch})
+                  (commit-and-bundle! worktree-path branch base-ref
+                                      archive-dir task-id message)))))))))
 
 (defn restore-from-bundle!
   "Restore work from a previously-persisted bundle into the host repo.
@@ -438,21 +522,25 @@
     ;; release-environment!. Without this, the host worktree had no record of
     ;; per-task work — successful agent output was destroyed when the scratch
     ;; worktree was torn down.
+    ;;
+    ;; `:base-ref` only falls back across :base-branch → :base-ref →
+    ;; default-base-ref. The task branch (`:branch` opt) is intentionally
+    ;; NOT a fallback: using it would make `commits-ahead` compute
+    ;; `task..HEAD` (always 0) and silently skip bundling.
     (let [worktree-path (str base-path "/" environment-id)
-          archive-dir   (or (get opts :archive-dir)
-                            (get-in config [:archive-dir])
-                            (default-archive-dir))
+          configured-archive-dir (or (get opts :archive-dir)
+                                     (get-in config [:archive-dir])
+                                     (default-archive-dir))
           ;; Workflow id (when present) namespaces the archive path so
           ;; concurrent runs don't collide on the same task-id stem.
-          archive-dir   (if-let [wf (get opts :workflow-id)]
-                          (str archive-dir "/" wf)
-                          archive-dir)
-          base-ref      (or (get opts :base-branch)
-                            (get opts :base-ref)
-                            (get opts :branch)
-                            "main")
-          task-id       (or (get opts :task-id) environment-id)
-          message       (or (get opts :message) "phase checkpoint")]
+          archive-dir (if-let [wf (get opts :workflow-id)]
+                        (str configured-archive-dir "/" wf)
+                        configured-archive-dir)
+          base-ref    (or (get opts :base-branch)
+                          (get opts :base-ref)
+                          default-base-ref)
+          task-id     (or (get opts :task-id) environment-id)
+          message     (or (get opts :message) default-commit-message)]
       (archive-bundle! worktree-path
                        {:archive-dir archive-dir
                         :task-id     task-id

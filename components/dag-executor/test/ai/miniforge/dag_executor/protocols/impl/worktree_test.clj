@@ -194,6 +194,94 @@
                   "/tmp/checkpoints/env-1.bundle" "task-1:task-1"]
                  @fetch-args)))))))
 
+(deftest persist-workspace-base-ref-never-falls-back-to-task-branch-test
+  (testing "persist-workspace! does NOT use the task branch as base-ref fallback"
+    ;; Regression: the original fallback chain was
+    ;;   (or :base-branch :base-ref :branch \"main\")
+    ;; which made commits-ahead compute task-branch..HEAD = 0, silently
+    ;; skipping bundle creation when callers passed :branch but not
+    ;; :base-branch. The current chain stops at default-base-ref ('main').
+    (let [executor (worktree/create-worktree-executor {})
+          rev-list-args (atom nil)]
+      (with-redefs [worktree/run-git
+                    (fn [& args]
+                      (let [tail (drop 2 args)]
+                        (cond
+                          (= ["rev-parse" "--abbrev-ref" "HEAD"] tail)
+                          {:exit 0 :out "task-1\n" :err ""}
+
+                          (= ["status" "--porcelain"] tail)
+                          {:exit 0 :out " M src/foo.clj\n" :err ""}
+
+                          (= "rev-list" (first tail))
+                          (do (reset! rev-list-args (vec tail))
+                              {:exit 0 :out "1\n" :err ""})
+
+                          (= "rev-parse" (first tail))
+                          {:exit 0 :out "abc123\n" :err ""}
+
+                          (= "bundle" (first tail))
+                          {:exit 0 :out "" :err ""}
+
+                          :else {:exit 0 :out "" :err ""})))
+                    worktree/ensure-archive-dir (fn [d] d)]
+        (proto/persist-workspace! executor "env-1"
+                                  ;; Caller passes :branch but no :base-branch
+                                  ;; — the executor must NOT use task-1 as base.
+                                  {:branch "task-1"
+                                   :archive-dir "/tmp/test-archive"
+                                   :task-id "env-1"})
+        (is (some? @rev-list-args))
+        (is (some #(re-matches #"main\.\.HEAD" %) @rev-list-args)
+            "rev-list must compare against the default base ('main'),
+             not against the task branch")))))
+
+(deftest archive-bundle-surfaces-status-failure-test
+  (testing "git status failure returns result/err — not a silent no-changes"
+    (with-redefs [worktree/run-git
+                  (fn [& args]
+                    (let [tail (drop 2 args)]
+                      (cond
+                        (= ["rev-parse" "--abbrev-ref" "HEAD"] tail)
+                        {:exit 0 :out "task-1\n" :err ""}
+
+                        (= ["status" "--porcelain"] tail)
+                        {:exit 128 :out "" :err "fatal: not a git repository"}
+
+                        :else {:exit 0 :out "" :err ""})))]
+      (let [r (worktree/archive-bundle! "/tmp/scratch"
+                                        {:archive-dir "/tmp/test-archive"
+                                         :task-id     "env-1"
+                                         :base-ref    "main"})]
+        (is (result/err? r))
+        (is (= :archive-status-failed (get-in r [:error :code]))
+            "git status failure must bubble up; the previous code silently
+             treated non-zero exit as 'no changes' and dropped the persist")))))
+
+(deftest archive-bundle-surfaces-rev-list-failure-test
+  (testing "git rev-list failure returns result/err — not a silent zero"
+    (with-redefs [worktree/run-git
+                  (fn [& args]
+                    (let [tail (drop 2 args)]
+                      (cond
+                        (= ["rev-parse" "--abbrev-ref" "HEAD"] tail)
+                        {:exit 0 :out "task-1\n" :err ""}
+
+                        (= ["status" "--porcelain"] tail)
+                        {:exit 0 :out "" :err ""}
+
+                        (= "rev-list" (first tail))
+                        {:exit 128 :out "" :err "fatal: bad revision"}
+
+                        :else {:exit 0 :out "" :err ""})))]
+      (let [r (worktree/archive-bundle! "/tmp/scratch"
+                                        {:archive-dir "/tmp/test-archive"
+                                         :task-id     "env-1"
+                                         :base-ref    "main"})]
+        (is (result/err? r))
+        (is (= :archive-rev-list-failed (get-in r [:error :code]))
+            "rev-list failure must bubble up rather than be coerced to 0")))))
+
 (deftest archive-bundle-fails-cleanly-on-bundle-error-test
   (testing "archive-bundle! returns an err result when git bundle fails"
     (with-redefs [worktree/run-git
