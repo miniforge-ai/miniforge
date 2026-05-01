@@ -223,6 +223,21 @@
       (:failure/vendor attribution) (assoc :failure/vendor (:failure/vendor attribution))
       context (assoc :failure/context context))))
 
+(defn make-classified-failure
+  "Construct canonical classified failure."
+  [{failure-class :failure/class
+    message :failure/message
+    context :failure/context}]
+  (require-field! :failure/class failure-class
+                  {:constructor :classified-failure})
+  (require-field! :failure/message message
+                  {:constructor :classified-failure})
+  (validate-enum! :failure/class failure-class valid-failure-class?
+                  {:constructor :classified-failure})
+  (cond-> {:failure/class failure-class
+           :failure/message message}
+    context (assoc :failure/context context)))
+
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
   failure-classes

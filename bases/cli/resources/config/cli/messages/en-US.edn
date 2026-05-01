@@ -116,6 +116,19 @@
   :status/workflow-todo "TODO: Query workflow component"
   :status/all-workflows "All workflows:"
   :status/all-workflows-todo "TODO: List active workflows"
+  ;; Workflow-status field labels emitted by `print-workflow-status` and
+  ;; the all-workflows summary view.
+  :status/field-status "  status: {value}"
+  :status/field-spec "  spec: {value}"
+  :status/field-events "  events: {value}"
+  :status/field-last-updated "  last-updated: {value}"
+  :status/field-completed-phases "  completed-phases: {value}"
+  :status/field-completed-dag-tasks "  completed-dag-tasks: {value}"
+  :status/summary-row "  {workflow-id} {status} {spec-name}"
+  :status/summary-last-updated "    last-updated: {value}"
+  :status/value-unknown "unknown"
+  :status/value-none "none"
+  :status/read-failed "Failed to read workflow status: {message}"
   :workflow-run/usage "Usage: {command}"
   :workflow-run/failed "Workflow execution failed: {error}"
   :chain-run/usage "Usage: {command}"
@@ -663,4 +676,15 @@
   :scan/rule-findings        "  {rule}: {count} finding(s) ({files} files, {duration-ms}ms)"
 
   :scan/exec-banner          "Executing auto-fixes..."
-  :scan/exec-summary         "Fixed {fixed} violation(s) across {files} file(s)"}}
+  :scan/exec-summary         "Fixed {fixed} violation(s) across {files} file(s)"
+
+  ;; ---------- `mf init` — repo analysis + config-file generation ----------
+  :init/repo-not-found        "Repository not found: {path}"
+  :init/analyzing             "Analyzing {path} ..."
+  :init/analysis-technologies "  Technologies: {value}"
+  :init/analysis-git-host     "  Git host:     {value}"
+  :init/analysis-packs        "  Packs:        {value}"
+  :init/git-host-unknown      "unknown"
+  :init/existing-overwritten  "  Existing config at {path} will be overwritten."
+  :init/wrote                 "Wrote {path}"}}
+

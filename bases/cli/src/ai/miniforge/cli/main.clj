@@ -126,16 +126,19 @@
 (defn- print-workflow-status
   [{:keys [workflow-id status spec-name event-count completed-phases
            completed-dag-task-count last-updated]}]
-  (display/print-info (messages/t :status/workflow {:workflow-id workflow-id}))
-  (println "  status:" (name status))
-  (println "  spec:" (or spec-name "unknown"))
-  (println "  events:" event-count)
-  (println "  last-updated:" (or last-updated "unknown"))
-  (println "  completed-phases:"
-           (if (seq completed-phases)
-             (str/join ", " (map name completed-phases))
-             "none"))
-  (println "  completed-dag-tasks:" completed-dag-task-count))
+  (let [unknown (messages/t :status/value-unknown)
+        none    (messages/t :status/value-none)]
+    (display/print-info (messages/t :status/workflow {:workflow-id workflow-id}))
+    (println (messages/t :status/field-status {:value (name status)}))
+    (println (messages/t :status/field-spec {:value (or spec-name unknown)}))
+    (println (messages/t :status/field-events {:value event-count}))
+    (println (messages/t :status/field-last-updated {:value (or last-updated unknown)}))
+    (println (messages/t :status/field-completed-phases
+                         {:value (if (seq completed-phases)
+                                   (str/join ", " (map name completed-phases))
+                                   none)}))
+    (println (messages/t :status/field-completed-dag-tasks
+                         {:value completed-dag-task-count}))))
 
 (defn- all-workflow-summaries
   []
@@ -199,17 +202,20 @@
       (try
         (print-workflow-status (workflow-status-summary (str workflow-id)))
         (catch Exception e
-          (display/print-error (str "Failed to read workflow status: " (ex-message e)))))
-      (do
+          (display/print-error (messages/t :status/read-failed
+                                           {:message (ex-message e)}))))
+      (let [unknown (messages/t :status/value-unknown)
+            none    (messages/t :status/value-none)]
         (display/print-info (messages/t :status/all-workflows))
         (if-let [summaries (seq (take 10 (all-workflow-summaries)))]
           (doseq [{:keys [workflow-id status spec-name last-updated]} summaries]
-            (println (format "  %-36s %-10s %s"
-                             workflow-id
-                             (name status)
-                             (or spec-name "unknown")))
-            (println "    last-updated:" (or last-updated "unknown")))
-          (println "  none"))))))
+            (println (messages/t :status/summary-row
+                                 {:workflow-id (format "%-36s" workflow-id)
+                                  :status      (format "%-10s" (name status))
+                                  :spec-name   (or spec-name unknown)}))
+            (println (messages/t :status/summary-last-updated
+                                 {:value (or last-updated unknown)})))
+          (println (str "  " none)))))))
 
 ;; Config commands — one-liner delegates
 (defn config-init-cmd [m] (config/cmd-init (get-opts m)))

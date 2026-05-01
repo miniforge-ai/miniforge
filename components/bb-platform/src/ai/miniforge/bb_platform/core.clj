@@ -54,7 +54,8 @@
    "markdownlint" "npm install -g markdownlint-cli"
    "poly"         "https://polylith.gitbook.io/polylith/install"
    "bb"           "curl -sLO https://raw.githubusercontent.com/babashka/babashka/master/install && chmod +x install && ./install --static"
-   "java"         "Install Temurin 21 via your distro package manager (apt/dnf/pacman)"})
+   "java"         "Install Temurin 21 via your distro package manager (apt/dnf/pacman)"
+   "podman"       "Linux: install via your distro package manager (apt install podman, dnf install podman, pacman -S podman). Windows: scoop install podman. See https://podman.io/getting-started/installation"})
 
 (defn formula->cmd
   "Extract the canonical command name from a brew-style formula path
@@ -214,6 +215,56 @@
   [formula]
   (execute-plan!
    (upgrade-plan {:formula formula :os (os-key)})))
+
+;------------------------------------------------------------------------------ Layer 1
+;; Podman machine bootstrap (macOS only — Linux Podman is daemonless)
+
+(defn- podman-machine-running?
+  "True when `podman machine list` reports a running default machine.
+   Returns false when Podman is missing entirely."
+  []
+  (when (installed? "podman")
+    (let [{:keys [exit out]} (p/sh "podman" "machine" "list" "--format" "{{.Running}}")]
+      (and (zero? exit) (str/includes? (or out "") "true")))))
+
+(defn- podman-machine-exists?
+  "True when at least one Podman machine is registered (running or not)."
+  []
+  (when (installed? "podman")
+    (let [{:keys [exit out]} (p/sh "podman" "machine" "list" "--format" "{{.Name}}")]
+      (and (zero? exit) (seq (str/trim (or out "")))))))
+
+(defn init-podman-machine!
+  "Mac-only courtesy: ensure a Podman machine is initialised and running.
+
+   On macOS Podman runs inside a Linux VM (`podman machine`); without
+   one, `podman run` fails. On Linux, Podman is daemonless and needs no
+   machine. On Windows, Podman runs on top of WSL2; machine setup
+   differs and is owned by the Windows-native install path
+   (docs/platform-support.md), not this helper.
+
+   No-op when Podman is not installed (caller already failed earlier),
+   when not on macOS, or when a machine is already running."
+  []
+  (cond
+    (not= :macos (os-key))
+    (println "  ✓ podman machine: skipping (only required on macOS)")
+
+    (not (installed? "podman"))
+    (println "  ⚠️  podman machine: skipping (podman not on PATH)")
+
+    (podman-machine-running?)
+    (println "  ✓ podman machine: already running")
+
+    (podman-machine-exists?)
+    (do (println "  ⬇️  Starting existing podman machine...")
+        (p/shell {:continue true} "podman" "machine" "start"))
+
+    :else
+    (do (println "  ⬇️  Initialising default podman machine (this can take a minute)...")
+        (p/shell {:continue true} "podman" "machine" "init")
+        (println "  ⬇️  Starting podman machine...")
+        (p/shell {:continue true} "podman" "machine" "start"))))
 
 (defn check-current
   "Gather facts about the current process and assemble a check report

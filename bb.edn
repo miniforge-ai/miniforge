@@ -279,9 +279,19 @@
   {:doc  "Install Polylith CLI"
    :task (brew-install "polyfy/polylith/poly")}
 
+  install:podman
+  {:doc  "Install Podman (macOS courtesy via brew) + initialize a default machine"
+   :task (do
+           (brew-install "podman")
+           (run 'setup:podman-machine))}
+
+  setup:podman-machine
+  {:doc  "Initialise + start a default Podman machine on macOS (no-op on Linux)"
+   :task (platform/init-podman-machine!)}
+
   install:deps
   {:doc     "Install all required dependencies"
-   :depends [install:java install:clojure install:clj-kondo install:markdownlint install:poly]
+   :depends [install:java install:clojure install:clj-kondo install:markdownlint install:poly install:podman]
    :task    (println "\n✅ All dependencies installed")}
 
   check:platform
@@ -314,9 +324,13 @@
   {:doc  "Upgrade Babashka"
    :task (brew-upgrade "babashka")}
 
+  upgrade:podman
+  {:doc  "Upgrade Podman"
+   :task (brew-upgrade "podman")}
+
   upgrade:deps
   {:doc     "Upgrade all dependencies"
-   :depends [upgrade:babashka upgrade:clojure upgrade:clj-kondo upgrade:markdownlint upgrade:poly]
+   :depends [upgrade:babashka upgrade:clojure upgrade:clj-kondo upgrade:markdownlint upgrade:poly upgrade:podman]
    :task    (println "\n✅ All dependencies upgraded")}
 
   ;; ──────────────────────────────────────────────────────────────────────────

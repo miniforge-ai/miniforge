@@ -99,6 +99,10 @@
   "Construct canonical classified dependency failure."
   taxonomy/make-classified-dependency-failure)
 
+(def make-classified-failure
+  "Construct canonical classified failure."
+  taxonomy/make-classified-failure)
+
 ;------------------------------------------------------------------------------ Layer 1
 ;; Classification
 
@@ -136,6 +140,22 @@
      (classify-exception (java.net.SocketTimeoutException. \"timeout\"))
      ;; => :failure.class/timeout"
   classifier/classify-exception)
+
+(def classify-record
+  "Classify a failure into a canonical failure record.
+
+   Returns either:
+   - ClassifiedFailure
+   - ClassifiedDependencyFailure
+
+   Dependency attribution is added when the failure matches provider,
+   platform, or user-environment patterns."
+  classifier/classify-failure-record)
+
+(def classify-exception-record
+  "Classify a Throwable into a canonical failure record with optional
+   dependency attribution."
+  classifier/classify-exception-record)
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

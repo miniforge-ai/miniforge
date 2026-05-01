@@ -22,6 +22,7 @@
    and Apache POI, which aren't BB-compatible."
   {:miniforge/runtime :jvm-only}
   (:require
+   [ai.miniforge.etl.messages :as msg]
    [ai.miniforge.etl.registry :as registry]
    [ai.miniforge.etl.runner :as runner]
    [ai.miniforge.schema.interface :as schema]
@@ -48,13 +49,14 @@
   [result]
   (let [run (:pipeline-run result)]
     (if (schema/succeeded? result)
-      (do (println "✓ pipeline run complete")
-          (println "  run-id:" (:pipeline-run/id run))
-          (println "  status:" (:pipeline-run/status run))
+      (do (println (msg/t :run/complete))
+          (println (msg/t :run/run-id {:value (:pipeline-run/id run)}))
+          (println (msg/t :run/status  {:value (:pipeline-run/status run)}))
           (when-let [stages (:pipeline-run/stage-runs run)]
-            (println "  stages:" (count stages))))
-      (do (println "✗ pipeline run failed")
-          (some->> (:error result) (println "  error:"))))))
+            (println (msg/t :run/stages {:value (count stages)}))))
+      (do (println (msg/t :run/failed))
+          (when-let [error (:error result)]
+            (println (msg/t :run/error {:value error})))))))
 
 (defn- emit-result!
   "Write the pipeline-runner result to `out-path`. Writes JSON when the
@@ -66,7 +68,7 @@
                      (cheshire/generate-string normalized {:pretty true})
                      (pr-str normalized))]
     (spit out-path body)
-    (println "  wrote:" out-path)))
+    (println (msg/t :run/wrote {:path out-path}))))
 
 (defn- exit! [code] (System/exit (or code 0)))
 
@@ -79,8 +81,8 @@
   [m]
   (let [{:keys [pipeline env out]} (get-opts m)]
     (cond
-      (nil? pipeline) (do (println "usage: etl run <pipeline.edn> --env <env.edn> [--out <result.edn|.json>]") (exit! 1))
-      (nil? env)      (do (println "etl run: missing --env <env.edn>") (exit! 1))
+      (nil? pipeline) (do (println (msg/t :run/usage)) (exit! 1))
+      (nil? env)      (do (println (msg/t :run/missing-env)) (exit! 1))
       :else
       (let [result (runner/run-pack pipeline env {})]
         (print-run-summary! result)
@@ -92,42 +94,44 @@
   (let [path   (:path (get-opts m) ".")
         result (runner/list-pipelines [path])]
     (if (schema/failed? result)
-      (do (println "✗ discovery failed:" (:error result)) (exit! 1))
+      (do (println (msg/t :list/discovery-failed {:error (:error result)})) (exit! 1))
       (let [pipelines (filter :name (:pipelines result))]
-        (println (str (count pipelines) " pipeline(s) discovered under " path ":"))
+        (println (msg/t :list/header {:count (count pipelines) :path path}))
         (doseq [p pipelines]
-          (println "  -" (:path p)
-                   (some->> (:name p) (str "  [") (#(str % "]")))
-                   (some->> (:version p) (str " v"))))
+          (println (msg/t :list/entry
+                          {:path    (:path p)
+                           :name    (or (some->> (:name p)    (#(msg/t :list/entry-name    {:value %}))) "")
+                           :version (or (some->> (:version p) (#(msg/t :list/entry-version {:value %}))) "")})))
         (exit! 0)))))
 
 (defn- validate-cmd
   [m]
   (let [{:keys [pipeline env]} (get-opts m)]
     (cond
-      (nil? pipeline) (do (println "usage: etl validate <pipeline.edn> --env <env.edn>") (exit! 1))
-      (nil? env)      (do (println "etl validate: missing --env <env.edn>") (exit! 1))
+      (nil? pipeline) (do (println (msg/t :validate/usage)) (exit! 1))
+      (nil? env)      (do (println (msg/t :validate/missing-env)) (exit! 1))
       :else
       (let [result (runner/validate-pack pipeline env)]
         (if (schema/succeeded? result)
-          (do (println "✓ pack valid — pipeline & env resolve")
-              (println "  stages:" (count (:pipeline/stages (:pipeline result))))
+          (do (println (msg/t :validate/ok))
+              (println (msg/t :validate/stages
+                              {:value (count (:pipeline/stages (:pipeline result)))}))
               (exit! 0))
-          (do (println "✗ validation failed")
-              (when-let [e (:error result)] (println "  error:" e))
+          (do (println (msg/t :validate/failed))
+              (when-let [e (:error result)] (println (msg/t :validate/error {:value e})))
               (exit! 1)))))))
 
 (defn- help-cmd
   [_m]
-  (println "usage: etl {run|list|validate} ...")
+  (println (msg/t :help/usage))
   (println)
-  (println "  run      <pipeline.edn> --env <env.edn> [--out <path>]")
-  (println "  list     [<search-path>]")
-  (println "  validate <pipeline.edn> --env <env.edn>")
+  (println (msg/t :help/run))
+  (println (msg/t :help/list))
+  (println (msg/t :help/validate))
   (println)
-  (println "supported connector types:")
+  (println (msg/t :help/connector-types))
   (doseq [t (registry/supported-types)]
-    (println "  -" t))
+    (println (msg/t :help/connector-entry {:value t})))
   (exit! 2))
 
 ;------------------------------------------------------------------------------ Layer 2

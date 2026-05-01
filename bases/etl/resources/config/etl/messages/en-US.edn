@@ -1,0 +1,59 @@
+;; Title: Miniforge.ai
+;; Subtitle: An agentic SDLC / fleet-control platform
+;; Author: Christopher Lester
+;; Line: Founder, Miniforge.ai (project)
+;; Copyright 2025-2026 Christopher Lester (christopher@miniforge.ai)
+;;
+;; Licensed under the Apache License, Version 2.0 (the "License");
+;; you may not use this file except in compliance with the License.
+;; You may obtain a copy of the License at
+;;
+;;     http://www.apache.org/licenses/LICENSE-2.0
+;;
+;; Unless required by applicable law or agreed to in writing, software
+;; distributed under the License is distributed on an "AS IS" BASIS,
+;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+;; See the License for the specific language governing permissions and
+;; limitations under the License.
+
+;; English (en-US) message catalog for the `mf etl` JVM base.
+;; Loaded by `ai.miniforge.etl.messages/t` via the shared
+;; `ai.miniforge.messages.interface/create-translator` helper.
+{:etl/messages
+ {;; -------- Pipeline-run summary (`run` subcommand) --------
+  :run/complete           "✓ pipeline run complete"
+  :run/run-id             "  run-id: {value}"
+  :run/status             "  status: {value}"
+  :run/stages             "  stages: {value}"
+  :run/failed             "✗ pipeline run failed"
+  :run/error              "  error: {value}"
+
+  ;; Result emission (--out)
+  :run/wrote              "  wrote: {path}"
+
+  ;; -------- Argument validation --------
+  :run/usage              "usage: etl run <pipeline.edn> --env <env.edn> [--out <result.edn|.json>]"
+  :run/missing-env        "etl run: missing --env <env.edn>"
+
+  ;; -------- `list` subcommand --------
+  :list/discovery-failed  "✗ discovery failed: {error}"
+  :list/header            "{count} pipeline(s) discovered under {path}:"
+  :list/entry             "  - {path}{name}{version}"
+  :list/entry-name        " [{value}]"
+  :list/entry-version     " v{value}"
+
+  ;; -------- `validate` subcommand --------
+  :validate/usage         "usage: etl validate <pipeline.edn> --env <env.edn>"
+  :validate/missing-env   "etl validate: missing --env <env.edn>"
+  :validate/ok            "✓ pack valid — pipeline & env resolve"
+  :validate/stages        "  stages: {value}"
+  :validate/failed        "✗ validation failed"
+  :validate/error         "  error: {value}"
+
+  ;; -------- `help` subcommand --------
+  :help/usage             "usage: etl {run|list|validate} ..."
+  :help/run               "  run      <pipeline.edn> --env <env.edn> [--out <path>]"
+  :help/list              "  list     [<search-path>]"
+  :help/validate          "  validate <pipeline.edn> --env <env.edn>"
+  :help/connector-types   "supported connector types:"
+  :help/connector-entry   "  - {value}"}}

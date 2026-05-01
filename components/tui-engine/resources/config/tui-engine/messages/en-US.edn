@@ -1,0 +1,14 @@
+{:tui-engine/messages
+ {;; Runtime — input thread + resize/tick lifecycle
+  :runtime/input-dispatch-error
+  "input dispatch error"
+
+  :runtime/resize-tick-render-error
+  "resize/tick render error"
+
+  :runtime/tui-starting
+  "TUI starting"
+
+  ;; Render watcher — fires when the model ref changes and a re-render fails.
+  :render/render-failed
+  "render failed view={view}"}}

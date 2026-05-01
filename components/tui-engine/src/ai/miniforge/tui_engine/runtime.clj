@@ -26,6 +26,7 @@
   (:require
    [ai.miniforge.tui-engine.core :as core]
    [ai.miniforge.tui-engine.log :as log]
+   [ai.miniforge.tui-engine.messages :as msg]
    [ai.miniforge.tui-engine.screen :as screen]
    [ai.miniforge.tui-engine.input :as input]))
 
@@ -114,7 +115,7 @@
                             (Thread/sleep 16))) ; ~60Hz polling
                         (catch InterruptedException e (throw e))
                         (catch Exception e
-                          (log/warn "input dispatch error" e))))
+                          (log/warn (msg/t :runtime/input-dispatch-error) e))))
                     (catch InterruptedException _))))]
     (.setDaemon thread true)
     (.setName thread "tui-input-poll")
@@ -139,7 +140,7 @@
       (when (or resized? tick?)
         (core/do-render! @app model)))
     (catch Exception e
-      (log/warn "resize/tick render error" e))))
+      (log/warn (msg/t :runtime/resize-tick-render-error) e))))
 
 (defn start-resize-thread!
   "Start a scheduled executor that checks for terminal size changes and forces
@@ -176,7 +177,7 @@
    Returns the app atom."
   [app]
   (let [screen (:screen @app)]
-    (log/info "TUI starting")
+    (log/info (msg/t :runtime/tui-starting))
     (screen/start-screen! screen)
     (swap! app assoc :running? true)
     ;; Initial render
