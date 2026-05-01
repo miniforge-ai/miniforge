@@ -69,7 +69,8 @@
       (git-remote-url ".")))
 
 ;------------------------------------------------------------------------------ Layer 2
-;; Sandbox preparation — composes Layer 1.
+;; Sandbox preparation — composes Layer 1 (`infer-repo-url`) plus
+;; Layer 0 (`infer-branch`).
 
 (defn prepare-sandbox [spec enriched-spec]
   (let [prep-result (dag/prepare-docker-executor! {:image-type :clojure})]

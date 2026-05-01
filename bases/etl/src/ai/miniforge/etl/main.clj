@@ -22,7 +22,9 @@
    and Apache POI, which aren't BB-compatible.
 
    Stratification (intra-namespace):
-   Layer 0 — pure helpers with no in-ns deps.
+   Layer 0 — helpers with no in-namespace deps. Mix of pure and
+             side-effecting (`stringify-instants` is pure;
+             `print-run-summary!` and `exit!` write to stdout / exit).
    Layer 1 — `emit-result!` (composes `stringify-instants`).
    Layer 2 — subcommand handlers (compose Layer 1).
    Layer 3 — `-main` (inlines the dispatch table to keep this file at
