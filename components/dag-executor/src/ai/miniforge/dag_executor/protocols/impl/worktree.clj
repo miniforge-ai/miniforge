@@ -38,6 +38,13 @@
 (def default-base-path "/tmp/miniforge-worktrees")
 (def default-max-concurrent 4)
 
+(defn default-archive-dir
+  "Default location for persisted task work archives.
+   Lives under the user's home rather than /tmp so checkpoints survive reboots
+   and can be referenced from evidence bundles long after the run ends."
+  []
+  (str (System/getProperty "user.home") "/.miniforge/checkpoints"))
+
 ;; ============================================================================
 ;; Helper Functions
 ;; ============================================================================
@@ -135,6 +142,127 @@
       (do
         (run-shell "rm" "-rf" worktree-path)
         (result/ok {:released? true})))))
+
+;; ============================================================================
+;; Archive-based persistence (local-tier fidelity for :governed parity)
+;; ============================================================================
+
+(defn- ensure-archive-dir
+  "Create the archive directory if it doesn't exist. Returns the absolute path."
+  [archive-dir]
+  (let [d (File. ^String archive-dir)]
+    (.mkdirs d)
+    (.getAbsolutePath d)))
+
+(defn- has-dirty-changes?
+  "True when `git status --porcelain` in the worktree returns any lines."
+  [worktree-path]
+  (let [r (run-git "-C" worktree-path "status" "--porcelain")]
+    (and (zero? (:exit r))
+         (-> (or (:out r) "") str/trim seq boolean))))
+
+(defn- count-commits-ahead
+  "Count commits on HEAD that are not reachable from base-ref. Returns 0 on error."
+  [worktree-path base-ref]
+  (let [r (run-git "-C" worktree-path
+                   "rev-list" "--count" (str base-ref "..HEAD"))]
+    (if (zero? (:exit r))
+      (try (Integer/parseInt (str/trim (or (:out r) "0")))
+           (catch NumberFormatException _ 0))
+      0)))
+
+(defn archive-bundle!
+  "Persist a worktree's task work as a git bundle.
+
+   Stages all dirty paths, commits them on the worktree's current branch,
+   then writes a bundle of `base-ref..HEAD` to <archive-dir>/<task-id>.bundle.
+   The bundle preserves the new commits' git objects in a single durable
+   file; a later `git fetch <bundle> <branch>:<branch>` from the host repo
+   restores the work without touching the live worktree.
+
+   Arguments:
+   - worktree-path: absolute path to the scratch worktree
+   - opts: {:archive-dir string  — destination dir for bundles
+           :task-id      string  — identifier used as the bundle filename
+           :base-ref     string  — base branch the worktree was forked from
+           :message      string  — commit message for any pending changes}
+
+   Returns result/ok with one of:
+   - {:persisted? true  :bundle-path str :commit-sha str :branch str}
+   - {:persisted? false :no-changes? true :branch str}
+   Returns result/err on git failure or filesystem failure."
+  [worktree-path {:keys [archive-dir task-id base-ref message]
+                  :or   {message  "phase checkpoint"
+                         base-ref "main"}}]
+  (try
+    (let [branch-r (run-git "-C" worktree-path "rev-parse" "--abbrev-ref" "HEAD")
+          branch   (str/trim (or (:out branch-r) ""))]
+      (cond
+        (not (zero? (:exit branch-r)))
+        (result/err :archive-no-branch (or (:err branch-r) "could not resolve HEAD"))
+
+        ;; Nothing dirty AND nothing already-committed-but-unpushed → no-op
+        (and (not (has-dirty-changes? worktree-path))
+             (zero? (count-commits-ahead worktree-path base-ref)))
+        (result/ok {:persisted? false :no-changes? true :branch branch})
+
+        :else
+        (let [;; Stage and commit any pending dirty changes (idempotent if clean)
+              _ (run-git "-C" worktree-path "add" "-A")
+              _ (when (has-dirty-changes? worktree-path)
+                  (run-git "-C" worktree-path "commit"
+                           "--allow-empty-message" "-m" message))
+              ahead (count-commits-ahead worktree-path base-ref)]
+          (if (zero? ahead)
+            ;; Commit produced nothing new vs base-ref — caller treats as no-op
+            (result/ok {:persisted? false :no-changes? true :branch branch})
+            (let [sha-r (run-git "-C" worktree-path "rev-parse" "HEAD")
+                  sha   (str/trim (or (:out sha-r) ""))
+                  abs-archive-dir (ensure-archive-dir archive-dir)
+                  bundle-path (str abs-archive-dir "/" task-id ".bundle")
+                  ;; `BRANCH --not BASE` creates a bundle with refs/heads/BRANCH
+                  ;; recorded as a head — `git fetch <bundle> BRANCH:BRANCH`
+                  ;; round-trips the work into the host repo. The shorter
+                  ;; `base-ref..HEAD` form bundles the same commits but only
+                  ;; records HEAD, leaving fetch unable to resolve the branch
+                  ;; by name.
+                  bundle-r (run-git "-C" worktree-path "bundle" "create"
+                                    bundle-path
+                                    branch "--not" base-ref)]
+              (if (zero? (:exit bundle-r))
+                (result/ok {:persisted?  true
+                            :bundle-path bundle-path
+                            :commit-sha  sha
+                            :branch      branch
+                            :commits-ahead ahead})
+                (result/err :archive-bundle-failed
+                            (or (:err bundle-r) "git bundle create failed"))))))))
+    (catch Exception e
+      (result/err :archive-persist-failed (.getMessage e)))))
+
+(defn restore-from-bundle!
+  "Restore work from a previously-persisted bundle into the host repo.
+
+   `git fetch <bundle> <branch>:<branch>` pulls the branch and all reachable
+   commits into the host repo without touching the working tree. The host
+   user (or orchestrator) can then check the branch out wherever they want.
+
+   Arguments:
+   - host-repo-path: path to a worktree of the host repo (any worktree on
+                     the same repo works; fetch goes to the shared object DB)
+   - opts: {:bundle-path str :branch str}
+
+   Returns result/ok with {:restored? true :branch str} on success."
+  [host-repo-path {:keys [bundle-path branch]}]
+  (try
+    (let [r (run-git "-C" host-repo-path "fetch"
+                     bundle-path (str branch ":" branch))]
+      (if (zero? (:exit r))
+        (result/ok {:restored? true :branch branch :bundle-path bundle-path})
+        (result/err :archive-restore-failed
+                    (or (:err r) "git fetch from bundle failed"))))
+    (catch Exception e
+      (result/err :archive-restore-failed (.getMessage e)))))
 
 ;; ============================================================================
 ;; Command Execution
@@ -259,7 +387,11 @@
                       worktree-name :worktree task-id worktree-path
                       (assoc env-config
                              :metadata {:worktree-path worktree-path
-                                        :repo-path repo-path}))))
+                                        :repo-path repo-path
+                                        ;; Stored so persist-workspace! can bundle
+                                        ;; the right base..HEAD range without
+                                        ;; guessing the parent branch.
+                                        :base-branch branch}))))
         create-result)))
 
   (execute! [_this environment-id command opts]
@@ -289,13 +421,42 @@
         (result/ok {:status :running})
         (result/ok {:status :stopped}))))
 
-  (persist-workspace! [_this _environment-id _opts]
-    ;; Worktree files are already on host — no persistence needed
-    (result/ok {:persisted? false :no-changes? true}))
+  (persist-workspace! [_this environment-id opts]
+    ;; Local-tier persistence parity with :governed (per N11 §7.4 fidelity goal):
+    ;; bundle the task branch into a durable archive so work survives
+    ;; release-environment!. Without this, the host worktree had no record of
+    ;; per-task work — successful agent output was destroyed when the scratch
+    ;; worktree was torn down.
+    (let [worktree-path (str base-path "/" environment-id)
+          archive-dir   (or (get opts :archive-dir)
+                            (get-in config [:archive-dir])
+                            (default-archive-dir))
+          ;; Workflow id (when present) namespaces the archive path so
+          ;; concurrent runs don't collide on the same task-id stem.
+          archive-dir   (if-let [wf (get opts :workflow-id)]
+                          (str archive-dir "/" wf)
+                          archive-dir)
+          base-ref      (or (get opts :base-branch)
+                            (get opts :base-ref)
+                            (get opts :branch)
+                            "main")
+          task-id       (or (get opts :task-id) environment-id)
+          message       (or (get opts :message) "phase checkpoint")]
+      (archive-bundle! worktree-path
+                       {:archive-dir archive-dir
+                        :task-id     task-id
+                        :base-ref    base-ref
+                        :message     message})))
 
-  (restore-workspace! [_this _environment-id _opts]
-    ;; Worktree files are already on host — no restore needed
-    (result/ok {:restored? false})))
+  (restore-workspace! [_this _environment-id opts]
+    ;; Pull a previously-persisted bundle back into the host repo's object DB.
+    ;; Caller supplies :host-repo-path (any worktree of the host repo works)
+    ;; and :bundle-path. The branch shows up as a ref in the host repo and
+    ;; can be checked out wherever the orchestrator wants.
+    (let [host-repo (or (get opts :host-repo-path)
+                        (get opts :workdir)
+                        ".")]
+      (restore-from-bundle! host-repo opts))))
 
 ;; ============================================================================
 ;; Factory
