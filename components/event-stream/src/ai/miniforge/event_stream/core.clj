@@ -235,7 +235,7 @@
              :workspace/branch      (:branch data)
              :workspace/commit-sha  (:commit-sha data)
              :workspace/bundle-path (:bundle-path data)
-             :workspace/tier        (or (:persist-tier data) :worktree))))
+             :workspace/tier        (get data :persist-tier :worktree))))
 
 (defn agent-chunk [stream workflow-id agent-id delta & [done?]]
   (-> (create-envelope stream :agent/chunk workflow-id

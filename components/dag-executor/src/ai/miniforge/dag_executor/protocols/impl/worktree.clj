@@ -176,16 +176,16 @@
   [worktree-path]
   (let [r (run-git "-C" worktree-path "rev-parse" "--abbrev-ref" "HEAD")]
     (if (zero? (:exit r))
-      (result/ok (str/trim (or (:out r) "")))
-      (result/err :archive-no-branch (or (:err r) "could not resolve HEAD")))))
+      (result/ok (str/trim (get r :out "")))
+      (result/err :archive-no-branch (get r :err "could not resolve HEAD")))))
 
 (defn- dirty?
   [worktree-path]
   (let [r (run-git "-C" worktree-path "status" "--porcelain")]
     (if (zero? (:exit r))
-      (result/ok (-> (or (:out r) "") str/trim seq boolean))
+      (result/ok (-> (get r :out "") str/trim seq boolean))
       (result/err :archive-status-failed
-                  (or (:err r) "git status --porcelain failed")))))
+                  (get r :err "git status --porcelain failed")))))
 
 (defn- commits-ahead
   "Count commits on HEAD not reachable from base-ref."
@@ -194,19 +194,19 @@
                    (str base-ref "..HEAD"))]
     (if (zero? (:exit r))
       (try
-        (result/ok (Integer/parseInt (str/trim (or (:out r) "0"))))
+        (result/ok (Integer/parseInt (str/trim (get r :out "0"))))
         (catch NumberFormatException _
           (result/err :archive-rev-list-parse-failed
                       (str "could not parse rev-list output: " (:out r)))))
       (result/err :archive-rev-list-failed
-                  (or (:err r) "git rev-list --count failed")))))
+                  (get r :err "git rev-list --count failed")))))
 
 (defn- stage-all!
   [worktree-path]
   (let [r (run-git "-C" worktree-path "add" "-A")]
     (if (zero? (:exit r))
       (result/ok :staged)
-      (result/err :archive-stage-failed (or (:err r) "git add -A failed")))))
+      (result/err :archive-stage-failed (get r :err "git add -A failed")))))
 
 (defn- commit-staged!
   "Commit staged changes with --no-verify. Persist runs inside a scratch
@@ -219,15 +219,15 @@
     (if (zero? (:exit r))
       (result/ok :committed)
       (result/err :archive-commit-failed
-                  (or (:err r) "git commit --no-verify failed")))))
+                  (get r :err "git commit --no-verify failed")))))
 
 (defn- head-sha
   [worktree-path]
   (let [r (run-git "-C" worktree-path "rev-parse" "HEAD")]
     (if (zero? (:exit r))
-      (result/ok (str/trim (or (:out r) "")))
+      (result/ok (str/trim (get r :out "")))
       (result/err :archive-rev-parse-failed
-                  (or (:err r) "git rev-parse HEAD failed")))))
+                  (get r :err "git rev-parse HEAD failed")))))
 
 (defn- write-bundle!
   "Run `git bundle create FILE BRANCH --not BASE`. The `BRANCH --not BASE`
@@ -240,7 +240,7 @@
     (if (zero? (:exit r))
       (result/ok bundle-path)
       (result/err :archive-bundle-failed
-                  (or (:err r) "git bundle create failed")))))
+                  (get r :err "git bundle create failed")))))
 
 (defn- maybe-commit
   "Commit only when the worktree has dirty changes. `git add -A` already
@@ -355,7 +355,7 @@
       (if (zero? (:exit r))
         (result/ok {:restored? true :branch branch :bundle-path bundle-path})
         (result/err :archive-restore-failed
-                    (or (:err r) "git fetch from bundle failed"))))
+                    (get r :err "git fetch from bundle failed"))))
     (catch Exception e
       (result/err :archive-restore-failed (.getMessage e)))))
 
