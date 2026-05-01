@@ -92,6 +92,22 @@
    worktrees are acquired."
   (Object.))
 
+(defn- resolve-branch-sha
+  "Resolve a branch name to its commit sha so `git worktree add -b new path
+   <sha>` works even when <branch> is checked out in another worktree.
+
+   The straightforward `git worktree add -b new path <branch>` fails with
+   `fatal: '<branch>' is already checked out at <other-worktree>` when the
+   parent worktree is the one running miniforge — which is the common case
+   for `bb dogfood`. Passing the resolved sha sidesteps the refusal.
+
+   Returns the sha string on success, nil on failure (caller falls back to
+   the branch name and accepts any failure that follows)."
+  [repo-path branch]
+  (let [r (run-git "-C" repo-path "rev-parse" branch)]
+    (when (zero? (:exit r))
+      (str/trim (or (:out r) "")))))
+
 (defn create-worktree
   "Create a git worktree for the task.
 
@@ -100,16 +116,25 @@
    simultaneously.
 
    Attempts in order:
-   1. git worktree add -b <name> <path> <branch>  — new branch from branch tip
+   1. git worktree add -b <name> <path> <sha>      — new branch from branch's
+                                                     resolved sha (works even
+                                                     when <branch> is checked
+                                                     out in another worktree)
    2. Clean up stale branch/directory and retry step 1
-   3. git worktree add --detach <path>             — detached HEAD (last resort)"
+   3. git worktree add --detach <path>             — detached HEAD (last resort)
+
+   Detached HEAD is a real fallback path here, but downstream `archive-bundle!`
+   handles it defensively by creating a real branch at HEAD before bundling.
+   This one-two punch keeps `git worktree add` failures from cascading into
+   broken bundles whose only ref is a bare HEAD."
   [base-path repo-path worktree-name branch]
   (locking worktree-lock
-    (let [worktree-path (str base-path "/" worktree-name)]
+    (let [worktree-path (str base-path "/" worktree-name)
+          base-ref      (or (resolve-branch-sha repo-path branch) branch)]
       (ensure-directory base-path)
       (let [result (run-git "-C" repo-path
                             "worktree" "add" "-b" worktree-name
-                            worktree-path branch)]
+                            worktree-path base-ref)]
         (if (zero? (:exit result))
           (result/ok {:worktree-path worktree-path})
           ;; Failed — clean up stale branch/directory from a prior run and retry
@@ -119,7 +144,7 @@
             (run-git "-C" repo-path "branch" "-D" worktree-name)
             (let [result2 (run-git "-C" repo-path
                                    "worktree" "add" "-b" worktree-name
-                                   worktree-path branch)]
+                                   worktree-path base-ref)]
               (if (zero? (:exit result2))
                 (result/ok {:worktree-path worktree-path})
                 ;; Still failing — detached HEAD as last resort
@@ -172,12 +197,48 @@
 ;; silent zeros — Copilot review on PR #729 caught the original "treat
 ;; non-zero exit as no-changes" pattern as a silent-failure vector.
 
+(def ^:private detached-head-sentinel
+  "What `git rev-parse --abbrev-ref HEAD` prints in a detached worktree.
+   Treated as 'no branch' for archive purposes — `archive-bundle!` creates
+   a real branch before recording the bundle so the result always has a
+   `refs/heads/<name>` ref, never a bare HEAD."
+  "HEAD")
+
+(defn- detached?
+  [branch-name]
+  (= detached-head-sentinel branch-name))
+
 (defn- current-branch
+  "Returns the worktree's HEAD branch name, or the literal sentinel
+   `\"HEAD\"` when the worktree is detached. Callers that need a real
+   branch name should call `ensure-named-branch!` to materialize one."
   [worktree-path]
   (let [r (run-git "-C" worktree-path "rev-parse" "--abbrev-ref" "HEAD")]
     (if (zero? (:exit r))
       (result/ok (str/trim (or (:out r) "")))
       (result/err :archive-no-branch (or (:err r) "could not resolve HEAD")))))
+
+(defn- ensure-named-branch!
+  "If the worktree is in detached-HEAD state, create a real branch at HEAD
+   so the bundle records `refs/heads/<name>` (not just bare HEAD).
+
+   Returns result/ok with the branch name to use for bundling. Pass-through
+   when the worktree is already on a named branch.
+
+   The bundle's ref namespace is what the harvest CLI fetches by name —
+   without a real branch, harvest correctly diagnoses the bundle as the
+   legacy `base..HEAD` shape and refuses to fetch. This helper makes that
+   diagnostic moot for new bundles by always producing the new shape."
+  [worktree-path branch task-id]
+  (if-not (detached? branch)
+    (result/ok branch)
+    (let [name (str "task-" task-id)
+          r    (run-git "-C" worktree-path "checkout" "-b" name)]
+      (if (zero? (:exit r))
+        (result/ok name)
+        (result/err :archive-detach-recovery-failed
+                    (or (:err r)
+                        "could not create branch from detached HEAD"))))))
 
 (defn- dirty?
   [worktree-path]
@@ -326,14 +387,17 @@
                          base-ref default-base-ref}}]
   (-> (current-branch worktree-path)
       (result/and-then
-       (fn [branch]
-         (-> (already-clean? worktree-path base-ref)
+       (fn [raw-branch]
+         (-> (ensure-named-branch! worktree-path raw-branch task-id)
              (result/and-then
-              (fn [clean?]
-                (if clean?
-                  (result/ok {:persisted? false :no-changes? true :branch branch})
-                  (commit-and-bundle! worktree-path branch base-ref
-                                      archive-dir task-id message)))))))))
+              (fn [branch]
+                (-> (already-clean? worktree-path base-ref)
+                    (result/and-then
+                     (fn [clean?]
+                       (if clean?
+                         (result/ok {:persisted? false :no-changes? true :branch branch})
+                         (commit-and-bundle! worktree-path branch base-ref
+                                             archive-dir task-id message))))))))))))
 
 (defn restore-from-bundle!
   "Restore work from a previously-persisted bundle into the host repo.

@@ -37,6 +37,31 @@
         (is (result/ok? r))
         (is (= "/tmp/base/task-abc" (:worktree-path (:data r))))))))
 
+(deftest create-worktree-resolves-branch-to-sha-before-add-test
+  (testing "the parent branch is resolved to its sha before `worktree add -b` so the
+            command works even when that branch is already checked out elsewhere"
+    (let [add-args (atom nil)]
+      (with-redefs [worktree/run-git
+                    (fn [& args]
+                      (cond
+                        (= ["rev-parse" "main"] (drop 2 args))
+                        {:exit 0 :out "abc1234deadbeef\n" :err ""}
+
+                        (some #{"worktree" "add"} args)
+                        (do (reset! add-args (vec args))
+                            {:exit 0 :out "" :err ""})
+
+                        :else {:exit 0 :out "" :err ""}))
+                    worktree/run-shell        (fn [& _] {:exit 0 :out "" :err ""})
+                    worktree/ensure-directory (fn [_] nil)]
+        (worktree/create-worktree "/tmp/base" "/tmp/repo" "task-abc" "main")
+        ;; Final positional arg of `worktree add` should be the resolved sha,
+        ;; not the literal branch name. Without this, `git worktree add -b
+        ;; new path main` fails when main is already checked out in another
+        ;; worktree (the common case for `bb dogfood` from a feature branch).
+        (is (= "abc1234deadbeef" (last @add-args))
+            "create-worktree must pass the resolved sha to `worktree add`, not the branch name")))))
+
 (deftest create-worktree-retries-after-cleanup-on-first-failure-test
   (testing "cleans up stale branch/dir and retries -b when first add fails"
     (let [add-b-calls (atom 0)]
@@ -101,6 +126,65 @@
 ;; ============================================================================
 ;; persist-workspace! / restore-workspace! (no-op for worktree)
 ;; ============================================================================
+
+(deftest archive-bundle-recovers-from-detached-head-test
+  (testing "detached-HEAD scratch gets a real branch before bundling so the
+            bundle records refs/heads/<name>, not bare HEAD"
+    ;; Regression: the dogfood of PR #732 caught this — when create-worktree
+    ;; falls back to `--detach`, archive-bundle! used to record the literal
+    ;; string \"HEAD\" as the branch name. The bundle then advertised only
+    ;; HEAD (legacy `base..HEAD` shape), which the harvest CLI correctly
+    ;; refused to fetch. ensure-named-branch! creates `task-<id>` at HEAD
+    ;; before any of the rest of the pipeline runs.
+    (let [checkout-args (atom nil)
+          bundle-args (atom nil)
+          status-calls (atom 0)]
+      (with-redefs [worktree/run-git
+                    (fn [& args]
+                      (let [tail (drop 2 args)]
+                        (cond
+                          ;; Scratch is detached — abbrev-ref returns the literal "HEAD"
+                          (= ["rev-parse" "--abbrev-ref" "HEAD"] tail)
+                          {:exit 0 :out "HEAD\n" :err ""}
+
+                          ;; ensure-named-branch! runs `checkout -b task-<id>`
+                          (and (= "checkout" (first tail))
+                               (= "-b" (second tail)))
+                          (do (reset! checkout-args (vec tail))
+                              {:exit 0 :out "" :err ""})
+
+                          (= ["status" "--porcelain"] tail)
+                          (do (swap! status-calls inc)
+                              (if (= 1 @status-calls)
+                                {:exit 0 :out " M file.clj\n" :err ""}
+                                {:exit 0 :out "" :err ""}))
+
+                          (= "rev-list" (first tail))
+                          {:exit 0 :out "1\n" :err ""}
+
+                          (= "rev-parse" (first tail))
+                          {:exit 0 :out "abc123\n" :err ""}
+
+                          (= "bundle" (first tail))
+                          (do (reset! bundle-args (vec tail))
+                              {:exit 0 :out "" :err ""})
+
+                          :else {:exit 0 :out "" :err ""})))
+                    worktree/ensure-archive-dir (fn [d] d)]
+        (let [r (worktree/archive-bundle! "/tmp/scratch"
+                                          {:archive-dir "/tmp/test-archive"
+                                           :task-id     "abc"
+                                           :base-ref    "main"})]
+          (is (result/ok? r))
+          ;; Real branch name was created
+          (is (= ["checkout" "-b" "task-abc"] @checkout-args))
+          ;; Bundle uses the new branch name, not "HEAD"
+          (is (= ["bundle" "create" "/tmp/test-archive/abc.bundle"
+                  "task-abc" "--not" "main"]
+                 @bundle-args))
+          (is (= "task-abc" (get-in r [:data :branch]))
+              "result reports the materialized branch name so callers know
+               which ref name to fetch"))))))
 
 (deftest persist-workspace-clean-worktree-no-changes-test
   (testing "persist-workspace! reports no-changes when the scratch worktree is clean"
