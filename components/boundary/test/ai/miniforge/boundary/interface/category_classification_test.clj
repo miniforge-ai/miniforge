@@ -68,3 +68,16 @@
                               :op
                               boom!)]
       (is (= :db (-> c chain/last-anomaly :anomaly/data :boundary/category))))))
+
+(deftest classify-category-resolves-known-categories
+  (testing "classify-category mirrors the mapping table for every standard category"
+    (doseq [category boundary/exception-categories]
+      (is (= (get boundary/category->anomaly-type category)
+             (boundary/classify-category category))
+          (str "classify-category should agree with the table for " category)))))
+
+(deftest classify-category-falls-back-to-fault-for-unknown
+  (testing "classify-category returns :fault when the category is outside the standard vocabulary"
+    (is (= :fault (boundary/classify-category :no-such-category)))
+    (is (= :fault (boundary/classify-category nil)))
+    (is (= :fault (boundary/classify-category "string-not-keyword")))))

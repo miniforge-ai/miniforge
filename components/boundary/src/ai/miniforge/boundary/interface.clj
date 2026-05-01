@@ -59,6 +59,15 @@
    `ai.miniforge.boundary.contract/CapturedException`."
   contract/CapturedException)
 
+(def CheckFn
+  "Malli schema for an advisory pre-flight `check-fn` consumers may
+   layer on top of `execute`. Returns nil when its inputs are
+   acceptable, or a canonical `Anomaly` when they are not. Boundary
+   itself does not consume a check-fn; the schema is exposed so
+   higher-level wrappers agree on the shape. See
+   `ai.miniforge.boundary.contract/CheckFn`."
+  contract/CheckFn)
+
 (def category->anomaly-type
   "Read-only mapping from boundary category to canonical anomaly type.
    See `ai.miniforge.boundary.core/category->anomaly-type`.
@@ -69,8 +78,24 @@
        :parse       -> :invalid-input
        :timeout     -> :timeout
        :unavailable -> :unavailable
-       :unknown     -> :fault"
+       :unknown     -> :fault
+
+   The map is invokable as a function in Clojure for known keys
+   (`(category->anomaly-type :db) ;; => :fault`); use `classify-category`
+   when you want explicit lookup-with-`:fault`-default semantics for
+   unknown keys."
   core/category->anomaly-type)
+
+(defn classify-category
+  "Return the canonical anomaly type for `category`, falling back to
+   `:fault` when the category is not in `exception-categories`.
+
+   This is the function form of the lookup. The underlying
+   `category->anomaly-type` mapping is also re-exported as a map for
+   inspection (e.g. listing every (category, type) pair, or asserting
+   coverage in tests)."
+  [category]
+  (get category->anomaly-type category :fault))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Canonical wrapper

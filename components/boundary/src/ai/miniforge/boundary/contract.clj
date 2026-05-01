@@ -30,6 +30,7 @@
    shape of the captured exception payload that lands inside an
    anomaly's `:anomaly/data`."
   (:require
+   [ai.miniforge.anomaly.interface :as anomaly]
    [malli.core :as m]
    [malli.error :as me]))
 
@@ -70,8 +71,13 @@
    evidence-bundle and replayed later:
    - :exception/type    — fully-qualified class name (string)
    - :exception/message — `(.getMessage e)` or nil
-   - :exception/cause   — root-cause message string, or nil when there
-                          is no cause
+   - :exception/cause   — immediate-cause message string from
+                          `(.getCause e)`, or nil when there is no
+                          cause. Note: this is the *immediate* cause
+                          only, not a walked root cause; nested causes
+                          remain accessible via the original throwable
+                          if a caller needs them, but boundary itself
+                          does not unwind the chain.
    - :exception/data    — `(ex-data e)` for `ExceptionInfo`, else nil
    - :boundary/category — the category the call site supplied"
   [:map {:closed true}
@@ -94,10 +100,11 @@
 (def CheckFn
   "Malli schema for the optional pre-flight check function consumers
    may layer on top of `execute`. A `check-fn` returns nil when its
-   inputs are acceptable, or an `Anomaly` when they are not. Boundary
-   itself does not consume a check-fn — this schema is exposed so
-   higher-level wrappers agree on the shape."
-  [:=> [:cat [:* :any]] [:maybe :map]])
+   inputs are acceptable, or a canonical `Anomaly` (per
+   `ai.miniforge.anomaly.interface/Anomaly`) when they are not.
+   Boundary itself does not consume a check-fn — this schema is
+   exposed so higher-level wrappers agree on the shape."
+  [:=> [:cat [:* :any]] [:maybe anomaly/Anomaly]])
 
 ;------------------------------------------------------------------------------ Layer 3
 ;; Validation helpers

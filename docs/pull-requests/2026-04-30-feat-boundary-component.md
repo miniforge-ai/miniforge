@@ -60,17 +60,31 @@ Foundations / cross-cutting primitive. New top-level component.
 exception-categories
 ;; #{:network :db :io :parse :timeout :unavailable :unknown}
 
-(category->anomaly-type category)
-;; :network    → :unavailable
-;; :db         → :fault
-;; :io         → :fault
-;; :parse      → :invalid-input
-;; :timeout    → :timeout
-;; :unavailable → :unavailable
-;; :unknown    → :fault
+category->anomaly-type
+;; Read-only mapping (a Clojure map, also invokable as a function for
+;; known keys: (category->anomaly-type :db) ;; => :fault):
+;;   :network    → :unavailable
+;;   :db         → :fault
+;;   :io         → :fault
+;;   :parse      → :invalid-input
+;;   :timeout    → :timeout
+;;   :unavailable → :unavailable
+;;   :unknown    → :fault
+
+(classify-category category)
+;; Function form of the lookup. Returns :fault when category is not
+;; in exception-categories. Use this when you want explicit
+;; lookup-with-default semantics; use the map directly for inspection.
+
+CapturedException
+;; Malli schema for the payload that lives inside an anomaly's
+;; :anomaly/data when boundary converts a throw.
 
 CheckFn
-;; Advisory malli schema for higher-level wrappers.
+;; Advisory malli schema for higher-level wrappers. Returns nil or a
+;; canonical Anomaly (per ai.miniforge.anomaly.interface/Anomaly).
+;; Re-exported from contract for consumers that reach for the schema
+;; via the interface namespace.
 ```
 
 ## Anomaly data shape
