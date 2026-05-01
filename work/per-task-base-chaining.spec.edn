@@ -9,8 +9,19 @@
 {:spec/title "Per-Task Base Chaining for DAG Sub-Workflows"
  :version "1.0.0"
  :type :feature
- :priority :high
+ :spec/priority
+ {:tier :high
+  :axes [:workflow-orchestration :dag-execution :local-mode-fidelity]
+  :theme :dag-execution
+  :rationale
+  ["DAG dependencies currently affect scheduling order but not the base state each task sees."
+   "This causes downstream tasks to rebuild upstream work instead of composing on persisted outputs."
+   "Fixing per-task base chaining makes terminal task branches sufficient for harvest and reduces manual cherry-picking."]
+  :blocks [:integrated-dag-task-output :reliable-local-dag-composition]
+  :blocked-by []}
 
+ :normative-refs
+ ["components/phase/resources/packs/miniforge-standards.pack.edn#:std/work-spec-authoring"]
  :spec/description
  "Make a DAG task's `:dependencies` actually shape the work, not just the
   execution order. Today the orchestrator respects scheduling order
