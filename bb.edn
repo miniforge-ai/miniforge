@@ -60,6 +60,15 @@
            (run! "markdownlint" "--fix" "."))}
 
   ;; ──────────────────────────────────────────────────────────────────────────
+  ;; Commit budget — keep agent commits small + reviewable
+  ;; ──────────────────────────────────────────────────────────────────────────
+
+  commit-budget
+  {:doc  "Reject staged commits over 200 lines (insertions+deletions, generated paths excluded). Override with MINIFORGE_COMMIT_BUDGET_OVERRIDE='reason'."
+   :requires ([commit-budget])
+   :task (commit-budget/run nil)}
+
+  ;; ──────────────────────────────────────────────────────────────────────────
   ;; Testing
   ;; ──────────────────────────────────────────────────────────────────────────
 
@@ -112,8 +121,8 @@
   ;; ──────────────────────────────────────────────────────────────────────────
 
   pre-commit
-  {:doc     "Run all pre-commit checks (lint, format, test, graalvm)"
-   :depends [lint:clj fmt:md test test:graalvm]
+  {:doc     "Run all pre-commit checks (commit budget first, then lint, format, test, graalvm)"
+   :depends [commit-budget lint:clj fmt:md test test:graalvm]
    :task    (println "\n✅ ALL PRE-COMMIT CHECKS PASSED\n")}
 
   ;; ──────────────────────────────────────────────────────────────────────────
