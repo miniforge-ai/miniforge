@@ -157,13 +157,27 @@
 ;; ============================================================================
 
 (deftest codex-args-minimal-test
-  (testing "minimal prompt produces exec with standard flags"
+  (testing "minimal prompt produces exec with explicit sandbox + approval flags"
     (let [args ((private-fn 'codex-args) {:prompt "fix bug"})]
       (is (= "exec" (first args)))
       (is (some #(= "--json" %) args))
-      (is (some #(= "--full-auto" %) args))
+      ;; Explicit sandbox + approval replaces the deprecated --full-auto alias.
+      (is (some #(= "--sandbox=workspace-write" %) args))
+      (is (some #(= "--ask-for-approval=never" %) args))
       (is (some #(= "--skip-git-repo-check" %) args))
       (is (= "fix bug" (last args))))))
+
+(deftest codex-args-mcp-required-test
+  (testing "config overrides force the artifact MCP server to be required"
+    (let [args ((private-fn 'codex-args) {:prompt "p"})]
+      ;; mcp_servers.artifact.required=true makes Codex fail loudly if our
+      ;; MCP server doesn't initialize, instead of running without it.
+      (is (some #(= "mcp_servers.artifact.required=true" %) args))
+      ;; --ask-for-approval=never sets the policy via the CLI flag, and
+      ;; approval_policy=never sets it via -c so any config.toml default
+      ;; cannot relax it. Two different knobs, both pinned to never.
+      (is (some #(= "--ask-for-approval=never" %) args))
+      (is (some #(re-matches #"approval_policy=\"?never\"?" %) args)))))
 
 (deftest codex-args-model-test
   (testing "model adds -m flag"

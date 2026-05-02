@@ -211,6 +211,32 @@
           (:tokens result) (assoc :phase/tokens (:tokens result))
           (:cost-usd result) (assoc :phase/cost-usd (:cost-usd result))))))
 
+(defn workspace-persisted
+  "Build a :workspace/persisted event recording that a phase's worktree was
+   archived to a checkpoint. Surfaces the bundle path so dashboards and
+   evidence bundles can offer 'inspect/resume from this checkpoint'
+   affordances without grepping logs.
+
+   Arguments:
+   - stream:      event stream
+   - workflow-id: id of the (sub-)workflow whose work was persisted
+   - data:        {:phase keyword     phase at which persistence ran
+                   :env-id str        executor environment id (task-X)
+                   :branch str        branch the work landed on
+                   :commit-sha str    sha of the persisted commit
+                   :bundle-path str   absolute path to the .bundle file
+                   :persist-tier kw   :worktree (local) or :remote (governed)}"
+  [stream workflow-id data]
+  (-> (create-envelope stream :workspace/persisted workflow-id
+                       (str "Workspace persisted: "
+                            (or (:bundle-path data) (:commit-sha data))))
+      (assoc :workspace/phase       (:phase data)
+             :workspace/env-id      (:env-id data)
+             :workspace/branch      (:branch data)
+             :workspace/commit-sha  (:commit-sha data)
+             :workspace/bundle-path (:bundle-path data)
+             :workspace/tier        (or (:persist-tier data) :worktree))))
+
 (defn agent-chunk [stream workflow-id agent-id delta & [done?]]
   (-> (create-envelope stream :agent/chunk workflow-id
                        (if done? "Agent stream completed" "Agent streaming"))

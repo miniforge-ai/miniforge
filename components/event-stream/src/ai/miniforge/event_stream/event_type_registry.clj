@@ -144,6 +144,11 @@
     :json-string "tool/completed"
     :browser?    false}
 
+   {:constructor "workspace-persisted"
+    :event-type  :workspace/persisted
+    :json-string "workspace/persisted"
+    :browser?    false}
+
    {:constructor "milestone-reached"
     :event-type  :workflow/milestone-reached
     :json-string "workflow/milestone-reached"

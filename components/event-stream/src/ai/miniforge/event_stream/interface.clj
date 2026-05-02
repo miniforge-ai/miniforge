@@ -54,6 +54,7 @@
 (def workflow-started events/workflow-started)
 (def phase-started events/phase-started)
 (def phase-completed events/phase-completed)
+(def workspace-persisted events/workspace-persisted)
 (def agent-chunk events/agent-chunk)
 (def agent-status events/agent-status)
 (def agent-tool-call events/agent-tool-call)

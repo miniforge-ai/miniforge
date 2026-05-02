@@ -424,6 +424,11 @@
    :requires ([dogfood])
    :task (apply dogfood/run *command-line-args*)}
 
+  harvest
+  {:doc "Pull persisted task bundles back into this repo as branches.\n   Usage: bb harvest                  (list workflows)\n          bb harvest <workflow-id>    (fetch one workflow's bundles)\n          bb harvest --all            (fetch every checkpoint)"
+   :requires ([harvest])
+   :task (apply harvest/run *command-line-args*)}
+
   ;; ──────────────────────────────────────────────────────────────────────────
   ;; MCP Context Server
   ;; ──────────────────────────────────────────────────────────────────────────
@@ -486,6 +491,8 @@
                  "components/config/src"
                  "components/config/resources"
                  "components/algorithms/src"
+                 "components/anomaly/src"
+                 "components/anomaly/resources"
                  "components/schema/src"
                  "components/schema/resources"
                  "components/logging/src"

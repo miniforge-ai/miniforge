@@ -24,6 +24,7 @@
    [ai.miniforge.workflow.runner :as runner]
    [ai.miniforge.workflow.context :as ctx]
    [ai.miniforge.dag-executor.interface :as dag-exec]
+   [ai.miniforge.event-stream.interface :as es]
    [ai.miniforge.logging.interface :as log]
    [ai.miniforge.workflow.messages :as messages]
    [ai.miniforge.workflow.execution :as exec]
@@ -311,18 +312,25 @@
           phase-ctx {:execution/current-phase :implement}]
       (is (nil? (persist-fn context phase-ctx))))))
 
-(deftest persist-workspace-noop-when-not-governed-test
-  (testing "returns nil when execution mode is :local (not :governed)"
-    (let [called (atom false)
+(deftest persist-workspace-fires-in-local-mode-test
+  (testing "persist fires in :local mode (parity with :governed) so worktree-tier work survives release"
+    (let [call-args (atom nil)
           context {:execution/executor :stub
                    :execution/mode :local
                    :execution/environment-id "env-1"
-                   :execution/task-branch "task/branch"}
+                   :execution/environment-metadata {:base-branch "feat/foo"}
+                   :execution/worktree-path "/tmp/scratch"}
           phase-ctx {:execution/current-phase :implement}]
       (with-redefs [dag-exec/persist-workspace!
-                    (fn [& _] (reset! called true))]
+                    (fn [executor env-id opts]
+                      (reset! call-args {:executor executor :env-id env-id :opts opts}))]
         (persist-fn context phase-ctx)
-        (is (false? @called))))))
+        (is (some? @call-args))
+        (is (= "env-1" (:env-id @call-args)))
+        ;; base-branch comes from environment-metadata so the worktree tier
+        ;; can bundle the right base..HEAD range
+        (is (= "feat/foo" (get-in @call-args [:opts :base-branch])))
+        (is (= "env-1" (get-in @call-args [:opts :task-id])))))))
 
 (deftest persist-workspace-calls-executor-in-governed-mode-test
   (testing "calls dag-exec/persist-workspace! with correct args in governed mode"
@@ -375,3 +383,52 @@
                     (fn [& _] nil)]
         ;; Should not throw
         (is (nil? (persist-fn context phase-ctx)))))))
+
+(defn- capture-persist-event-data
+  "Capture the data passed to es/workspace-persisted by running the
+   persist boundary against a stub executor that always reports a
+   successful persist."
+  [context phase-ctx]
+  (let [event-data (atom nil)
+        ok-result  (dag-exec/ok {:persisted? true
+                                 :branch "task-1"
+                                 :commit-sha "abc123"
+                                 :bundle-path "/tmp/x.bundle"})]
+    (with-redefs [dag-exec/persist-workspace!
+                  (fn [_exec _env-id _opts] ok-result)
+                  log/info
+                  (fn [& _] nil)
+                  es/workspace-persisted
+                  (fn [_stream _wf-id data]
+                    (reset! event-data data)
+                    {:event/type :workspace/persisted})
+                  es/publish!
+                  (fn [& _] nil)]
+      (persist-fn context phase-ctx)
+      @event-data)))
+
+(deftest persist-tier-is-worktree-in-local-mode-test
+  (testing ":workspace/persisted event labels :local mode as :worktree tier"
+    (let [data (capture-persist-event-data
+                {:execution/executor :stub
+                 :execution/mode :local
+                 :execution/environment-id "env-1"
+                 :execution/environment-metadata {:base-branch "feat/foo"}
+                 :event-stream :stub-stream
+                 :execution/id #uuid "00000000-0000-0000-0000-000000000001"}
+                {:execution/current-phase :implement})]
+      (is (= :worktree (:persist-tier data))
+          "local mode persists to a local archive — worktree tier"))))
+
+(deftest persist-tier-is-remote-in-governed-mode-test
+  (testing ":workspace/persisted event labels :governed mode as :remote tier"
+    (let [data (capture-persist-event-data
+                {:execution/executor :stub
+                 :execution/mode :governed
+                 :execution/environment-id "env-1"
+                 :execution/task-branch "task/abc"
+                 :event-stream :stub-stream
+                 :execution/id #uuid "00000000-0000-0000-0000-000000000002"}
+                {:execution/current-phase :implement})]
+      (is (= :remote (:persist-tier data))
+          "governed mode pushes to remote — remote tier label, not worktree"))))

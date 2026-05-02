@@ -291,6 +291,12 @@
         ;; Verify the codex path is tracked for cleanup
         (is (some? codex-file))
         (is (str/ends-with? codex-file "config.toml"))
+        ;; Verify the artifact block is marked required so Codex fails
+        ;; loudly if our MCP server can't initialize, instead of silently
+        ;; running without it.
+        (let [content (slurp codex-file)]
+          (is (str/includes? content "[mcp_servers.artifact]"))
+          (is (str/includes? content "required = true")))
         (finally
           (session/cleanup-session! s))))))
 

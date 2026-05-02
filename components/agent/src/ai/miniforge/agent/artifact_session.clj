@@ -241,6 +241,11 @@
    If the file exists and already has an [mcp_servers.artifact] block,
    replaces it. Otherwise appends the block. Creates .codex/ dir if needed.
 
+   Sets `required = true` per Codex's config-reference so startup fails
+   loudly if our MCP server can't initialize, rather than silently
+   running with the artifact server absent. This mirrors Claude's
+   behavior when --mcp-config can't be loaded.
+
    Returns the path to the config file."
   [config-root server-cmd]
   (let [{:keys [command args]} server-cmd
@@ -250,7 +255,8 @@
         block-header "[mcp_servers.artifact]"
         block (str block-header "\n"
                    "command = " (json/generate-string command) "\n"
-                   "args = " (json/generate-string args) "\n")]
+                   "args = " (json/generate-string args) "\n"
+                   "required = true\n")]
     (.mkdirs dir)
     (if (.exists config-file)
       (let [content (slurp config-file)

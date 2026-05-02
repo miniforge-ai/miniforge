@@ -43,6 +43,30 @@
   "Workflow statuses that indicate no further execution."
   #{:completed :failed :stale})
 
+(def dependency-event-types
+  "Event types that carry canonical dependency-health projections."
+  #{:dependency/health-updated :dependency/recovered})
+
+(def dependency-status-priority
+  "Sort dependency issues from most urgent to least urgent."
+  {:operator-action-required 0
+   :misconfigured 1
+   :unavailable 2
+   :degraded 3
+   :healthy 4})
+
+(def dependency-active-statuses
+  "Statuses that represent dependency trouble rather than healthy state."
+  #{:operator-action-required :misconfigured :unavailable :degraded})
+
+(def dependency-status-severity
+  "Severity labels used to summarize dependency health in workflow state."
+  {:operator-action-required :error
+   :misconfigured :error
+   :unavailable :error
+   :degraded :warning
+   :healthy :success})
+
 (defn normalize-ts
   "Normalize timestamp inputs to java.util.Date for UI rendering."
   [ts]
@@ -230,6 +254,91 @@
            str/trim
            not-empty))
 
+(defn- assoc-some
+  "Assoc only non-nil key/value pairs."
+  [m & kvs]
+  (reduce (fn [acc [k v]]
+            (if (nil? v)
+              acc
+              (assoc acc k v)))
+          m
+          (partition 2 kvs)))
+
+(defn- dependency-id
+  [event]
+  (or (:dependency/id event)
+      (:dependency/vendor event)
+      (:dependency/source event)))
+
+(defn- dependency-event?
+  [event]
+  (contains? dependency-event-types (:event/type event)))
+
+(defn- dependency-status-rank
+  [status]
+  (get dependency-status-priority status Long/MAX_VALUE))
+
+(defn- dependency-entity
+  [event]
+  (let [dependency-id' (dependency-id event)]
+    (assoc-some {:dependency/id dependency-id'
+                 :dependency/status (or (:dependency/status event) :healthy)}
+                :dependency/source (:dependency/source event)
+                :dependency/kind (:dependency/kind event)
+                :dependency/vendor (:dependency/vendor event)
+                :dependency/class (:dependency/class event)
+                :dependency/retryability (:dependency/retryability event)
+                :dependency/failure-count (:dependency/failure-count event)
+                :dependency/window-size (:dependency/window-size event)
+                :dependency/incident-counts (:dependency/incident-counts event)
+                :dependency/last-observed-at (:dependency/last-observed-at event)
+                :dependency/last-recovered-at (:dependency/last-recovered-at event)
+                :dependency/message (:event/message event))))
+
+(defn- workflow-dependency-health
+  "Project the latest dependency-health entities from workflow events."
+  [events]
+  (->> events
+       (filter dependency-event?)
+       (reduce (fn [health event]
+                 (if-let [dependency-id' (dependency-id event)]
+                   (assoc health dependency-id' (dependency-entity event))
+                   health))
+               {})))
+
+(defn- dependency-active?
+  [dependency]
+  (contains? dependency-active-statuses (:dependency/status dependency)))
+
+(defn- dependency-sort-label
+  [dependency]
+  (or (:dependency/vendor dependency)
+      (some-> (:dependency/id dependency) str)))
+
+(defn- active-dependencies
+  [dependency-health]
+  (->> (vals dependency-health)
+       (filter dependency-active?)
+       (sort-by (juxt #(dependency-status-rank (:dependency/status %))
+                      dependency-sort-label))
+       vec))
+
+(defn- dependency-severity
+  [dependency-issues]
+  (some-> dependency-issues first :dependency/status dependency-status-severity))
+
+(defn- attach-dependency-health
+  [workflow dependency-health]
+  (let [dependency-issues (active-dependencies dependency-health)]
+    (cond-> workflow
+      (seq dependency-health)
+      (assoc :dependency-health dependency-health)
+
+      (seq dependency-issues)
+      (assoc :dependency-issues dependency-issues
+             :dependency-severity (dependency-severity dependency-issues)
+             :failure-attribution (first dependency-issues)))))
+
 (def resolved-get-events
   "Cached reference to event-stream get-events fn."
   (delay
@@ -328,19 +437,21 @@
                                                           failed     (last-event  :workflow/failed    wf-events)
                                                           status     (wf-status completed failed (some-> wf-events last event-ts))
                                                           metrics    (workflow-metrics wf-events)
-                                                          output-preview (workflow-output-preview wf-events)]
-                                                      (cond-> {:id          id
-                                                               :name        (wf-name-from-started started id)
-                                                               :status      status
-                                                               :phase       (wf-phase wf-events started)
-                                                               :progress    (workflow-progress status)
-                                                               :started-at  (normalize-ts (event-ts started))
-                                                               :updated-at  (normalize-ts (some-> wf-events last event-ts))
-                                                               :completed-at (normalize-ts (event-ts completed))
-                                                               :event-count (count wf-events)
-                                                               :evidence-bundle-id (:workflow/evidence-bundle-id completed)
-                                                               :metrics     metrics}
-                                                        output-preview (assoc :latest-output output-preview))))
+                                                          output-preview (workflow-output-preview wf-events)
+                                                          dependency-health (workflow-dependency-health wf-events)
+                                                          workflow-summary (cond-> {:id           id
+                                                                                    :name         (wf-name-from-started started id)
+                                                                                    :status       status
+                                                                                    :phase        (wf-phase wf-events started)
+                                                                                    :progress     (workflow-progress status)
+                                                                                    :started-at   (normalize-ts (event-ts started))
+                                                                                    :updated-at   (normalize-ts (some-> wf-events last event-ts))
+                                                                                    :completed-at (normalize-ts (event-ts completed))
+                                                                                    :event-count  (count wf-events)
+                                                                                    :evidence-bundle-id (:workflow/evidence-bundle-id completed)
+                                                                                    :metrics      metrics}
+                                                                             output-preview (assoc :latest-output output-preview))]
+                                                      (attach-dependency-health workflow-summary dependency-health)))
                                                   grouped-events)]
                            (->> workflows
                                 (sort-by workflow-recency >)

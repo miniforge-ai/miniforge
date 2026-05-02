@@ -93,14 +93,18 @@
 ;; Gate check/repair
 
 (defn check-format
-  "Check which files can be formatted. Always passes — formatting is repair."
+  "Check which files can be formatted. Always passes — formatting is repair.
+
+   Returns the canonical `response/success` shape; the gate machinery's
+   `passed?` predicate recognizes it via `response/success?`."
   [artifact _ctx]
   (let [formattable (filterv formattable-file? (get artifact :code/files []))]
     (response/success {:formattable-files (mapv :path formattable)
-                       :message (str (count formattable) " file(s) support LSP formatting")})))
+                       :message (str (count formattable)
+                                     " file(s) support LSP formatting")})))
 
 (defn repair-format
-  "Format files via LSP."
+  "Format files via LSP. Returns the canonical `response/success` shape."
   [artifact _errors ctx]
   (let [worktree    (or (get ctx :execution/worktree-path) ".")
         manager     (get-or-create-lsp-manager ctx)

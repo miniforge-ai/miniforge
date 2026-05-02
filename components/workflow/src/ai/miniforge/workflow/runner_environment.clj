@@ -23,6 +23,7 @@
    workspace persistence at phase boundaries. Extracted from runner.clj."
   (:require
    [ai.miniforge.dag-executor.interface :as dag]
+   [ai.miniforge.event-stream.interface :as es]
    [ai.miniforge.logging.interface :as log]
    [ai.miniforge.response.interface :as response]
    [ai.miniforge.workflow.context :as context]
@@ -151,20 +152,111 @@
       last-phase
       :unknown)))
 
+(def ^:private persist-tier-by-mode
+  "Maps `:execution/mode` to the persist tier the executor is using.
+   :governed routes through the docker/k8s tier's `git-persist!` (push to
+   remote). :local routes through the worktree tier's `archive-bundle!`
+   (git bundle on local disk). The event consumers (dashboard, evidence
+   bundle) display the tier so users can tell push-to-remote checkpoints
+   from local-archive checkpoints at a glance."
+  {:governed :remote
+   :local    :worktree})
+
+(def ^:private default-persist-tier
+  "Tier label used when `:execution/mode` is missing or unrecognized.
+   Conservative default — local archive is always present in OSS."
+  :worktree)
+
+(defn- persist-tier-for
+  [context]
+  (get persist-tier-by-mode (get context :execution/mode) default-persist-tier))
+
+(defn- persist-opts
+  "Build the opts map passed to `dag/persist-workspace!`. Keeps map
+   construction key-value with all derivations lifted into the let so
+   readers see the shape of the call without a cond-> obscuring it."
+  [context phase env-id]
+  (let [metadata    (get context :execution/environment-metadata)
+        branch      (get context :execution/task-branch)
+        base-branch (:base-branch metadata)
+        message     (messages/t :env/persist-message {:phase (name phase)})]
+    (cond-> {:message     message
+             :workdir     (get context :execution/worktree-path)
+             :workflow-id (get context :execution/id)
+             :task-id     env-id}
+      branch      (assoc :branch branch)
+      base-branch (assoc :base-branch base-branch))))
+
+(defn- persist-event-data
+  "Shared event/log payload for a persisted checkpoint. Both the log line
+   and the `:workspace/persisted` event read from this — single source of
+   truth for the persistence record."
+  [context phase env-id data]
+  {:phase        phase
+   :env-id       env-id
+   :branch       (:branch data)
+   :commit-sha   (:commit-sha data)
+   :bundle-path  (:bundle-path data)
+   :persist-tier (persist-tier-for context)})
+
+(defn- log-workspace-persisted!
+  [event-data]
+  (let [bundle-or-sha (or (:bundle-path event-data) (:commit-sha event-data))
+        message       (str "Workspace persisted: " bundle-or-sha)]
+    (log/info env-logger :workflow :workflow/workspace-persisted
+              {:message message
+               :data    event-data})))
+
+(defn- publish-workspace-persisted!
+  "Publish the `:workspace/persisted` event when the run has an event
+   stream. Swallows publish exceptions — persistence already succeeded;
+   a downstream subscriber's failure should not surface as a workflow
+   error."
+  [context event-data]
+  (when-let [stream (get context :event-stream)]
+    (try
+      (es/publish! stream
+                   (es/workspace-persisted stream
+                                           (get context :execution/id)
+                                           event-data))
+      (catch Exception _e nil))))
+
+(defn- announce-persisted!
+  "Announce a successful persist on every visibility surface: log line,
+   first-class event, and (transitively) the evidence-bundle collector
+   that harvests events."
+  [context phase env-id data]
+  (let [event-data (persist-event-data context phase env-id data)]
+    (log-workspace-persisted! event-data)
+    (publish-workspace-persisted! context event-data)))
+
 (defn persist-workspace-at-phase-boundary!
-  "Persist workspace to task branch after phase completes (governed mode only)."
+  "Persist workspace at phase completion.
+
+   Both modes (:governed and :local) participate. :governed pushes to a
+   remote via the docker/k8s tier's `git-persist!`; :local writes a git
+   bundle via the worktree tier's `archive-bundle!` so work survives
+   `release-environment!`.
+
+   Earlier this was guarded on :governed only, which combined with the
+   worktree tier's no-op `persist-workspace!` meant local-mode tasks
+   lost their work the moment the scratch worktree was torn down. Per
+   the fidelity goal in N11 §7.4, local should match governed in not
+   destroying work on failure."
   [context phase-ctx]
   (when-let [executor (get context :execution/executor)]
-    (when (= :governed (get context :execution/mode))
-      (let [env-id (get context :execution/environment-id)
-            branch (get context :execution/task-branch)
-            phase  (boundary-phase phase-ctx)]
+    (let [env-id (get context :execution/environment-id)
+          phase  (boundary-phase phase-ctx)]
+      (when env-id
         (try
-          (dag/persist-workspace! executor env-id
-                                       {:branch  branch
-                                        :message (messages/t :env/persist-message {:phase (name phase)})
-                                        :workdir (get context :execution/worktree-path)})
+          (let [result (dag/persist-workspace! executor env-id
+                                               (persist-opts context phase env-id))
+                data   (when (dag/ok? result) (dag/unwrap result))]
+            (when (:persisted? data)
+              (announce-persisted! context phase env-id data))
+            result)
           (catch Exception e
             (log/warn env-logger :workflow :workflow/persist-failed
-                      {:message (messages/t :env/persist-failed {:error (ex-message e)})})
+                      {:message (messages/t :env/persist-failed
+                                            {:error (ex-message e)})})
             nil))))))

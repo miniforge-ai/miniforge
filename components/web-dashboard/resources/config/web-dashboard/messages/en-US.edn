@@ -76,6 +76,18 @@
   :workflow/none-heading       "No Workflows Yet"
   :workflow/none-body          "Workflows will appear here when you run a workflow"
   :workflow/none-hint          "Try running a workflow to see real-time progress tracking."
+  :workflow/dependency-section "Dependency Health"
+  :workflow/dependency-none    "No dependency issues recorded"
+  :workflow/dependency-issue-count "{count} dependency issue(s)"
+  :workflow/dependency-summary "{dependency} {status}"
+  :workflow.dependency-kind/provider "Provider"
+  :workflow.dependency-kind/platform "Platform"
+  :workflow.dependency-kind/environment "Environment"
+  :workflow.dependency-status/healthy "Healthy"
+  :workflow.dependency-status/degraded "Degraded"
+  :workflow.dependency-status/unavailable "Unavailable"
+  :workflow.dependency-status/misconfigured "Misconfigured"
+  :workflow.dependency-status/operator-action-required "Needs Operator Action"
 
   ;; workflow — time display
   :time/none                   "—"

@@ -99,3 +99,28 @@
           (is (= "Checking issues..." (:latest-output workflow)))
           (is (= 42 (get-in workflow [:metrics :tokens])))
           (is (= 3000 (get-in workflow [:metrics :duration-ms]))))))))
+
+(deftest get-workflows-projects-dependency-health-test
+  (testing "workflow summaries expose active dependency issues with attribution"
+    (let [stream     (es/create-event-stream {:sinks []})
+          state      (core/create-state {:event-stream stream})
+          events-dir (temp-events-dir)
+          wf-id      (random-uuid)]
+      (es/publish! stream (wf-event :workflow/started wf-id "2026-03-28T12:00:00Z"
+                                    :workflow/spec {:name "Dependency Signals"}))
+      (es/publish! stream (wf-event :dependency/health-updated wf-id "2026-03-28T12:00:01Z"
+                                    :dependency/id :anthropic
+                                    :dependency/vendor :anthropic
+                                    :dependency/source :external-provider
+                                    :dependency/kind :provider
+                                    :dependency/status :unavailable
+                                    :dependency/class :outage
+                                    :dependency/retryability :retryable
+                                    :event/message "Dependency anthropic unavailable"))
+      (with-redefs [sut/events-dir-path (.getPath events-dir)]
+        (let [workflow (->> (sut/get-workflows state) (filter #(= wf-id (:id %))) first)
+              issue (first (:dependency-issues workflow))]
+          (is (= :error (:dependency-severity workflow)))
+          (is (= :anthropic (:dependency/id issue)))
+          (is (= :unavailable (:dependency/status issue)))
+          (is (= :anthropic (:dependency/vendor (:failure-attribution workflow)))))))))

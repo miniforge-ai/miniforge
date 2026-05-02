@@ -46,6 +46,39 @@
     (< ms 60000) (format "%.1fs" (/ ms 1000.0))
     :else (format "%.1fm" (/ ms 60000.0))))
 
+(defn- humanize-keyword
+  [kw]
+  (some-> kw name (str/replace "-" " ")))
+
+(defn- dependency-display-name
+  [event]
+  (or (some-> (:dependency/vendor event) humanize-keyword str/capitalize)
+      (let [dependency-id (:dependency/id event)]
+        (cond
+          (keyword? dependency-id) (str/capitalize (humanize-keyword dependency-id))
+          (string? dependency-id) dependency-id
+          dependency-id (str dependency-id)
+          :else nil))
+      "?"))
+
+(defn- dependency-kind-label
+  [event]
+  (messages/t (keyword "workflow-runner.dependency-kind"
+                       (name (or (:dependency/kind event) :environment)))))
+
+(defn- dependency-status-label
+  [event]
+  (messages/t (keyword "workflow-runner.dependency-status"
+                       (name (or (:dependency/status event) :healthy)))))
+
+(defn- dependency-event-line
+  [event message-key color]
+  (colorize color
+            (messages/t message-key
+                        {:dependency (dependency-display-name event)
+                         :kind (dependency-kind-label event)
+                         :status (dependency-status-label event)})))
+
 ;------------------------------------------------------------------------------ Layer 1
 ;; Workflow progress output
 
@@ -87,6 +120,11 @@
                                        (str " (" (format-duration d) ")")))
       :workflow/milestone-reached (colorize :green (messages/t :workflow-runner/milestone
                                                                 {:message (:message event)}))
+      :workspace/persisted (colorize :cyan (messages/t :workflow-runner/workspace-persisted
+                                                       {:phase       (some-> (:workspace/phase event) name)
+                                                        :bundle-path (or (:workspace/bundle-path event)
+                                                                         (:workspace/commit-sha event)
+                                                                         "(no archive path)")}))
       :agent/started (colorize :cyan (messages/t :workflow-runner/agent-started
                                                  {:agent agent}))
       :agent/completed (colorize :green (messages/t :workflow-runner/agent-completed
@@ -108,6 +146,17 @@
                                                 {:gate gate}))
       :gate/failed (colorize :red (messages/t :workflow-runner/gate-failed
                                               {:gate gate}))
+      :dependency/health-updated
+      (dependency-event-line event
+                             :workflow-runner/dependency-health-updated
+                             (case (:dependency/status event)
+                               (:operator-action-required :misconfigured :unavailable) :red
+                               :degraded :yellow
+                               :green))
+      :dependency/recovered
+      (dependency-event-line event
+                             :workflow-runner/dependency-recovered
+                             :green)
       :chain/completed (str (colorize :green (messages/t :workflow-runner/chain-step-completed
                                                                  {:chain-id (name (get event :chain/id :unknown))}))
                             (when-let [d (:chain/duration-ms event)]
