@@ -2,8 +2,6 @@
   "Implementation functions for the GitLab REST API connector.
    Small composable functions organized in a stratified DAG."
   (:require [ai.miniforge.connector.interface :as connector]
-            [ai.miniforge.connector.interface :as connector]
-            [ai.miniforge.connector-auth.interface :as auth]
             [ai.miniforge.connector-gitlab.messages :as msg]
             [ai.miniforge.connector-gitlab.resources :as resources]
             [ai.miniforge.connector-gitlab.schema :as schema]
@@ -15,17 +13,15 @@
 
 (def ^:private handles (connector/create-handle-registry))
 
-(defn- get-handle    [handle] (connector/get-handle handles handle))
 (defn- store-handle! [handle state] (connector/store-handle! handles handle state))
 (defn- remove-handle! [handle] (connector/remove-handle! handles handle))
 (defn- touch-handle! [handle] (connector/touch-handle! handles handle))
 
 (defn- require-handle!
-  "Retrieve handle state or throw."
+  "Retrieve handle state or throw, delegating to the shared helper."
   [handle]
-  (or (get-handle handle)
-      (throw (ex-info (msg/t :gitlab/handle-not-found {:handle handle})
-                      {:handle handle}))))
+  (connector/require-handle! handles handle
+                             {:message (msg/t :gitlab/handle-not-found {:handle handle})}))
 
 ;; Auth
 
@@ -68,13 +64,12 @@
   (some? (or (:gitlab/project-id config) (:gitlab/project-path config))))
 
 (defn- validate-auth!
-  "Validate auth credential reference, throwing on failure."
+  "Validate auth credential reference, throwing on failure with the
+   GitLab-localized message. Delegates to the shared
+   `connector/validate-auth-or-throw!` helper so all the boundary
+   throwers across connector-{jira,gitlab,github} read the same way."
   [auth]
-  (when auth
-    (let [result (auth/validate-credential-ref auth)]
-      (when-not (:success? result)
-        (throw (ex-info (msg/t :gitlab/auth-invalid {:errors (:errors result)})
-                        {:errors (:errors result)}))))))
+  (connector/validate-auth-or-throw! auth msg/t :gitlab/auth-invalid))
 
 ;;------------------------------------------------------------------------------ Layer 1
 ;; HTTP

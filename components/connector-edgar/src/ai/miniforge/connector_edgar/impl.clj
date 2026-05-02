@@ -207,25 +207,29 @@
 
 ;; -- Source --
 
+(defn- require-handle!
+  "Retrieve handle state or throw, delegating to the shared helper."
+  [handle]
+  (connector/require-handle! handles handle
+                             {:message (msg/t :edgar/handle-not-found {:handle handle})}))
+
 (defn do-discover [handle]
-  (if-let [{:keys [config]} (get-handle handle)]
-    (connector/discover-result [{:schema/name      (:edgar/form-type config)
-                              :schema/aggregation (:edgar/aggregation config)}])
-    (throw (ex-info (msg/t :edgar/handle-not-found {:handle handle}) {:handle handle}))))
+  (let [{:keys [config]} (require-handle! handle)]
+    (connector/discover-result [{:schema/name        (:edgar/form-type config)
+                                 :schema/aggregation (:edgar/aggregation config)}])))
 
 (defn do-extract
   "Extract aggregated records from EDGAR filings."
   [handle _opts]
-  (if-let [{:keys [config]} (get-handle handle)]
-    (let [user-agent (:edgar/user-agent config)
-          records    (case (:edgar/aggregation config)
-                       :monthly-buy-sell-ratio
-                       (aggregate-buy-sell-ratio config user-agent)
+  (let [{:keys [config]} (require-handle! handle)
+        user-agent (:edgar/user-agent config)
+        records    (case (:edgar/aggregation config)
+                     :monthly-buy-sell-ratio
+                     (aggregate-buy-sell-ratio config user-agent)
 
-                       (throw (ex-info (msg/t :edgar/aggregation-unknown {:agg (:edgar/aggregation config)})
-                                       {:aggregation (:edgar/aggregation config)})))]
-      (connector/extract-result records nil false))
-    (throw (ex-info (msg/t :edgar/handle-not-found {:handle handle}) {:handle handle}))))
+                     (throw (ex-info (msg/t :edgar/aggregation-unknown {:agg (:edgar/aggregation config)})
+                                     {:aggregation (:edgar/aggregation config)})))]
+    (connector/extract-result records nil false)))
 
 (defn do-checkpoint [cursor-state]
   (connector/checkpoint-result cursor-state))

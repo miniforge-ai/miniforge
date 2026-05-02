@@ -124,3 +124,23 @@
     (is (thrown? Exception (impl/do-connect {} nil)))
     (is (thrown? Exception (impl/do-connect {:excel/url "x"} nil)))
     (is (thrown? Exception (impl/do-connect {:excel/url "x" :excel/sheet-name "S"} nil)))))
+
+;;------------------------------------------------------------------------------ Layer 2
+;; Migrated handle-lookup helper — confirm the shared connector helper
+;; preserves the legacy ex-info shape at the protocol boundary.
+
+(deftest discover-throws-on-unknown-handle-test
+  (testing "do-discover throws ex-info with :handle key when handle missing"
+    (try
+      (impl/do-discover "no-such-handle")
+      (is false "expected ex-info")
+      (catch clojure.lang.ExceptionInfo e
+        (is (= "no-such-handle" (:handle (ex-data e))))))))
+
+(deftest extract-throws-on-unknown-handle-test
+  (testing "do-extract throws ex-info with :handle key when handle missing"
+    (try
+      (impl/do-extract "no-such-handle" {})
+      (is false "expected ex-info")
+      (catch clojure.lang.ExceptionInfo e
+        (is (= "no-such-handle" (:handle (ex-data e))))))))

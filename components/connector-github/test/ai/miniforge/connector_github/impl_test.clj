@@ -310,3 +310,42 @@
     (etag/store-etag! "https://example.com" "W/\"test-etag\"")
     (let [headers (etag/add-etag-header {} "https://example.com")]
       (is (= "W/\"test-etag\"" (get headers "If-None-Match"))))))
+
+;;------------------------------------------------------------------------------ Layer 2
+;; Migrated validation helpers — confirm the shared connector helpers
+;; preserve the legacy ex-info shape at the protocol boundary.
+
+(deftest discover-throws-on-unknown-handle-test
+  (testing "do-discover throws ex-info with :handle key when handle missing"
+    (try
+      (impl/do-discover "no-such-handle")
+      (is false "expected ex-info")
+      (catch clojure.lang.ExceptionInfo e
+        (is (= "no-such-handle" (:handle (ex-data e))))))))
+
+(deftest extract-throws-on-unknown-handle-test
+  (testing "do-extract throws ex-info with :handle key when handle missing"
+    (try
+      (impl/do-extract "no-such-handle" "issues" {})
+      (is false "expected ex-info")
+      (catch clojure.lang.ExceptionInfo e
+        (is (= "no-such-handle" (:handle (ex-data e))))))))
+
+(deftest connect-rejects-malformed-auth-test
+  (testing "do-connect throws ex-info when auth credential-ref is malformed"
+    (try
+      (impl/do-connect {:github/owner "owner" :github/repo "repo"}
+                       {:auth/method :api-key
+                        ;; Missing :auth/credential-id
+                        :auth/scheme :bearer})
+      (is false "expected ex-info")
+      (catch clojure.lang.ExceptionInfo e
+        (is (some? (:errors (ex-data e))))))))
+
+(deftest connect-accepts-valid-auth-test
+  (testing "do-connect succeeds when auth credential-ref validates"
+    (let [result (impl/do-connect {:github/owner "owner" :github/repo "repo"}
+                                  {:auth/method        :api-key
+                                   :auth/credential-id "test-token"})]
+      (is (= :connected (:connector/status result)))
+      (impl/do-close (:connection/handle result)))))

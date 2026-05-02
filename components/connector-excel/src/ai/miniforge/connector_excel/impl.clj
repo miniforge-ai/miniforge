@@ -145,25 +145,29 @@
 
 ;; -- Source --
 
+(defn- require-handle!
+  "Retrieve handle state or throw, delegating to the shared helper."
+  [handle]
+  (connector/require-handle! handles handle
+                             {:message (msg/t :excel/handle-not-found {:handle handle})}))
+
 (defn do-discover [handle]
-  (if-let [{:keys [config]} (get-handle handle)]
-    (connector/discover-result [{:schema/name    (:excel/sheet-name config)
-                              :schema/url     (:excel/url config)}])
-    (throw (ex-info (msg/t :excel/handle-not-found {:handle handle}) {:handle handle}))))
+  (let [{:keys [config]} (require-handle! handle)]
+    (connector/discover-result [{:schema/name (:excel/sheet-name config)
+                                 :schema/url  (:excel/url config)}])))
 
 (defn do-extract
   "Parse the Excel sheet and return records."
   [handle _opts]
-  (if-let [{:keys [config workbook]} (get-handle handle)]
-    (let [{:excel/keys [sheet-name columns data-start-row series-id]} config
-          filter-fn (when-let [min-val (:excel/min-value config)]
-                      (min-value-filter min-val))
-          records   (parse-sheet workbook sheet-name columns
-                                 (or data-start-row 0) filter-fn)
-          date-fmt  (:excel/date-format config)
-          enriched  (mapv (partial normalize-record date-fmt series-id) records)]
-      (connector/extract-result enriched nil false))
-    (throw (ex-info (msg/t :excel/handle-not-found {:handle handle}) {:handle handle}))))
+  (let [{:keys [config workbook]} (require-handle! handle)
+        {:excel/keys [sheet-name columns data-start-row series-id]} config
+        filter-fn (when-let [min-val (:excel/min-value config)]
+                    (min-value-filter min-val))
+        records   (parse-sheet workbook sheet-name columns
+                               (or data-start-row 0) filter-fn)
+        date-fmt  (:excel/date-format config)
+        enriched  (mapv (partial normalize-record date-fmt series-id) records)]
+    (connector/extract-result enriched nil false)))
 
 (defn do-checkpoint [cursor-state]
   (connector/checkpoint-result cursor-state))

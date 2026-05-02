@@ -21,6 +21,7 @@
             [clojure.java.io :as io]
             [cheshire.core :as json]
             [ai.miniforge.connector-file.interface :as file-conn]
+            [ai.miniforge.connector-file.impl :as impl]
             [ai.miniforge.connector.interface :as conn]))
 
 ;; ---------------------------------------------------------------------------
@@ -277,3 +278,32 @@
       (is (= :committed (:checkpoint/status result)))
       (is (uuid? (:checkpoint/id result)))
       (conn/close fc handle))))
+
+;; ---------------------------------------------------------------------------
+;; Migrated handle-lookup helper — confirm the shared connector helper
+;; preserves the legacy ex-info shape at the protocol boundary.
+;; ---------------------------------------------------------------------------
+
+(deftest discover-throws-on-unknown-handle-test
+  (testing "do-discover throws ex-info with :handle key when handle missing"
+    (try
+      (impl/do-discover "no-such-handle")
+      (is false "expected ex-info")
+      (catch clojure.lang.ExceptionInfo e
+        (is (= "no-such-handle" (:handle (ex-data e))))))))
+
+(deftest extract-throws-on-unknown-handle-test
+  (testing "do-extract throws ex-info with :handle key when handle missing"
+    (try
+      (impl/do-extract "no-such-handle" {})
+      (is false "expected ex-info")
+      (catch clojure.lang.ExceptionInfo e
+        (is (= "no-such-handle" (:handle (ex-data e))))))))
+
+(deftest publish-throws-on-unknown-handle-test
+  (testing "do-publish throws ex-info with :handle key when handle missing"
+    (try
+      (impl/do-publish "no-such-handle" [] {})
+      (is false "expected ex-info")
+      (catch clojure.lang.ExceptionInfo e
+        (is (= "no-such-handle" (:handle (ex-data e))))))))

@@ -289,3 +289,42 @@
               (is (= ["PROJ-1" "PROJ-3"] (mapv :key (:records result)))))))
         (finally
           (impl/do-close handle))))))
+
+;;------------------------------------------------------------------------------ Layer 6
+;; Migrated validation helpers — confirm the shared connector helpers
+;; preserve the legacy ex-info shape at the protocol boundary.
+
+(deftest discover-throws-on-unknown-handle-test
+  (testing "do-discover throws ex-info with :handle key when handle missing"
+    (try
+      (impl/do-discover "no-such-handle")
+      (is false "expected ex-info")
+      (catch clojure.lang.ExceptionInfo e
+        (is (= "no-such-handle" (:handle (ex-data e))))))))
+
+(deftest extract-throws-on-unknown-handle-test
+  (testing "do-extract throws ex-info with :handle key when handle missing"
+    (try
+      (impl/do-extract "no-such-handle" "issues" {})
+      (is false "expected ex-info")
+      (catch clojure.lang.ExceptionInfo e
+        (is (= "no-such-handle" (:handle (ex-data e))))))))
+
+(deftest connect-rejects-malformed-auth-test
+  (testing "do-connect throws ex-info when auth credential-ref is malformed"
+    (try
+      (impl/do-connect {:jira/site "mycompany"}
+                       {:auth/method :api-key
+                        ;; Missing :auth/credential-id — connector-auth flags this
+                        :auth/scheme :basic})
+      (is false "expected ex-info")
+      (catch clojure.lang.ExceptionInfo e
+        (is (some? (:errors (ex-data e))))))))
+
+(deftest connect-accepts-valid-auth-test
+  (testing "do-connect succeeds when auth credential-ref validates"
+    (let [result (impl/do-connect {:jira/site "mycompany"}
+                                  {:auth/method        :api-key
+                                   :auth/credential-id "test-token"})]
+      (is (= :connected (:connector/status result)))
+      (impl/do-close (:connection/handle result)))))

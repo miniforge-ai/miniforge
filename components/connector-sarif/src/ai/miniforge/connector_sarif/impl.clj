@@ -18,22 +18,28 @@
 
 (ns ai.miniforge.connector-sarif.impl
   "SARIF connector implementation — connect, discover, extract, checkpoint."
-  (:require [ai.miniforge.connector-sarif.format :as fmt]
+  (:require [ai.miniforge.connector.interface :as connector]
+            [ai.miniforge.connector-sarif.format :as fmt]
             [ai.miniforge.connector-sarif.schema :as schema]
             [clojure.string :as str]))
 
 ;; --------------------------------------------------------------------------
 ;; Handle state
 
-(defonce ^:private handles (atom {}))
+(def ^:private handles (connector/create-handle-registry))
 
 (defn- generate-handle [] (str "sarif-" (java.util.UUID/randomUUID)))
 
 (defn- require-handle!
-  "Look up handle state, throw if missing."
+  "Look up handle state, throw if missing.
+   Delegates to the shared connector helper.
+
+   The `:connector` opt is omitted so the thrown ex-data preserves
+   the historical `{:handle ...}` payload shape; the message already
+   identifies the handle by name."
   [handle]
-  (or (get @handles handle)
-      (throw (ex-info "Unknown handle" {:handle handle}))))
+  (connector/require-handle! handles handle
+                             {:message (str "Unknown handle: " handle)}))
 
 ;; --------------------------------------------------------------------------
 ;; Connect / Close
@@ -45,17 +51,17 @@
     (when-not valid?
       (throw (ex-info "Invalid SARIF config" {:errors errors})))
     (let [handle (generate-handle)]
-      (swap! handles assoc handle
-             {:sarif/source-path (:sarif/source-path config)
-              :sarif/format      (get config :sarif/format :auto)
-              :sarif/csv-columns (get config :sarif/csv-columns nil)})
+      (connector/store-handle! handles handle
+                               {:sarif/source-path (:sarif/source-path config)
+                                :sarif/format      (get config :sarif/format :auto)
+                                :sarif/csv-columns (get config :sarif/csv-columns nil)})
       {:connection/handle handle
        :connector/status  :connected})))
 
 (defn do-close
   "Release a connection handle."
   [handle]
-  (swap! handles dissoc handle)
+  (connector/remove-handle! handles handle)
   {:connector/status :closed})
 
 ;; --------------------------------------------------------------------------
