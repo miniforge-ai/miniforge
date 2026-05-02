@@ -1,8 +1,12 @@
 (ns ai.miniforge.cursor-store.store
   "File-based cursor persistence.
 
-   Layer 0 — pure conversion helpers
-   Layer 1 — file I/O (save-cursors, load-cursors)"
+   Stratification (intra-namespace):
+   Layer 0 — no in-ns deps: cursor-file, normalize-for-storage,
+             stringify-instants, read-edn.
+   Layer 1 — write-edn (composes Layer 0's stringify-instants).
+   Layer 2 — public I/O (save-cursors, load-cursors). Both at L2 to
+             keep the persistence API at one stratum."
   (:require [clojure.edn :as edn]
             [clojure.java.io :as io]
             [clojure.pprint :as pp]
@@ -48,6 +52,13 @@
   [v]
   (walk/postwalk (fn [x] (if (instance? Instant x) (str x) x)) v))
 
+(defn- read-edn
+  "Parse an EDN string."
+  [s]
+  (edn/read-string s))
+
+;;------------------------------------------------------------------------------ Layer 1 — composes Layer 0
+
 (defn- write-edn
   "Render a value to a pretty-printed EDN string."
   [v]
@@ -55,12 +66,7 @@
     (pp/pprint (stringify-instants v) sw)
     (str sw)))
 
-(defn- read-edn
-  "Parse an EDN string."
-  [s]
-  (edn/read-string s))
-
-;;------------------------------------------------------------------------------ Layer 1 — I/O
+;;------------------------------------------------------------------------------ Layer 2 — public I/O
 
 (defn save-cursors
   "Persist connector cursors to <pipeline-dir>/.cursors/<pipeline-filename>.

@@ -22,13 +22,14 @@
    Provides the ControlPlaneAdapter protocol that vendor-specific
    adapters must implement, plus shared utilities for building adapters.
 
-   Layer 0: Protocol re-exports
-   Layer 1: Adapter utilities"
+   Stratification (intra-namespace):
+   Layer 0: Protocol re-exports + pure data + helpers with no in-ns deps.
+   Layer 1: `heartbeat-interval-for-vendor` (consumes Layer 0 data)."
   (:require
    [ai.miniforge.control-plane-adapter.protocol :as proto]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Protocol re-exports
+;; Protocol re-exports + pure data + helpers with no in-namespace deps.
 
 (def ControlPlaneAdapter proto/ControlPlaneAdapter)
 (def ControlPlaneAdapterLogs proto/ControlPlaneAdapterLogs)
@@ -40,8 +41,12 @@
 (def send-command proto/send-command)
 (def agent-logs proto/agent-logs)
 
-;------------------------------------------------------------------------------ Layer 1
-;; Adapter utilities
+(def ^:private vendor-heartbeat-ms
+  "Recommended heartbeat intervals per vendor (ms)."
+  {:claude-code 15000    ;; local process, fast check
+   :miniforge   10000    ;; native, fastest
+   :openai      60000    ;; API rate limits
+   :cursor      30000})
 
 (defn normalize-status
   "Normalize a vendor-specific status string to a control plane status keyword.
@@ -69,12 +74,8 @@
   (when timestamp
     (- (System/currentTimeMillis) (.getTime timestamp))))
 
-(def ^:private vendor-heartbeat-ms
-  "Recommended heartbeat intervals per vendor (ms)."
-  {:claude-code 15000    ;; local process, fast check
-   :miniforge   10000    ;; native, fastest
-   :openai      60000    ;; API rate limits
-   :cursor      30000})
+;------------------------------------------------------------------------------ Layer 1
+;; Composes Layer 0 (`vendor-heartbeat-ms`).
 
 (defn heartbeat-interval-for-vendor
   "Return the recommended heartbeat interval for a vendor.
