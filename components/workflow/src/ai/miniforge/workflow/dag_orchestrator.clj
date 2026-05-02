@@ -237,6 +237,33 @@
     (:task/component task-def)
     (assoc :task/component (:task/component task-def))))
 
+(defn- default-spec-branch
+  "Branch the orchestrator should treat as the spec's parent — the one root
+   tasks acquire off and dep-resolution falls back to."
+  [context]
+  (or (get-in context [:execution/opts :branch])
+      (get-in context [:execution/branch])
+      "main"))
+
+(defn- resolve-task-base-branch
+  "Look up the branch task-def's scratch worktree should be forked from.
+   Returns either a branch name string (the resolved base), an anomaly
+   map (multi-parent / non-forest), or nil when there is no registry on
+   context.
+
+   nil is the explicit 'don't override' signal: callers that don't opt
+   into the chaining path (legacy code, focused unit tests, anything
+   that constructs a context without `:dag/branch-registry`) get exactly
+   the pre-chaining behavior — `task-sub-opts` will omit `:branch` and
+   the sub-workflow's `acquire-environment!` falls back to whatever it
+   would have done before this feature existed."
+  [context task-def]
+  (when-let [registry-atom (get context :dag/branch-registry)]
+    (let [registry (deref registry-atom)
+          deps (vec (or (:task/deps task-def) []))
+          default (default-spec-branch context)]
+      (dag/resolve-base-branch registry deps default))))
+
 (defn task-sub-opts
   "Build execution opts for a DAG task's sub-workflow.
 
@@ -244,21 +271,36 @@
    Disables DAG execution to prevent recursion and skips lifecycle events
    (parent workflow owns those).
 
+   When the parent has a `:dag/branch-registry` on context (the
+   per-task-base-chaining path), resolves `task-def`'s dependency to a
+   real persisted branch and passes it as `:branch` so the sub-workflow's
+   `acquire-environment!` forks off that branch instead of the spec branch.
+   Without a registry on context, behaves exactly as pre-chaining code —
+   sub-workflow acquires off the default branch.
+
    IMPORTANT: Does NOT pass the parent's executor, environment-id, or
    worktree-path. Each sub-workflow acquires its own isolated environment
    via run-pipeline's acquire-execution-environment!. This prevents:
    - Concurrent sub-workflows from writing to the same directory
    - Stale/broken files from previous runs polluting the release commit
    - Pre-commit hooks picking up unrelated changes from sibling tasks"
-  [context]
-  (cond-> {:disable-dag-execution true
-           :skip-lifecycle-events true
-           :quiet (boolean (get-in context [:execution/opts :quiet]))
-           :create-pr? true}
-    (:llm-backend context)      (assoc :llm-backend (:llm-backend context))
-    (:event-stream context)     (assoc :event-stream (:event-stream context))
-    (get-in context [:execution/opts :event-stream])
-    (assoc :event-stream (get-in context [:execution/opts :event-stream]))))
+  ([context]
+   ;; Backward-compatible arity for callers that don't yet thread task-def.
+   (task-sub-opts context nil))
+  ([context task-def]
+   (let [base-branch (when task-def (resolve-task-base-branch context task-def))
+         resolved-branch (when (and base-branch
+                                    (not (dag/resolve-base-branch-error? base-branch)))
+                           base-branch)]
+     (cond-> {:disable-dag-execution true
+              :skip-lifecycle-events true
+              :quiet (boolean (get-in context [:execution/opts :quiet]))
+              :create-pr? true}
+       (:llm-backend context)      (assoc :llm-backend (:llm-backend context))
+       (:event-stream context)     (assoc :event-stream (:event-stream context))
+       (get-in context [:execution/opts :event-stream])
+       (assoc :event-stream (get-in context [:execution/opts :event-stream]))
+       resolved-branch (assoc :branch resolved-branch)))))
 
 ;--- Layer 1: Mini-Workflow Execution
 
@@ -294,6 +336,18 @@
              {:task-id (:task/id task-def)
               :deps (set (map normalize-task-id (:task/dependencies task-def [])))}))))
 
+(defn- task-result-branch
+  "Branch name produced by the sub-workflow's persist step for this task.
+
+   In governed mode the runner sets `:execution/task-branch` directly. In
+   local mode the worktree executor's `environment-id` IS the branch name
+   created by `git worktree add -b <env-id>`. Either is fine; we pick
+   whichever is present, falling back to nil so callers know nothing
+   persisted."
+  [result]
+  (or (:execution/task-branch result)
+      (:execution/environment-id result)))
+
 (defn run-mini-workflow
   "Execute a full sub-workflow pipeline for a single DAG task.
 
@@ -301,24 +355,35 @@
    derived from the parent workflow config. The plan phase is skipped
    because the task description IS the plan.
 
-   Extracts PR info from the release phase result and includes it
-   in the workflow result."
+   Threads `task-def` to `task-sub-opts` so per-task base chaining can
+   resolve the right base branch from the workflow's branch registry —
+   downstream tasks acquire off the prior task's persisted branch instead
+   of the spec branch. Extracts the task's resulting branch from the
+   sub-workflow result and includes it in the success envelope so
+   `execute-dag-loop` can register it for downstream consumers.
+
+   Extracts PR info from the release phase result and includes it in the
+   workflow result."
   [task-def context]
   (let [sub-workflow (task-sub-workflow task-def context)
-        sub-input (task-sub-input task-def)
-        sub-opts (task-sub-opts context)
+        sub-input    (task-sub-input task-def)
+        sub-opts     (task-sub-opts context task-def)
         run-pipeline (:execution/run-pipeline-fn context)
-        result (run-pipeline sub-workflow sub-input sub-opts)
-        artifacts (:execution/artifacts result)
-        metrics (:execution/metrics result)
-        pr-info (extract-pr-info-from-result result task-def)]
+        result       (run-pipeline sub-workflow sub-input sub-opts)
+        artifacts    (:execution/artifacts result)
+        metrics      (:execution/metrics result)
+        pr-info      (extract-pr-info-from-result result task-def)
+        task-branch  (task-result-branch result)]
     (if (phase/succeeded? result)
       (cond-> (workflow-success (first artifacts) metrics)
         pr-info (assoc :pr-info pr-info)
         ;; Carry sub-workflow's worktree path so apply-dag-success can
         ;; merge changes back into the parent worktree for release.
         (:execution/worktree-path result)
-        (assoc :worktree-path (:execution/worktree-path result)))
+        (assoc :worktree-path (:execution/worktree-path result))
+        ;; Carry the persisted branch name so the orchestrator can register
+        ;; it for downstream tasks' base resolution.
+        task-branch (assoc :task-branch task-branch))
       (workflow-failure (extract-sub-workflow-error result) metrics))))
 
 (defn workflow-result->dag-result [task-id description wf-result]
@@ -328,7 +393,8 @@
                      :status :implemented
                      :artifacts [(:artifact wf-result)]
                      :metrics (:metrics wf-result)}
-              (:pr-info wf-result) (assoc :pr-info (:pr-info wf-result))))
+              (:pr-info wf-result)    (assoc :pr-info (:pr-info wf-result))
+              (:task-branch wf-result) (assoc :task-branch (:task-branch wf-result))))
     (dag/err :task-execution-failed
              (:error wf-result)
              {:task-id task-id :metrics (:metrics wf-result)})))
@@ -584,13 +650,32 @@
       (:pr-infos metrics-agg) (assoc :pr-infos (:pr-infos metrics-agg))
       (:worktree-paths metrics-agg) (assoc :worktree-paths (:worktree-paths metrics-agg)))))
 
+(defn- register-batch-branches!
+  "Register every successfully-completed task's persisted branch in the
+   per-workflow branch registry. Runs once per batch, AFTER all futures
+   in the batch have joined — keeps mutation off the hot path of any
+   running task and guarantees siblings in the same batch never observe
+   each other's incomplete state."
+  [registry-atom batch-results]
+  (when registry-atom
+    (doseq [[task-id result] batch-results]
+      (when (dag/ok? result)
+        (when-let [branch (get-in result [:data :task-branch])]
+          (swap! registry-atom dag/register-branch task-id {:branch branch}))))))
+
 (defn execute-dag-loop [tasks-map context logger]
   (let [{:keys [on-task-start on-task-complete]} context
         max-parallel (get context :max-parallel 4)
         event-stream (or (:event-stream context)
                          (get-in context [:execution/opts :event-stream]))
         workflow-id (:workflow-id context)
-        pre-completed (get context :pre-completed-ids #{})]
+        pre-completed (get context :pre-completed-ids #{})
+        ;; Per-workflow branch registry. Lives on context so all sibling
+        ;; futures in `execute-tasks-batch` see the same atom; no global
+        ;; state. Empty for brand-new runs; pre-populated during resume
+        ;; from the prior run's checkpoint events when that lands.
+        registry-atom (atom (dag/create-branch-registry))
+        context (assoc context :dag/branch-registry registry-atom)]
 
     (when (seq pre-completed)
       (log/info logger :dag-orchestrator :dag/resuming
@@ -629,6 +714,11 @@
                 new-completed (into completed-ids completed)
                 new-failed (into failed-ids other-failed-ids)]
 
+            ;; Register persisted branches BEFORE the rate-limit decision so
+            ;; that even on pause the registry reflects what's been written
+            ;; — checkpoint/resume can replay it from the event stream
+            ;; alongside :dag/task-completed.
+            (register-batch-branches! registry-atom results)
             (emit-completed-checkpoints! completed results event-stream workflow-id)
 
             (if (seq rate-limited-ids)
@@ -665,19 +755,39 @@
                         :component-count (count components)
                         :file-count (count all-files)}}))))
 
+(defn- task-defs->forest-shape
+  "Adapt post-wiring task-defs (`:task/deps` set) to the shape
+   `validate-dag-forest` expects (`:task/dependencies` vec).
+
+   Validation runs AFTER stratum wiring on purpose: stratum auto-wiring
+   can introduce multi-parent edges that the raw plan doesn't show, and
+   we want the orchestrator to reject those at plan-validation time too."
+  [task-defs]
+  (mapv (fn [t]
+          {:task/id (:task/id t)
+           :task/dependencies (vec (:task/deps t #{}))})
+        task-defs))
+
 (defn execute-plan-as-dag [plan context]
   (let [logger (or (:logger context) (log/create-logger {:min-level :info}))
         _ (warn-potential-monolith plan logger)
         task-defs (plan->dag-tasks plan context)
-        tasks-map (->> task-defs (map (fn [t] [(:task/id t) t])) (into {}))
-        pre-completed (get context :pre-completed-ids #{})
-        ctx (cond-> context
-              (seq pre-completed) (assoc :pre-completed-ids pre-completed))]
-    (log/info logger :dag-orchestrator :dag/starting
-              {:data {:plan-id (:plan/id plan)
-                      :task-count (count task-defs)
-                      :pre-completed (count pre-completed)}})
-    (execute-dag-loop tasks-map ctx logger)))
+        forest-anomaly (dag/validate-dag-forest (task-defs->forest-shape task-defs))]
+    (if forest-anomaly
+      (do
+        (log/info logger :dag-orchestrator :dag/non-forest-rejected
+                  {:data {:plan-id (:plan/id plan)
+                          :violations (:multi-parent-tasks forest-anomaly)}})
+        (dag-execution-error 0 (count task-defs) forest-anomaly))
+      (let [tasks-map (->> task-defs (map (fn [t] [(:task/id t) t])) (into {}))
+            pre-completed (get context :pre-completed-ids #{})
+            ctx (cond-> context
+                  (seq pre-completed) (assoc :pre-completed-ids pre-completed))]
+        (log/info logger :dag-orchestrator :dag/starting
+                  {:data {:plan-id (:plan/id plan)
+                          :task-count (count task-defs)
+                          :pre-completed (count pre-completed)}})
+        (execute-dag-loop tasks-map ctx logger)))))
 
 ;--- Layer 3: Workflow Integration
 
