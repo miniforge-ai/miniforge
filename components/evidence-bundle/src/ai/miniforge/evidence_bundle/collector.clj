@@ -22,7 +22,6 @@
   (:require
    [ai.miniforge.content-hash.interface :as content-hash]
    [ai.miniforge.evidence-bundle.schema :as schema]
-   [ai.miniforge.event-stream.interface.stream :as event-stream]
    [ai.miniforge.response.interface :as response]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -201,6 +200,15 @@
 ;------------------------------------------------------------------------------ Layer 3.5
 ;; Supervision Decision Evidence (N6)
 
+(defn- collect-event-stream-events
+  [event-stream query]
+  (try
+    (when event-stream
+      (let [get-events-fn (requiring-resolve 'ai.miniforge.event-stream.core/get-events)]
+        (vec (get-events-fn event-stream query))))
+    (catch Exception _e
+      [])))
+
 (defn collect-supervision-decisions
   "Collect supervision decision events from the event stream.
 
@@ -215,10 +223,9 @@
   [event-stream workflow-id]
   (try
     (when event-stream
-      (let [get-events-fn (requiring-resolve 'ai.miniforge.event-stream.core/get-events)
-            events (get-events-fn event-stream
-                                  {:workflow-id workflow-id
-                                   :event-type :supervision/tool-use-evaluated})]
+      (let [events (collect-event-stream-events event-stream
+                                                {:workflow-id workflow-id
+                                                 :event-type :supervision/tool-use-evaluated})]
         (mapv (fn [event]
                 (cond-> {:supervision/tool-name (get event :tool/name "unknown")
                          :supervision/decision (get event :supervision/decision "allow")
@@ -253,13 +260,12 @@
   [event-stream workflow-id]
   (try
     (when event-stream
-      (let [get-events-fn (requiring-resolve 'ai.miniforge.event-stream.core/get-events)
-            requested (get-events-fn event-stream
-                                     {:workflow-id workflow-id
-                                      :event-type :control-action/requested})
-            executed (get-events-fn event-stream
-                                    {:workflow-id workflow-id
-                                     :event-type :control-action/executed})
+      (let [requested (collect-event-stream-events event-stream
+                                                   {:workflow-id workflow-id
+                                                    :event-type :control-action/requested})
+            executed (collect-event-stream-events event-stream
+                                                  {:workflow-id workflow-id
+                                                   :event-type :control-action/executed})
             executed-by-id (into {} (map (fn [e] [(:action/id e) e]) executed))]
         (mapv (fn [req-event]
                 (let [action-id (:action/id req-event)
@@ -372,14 +378,15 @@
 
 (defn- dependency-health-from-events
   [stream workflow-id]
-  (let [events (event-stream/get-events stream {:workflow-id workflow-id})]
-    (->> events
-         (filter #(contains? dependency-event-types (:event/type %)))
-         (reduce (fn [projection event]
-                   (if-let [entry (canonical-dependency-entry (:dependency/id event) event)]
-                     (assoc projection (:dependency/id entry) entry)
-                     projection))
-                 {}))))
+  (->> dependency-event-types
+       (mapcat #(collect-event-stream-events stream
+                                             {:workflow-id workflow-id
+                                              :event-type %}))
+       (reduce (fn [projection event]
+                 (if-let [entry (canonical-dependency-entry (:dependency/id event) event)]
+                   (assoc projection (:dependency/id entry) entry)
+                   projection))
+               {})))
 
 (defn- collect-dependency-health
   [workflow-state stream workflow-id opts]
