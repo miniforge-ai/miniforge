@@ -105,10 +105,11 @@
         (update-in [:execution/metrics :duration-ms] (fnil + 0) duration-ms))))
 
 (defn error-explore
-  "Handle exploration phase errors. Simple retry within budget;
-   delegates to the shared `phase/handle-error` helper."
+  "Handle exploration phase errors. Retry within budget, then fail in
+   place (Explore historically never honored `:on-fail`; pass
+   `redirect? = false` to preserve that semantics)."
   [ctx ex]
-  (phase/handle-error ctx ex 1))
+  (phase/handle-error ctx ex 1 false))
 
 ;------------------------------------------------------------------------------ Layer 2
 ;; Registry method

@@ -148,10 +148,11 @@
       updated-ctx)))
 
 (defn error-plan
-  "Handle planning phase errors. Retries within budget, otherwise
-   propagates; delegates to the shared `phase/handle-error` helper."
+  "Handle planning phase errors. Retry within budget, then fail in
+   place (Plan historically never honored `:on-fail`; pass
+   `redirect? = false` to preserve that semantics)."
   [ctx ex]
-  (phase/handle-error ctx ex 3))
+  (phase/handle-error ctx ex 3 false))
 
 ;------------------------------------------------------------------------------ Layer 2
 ;; Registry method
