@@ -66,9 +66,17 @@
    ;; Data-file extensions in resources/, messages/, fixtures/, etc.
    ;; — bulk data, not reviewed line-by-line. Code-shaped EDN
    ;; (deps.edn, bb.edn, workspace.edn, *.spec.edn) is NOT data and
-   ;; stays in the budget.
-   #"(?i)/(resources|messages|fixtures|fixture|seeds)/.*\.(edn|json|yaml|yml|csv|tsv)$"
-   #"(?i)\.(json|yaml|yml|csv|tsv)$"])           ; top-level data files
+   ;; stays in the budget. The `(^|/)` anchor matches both nested
+   ;; (`components/X/resources/…`) and top-level (`resources/…`)
+   ;; layouts — without it, root-level resource files would silently
+   ;; count against the budget.
+   ;;
+   ;; A bare `\.(json|yaml|yml|csv|tsv)$` catch-all was tempting but
+   ;; over-broad: it would also exclude .github workflow YAMLs,
+   ;; tsconfig.json, and other behavior-as-data files reviewers DO
+   ;; need to look at. Stick with the resource/message/fixture/seed
+   ;; gate.
+   #"(?i)(^|/)(resources|messages|fixtures|fixture|seeds)/.*\.(edn|json|yaml|yml|csv|tsv)$"])
 
 (defn excluded?
   "True when `path` matches any pattern in `excluded-path-patterns`."
@@ -119,32 +127,46 @@
   "Parse `git diff --cached -U0 --no-color` into a vector of per-file
    maps `{:path :added [\"line\" …] :deleted [\"line\" …]}`.
 
-   Tracks the current path via `+++ b/<path>` headers and accumulates
-   the body lines that follow until the next file header."
+   Whole-file deletions emit `--- a/<path>` followed by `+++
+   /dev/null`; track the `--- a/` path separately and use it when
+   the `+++` side is /dev/null so the deletion's `-` lines are
+   counted against the budget rather than dropped."
   [diff-text]
-  (loop [lines (str/split-lines (or diff-text ""))
-         current nil
-         out     []]
+  (loop [lines       (str/split-lines (or diff-text ""))
+         pending-old nil
+         current     nil
+         out         []]
     (if (empty? lines)
       (cond-> out current (conj current))
       (let [line (first lines)]
         (cond
+          (str/starts-with? line "--- a/")
+          (recur (rest lines) (subs line (count "--- a/")) current out)
+
+          (str/starts-with? line "--- /dev/null")
+          (recur (rest lines) nil current out)
+
           (str/starts-with? line "+++ b/")
-          (recur (rest lines)
+          (recur (rest lines) nil
                  {:path (subs line (count "+++ b/")) :added [] :deleted []}
                  (cond-> out current (conj current)))
 
           (str/starts-with? line "+++ /dev/null")
-          (recur (rest lines) nil (cond-> out current (conj current)))
+          ;; whole-file deletion: open a new entry under the
+          ;; previously-seen `--- a/<path>` and accumulate the `-`
+          ;; lines into it.
+          (recur (rest lines) nil
+                 (when pending-old {:path pending-old :added [] :deleted []})
+                 (cond-> out current (conj current)))
 
           (and current (= :added (classify-line line)))
-          (recur (rest lines) (update current :added conj (subs line 1)) out)
+          (recur (rest lines) pending-old (update current :added conj (subs line 1)) out)
 
           (and current (= :deleted (classify-line line)))
-          (recur (rest lines) (update current :deleted conj (subs line 1)) out)
+          (recur (rest lines) pending-old (update current :deleted conj (subs line 1)) out)
 
           :else
-          (recur (rest lines) current out))))))
+          (recur (rest lines) pending-old current out))))))
 
 (defn file-reportable-count
   "Count budget-impacting lines in one file entry. File-level
