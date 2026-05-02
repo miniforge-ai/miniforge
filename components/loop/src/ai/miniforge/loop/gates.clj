@@ -336,11 +336,12 @@
     (let [start (clock/now-ms)]
       (try
         (let [result (check-fn artifact context)]
-          (if (:gate/passed? result)
-            (assoc result :gate/duration-ms (clock/elapsed-since start))
-            (assoc result :gate/duration-ms (clock/elapsed-since start))))
+          (assoc result :gate/duration-ms (clock/elapsed-since start)))
         (catch Exception e
-          (fail-result id :custom
+          ;; Use the gate's declared `type-kw` rather than a hard-coded
+          ;; `:custom` so the result map matches the gate's
+          ;; `(gate-type)` on both success and failure paths.
+          (fail-result id type-kw
                        [(make-error :custom-gate-error (.getMessage e))]
                        :duration-ms (clock/elapsed-since start))))))
 

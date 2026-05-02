@@ -38,15 +38,25 @@
   (System/currentTimeMillis))
 
 (defn elapsed-since
-  "Milliseconds since `start-ms`. Pair with `now-ms` at entry:
+  "Milliseconds since `start-ms`. Pair with `now-ms` at entry — call
+   `now-ms` BEFORE the work, then `elapsed-since` AFTER:
 
        (let [start (clock/now-ms)]
          …work…
          {:duration-ms (clock/elapsed-since start)})
 
-   Equivalent to `(- (now-ms) start-ms)` but reads as the intent."
+   Note: `(elapsed-since (now-ms))` would measure ~0 because the start
+   timestamp is created at the end of the work. The two-step pattern
+   above is the only correct usage.
+
+   Wall-clock based, so an NTP step or VM clock adjustment could in
+   principle make `(now-ms)` go backwards. Clamp the result to
+   non-negative so downstream `:duration-ms` consumers (which model the
+   field as non-negative; see `components/loop/schema.clj`,
+   `components/schema/core.clj`, `components/agent/reviewer.clj`)
+   never see a negative duration."
   [start-ms]
-  (- (now-ms) start-ms))
+  (max 0 (- (now-ms) start-ms)))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Composes Layer 0.

@@ -32,9 +32,9 @@
     (with-redefs [sut/now-ms (constantly 1000)]
       (is (= 250 (sut/elapsed-since 750)))))
 
-  (testing "negative skew clamps to negative (caller is responsible for forward times)"
+  (testing "clock skew (start in the future) clamps to 0 instead of returning negative"
     (with-redefs [sut/now-ms (constantly 1000)]
-      (is (= -50 (sut/elapsed-since 1050))))))
+      (is (= 0 (sut/elapsed-since 1050))))))
 
 (deftest with-duration-test
   (testing "returns the body result + elapsed millis"
