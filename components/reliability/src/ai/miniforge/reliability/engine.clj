@@ -103,18 +103,28 @@
                :current projection})))
         current-projection))
 
+(defn- recovered-from-unhealthy?
+  "True when `previous-status` was a non-nil non-healthy state and
+   `current-status` is `:healthy`. The first observation of a
+   dependency (no prior status) is not a recovery."
+  [previous-status current-status]
+  (and previous-status
+       (not= :healthy previous-status)
+       (= :healthy current-status)))
+
+(defn- dependency-health-event
+  "Pick the right event constructor for a transition."
+  [event-stream current previous-status]
+  (if (recovered-from-unhealthy? previous-status (:dependency/status current))
+    (events/dependency-recovered event-stream current previous-status)
+    (events/dependency-health-updated event-stream current previous-status)))
+
 (defn- emit-dependency-health-events!
   [event-stream prior-projection current-projection]
   (doseq [{:keys [previous current]} (dependency-health-delta prior-projection current-projection)]
-    (let [previous-status (:dependency/status previous)
-          current-status (:dependency/status current)]
+    (let [previous-status (:dependency/status previous)]
       (stream/publish! event-stream
-                       (if (and previous-status
-                                (not= :healthy previous-status)
-                                (= :healthy current-status))
-                         (events/dependency-recovered event-stream current previous-status)
-                         (events/dependency-health-updated event-stream current previous-status)))))
-  )
+                       (dependency-health-event event-stream current previous-status)))))
 
 ;------------------------------------------------------------------------------ Layer 2
 ;; Compute cycle

@@ -280,20 +280,23 @@
 
 (defn- dependency-entity
   [event]
-  (let [dependency-id' (dependency-id event)]
-    (assoc-some {:dependency/id dependency-id'
-                 :dependency/status (or (:dependency/status event) :healthy)}
-                :dependency/source (:dependency/source event)
-                :dependency/kind (:dependency/kind event)
-                :dependency/vendor (:dependency/vendor event)
-                :dependency/class (:dependency/class event)
-                :dependency/retryability (:dependency/retryability event)
-                :dependency/failure-count (:dependency/failure-count event)
-                :dependency/window-size (:dependency/window-size event)
-                :dependency/incident-counts (:dependency/incident-counts event)
-                :dependency/last-observed-at (:dependency/last-observed-at event)
-                :dependency/last-recovered-at (:dependency/last-recovered-at event)
-                :dependency/message (:event/message event))))
+  (let [{:dependency/keys [status source kind vendor class retryability
+                           failure-count window-size incident-counts
+                           last-observed-at last-recovered-at]} event
+        message (:event/message event)]
+    (assoc-some {:dependency/id (dependency-id event)
+                 :dependency/status (or status :healthy)}
+                :dependency/source            source
+                :dependency/kind              kind
+                :dependency/vendor            vendor
+                :dependency/class             class
+                :dependency/retryability      retryability
+                :dependency/failure-count     failure-count
+                :dependency/window-size       window-size
+                :dependency/incident-counts   incident-counts
+                :dependency/last-observed-at  last-observed-at
+                :dependency/last-recovered-at last-recovered-at
+                :dependency/message           message)))
 
 (defn- workflow-dependency-health
   "Project the latest dependency-health entities from workflow events."
@@ -409,57 +412,73 @@
 ;------------------------------------------------------------------------------ Layer 1
 ;; Data fetchers
 
+(defn- merged-events
+  "Combine in-process live events with disk-archive events, filtering
+   out any disk events for workflow IDs already represented in the
+   live stream. Avoids duplicating in-process workflow events and
+   keeps test isolation when callers use a non-default state."
+  [state]
+  (let [live-events (live-stream-events state)
+        live-wf-ids (into #{} (keep wf-id live-events))
+        disk-events (->> (historical-events nil)
+                         (remove #(live-wf-ids (wf-id %))))]
+    (into live-events disk-events)))
+
+(defn- workflow-summary-from-events
+  "Build the workflow summary map for a single workflow from its
+   chronologically-ordered events. Returns the summary with
+   dependency-health attached."
+  [id wf-events]
+  (let [wf-events         (->> wf-events (sort-by #(ts-epoch-ms (event-ts %))) vec)
+        started           (first-event :workflow/started   wf-events)
+        completed         (last-event  :workflow/completed wf-events)
+        failed            (last-event  :workflow/failed    wf-events)
+        status            (wf-status completed failed (some-> wf-events last event-ts))
+        metrics           (workflow-metrics wf-events)
+        output-preview    (workflow-output-preview wf-events)
+        dependency-health (workflow-dependency-health wf-events)
+        summary           (cond-> {:id                 id
+                                   :name               (wf-name-from-started started id)
+                                   :status             status
+                                   :phase              (wf-phase wf-events started)
+                                   :progress           (workflow-progress status)
+                                   :started-at         (normalize-ts (event-ts started))
+                                   :updated-at         (normalize-ts (some-> wf-events last event-ts))
+                                   :completed-at       (normalize-ts (event-ts completed))
+                                   :event-count        (count wf-events)
+                                   :evidence-bundle-id (:workflow/evidence-bundle-id completed)
+                                   :metrics            metrics}
+                            output-preview (assoc :latest-output output-preview))]
+    (attach-dependency-health summary dependency-health)))
+
+(defn- compute-workflows
+  "Build the sorted, capped list of workflow summaries for `state`."
+  [state]
+  (try
+    (let [grouped-events (->> (merged-events state)
+                              (filter (comp some? wf-id))
+                              (group-by wf-id))]
+      (->> grouped-events
+           (map (fn [[id wf-events]] (workflow-summary-from-events id wf-events)))
+           (sort-by workflow-recency >)
+           (take max-recent-workflows)
+           vec))
+    (catch Exception e
+      (println "Error getting workflows:" (ex-message e))
+      [])))
+
 (def get-workflows
   "Get workflows from live event stream + disk archive (cached 5s).
    Merging both sources ensures workflows running in a separate process
    (e.g. bb miniforge run) are visible in the dashboard."
   (let [ttl-ms 5000
-        cache (atom {})]
+        cache  (atom {})]
     (fn [state]
-      (let [now (System/currentTimeMillis)
+      (let [now    (System/currentTimeMillis)
             cached (get @cache [state])]
         (if (and cached (< (- now (:time cached)) ttl-ms))
           (:value cached)
-          (let [result (try
-                         (let [live-events   (live-stream-events state)
-                               live-wf-ids   (into #{} (keep wf-id live-events))
-                               ;; Only load disk events for workflows not already in the
-                               ;; live stream — avoids contaminating tests and prevents
-                               ;; duplicate events for in-process workflows.
-                               disk-events   (->> (historical-events nil)
-                                                  (remove #(live-wf-ids (wf-id %))))
-                               events        (into live-events disk-events)
-                               grouped-events (group-by wf-id (filter (comp some? wf-id) events))
-                               workflows     (map (fn [[id wf-events]]
-                                                    (let [wf-events  (->> wf-events (sort-by #(ts-epoch-ms (event-ts %))) vec)
-                                                          started    (first-event :workflow/started   wf-events)
-                                                          completed  (last-event  :workflow/completed wf-events)
-                                                          failed     (last-event  :workflow/failed    wf-events)
-                                                          status     (wf-status completed failed (some-> wf-events last event-ts))
-                                                          metrics    (workflow-metrics wf-events)
-                                                          output-preview (workflow-output-preview wf-events)
-                                                          dependency-health (workflow-dependency-health wf-events)
-                                                          workflow-summary (cond-> {:id           id
-                                                                                    :name         (wf-name-from-started started id)
-                                                                                    :status       status
-                                                                                    :phase        (wf-phase wf-events started)
-                                                                                    :progress     (workflow-progress status)
-                                                                                    :started-at   (normalize-ts (event-ts started))
-                                                                                    :updated-at   (normalize-ts (some-> wf-events last event-ts))
-                                                                                    :completed-at (normalize-ts (event-ts completed))
-                                                                                    :event-count  (count wf-events)
-                                                                                    :evidence-bundle-id (:workflow/evidence-bundle-id completed)
-                                                                                    :metrics      metrics}
-                                                                             output-preview (assoc :latest-output output-preview))]
-                                                      (attach-dependency-health workflow-summary dependency-health)))
-                                                  grouped-events)]
-                           (->> workflows
-                                (sort-by workflow-recency >)
-                                (take max-recent-workflows)
-                                vec))
-                         (catch Exception e
-                           (println "Error getting workflows:" (ex-message e))
-                           []))]
+          (let [result (compute-workflows state)]
             (swap! cache assoc [state] {:value result :time now})
             result))))))
 
