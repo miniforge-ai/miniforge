@@ -141,6 +141,34 @@
                       (run-single-gate gate idx artifact context logger)))
        vec))
 
+(defn implementation-handoff-gate
+  "Reject degraded implement handoffs before semantic review.
+
+   This catches environment-model cases where implement recovered a code artifact
+   from disk after an agent-side failure, or where the curator flagged
+   out-of-scope writes. Both are strong signals that review must not silently
+   approve the handoff."
+  []
+  (loop/custom-gate
+   :implementation-handoff
+   :policy
+   (fn [artifact _context]
+     (let [degraded? (true? (:code/degraded-handoff? artifact))
+           scope-deviations (vec (:code/scope-deviations artifact))
+           errors (cond-> []
+                    degraded?
+                    (conj (loop/make-error
+                           :degraded-implement-handoff
+                           "Implement handoff is degraded: the artifact was recovered after an implementer-side failure"))
+                    (seq scope-deviations)
+                    (conj (loop/make-error
+                           :scope-deviations
+                           (str "Artifact includes out-of-scope writes: "
+                                (str/join ", " scope-deviations)))))]
+       (if (seq errors)
+         (loop/fail-result :implementation-handoff :policy errors)
+         (loop/pass-result :implementation-handoff :policy))))))
+
 (defn extract-blocking-issues
   "Extract blocking errors from failed gates."
   [failed-gates]
@@ -310,6 +338,22 @@
   (->> issues
        (filter #(= :warning (:severity %)))
        (mapv :description)))
+
+(def ^:private unparseable-review-message
+  "Blocking issue used when the reviewer LLM returns content that cannot be parsed
+   into the canonical review artifact shape."
+  "Reviewer LLM output could not be parsed into a review artifact")
+
+(defn- review-failure-message
+  "Derive the blocking issue recorded when the reviewer LLM response cannot
+   be converted into a canonical review artifact."
+  [response content]
+  (let [content-present? (not (str/blank? (or content "")))
+        llm-error (llm/get-error response)]
+    (cond
+      content-present? unparseable-review-message
+      (string? (:message llm-error)) (:message llm-error)
+      :else "Reviewer LLM invocation failed before producing a review artifact")))
 
 (defn llm-issues->recommendations
   "Extract suggestions from LLM issues as recommendations."
@@ -502,6 +546,7 @@
   (let [logger (or (:logger opts)
                    (log/create-logger {:min-level :info :output (fn [_])}))
         default-gates [(loop/syntax-gate)
+                       (implementation-handoff-gate)
                        (loop/lint-gate)
                        (loop/policy-gate :security {:policies [:no-secrets]})]
         gates (get opts :gates default-gates)
@@ -544,6 +589,7 @@
                              (llm/chat llm-client user-prompt
                                        {:system @reviewer-system-prompt
                                         :max-turns 20}))
+                  content (or (llm/get-content response) "")
                   tokens (get response :tokens 0)
                   cost-usd (get response :cost-usd)]
 
@@ -553,10 +599,13 @@
                                 :streaming? (boolean on-chunk)}})
 
               (let [;; Parse LLM review
-                    llm-review (when (llm/success? response)
-                                 (parse-review-response (llm/get-content response)))
-                    llm-decision (when llm-review
-                                  (normalize-llm-decision (:review/decision llm-review)))
+                    llm-review (when-not (str/blank? content)
+                                 (parse-review-response content))
+                    failure-message (review-failure-message response content)
+                    parse-failed? (nil? llm-review)
+                    llm-decision (cond
+                                   parse-failed? :rejected
+                                   llm-review (normalize-llm-decision (:review/decision llm-review)))
                     llm-issues (get llm-review :review/issues [])
                     llm-strengths (get llm-review :review/strengths [])
                     llm-summary (:review/summary llm-review)
@@ -572,8 +621,10 @@
                                      (:decision gate-result))
 
                     ;; Merge issues from both sources
-                    all-blocking (into (vec (:blocking-issues gate-result))
-                                       (llm-issues->blocking-strings llm-issues))
+                    all-blocking (cond-> (into (vec (:blocking-issues gate-result))
+                                               (llm-issues->blocking-strings llm-issues))
+                                   parse-failed?
+                                   (conj failure-message))
                     all-warnings (into (vec (:warnings gate-result))
                                        (llm-issues->warning-strings llm-issues))
 
@@ -598,6 +649,7 @@
                 (log/info logger :reviewer :reviewer/review-complete
                           {:data {:decision final-decision
                                   :llm-decision llm-decision
+                                  :llm-parse-failed? parse-failed?
                                   :gates-passed (:passed counts)
                                   :gates-failed (:failed counts)
                                   :llm-issues (count llm-issues)

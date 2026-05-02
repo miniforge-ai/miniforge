@@ -420,3 +420,11 @@
           sub-wf (dag-orch/task-sub-workflow task-def context)
           phase-names (mapv :phase (:workflow/pipeline sub-wf))]
       (is (= [:implement :release :done] phase-names)))))
+
+(deftest test-task-sub-opts-inherits-parent-quiet-setting
+  (testing "DAG sub-workflows inherit parent quiet=false so nested agent output stays visible"
+    (let [opts (#'dag-orch/task-sub-opts {:execution/opts {:quiet false}})]
+      (is (false? (:quiet opts)))))
+  (testing "DAG sub-workflows still honor explicit quiet=true from parent opts"
+    (let [opts (#'dag-orch/task-sub-opts {:execution/opts {:quiet true}})]
+      (is (true? (:quiet opts))))))

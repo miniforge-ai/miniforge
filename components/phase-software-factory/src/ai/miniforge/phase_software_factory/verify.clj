@@ -232,7 +232,6 @@
                         (assoc-in [:phase :metrics] metrics)
                         (assoc-in [:metrics :verification :duration-ms] duration-ms)
                         (assoc-in [:metrics :verification :repair-cycles] (dec iterations))
-                        (update-in [:execution :phases-completed] (fnil conj []) :verify)
                         ;; Merge agent metrics into execution metrics
                         (update-in [:execution/metrics :tokens] (fnil + 0) (:tokens metrics 0))
                         (update-in [:execution/metrics :duration-ms] (fnil + 0) (:duration-ms metrics 0)))
@@ -252,6 +251,8 @@
                                      (phase/request-redirect on-fail))]
                 (assoc updated-ctx :phase phase-result))
               (cond-> updated-ctx
+                (= :completed phase-status)
+                (update-in [:execution :phases-completed] (fnil conj []) :verify)
                 (= :failed phase-status)
                 (assoc-in [:phase :error]
                           {:message       error-message

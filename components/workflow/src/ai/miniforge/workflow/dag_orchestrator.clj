@@ -253,7 +253,7 @@
   [context]
   (cond-> {:disable-dag-execution true
            :skip-lifecycle-events true
-           :quiet true
+           :quiet (boolean (get-in context [:execution/opts :quiet]))
            :create-pr? true}
     (:llm-backend context)      (assoc :llm-backend (:llm-backend context))
     (:event-stream context)     (assoc :event-stream (:event-stream context))

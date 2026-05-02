@@ -88,11 +88,13 @@
   "Check if review is approved."
   [artifact _ctx]
   (let [decision (get artifact :review/decision)
-        approved? (or (= :approved decision)
-                      (= :conditionally-approved decision)
-                      (get-in artifact [:metadata :approved])
-                      (get-in artifact [:artifact/metadata :approved])
-                      (get-in artifact [:review :approved]))]
+        explicit-decision? (some? decision)
+        approved? (if explicit-decision?
+                    (or (= :approved decision)
+                        (= :conditionally-approved decision))
+                    (or (get-in artifact [:metadata :approved])
+                        (get-in artifact [:artifact/metadata :approved])
+                        (get-in artifact [:review :approved])))]
     (if approved?
       {:passed? true}
       {:passed? false

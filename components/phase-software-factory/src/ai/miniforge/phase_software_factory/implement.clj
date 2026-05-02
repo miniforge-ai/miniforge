@@ -286,13 +286,20 @@
         curator-terminal?
         (= :curator/no-files-written
            (get-in curator-result [:error :data :code]))
+        impl-succeeded? (phase/result-succeeded? impl-result)
         result (cond
                  ;; Curator found files — use its artifact, even if the
                  ;; implementer reported error. Merge implementer metrics through.
                  (phase/result-succeeded? curator-result)
                  (-> impl-result
-                     (assoc :status :success)
+                     (assoc :status :success
+                            :success? true)
                      (assoc :output (:output curator-result))
+                     (cond-> (not impl-succeeded?)
+                       (assoc :degraded-handoff? true
+                              :raw-agent-status (:status impl-result)
+                              :raw-error (:error impl-result)))
+                     (dissoc :error)
                      (update :metrics merge (:metrics curator-result)))
                  ;; Curator said no-files (terminal). This wins over any
                  ;; implementer error — the implementer's error is the symptom,
@@ -377,6 +384,24 @@
    :rate-limited? (boolean rate-limited?)
    :iterations iterations})
 
+(defn- successful-curated-artifact
+  "Extract the curated artifact from a successful implement phase result."
+  [result]
+  (or (:artifact result)
+      (:output result)))
+
+(defn- lightweight-curated-artifact
+  "Persist only lightweight curated metadata in phase results.
+   Serialized code stays in the worktree and can be rehydrated later."
+  [artifact]
+  (when artifact
+    (let [files (:code/files artifact)]
+      (cond-> (dissoc artifact :code/files)
+        (seq files)
+        (assoc :code/file-paths (mapv :path files)
+               :code/file-actions (mapv :action files)
+               :code/file-count (count files))))))
+
 (defn leave-implement
   "Post-processing for implementation phase.
 
@@ -419,6 +444,9 @@
                      (* (get metrics :tokens 0) 0.000015)))
         metrics (assoc metrics :cost-usd cost-usd :duration-ms duration-ms)
         env-id (get ctx :execution/environment-id)
+        curated-artifact (successful-curated-artifact result)
+        degraded-handoff? (true? (:degraded-handoff? result))
+        raw-agent-status (or (:raw-agent-status result) agent-status)
         summary (or (get-in result [:output :code/summary])
                     (when (string? (:output result)) (:output result))
                     (messages/t :implement/summary-default))
@@ -429,7 +457,6 @@
                         (assoc-in [:phase :metrics] metrics)
                         (assoc-in [:metrics :implementation :duration-ms] duration-ms)
                         (assoc-in [:metrics :implementation :repair-cycles] (dec iterations))
-                        (update-in [:execution :phases-completed] (fnil conj []) :implement)
                         ;; Merge agent metrics into execution metrics
                         (update-in [:execution/metrics :tokens] (fnil + 0) (:tokens metrics 0))
                         (update-in [:execution/metrics :cost-usd] (fnil + 0.0) cost-usd)
@@ -441,9 +468,18 @@
        (get-in ctx [:execution/input :title]) iterations))
     ;; Handle retrying, failure, completed, or already-implemented outcomes
     (cond-> updated-ctx
+      (contains? #{:completed :already-implemented} phase-status)
+      (update-in [:execution :phases-completed] (fnil conj []) :implement)
+
       ;; On success: store lightweight result — code is in the environment, not here
       (= :completed phase-status)
-      (assoc-in [:phase :result] (phase/success env-id summary))
+      (-> (assoc-in [:phase :result] (phase/success env-id summary))
+          (assoc-in [:phase :artifact]
+                    (cond-> (lightweight-curated-artifact curated-artifact)
+                      degraded-handoff?
+                      (assoc :code/degraded-handoff? true
+                             :code/raw-agent-status raw-agent-status
+                             :code/raw-error (:raw-error result)))))
       (phase/retrying? (:phase updated-ctx))
       (-> (update-in [:phase :iterations] (fnil inc 1))
           (assoc-in [:phase :last-error]
