@@ -27,6 +27,7 @@
    Layer 1: Built-in gates (syntax, lint, test, policy)
    Layer 2: Gate runner and composition"
   (:require
+   [ai.miniforge.clock.interface :as clock]
    [ai.miniforge.loop.interface.protocols.gate :as p]
    [ai.miniforge.logging.interface :as log]
    [ai.miniforge.response.interface :as response]
@@ -93,7 +94,7 @@
 (defrecord SyntaxGate [id config]
   p/Gate
   (check [_this artifact context]
-    (let [start (System/currentTimeMillis)
+    (let [start (clock/now-ms)
           content (:artifact/content artifact)
           artifact-type (:artifact/type artifact)
           logger (:logger context)]
@@ -109,14 +110,14 @@
             #_{:clj-kondo/ignore [:unused-value]}
             (read-string content)  ; Parse to check syntax; result intentionally unused
             (pass-result id :syntax
-                         :duration-ms (- (System/currentTimeMillis) start)))
+                         :duration-ms (clock/elapsed-since start)))
           ;; For non-code artifacts, pass by default
           (pass-result id :syntax
-                       :duration-ms (- (System/currentTimeMillis) start)))
+                       :duration-ms (clock/elapsed-since start)))
         (catch Exception e
           (fail-result id :syntax
                        [(make-error :syntax-error (.getMessage e))]
-                       :duration-ms (- (System/currentTimeMillis) start))))))
+                       :duration-ms (clock/elapsed-since start))))))
 
   (gate-id [_this] id)
   (gate-type [_this] :syntax)
@@ -138,7 +139,7 @@
 (defrecord LintGate [id config]
   p/Gate
   (check [_this artifact context]
-    (let [start (System/currentTimeMillis)
+    (let [start (clock/now-ms)
           content (:artifact/content artifact)
           artifact-type (:artifact/type artifact)
           logger (:logger context)
@@ -163,13 +164,13 @@
                                            "Unused namespace alias found")))]
           (if (and fail-on-warning? (seq warnings))
             (fail-result id :lint warnings
-                         :duration-ms (- (System/currentTimeMillis) start))
+                         :duration-ms (clock/elapsed-since start))
             (pass-result id :lint
                          :warnings (when (seq warnings) warnings)
-                         :duration-ms (- (System/currentTimeMillis) start))))
+                         :duration-ms (clock/elapsed-since start))))
         ;; Non-code artifacts pass lint
         (pass-result id :lint
-                     :duration-ms (- (System/currentTimeMillis) start)))))
+                     :duration-ms (clock/elapsed-since start)))))
 
   (gate-id [_this] id)
   (gate-type [_this] :lint)
@@ -203,7 +204,7 @@
 (defrecord TestGate [id config]
   p/Gate
   (check [_this artifact context]
-    (let [start (System/currentTimeMillis)
+    (let [start (clock/now-ms)
           logger (:logger context)
           test-fn (:test-fn config)
           artifact-type (:artifact/type artifact)]
@@ -216,19 +217,19 @@
           (let [result (test-fn artifact context)]
             (if (passed? result)
               (pass-result id :test
-                           :duration-ms (- (System/currentTimeMillis) start))
+                           :duration-ms (clock/elapsed-since start))
               (fail-result id :test
                            (or (:errors result)
                                [(make-error :test-failed "Test execution failed")])
-                           :duration-ms (- (System/currentTimeMillis) start))))
+                           :duration-ms (clock/elapsed-since start))))
           (catch Exception e
             (fail-result id :test
                          [(make-error :test-error (.getMessage e))]
-                         :duration-ms (- (System/currentTimeMillis) start))))
+                         :duration-ms (clock/elapsed-since start))))
         ;; No test function provided, pass by default
         (pass-result id :test
                      :warnings [(make-error :no-test-fn "No test function configured")]
-                     :duration-ms (- (System/currentTimeMillis) start)))))
+                     :duration-ms (clock/elapsed-since start)))))
 
   (gate-id [_this] id)
   (gate-type [_this] :test)
@@ -251,7 +252,7 @@
 (defrecord PolicyGate [id config]
   p/Gate
   (check [_this artifact context]
-    (let [start (System/currentTimeMillis)
+    (let [start (clock/now-ms)
           logger (:logger context)
           policies (:policies config [])
           artifact-type (:artifact/type artifact)
@@ -295,9 +296,9 @@
                     policies)]
         (if (seq errors)
           (fail-result id :policy errors
-                       :duration-ms (- (System/currentTimeMillis) start))
+                       :duration-ms (clock/elapsed-since start))
           (pass-result id :policy
-                       :duration-ms (- (System/currentTimeMillis) start))))))
+                       :duration-ms (clock/elapsed-since start))))))
 
   (gate-id [_this] id)
   (gate-type [_this] :policy)
@@ -332,16 +333,17 @@
 (defrecord CustomGate [id type-kw check-fn]
   p/Gate
   (check [_this artifact context]
-    (let [start (System/currentTimeMillis)]
+    (let [start (clock/now-ms)]
       (try
         (let [result (check-fn artifact context)]
-          (if (:gate/passed? result)
-            (assoc result :gate/duration-ms (- (System/currentTimeMillis) start))
-            (assoc result :gate/duration-ms (- (System/currentTimeMillis) start))))
+          (assoc result :gate/duration-ms (clock/elapsed-since start)))
         (catch Exception e
-          (fail-result id :custom
+          ;; Use the gate's declared `type-kw` rather than a hard-coded
+          ;; `:custom` so the result map matches the gate's
+          ;; `(gate-type)` on both success and failure paths.
+          (fail-result id type-kw
                        [(make-error :custom-gate-error (.getMessage e))]
-                       :duration-ms (- (System/currentTimeMillis) start))))))
+                       :duration-ms (clock/elapsed-since start))))))
 
   (gate-id [_this] id)
   (gate-type [_this] type-kw)

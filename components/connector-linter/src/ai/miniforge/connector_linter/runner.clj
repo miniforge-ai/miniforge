@@ -12,6 +12,7 @@
    Layer 2 — `run-all`, `run-fixes` (public orchestration; compose
              Layer 1)."
   (:require
+   [ai.miniforge.clock.interface :as clock]
    [ai.miniforge.connector-linter.etl :as etl]
    [babashka.process :as process]))
 
@@ -53,7 +54,7 @@
   [repo-path tech-id linter-config]
   (let [{:keys [command args parser check-cmd]} linter-config
         available? (linter-available? (or check-cmd [command "--version"]))
-        start-ms   (System/currentTimeMillis)]
+        start-ms   (clock/now-ms)]
     (if-not available?
       {:tech tech-id :violations [] :available? false :duration-ms 0}
       (let [result     (run-subprocess repo-path command args)
@@ -61,12 +62,11 @@
             mapping    (etl/get-mapping parser)
             violations (if mapping
                          (etl/apply-mapping mapping output)
-                         [])
-            end-ms     (System/currentTimeMillis)]
+                         [])]
         {:tech        tech-id
          :violations  violations
          :available?  true
-         :duration-ms (- end-ms start-ms)}))))
+         :duration-ms (clock/elapsed-since start-ms)}))))
 
 ;------------------------------------------------------------------------------ Layer 2
 ;; Public orchestration — composes Layer 1 (`run-linter`) + Layer 0

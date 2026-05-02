@@ -1,3 +1,4 @@
 {:paths ["src" "resources"]
- :deps {ai.miniforge/compliance-scanner {:local/root "../compliance-scanner"}}
+ :deps {ai.miniforge/clock              {:local/root "../clock"}
+        ai.miniforge/compliance-scanner {:local/root "../compliance-scanner"}}
  :aliases {:test {:extra-paths ["test"]}}}
