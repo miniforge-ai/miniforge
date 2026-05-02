@@ -1,6 +1,6 @@
 {:paths ["src" "resources"]
  :deps {ai.miniforge/coerce {:local/root "../coerce"}
-ai.miniforge/config {:local/root "../config"}
+        ai.miniforge/config {:local/root "../config"}
         ai.miniforge/messages {:local/root "../messages"}
         cheshire/cheshire {:mvn/version "5.13.0"}}
  :aliases {:test {:extra-paths ["test"]}}}

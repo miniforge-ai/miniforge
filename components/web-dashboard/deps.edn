@@ -1,6 +1,6 @@
 {:paths ["src" "resources"]
  :deps {ai.miniforge/coerce {:local/root "../coerce"}
-ai.miniforge/config {:local/root "../config"}
+        ai.miniforge/config {:local/root "../config"}
         ai.miniforge/messages {:local/root "../messages"}
         http-kit/http-kit {:mvn/version "2.8.0"}
         hiccup/hiccup {:mvn/version "2.0.0-RC3"}

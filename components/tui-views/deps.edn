@@ -1,6 +1,6 @@
 {:paths ["src" "resources"]
  :deps {ai.miniforge/coerce {:local/root "../coerce"}
-ai.miniforge/config {:local/root "../config"}
+        ai.miniforge/config {:local/root "../config"}
         ai.miniforge/pr-train {:local/root "../pr-train"}
         ai.miniforge/policy-pack {:local/root "../policy-pack"}
         ai.miniforge/orchestrator {:local/root "../orchestrator"}

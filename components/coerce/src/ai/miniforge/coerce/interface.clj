@@ -31,25 +31,40 @@
 ;; No in-namespace dependencies.
 
 (defn safe-parse-int
-  "Parse `s` as a 32-bit integer. Returns `default` on any failure
-   (`nil`, non-numeric, overflow). The default `default` is `nil` so
-   callers can pattern-match on the parsed-or-not distinction; pass
-   `0` (or any sentinel) when the call site needs a guaranteed number."
+  "Parse `s` as a 32-bit integer. Returns `default` when `s` is nil,
+   non-string, non-numeric, or out of range. The default `default` is
+   `nil` so callers can pattern-match on the parsed-or-not distinction;
+   pass `0` (or any sentinel) when the call site needs a guaranteed
+   number.
+
+   Pre-checks for nil/non-string up front so the common control-flow
+   paths don't run through exception handling, and the catch is
+   narrowed to the specific parse failure (`NumberFormatException`)."
   ([s] (safe-parse-int s nil))
   ([s default]
-   (try (Integer/parseInt s)
-        (catch Exception _ default))))
+   (if-not (string? s)
+     default
+     (try (Integer/parseInt ^String s)
+          (catch NumberFormatException _ default)))))
 
 (defn safe-parse-long
-  "Parse `s` as a 64-bit integer. Returns `default` on any failure."
+  "Parse `s` as a 64-bit integer. Returns `default` when `s` is nil,
+   non-string, non-numeric, or out of range. See [[safe-parse-int]] for
+   the rationale on the up-front nil check and narrowed catch."
   ([s] (safe-parse-long s nil))
   ([s default]
-   (try (Long/parseLong s)
-        (catch Exception _ default))))
+   (if-not (string? s)
+     default
+     (try (Long/parseLong ^String s)
+          (catch NumberFormatException _ default)))))
 
 (defn safe-parse-double
-  "Parse `s` as a double. Returns `default` on any failure."
+  "Parse `s` as a double. Returns `default` when `s` is nil, non-string,
+   or non-numeric. See [[safe-parse-int]] for the rationale on the
+   up-front nil check and narrowed catch."
   ([s] (safe-parse-double s nil))
   ([s default]
-   (try (Double/parseDouble s)
-        (catch Exception _ default))))
+   (if-not (string? s)
+     default
+     (try (Double/parseDouble ^String s)
+          (catch NumberFormatException _ default)))))
