@@ -183,32 +183,12 @@
          :tokens      (:tokens metrics 0)}))))
 
 (defn error-review
-  "Handle review phase errors.
-
-   On rejection, can redirect to :implement if on-fail specified."
+  "Handle review phase errors. Retries within budget; on exhaustion
+   redirects via `:on-fail` (typically to `:implement`) when set,
+   otherwise propagates. Delegates to the shared `phase/handle-error`
+   helper."
   [ctx ex]
-  (let [iterations (get-in ctx [:phase :iterations] 0)
-        max-iterations (get-in ctx [:phase :budget :iterations] 2)
-        on-fail (get-in ctx [:phase-config :on-fail])
-        error-map {:message (ex-message ex)
-                   :data (ex-data ex)}]
-    (cond
-      ;; Within budget - retry
-      (< iterations max-iterations)
-      (-> ctx
-          (update-in [:phase :iterations] (fnil inc 0))
-          (assoc-in [:phase :last-error] (ex-message ex))
-          (assoc-in [:phase :status] :retrying))
-
-      ;; Has on-fail transition - redirect
-      on-fail
-      (let [phase-result (-> (:phase ctx)
-                             (phase/fail-and-request-redirect error-map on-fail))]
-        (assoc ctx :phase phase-result))
-
-      ;; No recovery - propagate
-      :else
-      (assoc ctx :phase (phase/fail-phase (:phase ctx) error-map)))))
+  (phase/handle-error ctx ex 2))
 
 ;------------------------------------------------------------------------------ Layer 2
 ;; Registry method

@@ -178,12 +178,11 @@
         (update-in [:execution/metrics :duration-ms] (fnil + 0) duration-ms))))
 
 (defn error-observe
-  "Handle Observe phase errors."
+  "Handle Observe phase errors. Observe is a single-shot phase, so it
+   fails on first error (no retry); delegates to the shared
+   `phase/handle-error` helper with a `default-budget` of 0."
   [ctx ex]
-  (-> ctx
-      (assoc-in [:phase :status] :failed)
-      (assoc-in [:phase :error] {:message (ex-message ex)
-                                  :data (ex-data ex)})))
+  (phase/handle-error ctx ex 0))
 
 ;------------------------------------------------------------------------------ Layer 2
 ;; Registry method
