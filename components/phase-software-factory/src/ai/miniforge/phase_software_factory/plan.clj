@@ -148,21 +148,11 @@
       updated-ctx)))
 
 (defn error-plan
-  "Handle planning phase errors.
-
-   Attempts repair if within budget, otherwise propagates error."
+  "Handle planning phase errors. Retry within budget, then fail in
+   place (Plan historically never honored `:on-fail`; pass
+   `redirect? = false` to preserve that semantics)."
   [ctx ex]
-  (let [iterations (get-in ctx [:phase :iterations] 0)
-        max-iterations (get-in ctx [:phase :budget :iterations] 3)]
-    (if (< iterations max-iterations)
-      (-> ctx
-          (update-in [:phase :iterations] (fnil inc 0))
-          (assoc-in [:phase :last-error] (ex-message ex))
-          (assoc-in [:phase :status] :retrying))
-      (-> ctx
-          (assoc-in [:phase :status] :failed)
-          (assoc-in [:phase :error] {:message (ex-message ex)
-                                     :data (ex-data ex)})))))
+  (phase/handle-error ctx ex 3 false))
 
 ;------------------------------------------------------------------------------ Layer 2
 ;; Registry method

@@ -457,34 +457,12 @@
       (assoc-in [:phase :skipped-reason] :already-implemented))))
 
 (defn error-implement
-  "Handle implementation phase errors.
-
-   Attempts repair via inner loop if within budget."
+  "Handle implementation phase errors. Attempts repair via inner loop
+   within budget; on exhaustion redirects via `:on-fail` when set,
+   otherwise propagates. Delegates to the shared `phase/handle-error`
+   helper."
   [ctx ex]
-  (let [iterations (get-in ctx [:phase :iterations] 0)
-        max-iterations (get-in ctx [:phase :budget :iterations] 5)
-        on-fail (get-in ctx [:phase-config :on-fail])
-        error-map (phase/exception-error ex)]
-    (cond
-      ;; Within budget - retry
-      (< iterations max-iterations)
-      (-> ctx
-          (update-in [:phase :iterations] (fnil inc 0))
-          (assoc-in [:phase :last-error] (ex-message ex))
-          (assoc-in [:phase :status] :retrying))
-
-      ;; Has on-fail transition - redirect
-      on-fail
-      (let [phase-result (-> (:phase ctx)
-                             (phase/fail-and-request-redirect
-                              error-map
-                              on-fail))]
-        (assoc ctx :phase phase-result))
-
-      ;; No recovery - propagate
-      :else
-      (-> ctx
-          (assoc :phase (phase/fail-phase (:phase ctx) error-map))))))
+  (phase/handle-error ctx ex 5))
 
 ;------------------------------------------------------------------------------ Layer 2
 ;; Registry method

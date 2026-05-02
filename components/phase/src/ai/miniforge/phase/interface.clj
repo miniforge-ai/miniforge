@@ -234,6 +234,50 @@
   "Build a standard test-phase metrics map."
   phase-result/test-metrics)
 
+(defn handle-error
+  "Standard interceptor `:error` handler. Replaces the
+   `(defn error-<phase> [ctx ex] …)` boilerplate that every
+   phase-software-factory interceptor used to repeat verbatim:
+
+       within iteration budget                         → retry
+       past budget AND `:on-fail` set AND redirect?    → fail and redirect
+       otherwise                                       → fail and propagate
+
+   Iteration count is read from `[:phase :iterations]`, the budget
+   ceiling from `[:phase :budget :iterations]` (falling back to
+   `default-budget` when not specified — that's the per-phase legacy
+   default each interceptor used to hard-code), and the redirect target
+   from `[:phase-config :on-fail]`. The error payload is constructed via
+   `exception-error` (re-exported just above this defn).
+
+   - `default-budget` defaults to 1; pass 0 to opt out of retries (the
+     Observe phase fails on first error).
+   - `redirect?` defaults to true (the original verify/implement/review
+     behavior). Pass `false` to ignore `:on-fail` and always fail in
+     place when the budget is exhausted — that's the historical behavior
+     for the explore, plan, and observe interceptors, none of which ever
+     read `:phase-config :on-fail`."
+  ([ctx ex] (handle-error ctx ex 1 true))
+  ([ctx ex default-budget] (handle-error ctx ex default-budget true))
+  ([ctx ex default-budget redirect?]
+   (let [iterations     (get-in ctx [:phase :iterations] 0)
+         max-iterations (get-in ctx [:phase :budget :iterations] default-budget)
+         on-fail        (when redirect? (get-in ctx [:phase-config :on-fail]))
+         error-map      (exception-error ex)]
+     (cond
+       (< iterations max-iterations)
+       (-> ctx
+           (update-in [:phase :iterations] (fnil inc 0))
+           (assoc-in  [:phase :last-error] (ex-message ex))
+           (assoc-in  [:phase :status]     :retrying))
+
+       on-fail
+       (assoc ctx :phase (fail-and-request-redirect
+                          (:phase ctx) error-map on-fail))
+
+       :else
+       (assoc ctx :phase (fail-phase (:phase ctx) error-map))))))
+
 (def result-succeeded?
   "True when a phase result map has :status :success.
    Distinct from `succeeded?` which inspects multiple status keys across
