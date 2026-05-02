@@ -129,3 +129,32 @@
      (when (anomaly/anomaly? result)
        (throw (ex-info (or message (:anomaly/message result))
                        (:anomaly/data result)))))))
+
+(defn validate-auth-or-throw!
+  "Validate `auth`; on failure throw `ex-info` with a *localized*
+   message and `{:errors [...]}` ex-data.
+
+   - `translator`  — a `messages/t`-shaped function `(fn [key params])`
+                     bound to the calling connector's message catalog.
+   - `message-key` — catalog key whose template interpolates an
+                     `{errors}` placeholder (e.g. `:jira/auth-invalid`).
+
+   Replaces the duplicated jira/gitlab/github callsite shape
+
+       (when-let [a (connector/validate-auth auth)]
+         (let [errs (:errors (:anomaly/data a))]
+           (throw (ex-info (msg/t :<conn>/auth-invalid {:errors errs})
+                           {:errors errs}))))
+
+   The `{:errors …}` argument to the translator is the message
+   template's interpolation parameters, NOT a nested error envelope
+   — the credential errors happen to be both the data the message
+   text surfaces AND the data the thrown `ex-data` carries, so the
+   key name `:errors` appears twice but with different roles. This
+   helper centralizes the read-once / use-twice handling so every
+   connector boundary thrower reads as a single call."
+  [auth translator message-key]
+  (when-let [a (validate-auth auth)]
+    (let [errors (:errors (:anomaly/data a))]
+      (throw (ex-info (translator message-key {:errors errors})
+                      {:errors errors})))))

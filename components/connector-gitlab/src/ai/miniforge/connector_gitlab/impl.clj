@@ -64,17 +64,12 @@
   (some? (or (:gitlab/project-id config) (:gitlab/project-path config))))
 
 (defn- validate-auth!
-  "Validate auth credential reference, throwing on failure.
-   Delegates to the shared connector helper, then re-throws with the
-   localized message that interpolates the actual validation errors.
-
-   The shared helper's `:connector` opt is omitted so the thrown
-   ex-data preserves the historical `{:errors ...}` payload shape;
-   the local message already identifies this as a GitLab error."
+  "Validate auth credential reference, throwing on failure with the
+   GitLab-localized message. Delegates to the shared
+   `connector/validate-auth-or-throw!` helper so all the boundary
+   throwers across connector-{jira,gitlab,github} read the same way."
   [auth]
-  (when-let [a (connector/validate-auth auth)]
-    (throw (ex-info (msg/t :gitlab/auth-invalid {:errors (:errors (:anomaly/data a))})
-                    (:anomaly/data a)))))
+  (connector/validate-auth-or-throw! auth msg/t :gitlab/auth-invalid))
 
 ;;------------------------------------------------------------------------------ Layer 1
 ;; HTTP

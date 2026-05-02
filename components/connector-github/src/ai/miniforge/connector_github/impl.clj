@@ -190,9 +190,7 @@
       (throw (ex-info (msg/t :github/owner-or-org-required) {:config config}))
 
       :else
-      (when-let [a (connector/validate-auth auth)]
-        (let [errs (:errors (:anomaly/data a))]
-          (throw (ex-info (msg/t :github/auth-invalid {:errors errs}) {:errors errs})))))))
+      (connector/validate-auth-or-throw! auth msg/t :github/auth-invalid))))
 
 ;; -- Lifecycle --
 (defn do-connect

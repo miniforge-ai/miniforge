@@ -131,3 +131,7 @@
 ;; Throwing variants (deprecated; kept for incremental per-connector migration):
 (def require-handle! validation/require-handle!)
 (def validate-auth!  validation/validate-auth!)
+
+;; Throwing-with-localized-message helper (used at the connector boundary
+;; until all callers are migrated to the anomaly-returning variant):
+(def validate-auth-or-throw! validation/validate-auth-or-throw!)
