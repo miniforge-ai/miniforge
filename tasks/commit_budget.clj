@@ -93,15 +93,28 @@
 
 (defn staged-numstat
   "Return the parsed `git diff --cached --numstat` for the current
-   index. Returns an empty vec if there is no staged content."
+   index. Returns an empty vec when git reports no staged content.
+
+   Fails the task (`System/exit 1`) when git itself errors — without
+   that, a malformed repo state would silently return 0 lines and
+   gate would fail open. The stderr from git is printed first so the
+   operator can see why."
   []
-  (let [{:keys [out exit]} (p/sh ["git" "diff" "--cached" "--numstat"]
-                                 {:out :string :err :string})]
-    (if (zero? exit)
+  (let [{:keys [out err exit]}
+        (p/sh {:out :string :err :string}
+              "git" "diff" "--cached" "--numstat")]
+    (cond
+      (zero? exit)
       (->> (str/split-lines (or out ""))
            (remove str/blank?)
            (mapv parse-numstat-line))
-      [])))
+
+      :else
+      (do (binding [*out* *err*]
+            (println (format "❌ commit-budget: `git diff --cached --numstat` exited %d" exit))
+            (when-not (str/blank? err)
+              (println (str/trim err))))
+          (System/exit 1)))))
 
 (defn override-rationale
   "Read the override rationale from the env var, or nil when none set."
@@ -137,7 +150,7 @@
    `bb pre-commit` `:depends` chain (a `(System/exit 0)` here would
    terminate the JVM before lint/fmt/test got to run).
 
-   - With no staged content, succeeds silently (lets git itself emit
+   - With no staged content, returns silently (lets git itself emit
      the 'nothing to commit' message).
    - With `MINIFORGE_COMMIT_BUDGET_OVERRIDE` set, succeeds and echoes
      the rationale.
@@ -150,7 +163,7 @@
         rationale   (override-rationale)]
     (cond
       (empty? entries)
-      (println "📏 commit-budget: no staged content")
+      nil   ; truly silent — let git handle the 'nothing to commit' messaging
 
       rationale
       (do (println (format "📏 commit-budget: OVERRIDDEN (%d reportable lines)" total))
@@ -182,7 +195,9 @@
           (println "    commit, then continue with the next slice.")
           (println "  • Genuine exception (lockfile rev, generated migration):")
           (println "    MINIFORGE_COMMIT_BUDGET_OVERRIDE='<rationale>' git commit ...")
-          (println "    The rationale is echoed in the commit log for review.")
+          (println "    The rationale is echoed at commit time and in CI logs.")
+          (println "    (It is not written into the commit message itself —")
+          (println "     repeat it in your -m '...' if you want it in the trail.)")
           (println "")
           (System/exit 1)))))
 
