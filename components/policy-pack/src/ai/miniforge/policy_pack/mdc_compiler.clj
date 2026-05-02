@@ -34,6 +34,7 @@
      components/policy-pack/src/.../schema.clj  — Rule schema (target format)
      .standards/                                 — source .mdc files (input)"
   (:require
+   [ai.miniforge.coerce.interface :as coerce]
    [ai.miniforge.policy-pack.schema :as schema]
    [clojure.java.io :as io]
    [clojure.string :as str]))
@@ -264,8 +265,7 @@
   "Find the dewey-ranges entry for a given Dewey code string.
    Returns the matching range map, or nil."
   [dewey-str]
-  (when-let [code (try (Integer/parseInt (str/trim (str dewey-str)))
-                       (catch Exception _ nil))]
+  (when-let [code (coerce/safe-parse-int (str/trim (str dewey-str)))]
     (some (fn [{:keys [lo hi] :as entry}]
             (when (and (<= lo code) (<= code hi))
               entry))

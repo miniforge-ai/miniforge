@@ -1,5 +1,6 @@
 {:paths ["src" "resources"]
- :deps {ai.miniforge/algorithms {:local/root "../algorithms"}
+ :deps {ai.miniforge/coerce {:local/root "../coerce"}
+        ai.miniforge/algorithms {:local/root "../algorithms"}
         ai.miniforge/config {:local/root "../config"}
         metosin/malli {:mvn/version "0.16.4"}}
  :aliases {:test {:extra-paths ["test"]

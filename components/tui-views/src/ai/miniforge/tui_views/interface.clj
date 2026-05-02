@@ -25,6 +25,7 @@
    [clojure.java.browse :as browse]
    [clojure.java.io :as io]
    [clojure.string :as str]
+   [ai.miniforge.coerce.interface :as coerce]
    [ai.miniforge.tui-engine.interface :as tui]
    [ai.miniforge.tui-views.model :as model]
    [ai.miniforge.tui-views.msg :as msg]
@@ -428,7 +429,7 @@
   [line]
   (when-let [[_ id-str level reason] (re-matches risk-line-pattern line)]
     (let [[repo num-str] (str/split id-str #"#" 2)
-          num (try (Integer/parseInt num-str) (catch Exception _ nil))]
+          num (coerce/safe-parse-int num-str)]
       (when num
         {:id     [repo num]
          :level  (str/lower-case (str/trim level))

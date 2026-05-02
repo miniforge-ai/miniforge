@@ -23,6 +23,7 @@
                        "components/agent-runtime/src"
                        "components/agent-runtime/resources"
                        "components/anomaly/src"
+                       "components/coerce/src"
                        "components/response-chain/src"
                        "components/boundary/src"
                        "components/task/src"
@@ -194,6 +195,7 @@
                       ai.miniforge/agent {:local/root "components/agent"}
                       ai.miniforge/agent-runtime {:local/root "components/agent-runtime"}
                       ai.miniforge/anomaly {:local/root "components/anomaly"}
+                      ai.miniforge/coerce {:local/root "components/coerce"}
                       ai.miniforge/response-chain {:local/root "components/response-chain"}
                       ai.miniforge/boundary {:local/root "components/boundary"}
                       ai.miniforge/task {:local/root "components/task"}
@@ -309,6 +311,7 @@
                        "components/agent/test"
                        "components/agent-runtime/test"
                        "components/anomaly/test"
+                       "components/coerce/test"
                        "components/response-chain/test"
                        "components/boundary/test"
                        "components/task/test"
@@ -427,6 +430,7 @@
                       ai.miniforge/agent {:local/root "components/agent"}
                       ai.miniforge/agent-runtime {:local/root "components/agent-runtime"}
                       ai.miniforge/anomaly {:local/root "components/anomaly"}
+                      ai.miniforge/coerce {:local/root "components/coerce"}
                       ai.miniforge/response-chain {:local/root "components/response-chain"}
                       ai.miniforge/boundary {:local/root "components/boundary"}
                       ai.miniforge/task {:local/root "components/task"}

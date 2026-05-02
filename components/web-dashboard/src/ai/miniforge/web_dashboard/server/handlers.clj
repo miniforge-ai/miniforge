@@ -18,6 +18,7 @@
    [clojure.string :as str]
    [clojure.java.io :as io]
    [cheshire.core :as json]
+   [ai.miniforge.coerce.interface :as coerce]
    [ai.miniforge.event-stream.interface :as event-stream]
    [ai.miniforge.response.interface :as response]
    [ai.miniforge.web-dashboard.server.responses :as responses]
@@ -318,11 +319,13 @@
         event-type  (when-let [et (filters/param-value params :event-type nil)]
                       (keyword et))
         since       (filters/param-value params :since nil)
-        limit       (min (try (Integer/parseInt (str (filters/param-value params :limit "100")))
-                              (catch Exception _ 100))
+        limit       (min (coerce/safe-parse-int
+                          (str (filters/param-value params :limit "100"))
+                          100)
                          500)
-        offset      (max (try (Integer/parseInt (str (filters/param-value params :offset "0")))
-                              (catch Exception _ 0))
+        offset      (max (coerce/safe-parse-int
+                          (str (filters/param-value params :offset "0"))
+                          0)
                          0)
         ;; Fetch offset + limit + 1 so we can detect whether more events exist
         all-events  (state/get-events state {:workflow-id workflow-id

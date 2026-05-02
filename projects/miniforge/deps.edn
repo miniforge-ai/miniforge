@@ -16,6 +16,7 @@
         ai.miniforge/config {:local/root "../../components/config"}
         ai.miniforge/algorithms {:local/root "../../components/algorithms"}
         ai.miniforge/anomaly {:local/root "../../components/anomaly"}
+        ai.miniforge/coerce {:local/root "../../components/coerce"}
         ai.miniforge/content-hash {:local/root "../../components/content-hash"}
         ai.miniforge/logging {:local/root "../../components/logging"}
         ai.miniforge/llm {:local/root "../../components/llm"}

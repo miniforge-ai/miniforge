@@ -26,6 +26,7 @@
    Layer 1: GitHub PR status mapping
    Layer 2: GitLab MR status mapping + unified conversion"
   (:require
+   [ai.miniforge.coerce.interface :as coerce]
    [clojure.string :as str]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -207,7 +208,7 @@
      :pr/deletions           (or deletions 0)
      :pr/changed-files-count (if changes
                                (if (string? changes)
-                                 (try (Integer/parseInt changes) (catch Exception _ 0))
+                                 (coerce/safe-parse-int changes 0)
                                  (int changes))
                                0)}))
 
