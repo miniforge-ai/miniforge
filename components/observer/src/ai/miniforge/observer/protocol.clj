@@ -130,15 +130,20 @@
    Optional fields:
    - :phases - Vector of phase metrics
    - :history - Workflow transition history
-   - :errors - Error information if failed"
-  [{:keys [workflow-id metrics status timestamp phases history errors]}]
+   - :errors - Error information if failed
+   - :dependency-health - Canonical dependency-health projection
+   - :failure-attribution - Canonical failure attribution for failed workflows"
+  [{:keys [workflow-id metrics status timestamp phases history errors
+           dependency-health failure-attribution]}]
   {:workflow-id workflow-id
    :metrics (or metrics {:tokens 0 :cost-usd 0.0 :duration-ms 0})
    :status (or status :unknown)
    :timestamp (or timestamp (java.util.Date.))
    :phases (or phases [])
    :history (or history [])
-   :errors errors})
+   :errors errors
+   :dependency-health dependency-health
+   :failure-attribution failure-attribution})
 
 (defn phase-metrics
   "Create a phase metrics record.

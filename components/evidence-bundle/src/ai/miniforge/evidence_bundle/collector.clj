@@ -200,6 +200,15 @@
 ;------------------------------------------------------------------------------ Layer 3.5
 ;; Supervision Decision Evidence (N6)
 
+(defn- collect-event-stream-events
+  [event-stream query]
+  (try
+    (when event-stream
+      (let [get-events-fn (requiring-resolve 'ai.miniforge.event-stream.core/get-events)]
+        (vec (get-events-fn event-stream query))))
+    (catch Exception _e
+      [])))
+
 (defn collect-supervision-decisions
   "Collect supervision decision events from the event stream.
 
@@ -214,10 +223,9 @@
   [event-stream workflow-id]
   (try
     (when event-stream
-      (let [get-events-fn (requiring-resolve 'ai.miniforge.event-stream.core/get-events)
-            events (get-events-fn event-stream
-                                  {:workflow-id workflow-id
-                                   :event-type :supervision/tool-use-evaluated})]
+      (let [events (collect-event-stream-events event-stream
+                                                {:workflow-id workflow-id
+                                                 :event-type :supervision/tool-use-evaluated})]
         (mapv (fn [event]
                 (cond-> {:supervision/tool-name (get event :tool/name "unknown")
                          :supervision/decision (get event :supervision/decision "allow")
@@ -252,13 +260,12 @@
   [event-stream workflow-id]
   (try
     (when event-stream
-      (let [get-events-fn (requiring-resolve 'ai.miniforge.event-stream.core/get-events)
-            requested (get-events-fn event-stream
-                                     {:workflow-id workflow-id
-                                      :event-type :control-action/requested})
-            executed (get-events-fn event-stream
-                                    {:workflow-id workflow-id
-                                     :event-type :control-action/executed})
+      (let [requested (collect-event-stream-events event-stream
+                                                   {:workflow-id workflow-id
+                                                    :event-type :control-action/requested})
+            executed (collect-event-stream-events event-stream
+                                                  {:workflow-id workflow-id
+                                                   :event-type :control-action/executed})
             executed-by-id (into {} (map (fn [e] [(:action/id e) e]) executed))]
         (mapv (fn [req-event]
                 (let [action-id (:action/id req-event)
@@ -335,6 +342,87 @@
       (contains? output :evidence/image-digest)
       (assoc :evidence/image-digest (:evidence/image-digest output)))))
 
+(def ^:private dependency-event-types
+  #{:dependency/health-updated
+    :dependency/recovered})
+
+(def ^:private dependency-health-keys
+  [:dependency/id
+   :dependency/source
+   :dependency/kind
+   :dependency/status
+   :dependency/failure-count
+   :dependency/window-size
+   :dependency/incident-counts
+   :dependency/vendor
+   :dependency/class
+   :dependency/retryability
+   :failure/class
+   :dependency/last-observed-at
+   :dependency/last-recovered-at])
+
+(defn- canonical-dependency-entry
+  [dependency-id dependency]
+  (let [entity (select-keys dependency dependency-health-keys)
+        canonical-id (or dependency-id (:dependency/id entity))]
+    (when canonical-id
+      (assoc entity :dependency/id canonical-id))))
+
+(defn- canonical-dependency-health
+  [dependency-health]
+  (into {}
+        (keep (fn [[dependency-id dependency]]
+                (when-let [entry (canonical-dependency-entry dependency-id dependency)]
+                  [(:dependency/id entry) entry])))
+        dependency-health))
+
+(defn- dependency-health-from-events
+  [stream workflow-id]
+  (->> dependency-event-types
+       (mapcat #(collect-event-stream-events stream
+                                             {:workflow-id workflow-id
+                                              :event-type %}))
+       (reduce (fn [projection event]
+                 (if-let [entry (canonical-dependency-entry (:dependency/id event) event)]
+                   (assoc projection (:dependency/id entry) entry)
+                   projection))
+               {})))
+
+(defn- collect-dependency-health
+  [workflow-state stream workflow-id opts]
+  (let [projection (or (:dependency-health opts)
+                       (:dependency-health workflow-state)
+                       (when stream
+                         (dependency-health-from-events stream workflow-id)))]
+    (canonical-dependency-health projection)))
+
+(def ^:private failure-attribution-keys
+  [:failure/source
+   :failure/vendor
+   :failure/class
+   :failure/message
+   :dependency/class
+   :dependency/retryability
+   :dependency/id
+   :dependency/source
+   :dependency/kind
+   :dependency/vendor
+   :dependency/status])
+
+(defn- failure-attribution
+  [failure]
+  (let [attribution (select-keys failure failure-attribution-keys)]
+    (when (seq attribution)
+      attribution)))
+
+(defn- collect-failure-attribution
+  [workflow-state opts]
+  (or (:failure-attribution opts)
+      (some-> (:workflow/error workflow-state) failure-attribution)
+      (some->> (:workflow/errors workflow-state)
+               (keep failure-attribution)
+               first)))
+
 ;------------------------------------------------------------------------------ Layer 5
 ;; Complete Bundle Assembly
 
@@ -354,6 +442,8 @@
         rules-applied (collect-rules-applied workflow-state)
         supervision-decisions (collect-supervision-decisions event-stream workflow-id)
         control-actions (collect-control-actions event-stream workflow-id)
+        dependency-health (collect-dependency-health workflow-state event-stream workflow-id opts)
+        failure-attribution (collect-failure-attribution workflow-state opts)
 
         ;; N11 §9.1: extract execution evidence from workflow result
         execution-evidence (collect-execution-evidence workflow-state)
@@ -392,6 +482,10 @@
                  (assoc :evidence/supervision-decisions supervision-decisions)
                  (seq control-actions)
                  (assoc :evidence/control-actions control-actions)
+                 (seq dependency-health)
+                 (assoc :evidence/dependency-health dependency-health)
+                 failure-attribution
+                 (assoc :evidence/failure-attribution failure-attribution)
                  (seq rules-applied)
                  (assoc :evidence/rules-applied rules-applied)
                  semantic-validation

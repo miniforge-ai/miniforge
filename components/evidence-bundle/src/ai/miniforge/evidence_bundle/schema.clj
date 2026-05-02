@@ -259,6 +259,10 @@
    (optional-key :evidence/task-finished-at) inst?
    (optional-key :evidence/image-digest) string?
 
+   ;; Dependency Attribution
+   (optional-key :evidence/dependency-health) map?
+   (optional-key :evidence/failure-attribution) map?
+
    ;; Outcome
    :evidence/outcome map?
 
@@ -379,4 +383,5 @@
    :evidence/policy-checks []
    :evidence/outcome {}
    :evidence/tool-invocations []
-   :evidence/pack-promotions []})
+   :evidence/pack-promotions []
+   :evidence/dependency-health {}})

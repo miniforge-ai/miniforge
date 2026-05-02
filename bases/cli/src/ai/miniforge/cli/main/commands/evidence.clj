@@ -60,17 +60,90 @@
   {:header   :evidence/show-header
    :fields   [[:bundle/workflow-id :evidence/show-workflow {:default "—"}]
               [:bundle/status      :evidence/show-status   {:default "unknown"}]
-              [:bundle/created-at  :evidence/show-created  {:default "—"}]]
+              [:bundle/created-at  :evidence/show-created  {:default "—"}]
+              [:bundle/failure-attribution :evidence/show-failure-attribution {:default "—"}]
+              [:bundle/dependency-issues :evidence/show-dependency-issues {:default 0}]]
    :sections [{:key :bundle/artifacts :header :evidence/show-artifacts
                :entry :evidence/show-artifact-entry :max 10
                :entry-fn (fn [a] {:type (get a :artifact/type "unknown")
                                    :id   (get a :artifact/id "")})}
               {:key :bundle/phases :header :evidence/show-phases}]})
 
+(def ^:private phase-evidence-keys
+  [:evidence/plan
+   :evidence/design
+   :evidence/implement
+   :evidence/verify
+   :evidence/review
+   :evidence/release
+   :evidence/observe])
+
+(defn- active-dependency?
+  [dependency]
+  (contains? #{:degraded :unavailable :misconfigured :operator-action-required}
+             (:dependency/status dependency)))
+
+(defn- label
+  [value]
+  (cond
+    (keyword? value) (name value)
+    (string? value) value
+    (nil? value) "unknown"
+    :else (str value)))
+
+(defn- dependency-issue-count
+  [dependency-health]
+  (->> dependency-health
+       vals
+       (filter active-dependency?)
+       count))
+
+(defn- failure-attribution-summary
+  [failure-attribution]
+  (when (seq failure-attribution)
+    (let [source (or (:failure/source failure-attribution)
+                     (:dependency/source failure-attribution)
+                     :unknown)
+          vendor (or (:failure/vendor failure-attribution)
+                     (:dependency/vendor failure-attribution)
+                     (:dependency/id failure-attribution))
+          failure-class (or (:dependency/class failure-attribution)
+                            (:failure/class failure-attribution)
+                            :unknown)]
+      (str (label source) " / " (label vendor) " / " (label failure-class)))))
+
+(defn- canonical-phase-names
+  [bundle]
+  (->> phase-evidence-keys
+       (filter #(contains? bundle %))
+       (mapv (comp keyword name))))
+
+(defn- normalize-bundle-detail
+  [bundle]
+  (let [dependency-health (or (:evidence/dependency-health bundle) {})
+        artifacts (or (:bundle/artifacts bundle) [])
+        phases (or (:bundle/phases bundle)
+                   (canonical-phase-names bundle))
+        status (or (:bundle/status bundle)
+                   (if (true? (get-in bundle [:evidence/outcome :outcome/success]))
+                     "completed"
+                     "failed"))]
+    {:bundle/workflow-id (or (:bundle/workflow-id bundle)
+                             (:evidence-bundle/workflow-id bundle))
+     :bundle/status status
+     :bundle/created-at (or (:bundle/created-at bundle)
+                            (:evidence-bundle/created-at bundle))
+     :bundle/artifacts artifacts
+     :bundle/phases phases
+     :bundle/dependency-issues (dependency-issue-count dependency-health)
+     :bundle/failure-attribution (failure-attribution-summary
+                                  (:evidence/failure-attribution bundle))}))
+
 (defn- display-bundle-detail
   "Render the detail view for a single evidence bundle."
   [id bundle]
-  (display/render-detail (assoc bundle-detail-spec :header-params {:id id}) bundle))
+  (display/render-detail (assoc bundle-detail-spec :header-params {:id id})
+                         (normalize-bundle-detail bundle)))
 
 (defn- load-bundle-for-show
   "Load a bundle from the component interface or the filesystem."

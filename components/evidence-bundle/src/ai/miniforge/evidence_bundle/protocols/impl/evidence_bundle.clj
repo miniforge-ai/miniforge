@@ -20,6 +20,7 @@
   "Implementation functions for EvidenceBundle protocol.
    Pure functions organized in layers."
   (:require
+   [ai.miniforge.evidence-bundle.collector :as collector]
    [ai.miniforge.evidence-bundle.schema :as schema]
    [ai.miniforge.logging.interface :as log]))
 
@@ -58,71 +59,32 @@
 ;------------------------------------------------------------------------------ Layer 1
 ;; Bundle Creation
 
-(defn- extract-execution-evidence
-  "Extract N11 §9.1 evidence fields from the workflow result's :execution/output.
-   Returns a map of evidence keys to merge into the bundle, or empty map."
+(defn extract-execution-evidence
+  "Compatibility wrapper for execution evidence extraction.
+   Delegates to the canonical collector implementation."
   [workflow-state]
-  (let [output (get workflow-state :execution/output {})]
-    (cond-> {}
-      (contains? output :evidence/execution-mode)
-      (assoc :evidence/execution-mode (:evidence/execution-mode output))
-
-      (contains? output :evidence/runtime-class)
-      (assoc :evidence/runtime-class (:evidence/runtime-class output))
-
-      (contains? output :evidence/task-started-at)
-      (assoc :evidence/task-started-at (:evidence/task-started-at output))
-
-      (contains? output :evidence/task-finished-at)
-      (assoc :evidence/task-finished-at (:evidence/task-finished-at output))
-
-      (contains? output :evidence/image-digest)
-      (assoc :evidence/image-digest (:evidence/image-digest output)))))
+  (collector/collect-execution-evidence workflow-state))
 
 (defn create-bundle-impl
   "Create evidence bundle from workflow state.
    Merges N11 §9.1 execution evidence fields from :execution/output.
    Returns [bundle updated-bundles-atom-value]"
-  [bundles _artifact-store logger workflow-id opts]
+  [bundles artifact-store logger workflow-id opts]
   (let [workflow-state (:workflow-state opts)
-        ;; Extract intent and outcome from workflow state if not provided
-        workflow-spec (:workflow/spec workflow-state)
-        intent (or (:intent opts)
-                  (when workflow-spec
-                    (let [extract-fn (requiring-resolve 'ai.miniforge.evidence-bundle.collector/extract-intent)]
-                      (extract-fn workflow-spec))))
-        outcome (or (:outcome opts)
-                   (let [build-fn (requiring-resolve 'ai.miniforge.evidence-bundle.collector/build-outcome-evidence)]
-                     (build-fn workflow-state)))
-        policy-checks (or (:policy-checks opts)
-                         (let [collect-fn (requiring-resolve 'ai.miniforge.evidence-bundle.collector/collect-policy-checks)]
-                           (collect-fn workflow-state)))
-        tool-invocations (let [collect-fn (requiring-resolve
-                                           'ai.miniforge.evidence-bundle.collector/collect-tool-invocations)]
-                           (collect-fn workflow-state))
-        semantic-validation (get opts :semantic-validation {})
-        collect-all-fn (requiring-resolve 'ai.miniforge.evidence-bundle.collector/collect-all-phases)
-        phase-evidence (collect-all-fn workflow-state)
-
-        ;; N11 §9.1: extract execution evidence from workflow result
-        execution-evidence (extract-execution-evidence workflow-state)
-
         bundle-id (random-uuid)
-        bundle (merge
-                (schema/create-evidence-bundle-template)
-                {:evidence-bundle/id bundle-id
-                 :evidence-bundle/workflow-id workflow-id
-                 :evidence-bundle/created-at (java.time.Instant/now)
-                 :evidence/intent intent
-                 :evidence/semantic-validation semantic-validation
-                 :evidence/policy-checks policy-checks
-                 :evidence/outcome outcome}
-                phase-evidence
-                execution-evidence)
-        bundle (cond-> bundle
-                 (seq tool-invocations)
-                 (assoc :evidence/tool-invocations tool-invocations))
+        assembled (collector/assemble-evidence-bundle workflow-id workflow-state artifact-store opts)
+        bundle (cond-> (assoc assembled :evidence-bundle/id bundle-id)
+                 (:intent opts)
+                 (assoc :evidence/intent (:intent opts))
 
+                 (contains? opts :semantic-validation)
+                 (assoc :evidence/semantic-validation (:semantic-validation opts))
+
+                 (:policy-checks opts)
+                 (assoc :evidence/policy-checks (:policy-checks opts))
+
+                 (:outcome opts)
+                 (assoc :evidence/outcome (:outcome opts)))
         new-bundles (assoc @bundles bundle-id bundle)]
 
     (log/info logger :evidence-bundle :bundle/created

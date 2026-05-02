@@ -23,7 +23,7 @@
    [ai.miniforge.workflow.interface.protocols.workflow-observer :as wf-proto]))
 
 (defn sample-workflow-state
-  [workflow-id status & {:keys [tokens cost duration]
+  [workflow-id status & {:keys [tokens cost duration dependency-health failure-attribution]
                          :or {tokens 1000 cost 0.10 duration 5000}}]
   {:workflow/id workflow-id
    :workflow/status status
@@ -33,6 +33,8 @@
    :workflow/history [{:from-phase :start
                        :to-phase :implement
                        :timestamp (java.util.Date.)}]
+   :dependency-health dependency-health
+   :workflow/error failure-attribution
    :workflow/errors (when (= status :failed)
                      [{:phase :test :error "Test failed"}])})
 
@@ -64,10 +66,23 @@
     (let [obs (observer/create-observer)
           workflow-id (random-uuid)]
       (wf-proto/on-phase-error obs workflow-id :test {:message "Test failed" :type :assertion-error})
-      (wf-proto/on-workflow-complete obs workflow-id (sample-workflow-state workflow-id :failed))
+      (wf-proto/on-workflow-complete
+       obs
+       workflow-id
+       (sample-workflow-state workflow-id
+                              :failed
+                              :dependency-health {:anthropic {:dependency/id :anthropic
+                                                              :dependency/status :degraded}}
+                              :failure-attribution {:failure/source :external-provider
+                                                    :failure/vendor :anthropic
+                                                    :failure/class :failure.class/external
+                                                    :dependency/id :anthropic
+                                                    :dependency/class :rate-limit
+                                                    :dependency/retryability :retryable}))
       (let [metrics (observer/get-workflow-metrics obs workflow-id)]
         (is (= :failed (:status metrics)))
-        (is (seq (:phases metrics))))))
+        (is (seq (:phases metrics)))
+        (is (= :anthropic (get-in metrics [:failure-attribution :dependency/id]))))))
 
   (testing "observer handles rollback"
     (let [obs (observer/create-observer)

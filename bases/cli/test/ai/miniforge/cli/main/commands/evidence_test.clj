@@ -52,6 +52,22 @@
            :bundle/phases [:plan :implement]}
           overrides)))
 
+(defn make-canonical-bundle
+  [overrides]
+  (merge {:evidence-bundle/id "bundle-2"
+          :evidence-bundle/workflow-id "wf-2"
+          :evidence-bundle/created-at "2026-04-30T10:00:00Z"
+          :evidence/plan {:phase/name :plan}
+          :evidence/implement {:phase/name :implement}
+          :evidence/outcome {:outcome/success false}
+          :evidence/dependency-health {:anthropic {:dependency/id :anthropic
+                                                   :dependency/status :degraded}}
+          :evidence/failure-attribution {:failure/source :external-provider
+                                         :failure/vendor :anthropic
+                                         :dependency/id :anthropic
+                                         :dependency/class :rate-limit}}
+         overrides))
+
 ;------------------------------------------------------------------------------ Layer 1: Tests
 
 (deftest evidence-list-cmd-no-component-empty-dir-test
@@ -95,6 +111,19 @@
                     app-config/home-dir (constantly *tmp-dir*)]
         (let [output (with-out-str (sut/evidence-show-cmd {:id "test-bundle"}))]
           (is (.contains output "wf-1")))))))
+
+(deftest evidence-show-cmd-with-canonical-bundle-test
+  (testing "show command normalizes canonical evidence bundle fields"
+    (let [evidence-path (str *tmp-dir* "/evidence")]
+      (fs/create-dirs evidence-path)
+      (spit (str evidence-path "/canonical-bundle.edn") (pr-str (make-canonical-bundle {})))
+      (with-redefs [shared/try-resolve-fn (constantly nil)
+                    app-config/home-dir (constantly *tmp-dir*)]
+        (let [output (with-out-str (sut/evidence-show-cmd {:id "canonical-bundle"}))]
+          (is (.contains output "wf-2"))
+          (is (.contains output "failed"))
+          (is (.contains output "external-provider / anthropic / rate-limit"))
+          (is (.contains output "Dependencies: 1")))))))
 
 (deftest evidence-export-cmd-missing-id-test
   (testing "export command exits with error when no id provided"
