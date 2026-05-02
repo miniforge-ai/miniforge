@@ -832,6 +832,42 @@
              :safe-mode/duration-ms duration-ms
              :safe-mode/workflows-queued workflows-queued)))
 
+(defn- dependency-id-string
+  [dependency-id]
+  (if (keyword? dependency-id)
+    (name dependency-id)
+    (str dependency-id)))
+
+(defn- dependency-event
+  [stream event-type dependency previous-status message-key]
+  (let [dependency-id (:dependency/id dependency)
+        status (:dependency/status dependency)
+        message (messages/t message-key
+                            {:dependency-id (dependency-id-string dependency-id)
+                             :status (name status)})]
+    (-> (create-envelope stream event-type nil message)
+        (merge dependency)
+        (cond-> previous-status
+          (assoc :dependency/previous-status previous-status)))))
+
+(defn dependency-health-updated
+  "Emit when a dependency health projection changes."
+  [stream dependency & [previous-status]]
+  (dependency-event stream
+                    :dependency/health-updated
+                    dependency
+                    previous-status
+                    :dependency/health-updated))
+
+(defn dependency-recovered
+  "Emit when a dependency returns to healthy status."
+  [stream dependency & [previous-status]]
+  (dependency-event stream
+                    :dependency/recovered
+                    dependency
+                    previous-status
+                    :dependency/recovered))
+
 ;------------------------------------------------------------------------------ Layer 6
 ;; Meta-loop events
 

@@ -164,6 +164,28 @@
       (is (= "LLM timeout" (:workflow/failure-reason event)))
       (is (= error (:workflow/error-details event))))))
 
+(deftest dependency-event-constructors-test
+  (testing "dependency health events are exposed on the public interface"
+    (let [stream (es/create-event-stream)
+          dependency {:dependency/id :anthropic
+                      :dependency/source :external-provider
+                      :dependency/kind :provider
+                      :dependency/status :degraded
+                      :dependency/failure-count 1
+                      :dependency/window-size 5
+                      :dependency/incident-counts {:degraded 1}}
+          updated (es/dependency-health-updated stream dependency :healthy)
+          recovered (es/dependency-recovered stream
+                                             (assoc dependency
+                                                    :dependency/status :healthy
+                                                    :dependency/failure-count 0
+                                                    :dependency/incident-counts {})
+                                             :degraded)]
+      (is (= :dependency/health-updated (:event/type updated)))
+      (is (= :healthy (:dependency/previous-status updated)))
+      (is (= :dependency/recovered (:event/type recovered)))
+      (is (= :healthy (:dependency/status recovered))))))
+
 (deftest agent-event-constructors-test
   (testing "agent-chunk captures delta and done status"
     (let [stream (es/create-event-stream)

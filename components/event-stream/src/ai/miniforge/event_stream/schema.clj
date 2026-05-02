@@ -310,6 +310,59 @@
    [:llm/cost-usd {:optional true} number?]
    [:message string?]])
 
+;------------------------------------------------------------------------------ Layer 4.5
+;; Dependency health event schemas
+
+(def DependencyHealthUpdated
+  "Schema for dependency/health-updated event."
+  [:map
+   [:event/type [:= :dependency/health-updated]]
+   [:event/id uuid?]
+   [:event/timestamp inst?]
+   [:event/version string?]
+   [:event/sequence-number int?]
+   [:workflow/id {:optional true} [:maybe uuid?]]
+   [:dependency/id keyword?]
+   [:dependency/source keyword?]
+   [:dependency/kind keyword?]
+   [:dependency/status keyword?]
+   [:dependency/failure-count int?]
+   [:dependency/window-size int?]
+   [:dependency/incident-counts map?]
+   [:dependency/vendor {:optional true} keyword?]
+   [:dependency/class {:optional true} keyword?]
+   [:dependency/retryability {:optional true} keyword?]
+   [:failure/class {:optional true} keyword?]
+   [:dependency/previous-status {:optional true} keyword?]
+   [:dependency/last-observed-at {:optional true} inst?]
+   [:dependency/last-recovered-at {:optional true} inst?]
+   [:message string?]])
+
+(def DependencyRecovered
+  "Schema for dependency/recovered event."
+  [:map
+   [:event/type [:= :dependency/recovered]]
+   [:event/id uuid?]
+   [:event/timestamp inst?]
+   [:event/version string?]
+   [:event/sequence-number int?]
+   [:workflow/id {:optional true} [:maybe uuid?]]
+   [:dependency/id keyword?]
+   [:dependency/source keyword?]
+   [:dependency/kind keyword?]
+   [:dependency/status [:= :healthy]]
+   [:dependency/failure-count int?]
+   [:dependency/window-size int?]
+   [:dependency/incident-counts map?]
+   [:dependency/vendor {:optional true} keyword?]
+   [:dependency/class {:optional true} keyword?]
+   [:dependency/retryability {:optional true} keyword?]
+   [:failure/class {:optional true} keyword?]
+   [:dependency/previous-status {:optional true} keyword?]
+   [:dependency/last-observed-at {:optional true} inst?]
+   [:dependency/last-recovered-at {:optional true} inst?]
+   [:message string?]])
+
 ;------------------------------------------------------------------------------ Layer 5
 ;; Privacy levels and OCI event schemas (N8)
 
@@ -342,6 +395,8 @@
    :tool/completed   :internal
    :llm/request      :internal
    :llm/response     :internal
+   :dependency/health-updated :internal
+   :dependency/recovered      :internal
    :supervision/tool-use-evaluated :internal
    :supervisory/intervention-requested :confidential
    :supervisory/intervention-state-changed :confidential
