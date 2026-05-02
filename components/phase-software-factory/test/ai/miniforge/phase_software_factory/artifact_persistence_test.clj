@@ -127,16 +127,32 @@
       (is (= :completed (get-in result [:phase :status]))
           "Release should skip (complete) when implement status is nil and no dirty files"))))
 
-(deftest test-release-fails-with-failed-implement
-  (testing "release phase throws when implement result shows failure status"
+(deftest test-release-gate-is-env-not-impl-status
+  (testing "release fails on the env-based zero-files gate, not on impl-status"
+    ;; Regression contract change: the previous behavior was to throw
+    ;; `:release/no-implement-artifact` whenever the implement result map
+    ;; had `:status :failed`, even if the environment had real work. That
+    ;; gate disagreed with verify and review, which both read the worktree
+    ;; directly. Under the curator's `:curator/no-files-written` path the
+    ;; implement result reports failure while persist still captures
+    ;; whatever DID land on disk — release would explode and drop the
+    ;; work. The current behavior: release fails only when the env is
+    ;; genuinely empty (`:release/zero-files`), matching the downstream
+    ;; phases.
+    ;;
+    ;; This test pins the new error MESSAGE shape — release no longer
+    ;; references the implement artifact at all when it fails.
     (let [ctx (-> (create-base-context)
-                  ;; Simulate implement phase that failed
                   (assoc-in [:execution/phase-results :implement :result]
                             {:status :failed :error {:message "Agent timeout"}})
                   (assoc :worktree-path *test-worktree*))]
       (is (thrown-with-msg? clojure.lang.ExceptionInfo
-                            #"Release phase has no code artifact"
-                            (execute-phase-enter :release ctx))))))
+                            #"zero files"
+                            (execute-phase-enter :release ctx))
+          "release fails on env-based gate, not on impl-status — and the
+           error message now names the actual condition (env empty) rather
+           than the previously-misleading 'no code artifact from implement'
+           message"))))
 
 (deftest test-implement-writes-to-environment
   (testing "implement phase completes with environment-id when agent writes files directly"
