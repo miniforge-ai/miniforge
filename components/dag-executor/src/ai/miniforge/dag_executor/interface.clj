@@ -29,6 +29,7 @@
    A DAG node is not 'generate code once' - it's a task workflow that runs
    until it reaches a profile-defined terminal success state."
   (:require
+   [ai.miniforge.dag-executor.branch-registry :as branch-registry]
    [ai.miniforge.dag-executor.result :as result]
    [ai.miniforge.dag-executor.state-profile :as state-profile]
    [ai.miniforge.dag-executor.state :as state]
@@ -536,6 +537,47 @@
 
 ;------------------------------------------------------------------------------ Layer 7
 ;; Convenience functions
+
+;------------------------------------------------------------------------------ Layer 4
+;; Per-task branch registry — wires DAG dependency edges to scratch-worktree
+;; bases so a task's agent sees its dependency's persisted output instead of
+;; the spec branch. See branch_registry.clj for the design rationale.
+
+(def create-branch-registry
+  "Build an empty branch registry — `task-id → branch-info`."
+  branch-registry/create-registry)
+
+(def register-branch
+  "Pure-data: associate `branch-info` with `task-id` in a registry value.
+   The atom that holds the registry lives in the orchestrator; mutation
+   happens via `(swap! reg register-branch ...)` at the call site."
+  branch-registry/register-branch)
+
+(def lookup-branch
+  "Look up a task's persisted branch-info, or nil when unknown."
+  branch-registry/lookup-branch)
+
+(def resolve-base-branch
+  "Decide a downstream task's scratch base: the dep's branch when there's
+   exactly one registered, the default branch on zero deps or unregistered
+   single dep, or an `:anomalies/dag-non-forest` map on multi-dep tasks."
+  branch-registry/resolve-base-branch)
+
+(def resolve-base-branch-error?
+  "True when `resolve-base-branch` returned an anomaly map rather than a
+   branch string. Lets callers branch on the result without coupling to
+   the anomaly shape."
+  branch-registry/resolve-error?)
+
+(def validate-dag-forest
+  "Plan-time validator: nil when every task has ≤1 dependency,
+   `:anomalies/dag-non-forest` map otherwise. Multi-parent merge is a
+   v2 follow-up; v1 single-parent restriction is enforced here."
+  branch-registry/validate-forest)
+
+(def dag-forest?
+  "Predicate form of `validate-dag-forest`."
+  branch-registry/forest?)
 
 (defn create-dag-from-tasks
   "Create a complete DAG run state from a sequence of task definitions.
