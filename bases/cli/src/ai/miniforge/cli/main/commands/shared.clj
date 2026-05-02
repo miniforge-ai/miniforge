@@ -27,7 +27,7 @@
    [ai.miniforge.cli.messages :as messages]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Constants
+;; Constants + helpers with no in-namespace dependencies.
 
 (def max-artifacts-display
   "Maximum number of artifact files to display in a listing."
@@ -61,9 +61,6 @@
   "Changed-files threshold above which a PR is considered medium risk."
   5)
 
-;------------------------------------------------------------------------------ Layer 1
-;; Shared functions
-
 (defn try-resolve
   "Attempt to require-resolve a fully-qualified function symbol.
    Returns the resolved var (a function), or nil when the namespace
@@ -73,6 +70,14 @@
     (requiring-resolve fn-sym)
     (catch Exception _ nil)))
 
+(defn exit!
+  "Wrapper around System/exit that can be redef'd in tests."
+  [code]
+  (System/exit code))
+
+;------------------------------------------------------------------------------ Layer 1
+;; Composes Layer 0.
+
 (defn try-resolve-fn
   "Require-resolve `fn-sym` and immediately apply it to `args`.
    Returns nil when the namespace or var cannot be loaded."
@@ -81,11 +86,6 @@
     (try
       (apply f args)
       (catch Exception _ nil))))
-
-(defn exit!
-  "Wrapper around System/exit that can be redef'd in tests."
-  [code]
-  (System/exit code))
 
 (defn usage-error!
   "Print a usage error with the given message key and command string, then exit 1."

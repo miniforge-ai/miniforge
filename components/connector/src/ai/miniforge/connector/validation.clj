@@ -47,7 +47,7 @@
             [ai.miniforge.connector.handles :as handles]))
 
 ;;------------------------------------------------------------------------------ Layer 0
-;; Handle lookup
+;; No in-namespace dependencies — anomaly-returning primitives.
 
 (defn require-handle
   "Look up handle state in `store`. Return the state on success; return a
@@ -69,6 +69,14 @@
                       (cond-> {:handle handle}
                         connector (assoc :connector connector))))))
 
+(defn- auth-success?
+  "True when `result` is a credential-ref validation success map."
+  [result]
+  (true? (:success? result)))
+
+;;------------------------------------------------------------------------------ Layer 1
+;; Composes Layer 0.
+
 (defn require-handle!
   "Look up handle state in `store` or throw `ex-info` when absent.
 
@@ -85,14 +93,6 @@
        (throw (ex-info (or message (:anomaly/message result))
                        (:anomaly/data result)))
        result))))
-
-;;------------------------------------------------------------------------------ Layer 1
-;; Auth validation
-
-(defn- auth-success?
-  "True when `result` is a credential-ref validation success map."
-  [result]
-  (true? (:success? result)))
 
 (defn validate-auth
   "Validate a credential reference, if one is supplied. Return `nil` when
@@ -114,6 +114,9 @@
                             (or message "Credential validation failed")
                             (cond-> {:errors errors}
                               connector (assoc :connector connector)))))))))
+
+;;------------------------------------------------------------------------------ Layer 2
+;; Composes Layer 1.
 
 (defn validate-auth!
   "Validate a credential reference, throwing `ex-info` on failure.
