@@ -190,7 +190,7 @@
       (throw (ex-info (msg/t :github/owner-or-org-required) {:config config}))
 
       :else
-      (when-let [a (connector/validate-auth auth {:connector :github})]
+      (when-let [a (connector/validate-auth auth)]
         (let [errs (:errors (:anomaly/data a))]
           (throw (ex-info (msg/t :github/auth-invalid {:errors errs}) {:errors errs})))))))
 

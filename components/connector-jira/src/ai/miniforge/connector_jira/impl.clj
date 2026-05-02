@@ -46,9 +46,14 @@
 (defn- validate-auth!
   "Validate auth credential reference, throwing on failure.
    Delegates to the shared connector helper, then re-throws with the
-   localized message that interpolates the actual validation errors."
+   localized message that interpolates the actual validation errors.
+
+   The shared helper accepts a `:connector` opt that gets folded into
+   `:anomaly/data` for diagnostic logging, but here the throwing
+   boundary should preserve the historical `{:errors ...}` payload
+   shape, so we omit it."
   [auth]
-  (when-let [a (connector/validate-auth auth {:connector :jira})]
+  (when-let [a (connector/validate-auth auth)]
     (throw (ex-info (msg/t :jira/auth-invalid {:errors (:errors (:anomaly/data a))})
                     (:anomaly/data a)))))
 

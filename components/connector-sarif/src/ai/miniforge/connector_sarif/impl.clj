@@ -32,11 +32,14 @@
 
 (defn- require-handle!
   "Look up handle state, throw if missing.
-   Delegates to the shared connector helper."
+   Delegates to the shared connector helper.
+
+   The `:connector` opt is omitted so the thrown ex-data preserves
+   the historical `{:handle ...}` payload shape; the message already
+   identifies the handle by name."
   [handle]
   (connector/require-handle! handles handle
-                             {:message (str "Unknown handle: " handle)
-                              :connector :sarif}))
+                             {:message (str "Unknown handle: " handle)}))
 
 ;; --------------------------------------------------------------------------
 ;; Connect / Close

@@ -66,9 +66,13 @@
 (defn- validate-auth!
   "Validate auth credential reference, throwing on failure.
    Delegates to the shared connector helper, then re-throws with the
-   localized message that interpolates the actual validation errors."
+   localized message that interpolates the actual validation errors.
+
+   The shared helper's `:connector` opt is omitted so the thrown
+   ex-data preserves the historical `{:errors ...}` payload shape;
+   the local message already identifies this as a GitLab error."
   [auth]
-  (when-let [a (connector/validate-auth auth {:connector :gitlab})]
+  (when-let [a (connector/validate-auth auth)]
     (throw (ex-info (msg/t :gitlab/auth-invalid {:errors (:errors (:anomaly/data a))})
                     (:anomaly/data a)))))
 
