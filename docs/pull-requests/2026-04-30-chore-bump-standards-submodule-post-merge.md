@@ -1,11 +1,18 @@
-<!--\n  Title: Miniforge.ai\n  Author: Christopher Lester (christopher@miniforge.ai)\n  Copyright 2025-2026 Christopher Lester. Licensed under Apache 2.0.\n-->
+<!--
+  Title: Miniforge.ai
+  Author: Christopher Lester (christopher@miniforge.ai)
+  Copyright 2025-2026 Christopher Lester. Licensed under Apache 2.0.
+-->
 # chore(standards): bump `.standards` to merged-main commit
 
 ## Overview
 
 Small follow-up to [miniforge#713](https://github.com/miniforge-ai/miniforge/pull/713). The Phase 4b PR shipped with the
 `.standards` submodule pointing at the head of
-[`miniforge-standards/claude/runtime-policies`](https://github.com/miniforge-ai/miniforge-standards/tree/claude/runtime-policies) (`6f536a0`) — the branch HEAD before the standards repo's PR landed. miniforge-standards#14 merged in the
+[`miniforge-standards/claude/runtime-policies`][rtp-branch] (`6f536a0`) — the branch HEAD before the standards repo's
+PR landed. miniforge-standards#14 merged in the
+
+[rtp-branch]: https://github.com/miniforge-ai/miniforge-standards/tree/claude/runtime-policies
 meantime; this PR rebases the submodule pointer onto the merge commit on main
 ([`164d143`](https://github.com/miniforge-ai/miniforge-standards/commit/164d143)) so the consumer is tracking main
 rather than a now-orphan branch.

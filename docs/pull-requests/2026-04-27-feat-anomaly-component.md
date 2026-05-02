@@ -1,4 +1,8 @@
-<!--\n  Title: Miniforge.ai\n  Author: Christopher Lester (christopher@miniforge.ai)\n  Copyright 2025-2026 Christopher Lester. Licensed under Apache 2.0.\n-->
+<!--
+  Title: Miniforge.ai
+  Author: Christopher Lester (christopher@miniforge.ai)
+  Copyright 2025-2026 Christopher Lester. Licensed under Apache 2.0.
+-->
 # feat: add anomaly component for canonical data-first error type
 
 ## Overview
@@ -71,7 +75,7 @@ Anomaly map shape:
 
 Standard type vocabulary (mirrors cognitect anomalies):
 
-```
+```clojure
 #{:not-found :invalid-input :unauthorized :fault :unavailable
   :conflict :timeout :unsupported :fatal}
 ```
