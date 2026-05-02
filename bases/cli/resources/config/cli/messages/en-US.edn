@@ -397,6 +397,8 @@
   :evidence/show-workflow "  Workflow:  {value}"
   :evidence/show-status "  Status:    {value}"
   :evidence/show-created "  Created:   {value}"
+  :evidence/show-failure-attribution "  Failure:   {value}"
+  :evidence/show-dependency-issues "  Dependencies: {value}"
   :evidence/show-artifacts "  Artifacts: {count}"
   :evidence/show-artifact-entry "    • {type} — {id}"
   :evidence/show-phases "  Phases:    {count}"

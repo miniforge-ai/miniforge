@@ -42,6 +42,49 @@
 (declare generate-recommendations-report)
 
 ;; ============================================================================
+;; Failure Attribution Helpers
+;; ============================================================================
+
+(def ^:private failure-attribution-keys
+  [:failure/source
+   :failure/vendor
+   :failure/class
+   :failure/message
+   :dependency/id
+   :dependency/source
+   :dependency/kind
+   :dependency/vendor
+   :dependency/status
+   :dependency/class
+   :dependency/retryability])
+
+(defn- failure-attribution
+  [failure]
+  (let [attribution (select-keys failure failure-attribution-keys)]
+    (when (seq attribution)
+      attribution)))
+
+(defn- collect-failure-attribution
+  [workflow-state]
+  (or (some-> (:workflow/error workflow-state) failure-attribution)
+      (some->> (:workflow/errors workflow-state)
+               (keep failure-attribution)
+               first)))
+
+(defn- collect-dependency-health
+  [workflow-state]
+  (when-let [projection (:dependency-health workflow-state)]
+    (not-empty projection)))
+
+(defn- label
+  [value]
+  (cond
+    (keyword? value) (name value)
+    (string? value) value
+    (nil? value) "unknown"
+    :else (str value)))
+
+;; ============================================================================
 ;; Simple Observer Implementation
 ;; ============================================================================
 
@@ -57,6 +100,8 @@
           status (get workflow-state :workflow/status :unknown)
           history (get workflow-state :workflow/history [])
           errors (get workflow-state :workflow/errors [])
+          dependency-health (collect-dependency-health workflow-state)
+          failure-attribution (collect-failure-attribution workflow-state)
 
           workflow-metrics (proto/workflow-metrics
                             {:workflow-id workflow-id
@@ -65,6 +110,8 @@
                              :timestamp (java.util.Date.)
                              :history history
                              :errors errors
+                             :dependency-health dependency-health
+                             :failure-attribution failure-attribution
                              :phases (get-in @state [:phase-metrics workflow-id] [])})]
 
       (swap! state assoc-in [:metrics workflow-id] workflow-metrics)
@@ -341,6 +388,7 @@
   (let [limit (get opts :limit 100)
         metrics (proto/get-all-metrics observer {:limit limit})
         failed (filter phase/failed? metrics)
+        attributed-failures (keep :failure-attribution failed)
 
         ;; Analyze which phases fail most often
         failed-phases (reduce
@@ -353,6 +401,24 @@
                             failed-phases)))
                        {}
                        failed)
+        dependency-failures (->> attributed-failures
+                                 (keep (fn [failure]
+                                         (when-let [dependency-id (or (:dependency/id failure)
+                                                                      (:failure/vendor failure))]
+                                           [dependency-id (select-keys failure
+                                                                       [:failure/source
+                                                                        :failure/vendor
+                                                                        :failure/class
+                                                                        :dependency/class
+                                                                        :dependency/retryability])])))
+                                 (reduce (fn [acc [dependency-id failure]]
+                                           (update acc dependency-id
+                                                   (fn [existing]
+                                                     (-> (merge existing failure)
+                                                         (update :count (fnil inc 0))))))
+                                         {})
+                                 (sort-by (comp - :count val))
+                                 vec)
 
         total-workflows (count metrics)
         failure-rate (if (pos? total-workflows)
@@ -364,15 +430,20 @@
       :data {:total-workflows total-workflows
              :failed-workflows (count failed)
              :failure-rate failure-rate
-             :failed-phases (sort-by val > failed-phases)}
+             :failed-phases (sort-by val > failed-phases)
+             :dependency-failures dependency-failures}
       :summary (format "Failure rate: %.1f%% (%d/%d workflows failed)"
                        (* 100.0 failure-rate)
                        (count failed)
                        total-workflows)
       :recommendations
-      (when (seq failed-phases)
-        [(str "Most problematic phases: "
-              (str/join ", " (map first (take 3 (sort-by val > failed-phases)))))])})))
+      (cond-> []
+        (seq failed-phases)
+        (conj (str "Most problematic phases: "
+                   (str/join ", " (map first (take 3 (sort-by val > failed-phases))))))
+        (seq dependency-failures)
+        (conj (str "Dependency-attributed failures: "
+                   (str/join ", " (map (comp label first) (take 3 dependency-failures))))))})))
 
 (defn analyze-trends
   "Analyze metrics trends over time."
@@ -430,7 +501,7 @@
 (defn generate-summary-report
   "Generate a summary performance report."
   [observer opts]
-  (let [format (get opts :format :markdown)
+  (let [output-format (get opts :format :markdown)
         limit (get opts :limit 100)
 
         duration-analysis (proto/analyze-metrics observer :duration-stats {:limit limit})
@@ -444,7 +515,7 @@
                      :failures failure-analysis
                      :generated-at (java.util.Date.)}]
 
-    (case format
+    (case output-format
       :edn report-data
 
       :markdown
@@ -458,6 +529,18 @@
            (:summary token-analysis) "\n\n"
            "## Failure Analysis\n"
            (:summary failure-analysis) "\n"
+           (when-let [dependency-failures (seq (get-in failure-analysis [:data :dependency-failures]))]
+             (str "\n**Dependency-attributed failures:**\n"
+                  (str/join "\n"
+                            (map (fn [[dependency-id failure]]
+                                   (format "- %s (%s, count=%d)"
+                                           (label dependency-id)
+                                           (or (some-> (:dependency/class failure) label)
+                                               (some-> (:failure/class failure) label)
+                                               "unknown")
+                                           (:count failure)))
+                                 dependency-failures))
+                  "\n"))
            (when-let [recs (:recommendations failure-analysis)]
              (str "\n**Recommendations:**\n"
                   (str/join "\n" (map #(str "- " %) recs)) "\n")))
@@ -467,7 +550,7 @@
 (defn generate-detailed-report
   "Generate a detailed metrics breakdown report."
   [observer opts]
-  (let [format (get opts :format :edn)
+  (let [output-format (get opts :format :edn)
         limit (get opts :limit 50)
 
         all-metrics (proto/get-all-metrics observer {:limit limit})
@@ -478,7 +561,7 @@
                      :total-workflows (count all-metrics)
                      :generated-at (java.util.Date.)}]
 
-    (case format
+    (case output-format
       :edn report-data
       :markdown (str "# Detailed Workflow Metrics\n\n"
                      "**Generated:** " (:generated-at report-data) "\n"
@@ -497,7 +580,7 @@
 (defn generate-recommendations-report
   "Generate recommendations for workflow improvements."
   [observer opts]
-  (let [format (get opts :format :markdown)
+  (let [output-format (get opts :format :markdown)
         limit (get opts :limit 100)
 
         failure-analysis (proto/analyze-metrics observer :failure-patterns {:limit limit})
@@ -540,7 +623,7 @@
                      :trends-analysis trends-analysis
                      :generated-at (java.util.Date.)}]
 
-    (case format
+    (case output-format
       :edn report-data
       :markdown (str "# Workflow Improvement Recommendations\n\n"
                      "**Generated:** " (:generated-at report-data) "\n\n"
@@ -551,5 +634,17 @@
                      "\n\n"
                      "## Supporting Analysis\n\n"
                      "### Failures\n" (:summary failure-analysis) "\n\n"
+                     (when-let [dependency-failures (seq (get-in failure-analysis [:data :dependency-failures]))]
+                       (str "### Dependency Attribution\n"
+                            (str/join "\n"
+                                      (map (fn [[dependency-id failure]]
+                                             (format "- %s: %s (%d)"
+                                                     (label dependency-id)
+                                                     (or (some-> (:dependency/class failure) label)
+                                                         (some-> (:failure/class failure) label)
+                                                         "unknown")
+                                                     (:count failure)))
+                                           dependency-failures))
+                            "\n\n"))
                      "### Trends\n" (:summary trends-analysis) "\n")
       report-data)))

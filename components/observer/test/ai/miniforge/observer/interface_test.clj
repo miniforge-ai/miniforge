@@ -29,7 +29,7 @@
 
 (defn sample-workflow-state
   "Create a sample workflow state for testing."
-  [workflow-id status & {:keys [tokens cost duration]
+  [workflow-id status & {:keys [tokens cost duration dependency-health failure-attribution]
                          :or {tokens 1000 cost 0.10 duration 5000}}]
   {:workflow/id workflow-id
    :workflow/status status
@@ -39,6 +39,8 @@
    :workflow/history [{:from-phase :start
                       :to-phase :implement
                       :timestamp (java.util.Date.)}]
+   :dependency-health dependency-health
+   :workflow/error failure-attribution
    :workflow/errors (when (= status :failed)
                      [{:phase :test :error "Test failed"}])})
 
@@ -99,7 +101,27 @@
 
       (let [metrics (observer/get-workflow-metrics obs workflow-id)]
         (is (= :failed (:status metrics)) "Status should be :failed")
-        (is (seq (:errors metrics)) "Errors should be present")))))
+        (is (seq (:errors metrics)) "Errors should be present"))))
+
+  (testing "Collecting dependency attribution on failed workflow"
+    (let [obs (observer/create-observer)
+          workflow-id (random-uuid)
+          dependency-health {:anthropic {:dependency/id :anthropic
+                                         :dependency/status :degraded}}
+          failure-attribution {:failure/source :external-provider
+                               :failure/vendor :anthropic
+                               :failure/class :failure.class/external
+                               :dependency/id :anthropic
+                               :dependency/class :rate-limit
+                               :dependency/retryability :retryable}
+          workflow-state (sample-workflow-state workflow-id
+                                                :failed
+                                                :dependency-health dependency-health
+                                                :failure-attribution failure-attribution)]
+      (observer/collect-workflow-metrics obs workflow-id workflow-state)
+      (let [metrics (observer/get-workflow-metrics obs workflow-id)]
+        (is (= dependency-health (:dependency-health metrics)))
+        (is (= failure-attribution (:failure-attribution metrics)))))))
 
 (deftest collect-phase-metrics-test
   (testing "Collecting phase metrics"
@@ -281,7 +303,27 @@
         (let [data (:data analysis)]
           (is (= 10 (:total-workflows data)) "Should analyze 10 workflows")
           (is (= 3 (:failed-workflows data)) "Should have 3 failures")
-          (is (= 0.3 (:failure-rate data)) "Failure rate should be 30%"))))))
+          (is (= 0.3 (:failure-rate data)) "Failure rate should be 30%")))))
+
+  (testing "Analyzing dependency-attributed failures"
+    (let [obs (observer/create-observer)]
+      (dotimes [_ 2]
+        (observer/collect-workflow-metrics
+         obs
+         (random-uuid)
+         (sample-workflow-state
+          (random-uuid)
+          :failed
+          :failure-attribution {:failure/source :external-provider
+                                :failure/vendor :anthropic
+                                :failure/class :failure.class/external
+                                :dependency/id :anthropic
+                                :dependency/class :rate-limit
+                                :dependency/retryability :retryable})))
+      (let [analysis (observer/analyze-metrics obs :failure-patterns {})
+            dependency-failures (get-in analysis [:data :dependency-failures])]
+        (is (= :anthropic (ffirst dependency-failures)))
+        (is (= 2 (get-in (first dependency-failures) [1 :count])))))))
 
 (deftest analyze-trends-test
   (testing "Analyzing metrics trends"
@@ -311,11 +353,24 @@
         (observer/collect-workflow-metrics obs (random-uuid)
                                           (sample-workflow-state (random-uuid) :completed)))
 
+      (observer/collect-workflow-metrics
+       obs
+       (random-uuid)
+       (sample-workflow-state
+        (random-uuid)
+        :failed
+        :failure-attribution {:failure/source :external-provider
+                              :failure/vendor :anthropic
+                              :failure/class :failure.class/external
+                              :dependency/id :anthropic
+                              :dependency/class :rate-limit
+                              :dependency/retryability :retryable}))
       (let [report (observer/generate-report obs :summary {:format :markdown})]
         (is (string? report) "Report should be a string")
         (is (.contains report "Workflow Performance Summary") "Should have title")
         (is (.contains report "Duration Statistics") "Should have duration section")
-        (is (.contains report "Cost Statistics") "Should have cost section"))))
+        (is (.contains report "Cost Statistics") "Should have cost section")
+        (is (.contains report "Dependency-attributed failures") "Should include dependency attribution"))))
 
   (testing "Generating summary report in EDN"
     (let [obs (observer/create-observer)]

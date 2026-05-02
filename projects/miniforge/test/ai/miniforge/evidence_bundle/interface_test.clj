@@ -30,9 +30,24 @@
   []
   (artifact/create-transit-store {:dir nil}))
 
+(defn dependency-health-entry
+  [overrides]
+  (merge {:dependency/id :anthropic
+          :dependency/source :external-provider
+          :dependency/kind :provider
+          :dependency/status :degraded
+          :dependency/failure-count 2
+          :dependency/window-size 5
+          :dependency/incident-counts {:rate-limit 2}
+          :dependency/vendor :anthropic
+          :dependency/class :rate-limit
+          :dependency/retryability :retryable}
+         overrides))
+
 (defn create-test-workflow-state
   "Create a test workflow state."
-  [workflow-id status & {:keys [tool-invocations] :or {tool-invocations []}}]
+  [workflow-id status & {:keys [tool-invocations dependency-health failure-attribution]
+                         :or {tool-invocations []}}]
   {:workflow/id workflow-id
    :workflow/status status
    :workflow/spec {:intent/type :import
@@ -53,6 +68,8 @@
                                 :artifacts []}}
    :workflow/gate-results []
    :workflow/tool-invocations tool-invocations
+   :dependency-health dependency-health
+   :workflow/error failure-attribution
    :workflow/pr-info {:number 123
                       :url "https://github.com/test/repo/pull/123"
                       :status :merged
@@ -129,7 +146,30 @@
       (is (not (nil? bundle)))
       (is (false? (get-in bundle [:evidence/outcome :outcome/success])))
       (is (= "Test error" (get-in bundle [:evidence/outcome :outcome/error-message])))
-      (is (= :verify (get-in bundle [:evidence/outcome :outcome/error-phase]))))))
+      (is (= :verify (get-in bundle [:evidence/outcome :outcome/error-phase])))))
+
+  (testing "Carries dependency attribution and dependency health into evidence"
+    (let [store (create-test-artifact-store)
+          manager (evidence/create-evidence-manager {:artifact-store store})
+          workflow-id (random-uuid)
+          dependency-health {:anthropic (dependency-health-entry {})}
+          failure-attribution {:failure/source :external-provider
+                               :failure/vendor :anthropic
+                               :failure/class :failure.class/external
+                               :dependency/id :anthropic
+                               :dependency/source :external-provider
+                               :dependency/kind :provider
+                               :dependency/vendor :anthropic
+                               :dependency/class :rate-limit
+                               :dependency/retryability :retryable
+                               :failure/message "Claude API rate limited"}
+          state (create-test-workflow-state workflow-id
+                                            :failed
+                                            :dependency-health dependency-health
+                                            :failure-attribution failure-attribution)
+          bundle (evidence/create-bundle manager workflow-id {:workflow-state state})]
+      (is (= dependency-health (:evidence/dependency-health bundle)))
+      (is (= failure-attribution (:evidence/failure-attribution bundle))))))
 
 ;------------------------------------------------------------------------------ Layer 3: Bundle Retrieval
 
