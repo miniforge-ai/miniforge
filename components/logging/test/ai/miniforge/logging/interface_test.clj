@@ -186,6 +186,26 @@
       (is (= "Escalating to human" (:log/message entry)))
       (is (= {:reason "budget exceeded"} (:data entry))))))
 
+(deftest nil-logger-is-no-op-test
+  (testing "every level wrapper is nil-safe"
+    (is (nil? (log/trace nil :system :event)))
+    (is (nil? (log/debug nil :system :event)))
+    (is (nil? (log/info  nil :system :event)))
+    (is (nil? (log/warn  nil :system :event)))
+    (is (nil? (log/error nil :system :event)))
+    (is (nil? (log/fatal nil :system :event)))
+    (is (nil? (log/log   nil :info :system :event {}))))
+
+  (testing "with-context passes nil through"
+    (is (nil? (log/with-context nil {:ctx/workflow-id "x"}))))
+
+  (testing "timed with nil logger executes f and returns its result"
+    (let [calls (atom 0)
+          result (log/timed nil :info :system :event
+                            (fn [] (swap! calls inc) :done))]
+      (is (= :done result))
+      (is (= 1 @calls)))))
+
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
   (test/run-tests 'ai.miniforge.logging.interface-test)

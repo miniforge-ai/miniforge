@@ -40,13 +40,17 @@
 
 (defn with-context
   "Return a new logger with additional context merged into all entries.
-   Context keys are typically namespaced like :ctx/workflow-id, :ctx/agent-id.
+   Context keys are typically namespaced like :ctx/workflow-id,
+   :ctx/agent-id. Nil logger passes through (the result is still nil)
+   so chained `(-> logger (with-context …) (with-context …))` works
+   without an outer nil-check.
 
    Example:
      (with-context logger {:ctx/workflow-id (random-uuid)
                            :ctx/task-id task-id})"
   [logger context-map]
-  (core/with-context* logger context-map))
+  (when logger
+    (core/with-context* logger context-map)))
 
 (defn get-context
   "Return the current context map from a logger."
@@ -83,60 +87,69 @@
    Example:
      (log logger :info :agent :agent/task-started
           {:message \"Starting implementation\"
-           :data {:agent-role :implementer}})"
-  [logger level category event opts]
-  (core/log* logger level category event opts))
+           :data {:agent-role :implementer}})
 
-;; Level-specific convenience functions
+   Nil logger is a no-op. Callers no longer need to wrap with
+   `(when logger …)`; passing nil through is safe at every level."
+  [logger level category event opts]
+  (when logger
+    (core/log* logger level category event opts)))
+
+;; Level-specific convenience functions. Each wrapper is nil-safe so
+;; callers don't have to repeat `(when logger …)` at every call site
+;; — passing a nil logger drops the entry on the floor.
 
 (defn trace
-  "Log at :trace level (detailed internal state)."
+  "Log at :trace level (detailed internal state). Nil logger = no-op."
   ([logger category event] (trace logger category event {}))
   ([logger category event opts]
-   (core/log* logger :trace category event opts)))
+   (when logger (core/log* logger :trace category event opts))))
 
 (defn debug
-  "Log at :debug level (operational detail)."
+  "Log at :debug level (operational detail). Nil logger = no-op."
   ([logger category event] (debug logger category event {}))
   ([logger category event opts]
-   (core/log* logger :debug category event opts)))
+   (when logger (core/log* logger :debug category event opts))))
 
 (defn info
-  "Log at :info level (business events)."
+  "Log at :info level (business events). Nil logger = no-op."
   ([logger category event] (info logger category event {}))
   ([logger category event opts]
-   (core/log* logger :info category event opts)))
+   (when logger (core/log* logger :info category event opts))))
 
 (defn warn
-  "Log at :warn level (recoverable issues)."
+  "Log at :warn level (recoverable issues). Nil logger = no-op."
   ([logger category event] (warn logger category event {}))
   ([logger category event opts]
-   (core/log* logger :warn category event opts)))
+   (when logger (core/log* logger :warn category event opts))))
 
 (defn error
-  "Log at :error level (failed operations)."
+  "Log at :error level (failed operations). Nil logger = no-op."
   ([logger category event] (error logger category event {}))
   ([logger category event opts]
-   (core/log* logger :error category event opts)))
+   (when logger (core/log* logger :error category event opts))))
 
 (defn fatal
-  "Log at :fatal level (system-level failures)."
+  "Log at :fatal level (system-level failures). Nil logger = no-op."
   ([logger category event] (fatal logger category event {}))
   ([logger category event opts]
-   (core/log* logger :fatal category event opts)))
+   (when logger (core/log* logger :fatal category event opts))))
 
 ;------------------------------------------------------------------------------ Layer 2
 ;; Timed execution
 
 (defn timed
   "Execute f and log start/completion with duration.
-   Returns the result of f.
+   Returns the result of f. Nil logger skips both log entries and just
+   returns `(f)`.
 
    Example:
      (timed logger :info :system :system/health-check
             #(check-health))"
   [logger level category event f]
-  (first (core/timed* logger level category event f)))
+  (if logger
+    (first (core/timed* logger level category event f))
+    (f)))
 
 (defmacro with-timing
   "Execute body and log start/completion with duration.
