@@ -7,5 +7,7 @@
   :degradation/dependency-unavailable "Dependency unavailable: {dependencies}"
   :degradation/dependency-operator-action "Dependency requires operator action: {dependencies}"
   :degradation/dependency-recovered "Dependency health recovered"
+  :degradation/budget-recovered     "Error budgets recovered"
+  :degradation/nominal-restored     "Nominal mode restored"
   :safe-mode/entered    "Safe-mode entered: {trigger}"
   :safe-mode/exited     "Safe-mode exited after {duration}ms: {justification}"}}

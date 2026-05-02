@@ -271,12 +271,30 @@
       :degraded
       (cond
         (= target-mode :safe-mode)
-        (transition! manager signal)
+        ;; From :degraded, the FSM has a dedicated `:budget-exhausted`
+        ;; transition to :safe-mode. The budget signal upstream emits
+        ;; `:emergency-stop` (which also works), but `:budget-exhausted`
+        ;; is more specific — it lets downstream auditing distinguish a
+        ;; budget exhaustion from a true emergency-stop trigger.
+        (transition! manager
+                     (if (and (= (:event signal) :emergency-stop)
+                              (budget/critical-budget-exhausted? budget-state))
+                       (assoc signal :event :budget-exhausted)
+                       signal))
 
         (= target-mode :nominal)
-        (transition! manager (transition-signal :nominal
-                                                :budget-recovered
-                                                (messages/t :degradation/dependency-recovered)))
+        ;; `:degraded → :nominal` always rides the FSM's `:budget-recovered`
+        ;; event, but the recovery itself can be budget-driven or
+        ;; dependency-driven. Pick the message key from the inputs:
+        ;; non-empty budget-state means budgets are being evaluated;
+        ;; otherwise the recovery is the dependency clearing.
+        (transition! manager
+                     (transition-signal
+                      :nominal
+                      :budget-recovered
+                      (messages/t (if (seq budget-state)
+                                    :degradation/budget-recovered
+                                    :degradation/dependency-recovered))))
 
         :else current)
 
