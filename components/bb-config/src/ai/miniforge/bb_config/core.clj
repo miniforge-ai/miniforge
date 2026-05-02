@@ -19,8 +19,10 @@
 (ns ai.miniforge.bb-config.core
   "Config loader implementation.
 
-   Layer 0: pure EDN reader — no filesystem root assumed.
-   Layer 1: repo-rooted default path + map slicing."
+   Stratification (intra-namespace):
+   Layer 0 — `read-edn` and `default-path` (no in-ns deps).
+   Layer 1 — `load` (composes Layer 0).
+   Layer 2 — `get` (composes Layer 0 + Layer 1)."
   (:refer-clojure :exclude [load get])
   (:require [ai.miniforge.bb-paths.interface :as paths]
             [babashka.fs :as fs]
@@ -29,7 +31,7 @@
 (def ^:const default-filename "bb-tasks.edn")
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Pure EDN reader
+;; No in-namespace dependencies.
 
 (defn read-edn
   "Parse `path` as EDN. Returns `{}` if the file is absent."
@@ -38,18 +40,21 @@
     (edn/read-string (slurp path))
     {}))
 
-;------------------------------------------------------------------------------ Layer 1
-;; Repo-rooted loader + slice
-
 (defn default-path
   "Absolute path to `bb-tasks.edn` under the current repo root."
   []
   (str (paths/repo-root) "/" default-filename))
 
+;------------------------------------------------------------------------------ Layer 1
+;; Composes Layer 0.
+
 (defn load
   "Load the whole config map."
   ([] (read-edn (default-path)))
   ([path] (read-edn path)))
+
+;------------------------------------------------------------------------------ Layer 2
+;; Composes Layer 0 (`default-path`) + Layer 1 (`load`).
 
 (defn get
   "Return the config slice for `task-key`."

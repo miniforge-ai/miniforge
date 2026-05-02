@@ -19,7 +19,16 @@
 (ns ai.miniforge.etl.main
   "JVM entry point for `mf etl` subcommands. Shelled out to from the
    Babashka CLI because the concrete source connectors depend on hato
-   and Apache POI, which aren't BB-compatible."
+   and Apache POI, which aren't BB-compatible.
+
+   Stratification (intra-namespace):
+   Layer 0 — helpers with no in-namespace deps. Mix of pure and
+             side-effecting (`stringify-instants` is pure;
+             `print-run-summary!` and `exit!` write to stdout / exit).
+   Layer 1 — `emit-result!` (composes `stringify-instants`).
+   Layer 2 — subcommand handlers (compose Layer 1).
+   Layer 3 — `-main` (inlines the dispatch table to keep this file at
+             4 strata)."
   {:miniforge/runtime :jvm-only}
   (:require
    [ai.miniforge.etl.messages :as msg]
@@ -34,7 +43,7 @@
   (:gen-class))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Output formatting
+;; No in-namespace dependencies.
 
 (defn- stringify-instants
   "Walk `v` converting every `java.time.Instant` to its ISO-8601 string
@@ -58,6 +67,13 @@
           (when-let [error (:error result)]
             (println (msg/t :run/error {:value error})))))))
 
+(defn- exit! [code] (System/exit (or code 0)))
+
+(defn- get-opts [m] (if (contains? m :opts) (:opts m) m))
+
+;------------------------------------------------------------------------------ Layer 1
+;; Composes Layer 0.
+
 (defn- emit-result!
   "Write the pipeline-runner result to `out-path`. Writes JSON when the
    path ends in `.json`; EDN otherwise. Instants are stringified first
@@ -70,12 +86,8 @@
     (spit out-path body)
     (println (msg/t :run/wrote {:path out-path}))))
 
-(defn- exit! [code] (System/exit (or code 0)))
-
-(defn- get-opts [m] (if (contains? m :opts) (:opts m) m))
-
-;------------------------------------------------------------------------------ Layer 1
-;; Subcommand handlers
+;------------------------------------------------------------------------------ Layer 2
+;; Subcommand handlers — compose Layer 1.
 
 (defn- run-cmd
   [m]
@@ -134,15 +146,14 @@
     (println (msg/t :help/connector-entry {:value t})))
   (exit! 2))
 
-;------------------------------------------------------------------------------ Layer 2
-;; Entry point
-
-(def dispatch-table
-  [{:cmds ["run"]      :fn run-cmd      :args->opts [:pipeline]}
-   {:cmds ["list"]     :fn list-cmd     :args->opts [:path]}
-   {:cmds ["validate"] :fn validate-cmd :args->opts [:pipeline]}
-   {:cmds []           :fn help-cmd}])
+;------------------------------------------------------------------------------ Layer 3
+;; Entry point — composes Layer 2.
 
 (defn -main
   [& args]
-  (cli/dispatch dispatch-table args))
+  (cli/dispatch
+   [{:cmds ["run"]      :fn run-cmd      :args->opts [:pipeline]}
+    {:cmds ["list"]     :fn list-cmd     :args->opts [:path]}
+    {:cmds ["validate"] :fn validate-cmd :args->opts [:pipeline]}
+    {:cmds []           :fn help-cmd}]
+   args))

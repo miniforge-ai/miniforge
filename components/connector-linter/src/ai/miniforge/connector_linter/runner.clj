@@ -5,15 +5,18 @@
 (ns ai.miniforge.connector-linter.runner
   "Run linter subprocesses and parse output via ETL mappings.
 
-   Layer 0: Subprocess execution
-   Layer 1: Run a single linter
-   Layer 2: Run all linters for detected technologies"
+   Stratification (intra-namespace):
+   Layer 0 — `linter-available?`, `run-subprocess`, `lintable-tech`
+             (no in-ns deps).
+   Layer 1 — `run-linter` (composes Layer 0).
+   Layer 2 — `run-all`, `run-fixes` (public orchestration; compose
+             Layer 1)."
   (:require
    [ai.miniforge.connector-linter.etl :as etl]
    [babashka.process :as process]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Subprocess
+;; No in-namespace dependencies.
 
 (defn linter-available?
   "Check if a linter CLI is available on PATH."
@@ -35,8 +38,14 @@
     (catch Exception e
       {:exit -1 :out "" :err (.getMessage e)})))
 
+(defn- lintable-tech
+  "True when a fingerprint has a linter and is in the detected set."
+  [detected-techs fingerprint]
+  (and (:tech/linter fingerprint)
+       (contains? detected-techs (:tech/id fingerprint))))
+
 ;------------------------------------------------------------------------------ Layer 1
-;; Single linter execution
+;; Composes Layer 0.
 
 (defn run-linter
   "Run a single linter and parse output via ETL mapping.
@@ -60,13 +69,8 @@
          :duration-ms (- end-ms start-ms)}))))
 
 ;------------------------------------------------------------------------------ Layer 2
-;; Multi-linter orchestration
-
-(defn- lintable-tech
-  "True when a fingerprint has a linter and is in the detected set."
-  [detected-techs fingerprint]
-  (and (:tech/linter fingerprint)
-       (contains? detected-techs (:tech/id fingerprint))))
+;; Public orchestration — composes Layer 1 (`run-linter`) + Layer 0
+;; helpers (`lintable-tech`, `linter-available?`, `run-subprocess`).
 
 (defn run-all
   "Run linters for all detected technologies.
