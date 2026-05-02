@@ -259,7 +259,7 @@
    Usage: miniforge etl list [<search-path>]
           (defaults to `.`)"
   [opts]
-  (let [path (or (:paths opts) ".")]
+  (let [path (get opts :paths ".")]
     (shared/exit! (shell-etl! ["list" path]))))
 
 (defn etl-validate-cmd
