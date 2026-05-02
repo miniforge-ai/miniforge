@@ -20,7 +20,8 @@
   "SARIF JSON and CSV parsing helpers.
    Handles SARIF v2.1.0 structure (tool -> runs[] -> results[] -> locations[]).
    Provides pluggable CSV parsing with configurable column mapping."
-  (:require [cheshire.core :as json]
+  (:require [ai.miniforge.coerce.interface :as coerce]
+            [cheshire.core :as json]
             [clojure.java.io :as io]
             [clojure.string :as str]
             [clojure.data.csv :as csv]))
@@ -113,11 +114,9 @@
      :violation/severity    (normalize-severity (get-col :severity))
      :violation/location    {:file   (get-col :file)
                              :line   (when-let [l (get-col :line)]
-                                       (try (Integer/parseInt (str/trim l))
-                                            (catch Exception _ nil)))
+                                       (coerce/safe-parse-int (str/trim l)))
                              :column (when-let [c (get-col :column)]
-                                       (try (Integer/parseInt (str/trim c))
-                                            (catch Exception _ nil)))}
+                                       (coerce/safe-parse-int (str/trim c)))}
      :violation/source-tool "csv-import"
      :violation/raw         (zipmap headers row)}))
 

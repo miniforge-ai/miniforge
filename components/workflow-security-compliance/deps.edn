@@ -1,5 +1,6 @@
 {:paths ["src" "resources"]
- :deps {ai.miniforge/messages {:local/root "../messages"}
+ :deps {ai.miniforge/coerce {:local/root "../coerce"}
+ai.miniforge/messages {:local/root "../messages"}
         ai.miniforge/phase    {:local/root "../phase"}
         ai.miniforge/response {:local/root "../response"}
         cheshire/cheshire     {:mvn/version "5.12.0"}}

@@ -19,6 +19,7 @@
 (ns ai.miniforge.workflow-security-compliance.core
   "Pure workflow helpers for the security-compliance pipeline."
   (:require
+   [ai.miniforge.coerce.interface :as coerce]
    [ai.miniforge.workflow-security-compliance.config :as config]
    [cheshire.core :as json]
    [clojure.java.io :as io]
@@ -29,10 +30,7 @@
 
 (defn- parse-int
   [value]
-  (try
-    (Integer/parseInt (str/trim (str value)))
-    (catch Exception _
-      0)))
+  (coerce/safe-parse-int (str/trim (str value)) 0))
 
 (defn- csv-columns
   [line]

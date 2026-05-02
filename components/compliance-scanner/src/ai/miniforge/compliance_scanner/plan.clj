@@ -22,7 +22,8 @@
    Layer 0: DAG topology helpers
    Layer 1: Markdown work-spec builder
    Layer 2: Top-level plan entry point"
-  (:require [ai.miniforge.compliance-scanner.factory   :as factory]
+  (:require [ai.miniforge.coerce.interface             :as coerce]
+            [ai.miniforge.compliance-scanner.factory   :as factory]
             [ai.miniforge.compliance-scanner.messages  :as msg]
             [clojure.string                            :as str]))
 
@@ -38,7 +39,7 @@
 (defn- dewey-order
   "Numeric sort key for a Dewey code string."
   [dewey-str]
-  (try (Integer/parseInt dewey-str) (catch Exception _ 0)))
+  (coerce/safe-parse-int dewey-str 0))
 
 (defn- key->uuid-entry
   "Return [k (random-uuid)] for use in building a key->id map."
