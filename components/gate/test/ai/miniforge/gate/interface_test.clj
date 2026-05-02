@@ -247,6 +247,15 @@
                                    {:review/decision :rejected}
                                    {})]
       (is (not (:passed? result)))
+      (is (= :not-approved (get-in (first (:errors result)) [:type])))))
+
+  (testing "explicit negative review decisions override legacy fallback approval flags"
+    (let [result (gate/check-gate :review-approved
+                                  {:review/decision :changes-requested
+                                   :metadata {:approved true}
+                                   :review {:approved true}}
+                                  {})]
+      (is (not (:passed? result)))
       (is (= :not-approved (get-in (first (:errors result)) [:type]))))))
 
 (deftest check-gate-review-approved-fallback-paths-test

@@ -52,32 +52,60 @@
   "Resolve the implement-phase artifact using three strategies:
    1. Serialized :artifact key in the implement result (legacy model)
    2. The result itself when it already contains :code/files (it IS the artifact)
-   3. Fall back to collecting all changed files from the worktree on disk
-      (environment-promotion model where the agent writes directly to the worktree)"
-  [implement-result ctx]
-  (or
-   ;; Strategy 1 — explicit :artifact in result
-   (:artifact implement-result)
-   ;; Strategy 2 — result already is the artifact (has :code/files)
-   (when (:code/files implement-result)
-     implement-result)
-   ;; Strategy 3 — read changed files from worktree (env-promotion model)
-   (let [worktree-path (or (get ctx :execution/worktree-path)
-                           (get ctx :worktree-path))]
-     (when worktree-path
-       (agent/collect-written-files (agent/empty-snapshot)
-                                            worktree-path)))))
+   3. Serialized artifact under inner result :output
+   4. Fall back to collecting all changed files from the worktree on disk
+      (environment-promotion model where the agent writes directly to the worktree)
+   If the persisted outer artifact is metadata-only, merge that metadata over the
+   worktree-collected artifact so review sees full file content plus curator flags."
+  [implement-phase-result ctx]
+  (let [outer-artifact (:artifact implement-phase-result)
+        inner-artifact (get-in implement-phase-result [:result :artifact])
+        inner-output (get-in implement-phase-result [:result :output])
+        worktree-path (or (get ctx :execution/worktree-path)
+                          (get ctx :worktree-path))
+        worktree-artifact (when worktree-path
+                            (agent/collect-written-files (agent/empty-snapshot)
+                                                         worktree-path))]
+    (or
+     ;; Strategy 1 — persisted outer artifact already includes file content
+     (when (:code/files outer-artifact)
+       outer-artifact)
+     ;; Strategy 2 — explicit :artifact in inner result
+     (when (:code/files inner-artifact)
+       inner-artifact)
+     ;; Strategy 3 — result already is the artifact (has :code/files)
+     (when (:code/files implement-phase-result)
+       implement-phase-result)
+     ;; Strategy 4 — serialized artifact under inner :output
+     (when (:code/files inner-output)
+       inner-output)
+     ;; Strategy 5 — metadata-only outer artifact merged over worktree content
+     (when (and outer-artifact worktree-artifact)
+       (merge worktree-artifact outer-artifact))
+     ;; Strategy 6 — read changed files from worktree (env-promotion model)
+     worktree-artifact)))
+
+(defn- build-verify-review-input
+  "Build a stable verify summary for the reviewer prompt from the full verify phase result."
+  [verify-phase-result]
+  (when verify-phase-result
+    {:phase/status (get verify-phase-result :status)
+     :result/status (get-in verify-phase-result [:result :status])
+     :summary (or (get-in verify-phase-result [:result :summary])
+                  (get-in verify-phase-result [:result :output :summary]))
+     :metrics (get verify-phase-result :metrics
+                   (get-in verify-phase-result [:result :metrics]))}))
 
 (defn- build-review-task
   "Build the task map for the reviewer agent from execution context.
    Returns {:task task-map :rules-manifest manifest-or-nil}."
   [ctx]
   (let [input (get-in ctx [:execution/input])
-        implement-result (get-in ctx [:execution/phase-results :implement :result :output])
-        verify-result (get-in ctx [:execution/phase-results :verify :result :output])
+        implement-phase-result (get-in ctx [:execution/phase-results :implement])
+        verify-phase-result (get-in ctx [:execution/phase-results :verify])
         {:keys [formatted manifest]} (kb-helpers/inject-with-manifest
                                        (:knowledge-store ctx) :reviewer (get input :tags []))
-        artifact (resolve-implement-artifact implement-result ctx)
+        artifact (resolve-implement-artifact implement-phase-result ctx)
         task (cond-> {:task/id (random-uuid)
                       :task/type :review
                       :task/description (:description input)
@@ -85,7 +113,7 @@
                       :task/intent (:intent input)
                       :task/constraints (:constraints input)
                       :task/artifact artifact
-                      :task/tests verify-result}
+                      :task/tests (build-verify-review-input verify-phase-result)}
                formatted
                (assoc :task/knowledge-context formatted))]
     {:task task
@@ -158,7 +186,6 @@
                         (assoc-in [:phase :metrics] metrics)
                         (assoc-in [:metrics :review :duration-ms] duration-ms)
                         (assoc-in [:metrics :review :repair-cycles] (dec iterations))
-                        (update-in [:execution :phases-completed] (fnil conj []) :review)
                         ;; Merge agent metrics into execution metrics
                         (update-in [:execution/metrics :tokens] (fnil + 0) (:tokens metrics 0))
                         (update-in [:execution/metrics :duration-ms] (fnil + 0) (:duration-ms metrics 0)))]
@@ -176,7 +203,9 @@
                                      (assoc :review-feedback feedback)
                                      (phase/request-redirect :implement))]
                 (assoc updated-ctx :phase phase-result)))
-            updated-ctx)
+            (cond-> updated-ctx
+              (= :completed phase-status)
+              (update-in [:execution :phases-completed] (fnil conj []) :review)))
       (phase/emit-phase-completed! :review
         {:outcome     (if (= :completed phase-status) :success :failure)
          :duration-ms duration-ms

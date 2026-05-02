@@ -20,8 +20,10 @@
   "Tests for the reviewer agent."
   (:require
    [clojure.test :refer [deftest testing is]]
+   [ai.miniforge.agent.model :as model]
    [ai.miniforge.agent.reviewer :as reviewer]
    [ai.miniforge.agent.core :as core]
+   [ai.miniforge.llm.interface :as llm]
    [ai.miniforge.loop.interface :as loop]
    [ai.miniforge.response.interface :as response]))
 
@@ -178,6 +180,70 @@
 
       (is (= 0 (get-in result [:metrics :tokens]))
           "Should use 0 tokens - no LLM calls"))))
+
+(deftest test-reviewer-rejects-unparseable-llm-output
+  (testing "successful LLM calls that cannot be parsed fail closed"
+    (with-redefs [model/resolve-llm-client-for-role (fn [_role client] client)
+                  llm/chat (fn [_client _prompt _opts]
+                             {:success? true
+                              :content "not valid edn"
+                              :tokens 42})
+                  llm/success? :success?
+                  llm/get-content :content]
+      (let [reviewer (reviewer/create-reviewer {:llm-backend ::mock-backend
+                                                :gates []})
+            result (core/invoke reviewer {} sample-artifact)
+            review (:artifact result)]
+        (is (= :rejected (:review/decision review)))
+        (is (= ["Reviewer LLM output could not be parsed into a review artifact"]
+               (:review/blocking-issues review)))
+        (is (= 42 (get-in result [:metrics :tokens])))))))
+
+(deftest test-reviewer-uses-parseable-content-even-when-backend-flags-failure
+  (testing "parseable review content still drives the decision when backend success? is false"
+    (with-redefs [model/resolve-llm-client-for-role (fn [_role client] client)
+                  llm/chat (fn [_client _prompt _opts]
+                             {:success? false
+                              :content "```clojure\n{:review/decision :changes-requested\n :review/issues [{:severity :blocking :description \"Needs changes\"}]}\n```"
+                              :tokens 7
+                              :error {:message "artifact file not found"}})
+                  llm/success? :success?
+                  llm/get-content :content
+                  llm/get-error :error]
+      (let [reviewer (reviewer/create-reviewer {:llm-backend ::mock-backend
+                                                :gates []})
+            result (core/invoke reviewer {} sample-artifact)
+            review (:artifact result)]
+        (is (= :changes-requested (:review/decision review)))
+        (is (some #{"Needs changes"} (:review/blocking-issues review)))
+        (is (= 7 (get-in result [:metrics :tokens])))))))
+
+(deftest test-reviewer-rejects-degraded-implement-handoff
+  (testing "default reviewer rejects curated artifacts marked as degraded handoffs"
+    (let [reviewer (reviewer/create-reviewer {:llm-backend nil})
+          artifact {:code/id (random-uuid)
+                    :code/files [{:path "src/example.clj"
+                                  :content "(ns example)"
+                                  :action :create}]
+                    :code/degraded-handoff? true
+                    :code/scope-deviations []}
+          result (core/invoke reviewer {} artifact)
+          review (:artifact result)]
+      (is (= :rejected (:review/decision review)))
+      (is (seq (:review/blocking-issues review))))))
+
+(deftest test-reviewer-rejects-scope-deviations
+  (testing "default reviewer rejects artifacts with curator-reported scope deviations"
+    (let [reviewer (reviewer/create-reviewer {:llm-backend nil})
+          artifact {:code/id (random-uuid)
+                    :code/files [{:path "docs/out-of-scope.md"
+                                  :content "oops"
+                                  :action :modify}]
+                    :code/scope-deviations ["docs/out-of-scope.md"]}
+          result (core/invoke reviewer {} artifact)
+          review (:artifact result)]
+      (is (= :rejected (:review/decision review)))
+      (is (some #(re-find #"out-of-scope" %) (:review/blocking-issues review))))))
 
 ;------------------------------------------------------------------------------ Schema validation tests
 

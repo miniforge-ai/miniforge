@@ -171,6 +171,32 @@
         (is (= :success (get-in final-result [:phase :result :status]))
             "Result status should be :success")))))
 
+(deftest implement-marks-curator-recovered-errors-as-degraded-handoff-test
+  (testing "curator recovery after an implementer-side error is marked as a degraded handoff"
+    (with-redefs [agent/create-implementer (fn [_] {:type :mock-implementer})
+                  agent/invoke (fn [_ _ _]
+                                 (response/error "LLM output parse failed"
+                                                 {:tokens 50 :duration-ms 250}))
+                  agent/curate-implement-output
+                  (fn [_]
+                    (response/success {:code/files [{:path "src/core.clj"
+                                                     :content "(ns core)"
+                                                     :action :create}]
+                                       :code/summary "curated recovery"}
+                                      {:metrics {:tokens 25 :duration-ms 50}}))]
+      (let [ctx (create-base-context)
+            ctx-with-config (assoc ctx :phase-config {:phase :implement})
+            interceptor (phase/get-phase-interceptor {:phase :implement})
+            enter-result ((:enter interceptor) ctx-with-config)
+            final-result ((:leave interceptor) enter-result)]
+        (is (= :completed (get-in final-result [:phase :status])))
+        (is (true? (get-in enter-result [:phase :result :degraded-handoff?]))
+            "Recovered curator output must mark the handoff as degraded")
+        (is (true? (get-in enter-result [:phase :result :success?]))
+            "Recovered curator output must normalize the result to success for downstream phase accounting")
+        (is (true? (get-in final-result [:phase :artifact :code/degraded-handoff?])))
+        (is (= :error (get-in final-result [:phase :artifact :code/raw-agent-status])))))))
+
 (deftest implement-handles-agent-exception-test
   (testing "implement phase handles agent exceptions gracefully"
     (with-redefs [agent/create-implementer (fn [_] {:type :mock-implementer})
@@ -228,6 +254,49 @@
         (is (= :implement (first (get-in final-result [:execution :phases-completed])))
             "Implement should be added to phases-completed")))))
 
+(deftest leave-implement-preserves-curated-artifact-test
+  (testing "successful implement preserves curated artifact on the outer phase map for downstream review"
+    (with-redefs [agent/create-implementer (fn [_] {:type :mock-implementer})
+                  agent/invoke (fn [_ _ _]
+                                 (response/success nil {:tokens 200 :duration-ms 500}))
+                  agent/curate-implement-output
+                  (fn [_]
+                    (response/success {:code/files [{:path "src/core.clj"
+                                                     :content "(ns core)"
+                                                     :action :create}]
+                                       :code/summary "curated artifact"
+                                       :code/scope-deviations []}
+                                      {:metrics {:tokens 200 :duration-ms 500}}))]
+      (let [ctx (create-base-context)
+            ctx-with-config (assoc ctx :phase-config {:phase :implement})
+            interceptor (phase/get-phase-interceptor {:phase :implement})
+            enter-result ((:enter interceptor) ctx-with-config)
+            final-result ((:leave interceptor) enter-result)]
+        (is (= "curated artifact" (get-in final-result [:phase :artifact :code/summary])))
+        (is (= ["src/core.clj"] (get-in final-result [:phase :artifact :code/file-paths])))
+        (is (= :success (get-in final-result [:phase :result :status]))
+            "The persisted phase result stays lightweight")
+        (is (nil? (get-in final-result [:phase :result :output]))
+            "Serialized code does not go back into the environment-model result")
+        (is (nil? (get-in final-result [:phase :artifact :code/files]))
+            "Serialized code should not be persisted on the outer phase artifact")))))
+
+(deftest leave-implement-does-not-count-failed-phase-as-completed-test
+  (testing "failed implement does not append to :execution/phases-completed"
+    (with-redefs [agent/create-implementer (fn [_] {:type :mock-implementer})
+                  agent/invoke (fn [_ _ _]
+                                 (response/error "LLM timeout" {:tokens 0 :duration-ms 5000}))
+                  agent/curate-implement-output mock-curator-error]
+      (let [ctx (-> (create-base-context)
+                    (assoc-in [:phase :iterations] 8))
+            ctx-with-config (assoc ctx :phase-config {:phase :implement})
+            interceptor (phase/get-phase-interceptor {:phase :implement})
+            enter-result ((:enter interceptor) ctx-with-config)
+            final-result ((:leave interceptor) enter-result)]
+        (is (= :failed (get-in final-result [:phase :status])))
+        (is (empty? (get-in final-result [:execution :phases-completed] []))
+            "Failed implement must not be counted as completed")))))
+
 ;------------------------------------------------------------------------------ Layer 3: Capsule File Loading
 
 (deftest load-files-from-capsule-reads-via-execute-fn-test
@@ -270,7 +339,7 @@
 (deftest resolve-existing-files-uses-capsule-in-governed-mode-test
   (testing "resolve-existing-files prefers capsule path when execute-fn is on context"
     (let [capsule-called (atom false)
-          execute-fn (fn [_executor _env-id cmd _opts]
+          execute-fn (fn [_executor _env-id _cmd _opts]
                        (reset! capsule-called true)
                        {:data {:stdout "(ns capsule)" :exit-code 0}})
           ctx {:execution/execute-fn execute-fn

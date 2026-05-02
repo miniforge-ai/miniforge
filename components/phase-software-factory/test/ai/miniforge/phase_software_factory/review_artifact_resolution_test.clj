@@ -86,6 +86,33 @@
       (is (= "serialized artifact" (:code/summary resolved))
           "Should preserve the artifact's summary"))))
 
+(deftest resolve-outer-phase-artifact-test
+  (testing "metadata-only outer phase artifact rehydrates file contents from the worktree"
+    (let [impl-phase-result {:status :completed
+                             :artifact {:code/summary "serialized artifact"
+                                        :code/scope-deviations ["docs/out-of-scope.md"]
+                                        :code/file-paths ["src/core.clj"]}}
+          worktree-artifact (make-serialized-artifact)
+          ctx (make-ctx)
+          resolved (with-redefs [agent/collect-written-files
+                                 (fn [_snapshot working-dir]
+                                   (is (= "/tmp/test-worktree" working-dir))
+                                   worktree-artifact)]
+                     (resolve-implement-artifact impl-phase-result ctx))]
+      (is (= "serialized artifact" (:code/summary resolved)))
+      (is (= ["docs/out-of-scope.md"] (:code/scope-deviations resolved)))
+      (is (= 1 (count (:code/files resolved)))))))
+
+(deftest resolve-inner-output-artifact-test
+  (testing "environment-model implement phase can carry artifact under [:result :output]"
+    (let [artifact (make-code-files-result)
+          impl-phase-result {:status :completed
+                             :result {:status :success
+                                      :output artifact}}
+          ctx (make-ctx)
+          resolved (resolve-implement-artifact impl-phase-result ctx)]
+      (is (= artifact resolved)))))
+
 (deftest resolve-code-files-artifact-test
   (testing "Strategy 2: when implement-result has :code/files, returns the result itself"
     (let [impl-result (make-code-files-result)
