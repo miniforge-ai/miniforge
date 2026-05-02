@@ -1,3 +1,8 @@
+<!--
+  Title: Miniforge.ai
+  Author: Christopher Lester (christopher@miniforge.ai)
+  Copyright 2025-2026 Christopher Lester. Licensed under Apache 2.0.
+-->
 # Compliance Scanner Demo — YC Week
 
 ## Setup (before demo)
@@ -45,6 +50,7 @@ bb miniforge init examples/demo-polyglot-repo
 > Clojure, Python, TypeScript, and Kubernetes manifests."
 
 **Key points:**
+
 - Technologies detected automatically
 - Policy packs selected based on what's in the repo
 - Config written to `.miniforge/config.edn`
@@ -75,6 +81,7 @@ bb miniforge scan examples/demo-polyglot-repo
 > or linter can catch."
 
 **Key output to highlight:**
+
 - Policy violations: secrets in setup.sh, unsafe Rust, Swift force-unwraps
 - Linter violations: Clippy findings, clj-kondo namespace mismatch
 - Combined count with breakdown
@@ -91,6 +98,7 @@ bb miniforge scan examples/demo-polyglot-repo --execute --report false
 > review. One command, every language."
 
 **Show the git diff after:**
+
 ```bash
 cd examples/demo-polyglot-repo && git diff --stat
 ```
@@ -122,11 +130,13 @@ cd examples/demo-polyglot-repo && git diff --stat
 ## Fallback Plan
 
 If semantic analysis is slow during live demo:
+
 - Skip `--semantic` and mention it verbally
 - Show pre-recorded output from a previous run
 - Or run with `--semantic --report false` which completes faster
 
 If a linter isn't installed:
+
 - The scanner gracefully reports "not installed (skipped)"
 - This is actually a feature to demo — shows graceful degradation
 

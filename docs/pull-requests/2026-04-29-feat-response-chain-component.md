@@ -1,14 +1,27 @@
+<!--
+  Title: Miniforge.ai
+  Author: Christopher Lester (christopher@miniforge.ai)
+  Copyright 2025-2026 Christopher Lester. Licensed under Apache 2.0.
+-->
 # feat: add response-chain component for runtime trace + data-first errors
 
 ## Overview
 
-Adds a new `ai.miniforge.response-chain` Polylith component to miniforge OSS. Provides the canonical in-flight runtime trace primitive that miniforge-family Clojure repos consume. Threads through a logical flow as data; each participating function appends a step (operation keyword + success? + anomaly|response). The completed chain becomes the auditable record of "what happened during this request."
+Adds a new `ai.miniforge.response-chain` Polylith component to miniforge OSS. Provides the canonical in-flight runtime
+trace primitive that miniforge-family Clojure repos consume. Threads through a logical flow as data; each participating
+function appends a step (operation keyword + success? + anomaly|response). The completed chain becomes the auditable
+record of "what happened during this request."
 
 ## Motivation
 
-The recently-merged `ai.miniforge.anomaly` component gave us a canonical anomaly type. The response-chain is the next layer up: an accumulator that carries those anomalies — and successful step results — through composable flows. Together they form the substrate that the new `005 exceptions-as-data` standards rule prescribes.
+The recently-merged `ai.miniforge.anomaly` component gave us a canonical anomaly type. The response-chain is the next
+layer up: an accumulator that carries those anomalies — and successful step results — through composable flows. Together
+they form the substrate that the new `005 exceptions-as-data` standards rule prescribes.
 
-This is the H2 component in the cross-cutting H-series being added to miniforge OSS so that thesium-workflows, miniforge-fleet, and any future ports consume one shared error-flow vocabulary rather than reinventing it per-repo. The semantic reference is ixi's `responses-web` (read-only); this is a clean reimplementation under modern conventions, not a port.
+This is the H2 component in the cross-cutting H-series being added to miniforge OSS so that thesium-workflows,
+miniforge-fleet, and any future ports consume one shared error-flow vocabulary rather than reinventing it per-repo. The
+semantic reference is ixi's `responses-web` (read-only); this is a clean reimplementation under modern conventions, not
+a port.
 
 ## Base Branch
 
@@ -39,7 +52,9 @@ Foundations / cross-cutting primitive. New top-level component.
   - `last_successful_or_test.clj`
   - `multi_step_composition_test.clj`
   - `malli_validation_test.clj`
-- Workspace registration in root `deps.edn` (`:dev`, `:test`, `:conformance` aliases) + each consumer project's `deps.edn` (`projects/miniforge/`, `projects/miniforge-core/`, `projects/miniforge-tui/`). Also adds `ai.miniforge/anomaly` to those project deps where it was missing — `response-chain` requires it transitively.
+- Workspace registration in root `deps.edn` (`:dev`, `:test`, `:conformance` aliases) + each consumer project's
+  `deps.edn` (`projects/miniforge/`, `projects/miniforge-core/`, `projects/miniforge-tui/`). Also adds
+  `ai.miniforge/anomaly` to those project deps where it was missing — `response-chain` requires it transitively.
 
 ## Public API
 
@@ -71,11 +86,14 @@ Chain:
    :response-chain [:vector Step]}
 ```
 
-The chain's `:succeeded?` is the conjunction of every step's `:succeeded?`. `append-step` recomputes the invariant on every call.
+The chain's `:succeeded?` is the conjunction of every step's `:succeeded?`. `append-step` recomputes the invariant on
+every call.
 
 ## Eating our own dog food
 
-This component IS the boundary helper for response-chains; it never throws. Malformed inputs to `append-step` produce an `:invalid-input` anomaly step rather than a thrown exception — consistent with the `005 exceptions-as-data` rule. Verified by `malli_validation_test.clj`.
+This component IS the boundary helper for response-chains; it never throws. Malformed inputs to `append-step` produce an
+`:invalid-input` anomaly step rather than a thrown exception — consistent with the `005 exceptions-as-data` rule.
+Verified by `malli_validation_test.clj`.
 
 ## Strata Affected
 
@@ -89,7 +107,8 @@ No existing component touched. Pure additive change.
 
 - `bb pre-commit` (lint:clj + fmt:md + test + test:graalvm): **ALL PRE-COMMIT CHECKS PASSED**
 - `lint:clj` — 17 files, 0 errors / 0 warnings
-- `test` — 256 namespaces, **2886 tests / 10662 passes / 0 failures / 0 errors**. The 9 response-chain test namespaces account for 42 tests / 75 assertions in this brick alone.
+- `test` — 256 namespaces, **2886 tests / 10662 passes / 0 failures / 0 errors**. The 9 response-chain test namespaces
+  account for 42 tests / 75 assertions in this brick alone.
 - `test:graalvm` — 6 tests / 473 assertions / 0 failures
 
 The nine test files map 1:1 to the per-behavior dimensions in the brief. Each dimension is independently exercisable.
@@ -98,14 +117,22 @@ The nine test files map 1:1 to the per-behavior dimensions in the brief. Each di
 
 No migration required. New additive component. Existing miniforge code unchanged.
 
-Downstream consumption (thesium-workflows, miniforge-fleet) lands in subsequent PRs as those repos rewire flows to thread response-chains through retrieval / synthesis / agent pipelines.
+Downstream consumption (thesium-workflows, miniforge-fleet) lands in subsequent PRs as those repos rewire flows to
+thread response-chains through retrieval / synthesis / agent pipelines.
 
 ## Notes / Deviations
 
-- **Conformance alias not updated for response-chain or anomaly.** Conservatively followed the precedent set by the merged anomaly PR (which only registered in `:dev`/`:test`/root). Easy follow-up if conformance gate should cover these bricks.
-- **Anomaly added to consumer project `deps.edn` files.** The original anomaly merge registered it in root only; response-chain depends on it transitively, so the project classpaths needed both. Mirrors the content-hash pattern.
-- **One transient test flake observed mid-run** in `ai.miniforge.dag-executor.state-test/transition-task!-emits-event-test` — passes in isolation and final pre-commit run was clean. Unrelated to this change; pre-existing brick-isolation hazard around event-stream global state. Worth a separate look as `:fault`-classified follow-on.
-- **Apache 2 license headers** on every file (matches `components/anomaly/src/ai/miniforge/anomaly/interface.clj` exactly). Layer-labeled comment headers in interface, contract, and core.
+- **Conformance alias not updated for response-chain or anomaly.** Conservatively followed the precedent set by the
+  merged anomaly PR (which only registered in `:dev`/`:test`/root). Easy follow-up if conformance gate should cover
+  these bricks.
+- **Anomaly added to consumer project `deps.edn` files.** The original anomaly merge registered it in root only;
+  response-chain depends on it transitively, so the project classpaths needed both. Mirrors the content-hash pattern.
+- **One transient test flake observed mid-run** in
+  `ai.miniforge.dag-executor.state-test/transition-task!-emits-event-test` — passes in isolation and final pre-commit
+  run was clean. Unrelated to this change; pre-existing brick-isolation hazard around event-stream global state. Worth a
+  separate look as `:fault`-classified follow-on.
+- **Apache 2 license headers** on every file (matches `components/anomaly/src/ai/miniforge/anomaly/interface.clj`
+  exactly). Layer-labeled comment headers in interface, contract, and core.
 
 ## Related Issues/PRs
 
