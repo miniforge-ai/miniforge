@@ -1,4 +1,10 @@
-# Generalized Classification Runtime Handoff
+# Generalized Classification Runtime
+
+> **Status:** informative — architectural design spec. Captures the
+> classification-runtime direction agreed during the dependency-attribution
+> review. Not yet expressed as a work-spec; conversion to
+> `work/<id>.spec.edn` is a follow-up when the engine work is ready to be
+> picked up.
 
 ## Context
 
