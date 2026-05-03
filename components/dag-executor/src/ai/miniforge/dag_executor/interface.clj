@@ -538,7 +538,7 @@
 ;------------------------------------------------------------------------------ Layer 7
 ;; Convenience functions
 
-;------------------------------------------------------------------------------ Layer 4
+;------------------------------------------------------------------------------ Layer 8
 ;; Per-task branch registry — wires DAG dependency edges to scratch-worktree
 ;; bases so a task's agent sees its dependency's persisted output instead of
 ;; the spec branch. See branch_registry.clj for the design rationale.

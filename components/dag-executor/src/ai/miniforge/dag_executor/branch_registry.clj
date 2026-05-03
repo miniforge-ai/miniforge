@@ -27,9 +27,11 @@
    because no agent ever saw the prior task's output.
 
    Pure data + pure functions. The atom that holds the registry lives in
-   the orchestrator's per-workflow context, not here — keeping mutation
-   confined to one call site (`register-branch!`) simplifies reasoning
-   about concurrent sub-workflows.
+   the orchestrator's per-workflow context, not here — the orchestrator
+   does the single `(swap! reg register-branch ...)` per completed task,
+   from one helper (`register-batch-branches!` in dag-orchestrator),
+   which keeps mutation confined to one call site and simplifies
+   reasoning about concurrent sub-workflows.
 
    Layer 0: Pure registry operations (create / register / lookup)
    Layer 1: Resolution (turn a task's dep set into a base-branch decision)

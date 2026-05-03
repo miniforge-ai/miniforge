@@ -182,15 +182,25 @@
     {:dag/branch-registry reg
      :execution/opts {:branch default-branch}}))
 
-(deftest task-sub-opts-no-registry-omits-branch-test
-  (testing "without :dag/branch-registry on context, no :branch is set —
-            preserves pre-chaining behavior so callers that don't opt in
-            (legacy paths, focused unit tests) keep acquiring off the
-            default branch."
+(deftest task-sub-opts-no-registry-resolves-to-default-test
+  (testing "absent :dag/branch-registry on context is treated as an empty
+            registry — `:branch` still resolves deterministically.
+
+            Earlier draft kept a 'no-registry → omit :branch' fallback,
+            but that fallback reproduced the pre-chaining bug (every
+            sub-workflow forks off whatever main is now). There is no
+            production caller that hits the no-registry path:
+            `execute-dag-loop` always installs one. Failing back to a
+            silent 'use whatever default' was a foot-gun, not a feature.
+
+            The new contract: when task-def is supplied, `:branch` is
+            ALWAYS set. With no registry and no `:execution/opts :branch`
+            on context, the resolver falls back to 'main' — the same
+            value `default-spec-branch` produces."
     (let [task-def {:task/id id-a :task/description "A" :task/deps #{}}
           opts (dag-orch/task-sub-opts {} task-def)]
-      (is (not (contains? opts :branch))
-          "absence of registry → no :branch on opts (sub-workflow uses default)"))))
+      (is (= "main" (:branch opts))
+          "no registry + no spec branch on context → default 'main'"))))
 
 (deftest task-sub-opts-zero-deps-uses-default-test
   (testing "root task: with registry but no deps, base = default branch.

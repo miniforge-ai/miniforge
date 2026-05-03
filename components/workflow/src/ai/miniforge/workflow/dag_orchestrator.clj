@@ -247,22 +247,24 @@
 
 (defn- resolve-task-base-branch
   "Look up the branch task-def's scratch worktree should be forked from.
-   Returns either a branch name string (the resolved base), an anomaly
-   map (multi-parent / non-forest), or nil when there is no registry on
-   context.
+   Returns either a branch name string (the resolved base) or an anomaly
+   map (multi-parent / non-forest).
 
-   nil is the explicit 'don't override' signal: callers that don't opt
-   into the chaining path (legacy code, focused unit tests, anything
-   that constructs a context without `:dag/branch-registry`) get exactly
-   the pre-chaining behavior — `task-sub-opts` will omit `:branch` and
-   the sub-workflow's `acquire-environment!` falls back to whatever it
-   would have done before this feature existed."
+   When `:dag/branch-registry` is absent on context (test scaffolding
+   that didn't bother building one), behaves exactly as if an empty
+   registry were on context — root tasks resolve to the spec branch,
+   single-dep tasks fall back to the spec branch (defensive: scheduler
+   ordering should prevent this in production). The previous
+   'no-registry → omit :branch' path was deliberately removed: it
+   reproduced the pre-chaining bug (every task forks off the same
+   base), and there's no production caller that hits it — `execute-dag-loop`
+   always installs a registry."
   [context task-def]
-  (when-let [registry-atom (get context :dag/branch-registry)]
-    (let [registry (deref registry-atom)
-          deps (vec (or (:task/deps task-def) []))
-          default (default-spec-branch context)]
-      (dag/resolve-base-branch registry deps default))))
+  (let [registry (some-> (get context :dag/branch-registry) deref)
+        deps (vec (or (:task/deps task-def) []))
+        default (default-spec-branch context)]
+    (dag/resolve-base-branch (or registry (dag/create-branch-registry))
+                             deps default)))
 
 (defn task-sub-opts
   "Build execution opts for a DAG task's sub-workflow.
@@ -271,12 +273,20 @@
    Disables DAG execution to prevent recursion and skips lifecycle events
    (parent workflow owns those).
 
-   When the parent has a `:dag/branch-registry` on context (the
-   per-task-base-chaining path), resolves `task-def`'s dependency to a
-   real persisted branch and passes it as `:branch` so the sub-workflow's
-   `acquire-environment!` forks off that branch instead of the spec branch.
-   Without a registry on context, behaves exactly as pre-chaining code —
-   sub-workflow acquires off the default branch.
+   When `task-def` is supplied, resolves its dependency to a persisted
+   branch via the registry on context and passes it as `:branch` so the
+   sub-workflow's `acquire-environment!` forks off that branch instead
+   of the spec branch. `:branch` is ALWAYS set when task-def is given:
+   - Single-dep registered → dep's branch (chaining payoff).
+   - Single-dep unregistered or zero deps → the spec branch.
+   - Multi-dep → the registry returns an anomaly; we omit `:branch` here
+     because there's no usable string. In practice the orchestrator
+     short-circuits multi-parent plans at validation time
+     (`execute-plan-as-dag`), so this path is unreachable in production.
+
+   The single-arity form `(task-sub-opts context)` is for callers that
+   don't yet thread task-def (kept for compatibility with the
+   workflow-runner adapter). It does NOT pass `:branch`.
 
    IMPORTANT: Does NOT pass the parent's executor, environment-id, or
    worktree-path. Each sub-workflow acquires its own isolated environment
@@ -285,11 +295,10 @@
    - Stale/broken files from previous runs polluting the release commit
    - Pre-commit hooks picking up unrelated changes from sibling tasks"
   ([context]
-   ;; Backward-compatible arity for callers that don't yet thread task-def.
    (task-sub-opts context nil))
   ([context task-def]
    (let [base-branch (when task-def (resolve-task-base-branch context task-def))
-         resolved-branch (when (and base-branch
+         resolved-branch (when (and (string? base-branch)
                                     (not (dag/resolve-base-branch-error? base-branch)))
                            base-branch)]
      (cond-> {:disable-dag-execution true
@@ -761,11 +770,19 @@
 
    Validation runs AFTER stratum wiring on purpose: stratum auto-wiring
    can introduce multi-parent edges that the raw plan doesn't show, and
-   we want the orchestrator to reject those at plan-validation time too."
+   we want the orchestrator to reject those at plan-validation time too.
+
+   Sorts deps before vectorizing so anomaly payloads (`:dependencies`
+   in `:multi-parent-tasks`) are deterministic across runs — sets have
+   no iteration order, and `vec` of a set would otherwise produce
+   different log/error output run-to-run for the same plan."
   [task-defs]
   (mapv (fn [t]
           {:task/id (:task/id t)
-           :task/dependencies (vec (:task/deps t #{}))})
+           ;; sort-by str so heterogeneous task-id types (UUID/keyword/
+           ;; string) still produce a total order — `sort` would throw
+           ;; on a mixed set.
+           :task/dependencies (vec (sort-by str (:task/deps t #{})))})
         task-defs))
 
 (defn execute-plan-as-dag [plan context]
