@@ -5,7 +5,7 @@
 ;; creates detailed implementation plans.
 
 {:prompt/id :planner
- :prompt/version "2.3.0"
+ :prompt/version "2.4.0"
  :prompt/agent :planner
 
  ;; Hard turn cap passed to the backend CLI. Observed 2026-04-18: at 40
@@ -156,12 +156,34 @@ conceptual modules, you MUST decompose into separate tasks per boundary.
    corresponding :test task that depends on it.
 
 4. **Cross-component wiring = separate task.** If components need integration glue
-   (e.g., a new function call from workflow -> agent), that is a dedicated task
-   depending on both component tasks.
+   (e.g., a new function call from workflow -> agent), that is a dedicated task.
+   It must depend on exactly ONE upstream task — pick the component whose
+   completed work the wiring task most directly builds on. Do not list multiple
+   component tasks in :task/dependencies.
 
 5. **Stratum ordering.** Assign :task/stratum starting at 0 for foundation tasks
    (schemas, interfaces), 1 for implementations that depend on them, 2 for
    integration/tests. Tasks at the same stratum can run in parallel.
+
+6. **Single-parent dependencies (HARD CONSTRAINT).** Each task's
+   :task/dependencies vector MUST contain at most ONE entry. The runtime DAG
+   executor v1 supports single-parent forests only: it forks each task's
+   scratch worktree from one upstream branch. Multi-parent dependencies
+   (e.g. :task/dependencies [#uuid \"aaa...\" #uuid \"bbb...\"]) are
+   REJECTED at plan-validation time with :anomalies/dag-non-forest, which
+   fails the workflow before any task runs.
+
+   When a task semantically depends on two upstream tasks (e.g. a test
+   that exercises both component A and component B), pick the more
+   recently-finishing component as the single parent and rely on the
+   chain-of-stratum ordering to ensure the other has also completed.
+   The test will see both components' files in its worktree because the
+   parent's branch already contains the chain of work that landed before it.
+
+   Concretely: if task X needs both A and B, structure as
+     A → B → X        (B picks up A's branch; X picks up B's branch),
+   not
+     A → X, B → X    (multi-parent; rejected).
 
 ### Task Scope Fields
 
@@ -212,12 +234,16 @@ workflow orchestrator to respect it\":
    :task/component \"agent\"
    :task/exclusive-files [\"components/agent/test/ai/miniforge/agent/rate_limit_test.clj\"]
    :task/stratum 2
-   :task/dependencies [#uuid \"aaa...\" #uuid \"bbb...\"]
+   :task/dependencies [#uuid \"bbb...\"]
    :task/acceptance-criteria [\"Unit tests pass\" \"Edge cases covered\"]}]}
 ```
 
-Note: tasks aaa and bbb touch different components. If they were at the same
-stratum (and bbb did not import aaa), they could run in parallel.
+Note: ccc has only ONE entry in :task/dependencies (#uuid \"bbb...\") even
+though it semantically exercises both aaa and bbb. The single-parent chain
+A → B → C means C's worktree is forked from B's branch, which already
+contains A's work because B was forked from A. This satisfies the v1
+single-parent forest constraint. Listing both [aaa bbb] would fail the
+plan with :anomalies/dag-non-forest before any task ran.
 
 ### Single-Component Specs
 
