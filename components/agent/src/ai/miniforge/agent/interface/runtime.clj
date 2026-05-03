@@ -20,7 +20,8 @@
   "Agent creation, execution, and lifecycle operations."
   (:require
    [ai.miniforge.agent.core :as core]
-   [ai.miniforge.agent.interface.protocols.agent :as agent-proto]))
+   [ai.miniforge.agent.interface.protocols.agent :as agent-proto]
+   [ai.miniforge.agent.supervisory-bridge :as supervisory-bridge]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Agent creation and execution
@@ -35,7 +36,11 @@
 
 (defn invoke
   [agent task context]
-  (agent-proto/invoke agent task context))
+  (supervisory-bridge/invoke-with-projection
+   agent
+   task
+   context
+   #(agent-proto/invoke agent task context)))
 
 (defn validate
   [agent output context]
