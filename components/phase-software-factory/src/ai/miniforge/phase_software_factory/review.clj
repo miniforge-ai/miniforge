@@ -23,8 +23,9 @@
    Agent: :reviewer
    Default gates: [:review-approved :quality-check]"
   (:require            [ai.miniforge.phase.interface :as phase]
+            [ai.miniforge.phase-software-factory.messages :as messages]
             [ai.miniforge.phase-software-factory.phase-config :as phase-config]
-            
+
             [ai.miniforge.phase-software-factory.knowledge-helpers :as kb-helpers]
             [ai.miniforge.agent.interface :as agent]
             [ai.miniforge.knowledge.interface :as knowledge]
@@ -149,60 +150,103 @@
     (-> (phase/enter-context ctx :review :reviewer gates budget start-time result)
         (assoc-in [:phase :rules-manifest] rules-manifest))))
 
+(defn- terminate-stagnated
+  "Mark a stagnated phase as failed and skip the redirect-to-implement
+   path. Carries the fingerprint chain in :phase/error so the
+   workflow runner / evidence bundle can report what didn't move."
+  [ctx fingerprint-history]
+  (-> ctx
+      (assoc-in [:phase :stagnated?] true)
+      (assoc-in [:phase :error]
+                {:anomaly/category :anomalies.review/stagnation
+                 :anomaly/message  (messages/t :review/stagnation)
+                 :review/fingerprint-history (vec fingerprint-history)})))
+
+(defn- redirect-to-implement
+  "Update phase to redirect back to :implement with review feedback for
+   repair. Caller is responsible for the iteration-budget guard."
+  [updated-ctx feedback]
+  (let [phase-result (-> (:phase updated-ctx)
+                         (update :iterations (fnil inc 1))
+                         (assoc :review-feedback feedback)
+                         (phase/request-redirect :implement))]
+    (assoc updated-ctx :phase phase-result)))
+
+(defn- record-fingerprint
+  "Append the latest review fingerprint to [:execution :review-fingerprints]."
+  [ctx fingerprint]
+  (update-in ctx [:execution :review-fingerprints] (fnil conj []) fingerprint))
+
 (defn leave-review
   "Post-processing for review phase.
 
    Records review metrics: issues found, approval status.
    When review decision is :changes-requested and within iteration budget,
    sets status to :failed with a redirect transition request so the execution
-   engine jumps back to implement with the review feedback attached."
+   engine jumps back to implement with the review feedback attached.
+
+   Stagnation guard: if the reviewer's actionable-issue fingerprint is
+   identical to the immediately prior iteration's, the repair loop has
+   produced no movement on the blocking complaints. Terminate with
+   :anomalies.review/stagnation instead of redirecting — better to
+   surface the loop than burn another budget cycle."
   [ctx]
-  (let [start-time (get-in ctx [:phase :started-at])
-        end-time (System/currentTimeMillis)
-        duration-ms (- end-time start-time)
-        result (get-in ctx [:phase :result])
-        review-decision (get-in result [:output :review/decision])
-        metrics (-> (get result :metrics {:tokens 0 :duration-ms duration-ms})
-                    (assoc :duration-ms duration-ms))
-        iterations (get-in ctx [:phase :iterations] 1)
-        max-iterations (get-in ctx [:phase :budget :iterations]
-                               (get-in default-config [:budget :iterations]))
+  (let [start-time        (get-in ctx [:phase :started-at])
+        end-time          (System/currentTimeMillis)
+        duration-ms       (- end-time start-time)
+        result            (get-in ctx [:phase :result])
+        review-artifact   (get result :output)
+        review-decision   (get-in result [:output :review/decision])
+        metrics           (-> (get result :metrics {:tokens 0 :duration-ms duration-ms})
+                              (assoc :duration-ms duration-ms))
+        iterations        (get-in ctx [:phase :iterations] 1)
+        max-iterations    (get-in ctx [:phase :budget :iterations]
+                                  (get-in default-config [:budget :iterations]))
         ;; :rejected and :changes-requested both indicate the reviewer found
         ;; blocking issues. Iter 23 regression: :rejected fell through to
         ;; :completed, letting release open a PR against a reviewer-rejected
         ;; artifact. Both decisions now set :failed; within iteration budget
         ;; the phase requests a redirect to :implement for repair.
         ;; Preserve :failed from gate validation — don't overwrite with :completed.
-        gate-failed? (= :failed (:phase/status (get-in ctx [:phase])))
+        gate-failed?      (= :failed (:phase/status (get-in ctx [:phase])))
         reviewer-blocked? (contains? #{:rejected :changes-requested} review-decision)
-        phase-status (cond
-                       reviewer-blocked? :failed
-                       gate-failed? :failed
-                       :else :completed)
-        updated-ctx (-> ctx
-                        (assoc-in [:phase :ended-at] end-time)
-                        (assoc-in [:phase :duration-ms] duration-ms)
-                        (assoc-in [:phase :status] phase-status)
-                        (assoc-in [:phase :metrics] metrics)
-                        (assoc-in [:metrics :review :duration-ms] duration-ms)
-                        (assoc-in [:metrics :review :repair-cycles] (dec iterations))
-                        ;; Merge agent metrics into execution metrics
-                        (update-in [:execution/metrics :tokens] (fnil + 0) (:tokens metrics 0))
-                        (update-in [:execution/metrics :duration-ms] (fnil + 0) (:duration-ms metrics 0)))]
-    ;; Handle reviewer-blocked (:changes-requested OR :rejected): redirect
-    ;; to implement with review feedback for repair within iteration budget.
-    (doto (if (and reviewer-blocked?
-                   (< iterations max-iterations))
-            (let [feedback (or (get-in result [:output :review/feedback])
-                               (get-in result [:output :review/issues]))]
-              (knowledge/capture-feedback-learning!
-               (:knowledge-store ctx) :reviewer
-               (get-in ctx [:execution/input :title]) feedback)
-              (let [phase-result (-> (:phase updated-ctx)
-                                     (update :iterations (fnil inc 1))
-                                     (assoc :review-feedback feedback)
-                                     (phase/request-redirect :implement))]
-                (assoc updated-ctx :phase phase-result)))
+        prior-history     (get-in ctx [:execution :review-fingerprints] [])
+        current-fp        (agent/review-fingerprint review-artifact)
+        stagnated?        (and reviewer-blocked?
+                               (agent/review-stagnated? (peek prior-history)
+                                                        current-fp))
+        phase-status      (cond
+                            reviewer-blocked? :failed
+                            gate-failed?      :failed
+                            :else             :completed)
+        feedback          (or (get-in result [:output :review/feedback])
+                              (get-in result [:output :review/issues]))
+        within-budget?    (< iterations max-iterations)
+        redirect?         (and reviewer-blocked? within-budget? (not stagnated?))
+        updated-ctx       (-> ctx
+                              (assoc-in [:phase :ended-at] end-time)
+                              (assoc-in [:phase :duration-ms] duration-ms)
+                              (assoc-in [:phase :status] phase-status)
+                              (assoc-in [:phase :metrics] metrics)
+                              (assoc-in [:metrics :review :duration-ms] duration-ms)
+                              (assoc-in [:metrics :review :repair-cycles] (dec iterations))
+                              ;; Merge agent metrics into execution metrics
+                              (update-in [:execution/metrics :tokens] (fnil + 0) (:tokens metrics 0))
+                              (update-in [:execution/metrics :duration-ms] (fnil + 0) (:duration-ms metrics 0))
+                              (record-fingerprint current-fp))]
+    (when redirect?
+      (knowledge/capture-feedback-learning!
+       (:knowledge-store ctx) :reviewer
+       (get-in ctx [:execution/input :title]) feedback))
+    (doto (cond
+            stagnated?
+            (terminate-stagnated updated-ctx
+                                 (conj prior-history current-fp))
+
+            redirect?
+            (redirect-to-implement updated-ctx feedback)
+
+            :else
             (cond-> updated-ctx
               (= :completed phase-status)
               (update-in [:execution :phases-completed] (fnil conj []) :review)))

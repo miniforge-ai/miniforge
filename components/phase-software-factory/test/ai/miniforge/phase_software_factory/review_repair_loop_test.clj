@@ -172,3 +172,92 @@
           {:keys [task]} (build-implement-task ctx)]
       (is (nil? (:task/review-feedback task))
           "Task should not have review feedback when none in context"))))
+
+;; ============================================================================
+;; Stagnation detector
+;;
+;; The review→implement loop must terminate with :anomalies.review/stagnation
+;; when the reviewer's actionable-issue fingerprint is identical to the prior
+;; iteration's. Catching it here saves the next implement+verify+review cycle.
+
+(def ^:private blocking-issue
+  {:severity :blocking :file "src/foo.clj" :line 12 :description "Bad"})
+
+(def ^:private different-blocking-issue
+  {:severity :blocking :file "src/bar.clj" :line 4 :description "Worse"})
+
+(defn- run-leave-review
+  "Run leave-review against a custom ctx and return the resulting full ctx."
+  [{:keys [issues iterations max-iterations prior-fingerprints]
+    :or   {iterations 1 max-iterations 4 prior-fingerprints []}}]
+  (let [result {:output  {:review/decision :changes-requested
+                          :review/issues issues}
+                :metrics {:tokens 100 :duration-ms 5000}}
+        ctx {:phase {:started-at (- (System/currentTimeMillis) 1000)
+                     :iterations iterations
+                     :budget {:iterations max-iterations}
+                     :result result}
+             :phase-config {:phase :review}
+             :execution {:review-fingerprints prior-fingerprints}
+             :execution/phase-results {}
+             :execution/input {:description "test task"}
+             :execution/metrics {}}
+        interceptor (phase/get-phase-interceptor {:phase :review})]
+    ((:leave interceptor) ctx)))
+
+(deftest stagnation-terminates-instead-of-redirecting-test
+  (testing "two consecutive identical fingerprints ⇒ no redirect, anomaly attached"
+    (let [issues          [blocking-issue]
+          first-pass-ctx  (run-leave-review {:issues issues :iterations 1})
+          first-fp        (peek (get-in first-pass-ctx [:execution :review-fingerprints]))
+          stagnated-ctx   (run-leave-review {:issues issues
+                                             :iterations 2
+                                             :prior-fingerprints [first-fp]})
+          phase           (:phase stagnated-ctx)]
+      (is (true? (:stagnated? phase))
+          "phase tagged stagnated when current fingerprint matches prior")
+      (is (not (phase/redirect-requested? phase))
+          "no redirect to :implement on stagnation — repair loop is the burn we are stopping")
+      (is (= :anomalies.review/stagnation
+             (get-in phase [:error :anomaly/category]))
+          ":anomalies.review/stagnation anomaly attached to :phase :error")
+      (is (>= (count (get-in phase [:error :review/fingerprint-history])) 2)
+          "fingerprint history carries the chain that proved stagnation"))))
+
+(deftest non-stagnant-progress-still-redirects-test
+  (testing "fingerprint changed between iterations ⇒ ordinary repair redirect"
+    (let [first-fp     (run-leave-review {:issues [blocking-issue]
+                                          :iterations 1})
+          first-print  (peek (get-in first-fp [:execution :review-fingerprints]))
+          progressed   (run-leave-review {:issues [different-blocking-issue]
+                                          :iterations 2
+                                          :prior-fingerprints [first-print]})
+          phase        (:phase progressed)]
+      (is (not (:stagnated? phase))
+          "different fingerprint ⇒ not stagnated")
+      (is (= :implement (phase/transition-target phase))
+          "ordinary repair: redirect to implement")
+      (is (nil? (get-in phase [:error :anomaly/category]))
+          "no stagnation anomaly when progress is detected"))))
+
+(deftest first-iteration-never-stagnates-test
+  (testing "no prior fingerprint history ⇒ first review must not short-circuit"
+    (let [phase (:phase (run-leave-review {:issues [blocking-issue]
+                                           :iterations 1
+                                           :prior-fingerprints []}))]
+      (is (not (:stagnated? phase))
+          "first review iteration is never stagnation")
+      (is (= :implement (phase/transition-target phase))
+          "first :changes-requested still redirects normally"))))
+
+(deftest fingerprint-recorded-on-every-review-test
+  (testing "every review iteration appends its fingerprint to the execution history"
+    (let [final-ctx (run-leave-review {:issues [blocking-issue] :iterations 1})]
+      (is (= 1 (count (get-in final-ctx [:execution :review-fingerprints])))
+          "first iteration appends one fingerprint"))
+    (let [seed-fp [[:blocking "src/seed.clj" 1 (hash "seed")]]
+          final-ctx (run-leave-review {:issues [different-blocking-issue]
+                                       :iterations 2
+                                       :prior-fingerprints [seed-fp]})]
+      (is (= 2 (count (get-in final-ctx [:execution :review-fingerprints])))
+          "second iteration appends without dropping prior history"))))
