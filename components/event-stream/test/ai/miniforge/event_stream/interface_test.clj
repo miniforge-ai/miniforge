@@ -308,7 +308,19 @@
           callback (es/create-streaming-callback stream wf-id :planner {:print? true})
           output (with-out-str
                    (callback {:delta "test" :done? false}))]
-      (is (= "test" output)))))
+      (is (= "test" output))))
+
+  (testing "tool-use callback prints a visible tool line and publishes structured events"
+    (let [stream (es/create-event-stream)
+          wf-id (random-uuid)
+          callback (es/create-streaming-callback stream wf-id :planner {:print? true})
+          output (with-out-str
+                   (callback {:tool-use true
+                              :tool-name "context_read"
+                              :content ""}))]
+      (is (= "\n[tool] context_read\n" output))
+      (is (= 1 (count (es/get-events stream {:event-type :agent/tool-call}))))
+      (is (= 1 (count (es/get-events stream {:event-type :agent/status})))))))
 
 ;; --------------------------------------------------------------------------- New N3 event constructors
 

@@ -22,6 +22,7 @@
             [ai.miniforge.llm.interface :as llm]
             [ai.miniforge.llm.protocols.records.llm-client]
             [ai.miniforge.llm.protocols.impl.llm-client :as impl]
+            [ai.miniforge.llm.progress-monitor :as pm]
             [cheshire.core :as json]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -466,22 +467,27 @@
 
   (testing "normal content in success-response returns success"
     (let [resp (impl/success-response "(defn hello [] \"world\")" 0)]
-      (is (:success resp)))))
+      (is (:success resp))))
+
+  (testing "success-response preserves stderr for diagnostics"
+    (let [resp (impl/success-response "ok" 0 "warning on stderr")]
+      (is (:success resp))
+      (is (= "warning on stderr" (:stderr resp))))))
 
 (deftest rate-limited-streaming-success-response-test
   (testing "rate limit content in streaming-success-response returns error"
     (let [resp (impl/streaming-success-response
-                 "You've hit your limit · resets 7pm (America/Los_Angeles)" 0 nil nil nil nil nil nil)]
+                 "You've hit your limit · resets 7pm (America/Los_Angeles)" 0 nil nil nil nil nil nil nil)]
       (is (not (:success resp)))
       (is (some? (:error resp)))))
 
   (testing "normal content in streaming-success-response returns success"
-    (let [resp (impl/streaming-success-response "(defn foo [] 42)" 0 nil nil nil nil nil nil)]
+    (let [resp (impl/streaming-success-response "(defn foo [] 42)" 0 nil nil nil nil nil nil nil)]
       (is (:success resp))))
 
   (testing "stop-reason and num-turns flow through to success response"
     (let [resp (impl/streaming-success-response "ok" 0 {:input-tokens 1 :output-tokens 2}
-                                                 nil "max_turns" 80 nil nil)]
+                                                 nil "max_turns" 80 nil nil nil)]
       (is (:success resp))
       (is (= "max_turns" (:stop-reason resp)))
       (is (= 80 (:num-turns resp))))))
@@ -491,35 +497,36 @@
 
 (deftest streaming-success-response-diagnostic-test
   (testing "tool-call-count is included when provided"
-    (let [resp (impl/streaming-success-response "hello" 0 nil nil nil nil 3 nil)]
+    (let [resp (impl/streaming-success-response "hello" 0 nil nil nil nil 3 nil nil)]
       (is (:success resp))
       (is (= 3 (:tool-call-count resp)))))
 
   (testing "tool-call-count of 0 is still surfaced"
-    (let [resp (impl/streaming-success-response "hello" 0 nil nil nil nil 0 nil)]
+    (let [resp (impl/streaming-success-response "hello" 0 nil nil nil nil 0 nil nil)]
       (is (:success resp))
       (is (= 0 (:tool-call-count resp)))))
 
   (testing "final-message-preview is included for non-empty content"
-    (let [resp (impl/streaming-success-response "hello" 0 nil nil nil nil nil "hello")]
+    (let [resp (impl/streaming-success-response "hello" 0 nil nil nil nil nil "hello" nil)]
       (is (:success resp))
       (is (= "hello" (:final-message-preview resp)))))
 
   (testing "final-message-preview is absent when nil"
-    (let [resp (impl/streaming-success-response "hello" 0 nil nil nil nil nil nil)]
+    (let [resp (impl/streaming-success-response "hello" 0 nil nil nil nil nil nil nil)]
       (is (:success resp))
       (is (nil? (:final-message-preview resp)))))
 
   (testing "all diagnostic fields coexist with existing fields"
     (let [resp (impl/streaming-success-response
                  "done" 0 {:input-tokens 10 :output-tokens 5}
-                 0.002 "end_turn" 3 7 "preview text")]
+                 0.002 "end_turn" 3 7 "preview text" "diagnostic stderr")]
       (is (:success resp))
       (is (= "done" (:content resp)))
       (is (= "end_turn" (:stop-reason resp)))
       (is (= 3 (:num-turns resp)))
       (is (= 7 (:tool-call-count resp)))
       (is (= "preview text" (:final-message-preview resp)))
+      (is (= "diagnostic stderr" (:stderr resp)))
       (is (= 0.002 (:cost-usd resp))))))
 
 (deftest streaming-error-response-diagnostic-test
@@ -543,17 +550,45 @@
       (is (= 3 (:tool-call-count resp)))
       (is (= "last bit" (:final-message-preview resp))))))
 
+(deftest process-stream-lines-eof-is-not-timeout-test
+  (testing "clean EOF with no lines does not synthesize a stream-idle timeout"
+    (let [reader (java.io.BufferedReader. (java.io.StringReader. ""))
+          monitor (pm/create-progress-monitor
+                   {:stagnation-threshold-ms 1000
+                    :max-total-ms 1000
+                    :min-activity-interval-ms 1})
+          result (impl/process-stream-lines reader monitor (fn [_] nil))]
+      (is (= [] (:lines result)))
+      (is (nil? (:timeout result))))))
+
 (deftest message-preview-via-streaming-success-test
   (testing "short content is returned in full as preview"
     (let [short-content "short response"
-          resp (impl/streaming-success-response short-content 0 nil nil nil nil 0 short-content)]
+          resp (impl/streaming-success-response short-content 0 nil nil nil nil 0 short-content nil)]
       (is (= short-content (:final-message-preview resp)))))
 
   (testing "long content preview contains only last 500 chars"
     (let [long-content (str/join (repeat 600 "x"))
           preview (subs long-content 100)  ; last 500 of 600
-          resp (impl/streaming-success-response long-content 0 nil nil nil nil 0 preview)]
+          resp (impl/streaming-success-response long-content 0 nil nil nil nil 0 preview nil)]
       (is (= 500 (count (:final-message-preview resp)))))))
+
+(deftest complete-stream-impl-empty-stream-fallback-test
+  (testing "streaming success with no parsed output falls back to non-streaming completion"
+    (let [chunks (atom [])
+          client (ai.miniforge.llm.protocols.records.llm-client/create-client
+                  {:backend :claude
+                   :stream-exec-fn (fn [_cmd _on-line _opts]
+                                     {:out "" :err "stream stderr" :exit 0})
+                   :exec-fn (fn [_cmd]
+                              {:out "fallback answer" :err "" :exit 0})})
+          resp (llm/complete-stream client {:prompt "test"} #(swap! chunks conj %))]
+      (is (:success resp))
+      (is (= "fallback answer" (:content resp)))
+      (is (= [{:delta "fallback answer"
+               :done? true
+               :content "fallback answer"}]
+             @chunks)))))
 
 ;------------------------------------------------------------------------------ Layer 5
 ;; Claude backend args-fn budget tests (PR #288)

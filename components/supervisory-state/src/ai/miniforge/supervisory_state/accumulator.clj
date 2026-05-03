@@ -246,6 +246,31 @@
                    {:workflow-run/status     :cancelled
                     :workflow-run/updated-at ts}))))
 
+(def ^:private workflow-activity-event-types
+  #{:agent/chunk
+    :agent/status
+    :agent/tool-call
+    :agent/started
+    :agent/completed
+    :agent/failed
+    :gate/started
+    :gate/passed
+    :gate/failed
+    :tool/invoked
+    :tool/completed
+    :llm/request
+    :llm/response
+    :task/state-changed})
+
+(defn- touch-workflow-activity
+  [table event]
+  (let [workflow-id (:workflow/id event)
+        ts (event-instant event)]
+    (cond-> table
+      workflow-id
+      (-> (ensure-workflow workflow-id ts)
+          (assoc-in [:workflows workflow-id :workflow-run/updated-at] ts)))))
+
 ;------------------------------------------------------------------------------ Layer 1
 ;; AgentSession handlers
 
@@ -814,10 +839,14 @@
    updated table. Unknown event types are silently ignored at the entity
    level — they may still be observed by other consumers."
   [table event]
-  (let [handler (get handlers (:event/type event))]
-    (if handler
-      (handler table event)
-      table)))
+  (let [event-type (:event/type event)
+        handler (get handlers event-type)
+        table' (if handler
+                 (handler table event)
+                 table)]
+    (if (contains? workflow-activity-event-types event-type)
+      (touch-workflow-activity table' event)
+      table')))
 
 (defn apply-events
   "Reduce a sequence of events into an entity table."

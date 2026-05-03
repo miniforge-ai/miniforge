@@ -68,8 +68,17 @@
 (defn home-dir-name []
   (:home-dir-name (app-profile)))
 
-(defn home-dir []
+(defn- getenv
+  [var-name]
+  (System/getenv var-name))
+
+(defn- default-home-dir
+  []
   (str (fs/home) "/" (home-dir-name)))
+
+(defn home-dir []
+  (or (getenv "MINIFORGE_HOME")
+      (default-home-dir)))
 
 (defn tui-package []
   (:tui-package (app-profile)))

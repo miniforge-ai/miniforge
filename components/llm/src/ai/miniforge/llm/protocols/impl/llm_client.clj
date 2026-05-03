@@ -294,40 +294,15 @@
       true                         (conj prompt))))
 
 (defn- codex-args
-  "Build CLI arguments for the Codex backend.
-
-   Tool / approval surface (mirrors Claude's --allowedTools intent within
-   Codex's different tool model — see PR notes):
-
-   - `--sandbox=workspace-write`     — explicit sandbox; agent can edit
-                                       files in the workspace. Replaces
-                                       the deprecated `--full-auto` alias
-                                       for clarity.
-   - `--ask-for-approval=never`      — CLI flag: no human-in-the-loop
-                                       pings during exec.
-   - `-c approval_policy=\"never\"`    — TOML override pinning the same
-                                       approval policy at the config
-                                       layer so any `~/.codex/config.toml`
-                                       default cannot relax it.
-   - `-c mcp_servers.artifact.required=true`
-                                     — TOML override: fail loudly if the
-                                       artifact MCP server doesn't
-                                       initialize. Matches Claude's
-                                       behavior when --mcp-config fails
-                                       to load.
-
-   What we cannot do (per Codex config-reference): allow-list individual
-   built-in tools. `apply_patch` / `shell` are governed by `sandbox_mode`
-   categorically. The implementer prompt + the artifact MCP server's own
-   `enabled_tools` list are the per-tool surface."
+  "Build CLI arguments for the Codex backend."
   [{:keys [prompt model system]}]
   (cond-> ["exec"
            "--json"
            "--sandbox=workspace-write"
            "--ask-for-approval=never"
-           "--skip-git-repo-check"
-           "-c" "approval_policy=\"never\""
-           "-c" "mcp_servers.artifact.required=true"]
+           "--skip-git-repo-check"]
+    true   (into ["-c" "approval_policy=never"])
+    true   (into ["-c" "mcp_servers.artifact.required=true"])
     model  (into ["-m" model])
     system (into ["-c" (str "system_prompt=" (json/generate-string system))])
     true   (conj prompt)))
@@ -540,13 +515,17 @@
   (and (string? content)
        (re-find #"(?i)you've hit your limit|rate limit|resets \d+[ap]m" content)))
 
-(defn success-response [output exit-code]
+(defn success-response
+  ([output exit-code]
+   (success-response output exit-code nil))
+  ([output exit-code stderr]
   (let [trimmed (str/trim output)]
     (if (rate-limited? trimmed)
       (llm-error :anomalies.agent/rate-limited "rate_limit"
                  (str "Claude CLI rate limited: " trimmed)
                  {:exit-code exit-code :stdout output})
-      (llm-success trimmed {:exit-code exit-code}))))
+      (cond-> (llm-success trimmed {:exit-code exit-code})
+        (seq stderr) (assoc :stderr stderr))))))
 
 (defn error-response [output exit-code stderr]
   (let [error-message (if (and stderr (str/blank? output)) stderr output)]
@@ -558,7 +537,7 @@
    (parse-cli-output output exit-code nil))
   ([output exit-code stderr]
    (if (zero? exit-code)
-     (success-response output exit-code)
+     (success-response output exit-code stderr)
      (error-response output exit-code stderr))))
 
 (defn default-progress-monitor []
@@ -584,12 +563,16 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
+(def ^:private read-timeout-sentinel
+  (Object.))
+
 (defn read-line-with-timeout [reader timeout-ms]
   (let [read-future (future (.readLine reader))]
     (try
-      (deref read-future timeout-ms nil)
+      (let [line-or-sentinel (deref read-future timeout-ms read-timeout-sentinel)]
+        line-or-sentinel)
       (catch java.util.concurrent.TimeoutException _
-        nil))))
+        read-timeout-sentinel))))
 
 (defn process-stream-lines [out-reader monitor on-line]
   (let [out-lines (atom [])
@@ -609,22 +592,29 @@
       (if-let [t (pm/check-timeout monitor)]
         ;; Progress-monitor timeout (stagnation or total-max)
         (reset! timeout-reason t)
-        (if-let [line (read-line-with-timeout out-reader line-timeout-ms)]
-          (do (swap! out-lines conj line)
-              (pm/record-chunk! monitor line)
-              (when dump-writer (.println dump-writer line) (.flush dump-writer))
-              (on-line line)
-              (recur))
-          ;; Line-timeout: reader produced nothing for line-timeout-ms.
-          ;; Treat as stream-idle — a stalled stream, not clean EOF.
-          ;; Set an explicit reason so the caller reports it instead of
-          ;; waiting on `deref process` for the full 10 min and then
-          ;; reporting a bare "Process timed out" with no context.
-          (reset! timeout-reason
-                  {:type :stream-idle
-                   :message (str "No stream output for " line-timeout-ms "ms")
-                   :elapsed-ms line-timeout-ms
-                   :stats {:lines-read (count @out-lines)}}))))
+        (let [line-or-timeout (read-line-with-timeout out-reader line-timeout-ms)]
+          (cond
+            (identical? line-or-timeout read-timeout-sentinel)
+            ;; Line-timeout: reader produced nothing for line-timeout-ms.
+            ;; Treat as stream-idle — a stalled stream, not clean EOF.
+            ;; Set an explicit reason so the caller reports it instead of
+            ;; waiting on `deref process` for the full 10 min and then
+            ;; reporting a bare "Process timed out" with no context.
+            (reset! timeout-reason
+                    {:type :stream-idle
+                     :message (str "No stream output for " line-timeout-ms "ms")
+                     :elapsed-ms line-timeout-ms
+                     :stats {:lines-read (count @out-lines)}})
+
+            (some? line-or-timeout)
+            (do (swap! out-lines conj line-or-timeout)
+                (pm/record-chunk! monitor line-or-timeout)
+                (when dump-writer (.println dump-writer line-or-timeout) (.flush dump-writer))
+                (on-line line-or-timeout)
+                (recur))
+
+            :else
+            nil))))
     (when dump-writer (.close dump-writer))
     {:lines @out-lines
      :timeout @timeout-reason}))
@@ -657,7 +647,12 @@
                (when-let [^Process jp (:proc process)]
                  (.destroyForcibly jp))
                (catch Exception _ nil)))
-         result (deref process 600000 {:exit -1 :err "Process timed out"})]
+         ;; After we have already classified a timeout and force-killed the
+         ;; subprocess, do not wait another full 10 minutes for join/cleanup.
+         ;; That path turned a 10-minute planner hard limit into an 18-minute
+         ;; wall-clock failure during Claude dogfood on 2026-05-02.
+         result (deref process (if timeout 5000 600000)
+                       {:exit -1 :err "Process timed out"})]
      (if timeout
        (timeout-result lines timeout)
        (success-result lines result)))))
@@ -775,7 +770,7 @@
    - :num-turns            — number of conversation turns consumed
    - :tool-call-count      — total number of tool invocations during the run
    - :final-message-preview — last 500 chars of accumulated content (post-mortem aid)"
-  [content exit-code usage cost-usd stop-reason num-turns tool-call-count final-message-preview]
+  [content exit-code usage cost-usd stop-reason num-turns tool-call-count final-message-preview stderr]
   (if (rate-limited? content)
     (llm-error :anomalies.agent/rate-limited "rate_limit"
                (str "Claude CLI rate limited: " (str/trim content))
@@ -786,7 +781,21 @@
       stop-reason                 (assoc :stop-reason stop-reason)
       num-turns                   (assoc :num-turns num-turns)
       (some? tool-call-count)     (assoc :tool-call-count tool-call-count)
-      (seq final-message-preview) (assoc :final-message-preview final-message-preview))))
+      (seq final-message-preview) (assoc :final-message-preview final-message-preview)
+      (seq stderr)                (assoc :stderr stderr))))
+
+(defn- blank-streaming-success?
+  "True when the streaming transport exited 0 but produced no useful parsed output.
+
+   This is the Claude failure mode observed in dogfood on 2026-05-02:
+   the process exited successfully, emitted no parsed stdout blocks, no tool calls,
+   and left the planner with an empty assistant turn. In that case we retry once
+   through the non-streaming path before classifying the invocation as failed."
+  [exit-code final-content tool-call-count usage]
+  (and (zero? exit-code)
+       (str/blank? final-content)
+       (zero? tool-call-count)
+       (nil? usage)))
 
 (defn streaming-error-response
   "Build a streaming error response with diagnostic metadata.
@@ -846,30 +855,50 @@
           stop-reason @accumulated-stop-reason
           num-turns @accumulated-turns
           tool-call-count (count tools)
-          final-message-preview (message-preview final-content)]
-      (on-chunk {:delta ""
-                 :done? true
-                 :content final-content
-                 :timeout timeout-info})
-      (log-streaming-result logger timeout-info (count final-content))
-      (when (and logger (seq tools))
-        (log/info logger :system :agent/tools-called
-                  {:data {:tools tools :count (count tools)}}))
-      (when (and logger stop-reason)
-        (log/info logger :system :agent/stop-reason
-                  {:data {:stop-reason stop-reason :num-turns num-turns
-                          :content-length (count final-content)}}))
-      (if (zero? exit-code)
-        (cond-> (streaming-success-response final-content exit-code
-                                            @accumulated-usage @accumulated-cost
-                                            stop-reason num-turns
-                                            tool-call-count final-message-preview)
-          (seq tools) (assoc :tools-called tools)
-          session-id  (assoc :session-id session-id))
-        (cond-> (streaming-error-response final-content exit-code (:err result)
-                                          timeout-info stop-reason num-turns
-                                          tool-call-count final-message-preview)
-          session-id (assoc :session-id session-id))))))
+          final-message-preview (message-preview final-content)
+          usage @accumulated-usage
+          fallback-response (when (blank-streaming-success? exit-code
+                                                            final-content
+                                                            tool-call-count
+                                                            usage)
+                              (complete-impl client request))]
+      (if fallback-response
+        (do
+          (when (:success fallback-response)
+            (on-chunk {:delta (:content fallback-response)
+                       :done? true
+                       :content (:content fallback-response)}))
+          (when logger
+            (log/info logger :system :agent/streaming-fallback
+                      {:data {:backend backend
+                              :reason :empty-stream-success
+                              :stderr (:err result)}}))
+          fallback-response)
+        (do
+          (on-chunk {:delta ""
+                     :done? true
+                     :content final-content
+                     :timeout timeout-info})
+          (log-streaming-result logger timeout-info (count final-content))
+          (when (and logger (seq tools))
+            (log/info logger :system :agent/tools-called
+                      {:data {:tools tools :count (count tools)}}))
+          (when (and logger stop-reason)
+            (log/info logger :system :agent/stop-reason
+                      {:data {:stop-reason stop-reason :num-turns num-turns
+                              :content-length (count final-content)}}))
+          (if (zero? exit-code)
+            (cond-> (streaming-success-response final-content exit-code
+                                                usage @accumulated-cost
+                                                stop-reason num-turns
+                                                tool-call-count final-message-preview
+                                                (:err result))
+              (seq tools) (assoc :tools-called tools)
+              session-id  (assoc :session-id session-id))
+            (cond-> (streaming-error-response final-content exit-code (:err result)
+                                              timeout-info stop-reason num-turns
+                                              tool-call-count final-message-preview)
+              session-id (assoc :session-id session-id))))))))
 
 (defn complete-stream-impl [client request on-chunk]
   (let [{:keys [config]} client

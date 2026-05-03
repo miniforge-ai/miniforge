@@ -373,6 +373,32 @@
       (not-empty (get-in result [:output :error]))
       default-msg))
 
+(defn- prior-verify-failure?
+  "Return true when the previous verify phase recorded a failure."
+  [ctx]
+  (let [verify-phase (get-in ctx [:execution/phase-results :verify])]
+    (contains? #{:failed :failure :error}
+               (or (:status verify-phase)
+                   (get-in verify-phase [:result :status])))))
+
+(defn- unverified-already-implemented?
+  "Return true when implement claims :already-implemented while responding to
+   known review or verify failures."
+  [ctx result]
+  (and (= :already-implemented (:status result))
+       (or (resolve-review-feedback ctx)
+           (prior-verify-failure? ctx))))
+
+(defn- build-unverified-already-implemented-error
+  "Build a structured error for an unsupported :already-implemented repair outcome."
+  [ctx result iterations]
+  {:message "Implement returned :already-implemented after prior review or verify failures without producing a repair artifact"
+   :agent-status (:status result)
+   :rate-limited? false
+   :iterations iterations
+   :review-feedback? (boolean (resolve-review-feedback ctx))
+   :verify-failure? (prior-verify-failure? ctx)})
+
 (defn- build-phase-error
   "Build a structured phase error map from an agent result."
   [result agent-status rate-limited? iterations]
@@ -429,8 +455,10 @@
         ;; the executor environment. A nil output is NOT an error — code is in
         ;; the environment, not serialized in the result.
         effective-status agent-status
+        invalid-already-implemented? (unverified-already-implemented? ctx result)
         phase-status (cond
                        gate-failed? :failed
+                       invalid-already-implemented? :failed
                        (= :already-implemented agent-status) :already-implemented
                        ;; Rate limit: fail immediately, don't burn retry budget
                        rate-limited? :failed
@@ -487,9 +515,12 @@
 
       (= :failed phase-status)
       (assoc-in [:phase :error]
-                (build-phase-error result agent-status rate-limited? iterations))
+                (if invalid-already-implemented?
+                  (build-unverified-already-implemented-error ctx result iterations)
+                  (build-phase-error result agent-status rate-limited? iterations)))
 
-      (= :already-implemented agent-status)
+      (and (= :already-implemented agent-status)
+           (not invalid-already-implemented?))
       (assoc-in [:phase :skipped-reason] :already-implemented))))
 
 (defn error-implement

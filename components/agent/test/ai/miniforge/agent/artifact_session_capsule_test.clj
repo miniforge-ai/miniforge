@@ -28,24 +28,22 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Mock executor infrastructure
 
-(def ^:dynamic *exec-log* nil)
-
-(defn mock-execute!
+(defn- mock-execute!
   "Mock executor that records commands and returns success."
-  [_executor _env-id command & [_opts]]
-  (when *exec-log*
-    (swap! *exec-log* conj command))
-  {:ok? true :data {:stdout "" :stderr "" :exit-code 0}})
-
-(defn mock-execute-with-artifact!
-  "Mock executor that returns artifact EDN for cat commands."
-  [_executor _env-id command & [_opts]]
-  (when *exec-log*
-    (swap! *exec-log* conj command))
-  (if (and (string? command) (str/starts-with? command "cat ") (str/includes? command "artifact.edn"))
-    {:ok? true :data {:stdout "{:code/id \"a1b2c3d4-e5f6-7890-abcd-ef1234567890\" :code/description \"test\"}"
-                      :stderr "" :exit-code 0}}
+  [log]
+  (fn [_executor _env-id command & [_opts]]
+    (swap! log conj command)
     {:ok? true :data {:stdout "" :stderr "" :exit-code 0}}))
+
+(defn- mock-execute-with-artifact!
+  "Mock executor that records commands and returns artifact EDN for cat commands."
+  [log]
+  (fn [_executor _env-id command & [_opts]]
+    (swap! log conj command)
+    (if (and (string? command) (str/starts-with? command "cat ") (str/includes? command "artifact.edn"))
+      {:ok? true :data {:stdout "{:code/id \"a1b2c3d4-e5f6-7890-abcd-ef1234567890\" :code/description \"test\"}"
+                        :stderr "" :exit-code 0}}
+      {:ok? true :data {:stdout "" :stderr "" :exit-code 0}})))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; with-session dispatch tests
@@ -73,53 +71,52 @@
 
 (deftest with-session-governed-mode-test
   (testing "governed mode with executor uses capsule session"
-    (with-redefs [executor/execute! mock-execute!]
-      (let [log (atom [])
-            context {:execution/mode :governed
-                     :execution/executor :mock-executor
-                     :execution/environment-id "env-123"
-                     :execution/worktree-path "/workspace"}
-            result (binding [*exec-log* log]
-                     (session/with-session context
+    (let [log (atom [])]
+      (with-redefs [executor/execute! (mock-execute! log)]
+        (let [context {:execution/mode :governed
+                       :execution/executor :mock-executor
+                       :execution/environment-id "env-123"
+                       :execution/worktree-path "/workspace"}
+              result (session/with-session context
                        (fn [session]
                          (is (true? (:capsule? session)))
                          (is (= "/workspace/.miniforge-session" (:dir session)))
                          (is (= :mock-executor (:executor session)))
-                         :capsule-response)))]
-        (is (= :capsule-response (:llm-result result)))
-        (is (= :capsule (:session-mode result)))
-        (is (nil? (:context-misses result)))
-        (is (map? (:pre-session-snapshot result)))
-        ;; Should have executed mkdir, config writes, and cleanup
-        (is (pos? (count @log)))))))
+                         :capsule-response))]
+          (is (= :capsule-response (:llm-result result)))
+          (is (= :capsule (:session-mode result)))
+          (is (nil? (:context-misses result)))
+          (is (map? (:pre-session-snapshot result)))
+          ;; Should have executed mkdir, config writes, and cleanup
+          (is (pos? (count @log))))))))
 
 (deftest with-session-governed-reads-artifact-test
   (testing "governed mode reads and parses artifact from capsule"
-    (with-redefs [executor/execute! mock-execute-with-artifact!]
-      (let [context {:execution/mode :governed
-                     :execution/executor :mock
-                     :execution/environment-id "env-456"
-                     :execution/worktree-path "/workspace"}
-            result (session/with-session context
-                     (fn [_session] :done))]
-        (is (some? (:artifact result)))
-        (is (uuid? (:code/id (:artifact result))))))))
+    (let [log (atom [])]
+      (with-redefs [executor/execute! (mock-execute-with-artifact! log)]
+        (let [context {:execution/mode :governed
+                       :execution/executor :mock
+                       :execution/environment-id "env-456"
+                       :execution/worktree-path "/workspace"}
+              result (session/with-session context
+                       (fn [_session] :done))]
+          (is (some? (:artifact result)))
+          (is (uuid? (:code/id (:artifact result)))))))))
 
 (deftest with-session-governed-cleanup-on-exception-test
   (testing "capsule session cleans up even on exception"
-    (with-redefs [executor/execute! mock-execute!]
-      (let [log (atom [])
-            context {:execution/mode :governed
-                     :execution/executor :mock
-                     :execution/environment-id "env-789"
-                     :execution/worktree-path "/workspace"}]
+    (let [log (atom [])
+          context {:execution/mode :governed
+                   :execution/executor :mock
+                   :execution/environment-id "env-789"
+                   :execution/worktree-path "/workspace"}]
+      (with-redefs [executor/execute! (mock-execute! log)]
         (is (thrown? Exception
-              (binding [*exec-log* log]
-                (session/with-session context
-                  (fn [_session]
-                    (throw (ex-info "test error" {})))))))
-        ;; Cleanup rm -rf should have been called
-        (is (some #(.contains (str %) "rm -rf") @log))))))
+              (session/with-session context
+                (fn [_session]
+                  (throw (ex-info "test error" {})))))))
+      ;; Cleanup rm -rf should have been called
+      (is (some #(.contains (str %) "rm -rf") @log)))))
 
 ;------------------------------------------------------------------------------ Layer 2
 ;; Context cache dispatch tests
@@ -138,12 +135,11 @@
     (let [log (atom [])
           s {:dir "/workspace/.miniforge-session"
              :capsule? true
-             :exec! mock-execute!
+             :exec! (mock-execute! log)
              :executor :mock
              :environment-id "env-test"
              :workdir "/workspace"}]
-      (binding [*exec-log* log]
-        (session/write-context-cache-for-session! s {"src/foo.clj" "(ns foo)"}))
+      (session/write-context-cache-for-session! s {"src/foo.clj" "(ns foo)"})
       (is (some #(.contains (str %) "context-cache.edn") @log)))))
 
 ;------------------------------------------------------------------------------ Layer 3
@@ -151,9 +147,10 @@
 
 (deftest read-capsule-artifact-parses-uuids-test
   (testing "UUID strings are converted to java.util.UUID"
-    (let [s {:artifact-path "/workspace/.miniforge-session/artifact.edn"
+    (let [log (atom [])
+          s {:artifact-path "/workspace/.miniforge-session/artifact.edn"
              :capsule? true
-             :exec! mock-execute-with-artifact!
+             :exec! (mock-execute-with-artifact! log)
              :executor :mock
              :environment-id "env-uuid"
              :workdir "/workspace"}

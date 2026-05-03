@@ -144,7 +144,7 @@
                                file-artifacts/collect-written-files
                                (fn [_ _] fallback-artifact)]
                    (@#'implementer/invoke-with-llm
-                    nil "prompt" "system" {} {} nil logger []))
+                    nil "prompt" "system" {} {} nil logger [] {}))
           fallback-log (find-log-entry entries :implementer/file-artifact-fallback)]
       (is (response/success? result))
       (is (= [{:path "src/generated.clj"
@@ -189,7 +189,7 @@
                                file-artifacts/collect-written-files
                                (fn [_ _] fallback-artifact)]
                    (@#'implementer/invoke-with-llm
-                    nil "prompt" "system" {} {} nil logger []))]
+                    nil "prompt" "system" {} {} nil logger [] {}))]
       (is (response/success? result)
           "file artifact container-promotion honors the work even on CLI error")
       (is (= [{:path "src/partial.clj"
@@ -226,13 +226,84 @@
                                file-artifacts/collect-written-files
                                (fn [_ _] nil)]
                    (@#'implementer/invoke-with-llm
-                    nil "prompt" "system" {} {} nil logger []))]
+                    nil "prompt" "system" {} {} nil logger [] {}))]
       (is (response/error? result))
       (is (= "Adaptive timeout: stream-idle" (get-in result [:error :message])))
       (is (= "adaptive_timeout" (get-in result [:error :data :type])))
       (is (= :stream-idle (get-in result [:error :data :timeout :type])))
       (is (= "max_turns" (get-in result [:error :data :stop-reason])))
-      (is (= 10 (get-in result [:error :data :num-turns]))))))
+      (is (= 10 (get-in result [:error :data :num-turns])))))
+
+  (testing "file artifact wins over a prose-only already-implemented claim"
+    (let [[logger _] (log/collecting-logger {:min-level :trace})
+          fallback-artifact {:code/files [{:path "src/generated.clj"
+                                           :content "(ns generated)"
+                                           :action :create}]
+                             :code/summary "Collected from working tree"
+                             :code/language "clojure"
+                             :code/tests-needed? true}
+          response (llm-response :content "{:status :already-implemented :summary \"done\"}"
+                                 :tokens 17
+                                 :cost-usd 0.02)
+          result (with-redefs [artifact-session/create-session!
+                               (fn [& _] (session-map))
+                               artifact-session/write-mcp-config!
+                               identity
+                               artifact-session/read-artifact
+                               (constantly nil)
+                               artifact-session/read-context-misses
+                               (constantly nil)
+                               artifact-session/cleanup-session!
+                               (constantly nil)
+                               budget/resolve-cost-budget-usd
+                               (fn [& _] 1.0)
+                               llm/chat
+                               (fn [& _] response)
+                               llm/success?
+                               :success
+                               llm/get-content
+                               :content
+                               file-artifacts/collect-written-files
+                               (fn [_ _] fallback-artifact)]
+                   (@#'implementer/invoke-with-llm
+                    nil "prompt" "system" {} {} nil logger [] {}))]
+      (is (response/success? result))
+      (is (= [{:path "src/generated.clj"
+               :content "(ns generated)"
+               :action :create}]
+             (get-in result [:output :code/files])))))
+
+  (testing "already-implemented fails closed on a repair attempt without artifact evidence"
+    (let [[logger _] (log/collecting-logger {:min-level :trace})
+          response (llm-response :content "{:status :already-implemented :summary \"done\"}"
+                                 :tokens 11
+                                 :cost-usd 0.01)
+          result (with-redefs [artifact-session/create-session!
+                               (fn [& _] (session-map))
+                               artifact-session/write-mcp-config!
+                               identity
+                               artifact-session/read-artifact
+                               (constantly nil)
+                               artifact-session/read-context-misses
+                               (constantly nil)
+                               artifact-session/cleanup-session!
+                               (constantly nil)
+                               budget/resolve-cost-budget-usd
+                               (fn [& _] 1.0)
+                               llm/chat
+                               (fn [& _] response)
+                               llm/success?
+                               :success
+                               llm/get-content
+                               :content
+                               file-artifacts/collect-written-files
+                               (fn [_ _] nil)]
+                   (@#'implementer/invoke-with-llm
+                    nil "prompt" "system" {} {} nil logger []
+                    {:task/review-feedback ["Fix the blocking issues"]}))]
+      (is (response/error? result))
+      (is (= :implementer/unverified-already-implemented
+             (get-in result [:error :data :code]))))))
 
 ;------------------------------------------------------------------------------ Layer 3
 ;; Validation tests

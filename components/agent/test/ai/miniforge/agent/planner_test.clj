@@ -81,7 +81,153 @@
     (let [agent (planner/create-planner)]
       (is (thrown-with-msg? clojure.lang.ExceptionInfo #"No LLM backend"
             (core/invoke agent {:codebase {:has-tests? true}}
-                         "Add feature to existing codebase"))))))
+                         "Add feature to existing codebase")))))
+
+  (testing "writes existing files into the planner context cache"
+    (let [cached-files (atom nil)
+          fake-llm-client {:type :fake}
+          fake-plan {:plan/id (random-uuid)
+                     :plan/name "cache-test"
+                     :plan/tasks []}
+          input {:description "Plan this"
+                 :task/existing-files [{:path "src/foo.clj"
+                                        :content "(ns foo)"
+                                        :truncated? false}]}
+          agent (planner/create-planner {:llm-backend fake-llm-client})]
+      (with-redefs [model/resolve-llm-client-for-role
+                    (fn [_role provided] provided)
+                    artifact-session/write-context-cache-for-session!
+                    (fn [session files]
+                      (reset! cached-files files)
+                      session)
+                    artifact-session/with-session
+                    (fn [_context body-fn]
+                      {:llm-result (body-fn {:dir "/tmp/fake-session"
+                                             :workdir "/tmp/fake-workdir"
+                                             :mcp-config-path "/tmp/fake-session/mcp-config.json"
+                                             :mcp-allowed-tools []
+                                             :supervision {}
+                                             :pre-session-snapshot {}})
+                       :artifact nil
+                       :worktree-artifacts {}
+                       :context-misses nil
+                       :pre-session-snapshot {}
+                       :session-mode :host})
+                    llm/success? (constantly true)
+                    llm/get-content (constantly (str "```clojure\n" (pr-str fake-plan) "\n```"))
+                    llm/chat (fn [_client _prompt _opts] {:status :success})
+                    llm/chat-stream (fn [_client _prompt _on-chunk _opts] {:status :success})]
+        (core/invoke agent {:llm-backend fake-llm-client} input)
+        (is (= {"src/foo.clj" "(ns foo)"} @cached-files)))))
+
+  (testing "accepts a submitted artifact even when the LLM response is classified as failure"
+    (let [fake-llm-client {:type :fake}
+          submitted-plan {:plan/id (random-uuid)
+                          :plan/name "artifact-wins"
+                          :plan/tasks []}
+          agent (planner/create-planner {:llm-backend fake-llm-client})]
+      (with-redefs [model/resolve-llm-client-for-role
+                    (fn [_role provided] provided)
+                    artifact-session/with-session
+                    (fn [_context _body-fn]
+                      {:llm-result {:status :error}
+                       :artifact submitted-plan
+                       :worktree-artifacts {}
+                       :context-misses nil
+                       :pre-session-snapshot {}
+                       :session-mode :host})
+                    llm/success? (constantly false)
+                    llm/get-content (constantly "")
+                    llm/get-error (constantly {:message "Adaptive timeout"})]
+        (let [result (core/invoke agent {:llm-backend fake-llm-client}
+                                  {:description "Plan this"})]
+          (is (= :success (:status result)))
+          (is (= "artifact-wins" (get-in result [:output :plan/name]))))))
+
+  (testing "accepts parseable EDN from error stdout"
+    (let [fake-llm-client {:type :fake}
+          stdout-plan {:plan/id (random-uuid)
+                       :plan/name "stdout-plan"
+                       :plan/tasks []}
+          agent (planner/create-planner {:llm-backend fake-llm-client})]
+      (with-redefs [model/resolve-llm-client-for-role
+                    (fn [_role provided] provided)
+                    artifact-session/with-session
+                    (fn [_context body-fn]
+                      {:llm-result (body-fn {:dir "/tmp/fake-session"
+                                             :workdir "/tmp/fake-workdir"
+                                             :mcp-config-path "/tmp/fake-session/mcp-config.json"
+                                             :mcp-allowed-tools []
+                                             :supervision {}
+                                             :pre-session-snapshot {}})
+                       :artifact nil
+                       :worktree-artifacts {}
+                       :context-misses nil
+                       :pre-session-snapshot {}
+                       :session-mode :host})
+                    llm/chat (fn [_client _prompt _opts]
+                               {:status :error
+                                :type "adaptive_timeout"
+                                :message "Adaptive timeout"
+                                :stdout (str "```clojure\n" (pr-str stdout-plan) "\n```")})
+                    llm/success? #(= :success (:status %))
+                    llm/get-content :content
+                    llm/get-error identity]
+        (let [result (core/invoke agent {:llm-backend fake-llm-client}
+                                  {:description "Plan this"})]
+          (is (= :success (:status result)))
+          (is (= "stdout-plan" (get-in result [:output :plan/name])))))))
+
+  (testing "retries once with submission-only prompt when analysis exists but no plan was submitted"
+    (let [fake-llm-client {:type :fake}
+          prompts (atom [])
+          call-count (atom 0)
+          submitted-plan {:plan/id (random-uuid)
+                          :plan/name "retry-plan"
+                          :plan/tasks []}
+          first-response {:status :error
+                          :type "adaptive_timeout"
+                          :message "Adaptive timeout"
+                          :stdout "Sufficient data. Architectural picture is clear.\n\nWriting the plan now."}
+          second-response {:status :success
+                           :content ""}
+          responses (atom [first-response second-response])
+          agent (planner/create-planner {:llm-backend fake-llm-client})]
+      (with-redefs [model/resolve-llm-client-for-role
+                    (fn [_role provided] provided)
+                    artifact-session/with-session
+                    (fn [_context body-fn]
+                      (let [n (swap! call-count inc)
+                            llm-result (body-fn {:dir "/tmp/fake-session"
+                                                 :workdir "/tmp/fake-workdir"
+                                                 :mcp-config-path "/tmp/fake-session/mcp-config.json"
+                                                 :mcp-allowed-tools []
+                                                 :supervision {}
+                                                 :pre-session-snapshot {}})]
+                        {:llm-result llm-result
+                         :artifact (when (= n 2) submitted-plan)
+                         :worktree-artifacts {}
+                         :context-misses nil
+                         :pre-session-snapshot {}
+                         :session-mode :host}))
+                    llm/chat (fn [_client prompt _opts]
+                               (swap! prompts conj prompt)
+                               (let [response (first @responses)]
+                                 (swap! responses rest)
+                                 response))
+                    llm/success? #(= :success (:status %))
+                    llm/get-content :content
+                    llm/get-error identity]
+        (let [result (core/invoke agent {:llm-backend fake-llm-client}
+                                  {:description "Plan this"})]
+          (is (= :success (:status result)))
+          (is (= "retry-plan" (get-in result [:output :plan/name])))
+          (is (= 2 @call-count))
+          (is (= 2 (count @prompts)))
+          (is (not (str/includes? (first @prompts) "artifact submission MCP tool")))
+          (is (str/includes? (first @prompts) ".miniforge/plan.edn"))
+          (is (str/includes? (second @prompts) "Do NOT explore further"))
+          (is (str/includes? (second @prompts) "Write `.miniforge/plan.edn`"))))))))
 
 ;------------------------------------------------------------------------------ Layer 3
 ;; Validation tests
