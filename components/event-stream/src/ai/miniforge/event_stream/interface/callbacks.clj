@@ -21,7 +21,8 @@
   (:require
    [clojure.string :as str]
    [ai.miniforge.event-stream.interface.events :as events]
-   [ai.miniforge.event-stream.interface.stream :as stream]))
+   [ai.miniforge.event-stream.interface.stream :as stream]
+   [ai.miniforge.event-stream.messages :as messages]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Convenience callbacks
@@ -32,7 +33,7 @@
   (let [names (or (seq tool-names)
                   (when tool-name [tool-name]))]
     (when (seq names)
-      (str "\n[tool] " (str/join ", " names) "\n"))))
+      (messages/t :stream/tool-use-line {:names (str/join ", " names)}))))
 
 (defn create-streaming-callback
   "Callback invoked by the LLM client for each parsed stream event.
@@ -78,7 +79,8 @@
             (stream/publish!
               stream-atom
               (events/agent-status stream-atom workflow-id agent-id
-                                   :tool-calling "Agent calling tool"))))
+                                   :tool-calling
+                                   (messages/t :stream/agent-calling-tool)))))
 
         heartbeat
         nil

@@ -44,6 +44,48 @@
    supply an explicit dollar budget."
   "0.10")
 
+;; ---------------------------------------------------------------------------
+;; Stream-timing constants
+;;
+;; Names spell out intent so the surrounding code reads as the why,
+;; not the what. Tuning history lives in inline doc-comments next to
+;; each constant.
+
+(def ^:private default-stagnation-threshold-ms
+  "Progress-monitor stagnation cap. 120s lets Opus 4.6 think between
+   tool-call batches (observed: 20 tool calls, 0 text chunks, the
+   stream went quiet for 60-90s on ordinary reasoning) without
+   tripping a false timeout."
+  120000)
+
+(def ^:private default-max-total-ms
+  "Progress-monitor hard ceiling on total subprocess wall time."
+  600000)
+
+(def ^:private default-min-activity-interval-ms
+  "Progress-monitor minimum interval between activity checks."
+  5000)
+
+(def ^:private stream-line-timeout-ms
+  "Per-line read timeout. 180s — see default-stagnation-threshold-ms
+   for the same reasoning class. Hitting this cap classifies the
+   stream as :stream-idle (a stalled stream, not clean EOF)."
+  180000)
+
+(def ^:private process-join-timeout-ms
+  "How long to wait on subprocess `deref` after the stream has ended
+   cleanly. Matches default-max-total-ms; the subprocess should have
+   exited by now."
+  600000)
+
+(def ^:private post-kill-join-timeout-ms
+  "How long to wait on subprocess `deref` after we already classified
+   a timeout and force-killed the process. The kill makes joining a
+   matter of seconds — without this, we paid an extra 10 minutes per
+   timeout (observed Claude dogfood 2026-05-02: 10-min planner cap
+   becoming an 18-min wall-clock failure)."
+  5000)
+
 (defn llm-success
   "Build a successful LLM response."
   ([content]
@@ -542,9 +584,9 @@
 
 (defn default-progress-monitor []
   (pm/create-progress-monitor
-   {:stagnation-threshold-ms 120000
-    :max-total-ms 600000
-    :min-activity-interval-ms 5000}))
+   {:stagnation-threshold-ms  default-stagnation-threshold-ms
+    :max-total-ms             default-max-total-ms
+    :min-activity-interval-ms default-min-activity-interval-ms}))
 
 (defn format-timeout-error [{:keys [message type elapsed-ms]}]
   (format "Adaptive timeout: %s (type: %s, elapsed: %dms)"
@@ -584,13 +626,7 @@
 (defn process-stream-lines [out-reader monitor on-line]
   (let [out-lines (atom [])
         timeout-reason (atom nil)
-        ;; 180s — Opus 4.6 can be silent for 60-90s while reasoning
-        ;; between tool-call batches (observed iter 14: 20 tool calls,
-        ;; 0 text chunks, stream went quiet after the 20th tool result
-        ;; and the 60s cap tripped on ordinary thinking time). The
-        ;; progress-monitor's stagnation-threshold (120s) is separately
-        ;; the upper bound on activity silence.
-        line-timeout-ms 180000
+        line-timeout-ms stream-line-timeout-ms
         dump-path (System/getenv "MF_STREAM_DUMP")
         dump-writer (when dump-path
                       (java.io.PrintWriter.
@@ -654,11 +690,8 @@
                (when-let [^Process jp (:proc process)]
                  (.destroyForcibly jp))
                (catch Exception _ nil)))
-         ;; After we have already classified a timeout and force-killed the
-         ;; subprocess, do not wait another full 10 minutes for join/cleanup.
-         ;; That path turned a 10-minute planner hard limit into an 18-minute
-         ;; wall-clock failure during Claude dogfood on 2026-05-02.
-         result (deref process (if timeout 5000 600000)
+         join-timeout (if timeout post-kill-join-timeout-ms process-join-timeout-ms)
+         result (deref process join-timeout
                        {:exit -1 :err "Process timed out"})]
      (if timeout
        (timeout-result lines timeout)

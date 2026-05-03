@@ -19,7 +19,8 @@
 (ns ai.miniforge.agent.model
   "Shared agent model policy and configuration helpers."
   (:require
-   [ai.miniforge.config.interface :as config]))
+   [ai.miniforge.config.interface :as config]
+   [ai.miniforge.llm.interface :as llm]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Canonical role model policy
@@ -75,15 +76,12 @@
   [role provided-client]
   (if (nil? provided-client)
     nil
-    (let [model-id (default-model-for-role role)
-        backend-for-model (requiring-resolve 'ai.miniforge.llm.interface/backend-for-model)
-        client-backend (requiring-resolve 'ai.miniforge.llm.interface/client-backend)
-        create-client (requiring-resolve 'ai.miniforge.llm.interface/create-client)
-        needed-backend (backend-for-model model-id)
-        current-backend (client-backend provided-client)]
+    (let [model-id        (default-model-for-role role)
+          needed-backend  (llm/backend-for-model model-id)
+          current-backend (llm/client-backend provided-client)]
       (if (= current-backend needed-backend)
         (assoc-in provided-client [:config :model] model-id)
-        (create-client {:backend needed-backend :model model-id})))))
+        (llm/create-client {:backend needed-backend :model model-id})))))
 
 
 (comment
