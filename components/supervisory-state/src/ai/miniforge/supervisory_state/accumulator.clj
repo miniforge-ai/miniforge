@@ -488,6 +488,8 @@
   [{:gate/keys [id target-type target-id packs violations] :as event} passed?]
   (let [eval-id (or id (random-uuid))]
     {:policy-eval/id            eval-id
+     :policy-eval/workflow-run-id (:workflow/id event)
+     :policy-eval/gate-id       id
      :policy-eval/target-type   (or target-type :artifact)
      :policy-eval/target-id     (or target-id eval-id)
      :policy-eval/passed?       passed?

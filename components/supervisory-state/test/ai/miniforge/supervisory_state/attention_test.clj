@@ -19,7 +19,7 @@
 (ns ai.miniforge.supervisory-state.attention-test
   "Tests for attention derivation (N5-delta-1 §5.1)."
   (:require
-   [clojure.test :refer [deftest testing is]]
+   [clojure.test :refer [deftest is]]
    [ai.miniforge.supervisory-state.attention :as attention]
    [ai.miniforge.supervisory-state.schema :as schema]))
 
@@ -113,3 +113,35 @@
 
 (deftest empty-table-yields-no-items
   (is (empty? (attention/derive-seq schema/empty-table))))
+
+(deftest policy-violation-summary-carries-gate-and-target-context
+  (let [wf-id (random-uuid)
+        eval-id (random-uuid)
+        table (assoc-in schema/empty-table
+                        [:policy-evals eval-id]
+                        {:policy-eval/id eval-id
+                         :policy-eval/workflow-run-id wf-id
+                         :policy-eval/gate-id :review-approved
+                         :policy-eval/target-type :workflow-output
+                         :policy-eval/target-id "bundle-42"
+                         :policy-eval/passed? false
+                         :policy-eval/packs-applied ["core"]
+                         :policy-eval/violations [{:violation/rule-id :review-body-required
+                                                   :violation/severity :critical
+                                                   :violation/category :process
+                                                   :violation/message "Review body is missing"
+                                                   :violation/remediable? true}
+                                                  {:violation/rule-id :approvals-required
+                                                   :violation/severity :high
+                                                   :violation/category :process
+                                                   :violation/message "Missing approval"
+                                                   :violation/remediable? true}]
+                         :policy-eval/evaluated-at (java.util.Date.)})
+        item (first (attention/derive-seq table))]
+    (is (= :policy (:attention/source-type item)))
+    (is (= wf-id (:attention/workflow-run-id item)))
+    (is (= :review-approved (:attention/gate-id item)))
+    (is (= :workflow-output (:attention/target-type item)))
+    (is (= "bundle-42" (:attention/target-id item)))
+    (is (= "Policy violation in review-approved for workflow output bundle-42: review-body-required — Review body is missing (+1 more)"
+           (:attention/summary item)))))

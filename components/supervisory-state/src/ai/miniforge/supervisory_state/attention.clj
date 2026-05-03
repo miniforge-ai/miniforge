@@ -24,8 +24,6 @@
    a summary formatter. The runner maps rules over entities and returns a
    deterministic attention list keyed by stable UUIDv5 IDs so consumers don't
    see flicker on identical signals."
-  (:require
-   [clojure.string :as str])
   (:import
    (java.util UUID)
    (java.security MessageDigest)
@@ -74,14 +72,17 @@
 (defn- now [] (java.util.Date.))
 
 (defn- item
-  [severity source-type source-id summary]
-  {:attention/id          (attention-id source-type source-id)
-   :attention/severity    severity
-   :attention/source-type source-type
-   :attention/source-id   source-id
-   :attention/summary     summary
-   :attention/derived-at  (now)
-   :attention/resolved?   false})
+  ([severity source-type source-id summary]
+   (item severity source-type source-id summary {}))
+  ([severity source-type source-id summary extra]
+   (merge {:attention/id          (attention-id source-type source-id)
+           :attention/severity    severity
+           :attention/source-type source-type
+           :attention/source-id   source-id
+           :attention/summary     summary
+           :attention/derived-at  (now)
+           :attention/resolved?   false}
+          extra)))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Individual rules — each returns a seq of AttentionItems
@@ -166,11 +167,33 @@
         :when (false? (:policy-eval/passed? ev))
         :let [critical? (some #(#{:critical :high} (:violation/severity %))
                               (:policy-eval/violations ev))
-              sev       (if critical? :critical :info)]]
+              sev       (if critical? :critical :info)
+              gate-id   (:policy-eval/gate-id ev)
+              target-type (:policy-eval/target-type ev)
+              target-id (:policy-eval/target-id ev)
+              first-violation (first (:policy-eval/violations ev))
+              rule-id   (:violation/rule-id first-violation)
+              message   (:violation/message first-violation)
+              extra-count (max 0 (dec (count (:policy-eval/violations ev))))
+              target-summary
+              (case target-type
+                :pr (str "PR " target-id)
+                :workflow-output (str "workflow output " target-id)
+                :artifact (str "artifact " target-id)
+                (str (name (or target-type :artifact)) " " target-id))
+              summary  (str "Policy violation"
+                            (when gate-id (str " in " (name gate-id)))
+                            (when target-id (str " for " target-summary))
+                            (when rule-id (str ": " (name rule-id)))
+                            (when (seq message) (str " — " message))
+                            (when (pos? extra-count) (str " (+" extra-count " more)")))]]
     (item sev :policy
           (str (:policy-eval/id ev))
-          (str "Policy violation: " (count (:policy-eval/violations ev))
-               " rule(s) failed"))))
+          summary
+          {:attention/workflow-run-id (:policy-eval/workflow-run-id ev)
+           :attention/gate-id gate-id
+           :attention/target-type target-type
+           :attention/target-id target-id})))
 
 ;------------------------------------------------------------------------------ Layer 2
 ;; Rule registry + runner

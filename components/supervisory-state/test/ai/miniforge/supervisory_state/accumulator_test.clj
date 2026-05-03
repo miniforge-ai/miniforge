@@ -648,10 +648,14 @@
     (is (= ["core"] (:policy-eval/packs-applied ev*)))))
 
 (deftest gate-failed-captures-violations
-  (let [id    (random-uuid)
+  (let [id    :review-approved
+        wf-id (random-uuid)
         table (acc/apply-event schema/empty-table
                                (ev :gate/failed
                                    {:gate/id id
+                                    :workflow/id wf-id
+                                    :gate/target-type :workflow-output
+                                    :gate/target-id "bundle-42"
                                     :gate/violations [{:rule-id :no-force-push
                                                        :severity :critical
                                                        :category :security
@@ -659,6 +663,10 @@
                                                        :remediable? false}]}))
         ev*   (get-in table [:policy-evals id])]
     (is (false? (:policy-eval/passed? ev*)))
+    (is (= wf-id (:policy-eval/workflow-run-id ev*)))
+    (is (= :review-approved (:policy-eval/gate-id ev*)))
+    (is (= :workflow-output (:policy-eval/target-type ev*)))
+    (is (= "bundle-42" (:policy-eval/target-id ev*)))
     (is (= 1 (count (:policy-eval/violations ev*))))
     (is (= :no-force-push
            (-> ev* :policy-eval/violations first :violation/rule-id)))))
