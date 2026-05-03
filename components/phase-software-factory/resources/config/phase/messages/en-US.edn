@@ -20,8 +20,6 @@
   :verify/failed              "Verification failed"
 
   ;; Release phase
-  :release/no-implement-artifact        "Release phase has no code artifact from implement phase"
-  :release/no-implement-hint            "Implement phase may have failed or produced no output"
   :release/zero-files                   "Release phase received code artifact with zero files"
   :release/skipped-already-implemented  "Release skipped — task was already implemented"
   :release/changes-description          "Changes from implementation"

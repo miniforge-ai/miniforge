@@ -65,26 +65,17 @@
       (log/info logger :release :release/skipped-already-implemented
                 {:data {:summary (get-in ctx [:execution/phase-results :implement :result :summary])}}))))
 
-(defn- assert-implement-artifact!
-  "Throw when implement phase has no result or has not succeeded.
-
-   In the new environment model, the implement result carries :status,
-   :environment-id, :summary, and :metrics — NOT a serialized :output map.
-   We check :status to confirm the phase completed successfully."
-  [ctx impl-result]
-  (let [impl-status (:status impl-result)
-        succeeded?  (phase/result-succeeded? impl-result)]
-    (when (or (nil? impl-result) (not succeeded?))
-      (let [phase-results-keys (vec (keys (:execution/phase-results ctx)))
-            logger (or (get-in ctx [:execution/logger])
-                       (log/create-logger {:min-level :error :output :human}))]
-        (log/error logger :release :release/no-implement-artifact
-                   {:data {:implement-status impl-status
-                           :phase-results-keys phase-results-keys}})
-        (throw (ex-info (messages/t :release/no-implement-artifact)
-                        {:phase            :release
-                         :implement-status impl-status
-                         :hint             (messages/t :release/no-implement-hint)}))))))
+;; assert-implement-artifact! used to throw when the implement phase
+;; reported anything other than :status :success. That gate disagreed with
+;; verify and review, which read the environment directly and run regardless
+;; of what the implement result map said. The disagreement surfaced under
+;; the curator's :curator/no-files-written path: the agent narrates code in
+;; chat, curator marks implement :failed, but persist still captures whatever
+;; landed on disk and verify+review work fine against it. Release would
+;; then explode with `:release/no-implement-artifact` even though there was
+;; real work to release. Removed — the env-based `:release/zero-files`
+;; check below is the authoritative gate, matching what verify and review
+;; already do.
 
 (defn- ctx-worktree-path
   "Resolve the working directory from phase context."
@@ -164,25 +155,26 @@
 (defn build-workflow-state
   "Build workflow state from phase context for the release executor.
 
-   In the new environment model, code changes live in the execution environment's
-   git working tree (:execution/worktree-path) rather than being serialized
-   into phase results. This function reads the current git diff from the
-   worktree to discover which files need to be released.
+   In the new environment model, code changes live in the execution
+   environment's git working tree (:execution/worktree-path) rather than
+   being serialized into phase results. This function reads the current
+   git diff from the worktree to discover which files need to be released.
 
-   Falls back gracefully if implement was :already-implemented (other phases
-   such as verify or review may have produced git changes that still need
-   releasing).
+   The environment is the authoritative source — release proceeds when the
+   worktree has dirty paths, regardless of what the implement phase's
+   result map said. This matches verify and review, which both read the
+   environment directly. The previous behavior (gating on
+   `[:execution/phase-results :implement :result :status]`) disagreed with
+   verify/review and dropped real work whenever the curator marked
+   implement :failed despite persist capturing files on disk.
 
-   Throws :release/zero-files when no changed files are found in the worktree."
+   Throws :release/zero-files when no changed files are found in the
+   worktree — that's the only legitimate \"nothing to release\" condition
+   in the env model."
   [ctx]
   (let [impl-result   (get-in ctx [:execution/phase-results :implement :result])
-        impl-status   (:status impl-result)
-        already-impl? (= :already-implemented impl-status)]
+        impl-status   (:status impl-result)]
     (log-already-implemented! ctx impl-status)
-    ;; Assert implement phase succeeded (unless :already-implemented).
-    ;; In the environment model we check :status on the result map directly.
-    (when-not already-impl?
-      (assert-implement-artifact! ctx impl-result))
     ;; Discover files via the environment's git working tree.
     ;; Code provenance is environment-based: the agent writes to the worktree
     ;; and the PR diff is the authoritative record of what changed.

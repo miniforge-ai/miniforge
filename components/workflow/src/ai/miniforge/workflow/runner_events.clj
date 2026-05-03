@@ -108,7 +108,20 @@
         (false? (get-in result [:result :success?])))))
 
 (defn- build-phase-event-data
-  "Build event data map for a phase completion event."
+  "Build event data map for a phase completion event.
+
+   `error-info` is sourced from any of five shapes the phase machinery uses:
+
+   1. `(:error result)`          — top-level error map (early failures)
+   2. `[:result :error]`         — inner agent result error (post-inner-fail)
+   3. `[:phase :error]`          — error attached by an `error-*` interceptor
+                                   that fell through to `phase/fail-phase`
+                                   (the release-phase no-files path before
+                                   this fix landed produced bare failure
+                                   events with no payload because of this
+                                   missing branch)
+   4. `:phase/gate-errors`       — gate validation failures
+   5. `(:message result)`        — last-resort string message"
   [result]
   (let [succeeded? (and (get result :success? (phase/succeeded-or-done? result))
                         (not (inner-result-failed? result)))
@@ -119,6 +132,7 @@
         error-info (when-not succeeded?
                      (or (:error result)
                          (get-in result [:result :error])
+                         (get-in result [:phase :error])
                          (when-let [msg (get-in result [:phase/gate-errors])]
                            {:message (messages/t :status/gate-failed) :details msg})
                          (when-let [msg (:message result)]

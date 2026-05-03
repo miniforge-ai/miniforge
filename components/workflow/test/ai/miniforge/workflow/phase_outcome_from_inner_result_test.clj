@@ -79,3 +79,24 @@
         (is evt "phase-completed event should be published")
         (is (= :failure (:phase/outcome evt)))
         (is (= {:message "boom"} (:phase/error evt)))))))
+
+(deftest error-attached-at-phase-error-surfaces-test
+  (testing "[:phase :error] is read when nothing higher carries the payload"
+    ;; Regression: error-* interceptors that fall through to
+    ;; `phase/fail-phase` attach the error map at `[:phase :error]` rather
+    ;; than at the top level or at `[:result :error]`. Before this branch
+    ;; was added, `build-phase-event-data` couldn't find that error and
+    ;; emitted a bare failure event with no payload — observed on the
+    ;; 2026-05-02 dogfood as "Phase :release failure (0ms)" with no
+    ;; diagnostic context whatsoever.
+    (let [phase-result {:name :release
+                        :status :failed
+                        :phase {:error {:message "Release phase received code artifact with zero files"
+                                        :data {:phase :release :worktree-path "/tmp/x"}}}}
+          data (build phase-result)]
+      (is (= :failure (:outcome data)))
+      (is (= "Release phase received code artifact with zero files"
+             (get-in data [:error :message])))
+      (is (= "/tmp/x" (get-in data [:error :data :worktree-path]))
+          "the error data payload is preserved end-to-end so consumers can
+           debug the failure without parsing the run log"))))
