@@ -175,15 +175,22 @@
               rule-id   (:violation/rule-id first-violation)
               message   (:violation/message first-violation)
               extra-count (max 0 (dec (count (:policy-eval/violations ev))))
+              pr-target? (and (= :pr target-type)
+                              (vector? target-id)
+                              (= 2 (count target-id)))
               target-summary
-              (case target-type
-                :pr (str "PR " target-id)
-                :workflow-output (str "workflow output " target-id)
-                :artifact (str "artifact " target-id)
-                (str (name (or target-type :artifact)) " " target-id))
+              (when (some? target-id)
+                (case target-type
+                  :pr (if pr-target?
+                        (str "PR " (first target-id) "#" (second target-id))
+                        (str "PR " target-id))
+                  :workflow-output (str "workflow output " target-id)
+                  :artifact (str "artifact " target-id)
+                  (when target-type
+                    (str (name target-type) " " target-id))))
               summary  (str "Policy violation"
                             (when gate-id (str " in " (name gate-id)))
-                            (when target-id (str " for " target-summary))
+                            (when target-summary (str " for " target-summary))
                             (when rule-id (str ": " (name rule-id)))
                             (when (seq message) (str " — " message))
                             (when (pos? extra-count) (str " (+" extra-count " more)")))]]

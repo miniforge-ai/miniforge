@@ -145,3 +145,41 @@
     (is (= "bundle-42" (:attention/target-id item)))
     (is (= "Policy violation in review-approved for workflow output bundle-42: review-body-required — Review body is missing (+1 more)"
            (:attention/summary item)))))
+
+(deftest policy-violation-summary-omits-synthetic-target-context
+  (let [eval-id (random-uuid)
+        table (assoc-in schema/empty-table
+                        [:policy-evals eval-id]
+                        {:policy-eval/id eval-id
+                         :policy-eval/gate-id :lint
+                         :policy-eval/passed? false
+                         :policy-eval/packs-applied ["core"]
+                         :policy-eval/violations [{:violation/rule-id :format-required
+                                                   :violation/severity :critical
+                                                   :violation/category :process
+                                                   :violation/message "Formatting is required"
+                                                   :violation/remediable? true}]
+                         :policy-eval/evaluated-at (java.util.Date.)})
+        item (first (attention/derive-seq table))]
+    (is (= "Policy violation in lint: format-required — Formatting is required"
+           (:attention/summary item)))))
+
+(deftest policy-violation-summary-formats-pr-targets-like-existing-pr-signals
+  (let [eval-id (random-uuid)
+        table (assoc-in schema/empty-table
+                        [:policy-evals eval-id]
+                        {:policy-eval/id eval-id
+                         :policy-eval/gate-id :review-approved
+                         :policy-eval/target-type :pr
+                         :policy-eval/target-id ["acme/widget" 42]
+                         :policy-eval/passed? false
+                         :policy-eval/packs-applied ["core"]
+                         :policy-eval/violations [{:violation/rule-id :approval-required
+                                                   :violation/severity :critical
+                                                   :violation/category :process
+                                                   :violation/message "Approval is missing"
+                                                   :violation/remediable? true}]
+                         :policy-eval/evaluated-at (java.util.Date.)})
+        item (first (attention/derive-seq table))]
+    (is (= "Policy violation in review-approved for PR acme/widget#42: approval-required — Approval is missing"
+           (:attention/summary item)))))
