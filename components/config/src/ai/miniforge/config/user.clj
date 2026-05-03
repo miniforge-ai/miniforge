@@ -52,7 +52,10 @@
   "Fallback resource path when the primary config cannot be loaded."
   "config/default-user-config-fallback.edn")
 
-(defn- find-resource
+(defn find-resource
+  "Resource lookup seam. Public so tests can rebind it via `with-redefs`
+   when validating the fallback resource path; not part of the external
+   API."
   [resource-path]
   (io/resource resource-path))
 

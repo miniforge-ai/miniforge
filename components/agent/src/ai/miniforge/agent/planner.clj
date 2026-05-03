@@ -146,6 +146,34 @@
                [path content]))
         existing-files))
 
+(defn- render-template
+  "Render a `{{key}}`-style template with the given substitutions.
+   Each substitutions map entry `{kw v}` replaces the literal string
+   \"{{kw}}\" with `v` (nil values render as the empty string)."
+  [template substitutions]
+  (reduce-kv (fn [text k v]
+               (str/replace text (str "{{" (name k) "}}") (or v "")))
+             (or template "")
+             substitutions))
+
+(defn- existing-files-section
+  "Build the planner-prompt section that previews existing in-scope
+   files. Returns the empty string when no files are present."
+  [existing-files]
+  (if (seq existing-files)
+    (render-template (get @planner-prompt-data :prompt/existing-files-template)
+                     {:files-list (format-existing-files existing-files)})
+    ""))
+
+(defn- build-user-prompt
+  "Render the planner user-turn prompt from the spec text and any
+   existing in-scope files. Template lives in
+   resources/prompts/planner.edn (:prompt/user-template)."
+  [spec-text existing-files]
+  (render-template (get @planner-prompt-data :prompt/user-template)
+                   {:spec-text              spec-text
+                    :existing-files-section (existing-files-section existing-files)}))
+
 (defn spec->text
   "Convert a spec to text for the LLM."
   [spec]
@@ -181,20 +209,13 @@
       ""))
 
 (defn- submission-retry-prompt
-  "Build a short, submission-only retry prompt for planner recovery."
+  "Build a short, submission-only retry prompt for planner recovery.
+   Template lives in resources/prompts/planner.edn
+   (:prompt/submission-retry-template)."
   [spec-text prior-content]
-  (str "You already completed the planning analysis for this specification.\n\n"
-       "Do NOT explore further. Do NOT call context_read/context_grep/context_glob.\n"
-       "Your only job is to submit the finished plan NOW.\n\n"
-       "Primary submission path:\n"
-       "  Write `.miniforge/plan.edn` in the working directory using the Write tool.\n\n"
-       "Fallback only if Write fails or is unavailable:\n"
-       "  End your turn with ONLY the plan EDN in a ```clojure code fence.\n\n"
-       "No narration. No explanation. No bullets. No markdown beyond the fallback code fence.\n\n"
-       "Original specification:\n\n"
-       spec-text
-       "\n\nPrior planner output to convert into the final plan submission:\n\n"
-       prior-content))
+  (render-template (get @planner-prompt-data :prompt/submission-retry-template)
+                   {:spec-text     spec-text
+                    :prior-content prior-content}))
 
 (defn- planner-submission-retry?
   "True when a failed planner turn produced useful prose but no submitted plan."
@@ -389,16 +410,11 @@
   ["Read" "Bash" "Grep" "Glob" "Agent" "LS"])
 
 (defn- create-planner-progress-monitor
-  "Planner-specific progress monitor.
-
-   Planner runs should converge quickly once exploration is done. A shorter
-   hard limit keeps us from burning a full 10+ minutes after the model has
-   already gathered enough context but failed to submit the plan."
+  "Planner main-turn progress monitor. Thresholds live in
+   resources/prompts/planner.edn (:prompt/progress-monitor)."
   []
   (llm/create-progress-monitor
-   {:stagnation-threshold-ms 60000
-    :max-total-ms 240000
-    :min-activity-interval-ms 3000}))
+   (get @planner-prompt-data :prompt/progress-monitor)))
 
 (defn- invoke-planner-session
   "Session body for the planner: build mcp-opts with model hint, call LLM."
@@ -462,18 +478,21 @@
       (assoc :num-turns (:num-turns llm-response)))))
 
 (defn- invoke-planner-submission-retry-session
-  "Run one short follow-up turn that only submits the final plan."
+  "Run one short follow-up turn that only submits the final plan.
+   Turn cap and progress-monitor thresholds come from
+   resources/prompts/planner.edn (:prompt/submission-retry-max-turns,
+   :prompt/submission-retry-monitor)."
   [session llm-client retry-prompt config context on-chunk]
-  (let [budget-usd (budget/resolve-cost-budget-usd :planner config context)
-        retry-monitor (llm/create-progress-monitor
-                       {:stagnation-threshold-ms 30000
-                        :max-total-ms 120000
-                        :min-activity-interval-ms 2000})
-        mcp-opts (cond-> (artifact-session/session->mcp-opts session budget-usd 4)
-                   true (assoc :model (model/default-model-for-role :planner)
-                               :disallowed-tools planner-disallowed-tools
-                               :progress-monitor retry-monitor)
-                   (:workdir session) (assoc :workdir (:workdir session)))]
+  (let [prompt-data    @planner-prompt-data
+        budget-usd     (budget/resolve-cost-budget-usd :planner config context)
+        retry-max-turns (get prompt-data :prompt/submission-retry-max-turns)
+        retry-monitor  (llm/create-progress-monitor
+                        (get prompt-data :prompt/submission-retry-monitor))
+        mcp-opts       (cond-> (artifact-session/session->mcp-opts session budget-usd retry-max-turns)
+                         true (assoc :model (model/default-model-for-role :planner)
+                                     :disallowed-tools planner-disallowed-tools
+                                     :progress-monitor retry-monitor)
+                         (:workdir session) (assoc :workdir (:workdir session)))]
     (if on-chunk
       (llm/chat-stream llm-client retry-prompt on-chunk
                        (merge {:system @planner-system-prompt} mcp-opts))
@@ -484,19 +503,19 @@
   "Retry planner submission once when analysis exists but the final submission
    did not land. Returns {:llm-response ... :submitted-plan ... :parsed-plan ...}."
   [llm-client spec-text config context on-chunk prior-content]
-  (let [{:keys [llm-result artifact worktree-artifacts]}
-        (artifact-session/with-session
-         context
-         #(invoke-planner-submission-retry-session % llm-client
-                                                   (submission-retry-prompt spec-text prior-content)
-                                                   config context on-chunk))
-        llm-response llm-result
-        submitted-plan (effective-plan (planner-plan-artifact worktree-artifacts artifact))
-        parsed-plan (when-not submitted-plan
-                      (parse-plan-response (planner-response-content llm-response)))]
-    {:llm-response llm-response
+  (let [retry-prompt   (submission-retry-prompt spec-text prior-content)
+        run-retry      #(invoke-planner-submission-retry-session
+                          % llm-client retry-prompt config context on-chunk)
+        {:keys [llm-result artifact worktree-artifacts]}
+        (artifact-session/with-session context run-retry)
+        plan-artifact  (planner-plan-artifact worktree-artifacts artifact)
+        submitted-plan (effective-plan plan-artifact)
+        parsed-plan    (when-not submitted-plan
+                         (parse-plan-response (planner-response-content llm-result)))]
+    {:llm-response   llm-result
+     :plan-artifact  plan-artifact
      :submitted-plan submitted-plan
-     :parsed-plan parsed-plan}))
+     :parsed-plan    parsed-plan}))
 
 (defn create-planner
   "Create a Planner agent with optional configuration overrides.
@@ -529,29 +548,7 @@
               on-chunk (:on-chunk context)
               spec-text (spec->text input)
               existing-files (:task/existing-files input)
-              user-prompt (str "Create an implementation plan for the following specification:\n\n"
-                               spec-text
-                               (when (seq existing-files)
-                                 (str "\n\n## Existing Files in Scope\n\n"
-                                      "Review these files before planning. If the spec is already "
-                                      "fully satisfied by existing code, respond with an evidence bundle:\n"
-                                      "```clojure\n{:plan/status :already-satisfied\n"
-                                      " :plan/summary \"Brief explanation\"\n"
-                                      " :plan/evidence [{:requirement \"what spec requires\"\n"
-                                      "                  :satisfied-by \"path/to/file.clj\"\n"
-                                      "                  :proof \"specific function/test that satisfies it\"}]}\n```\n"
-                                      (format-existing-files existing-files)))
-                               "\n\n## REQUIRED Output\n\n"
-                               "Primary submission path: use Write to create `.miniforge/plan.edn` in the working directory.\n"
-                               "That file IS the plan submission authority.\n\n"
-                               "Fallback only if Write fails or is unavailable:\n"
-                               "end your FINAL assistant message with the plan EDN wrapped in a ```clojure code fence.\n\n"
-                               "There is no separate artifact-submission MCP tool in this session.\n"
-                               "Narration-only responses (e.g. \"Based on my exploration...\" with no EDN or Write) "
-                               "are rejected by the runtime with :anomalies.agent/invoke-failed and cost "
-                               "a full turn's tokens. If the last thing you would say is prose, STOP and "
-                               "replace it by Writing `.miniforge/plan.edn` instead.\n\n"
-                               "Use (random-uuid) for all IDs - just write #uuid \"<any-uuid>\" placeholders that I'll fill in.")]
+              user-prompt    (build-user-prompt spec-text existing-files)]
           (if llm-client
             ;; Use the real LLM with artifact session for MCP tool support
             (let [{:keys [llm-result artifact worktree-artifacts context-misses]}
@@ -573,19 +570,20 @@
                                  (recover-submitted-plan llm-client spec-text
                                                          config context on-chunk
                                                          response-content))
-                  final-llm-response (or (:llm-response retry-result) llm-response)
+                  final-llm-response   (or (:llm-response retry-result) llm-response)
+                  final-plan-artifact  (or (:plan-artifact retry-result) plan-artifact)
                   final-submitted-plan (or (:submitted-plan retry-result) submitted-plan)
-                  final-parsed-plan (or (:parsed-plan retry-result) parsed-plan)
-                  tokens (+ (get llm-response :tokens 0)
-                            (if (identical? final-llm-response llm-response)
-                              0
-                              (get final-llm-response :tokens 0)))]
+                  final-parsed-plan    (or (:parsed-plan retry-result) parsed-plan)
+                  retry-tokens         (if (identical? final-llm-response llm-response)
+                                         0
+                                         (get final-llm-response :tokens 0))
+                  tokens               (+ (get llm-response :tokens 0) retry-tokens)]
               (when (seq context-misses)
                 (log/info logger :planner :planner/context-cache-misses
                           {:data {:miss-count (count context-misses)
                                   :misses context-misses}}))
               (log/info logger :planner :planner/llm-called
-                        {:data (planner-log-data llm-response on-chunk plan-artifact)})
+                        {:data (planner-log-data final-llm-response on-chunk final-plan-artifact)})
               ;; Container-promotion preempts CLI error classification:
               ;; if the agent wrote a valid plan.edn into the worktree,
               ;; or submitted a plan through the MCP artifact path,

@@ -392,7 +392,7 @@
 (defn- build-unverified-already-implemented-error
   "Build a structured error for an unsupported :already-implemented repair outcome."
   [ctx result iterations]
-  {:message "Implement returned :already-implemented after prior review or verify failures without producing a repair artifact"
+  {:message (messages/t :implement/unverified-already-implemented)
    :agent-status (:status result)
    :rate-limited? false
    :iterations iterations

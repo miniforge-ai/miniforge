@@ -566,13 +566,20 @@
 (def ^:private read-timeout-sentinel
   (Object.))
 
-(defn read-line-with-timeout [reader timeout-ms]
-  (let [read-future (future (.readLine reader))]
-    (try
-      (let [line-or-sentinel (deref read-future timeout-ms read-timeout-sentinel)]
-        line-or-sentinel)
-      (catch java.util.concurrent.TimeoutException _
-        read-timeout-sentinel))))
+(defn read-line-with-timeout
+  "Read one line from `reader`, returning `read-timeout-sentinel` if
+   nothing arrives within `timeout-ms`. On timeout the underlying
+   reader is closed so the blocked `.readLine` thread can return
+   instead of leaking. (`deref` with a timeout returns the supplied
+   default — it does not throw `TimeoutException` — so no
+   `catch` clause is needed.)"
+  [reader timeout-ms]
+  (let [read-future (future (.readLine reader))
+        result      (deref read-future timeout-ms read-timeout-sentinel)]
+    (when (identical? result read-timeout-sentinel)
+      (try (.close reader) (catch Exception _))
+      (future-cancel read-future))
+    result))
 
 (defn process-stream-lines [out-reader monitor on-line]
   (let [out-lines (atom [])

@@ -10,6 +10,8 @@
   :implement/prior-error-default   "No artifact produced — agent exhausted turn budget exploring files instead of writing code"
   :implement/retry-instruction     "This is a RETRY. Do NOT explore or read files. The plan and existing files are already in this prompt. Write the implementation code IMMEDIATELY and call submit."
   :implement/summary-default       "Implementation complete"
+  :implement/unverified-already-implemented
+  "Implement returned :already-implemented after prior review or verify failures without producing a repair artifact"
 
   ;; Verify phase
   :verify/no-environment      "Verify phase has no execution environment"

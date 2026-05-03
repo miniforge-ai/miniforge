@@ -68,11 +68,16 @@
 (defn home-dir-name []
   (:home-dir-name (app-profile)))
 
-(defn- getenv
+(defn getenv
+  "Environment-variable lookup seam. Public so tests can rebind it via
+   `with-redefs` when validating MINIFORGE_HOME resolution; not part of
+   the external API."
   [var-name]
   (System/getenv var-name))
 
-(defn- default-home-dir
+(defn default-home-dir
+  "Profile-derived default home directory. Public so tests can rebind
+   it via `with-redefs`; not part of the external API."
   []
   (str (fs/home) "/" (home-dir-name)))
 

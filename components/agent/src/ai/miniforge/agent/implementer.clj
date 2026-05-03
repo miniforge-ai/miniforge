@@ -394,7 +394,7 @@
   "Reject an :already-implemented claim when there is no artifact evidence on a repair attempt."
   [input tokens]
   (response/error
-   "Implementer claimed :already-implemented without artifact evidence after prior review or verify failures"
+   (messages/t :error/unverified-already-implemented)
    {:tokens tokens
     :data {:code :implementer/unverified-already-implemented
            :review-feedback? (boolean (:task/review-feedback input))
