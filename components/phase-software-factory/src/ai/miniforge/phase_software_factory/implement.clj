@@ -286,7 +286,6 @@
         curator-terminal?
         (= :curator/no-files-written
            (get-in curator-result [:error :data :code]))
-        impl-succeeded? (phase/result-succeeded? impl-result)
         ;; "Degraded handoff" means the implementer agent reported a hard
         ;; error but the curator recovered files anyway. :already-implemented
         ;; is a deliberate skip (work was completed in a prior turn) — the
@@ -294,7 +293,13 @@
         ;; Don't mark such handoffs as degraded; the reviewer's handoff
         ;; gate would otherwise auto-reject every repair iteration that
         ;; legitimately recognized "already done."
-        impl-errored? (= :error (:status impl-result))
+        ;;
+        ;; response/error? recognises every error-shape the implementer
+        ;; can return: :status :error (response/error), :status :failed
+        ;; (legacy phase shape), and :success false (response/failure
+        ;; from a thrown exception in agent/invoke). :already-implemented
+        ;; matches none of these, so it correctly bypasses the flag.
+        impl-errored? (response/error? impl-result)
         result (cond
                  ;; Curator found files — use its artifact, even if the
                  ;; implementer reported error. Merge implementer metrics through.

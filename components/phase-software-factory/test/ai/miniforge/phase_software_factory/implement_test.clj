@@ -197,6 +197,62 @@
         (is (true? (get-in final-result [:phase :artifact :code/degraded-handoff?])))
         (is (= :error (get-in final-result [:phase :artifact :code/raw-agent-status])))))))
 
+(deftest implement-marks-curator-recovered-failure-shape-as-degraded-handoff-test
+  (testing "curator recovery from a thrown-exception (response/failure :success false) handoff is still marked degraded"
+    ;; response/error? must catch :success false (the shape produced when
+    ;; agent/invoke throws and the wrapper synthesizes a failure response)
+    ;; in addition to :status :error / :failed. A naive (= :error :status)
+    ;; check would silently leave this handoff untagged.
+    (with-redefs [agent/create-implementer (fn [_] {:type :mock-implementer})
+                  agent/invoke (fn [_ _ _]
+                                 (response/failure "Implementation failed"
+                                                   {:tokens 50 :duration-ms 250}))
+                  agent/curate-implement-output
+                  (fn [_]
+                    (response/success {:code/files [{:path "src/core.clj"
+                                                     :content "(ns core)"
+                                                     :action :create}]
+                                       :code/summary "curated recovery"}
+                                      {:metrics {:tokens 25 :duration-ms 50}}))]
+      (let [ctx (create-base-context)
+            ctx-with-config (assoc ctx :phase-config {:phase :implement})
+            interceptor (phase/get-phase-interceptor {:phase :implement})
+            enter-result ((:enter interceptor) ctx-with-config)]
+        (is (true? (get-in enter-result [:phase :result :degraded-handoff?]))
+            ":success false must still trigger the degraded-handoff flag")))))
+
+(deftest implement-does-not-mark-already-implemented-as-degraded-handoff-test
+  (testing "curator recovery alongside an :already-implemented agent verdict must NOT flag degraded-handoff"
+    ;; :already-implemented is a deliberate skip — the agent correctly
+    ;; recognised the work was completed in a prior turn. The curator's
+    ;; per-session diff is structurally empty in that case, so any artifact
+    ;; the curator surfaces is the prior turn's output, not a recovered
+    ;; failure. Tagging it degraded would auto-reject every legitimate
+    ;; repair iteration that recognized "already done."
+    (with-redefs [agent/create-implementer (fn [_] {:type :mock-implementer})
+                  agent/invoke (fn [_ _ _]
+                                 {:status  :already-implemented
+                                  :output  {:code/id (random-uuid)
+                                            :code/files []
+                                            :code/summary "prior turn satisfied the task"}
+                                  :summary "prior turn satisfied the task"
+                                  :metrics {:tokens 0 :duration-ms 0}})
+                  agent/curate-implement-output
+                  (fn [_]
+                    (response/success {:code/files [{:path "src/core.clj"
+                                                     :content "(ns core)"
+                                                     :action :create}]
+                                       :code/summary "curated recovery"}
+                                      {:metrics {:tokens 0 :duration-ms 0}}))]
+      (let [ctx (create-base-context)
+            ctx-with-config (assoc ctx :phase-config {:phase :implement})
+            interceptor (phase/get-phase-interceptor {:phase :implement})
+            enter-result ((:enter interceptor) ctx-with-config)]
+        (is (not (get-in enter-result [:phase :result :degraded-handoff?]))
+            ":already-implemented must not set :degraded-handoff?")
+        (is (nil? (get-in enter-result [:phase :result :raw-agent-status]))
+            "no degraded-handoff means no :raw-agent-status sidecar")))))
+
 (deftest implement-handles-agent-exception-test
   (testing "implement phase handles agent exceptions gracefully"
     (with-redefs [agent/create-implementer (fn [_] {:type :mock-implementer})
