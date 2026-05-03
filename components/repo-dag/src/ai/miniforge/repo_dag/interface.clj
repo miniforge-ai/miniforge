@@ -119,13 +119,31 @@
    - DAG not found
    - Repo with same name already exists
 
+   DEPRECATED: prefer [[add-repo-anomaly]], which returns an anomaly map
+   instead of throwing. Retained for backward compatibility.
+
    Example:
      (add-repo mgr dag-id
                {:repo/url \"https://github.com/acme/terraform-modules\"
                 :repo/name \"terraform-modules\"
                 :repo/type :terraform-module})"
+  {:deprecated "exceptions-as-data — prefer add-repo-anomaly"}
   [manager dag-id repo-config]
   (core/add-repo manager dag-id repo-config))
+
+(defn add-repo-anomaly
+  "Anomaly-returning variant of [[add-repo]].
+
+   Returns the updated DAG on success, or an anomaly map on failure:
+   - `:not-found`     — DAG with `dag-id` does not exist
+   - `:invalid-input` — `repo-config` fails schema validation (e.g.
+                        missing `:repo/type`, malformed `:repo/url`)
+   - `:conflict`      — a repo with the same `:repo/name` already exists
+                        in the DAG
+
+   Prefer this over [[add-repo]] in non-boundary code."
+  [manager dag-id repo-config]
+  (core/add-repo-anomaly manager dag-id repo-config))
 
 (defn remove-repo
   "Remove a repository from the DAG.
@@ -138,9 +156,20 @@
    Returns the updated DAG.
    Also removes all edges referencing this repo.
 
-   Throws if DAG not found."
+   Throws if DAG not found.
+
+   DEPRECATED: prefer [[remove-repo-anomaly]]."
+  {:deprecated "exceptions-as-data — prefer remove-repo-anomaly"}
   [manager dag-id repo-name]
   (core/remove-repo manager dag-id repo-name))
+
+(defn remove-repo-anomaly
+  "Anomaly-returning variant of [[remove-repo]].
+
+   Returns the updated DAG on success, or a `:not-found` anomaly when the
+   DAG does not exist."
+  [manager dag-id repo-name]
+  (core/remove-repo-anomaly manager dag-id repo-name))
 
 (defn add-edge
   "Add a dependency edge between repos.
@@ -162,12 +191,31 @@
    - Edge already exists
    - Self-loop attempted
 
+   DEPRECATED: prefer [[add-edge-anomaly]].
+
    Example:
      (add-edge mgr dag-id
                \"terraform-modules\" \"terraform-live\"
                :module-before-live :sequential)"
+  {:deprecated "exceptions-as-data — prefer add-edge-anomaly"}
   [manager dag-id from-repo to-repo constraint merge-ordering]
   (core/add-edge manager dag-id from-repo to-repo constraint merge-ordering))
+
+(defn add-edge-anomaly
+  "Anomaly-returning variant of [[add-edge]].
+
+   Returns the updated DAG on success, or an anomaly map on failure:
+   - `:not-found`     — DAG, from-repo, or to-repo does not exist
+   - `:invalid-input` — self-loop attempted (`from-repo` = `to-repo`),
+                        or the edge payload fails schema validation
+                        (unknown `constraint`, unknown `merge-ordering`,
+                        missing endpoints)
+   - `:conflict`      — edge already exists, or adding the edge would
+                        introduce a cycle (`:cycle-nodes` carried in data)
+
+   Prefer this over [[add-edge]] in non-boundary code."
+  [manager dag-id from-repo to-repo constraint merge-ordering]
+  (core/add-edge-anomaly manager dag-id from-repo to-repo constraint merge-ordering))
 
 (defn remove-edge
   "Remove a dependency edge.
@@ -180,9 +228,20 @@
 
    Returns the updated DAG.
 
-   Throws if DAG not found."
+   Throws if DAG not found.
+
+   DEPRECATED: prefer [[remove-edge-anomaly]]."
+  {:deprecated "exceptions-as-data — prefer remove-edge-anomaly"}
   [manager dag-id from-repo to-repo]
   (core/remove-edge manager dag-id from-repo to-repo))
+
+(defn remove-edge-anomaly
+  "Anomaly-returning variant of [[remove-edge]].
+
+   Returns the updated DAG on success, or a `:not-found` anomaly when the
+   DAG does not exist."
+  [manager dag-id from-repo to-repo]
+  (core/remove-edge-anomaly manager dag-id from-repo to-repo))
 
 ;------------------------------------------------------------------------------ Layer 3
 ;; Query operations
@@ -198,11 +257,24 @@
    - On success: {:success true :order [repo-names...]}
    - On failure: {:success false :error :cycle-detected :cycle-nodes #{...}}
 
+   Throws ex-info when the DAG does not exist.
+
+   DEPRECATED: prefer [[compute-topo-order-anomaly]].
+
    Example:
      (compute-topo-order mgr dag-id)
      ;; => {:success true :order [\"terraform-modules\" \"terraform-live\" \"k8s\"]}"
+  {:deprecated "exceptions-as-data — prefer compute-topo-order-anomaly"}
   [manager dag-id]
   (core/compute-topo-order manager dag-id))
+
+(defn compute-topo-order-anomaly
+  "Anomaly-returning variant of [[compute-topo-order]].
+
+   Returns the topo-sort result map on success, or a `:not-found` anomaly
+   when the DAG does not exist."
+  [manager dag-id]
+  (core/compute-topo-order-anomaly manager dag-id))
 
 (defn affected-repos
   "Given a changed repo, return all downstream repos that may be affected.
@@ -214,11 +286,24 @@
 
    Returns a set of repo names that are downstream (depend on) the changed repo.
 
+   Throws ex-info when the DAG does not exist.
+
+   DEPRECATED: prefer [[affected-repos-anomaly]].
+
    Example:
      (affected-repos mgr dag-id \"terraform-modules\")
      ;; => #{\"terraform-live\" \"k8s-manifests\"}"
+  {:deprecated "exceptions-as-data — prefer affected-repos-anomaly"}
   [manager dag-id changed-repo]
   (core/affected-repos manager dag-id changed-repo))
+
+(defn affected-repos-anomaly
+  "Anomaly-returning variant of [[affected-repos]].
+
+   Returns the set of downstream repo names on success, or a `:not-found`
+   anomaly when the DAG does not exist."
+  [manager dag-id changed-repo]
+  (core/affected-repos-anomaly manager dag-id changed-repo))
 
 (defn upstream-repos
   "Return all repos that the given repo depends on.
@@ -230,11 +315,24 @@
 
    Returns a set of repo names that are upstream (dependencies of) the given repo.
 
+   Throws ex-info when the DAG does not exist.
+
+   DEPRECATED: prefer [[upstream-repos-anomaly]].
+
    Example:
      (upstream-repos mgr dag-id \"k8s-manifests\")
      ;; => #{\"terraform-modules\" \"terraform-live\"}"
+  {:deprecated "exceptions-as-data — prefer upstream-repos-anomaly"}
   [manager dag-id repo-name]
   (core/upstream-repos manager dag-id repo-name))
+
+(defn upstream-repos-anomaly
+  "Anomaly-returning variant of [[upstream-repos]].
+
+   Returns the set of upstream repo names on success, or a `:not-found`
+   anomaly when the DAG does not exist."
+  [manager dag-id repo-name]
+  (core/upstream-repos-anomaly manager dag-id repo-name))
 
 (defn merge-order
   "Given a set of repos with PRs, compute valid merge order.
@@ -250,11 +348,24 @@
 
    Only considers dependencies between repos in the pr-set.
 
+   Throws ex-info when the DAG does not exist.
+
+   DEPRECATED: prefer [[merge-order-anomaly]].
+
    Example:
      (merge-order mgr dag-id #{\"terraform-modules\" \"terraform-live\"})
      ;; => {:success true :order [\"terraform-modules\" \"terraform-live\"]}"
+  {:deprecated "exceptions-as-data — prefer merge-order-anomaly"}
   [manager dag-id pr-set]
   (core/merge-order manager dag-id pr-set))
+
+(defn merge-order-anomaly
+  "Anomaly-returning variant of [[merge-order]].
+
+   Returns the merge-order result map on success, or a `:not-found`
+   anomaly when the DAG does not exist."
+  [manager dag-id pr-set]
+  (core/merge-order-anomaly manager dag-id pr-set))
 
 ;------------------------------------------------------------------------------ Layer 4
 ;; Validation
@@ -276,11 +387,24 @@
    - Edges referencing missing repos
    - Self-loops
 
+   Throws ex-info when the DAG does not exist.
+
+   DEPRECATED: prefer [[validate-dag-anomaly]].
+
    Example:
      (validate-dag mgr dag-id)
      ;; => {:valid? true :errors []}"
+  {:deprecated "exceptions-as-data — prefer validate-dag-anomaly"}
   [manager dag-id]
   (core/validate-dag manager dag-id))
+
+(defn validate-dag-anomaly
+  "Anomaly-returning variant of [[validate-dag]].
+
+   Returns the validation result map on success, or a `:not-found` anomaly
+   when the DAG does not exist."
+  [manager dag-id]
+  (core/validate-dag-anomaly manager dag-id))
 
 ;------------------------------------------------------------------------------ Layer 5
 ;; Pure functions (no manager required)
