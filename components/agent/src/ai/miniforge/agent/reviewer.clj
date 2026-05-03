@@ -748,6 +748,67 @@
   [artifact]
   (:review/strengths artifact []))
 
+;------------------------------------------------------------------------------ Layer 6
+;; Repair-loop progress detection
+;;
+;; A pure fingerprint of a review's actionable issues, used by the
+;; phase runner to detect "useless loops" — the agent has burned
+;; another implement+verify+review cycle but the reviewer's blocking
+;; complaints didn't budge. Cheaper signal than budget caps and
+;; localizes the burn rather than masking it.
+
+(def ^:private actionable-severities
+  "Severities that count as 'something the implementer should fix.'
+   Nits are excluded — a stable nit list is not stagnation, it's the
+   normal long tail of style polish."
+  #{:blocking :warning})
+
+(defn- issue-fingerprint
+  "Stable per-issue tuple [severity file line description-hash].
+   description-hash uses Clojure's `hash` because the description is
+   the only sizeable part — keeping it as the integer hash makes the
+   tuple cheap to compare across iterations and trivial to log."
+  [{:keys [severity file line description]}]
+  [severity
+   (or file "")
+   (or line 0)
+   (hash (or description ""))])
+
+(defn review-fingerprint
+  "Reduce a review artifact to a stable, comparable fingerprint of its
+   actionable issues. Returns a sorted vector of `[severity file line
+   description-hash]` tuples — order-independent because the inputs
+   are sorted before comparison.
+
+   Issues at severity :nit are excluded; they reflect normal long-tail
+   polish, not progress signal. A review with no actionable issues
+   returns the empty vector.
+
+   Used by the phase runner's stagnation detector to decide whether a
+   repair iteration produced any movement on the reviewer's blocking
+   complaints."
+  [review]
+  (->> (get review :review/issues [])
+       (filter (comp actionable-severities :severity))
+       (map issue-fingerprint)
+       sort
+       vec))
+
+(defn stagnated?
+  "True when a review's fingerprint matches the prior review's
+   fingerprint exactly. v1 uses strict equality — if the implementer
+   produced any actionable change between iterations the fingerprint
+   should differ at minimum on file or description-hash. Loosening to
+   set-overlap with a threshold belongs in a follow-up once we have
+   data on real-world false-positive rates.
+
+   `prior` may be nil (first iteration); returns false in that case so
+   the first review never short-circuits."
+  [prior current]
+  (and (some? prior)
+       (seq current)
+       (= prior current)))
+
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
   ;; Create a reviewer with default gates (gate-only mode)

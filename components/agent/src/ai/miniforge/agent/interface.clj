@@ -151,6 +151,8 @@
 (def get-review-issues specialized/get-review-issues)
 (def get-review-strengths specialized/get-review-strengths)
 (def validate-review-artifact specialized/validate-review-artifact)
+(def review-fingerprint specialized/review-fingerprint)
+(def review-stagnated? specialized/review-stagnated?)
 (def release-summary specialized/release-summary)
 (def validate-release-artifact specialized/validate-release-artifact)
 
