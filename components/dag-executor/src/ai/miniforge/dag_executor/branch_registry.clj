@@ -35,7 +35,18 @@
 
    Layer 0: Pure registry operations (create / register / lookup)
    Layer 1: Resolution (turn a task's dep set into a base-branch decision)
-   Layer 2: Forest validation (reject multi-parent DAGs at plan time)")
+   Layer 2: Forest validation (reject multi-parent DAGs at plan time)"
+  (:require [ai.miniforge.messages.interface :as messages]))
+
+;------------------------------------------------------------------------------ Translator
+;; All user-facing strings — even ones that only ever flow into anomaly
+;; payloads or logs — go through the message catalog so they can be
+;; localized later without touching code.
+
+(def ^:private t
+  (messages/create-translator
+    "config/dag-executor/branch_registry/messages/en-US.edn"
+    :dag-executor.branch-registry/messages))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Registry primitives — value-in / value-out
@@ -86,7 +97,7 @@
    expect from other anomaly emitters."
   [task-deps]
   {:anomaly/category dag-non-forest-anomaly
-   :anomaly/message  "Task has multiple dependencies; linearize or split"
+   :anomaly/message  (t :resolve/multi-parent)
    :task/dependencies (vec task-deps)})
 
 (defn resolve-base-branch
@@ -160,7 +171,7 @@
   (let [violations (multi-parent-tasks tasks)]
     (when (seq violations)
       {:anomaly/category dag-non-forest-anomaly
-       :anomaly/message  "Plan has tasks with multiple dependencies; v1 only supports single-parent forests"
+       :anomaly/message  (t :validate/multi-parent)
        :multi-parent-tasks violations})))
 
 (defn forest?

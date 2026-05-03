@@ -1,0 +1,6 @@
+{:dag-executor.branch-registry/messages
+ {:resolve/multi-parent
+  "Task has multiple dependencies; linearize or split"
+
+  :validate/multi-parent
+  "Plan has tasks with multiple dependencies; v1 only supports single-parent forests"}}

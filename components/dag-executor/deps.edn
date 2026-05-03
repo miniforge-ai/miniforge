@@ -4,6 +4,7 @@
         ai.miniforge/task {:local/root "../task"}
         ai.miniforge/loop {:local/root "../loop"}
         ai.miniforge/logging {:local/root "../logging"}
+        ai.miniforge/messages {:local/root "../messages"}
         ai.miniforge/schema {:local/root "../schema"}
         ai.miniforge/agent {:local/root "../agent"}
         ai.miniforge/artifact {:local/root "../artifact"}
