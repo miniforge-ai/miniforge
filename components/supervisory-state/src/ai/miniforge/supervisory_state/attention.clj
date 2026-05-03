@@ -24,6 +24,8 @@
    a summary formatter. The runner maps rules over entities and returns a
    deterministic attention list keyed by stable UUIDv5 IDs so consumers don't
    see flicker on identical signals."
+  (:require
+   [ai.miniforge.supervisory-state.messages :as msg])
   (:import
    (java.util UUID)
    (java.security MessageDigest)
@@ -182,18 +184,22 @@
               (when (some? target-id)
                 (case target-type
                   :pr (if pr-target?
-                        (str "PR " (first target-id) "#" (second target-id))
-                        (str "PR " target-id))
-                  :workflow-output (str "workflow output " target-id)
-                  :artifact (str "artifact " target-id)
+                        (msg/t :policy/target-pr
+                               {:repo (first target-id)
+                                :number (second target-id)})
+                        (msg/t :policy/target-pr-generic {:target target-id}))
+                  :workflow-output (msg/t :policy/target-workflow-output {:target target-id})
+                  :artifact (msg/t :policy/target-artifact {:target target-id})
                   (when target-type
-                    (str (name target-type) " " target-id))))
-              summary  (str "Policy violation"
-                            (when gate-id (str " in " (name gate-id)))
-                            (when target-summary (str " for " target-summary))
-                            (when rule-id (str ": " (name rule-id)))
-                            (when (seq message) (str " — " message))
-                            (when (pos? extra-count) (str " (+" extra-count " more)")))]]
+                    (msg/t :policy/target-generic
+                           {:target-type (name target-type)
+                            :target target-id}))))
+              summary  (msg/t :policy/violation-summary
+                              {:gate (if gate-id (str " in " (name gate-id)) "")
+                               :target (if target-summary (str " for " target-summary) "")
+                               :rule (if rule-id (str ": " (name rule-id)) "")
+                               :message (if (seq message) (str " — " message) "")
+                               :extra (if (pos? extra-count) (str " (+" extra-count " more)") "")})]]
     (item sev :policy
           (str (:policy-eval/id ev))
           summary

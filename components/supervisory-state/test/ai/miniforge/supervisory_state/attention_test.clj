@@ -21,6 +21,7 @@
   (:require
    [clojure.test :refer [deftest is]]
    [ai.miniforge.supervisory-state.attention :as attention]
+   [ai.miniforge.supervisory-state.messages :as msg]
    [ai.miniforge.supervisory-state.schema :as schema]))
 
 (defn- workflow
@@ -143,7 +144,12 @@
     (is (= :review-approved (:attention/gate-id item)))
     (is (= :workflow-output (:attention/target-type item)))
     (is (= "bundle-42" (:attention/target-id item)))
-    (is (= "Policy violation in review-approved for workflow output bundle-42: review-body-required — Review body is missing (+1 more)"
+    (is (= (msg/t :policy/violation-summary
+                  {:gate " in review-approved"
+                   :target " for workflow output bundle-42"
+                   :rule ": review-body-required"
+                   :message " — Review body is missing"
+                   :extra " (+1 more)"})
            (:attention/summary item)))))
 
 (deftest policy-violation-summary-omits-synthetic-target-context
@@ -161,7 +167,12 @@
                                                    :violation/remediable? true}]
                          :policy-eval/evaluated-at (java.util.Date.)})
         item (first (attention/derive-seq table))]
-    (is (= "Policy violation in lint: format-required — Formatting is required"
+    (is (= (msg/t :policy/violation-summary
+                  {:gate " in lint"
+                   :target ""
+                   :rule ": format-required"
+                   :message " — Formatting is required"
+                   :extra ""})
            (:attention/summary item)))))
 
 (deftest policy-violation-summary-formats-pr-targets-like-existing-pr-signals
@@ -181,5 +192,10 @@
                                                    :violation/remediable? true}]
                          :policy-eval/evaluated-at (java.util.Date.)})
         item (first (attention/derive-seq table))]
-    (is (= "Policy violation in review-approved for PR acme/widget#42: approval-required — Approval is missing"
+    (is (= (msg/t :policy/violation-summary
+                  {:gate " in review-approved"
+                   :target " for PR acme/widget#42"
+                   :rule ": approval-required"
+                   :message " — Approval is missing"
+                   :extra ""})
            (:attention/summary item)))))
