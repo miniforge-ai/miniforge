@@ -360,9 +360,12 @@
     (let [[logger _] (log/collecting-logger)
           task-ids (repeatedly 6 random-uuid)
           [a b c d e f] task-ids
-          ;; a, b: independent. c depends on a. d depends on b.
-          ;; e depends on c and d. f: independent.
-          ;; b will fail -> d transitively fails -> e transitively fails
+          ;; Forest layout (single-parent): a, b, f are roots. c→a, d→b, e→d.
+          ;; b will fail -> d transitively fails -> e transitively fails.
+          ;; (Pre per-task-base-chaining the test had e depending on both c
+          ;; and d, but v1 of the orchestrator rejects multi-parent DAGs at
+          ;; plan-validation time. The accounting contract under test —
+          ;; completed + failed + unreached = total — is unchanged.)
           plan {:plan/id (random-uuid)
                 :plan/name "accounting-plan"
                 :plan/tasks [{:task/id a :task/description "A"
@@ -374,7 +377,7 @@
                              {:task/id d :task/description "D"
                               :task/type :implement :task/dependencies [b]}
                              {:task/id e :task/description "E"
-                              :task/type :implement :task/dependencies [c d]}
+                              :task/type :implement :task/dependencies [d]}
                              {:task/id f :task/description "F"
                               :task/type :implement :task/dependencies []}]}]
       (with-redefs [dag-orch/execute-single-task

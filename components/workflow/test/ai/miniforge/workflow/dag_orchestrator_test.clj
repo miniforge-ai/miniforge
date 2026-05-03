@@ -18,9 +18,12 @@
 
 (ns ai.miniforge.workflow.dag-orchestrator-test
   "Tests for DAG orchestrator: stratum wiring, conflict-aware batching,
-   plan-to-DAG conversion with new decomposition fields."
+   plan-to-DAG conversion with new decomposition fields, per-task base
+   branch chaining, and forest validation at plan time."
   (:require
    [clojure.test :refer [deftest testing is]]
+   [ai.miniforge.dag-executor.interface :as dag]
+   [ai.miniforge.logging.interface :as log]
    [ai.miniforge.workflow.dag-orchestrator :as dag-orch]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -161,6 +164,138 @@
       (is (= id-a (:task/id task)))
       (is (nil? (:task/component task)))
       (is (nil? (:task/exclusive-files task))))))
+
+;------------------------------------------------------------------------------ Layer 2
+;; Per-task base branch chaining — `task-sub-opts` resolves the right
+;; base branch from the per-workflow registry so a downstream task's
+;; sub-workflow forks off its dependency's persisted branch instead of
+;; the spec branch.
+
+(defn- registry-context
+  "Build a context with a populated branch registry. `entries` is a map of
+   `task-id → {:branch ...}`. Returns the context map (not the atom) so
+   tests reuse it for `task-sub-opts` calls."
+  [entries default-branch]
+  (let [reg (atom (reduce-kv dag/register-branch
+                             (dag/create-branch-registry)
+                             entries))]
+    {:dag/branch-registry reg
+     :execution/opts {:branch default-branch}}))
+
+(deftest task-sub-opts-no-registry-resolves-to-default-test
+  (testing "absent :dag/branch-registry on context is treated as an empty
+            registry — `:branch` still resolves deterministically.
+
+            Earlier draft kept a 'no-registry → omit :branch' fallback,
+            but that fallback reproduced the pre-chaining bug (every
+            sub-workflow forks off whatever main is now). There is no
+            production caller that hits the no-registry path:
+            `execute-dag-loop` always installs one. Failing back to a
+            silent 'use whatever default' was a foot-gun, not a feature.
+
+            The new contract: when task-def is supplied, `:branch` is
+            ALWAYS set. With no registry and no `:execution/opts :branch`
+            on context, the resolver falls back to 'main' — the same
+            value `default-spec-branch` produces."
+    (let [task-def {:task/id id-a :task/description "A" :task/deps #{}}
+          opts (dag-orch/task-sub-opts {} task-def)]
+      (is (= "main" (:branch opts))
+          "no registry + no spec branch on context → default 'main'"))))
+
+(deftest task-sub-opts-zero-deps-uses-default-test
+  (testing "root task: with registry but no deps, base = default branch.
+            The opts SHOULD carry :branch so the sub-workflow's
+            acquire-environment is explicit about the fork point — even
+            for roots we want to be deterministic, not 'whatever main is
+            now'."
+    (let [task-def {:task/id id-a :task/description "A" :task/deps #{}}
+          ctx (registry-context {} "feat/spec")
+          opts (dag-orch/task-sub-opts ctx task-def)]
+      (is (= "feat/spec" (:branch opts))
+          "zero-dep tasks fork from the spec branch resolved off context"))))
+
+(deftest task-sub-opts-single-dep-uses-deps-branch-test
+  (testing "single dep registered: base = the dep's persisted branch.
+            This is the whole point of the chaining feature — the
+            downstream sub-workflow sees its parent's work on disk."
+    (let [task-def {:task/id id-b :task/description "B" :task/deps #{id-a}}
+          ctx (registry-context {id-a {:branch "task-a"}} "main")
+          opts (dag-orch/task-sub-opts ctx task-def)]
+      (is (= "task-a" (:branch opts))
+          "single-dep base resolves to the dep's branch, NOT the spec branch"))))
+
+(deftest task-sub-opts-single-dep-unregistered-falls-back-test
+  (testing "single dep not yet registered: fall back to default branch.
+            Defensive: scheduler shouldn't allow this in practice (deps
+            run first) but failing-soft beats blocking when the prior
+            task crashed before persisting."
+    (let [task-def {:task/id id-b :task/description "B" :task/deps #{id-a}}
+          ctx (registry-context {} "main")
+          opts (dag-orch/task-sub-opts ctx task-def)]
+      (is (= "main" (:branch opts))
+          "unregistered dep falls back to spec branch — no block"))))
+
+(deftest task-sub-opts-multi-dep-omits-branch-test
+  (testing "multi-parent task: registry returns an anomaly map; opts must
+            NOT carry :branch (we'd be passing a map where a string is
+            expected). v1 is supposed to reject these at plan time via
+            execute-plan-as-dag, so reaching this branch in production
+            is a bug — but the local fallback keeps the orchestrator
+            from crashing if validation is ever bypassed."
+    (let [task-def {:task/id id-c :task/description "C" :task/deps #{id-a id-b}}
+          ctx (registry-context {id-a {:branch "task-a"}
+                                 id-b {:branch "task-b"}}
+                                "main")
+          opts (dag-orch/task-sub-opts ctx task-def)]
+      (is (not (contains? opts :branch))
+          "anomaly result must not be passed through as a branch name"))))
+
+;------------------------------------------------------------------------------ Layer 3
+;; Forest validation at plan time — multi-parent DAGs are rejected
+;; before any task starts so non-forest plans fail loud and early
+;; instead of after some tasks have already burned tokens.
+
+(deftest execute-plan-as-dag-accepts-forest-test
+  (testing "linear chain is a forest — orchestrator runs to completion"
+    (let [[logger _] (log/collecting-logger)
+          plan {:plan/id (random-uuid)
+                :plan/name "linear"
+                :plan/tasks [{:task/id id-a :task/description "A"
+                              :task/type :implement :task/dependencies []}
+                             {:task/id id-b :task/description "B"
+                              :task/type :implement :task/dependencies [id-a]}]}
+          result (dag-orch/execute-plan-as-dag plan {:logger logger})]
+      (is (:success? result) "forest plan should run to success")
+      (is (= 2 (:tasks-completed result))))))
+
+(deftest execute-plan-as-dag-rejects-diamond-test
+  (testing "diamond (multi-parent) plan rejected before any task runs.
+            The orchestrator surfaces the anomaly at plan-validation
+            time rather than at task-execution time so callers can
+            linearize or split — and so we don't burn tokens on tasks
+            that will end up in a doomed merge."
+    (let [[logger _] (log/collecting-logger)
+          plan {:plan/id (random-uuid)
+                :plan/name "diamond"
+                :plan/tasks [{:task/id id-a :task/description "A"
+                              :task/type :implement :task/dependencies []}
+                             {:task/id id-b :task/description "B"
+                              :task/type :implement :task/dependencies [id-a]}
+                             {:task/id id-c :task/description "C"
+                              :task/type :implement :task/dependencies [id-a]}
+                             {:task/id id-d :task/description "D"
+                              :task/type :implement :task/dependencies [id-b id-c]}]}
+          result (dag-orch/execute-plan-as-dag plan {:logger logger})]
+      (is (false? (:success? result))
+          "non-forest plans must short-circuit the orchestrator")
+      (is (= 0 (:tasks-completed result))
+          "no tasks should run when the plan is rejected at validation time")
+      (is (= :anomalies/dag-non-forest
+             (get-in result [:error :anomaly/category]))
+          "error carries the canonical anomaly category for downstream surfaces")
+      (is (some #(= id-d (:task/id %))
+                (get-in result [:error :multi-parent-tasks]))
+          "the violation list pinpoints the offending task id"))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

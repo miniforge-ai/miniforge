@@ -250,9 +250,14 @@
 
 (deftest test-execute-plan-as-dag-with-deps
   (testing "executes plan with dependencies"
+    ;; Forest layout (single-parent): a, b are independent roots;
+    ;; c depends only on a. Earlier draft had c depending on both
+    ;; [a b] but v1 of the orchestrator rejects multi-parent DAGs at
+    ;; plan-validation time. The contract under test — execute-plan-as-dag
+    ;; runs a multi-task plan with deps to completion — is unchanged.
     (let [plan (make-plan [(make-task :a)
                            (make-task :b)
-                           (make-task :c [:a :b])])
+                           (make-task :c [:a])])
           result (dag-orch/execute-plan-as-dag plan {})]
       (is (:success? result))
       (is (= 3 (:tasks-completed result))))))
@@ -304,9 +309,13 @@
 (deftest test-execute-plan-with-pre-completed-ids
   (testing "skips pre-completed tasks and only executes remaining"
     (let [started (atom [])
+          ;; Forest layout (single-parent): a, b roots; c→a only.
+          ;; The pre-completion contract — :a not re-run, :b and :c
+          ;; still execute, total :tasks-completed counts all three —
+          ;; is unaffected by the topology shrink.
           plan (make-plan [(make-task :a)
                            (make-task :b)
-                           (make-task :c [:a :b])])
+                           (make-task :c [:a])])
           ;; Mark :a as already completed from a prior run
           context {:pre-completed-ids #{:a}
                    :on-task-start #(swap! started conj %)}
@@ -338,9 +347,13 @@
 
 (deftest test-resume-preserves-artifacts-from-new-tasks
   (testing "resumed execution includes artifacts from newly executed tasks"
+    ;; Forest layout (single-parent): a, b roots; c→a only. The
+    ;; artifact-aggregation contract under test is unaffected by the
+    ;; topology shrink — what matters is that the aggregate vector
+    ;; survives a partial-resume.
     (let [plan (make-plan [(make-task :a)
                            (make-task :b)
-                           (make-task :c [:a :b])])
+                           (make-task :c [:a])])
           ;; :a pre-completed; :b and :c will execute and produce placeholder artifacts
           context {:pre-completed-ids #{:a}}
           result (dag-orch/execute-plan-as-dag plan context)]
