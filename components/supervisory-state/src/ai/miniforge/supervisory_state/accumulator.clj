@@ -486,14 +486,20 @@
 
 (defn- policy-evaluation
   [{:gate/keys [id target-type target-id packs violations] :as event} passed?]
-  (let [eval-id (or id (random-uuid))]
-    {:policy-eval/id            eval-id
-     :policy-eval/target-type   (or target-type :artifact)
-     :policy-eval/target-id     (or target-id eval-id)
-     :policy-eval/passed?       passed?
-     :policy-eval/packs-applied (or packs [])
-     :policy-eval/violations    (mapv normalize-violation (or violations []))
-     :policy-eval/evaluated-at  (event-instant event)}))
+  (let [eval-id (:event/id event)
+        workflow-run-id (:workflow/id event)
+        evaluated-at (event-instant event)
+        packs-applied (or packs [])
+        normalized-violations (mapv normalize-violation (or violations []))]
+    (cond-> {:policy-eval/id            (or eval-id (random-uuid))
+             :policy-eval/passed?       passed?
+             :policy-eval/packs-applied packs-applied
+             :policy-eval/violations    normalized-violations
+             :policy-eval/evaluated-at  evaluated-at}
+      workflow-run-id (assoc :policy-eval/workflow-run-id workflow-run-id)
+      id (assoc :policy-eval/gate-id id)
+      target-type (assoc :policy-eval/target-type target-type)
+      (contains? event :gate/target-id) (assoc :policy-eval/target-id target-id))))
 
 (defn gate-passed
   [table event]

@@ -635,33 +635,80 @@
 ;------------------------------------------------------------------------------ PolicyEvaluation
 
 (deftest gate-passed-creates-evaluation
-  (let [id    (random-uuid)
+  (let [gate-id    (random-uuid)
+        eval-id    (random-uuid)
         table (acc/apply-event schema/empty-table
-                               (ev :gate/passed
-                                   {:gate/id id
-                                    :gate/target-type :pr
-                                    :gate/target-id   ["acme/widget" 42]
-                                    :gate/packs       ["core"]}))
-        ev*   (get-in table [:policy-evals id])]
+                               (merge (ev :gate/passed
+                                          {:gate/id gate-id
+                                           :gate/target-type :pr
+                                           :gate/target-id   ["acme/widget" 42]
+                                           :gate/packs       ["core"]})
+                                      {:event/id eval-id}))
+        ev*   (get-in table [:policy-evals eval-id])]
     (is (true? (:policy-eval/passed? ev*)))
+    (is (= gate-id (:policy-eval/gate-id ev*)))
     (is (= :pr (:policy-eval/target-type ev*)))
     (is (= ["core"] (:policy-eval/packs-applied ev*)))))
 
 (deftest gate-failed-captures-violations
-  (let [id    (random-uuid)
+  (let [gate-id :review-approved
+        eval-id (random-uuid)
+        wf-id (random-uuid)
         table (acc/apply-event schema/empty-table
-                               (ev :gate/failed
-                                   {:gate/id id
-                                    :gate/violations [{:rule-id :no-force-push
-                                                       :severity :critical
-                                                       :category :security
-                                                       :message "force push detected"
-                                                       :remediable? false}]}))
-        ev*   (get-in table [:policy-evals id])]
+                               (merge (ev :gate/failed
+                                          {:gate/id gate-id
+                                           :workflow/id wf-id
+                                           :gate/target-type :workflow-output
+                                           :gate/target-id "bundle-42"
+                                           :gate/violations [{:rule-id :no-force-push
+                                                              :severity :critical
+                                                              :category :security
+                                                              :message "force push detected"
+                                                              :remediable? false}]})
+                                      {:event/id eval-id}))
+        ev*   (get-in table [:policy-evals eval-id])]
     (is (false? (:policy-eval/passed? ev*)))
+    (is (= wf-id (:policy-eval/workflow-run-id ev*)))
+    (is (= :review-approved (:policy-eval/gate-id ev*)))
+    (is (= :workflow-output (:policy-eval/target-type ev*)))
+    (is (= "bundle-42" (:policy-eval/target-id ev*)))
     (is (= 1 (count (:policy-eval/violations ev*))))
     (is (= :no-force-push
            (-> ev* :policy-eval/violations first :violation/rule-id)))))
+
+(deftest repeated-gate-evaluations-remain-distinct-records
+  (let [gate-id :review-approved
+        first-eval-id (random-uuid)
+        second-eval-id (random-uuid)
+        workflow-id (random-uuid)
+        table (-> schema/empty-table
+                  (acc/apply-event
+                   (merge (ev :gate/failed
+                              {:gate/id gate-id
+                               :workflow/id workflow-id
+                               :gate/violations [{:rule-id :first-rule
+                                                  :severity :critical
+                                                  :category :process
+                                                  :message "first failure"}]})
+                          {:event/id first-eval-id}))
+                  (acc/apply-event
+                   (merge (ev :gate/failed
+                              {:gate/id gate-id
+                               :workflow/id workflow-id
+                               :gate/violations [{:rule-id :second-rule
+                                                  :severity :high
+                                                  :category :process
+                                                  :message "second failure"}]})
+                          {:event/id second-eval-id})))
+        first-eval (get-in table [:policy-evals first-eval-id])
+        second-eval (get-in table [:policy-evals second-eval-id])]
+    (is (= 2 (count (:policy-evals table))))
+    (is (= gate-id (:policy-eval/gate-id first-eval)))
+    (is (= gate-id (:policy-eval/gate-id second-eval)))
+    (is (= :first-rule
+           (-> first-eval :policy-eval/violations first :violation/rule-id)))
+    (is (= :second-rule
+           (-> second-eval :policy-eval/violations first :violation/rule-id)))))
 
 ;------------------------------------------------------------------------------ Supervisory snapshot replay
 

@@ -1,0 +1,8 @@
+{:supervisory-state/messages
+ {;; attention.clj
+  :policy/target-pr "PR {repo}#{number}"
+  :policy/target-pr-generic "PR {target}"
+  :policy/target-workflow-output "workflow output {target}"
+  :policy/target-artifact "artifact {target}"
+  :policy/target-generic "{target-type} {target}"
+  :policy/violation-summary "Policy violation{gate}{target}{rule}{message}{extra}"}}

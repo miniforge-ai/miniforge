@@ -25,7 +25,7 @@
    deterministic attention list keyed by stable UUIDv5 IDs so consumers don't
    see flicker on identical signals."
   (:require
-   [clojure.string :as str])
+   [ai.miniforge.supervisory-state.messages :as msg])
   (:import
    (java.util UUID)
    (java.security MessageDigest)
@@ -74,14 +74,17 @@
 (defn- now [] (java.util.Date.))
 
 (defn- item
-  [severity source-type source-id summary]
-  {:attention/id          (attention-id source-type source-id)
-   :attention/severity    severity
-   :attention/source-type source-type
-   :attention/source-id   source-id
-   :attention/summary     summary
-   :attention/derived-at  (now)
-   :attention/resolved?   false})
+  ([severity source-type source-id summary]
+   (item severity source-type source-id summary {}))
+  ([severity source-type source-id summary extra]
+   (merge {:attention/id          (attention-id source-type source-id)
+           :attention/severity    severity
+           :attention/source-type source-type
+           :attention/source-id   source-id
+           :attention/summary     summary
+           :attention/derived-at  (now)
+           :attention/resolved?   false}
+          extra)))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Individual rules — each returns a seq of AttentionItems
@@ -166,11 +169,44 @@
         :when (false? (:policy-eval/passed? ev))
         :let [critical? (some #(#{:critical :high} (:violation/severity %))
                               (:policy-eval/violations ev))
-              sev       (if critical? :critical :info)]]
+              sev       (if critical? :critical :info)
+              gate-id   (:policy-eval/gate-id ev)
+              target-type (:policy-eval/target-type ev)
+              target-id (:policy-eval/target-id ev)
+              first-violation (first (:policy-eval/violations ev))
+              rule-id   (:violation/rule-id first-violation)
+              message   (:violation/message first-violation)
+              extra-count (max 0 (dec (count (:policy-eval/violations ev))))
+              pr-target? (and (= :pr target-type)
+                              (vector? target-id)
+                              (= 2 (count target-id)))
+              target-summary
+              (when (some? target-id)
+                (case target-type
+                  :pr (if pr-target?
+                        (msg/t :policy/target-pr
+                               {:repo (first target-id)
+                                :number (second target-id)})
+                        (msg/t :policy/target-pr-generic {:target target-id}))
+                  :workflow-output (msg/t :policy/target-workflow-output {:target target-id})
+                  :artifact (msg/t :policy/target-artifact {:target target-id})
+                  (when target-type
+                    (msg/t :policy/target-generic
+                           {:target-type (name target-type)
+                            :target target-id}))))
+              summary  (msg/t :policy/violation-summary
+                              {:gate (if gate-id (str " in " (name gate-id)) "")
+                               :target (if target-summary (str " for " target-summary) "")
+                               :rule (if rule-id (str ": " (name rule-id)) "")
+                               :message (if (seq message) (str " — " message) "")
+                               :extra (if (pos? extra-count) (str " (+" extra-count " more)") "")})]]
     (item sev :policy
           (str (:policy-eval/id ev))
-          (str "Policy violation: " (count (:policy-eval/violations ev))
-               " rule(s) failed"))))
+          summary
+          {:attention/workflow-run-id (:policy-eval/workflow-run-id ev)
+           :attention/gate-id gate-id
+           :attention/target-type target-type
+           :attention/target-id target-id})))
 
 ;------------------------------------------------------------------------------ Layer 2
 ;; Rule registry + runner

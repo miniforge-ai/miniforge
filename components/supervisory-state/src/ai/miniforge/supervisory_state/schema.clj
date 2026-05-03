@@ -341,12 +341,14 @@
 (def PolicyEvaluation
   "Immutable record of a completed policy evaluation per N5-delta-1 §3.1.
 
-   A re-evaluation MUST produce a new record with a fresh `:policy-eval/id`
+  A re-evaluation MUST produce a new record with a fresh `:policy-eval/id`
    rather than mutate a prior one."
   [:map {:registry registry}
    [:policy-eval/id :policy-eval/id]
-   [:policy-eval/target-type :policy-eval/target-type]
-   [:policy-eval/target-id any?]
+   [:policy-eval/workflow-run-id {:optional true} [:maybe :id/uuid]]
+   [:policy-eval/gate-id {:optional true} [:maybe keyword?]]
+   [:policy-eval/target-type {:optional true} [:maybe :policy-eval/target-type]]
+   [:policy-eval/target-id {:optional true} [:maybe any?]]
    [:policy-eval/passed? boolean?]
    [:policy-eval/packs-applied [:vector string?]]
    [:policy-eval/violations [:vector PolicyViolation]]
