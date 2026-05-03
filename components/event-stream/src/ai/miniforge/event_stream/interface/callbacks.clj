@@ -19,11 +19,21 @@
 (ns ai.miniforge.event-stream.interface.callbacks
   "Streaming callback helpers for the event-stream public API."
   (:require
+   [clojure.string :as str]
    [ai.miniforge.event-stream.interface.events :as events]
-   [ai.miniforge.event-stream.interface.stream :as stream]))
+   [ai.miniforge.event-stream.interface.stream :as stream]
+   [ai.miniforge.event-stream.messages :as messages]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Convenience callbacks
+
+(defn- tool-use-line
+  "Render a short terminal-visible line for a tool-use streaming event."
+  [{:keys [tool-name tool-names]}]
+  (let [names (or (seq tool-names)
+                  (when tool-name [tool-name]))]
+    (when (seq names)
+      (messages/t :stream/tool-use-line {:names (str/join ", " names)}))))
 
 (defn create-streaming-callback
   "Callback invoked by the LLM client for each parsed stream event.
@@ -52,18 +62,25 @@
                  tool-name tool-names tool-call-id tool-args-preview]}]
       (cond
         tool-use
-        (when stream-atom
-          (stream/publish!
-            stream-atom
-            (events/agent-tool-call stream-atom workflow-id agent-id
-                                    {:tool-name tool-name
-                                     :tool-names tool-names
-                                     :tool-call-id tool-call-id
-                                     :tool-args-preview tool-args-preview}))
-          (stream/publish!
-            stream-atom
-            (events/agent-status stream-atom workflow-id agent-id
-                                 :tool-calling "Agent calling tool")))
+        (do
+          (when-let [line (and print? (not quiet?)
+                               (tool-use-line {:tool-name tool-name
+                                               :tool-names tool-names}))]
+            (print line)
+            (flush))
+          (when stream-atom
+            (stream/publish!
+              stream-atom
+              (events/agent-tool-call stream-atom workflow-id agent-id
+                                      {:tool-name tool-name
+                                       :tool-names tool-names
+                                       :tool-call-id tool-call-id
+                                       :tool-args-preview tool-args-preview}))
+            (stream/publish!
+              stream-atom
+              (events/agent-status stream-atom workflow-id agent-id
+                                   :tool-calling
+                                   (messages/t :stream/agent-calling-tool)))))
 
         heartbeat
         nil

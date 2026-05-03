@@ -58,7 +58,8 @@
   (let [start-time (System/currentTimeMillis)
         input (get-in ctx [:execution/input])
         config (get ctx :phase-config default-config)
-        files-in-scope (:files-in-scope input)
+        files-in-scope (or (:files-in-scope input)
+                           (get-in input [:context :files-in-scope]))
         worktree-path (or (:worktree-path input)
                           (:execution/worktree-path ctx)
                           ".")
@@ -105,11 +106,21 @@
         (update-in [:execution/metrics :duration-ms] (fnil + 0) duration-ms))))
 
 (defn error-explore
-  "Handle exploration phase errors. Retry within budget, then fail in
-   place (Explore historically never honored `:on-fail`; pass
-   `redirect? = false` to preserve that semantics)."
+  "Handle exploration phase errors.
+
+   Simple retry within budget."
   [ctx ex]
-  (phase/handle-error ctx ex 1 false))
+  (let [iterations (get-in ctx [:phase :iterations] 0)
+        max-iterations (get-in ctx [:phase :budget :iterations] 1)]
+    (if (< iterations max-iterations)
+      (-> ctx
+          (update-in [:phase :iterations] (fnil inc 0))
+          (assoc-in [:phase :last-error] (ex-message ex))
+          (assoc-in [:phase :status] :retrying))
+      (-> ctx
+          (assoc-in [:phase :status] :failed)
+          (assoc-in [:phase :error] {:message (ex-message ex)
+                                     :data (ex-data ex)})))))
 
 ;------------------------------------------------------------------------------ Layer 2
 ;; Registry method

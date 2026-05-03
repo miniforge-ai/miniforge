@@ -138,6 +138,42 @@
                      "\n```\n" content "\n```")))
          (str/join "\n"))))
 
+(defn- existing-files->cache-map
+  "Build the artifact-session context cache map from existing files."
+  [existing-files]
+  (into {}
+        (map (fn [{:keys [path content]}]
+               [path content]))
+        existing-files))
+
+(defn- render-template
+  "Render a `{{key}}`-style template with the given substitutions.
+   Each substitutions map entry `{kw v}` replaces the literal string
+   \"{{kw}}\" with `v` (nil values render as the empty string)."
+  [template substitutions]
+  (reduce-kv (fn [text k v]
+               (str/replace text (str "{{" (name k) "}}") (or v "")))
+             (or template "")
+             substitutions))
+
+(defn- existing-files-section
+  "Build the planner-prompt section that previews existing in-scope
+   files. Returns the empty string when no files are present."
+  [existing-files]
+  (if (seq existing-files)
+    (render-template (get @planner-prompt-data :prompt/existing-files-template)
+                     {:files-list (format-existing-files existing-files)})
+    ""))
+
+(defn- build-user-prompt
+  "Render the planner user-turn prompt from the spec text and any
+   existing in-scope files. Template lives in
+   resources/prompts/planner.edn (:prompt/user-template)."
+  [spec-text existing-files]
+  (render-template (get @planner-prompt-data :prompt/user-template)
+                   {:spec-text              spec-text
+                    :existing-files-section (existing-files-section existing-files)}))
+
 (defn spec->text
   "Convert a spec to text for the LLM."
   [spec]
@@ -164,6 +200,34 @@
     (catch Exception _
       ;; Return nil if parsing fails
       nil)))
+
+(defn- planner-response-content
+  "Return the best available content payload for plan extraction."
+  [llm-response]
+  (or (llm/get-content llm-response)
+      (get (llm/get-error llm-response) :stdout)
+      ""))
+
+(defn- submission-retry-prompt
+  "Build a short, submission-only retry prompt for planner recovery.
+   Template lives in resources/prompts/planner.edn
+   (:prompt/submission-retry-template)."
+  [spec-text prior-content]
+  (render-template (get @planner-prompt-data :prompt/submission-retry-template)
+                   {:spec-text     spec-text
+                    :prior-content prior-content}))
+
+(defn- planner-submission-retry?
+  "True when a failed planner turn produced useful prose but no submitted plan."
+  [llm-response submitted-plan parsed-plan]
+  (let [err (llm/get-error llm-response)
+        stdout (:stdout err)
+        err-type (:type err)]
+    (and (nil? submitted-plan)
+         (nil? parsed-plan)
+         (not (llm/success? llm-response))
+         (seq stdout)
+         (#{"adaptive_timeout" "cli_error"} err-type))))
 
 ;; make-fallback-plan removed — silent fallback masks real failures.
 ;; Plan generation now throws with evidence on failure (see invoke-fn below).
@@ -345,9 +409,20 @@
    Matches the role-scoped disallow-list pattern tester.clj uses."
   ["Read" "Bash" "Grep" "Glob" "Agent" "LS"])
 
+(defn- create-planner-progress-monitor
+  "Planner main-turn progress monitor. Thresholds live in
+   resources/prompts/planner.edn (:prompt/progress-monitor)."
+  []
+  (llm/create-progress-monitor
+   (get @planner-prompt-data :prompt/progress-monitor)))
+
 (defn- invoke-planner-session
   "Session body for the planner: build mcp-opts with model hint, call LLM."
-  [session llm-client user-prompt config context on-chunk]
+  [session llm-client user-prompt config context on-chunk existing-files]
+  (when (seq existing-files)
+    (artifact-session/write-context-cache-for-session!
+     session
+     (existing-files->cache-map existing-files)))
   (let [budget-usd (budget/resolve-cost-budget-usd :planner config context)
         ;; Turn cap: read from prompt EDN (:prompt/max-turns) with a safe
         ;; fallback. 80 was observed empirically as the smallest value that
@@ -365,13 +440,82 @@
         ;; The implementer threads :workdir the same way.
         mcp-opts (cond-> (artifact-session/session->mcp-opts session budget-usd max-turns)
                    true (assoc :model (model/default-model-for-role :planner)
-                               :disallowed-tools planner-disallowed-tools)
+                               :disallowed-tools planner-disallowed-tools
+                               :progress-monitor (create-planner-progress-monitor))
                    (:workdir session) (assoc :workdir (:workdir session)))]
     (if on-chunk
       (llm/chat-stream llm-client user-prompt on-chunk
                        (merge {:system @planner-system-prompt} mcp-opts))
       (llm/chat llm-client user-prompt
                 (merge {:system @planner-system-prompt} mcp-opts)))))
+
+(defn- planner-plan-artifact
+  "Select the planner artifact authority for the session."
+  [worktree-artifacts artifact]
+  {:worktree-plan (get worktree-artifacts :plan)
+   :artifact artifact})
+
+(defn- effective-plan
+  "Return the authoritative submitted plan when one exists."
+  [{:keys [worktree-plan artifact]}]
+  (or worktree-plan artifact))
+
+(defn- planner-log-data
+  "Build planner invocation telemetry data."
+  [llm-response on-chunk plan-artifact]
+  (let [plan-source (cond
+                      (:worktree-plan plan-artifact) :worktree
+                      (:artifact plan-artifact) :mcp-artifact
+                      :else :final-message)]
+    (cond-> {:success (llm/success? llm-response)
+             :tokens (get llm-response :tokens 0)
+             :streaming? (boolean on-chunk)
+             :plan-source plan-source}
+      (:stop-reason llm-response)
+      (assoc :stop-reason (:stop-reason llm-response))
+
+      (:num-turns llm-response)
+      (assoc :num-turns (:num-turns llm-response)))))
+
+(defn- invoke-planner-submission-retry-session
+  "Run one short follow-up turn that only submits the final plan.
+   Turn cap and progress-monitor thresholds come from
+   resources/prompts/planner.edn (:prompt/submission-retry-max-turns,
+   :prompt/submission-retry-monitor)."
+  [session llm-client retry-prompt config context on-chunk]
+  (let [prompt-data    @planner-prompt-data
+        budget-usd     (budget/resolve-cost-budget-usd :planner config context)
+        retry-max-turns (get prompt-data :prompt/submission-retry-max-turns)
+        retry-monitor  (llm/create-progress-monitor
+                        (get prompt-data :prompt/submission-retry-monitor))
+        mcp-opts       (cond-> (artifact-session/session->mcp-opts session budget-usd retry-max-turns)
+                         true (assoc :model (model/default-model-for-role :planner)
+                                     :disallowed-tools planner-disallowed-tools
+                                     :progress-monitor retry-monitor)
+                         (:workdir session) (assoc :workdir (:workdir session)))]
+    (if on-chunk
+      (llm/chat-stream llm-client retry-prompt on-chunk
+                       (merge {:system @planner-system-prompt} mcp-opts))
+      (llm/chat llm-client retry-prompt
+                (merge {:system @planner-system-prompt} mcp-opts)))))
+
+(defn- recover-submitted-plan
+  "Retry planner submission once when analysis exists but the final submission
+   did not land. Returns {:llm-response ... :submitted-plan ... :parsed-plan ...}."
+  [llm-client spec-text config context on-chunk prior-content]
+  (let [retry-prompt   (submission-retry-prompt spec-text prior-content)
+        run-retry      #(invoke-planner-submission-retry-session
+                          % llm-client retry-prompt config context on-chunk)
+        {:keys [llm-result artifact worktree-artifacts]}
+        (artifact-session/with-session context run-retry)
+        plan-artifact  (planner-plan-artifact worktree-artifacts artifact)
+        submitted-plan (effective-plan plan-artifact)
+        parsed-plan    (when-not submitted-plan
+                         (parse-plan-response (planner-response-content llm-result)))]
+    {:llm-response   llm-result
+     :plan-artifact  plan-artifact
+     :submitted-plan submitted-plan
+     :parsed-plan    parsed-plan}))
 
 (defn create-planner
   "Create a Planner agent with optional configuration overrides.
@@ -404,66 +548,59 @@
               on-chunk (:on-chunk context)
               spec-text (spec->text input)
               existing-files (:task/existing-files input)
-              user-prompt (str "Create an implementation plan for the following specification:\n\n"
-                               spec-text
-                               (when (seq existing-files)
-                                 (str "\n\n## Existing Files in Scope\n\n"
-                                      "Review these files before planning. If the spec is already "
-                                      "fully satisfied by existing code, respond with an evidence bundle:\n"
-                                      "```clojure\n{:plan/status :already-satisfied\n"
-                                      " :plan/summary \"Brief explanation\"\n"
-                                      " :plan/evidence [{:requirement \"what spec requires\"\n"
-                                      "                  :satisfied-by \"path/to/file.clj\"\n"
-                                      "                  :proof \"specific function/test that satisfies it\"}]}\n```\n"
-                                      (format-existing-files existing-files)))
-                               "\n\n## REQUIRED Output\n\n"
-                               "Your FINAL assistant message MUST be the plan. Either:\n"
-                               "  (a) call the artifact submission MCP tool with your plan map, OR\n"
-                               "  (b) end your turn with the plan EDN wrapped in a ```clojure code fence.\n\n"
-                               "Narration-only responses (e.g. \"Based on my exploration...\" with no EDN) "
-                               "are rejected by the runtime with :anomalies.agent/invoke-failed and cost "
-                               "a full turn's tokens. If the last thing you would say is prose, STOP and "
-                               "replace it with the plan EDN instead.\n\n"
-                               "Use (random-uuid) for all IDs - just write #uuid \"<any-uuid>\" placeholders that I'll fill in.")]
+              user-prompt    (build-user-prompt spec-text existing-files)]
           (if llm-client
             ;; Use the real LLM with artifact session for MCP tool support
-            (let [{:keys [llm-result artifact worktree-artifacts]}
+            (let [{:keys [llm-result artifact worktree-artifacts context-misses]}
                   (artifact-session/with-session context
-                    #(invoke-planner-session % llm-client user-prompt config context on-chunk))
+                    #(invoke-planner-session % llm-client user-prompt config context
+                                             on-chunk existing-files))
                   llm-response llm-result
-                  tokens (get llm-response :tokens 0)
-                  ;; Container promotion: prefer the plan the agent wrote into
-                  ;; the worktree at .miniforge/plan.edn — that is how the
-                  ;; implementer already submits, now the planner too.
-                  ;; Fallbacks preserved so backend-specific regressions
-                  ;; don't block the migration window.
-                  worktree-plan (get worktree-artifacts :plan)]
+                  plan-artifact (planner-plan-artifact worktree-artifacts artifact)
+                  submitted-plan (effective-plan plan-artifact)
+                  response-content (planner-response-content llm-response)
+                  parsed-plan (when-not submitted-plan
+                                (parse-plan-response response-content))
+                  retry-result (when (planner-submission-retry? llm-response
+                                                                submitted-plan
+                                                                parsed-plan)
+                                 (log/info logger :planner :planner/submission-retry
+                                           {:data {:reason :missing-plan-submission
+                                                   :content-length (count response-content)}})
+                                 (recover-submitted-plan llm-client spec-text
+                                                         config context on-chunk
+                                                         response-content))
+                  final-llm-response   (or (:llm-response retry-result) llm-response)
+                  final-plan-artifact  (or (:plan-artifact retry-result) plan-artifact)
+                  final-submitted-plan (or (:submitted-plan retry-result) submitted-plan)
+                  final-parsed-plan    (or (:parsed-plan retry-result) parsed-plan)
+                  retry-tokens         (if (identical? final-llm-response llm-response)
+                                         0
+                                         (get final-llm-response :tokens 0))
+                  tokens               (+ (get llm-response :tokens 0) retry-tokens)]
+              (when (seq context-misses)
+                (log/info logger :planner :planner/context-cache-misses
+                          {:data {:miss-count (count context-misses)
+                                  :misses context-misses}}))
               (log/info logger :planner :planner/llm-called
-                        {:data (cond-> {:success (llm/success? llm-response)
-                                        :tokens tokens
-                                        :streaming? (boolean on-chunk)
-                                        :plan-source (cond worktree-plan :worktree
-                                                           artifact      :mcp-artifact
-                                                           :else         :final-message)}
-                                 (:stop-reason llm-response)
-                                 (assoc :stop-reason (:stop-reason llm-response))
-                                 (:num-turns llm-response)
-                                 (assoc :num-turns (:num-turns llm-response)))})
+                        {:data (planner-log-data final-llm-response on-chunk final-plan-artifact)})
               ;; Container-promotion preempts CLI error classification:
               ;; if the agent wrote a valid plan.edn into the worktree,
+              ;; or submitted a plan through the MCP artifact path,
               ;; that IS the submission and we honor it regardless of
               ;; whether Claude CLI emitted a clean result event
               ;; afterwards. Iter 18 hit a stream-idle timeout AFTER a
               ;; successful Write — the plan existed, but the old
               ;; success-branch-only logic ignored it because the LLM
               ;; response was classified as failure.
-              (if (or worktree-plan (llm/success? llm-response))
-                (let [content (or (llm/get-content llm-response) "")
-                      stop-reason (:stop-reason llm-response)
-                      num-turns   (:num-turns llm-response)
-                      plan (or worktree-plan
-                               artifact
-                               (parse-plan-response content)
+              (if (or final-submitted-plan
+                      final-parsed-plan
+                      (llm/success? final-llm-response))
+                (let [content (planner-response-content final-llm-response)
+                      stop-reason (:stop-reason final-llm-response)
+                      num-turns   (:num-turns final-llm-response)
+                      plan (or final-submitted-plan
+                               final-parsed-plan
                                (response/throw-anomaly! :anomalies.agent/invoke-failed
                                                        "Plan generation failed: EDN parse did not succeed"
                                                        (cond-> {:phase :plan
@@ -506,10 +643,10 @@
                 ;; post-mortem. Iters 11-12 lost this context and
                 ;; produced undiagnosable \"Unknown error\" / bare
                 ;; \"Process timed out\" phase errors.
-                (let [llm-err (llm/get-error llm-response)
+                (let [llm-err (llm/get-error final-llm-response)
                       error-msg (or (:message llm-err) "LLM call failed")
-                      stop-reason (:stop-reason llm-response)
-                      num-turns   (:num-turns llm-response)]
+                      stop-reason (:stop-reason final-llm-response)
+                      num-turns   (:num-turns final-llm-response)]
                   (response/error error-msg
                                   {:data (cond-> (or llm-err {})
                                            stop-reason (assoc :stop-reason stop-reason)

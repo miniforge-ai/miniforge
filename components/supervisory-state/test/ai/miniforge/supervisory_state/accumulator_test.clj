@@ -124,6 +124,37 @@
                   (acc/apply-event (ev :workflow/cancelled {:workflow/id wf-id})))]
     (is (= :cancelled (get-in table [:workflows wf-id :workflow-run/status])))))
 
+(deftest workflow-activity-events-refresh-updated-at
+  (let [wf-id (random-uuid)
+        t0    (java.util.Date. 1000)
+        t1    (java.util.Date. 2000)
+        t2    (java.util.Date. 3000)
+        table (-> schema/empty-table
+                  (acc/apply-event (merge (ev :workflow/started {:workflow/id wf-id})
+                                          {:event/timestamp t0}))
+                  (acc/apply-event (merge (ev :agent/chunk
+                                             {:workflow/id wf-id
+                                              :agent/id :reviewer
+                                              :chunk/delta "working"})
+                                          {:event/timestamp t1}))
+                  (acc/apply-event (merge (ev :tool/completed
+                                             {:workflow/id wf-id
+                                              :agent/id :reviewer
+                                              :tool/id :read_file})
+                                          {:event/timestamp t2})))]
+    (is (= t2 (get-in table [:workflows wf-id :workflow-run/updated-at])))))
+
+(deftest workflow-activity-before-workflow-started-inserts-placeholder
+  (let [wf-id (random-uuid)
+        ts    (java.util.Date. 1000)
+        table (acc/apply-event schema/empty-table
+                               (merge (ev :gate/started
+                                          {:workflow/id wf-id
+                                           :gate/id :review-approved})
+                                      {:event/timestamp ts}))]
+    (is (= :running (get-in table [:workflows wf-id :workflow-run/status])))
+    (is (= ts (get-in table [:workflows wf-id :workflow-run/updated-at])))))
+
 ;------------------------------------------------------------------------------ DependencyHealth
 
 (defn- dependency-health-attrs

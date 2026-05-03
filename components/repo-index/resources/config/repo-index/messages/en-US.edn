@@ -34,6 +34,8 @@
   :error/parse-failed             "LLM response could not be parsed as code artifact"
   :error/llm-failed               "LLM call failed"
   :error/no-llm-backend           "No LLM backend provided"
+  :error/unverified-already-implemented
+  "Implementer claimed :already-implemented without artifact evidence after prior review or verify failures"
 
   ;; Repo map formatting
   :repo-map/header-title          "Repository Map"

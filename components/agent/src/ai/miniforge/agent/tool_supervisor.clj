@@ -36,7 +36,9 @@
   (:require
    [cheshire.core :as json]
    [clojure.string :as str]
-   [ai.miniforge.agent.meta-evaluator :as meta-eval]))
+   [ai.miniforge.agent.meta-evaluator :as meta-eval])
+  (:import
+   [java.io PushbackReader]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Bash command policy
@@ -204,6 +206,16 @@
 ;------------------------------------------------------------------------------ Layer 2
 ;; Claude hook protocol (stdin/stdout JSON)
 
+(defn- read-hook-request
+  "Parse a single Claude hook JSON payload from stdin without waiting for EOF.
+
+   Claude's PreToolUse hook contract is request/response over a live stream.
+   Reading with `slurp` waits for stream closure and can deadlock before the
+   first tool approval. `parse-stream` reads one JSON value and returns as soon
+   as the object is complete."
+  []
+  (json/parse-stream (PushbackReader. *in*) true))
+
 (defn hook-eval-stdin!
   "CLI entry point for `miniforge hook-eval`.
 
@@ -218,10 +230,10 @@
      {} for allow (empty object = no objection)
      {\"decision\": \"block\", \"reason\": \"...\"} for deny
 
-   Returns exit code 0 always (non-zero would crash the hook)."
+  Returns exit code 0 always (non-zero would crash the hook)."
   []
   (try
-    (let [input (json/parse-string (slurp *in*) true)
+    (let [input (read-hook-request)
           tool-name (:tool_name input)
           tool-input (get input :tool_input {})
           tool-input-kw (into {} (map (fn [[k v]] [(keyword k) v]) tool-input))

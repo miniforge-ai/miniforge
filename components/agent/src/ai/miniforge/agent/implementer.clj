@@ -250,13 +250,10 @@
     (catch Exception _ nil)))
 
 (defn- try-parse-inline-status
-  "Scan for an inline {:status :already-implemented ...} EDN map,
-   or a bare :already-implemented keyword anywhere in the text."
+  "Scan for an inline {:status :already-implemented ...} EDN map."
   [text]
-  (if-let [match (re-find #"\{:status\s+:already-implemented[^}]*\}" text)]
-    (edn/read-string match)
-    (when (re-find #":already-implemented" text)
-      {:status :already-implemented})))
+  (when-let [match (re-find #"\{:status\s+:already-implemented[^}]*\}" text)]
+    (edn/read-string match)))
 
 (defn parse-code-response
   "Parse the LLM response to extract code artifact.
@@ -387,6 +384,22 @@
              :files-created 0
              :skipped-reason :already-implemented}})
 
+(defn- repair-attempt?
+  "Return true when the implementer is handling prior review or verify feedback."
+  [input]
+  (or (:task/review-feedback input)
+      (:task/verify-failures input)))
+
+(defn- unverified-already-implemented-response
+  "Reject an :already-implemented claim when there is no artifact evidence on a repair attempt."
+  [input tokens]
+  (response/error
+   (messages/t :error/unverified-already-implemented)
+   {:tokens tokens
+    :data {:code :implementer/unverified-already-implemented
+           :review-feedback? (boolean (:task/review-feedback input))
+           :verify-failures? (boolean (:task/verify-failures input))}}))
+
 (defn- count-files-by-action
   "Count files matching a given action in an artifact."
   [action files]
@@ -421,7 +434,7 @@
 
 (defn- process-llm-response
   "Process a successful LLM response, returning the appropriate result."
-  [response artifact artifact-source context logger tokens cost-usd]
+  [response artifact artifact-source context logger tokens cost-usd input]
   (let [content (llm/get-content response)
         parsed (or artifact (parse-code-response content))]
     (let [tools (get response :tools-called [])]
@@ -430,8 +443,16 @@
                   {:data {:content-length (count (or content ""))
                           :tools-called tools
                           :has-code-blocks? (boolean (re-find #"```" (or content "")))}})))
-    (if (= :already-implemented (:status parsed))
-      (build-already-implemented-response parsed tokens cost-usd)
+    (cond
+      artifact
+      (build-code-response artifact context tokens cost-usd)
+
+      (= :already-implemented (:status parsed))
+      (if (repair-attempt? input)
+        (unverified-already-implemented-response input tokens)
+        (build-already-implemented-response parsed tokens cost-usd))
+
+      :else
       (if-let [code (or parsed (code-from-blocks content))]
         (build-code-response code context tokens cost-usd)
         (response/error (messages/t :error/parse-failed) {:tokens tokens})))))
@@ -488,7 +509,7 @@
 (defn- invoke-with-llm
   "Invoke the implementer via the LLM backend."
   [llm-client user-prompt effective-system-prompt config context on-chunk logger
-   existing-files]
+   existing-files input]
   (let [working-dir (or (:execution/worktree-path context)
                         (System/getProperty "user.dir"))
         {:keys [llm-result artifact context-misses pre-session-snapshot session-mode]}
@@ -541,7 +562,7 @@
     ;; Mirrors the planner fix in `(or worktree-plan (llm/success? …))`.
     (if (or effective-artifact (llm/success? response))
       (process-llm-response response effective-artifact artifact-source
-                            context logger tokens cost-usd)
+                            context logger tokens cost-usd input)
       ;; LLM call failed, no artifact — preserve the full llm-error
       ;; shape into :data so the phase-completed event carries
       ;; :type (e.g. "cli_error" / "adaptive_timeout"), :stderr /
@@ -593,7 +614,8 @@
           (if llm-client
             (invoke-with-llm llm-client user-prompt effective-system-prompt
                              config context on-chunk logger
-                             (:task/existing-files input))
+                             (:task/existing-files input)
+                             input)
             (response/error (messages/t :error/no-llm-backend)))))
 
       :validate-fn validate-code-artifact

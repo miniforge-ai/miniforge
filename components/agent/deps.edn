@@ -7,6 +7,7 @@
         ai.miniforge/reliability {:local/root "../reliability"}
         ai.miniforge/diagnosis {:local/root "../diagnosis"}
         ai.miniforge/improvement {:local/root "../improvement"}
+        ai.miniforge/llm {:local/root "../llm"}
         slingshot/slingshot {:mvn/version "0.12.2"}}
  :aliases
  {:test {:extra-paths ["test"]

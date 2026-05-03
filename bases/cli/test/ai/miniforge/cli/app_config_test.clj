@@ -44,3 +44,19 @@
       (let [profile (app-config/app-profile)]
         (is (= "miniforge-core" (:name profile)))
         (is (= ["run demo" "doctor"] (:help-examples profile)))))))
+
+(deftest home-dir-prefers-miniforge-home-env-test
+  (testing "MINIFORGE_HOME overrides the default CLI home path"
+    (with-redefs [app-config/getenv (fn [var-name]
+                                      (when (= "MINIFORGE_HOME" var-name)
+                                        "/tmp/mf-home"))
+                  app-config/default-home-dir (constantly "/Users/test/.miniforge")]
+      (is (= "/tmp/mf-home" (app-config/home-dir)))
+      (is (= "/tmp/mf-home/events" (app-config/events-dir))))))
+
+(deftest home-dir-falls-back-to-profile-based-default-test
+  (testing "default CLI home path stays profile-derived when MINIFORGE_HOME is unset"
+    (with-redefs [app-config/getenv (constantly nil)
+                  app-config/default-home-dir (constantly "/Users/test/.miniforge-core")]
+      (is (= "/Users/test/.miniforge-core" (app-config/home-dir)))
+      (is (= "/Users/test/.miniforge-core/config.edn" (app-config/config-path))))))

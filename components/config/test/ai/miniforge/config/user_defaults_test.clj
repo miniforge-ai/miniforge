@@ -49,12 +49,12 @@
 
 (deftest load-default-config-falls-back-to-edn-resource-test
   (let [orig-resource io/resource]
-    (with-redefs [io/resource (fn [path]
-                                (case path
-                                  "config/default-user-config.edn" nil
-                                  "config/default-user-config-fallback.edn"
-                                  (orig-resource "config/default-user-config-fallback.edn")
-                                  nil))]
+    (with-redefs [user/find-resource (fn [path]
+                                       (case path
+                                         "config/default-user-config.edn" nil
+                                         "config/default-user-config-fallback.edn"
+                                         (orig-resource "config/default-user-config-fallback.edn")
+                                         nil))]
       (let [cfg (user/load-default-config)]
         (is (= :codex (get-in cfg [:llm :backend])))
         (is (= "claude-sonnet-4-6" (get-in cfg [:agents :default-models :execution])))

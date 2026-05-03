@@ -297,6 +297,28 @@
         (is (empty? (get-in final-result [:execution :phases-completed] []))
             "Failed implement must not be counted as completed")))))
 
+(deftest leave-implement-rejects-already-implemented-after-review-feedback-test
+  (testing "already-implemented after review feedback fails closed instead of skipping"
+    (with-redefs [agent/create-implementer (fn [_] {:type :mock-implementer})
+                  agent/invoke (fn [_ _ _]
+                                 {:status :already-implemented
+                                  :output {:code/id (random-uuid)
+                                           :code/files []
+                                           :code/summary "No changes needed"}
+                                  :metrics {:tokens 25 :duration-ms 250}})
+                  agent/curate-implement-output mock-curator-error]
+      (let [ctx (-> (create-base-context)
+                    (assoc-in [:execution/phase-results :review :result :output :review/feedback]
+                              ["Blocking issue still unresolved"]))
+            ctx-with-config (assoc ctx :phase-config {:phase :implement})
+            interceptor (phase/get-phase-interceptor {:phase :implement})
+            enter-result ((:enter interceptor) ctx-with-config)
+            final-result ((:leave interceptor) enter-result)]
+        (is (= :failed (get-in final-result [:phase :status])))
+        (is (= "Implement returned :already-implemented after prior review or verify failures without producing a repair artifact"
+               (get-in final-result [:phase :error :message])))
+        (is (empty? (get-in final-result [:execution :phases-completed] [])))))))
+
 ;------------------------------------------------------------------------------ Layer 3: Capsule File Loading
 
 (deftest load-files-from-capsule-reads-via-execute-fn-test

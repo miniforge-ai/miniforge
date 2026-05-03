@@ -10,4 +10,11 @@
   "Dependency {dependency-id} health -> {status}"
 
   :dependency/recovered
-  "Dependency {dependency-id} recovered"}}
+  "Dependency {dependency-id} recovered"
+
+  ;; Streaming tool-use callback line printed to the terminal so
+  ;; tool-heavy phases don't look dead. Format: "\n[tool] <names>\n".
+  :stream/tool-use-line       "\n[tool] {names}\n"
+
+  ;; Status payload published when the agent calls one or more tools.
+  :stream/agent-calling-tool  "Agent calling tool"}}

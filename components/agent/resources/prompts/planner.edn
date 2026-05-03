@@ -15,6 +15,89 @@
  ;; work/n07-opsv-agent-budgets.spec.edn.
  :prompt/max-turns 80
 
+ ;; Main-turn progress monitor. Planner runs should converge quickly
+ ;; once exploration is done. A shorter hard limit keeps us from
+ ;; burning a full 10+ minutes after the model has gathered enough
+ ;; context but failed to submit the plan.
+ :prompt/progress-monitor
+ {:stagnation-threshold-ms     60000
+  :max-total-ms                240000
+  :min-activity-interval-ms    3000}
+
+ ;; Submission-retry runs after the main planner turn already produced
+ ;; useful prose but failed to land the plan as `.miniforge/plan.edn`.
+ ;; Caps and turn budget are tight on purpose: the only legitimate work
+ ;; is one Write call.
+ :prompt/submission-retry-max-turns 4
+ :prompt/submission-retry-monitor
+ {:stagnation-threshold-ms     30000
+  :max-total-ms                120000
+  :min-activity-interval-ms    2000}
+
+ ;; User-turn template wrapped around every spec the planner sees.
+ ;; Substitution keys: {{spec-text}} {{existing-files-section}}.
+ ;; existing-files-section is built by the planner namespace and may
+ ;; be the empty string when no in-scope files were loaded.
+ :prompt/user-template
+ "Create an implementation plan for the following specification:
+
+{{spec-text}}{{existing-files-section}}
+
+## REQUIRED Output
+
+Primary submission path: use Write to create `.miniforge/plan.edn` in the working directory.
+That file IS the plan submission authority.
+
+Fallback only if Write fails or is unavailable:
+end your FINAL assistant message with the plan EDN wrapped in a ```clojure code fence.
+
+There is no separate artifact-submission MCP tool in this session.
+Narration-only responses (e.g. \"Based on my exploration...\" with no EDN or Write) are rejected by the runtime with :anomalies.agent/invoke-failed and cost a full turn's tokens. If the last thing you would say is prose, STOP and replace it by Writing `.miniforge/plan.edn` instead.
+
+Use (random-uuid) for all IDs - just write #uuid \"<any-uuid>\" placeholders that I'll fill in."
+
+ ;; Existing-files block prepended to {{existing-files-section}}.
+ ;; Substitution key: {{files-list}}.
+ :prompt/existing-files-template
+ "
+
+## Existing Files in Scope
+
+Review these files before planning. If the spec is already fully satisfied by existing code, respond with an evidence bundle:
+```clojure
+{:plan/status :already-satisfied
+ :plan/summary \"Brief explanation\"
+ :plan/evidence [{:requirement \"what spec requires\"
+                  :satisfied-by \"path/to/file.clj\"
+                  :proof \"specific function/test that satisfies it\"}]}
+```
+{{files-list}}"
+
+ ;; Template substitution keys: {{spec-text}} {{prior-content}}.
+ ;; Uses literal "{{...}}" markers so the substitution layer can do
+ ;; plain string replacement without an EDN-aware mini-language.
+ :prompt/submission-retry-template
+ "You already completed the planning analysis for this specification.
+
+Do NOT explore further. Do NOT call context_read/context_grep/context_glob.
+Your only job is to submit the finished plan NOW.
+
+Primary submission path:
+  Write `.miniforge/plan.edn` in the working directory using the Write tool.
+
+Fallback only if Write fails or is unavailable:
+  End your turn with ONLY the plan EDN in a ```clojure code fence.
+
+No narration. No explanation. No bullets. No markdown beyond the fallback code fence.
+
+Original specification:
+
+{{spec-text}}
+
+Prior planner output to convert into the final plan submission:
+
+{{prior-content}}"
+
  :prompt/system
  "You are a Planning Agent for an autonomous software development team.
 

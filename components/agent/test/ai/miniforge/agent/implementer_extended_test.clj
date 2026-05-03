@@ -64,17 +64,15 @@
       (is (= :already-implemented (:status result)))
       (is (= "Already done" (:summary result)))))
 
-  (testing "detects bare :already-implemented keyword without map format"
+  (testing "does not accept bare :already-implemented keyword without map format"
     (let [text "The requested changes are already in place. :already-implemented"
           result (impl/parse-code-response text)]
-      (is (map? result))
-      (is (= :already-implemented (:status result)))))
+      (is (nil? result))))
 
-  (testing "detects :already-implemented in prose response from agent"
+  (testing "does not accept prose-only :already-implemented claims"
     (let [text "After reviewing the codebase, I can see that this feature is :already-implemented in the current code."
           result (impl/parse-code-response text)]
-      (is (map? result))
-      (is (= :already-implemented (:status result))))))
+      (is (nil? result)))))
 
 (deftest parse-code-response-nil-cases-test
   (testing "returns nil for plain text without EDN"

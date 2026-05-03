@@ -52,10 +52,17 @@
   "Fallback resource path when the primary config cannot be loaded."
   "config/default-user-config-fallback.edn")
 
+(defn find-resource
+  "Resource lookup seam. Public so tests can rebind it via `with-redefs`
+   when validating the fallback resource path; not part of the external
+   API."
+  [resource-path]
+  (io/resource resource-path))
+
 (defn- read-config-resource
   "Read an EDN config resource, returning nil on missing resource or parse failure."
   [resource-path]
-  (when-let [resource (io/resource resource-path)]
+  (when-let [resource (find-resource resource-path)]
     (try
       (edn/read-string (slurp resource))
       (catch Exception _e
