@@ -18,16 +18,19 @@
 
 (ns ai.miniforge.repo-dag.anomaly.add-edge-test
   "Coverage for `dag/add-edge-anomaly` and its deprecated throwing
-   sibling `dag/add-edge`. Five failure modes:
-   - `:not-found` when DAG missing
-   - `:not-found` when from-repo missing
-   - `:not-found` when to-repo missing
+   sibling `dag/add-edge`. Seven failure modes:
+   - `:not-found`     when DAG missing
+   - `:not-found`     when from-repo missing
+   - `:not-found`     when to-repo missing
    - `:invalid-input` on self-loop
-   - `:conflict` on duplicate edge
-   - `:conflict` when adding the edge would introduce a cycle"
+   - `:invalid-input` on schema-invalid edge payload (unknown constraint,
+                      unknown merge-ordering)
+   - `:conflict`      on duplicate edge
+   - `:conflict`      when adding the edge would introduce a cycle"
   (:require [clojure.test :refer [deftest is testing use-fixtures]]
             [ai.miniforge.anomaly.interface :as anomaly]
-            [ai.miniforge.repo-dag.interface :as dag]))
+            [ai.miniforge.repo-dag.interface :as dag]
+            [ai.miniforge.repo-dag.schema :as schema]))
 
 (def ^:dynamic *manager* nil)
 (def ^:dynamic *dag-id* nil)
@@ -102,6 +105,29 @@
       (is (anomaly/anomaly? result))
       (is (= :invalid-input (:anomaly/type result)))
       (is (= "repo-a" (get-in result [:anomaly/data :repo-name]))))))
+
+;------------------------------------------------------------------------------ Failure: schema-invalid edge payload
+
+(deftest add-edge-anomaly-invalid-input-on-unknown-constraint
+  (testing "unknown :edge/constraint yields :invalid-input anomaly — schema rejection
+            short-circuits via make-repo-edge-anomaly before the edge is appended.
+            Pre-fix this path threw an ExceptionInfo via the deprecated throwing
+            validate-schema and silently violated the anomaly-returning contract."
+    (let [result (dag/add-edge-anomaly *manager* *dag-id*
+                                       "repo-a" "repo-b"
+                                       :not-a-real-constraint :sequential)]
+      (is (anomaly/anomaly? result))
+      (is (= :invalid-input (:anomaly/type result)))
+      (is (some? (get-in result [:anomaly/data :errors])))
+      (is (= schema/RepoEdge (get-in result [:anomaly/data :schema]))))))
+
+(deftest add-edge-anomaly-invalid-input-on-unknown-merge-ordering
+  (testing "unknown :edge/merge-ordering yields :invalid-input anomaly"
+    (let [result (dag/add-edge-anomaly *manager* *dag-id*
+                                       "repo-a" "repo-b"
+                                       :library-before-consumer :not-an-ordering)]
+      (is (anomaly/anomaly? result))
+      (is (= :invalid-input (:anomaly/type result))))))
 
 ;------------------------------------------------------------------------------ Failure: duplicate edge
 

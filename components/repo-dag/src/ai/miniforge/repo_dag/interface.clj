@@ -135,8 +135,11 @@
   "Anomaly-returning variant of [[add-repo]].
 
    Returns the updated DAG on success, or an anomaly map on failure:
-   - `:not-found` — DAG with `dag-id` does not exist
-   - `:conflict`  — a repo with the same `:repo/name` already exists in the DAG
+   - `:not-found`     — DAG with `dag-id` does not exist
+   - `:invalid-input` — `repo-config` fails schema validation (e.g.
+                        missing `:repo/type`, malformed `:repo/url`)
+   - `:conflict`      — a repo with the same `:repo/name` already exists
+                        in the DAG
 
    Prefer this over [[add-repo]] in non-boundary code."
   [manager dag-id repo-config]
@@ -203,7 +206,10 @@
 
    Returns the updated DAG on success, or an anomaly map on failure:
    - `:not-found`     — DAG, from-repo, or to-repo does not exist
-   - `:invalid-input` — self-loop attempted (`from-repo` = `to-repo`)
+   - `:invalid-input` — self-loop attempted (`from-repo` = `to-repo`),
+                        or the edge payload fails schema validation
+                        (unknown `constraint`, unknown `merge-ordering`,
+                        missing endpoints)
    - `:conflict`      — edge already exists, or adding the edge would
                         introduce a cycle (`:cycle-nodes` carried in data)
 

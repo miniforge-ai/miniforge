@@ -68,30 +68,65 @@
                        :errors (get-in result [:anomaly/data :errors])}))
       result)))
 
-(defn make-repo-node
-  "Create a repo node with layer inference if not specified."
+(defn- build-repo-node
+  "Internal: assemble the repo-node map (no validation). Shared between
+   the throwing and anomaly-returning constructors so the two never drift."
   [{:keys [repo/url repo/name repo/org repo/type repo/layer repo/default-branch repo/watch-config]
     :or {default-branch "main"}}]
-  (let [inferred-layer (or layer (schema/infer-layer type))
-        node (cond-> {:repo/url url
-                      :repo/name name
-                      :repo/type type
-                      :repo/layer inferred-layer
-                      :repo/default-branch default-branch}
-               org (assoc :repo/org org)
-               watch-config (assoc :repo/watch-config watch-config))]
-    (validate-schema schema/RepoNode node)))
+  (let [inferred-layer (or layer (schema/infer-layer type))]
+    (cond-> {:repo/url url
+             :repo/name name
+             :repo/type type
+             :repo/layer inferred-layer
+             :repo/default-branch default-branch}
+      org (assoc :repo/org org)
+      watch-config (assoc :repo/watch-config watch-config))))
 
-(defn make-repo-edge
-  "Create a repo edge with default merge ordering."
+(defn make-repo-node-anomaly
+  "Build a repo node from `repo-config`, returning the validated node or
+   an `:invalid-input` anomaly when schema validation rejects it (e.g.
+   missing `:repo/type`, malformed `:repo/url`, …).
+
+   Prefer this over [[make-repo-node]] in non-boundary code."
+  [repo-config]
+  (validate-schema-anomaly schema/RepoNode (build-repo-node repo-config)))
+
+(defn make-repo-node
+  "Create a repo node with layer inference if not specified.
+
+   DEPRECATED: prefer [[make-repo-node-anomaly]], which returns an anomaly
+   map rather than throwing on schema validation failure."
+  {:deprecated "exceptions-as-data — prefer make-repo-node-anomaly"}
+  [repo-config]
+  (validate-schema schema/RepoNode (build-repo-node repo-config)))
+
+(defn- build-repo-edge
+  "Internal: assemble the edge map (no validation). Shared between the
+   throwing and anomaly-returning constructors."
   [{:keys [edge/from edge/to edge/constraint edge/merge-ordering edge/validation]
     :or {merge-ordering :sequential}}]
-  (let [edge (cond-> {:edge/from from
-                      :edge/to to
-                      :edge/constraint constraint
-                      :edge/merge-ordering merge-ordering}
-               validation (assoc :edge/validation validation))]
-    (validate-schema schema/RepoEdge edge)))
+  (cond-> {:edge/from from
+           :edge/to to
+           :edge/constraint constraint
+           :edge/merge-ordering merge-ordering}
+    validation (assoc :edge/validation validation)))
+
+(defn make-repo-edge-anomaly
+  "Build a repo edge from `edge-config`, returning the validated edge or
+   an `:invalid-input` anomaly when schema validation rejects it (unknown
+   `:edge/constraint`, unknown `:edge/merge-ordering`, missing endpoints, …).
+
+   Prefer this over [[make-repo-edge]] in non-boundary code."
+  [edge-config]
+  (validate-schema-anomaly schema/RepoEdge (build-repo-edge edge-config)))
+
+(defn make-repo-edge
+  "Create a repo edge with default merge ordering.
+
+   DEPRECATED: prefer [[make-repo-edge-anomaly]]."
+  {:deprecated "exceptions-as-data — prefer make-repo-edge-anomaly"}
+  [edge-config]
+  (validate-schema schema/RepoEdge (build-repo-edge edge-config)))
 
 (defn make-dag
   "Create a new empty DAG."
@@ -289,18 +324,22 @@
 
 (defn- add-repo-impl
   "Anomaly-returning add-repo. `store` is the manager's atom. Returns the
-   updated DAG on success, or an anomaly on lookup/conflict failure."
+   updated DAG on success, or an anomaly on missing DAG (`:not-found`),
+   schema-invalid `repo-config` (`:invalid-input`), or duplicate repo name
+   (`:conflict`)."
   [store dag-id repo-config]
   (if-let [dag (get @store dag-id)]
-    (let [node (make-repo-node repo-config)
-          rname (:repo/name node)]
-      (if (find-repo-by-name dag rname)
-        (anomaly/anomaly :conflict
-                         "Repo already exists"
-                         {:dag-id dag-id :repo-name rname})
-        (let [updated (update dag :dag/repos conj node)]
-          (swap! store assoc dag-id updated)
-          updated)))
+    (let [node-or-anomaly (make-repo-node-anomaly repo-config)]
+      (if (anomaly/anomaly? node-or-anomaly)
+        node-or-anomaly
+        (let [rname (:repo/name node-or-anomaly)]
+          (if (find-repo-by-name dag rname)
+            (anomaly/anomaly :conflict
+                             "Repo already exists"
+                             {:dag-id dag-id :repo-name rname})
+            (let [updated (update dag :dag/repos conj node-or-anomaly)]
+              (swap! store assoc dag-id updated)
+              updated)))))
     (dag-not-found-anomaly dag-id)))
 
 (defn- remove-repo-impl
@@ -347,22 +386,25 @@
                          {:dag-id dag-id :from from-repo :to to-repo})
 
         :else
-        (let [edge (make-repo-edge {:edge/from from-repo
-                                    :edge/to to-repo
-                                    :edge/constraint constraint
-                                    :edge/merge-ordering merge-ordering})
-              updated (update dag :dag/edges conj edge)
-              result (topo-sort updated)]
-          (if (:success result)
-            (do
-              (swap! store assoc dag-id updated)
-              updated)
-            (anomaly/anomaly :conflict
-                             "Adding edge would create cycle"
-                             {:dag-id dag-id
-                              :from from-repo
-                              :to to-repo
-                              :cycle-nodes (:cycle-nodes result)})))))
+        (let [edge-or-anomaly (make-repo-edge-anomaly
+                               {:edge/from from-repo
+                                :edge/to to-repo
+                                :edge/constraint constraint
+                                :edge/merge-ordering merge-ordering})]
+          (if (anomaly/anomaly? edge-or-anomaly)
+            edge-or-anomaly
+            (let [updated (update dag :dag/edges conj edge-or-anomaly)
+                  result (topo-sort updated)]
+              (if (:success result)
+                (do
+                  (swap! store assoc dag-id updated)
+                  updated)
+                (anomaly/anomaly :conflict
+                                 "Adding edge would create cycle"
+                                 {:dag-id dag-id
+                                  :from from-repo
+                                  :to to-repo
+                                  :cycle-nodes (:cycle-nodes result)})))))))
     (dag-not-found-anomaly dag-id)))
 
 (defn- remove-edge-impl

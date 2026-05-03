@@ -18,12 +18,15 @@
 
 (ns ai.miniforge.repo-dag.anomaly.add-repo-test
   "Coverage for `dag/add-repo-anomaly` and its deprecated throwing
-   sibling `dag/add-repo`. Two anomaly classes:
-   - `:not-found` — DAG missing
-   - `:conflict`  — repo with same name already exists"
+   sibling `dag/add-repo`. Three anomaly classes:
+   - `:not-found`     — DAG missing
+   - `:invalid-input` — `repo-config` fails schema validation (missing
+                        `:repo/type`, malformed `:repo/url`, …)
+   - `:conflict`      — repo with same name already exists"
   (:require [clojure.test :refer [deftest is testing use-fixtures]]
             [ai.miniforge.anomaly.interface :as anomaly]
-            [ai.miniforge.repo-dag.interface :as dag]))
+            [ai.miniforge.repo-dag.interface :as dag]
+            [ai.miniforge.repo-dag.schema :as schema]))
 
 (def ^:dynamic *manager* nil)
 
@@ -57,6 +60,23 @@
       (is (anomaly/anomaly? result))
       (is (= :not-found (:anomaly/type result)))
       (is (= missing-id (get-in result [:anomaly/data :dag-id]))))))
+
+;------------------------------------------------------------------------------ Failure path: schema-invalid repo-config
+
+(deftest add-repo-anomaly-invalid-input-on-missing-repo-type
+  (testing "repo-config without :repo/type yields :invalid-input anomaly —
+            schema rejection short-circuits via make-repo-node-anomaly
+            before the node is appended. Pre-fix this path threw
+            ExceptionInfo via the deprecated throwing validate-schema and
+            silently violated the anomaly-returning contract."
+    (let [d (dag/create-dag *manager* "test-dag")
+          bad-config {:repo/url "https://github.com/acme/x"
+                      :repo/name "x"} ;; missing :repo/type
+          result (dag/add-repo-anomaly *manager* (:dag/id d) bad-config)]
+      (is (anomaly/anomaly? result))
+      (is (= :invalid-input (:anomaly/type result)))
+      (is (some? (get-in result [:anomaly/data :errors])))
+      (is (= schema/RepoNode (get-in result [:anomaly/data :schema]))))))
 
 ;------------------------------------------------------------------------------ Failure path: duplicate
 
