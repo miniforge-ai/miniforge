@@ -119,7 +119,9 @@
 
 (defn- workflow-spec
   [context]
-  (or (get-in context [:execution/workflow :workflow/spec])
+  (or (:workflow/spec context)
+      (:workflow-spec context)
+      (get-in context [:execution/workflow :workflow/spec])
       (get-in context [:execution/input :workflow-spec])
       (get-in context [:execution/input :workflow/spec])
       (get-in context [:execution/input :spec])
