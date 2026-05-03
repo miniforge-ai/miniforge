@@ -110,7 +110,7 @@
 (defn- build-phase-event-data
   "Build event data map for a phase completion event.
 
-   `error-info` is sourced from any of four shapes the phase machinery uses:
+   `error-info` is sourced from any of five shapes the phase machinery uses:
 
    1. `(:error result)`          — top-level error map (early failures)
    2. `[:result :error]`         — inner agent result error (post-inner-fail)
