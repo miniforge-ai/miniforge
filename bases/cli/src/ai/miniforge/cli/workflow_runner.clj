@@ -308,7 +308,8 @@
             (.destroyForcibly jp))
           (catch Exception _ nil))
         {:out ""
-         :err (str "Process timed out after " timeout-ms "ms")
+         :err (messages/t :workflow-runner/cli-process-timeout
+                          {:timeout-ms timeout-ms})
          :exit -1
          :timeout-ms timeout-ms})
       {:out (:out result)
@@ -407,13 +408,14 @@
 
 (defn- claude-preflight-command
   [cmd-path]
-  [cmd-path
-   "-p"
-   backend-preflight-prompt
-   "--output-format"
-   "json"
-   "--max-turns"
-   "1"])
+  (into [cmd-path "-p" (backend-preflight-prompt)]
+        (claude-preflight-args)))
+
+(defn- cli-required-backend-stamp
+  [llm-client]
+  (when-let [stamp (backend-stamp llm-client)]
+    (when (:requires-cli? (:backend-config stamp))
+      stamp)))
 
 (defn- parse-preflight-payload
   [content]
@@ -432,84 +434,137 @@
      (cond-> {:backend backend
               :exec-fn (fn [[_cmd & args]]
                          (run-cli-command (into [cmd-path] args)
-                                          backend-preflight-timeout-ms
+                                          (backend-preflight-timeout-ms)
                                           :workdir workdir))}
        model (assoc :model model)))))
 
 (defn- run-generic-backend-preflight
   [llm-client cmd-path workdir]
-  (llm/complete (create-preflight-client llm-client cmd-path workdir)
-                {:prompt backend-preflight-prompt
-                 :max-turns 1}))
+  (let [response (llm/complete (create-preflight-client llm-client cmd-path workdir)
+                               {:prompt (backend-preflight-prompt)
+                                :max-turns 1})]
+    (if (and (llm/success? response)
+             (preflight-success? (:content response)))
+      (success-response {:content (:content response)
+                         :exit-code (:exit-code response)})
+      (failure-response :anomalies/unavailable
+                        "backend_preflight_failed"
+                        (messages/t :workflow-runner/backend-preflight-failed
+                                    {:backend (name (llm/client-backend llm-client))})
+                        {:cmd-path cmd-path
+                         :content (:content response)
+                         :error (:error response)
+                         :anomaly (:anomaly response)
+                         :exit-code (:exit-code response)}))))
 
 (defn- run-claude-backend-preflight
   [cmd-path workdir]
   (let [{:keys [out err exit timeout-ms]} (run-cli-command (claude-preflight-command cmd-path)
-                                                           backend-preflight-timeout-ms
+                                                           (backend-preflight-timeout-ms)
                                                            :workdir workdir)
         trimmed (some-> out str/trim)]
     (cond
       timeout-ms
-      {:success false
-       :error {:type "backend_preflight_timeout"
-               :message err
-               :timeout timeout-ms}
-       :exit-code exit}
+      (assoc (failure-response :anomalies/unavailable
+                               "backend_preflight_timeout"
+                               err
+                               {:cmd-path cmd-path
+                                :timeout-ms timeout-ms
+                                :exit-code exit})
+             :exit-code exit)
 
       (not (zero? exit))
-      {:success false
-       :error {:type "backend_preflight_cli_error"
-               :message (or (some-> err str/trim not-empty)
-                            trimmed
-                            (str "Claude preflight exited " exit))}
-       :exit-code exit}
+      (assoc (failure-response :anomalies/unavailable
+                               "backend_preflight_cli_error"
+                               (or (some-> err str/trim not-empty)
+                                   trimmed
+                                   (messages/t :workflow-runner/backend-preflight-exit
+                                               {:exit-code exit}))
+                               {:cmd-path cmd-path
+                                :exit-code exit})
+             :exit-code exit)
 
       (preflight-success? trimmed)
-      {:success true
-       :content trimmed
-       :exit-code exit}
+      (-> (success-response {:content trimmed
+                             :exit-code exit})
+          (assoc :exit-code exit
+                 :content trimmed))
 
       :else
-      {:success false
-       :error {:type "backend_preflight_unexpected_output"
-               :message "Claude preflight returned unexpected output"
-               :stdout trimmed
-               :stderr (some-> err str/trim not-empty)}
-       :exit-code exit})))
+      (assoc (failure-response :anomalies/unavailable
+                               "backend_preflight_unexpected_output"
+                               (messages/t :workflow-runner/claude-preflight-unexpected-output)
+                               {:cmd-path cmd-path
+                                :stdout trimmed
+                                :stderr (some-> err str/trim not-empty)
+                                :exit-code exit})
+             :exit-code exit))))
+
+(defn- backend-cli-missing!
+  [{:keys [backend cmd]}]
+  (response/throw-anomaly! :anomalies/incorrect
+                           (messages/t :workflow-runner/cli-not-on-path {:cmd cmd})
+                           {:backend backend
+                            :cmd cmd
+                            :path (System/getenv "PATH")}))
+
+(defn- backend-version-failed!
+  [{:keys [backend cmd cmd-path]} version-response]
+  (response/throw-anomaly! :anomalies/unavailable
+                           (messages/t :workflow-runner/backend-version-failed
+                                       {:backend (name backend)})
+                           {:backend backend
+                            :cmd cmd
+                            :cmd-path cmd-path
+                            :version-error (get-in version-response [:error :message])
+                            :version-error-data (get-in version-response [:error :data])}))
+
+(defn- backend-preflight-failed!
+  [{:keys [backend cmd cmd-path cmd-version]} probe-response]
+  (response/throw-anomaly! :anomalies/unavailable
+                           (messages/t :workflow-runner/backend-preflight-failed
+                                       {:backend (name backend)})
+                           {:backend backend
+                            :cmd cmd
+                            :cmd-path cmd-path
+                            :cmd-version cmd-version
+                            :probe-response (response-summary probe-response)}))
+
+(defn- run-backend-probe
+  [llm-client {:keys [backend cmd-path]} workdir]
+  (if (= backend :claude)
+    (run-claude-backend-preflight cmd-path workdir)
+    (run-generic-backend-preflight llm-client cmd-path workdir)))
+
+(defn- ensure-cli-command-path!
+  [stamp]
+  (when-not (:cmd-path stamp)
+    (backend-cli-missing! stamp))
+  stamp)
+
+(defn- versioned-backend-stamp
+  [stamp]
+  (let [version-response (read-cli-version (:cmd-path stamp))
+        version (get-in (response-output version-response) [:version])]
+    (when-not (response-succeeded? version-response)
+      (backend-version-failed! stamp version-response))
+    (with-backend-version stamp version)))
+
+(defn- verify-backend-probe!
+  [llm-client stamp workdir]
+  (let [probe-response (run-backend-probe llm-client stamp workdir)]
+    (when-not (response-succeeded? probe-response)
+      (backend-preflight-failed! stamp probe-response))
+    stamp))
 
 (defn- run-backend-preflight!
   [quiet llm-client context]
-  (when-let [{:keys [backend backend-config cmd cmd-path] :as stamp} (backend-stamp llm-client)]
-    (when (:requires-cli? backend-config)
-      (when-not cmd-path
-        (response/throw-anomaly! :anomalies/incorrect
-                                 (str "Configured backend CLI is not on PATH: " cmd)
-                                 {:backend backend
-                                  :cmd cmd
-                                  :path (System/getenv "PATH")}))
-      (let [{:keys [success version error]} (read-cli-version cmd-path)
-            stamp (assoc stamp :cmd-version version)]
-        (print-backend-provenance! quiet stamp)
-        (when-not success
-          (response/throw-anomaly! :anomalies/unavailable
-                                   (str "Backend version probe failed for " (name backend))
-                                   {:backend backend
-                                    :cmd cmd
-                                    :cmd-path cmd-path
-                                    :version-error error}))
-        (let [probe-response (if (= backend :claude)
-                               (run-claude-backend-preflight cmd-path (:worktree-path context))
-                               (run-generic-backend-preflight llm-client cmd-path (:worktree-path context)))]
-          (when-not (and (llm/success? probe-response)
-                         (preflight-success? (:content probe-response)))
-            (response/throw-anomaly! :anomalies/unavailable
-                                     (str "Backend preflight failed for " (name backend))
-                                     {:backend backend
-                                      :cmd cmd
-                                      :cmd-path cmd-path
-                                      :cmd-version version
-                                      :probe-response (select-keys probe-response
-                                                                   [:success :content :error :anomaly :exit-code])})))))))
+  (when-let [stamp (cli-required-backend-stamp llm-client)]
+    (let [stamp (-> stamp
+                    ensure-cli-command-path!
+                    versioned-backend-stamp)]
+      (print-backend-provenance! quiet stamp)
+      (verify-backend-probe! llm-client stamp (:worktree-path context)))))
 
 (defn close-artifact-store [artifact-store]
   (when artifact-store
