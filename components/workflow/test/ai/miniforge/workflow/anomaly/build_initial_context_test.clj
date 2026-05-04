@@ -82,9 +82,16 @@
 ;;
 ;; `build-initial-context` is `defn-` (private) — the runner namespace
 ;; never intends it as a public API. We reach in via #'var to verify
-;; the slingshot throw shape that legacy try+ callers (none upstream
-;; today, but the catch site at runner.clj's top-level Object handler
-;; wraps it) will continue to see.
+;; the slingshot throw shape preserved for backward compat.
+;;
+;; Important: in `runner/run-pipeline`, `initial-ctx` is built *before*
+;; the pipeline-loop `try+` is entered. The runner does NOT catch this
+;; throw itself; it propagates up to whatever boundary called
+;; `run-pipeline` (the CLI handler, MCP tool entry, or in-process
+;; orchestrator above). Those boundaries are responsible for
+;; converting the slingshot ex-data into a user-facing error. This
+;; test pins only the throw shape — not the catch site — because no
+;; runner-level catch participates.
 
 (deftest build-initial-context-still-throws-on-governed-without-capsule
   (testing "deprecated throwing variant still throws via slingshot for legacy callers"

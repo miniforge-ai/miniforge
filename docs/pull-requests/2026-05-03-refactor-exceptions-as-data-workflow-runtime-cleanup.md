@@ -62,15 +62,15 @@ Other runtime-area files (`runner_cleanup.clj`, `monitoring.clj`, `observe_phase
 
 ## Per-site classification
 
-| Site | `:anomaly/type` | Why |
-|---|---|---|
-| `state.clj` `transition-status` | `:invalid-input` | FSM rejection is validation-shaped — the caller passed an event the current state cannot accept. `:conflict` was tempting, but the FSM treats this as malformed input, not a state-vs-state collision. |
-| `runner_environment.clj` `assert-executor-for-mode!` | `:unavailable` | Governed mode requires capsule; absence is downstream/system unavailability (no capsule executor present). Mirrors the existing `:anomalies.executor/unavailable` slingshot mapping. |
-| `runner.clj` `build-initial-context` | `:invalid-input` | Caller supplied `:execution-mode :governed` without the matching `:executor` + `:environment-id` — caller-side input mismatch. Pre-flight guard runs before any environment lookup. |
+| File | Function | `:anomaly/type` | Why |
+|---|---|---|---|
+| `state.clj` | `transition-status` | `:invalid-input` | FSM rejection is validation-shaped — the caller passed an event the current state cannot accept. `:conflict` was tempting, but the FSM treats this as malformed input, not a state-vs-state collision. |
+| `runner_environment.clj` | `assert-executor-for-mode!` | `:unavailable` | Governed mode requires capsule; absence is downstream/system unavailability (no capsule executor present). Mirrors the existing `:anomalies.executor/unavailable` slingshot mapping. |
+| `runner.clj` | `build-initial-context` | `:invalid-input` | Caller supplied `:execution-mode :governed` without the matching `:executor` + `:environment-id` — caller-side input mismatch. Pre-flight guard runs before any environment lookup. |
 
-## Slingshot at `runner.clj:156` — kept as control-flow
+## Slingshot stop-anomaly in `runner.clj` — kept as control-flow
 
-The inventory flagged `runner.clj:156` (`response/throw-anomaly!` to `:anomalies.dashboard/stop`) as `:ambiguous`. Verified by reading the catch site at `runner.clj:391`:
+The inventory flagged the dashboard-stop throw inside `runner.clj`'s `check-stopped!` helper (`response/throw-anomaly!` to `:anomalies.dashboard/stop`) as `:ambiguous`. Verified by reading the matching catch in the same file's pipeline-loop `try+`:
 
 ```clojure
 (catch [:anomaly/category :anomalies.dashboard/stop] {:keys [anomaly/message]} ...)

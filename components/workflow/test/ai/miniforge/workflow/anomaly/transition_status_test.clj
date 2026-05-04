@@ -58,12 +58,22 @@
         (is (some? (:error data)))
         (is (some? (:fsm-message data)))))))
 
-(deftest transition-status-anomaly-leaves-state-untouched-on-rejection
-  (testing "rejected transition does not mutate execution status"
-    (let [s (pending-state)]
-      (state/transition-status-anomaly s :complete)
-      (is (= :pending (:execution/status s))
-          "anomaly path is functionally pure — no FSM transition recorded"))))
+(deftest transition-status-anomaly-rejection-does-not-advance-status
+  (testing "rejected transition produces an anomaly whose data still reports the
+            pre-transition status — verifies the FSM did not partially advance
+            before flagging the rejection"
+    (let [s      (pending-state)
+          result (state/transition-status-anomaly s :complete)
+          data   (:anomaly/data result)]
+      (is (anomaly/anomaly? result))
+      ;; The anomaly carries the status the FSM was in *at evaluation time*.
+      ;; If a buggy implementation advanced the status before deciding the
+      ;; transition was invalid, this would report the wrong current-status.
+      (is (= :pending (:current-status data)))
+      ;; Returned value is the anomaly itself, not a partially-transitioned
+      ;; state map — ie. the function does not return a map carrying both
+      ;; an updated :execution/status and the anomaly.
+      (is (not (contains? result :execution/status))))))
 
 ;------------------------------------------------------------------------------ Throwing-variant compat
 
