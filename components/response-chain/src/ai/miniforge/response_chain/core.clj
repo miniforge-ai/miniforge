@@ -35,8 +35,9 @@
 (defn- build-step
   "Build a canonical step map. `an` may be nil. The step's
    `:succeeded?` is true iff `an` is nil. When `request` is non-nil it
-   is attached as `:request` metadata; when nil the key is omitted so
-   the step shape stays minimal for callers that don't need it."
+   is attached as an optional `:request` key; when nil the key is
+   omitted so the step shape stays minimal for callers that don't need
+   it."
   ([operation an response]
    (build-step operation an response nil))
   ([operation an response request]
