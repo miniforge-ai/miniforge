@@ -571,13 +571,57 @@
 
 (def validate-dag-forest
   "Plan-time validator: nil when every task has ≤1 dependency,
-   `:anomalies/dag-non-forest` map otherwise. Multi-parent merge is a
-   v2 follow-up; v1 single-parent restriction is enforced here."
+   `:anomalies/dag-non-forest` map otherwise.
+
+   v1 uses this as a hard plan-time gate (the orchestrator's
+   `execute-plan-as-dag` rejects non-forest plans up front). v2
+   (per I-DAG-MULTI-PARENT-MERGE.md) drops the gate — multi-parent
+   DAGs become the normal path. The drop happens in Stage 1B
+   alongside the orchestrator wiring that consumes the new
+   multi-parent helpers; in Stage 1A this validator still gates,
+   so v1 behavior is preserved.
+
+   After 1B this becomes an informational helper for plan-quality
+   reporting."
   branch-registry/validate-forest)
 
 (def dag-forest?
-  "Predicate form of `validate-dag-forest`."
+  "Predicate form of `validate-dag-forest`. See [[validate-dag-forest]]
+   for the Stage 1A vs 1B status."
   branch-registry/forest?)
+
+;------------------------------------------------------------------------------ Layer 9
+;; Multi-parent base resolution primitives (v2)
+;; Pure-data inputs to the orchestrator's git-using `merge-parent-branches!`.
+;; See I-DAG-MULTI-PARENT-MERGE.md §3.2.
+
+(def multi-parent?
+  "True when a task's `:task/dependencies` declares more than one entry.
+   Callers gate on this before choosing between [[resolve-base-branch]]
+   (single-parent fast path, returns a string) and
+   [[resolve-multi-parent-base]] (returns the v2 ordered-parents shape)."
+  branch-registry/multi-parent?)
+
+(def resolve-multi-parent-base
+  "Build the ordered, SHA-pinned parent list for a multi-parent task.
+   Returns `{:merge/parents [{:task/id :branch :commit-sha :order}]}` in
+   declaration order. The orchestrator's git layer is responsible for
+   ancestor collapse (`merge-base --is-ancestor`); this returns the
+   pre-collapse list. Uses the `:commit-sha` key to match the existing
+   workspace/registry plumbing."
+  branch-registry/resolve-multi-parent-base)
+
+(def collapse-duplicate-tips
+  "Drop later parents whose `:commit-sha` matches an earlier parent's
+   `:commit-sha`. Returns
+   `{:parents [...] :collapsed [{:dropped :duplicate-of}]}`."
+  branch-registry/collapse-duplicate-tips)
+
+(def compute-merge-input-key
+  "Deterministic idempotency hash from `[task-id, strategy, ordered
+   parent SHAs]`. Used to name the merge ref under
+   `refs/miniforge/dag-base/<run-id>/<task-id>/<input-key>`."
+  branch-registry/compute-input-key)
 
 (defn create-dag-from-tasks
   "Create a complete DAG run state from a sequence of task definitions.
