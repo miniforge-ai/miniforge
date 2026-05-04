@@ -315,27 +315,63 @@
        :err (:err result)
        :exit (:exit result)})))
 
+(defn- success-response
+  [output]
+  (response/success output))
+
+(defn- failure-response
+  [category error-type message data]
+  (-> (response/failure message {:data (assoc data :type error-type)})
+      (assoc :anomaly (response/make-anomaly category message data))))
+
+(defn- response-output
+  [response]
+  (merge (select-keys response [:content :exit-code :version])
+         (or (:output response) {})))
+
+(defn- response-succeeded?
+  [response]
+  (or (true? (:success response))
+      (response/success? response)))
+
+(defn- response-summary
+  [response]
+  (merge
+   (select-keys response [:success :error :anomaly :exit-code])
+   (select-keys (response-output response)
+                [:content :exit-code :version])))
+
 (defn- read-cli-version
   [cmd-path]
-  (let [{:keys [out err exit timeout-ms]} (run-cli-command [cmd-path "--version"] backend-version-timeout-ms)]
+  (let [{:keys [out err exit timeout-ms]} (run-cli-command [cmd-path "--version"] (backend-version-timeout-ms))]
     (cond
       timeout-ms
-      {:success false
-       :error (str "Version probe timed out after " timeout-ms "ms")}
+      (failure-response :anomalies/unavailable
+                        "backend_version_timeout"
+                        (messages/t :workflow-runner/backend-version-timeout
+                                    {:timeout-ms timeout-ms})
+                        {:cmd-path cmd-path
+                         :timeout-ms timeout-ms})
 
       (zero? exit)
       (if-let [version (or (some-> out str/trim not-empty)
                            (some-> err str/trim not-empty))]
-        {:success true
-         :version version}
-        {:success false
-         :error "Version probe exited 0 but produced no output"})
+        (success-response {:version version})
+        (failure-response :anomalies/unavailable
+                          "backend_version_empty_output"
+                          (messages/t :workflow-runner/backend-version-empty)
+                          {:cmd-path cmd-path
+                           :exit-code exit}))
 
       :else
-      {:success false
-       :error (or (some-> err str/trim not-empty)
-                  (some-> out str/trim not-empty)
-                  (str "Version probe exited " exit))})))
+      (failure-response :anomalies/unavailable
+                        "backend_version_cli_error"
+                        (or (some-> err str/trim not-empty)
+                            (some-> out str/trim not-empty)
+                            (messages/t :workflow-runner/backend-version-exit
+                                        {:exit-code exit}))
+                        {:cmd-path cmd-path
+                         :exit-code exit}))))
 
 (defn- backend-stamp
   [llm-client]
@@ -349,14 +385,25 @@
        :cmd cmd
        :cmd-path cmd-path})))
 
+(defn- with-backend-version
+  [stamp version]
+  (assoc stamp :cmd-version version))
+
+(defn- backend-provenance-lines
+  [{:keys [backend cmd-path cmd-version]}]
+  (concat
+   [[:cyan (messages/t :workflow-runner/backend-label
+                       {:backend (name backend)})]]
+   (when cmd-path
+     [[:cyan (messages/t :workflow-runner/backend-path {:path cmd-path})]])
+   (when cmd-version
+     [[:cyan (messages/t :workflow-runner/backend-version {:version cmd-version})]])))
+
 (defn- print-backend-provenance!
   [quiet {:keys [backend cmd-path cmd-version]}]
-  (when-not quiet
-    (println (display/colorize :cyan (str "   Backend: " (name backend))))
-    (when cmd-path
-      (println (display/colorize :cyan (str "   Backend Path: " cmd-path))))
-    (when cmd-version
-      (println (display/colorize :cyan (str "   Backend Version: " cmd-version))))))
+  (print-colored-lines! quiet (backend-provenance-lines {:backend backend
+                                                         :cmd-path cmd-path
+                                                         :cmd-version cmd-version})))
 
 (defn- claude-preflight-command
   [cmd-path]
