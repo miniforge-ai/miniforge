@@ -93,12 +93,12 @@
 
    - 5-arity `(append-step chain operation-key anomaly response request)`
        Same as the 4-arity, plus the original `request` is recorded on
-       the step as `:request` metadata. Use this when a downstream
-       consumer (e.g. an inference-evidence bridge) needs to
-       reconstruct what was asked, not just what came back. Pass `nil`
-       to omit the metadata. The `:request` key is intentionally
-       absent on steps that don't carry one — chains stay minimal for
-       LLM-visible renderings.
+       the step under an optional `:request` key. Use this when a
+       downstream consumer (e.g. an inference-evidence bridge) needs
+       to reconstruct what was asked, not just what came back. Pass
+       `nil` to omit the `:request` key. The `:request` key is
+       intentionally absent on steps that don't carry one — chains
+       stay minimal for LLM-visible renderings.
 
    This function never throws. Malformed input is recorded as an
    `:invalid-input` anomaly step rather than raising; the chain remains
