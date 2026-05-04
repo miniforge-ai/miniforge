@@ -13,6 +13,10 @@
   :implement/unverified-already-implemented
   "Implement returned :already-implemented after prior review or verify failures without producing a repair artifact"
 
+  ;; Review phase — repair-loop progress detection
+  :review/stagnation
+  "Review-repair loop stagnated: actionable-issue fingerprint did not change between iterations. Terminating instead of redirecting back to implement to avoid burning more tokens on a useless loop."
+
   ;; Verify phase
   :verify/no-environment      "Verify phase has no execution environment"
   :verify/no-environment-hint "Workflow runner must acquire an execution environment before verify phase"

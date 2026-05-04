@@ -84,5 +84,7 @@
 (def get-review-issues reviewer/get-issues)
 (def get-review-strengths reviewer/get-strengths)
 (def validate-review-artifact reviewer/validate-review-artifact)
+(def review-fingerprint reviewer/review-fingerprint)
+(def review-stagnated? reviewer/stagnated?)
 (def release-summary releaser/release-summary)
 (def validate-release-artifact releaser/validate-release-artifact)

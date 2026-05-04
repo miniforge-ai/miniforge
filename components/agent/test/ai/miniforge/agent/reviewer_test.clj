@@ -402,3 +402,116 @@
       (is (number? (:duration-ms metrics)))
       (is (= 0 (:tokens metrics))
           "Should report 0 tokens"))))
+
+;------------------------------------------------------------------------------ Repair-loop progress detection
+
+(def ^:private blocking-issue-a
+  {:severity :blocking :file "src/foo.clj" :line 12 :description "Null pointer access"})
+
+(def ^:private blocking-issue-b
+  {:severity :blocking :file "src/bar.clj" :line 7  :description "Bad arity"})
+
+(def ^:private warning-issue
+  {:severity :warning :file "src/foo.clj" :line 90 :description "Inefficient loop"})
+
+(def ^:private nit-issue
+  {:severity :nit :file "src/foo.clj" :line 4 :description "Stale comment"})
+
+(deftest review-fingerprint-includes-blocking-and-warning-test
+  (testing "fingerprint covers actionable severities (:blocking + :warning)"
+    (let [fp (reviewer/review-fingerprint
+              {:review/issues [blocking-issue-a warning-issue]})]
+      (is (= 2 (count fp)) ":blocking and :warning both flow through")
+      (is (every? vector? fp) "each entry is a tuple"))))
+
+(deftest review-fingerprint-excludes-nits-test
+  (testing ":nit issues are intentionally excluded — long-tail polish, not stagnation"
+    (let [fp (reviewer/review-fingerprint
+              {:review/issues [blocking-issue-a nit-issue]})]
+      (is (= 1 (count fp)) "only the blocking issue counted")
+      (is (= :blocking (-> fp first first))))))
+
+(deftest review-fingerprint-is-order-independent-test
+  (testing "issue order does not affect the fingerprint"
+    (let [fp1 (reviewer/review-fingerprint
+               {:review/issues [blocking-issue-a blocking-issue-b]})
+          fp2 (reviewer/review-fingerprint
+               {:review/issues [blocking-issue-b blocking-issue-a]})]
+      (is (= fp1 fp2)
+          "fingerprint is sorted before comparison"))))
+
+(deftest review-fingerprint-empty-when-no-actionable-issues-test
+  (testing "approved review with only nits has empty fingerprint"
+    (is (= [] (reviewer/review-fingerprint
+               {:review/issues [nit-issue]})))
+    (is (= [] (reviewer/review-fingerprint
+               {:review/issues []})))))
+
+(deftest review-fingerprint-discriminates-on-description-change-test
+  (testing "fingerprint changes when an issue description changes"
+    (let [original (reviewer/review-fingerprint
+                    {:review/issues [blocking-issue-a]})
+          edited   (reviewer/review-fingerprint
+                    {:review/issues [(assoc blocking-issue-a
+                                            :description "Different bug")]})]
+      (is (not= original edited)
+          "different description ⇒ different fingerprint"))))
+
+(deftest review-fingerprint-survives-whitespace-reformatting-test
+  (testing "trivial whitespace differences in the description don't read as progress"
+    (let [base    (reviewer/review-fingerprint
+                   {:review/issues [(assoc blocking-issue-a
+                                           :description "Null pointer access")]})
+          reflowed (reviewer/review-fingerprint
+                    {:review/issues [(assoc blocking-issue-a
+                                            :description "  Null   pointer\n access  ")]})]
+      (is (= base reflowed)
+          "whitespace normalization keeps the fingerprint stable across reformats"))))
+
+(deftest review-fingerprint-includes-failed-gates-test
+  (testing "gate-only mode: failed gate-results contribute to the fingerprint"
+    ;; Critical for gate-only mode: the reviewer populates :review/gate-results
+    ;; without filling :review/issues, so an :issues-only fingerprint would
+    ;; be empty and the stagnation guard would never fire on a looping
+    ;; gate failure. Failed gates must surface as virtual issues.
+    (let [fp (reviewer/review-fingerprint
+              {:review/gate-results [{:gate-id :syntax
+                                      :passed? false
+                                      :errors [{:message "Unbalanced paren at line 8"}]}
+                                     {:gate-id :lint
+                                      :passed? true
+                                      :errors []}]})]
+      (is (= 1 (count fp)) "only the failed gate contributes")
+      (is (= :blocking (-> fp first first))
+          "failed gates fingerprint as :blocking severity")
+      (is (= ":gate/syntax" (-> fp first second))
+          "gate id is the file slot for sortable identification"))))
+
+(deftest stagnated?-true-on-identical-fingerprints-test
+  (testing "two consecutive identical fingerprints with non-empty issues ⇒ stagnated"
+    (let [fp (reviewer/review-fingerprint
+              {:review/issues [blocking-issue-a]})]
+      (is (true? (reviewer/stagnated? fp fp))))))
+
+(deftest stagnated?-false-on-first-iteration-test
+  (testing "no prior fingerprint ⇒ not stagnated (first review never short-circuits)"
+    (let [fp (reviewer/review-fingerprint
+              {:review/issues [blocking-issue-a]})]
+      (is (false? (boolean (reviewer/stagnated? nil fp)))))))
+
+(deftest stagnated?-false-on-empty-fingerprint-test
+  (testing "no actionable issues ⇒ not stagnated regardless of prior — :approved is progress"
+    (is (false? (boolean (reviewer/stagnated? [] []))))
+    (is (false? (boolean (reviewer/stagnated?
+                          (reviewer/review-fingerprint
+                           {:review/issues [blocking-issue-a]})
+                          []))))))
+
+(deftest stagnated?-false-on-progress-test
+  (testing "fingerprint changed between iterations ⇒ progress, not stagnated"
+    (let [fp1 (reviewer/review-fingerprint
+               {:review/issues [blocking-issue-a blocking-issue-b]})
+          fp2 (reviewer/review-fingerprint
+               {:review/issues [blocking-issue-b]})]
+      (is (false? (boolean (reviewer/stagnated? fp1 fp2)))
+          "one issue resolved between iterations is real progress"))))
