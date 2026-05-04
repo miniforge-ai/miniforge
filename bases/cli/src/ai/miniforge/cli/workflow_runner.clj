@@ -19,9 +19,11 @@
 (ns ai.miniforge.cli.workflow-runner
   (:require
    [babashka.fs :as fs]
+   [babashka.process :as p]
    [clojure.string :as str]
    [clojure.edn :as edn]
    [cheshire.core :as json]
+   [ai.miniforge.llm.interface :as llm]
    [ai.miniforge.event-stream.interface :as es]
    [ai.miniforge.supervisory-state.interface :as supervisory]
    [ai.miniforge.workflow.interface :as workflow]
@@ -218,6 +220,218 @@
       (println (display/colorize :yellow "   Warning: source checkout is detached HEAD")))
     (when (:git-dirty? context)
       (println (display/colorize :yellow "   Warning: source checkout has uncommitted changes")))))
+
+(def ^:private backend-preflight-prompt
+  "Reply with exactly {\"ok\":true}")
+
+(def ^:private backend-preflight-timeout-ms
+  10000)
+
+(def ^:private backend-version-timeout-ms
+  5000)
+
+(defn- executable-file?
+  [path]
+  (let [file (some-> path fs/file)]
+    (and file
+         (fs/exists? file)
+         (not (fs/directory? file))
+         (fs/executable? file))))
+
+(defn- resolve-cli-command-path
+  [cmd]
+  (cond
+    (str/blank? cmd) nil
+    (str/includes? cmd "/")
+    (when (executable-file? cmd)
+      (str (fs/absolutize cmd)))
+
+    :else
+    (some (fn [entry]
+            (let [candidate (fs/path entry cmd)]
+              (when (executable-file? candidate)
+                (str candidate))))
+          (str/split (or (System/getenv "PATH") "") #":"))))
+
+(defn- cli-process-env
+  []
+  (when (System/getenv "CLAUDECODE")
+    (into {} (remove (fn [[k _]] (= k "CLAUDECODE"))) (System/getenv))))
+
+(defn- run-cli-command
+  [cmd timeout-ms & {:keys [workdir]}]
+  (let [empty-stdin (java.io.ByteArrayInputStream. (byte-array 0))
+        process (apply p/process
+                       (cond-> {:out :string
+                                :err :string
+                                :continue true
+                                :in empty-stdin}
+                         (cli-process-env) (assoc :env (cli-process-env))
+                         workdir (assoc :dir workdir))
+                       cmd)
+        result (deref process timeout-ms ::timeout)]
+    (if (= ::timeout result)
+      (do
+        (try
+          (when-let [^Process jp (:proc process)]
+            (.destroyForcibly jp))
+          (catch Exception _ nil))
+        {:out ""
+         :err (str "Process timed out after " timeout-ms "ms")
+         :exit -1
+         :timeout-ms timeout-ms})
+      {:out (:out result)
+       :err (:err result)
+       :exit (:exit result)})))
+
+(defn- read-cli-version
+  [cmd-path]
+  (let [{:keys [out err exit timeout-ms]} (run-cli-command [cmd-path "--version"] backend-version-timeout-ms)]
+    (cond
+      timeout-ms
+      {:success false
+       :error (str "Version probe timed out after " timeout-ms "ms")}
+
+      (zero? exit)
+      (if-let [version (or (some-> out str/trim not-empty)
+                           (some-> err str/trim not-empty))]
+        {:success true
+         :version version}
+        {:success false
+         :error "Version probe exited 0 but produced no output"})
+
+      :else
+      {:success false
+       :error (or (some-> err str/trim not-empty)
+                  (some-> out str/trim not-empty)
+                  (str "Version probe exited " exit))})))
+
+(defn- backend-stamp
+  [llm-client]
+  (when-let [backend (llm/client-backend llm-client)]
+    (let [backend-config (get llm/backends backend)
+          cmd (:cmd backend-config)
+          cmd-path (when (:requires-cli? backend-config)
+                     (resolve-cli-command-path cmd))]
+      {:backend backend
+       :backend-config backend-config
+       :cmd cmd
+       :cmd-path cmd-path})))
+
+(defn- print-backend-provenance!
+  [quiet {:keys [backend cmd-path cmd-version]}]
+  (when-not quiet
+    (println (display/colorize :cyan (str "   Backend: " (name backend))))
+    (when cmd-path
+      (println (display/colorize :cyan (str "   Backend Path: " cmd-path))))
+    (when cmd-version
+      (println (display/colorize :cyan (str "   Backend Version: " cmd-version))))))
+
+(defn- claude-preflight-command
+  [cmd-path]
+  [cmd-path
+   "-p"
+   backend-preflight-prompt
+   "--output-format"
+   "json"
+   "--max-turns"
+   "1"])
+
+(defn- parse-preflight-payload
+  [content]
+  (try
+    (some-> content str/trim not-empty (json/parse-string true))
+    (catch Exception _ nil)))
+
+(defn- preflight-success?
+  [content]
+  (= {:ok true} (parse-preflight-payload content)))
+
+(defn- create-preflight-client
+  [llm-client cmd-path workdir]
+  (let [{:keys [backend model]} (:config llm-client)]
+    (llm/create-client
+     (cond-> {:backend backend
+              :exec-fn (fn [[_cmd & args]]
+                         (run-cli-command (into [cmd-path] args)
+                                          backend-preflight-timeout-ms
+                                          :workdir workdir))}
+       model (assoc :model model)))))
+
+(defn- run-generic-backend-preflight
+  [llm-client cmd-path workdir]
+  (llm/complete (create-preflight-client llm-client cmd-path workdir)
+                {:prompt backend-preflight-prompt
+                 :max-turns 1}))
+
+(defn- run-claude-backend-preflight
+  [cmd-path workdir]
+  (let [{:keys [out err exit timeout-ms]} (run-cli-command (claude-preflight-command cmd-path)
+                                                           backend-preflight-timeout-ms
+                                                           :workdir workdir)
+        trimmed (some-> out str/trim)]
+    (cond
+      timeout-ms
+      {:success false
+       :error {:type "backend_preflight_timeout"
+               :message err
+               :timeout timeout-ms}
+       :exit-code exit}
+
+      (not (zero? exit))
+      {:success false
+       :error {:type "backend_preflight_cli_error"
+               :message (or (some-> err str/trim not-empty)
+                            trimmed
+                            (str "Claude preflight exited " exit))}
+       :exit-code exit}
+
+      (preflight-success? trimmed)
+      {:success true
+       :content trimmed
+       :exit-code exit}
+
+      :else
+      {:success false
+       :error {:type "backend_preflight_unexpected_output"
+               :message "Claude preflight returned unexpected output"
+               :stdout trimmed
+               :stderr (some-> err str/trim not-empty)}
+       :exit-code exit})))
+
+(defn- run-backend-preflight!
+  [quiet llm-client context]
+  (when-let [{:keys [backend backend-config cmd cmd-path] :as stamp} (backend-stamp llm-client)]
+    (when (:requires-cli? backend-config)
+      (when-not cmd-path
+        (response/throw-anomaly! :anomalies/incorrect
+                                 (str "Configured backend CLI is not on PATH: " cmd)
+                                 {:backend backend
+                                  :cmd cmd
+                                  :path (System/getenv "PATH")}))
+      (let [{:keys [success version error]} (read-cli-version cmd-path)
+            stamp (assoc stamp :cmd-version version)]
+        (print-backend-provenance! quiet stamp)
+        (when-not success
+          (response/throw-anomaly! :anomalies/unavailable
+                                   (str "Backend version probe failed for " (name backend))
+                                   {:backend backend
+                                    :cmd cmd
+                                    :cmd-path cmd-path
+                                    :version-error error}))
+        (let [probe-response (if (= backend :claude)
+                               (run-claude-backend-preflight cmd-path (:worktree-path context))
+                               (run-generic-backend-preflight llm-client cmd-path (:worktree-path context)))]
+          (when-not (and (llm/success? probe-response)
+                         (preflight-success? (:content probe-response)))
+            (response/throw-anomaly! :anomalies/unavailable
+                                     (str "Backend preflight failed for " (name backend))
+                                     {:backend backend
+                                      :cmd cmd
+                                      :cmd-path cmd-path
+                                      :cmd-version version
+                                      :probe-response (select-keys probe-response
+                                                                   [:success :content :error :anomaly :exit-code])})))))))
 
 (defn close-artifact-store [artifact-store]
   (when artifact-store
@@ -487,6 +701,7 @@
       (dashboard/print-dashboard-status! quiet)
       (assert-runtime-alignment! spec context)
       (print-runtime-provenance! quiet context)
+      (run-backend-preflight! quiet llm-client context)
       (let [provenance (move-spec-to-in-progress! (:spec/provenance enriched-spec))]
         (try
           (let [result (execute-with-events {:run-pipeline run-pipeline
@@ -623,6 +838,7 @@
             progress-cleanup (display/start-progress! event-stream quiet)]
         (print-chain-header chain-id chain-def quiet)
         (dashboard/print-dashboard-status! quiet)
+        (run-backend-preflight! quiet llm-client context)
         (try
           (let [result (workflow/run-chain chain-def chain-input context)]
             (print-chain-result result quiet)

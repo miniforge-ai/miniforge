@@ -27,7 +27,8 @@
    [ai.miniforge.llm.progress-monitor :as pm]
    [ai.miniforge.response.interface :as response])
   (:import
-   [java.io ByteArrayInputStream]))
+   [java.io ByteArrayInputStream]
+   [java.util.concurrent LinkedBlockingQueue TimeUnit]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; LLM response builders
@@ -82,9 +83,14 @@
   "How long to wait on subprocess `deref` after we already classified
    a timeout and force-killed the process. The kill makes joining a
    matter of seconds — without this, we paid an extra 10 minutes per
-   timeout (observed Claude dogfood 2026-05-02: 10-min planner cap
+  timeout (observed Claude dogfood 2026-05-02: 10-min planner cap
    becoming an 18-min wall-clock failure)."
   5000)
+
+(def ^:private stream-poll-interval-ms
+  "How often the stream reader loop wakes up to re-check timeout state while
+   waiting for the next stdout line."
+  250)
 
 (defn llm-success
   "Build a successful LLM response."
@@ -562,10 +568,18 @@
    (success-response output exit-code nil))
   ([output exit-code stderr]
   (let [trimmed (str/trim output)]
-    (if (rate-limited? trimmed)
+    (cond
+      (str/blank? trimmed)
+      (llm-error :anomalies.agent/llm-error "empty_success_output"
+                 "CLI backend exited successfully but produced no output"
+                 {:exit-code exit-code :stderr stderr :stdout output})
+
+      (rate-limited? trimmed)
       (llm-error :anomalies.agent/rate-limited "rate_limit"
                  (str "Claude CLI rate limited: " trimmed)
                  {:exit-code exit-code :stdout output})
+
+      :else
       (cond-> (llm-success trimmed {:exit-code exit-code})
         (seq stderr) (assoc :stderr stderr))))))
 
@@ -605,60 +619,62 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
-(def ^:private read-timeout-sentinel
+(def ^:private eof-sentinel
   (Object.))
-
-(defn read-line-with-timeout
-  "Read one line from `reader`, returning `read-timeout-sentinel` if
-   nothing arrives within `timeout-ms`. On timeout the underlying
-   reader is closed so the blocked `.readLine` thread can return
-   instead of leaking. (`deref` with a timeout returns the supplied
-   default — it does not throw `TimeoutException` — so no
-   `catch` clause is needed.)"
-  [reader timeout-ms]
-  (let [read-future (future (.readLine reader))
-        result      (deref read-future timeout-ms read-timeout-sentinel)]
-    (when (identical? result read-timeout-sentinel)
-      (try (.close reader) (catch Exception _))
-      (future-cancel read-future))
-    result))
 
 (defn process-stream-lines [out-reader monitor on-line]
   (let [out-lines (atom [])
         timeout-reason (atom nil)
         line-timeout-ms stream-line-timeout-ms
+        last-line-at (atom (System/currentTimeMillis))
         dump-path (System/getenv "MF_STREAM_DUMP")
         dump-writer (when dump-path
                       (java.io.PrintWriter.
-                        (java.io.FileWriter. dump-path true)))]
-    (loop []
-      (if-let [t (pm/check-timeout monitor)]
-        ;; Progress-monitor timeout (stagnation or total-max)
-        (reset! timeout-reason t)
-        (let [line-or-timeout (read-line-with-timeout out-reader line-timeout-ms)]
-          (cond
-            (identical? line-or-timeout read-timeout-sentinel)
-            ;; Line-timeout: reader produced nothing for line-timeout-ms.
-            ;; Treat as stream-idle — a stalled stream, not clean EOF.
-            ;; Set an explicit reason so the caller reports it instead of
-            ;; waiting on `deref process` for the full 10 min and then
-            ;; reporting a bare "Process timed out" with no context.
-            (reset! timeout-reason
-                    {:type :stream-idle
-                     :message (str "No stream output for " line-timeout-ms "ms")
-                     :elapsed-ms line-timeout-ms
-                     :stats {:lines-read (count @out-lines)}})
+                       (java.io.FileWriter. dump-path true)))
+        line-queue (LinkedBlockingQueue.)
+        reader-future (future
+                        (try
+                          (loop []
+                            (if-some [line (.readLine out-reader)]
+                              (do (.put line-queue line)
+                                  (recur))
+                              (.put line-queue eof-sentinel)))
+                          (catch Exception e
+                            (.put line-queue e))))]
+    (try
+      (loop []
+        (if-let [t (pm/check-timeout monitor)]
+          (reset! timeout-reason t)
+          (let [line-or-signal (.poll line-queue stream-poll-interval-ms TimeUnit/MILLISECONDS)
+                now (System/currentTimeMillis)]
+            (cond
+              (instance? Exception line-or-signal)
+              (throw line-or-signal)
 
-            (some? line-or-timeout)
-            (do (swap! out-lines conj line-or-timeout)
-                (pm/record-chunk! monitor line-or-timeout)
-                (when dump-writer (.println dump-writer line-or-timeout) (.flush dump-writer))
-                (on-line line-or-timeout)
-                (recur))
+              (identical? line-or-signal eof-sentinel)
+              nil
 
-            :else
-            nil))))
-    (when dump-writer (.close dump-writer))
+              (some? line-or-signal)
+              (do (reset! last-line-at now)
+                  (swap! out-lines conj line-or-signal)
+                  (pm/record-chunk! monitor line-or-signal)
+                  (when dump-writer (.println dump-writer line-or-signal) (.flush dump-writer))
+                  (on-line line-or-signal)
+                  (recur))
+
+              (>= (- now @last-line-at) line-timeout-ms)
+              (reset! timeout-reason
+                      {:type :stream-idle
+                       :message (str "No stream output for " line-timeout-ms "ms")
+                       :elapsed-ms (- now @last-line-at)
+                       :stats {:lines-read (count @out-lines)}})
+
+              :else
+              (recur)))))
+      (finally
+        (future-cancel reader-future)
+        (try (.close out-reader) (catch Exception _))
+        (when dump-writer (.close dump-writer))))
     {:lines @out-lines
      :timeout @timeout-reason}))
 
