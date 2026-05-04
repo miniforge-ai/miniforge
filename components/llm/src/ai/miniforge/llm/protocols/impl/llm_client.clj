@@ -27,7 +27,8 @@
    [org.httpkit.client :as http]
    [ai.miniforge.logging.interface :as log]
    [ai.miniforge.llm.progress-monitor :as pm]
-   [ai.miniforge.response.interface :as response])
+   [ai.miniforge.response.interface :as response]
+   [slingshot.slingshot :refer [throw+ try+]])
   (:import
    [java.io ByteArrayInputStream]
    [java.util.concurrent LinkedBlockingQueue TimeUnit]))
@@ -625,55 +626,122 @@
 (def ^:private eof-sentinel
   (Object.))
 
+(defn- open-stream-dump-writer
+  []
+  (when-let [dump-path (System/getenv "MF_STREAM_DUMP")]
+    (java.io.PrintWriter.
+     (java.io.FileWriter. dump-path true))))
+
+(defn- stream-read-failure
+  [ex]
+  (response/from-exception ex))
+
+(defn- enqueue-stream-line!
+  [line-queue line]
+  (.put line-queue line))
+
+(defn- read-stream-loop!
+  [out-reader line-queue]
+  (loop []
+    (if-some [line (.readLine out-reader)]
+      (do (enqueue-stream-line! line-queue line)
+          (recur))
+      (enqueue-stream-line! line-queue eof-sentinel))))
+
+(defn- start-stream-reader!
+  [out-reader line-queue]
+  (future
+    (try
+      (read-stream-loop! out-reader line-queue)
+      (catch Exception e
+        (enqueue-stream-line! line-queue (stream-read-failure e))))))
+
+(defn- record-stream-line!
+  [out-lines monitor dump-writer on-line last-line-at now line]
+  (reset! last-line-at now)
+  (swap! out-lines conj line)
+  (pm/record-chunk! monitor line)
+  (when dump-writer
+    (.println dump-writer line)
+    (.flush dump-writer))
+  (on-line line))
+
+(defn- stream-idle-timeout
+  [last-line-at line-timeout-ms out-lines now]
+  (when (>= (- now @last-line-at) line-timeout-ms)
+    {:type :stream-idle
+     :message (str "No stream output for " line-timeout-ms "ms")
+     :elapsed-ms (- now @last-line-at)
+     :stats {:lines-read (count @out-lines)}}))
+
+(defn- stream-poll-signal
+  [line-queue]
+  (.poll line-queue
+         (stream-poll-interval-ms)
+         TimeUnit/MILLISECONDS))
+
+(defn- anomaly-signal?
+  [line-or-signal]
+  (response/anomaly-map? line-or-signal))
+
+(defn- eof-signal?
+  [line-or-signal]
+  (identical? line-or-signal eof-sentinel))
+
+(defn- timeout-signal
+  [last-line-at line-timeout-ms out-lines]
+  {:done? false
+   :timeout (stream-idle-timeout last-line-at
+                                 line-timeout-ms
+                                 out-lines
+                                 (System/currentTimeMillis))})
+
+(defn- process-stream-signal
+  [line-or-signal out-lines monitor dump-writer on-line last-line-at line-timeout-ms]
+  (cond
+    (anomaly-signal? line-or-signal)
+    (throw+ line-or-signal)
+
+    (eof-signal? line-or-signal)
+    {:done? true}
+
+    (some? line-or-signal)
+    (do (record-stream-line! out-lines
+                             monitor
+                             dump-writer
+                             on-line
+                             last-line-at
+                             (System/currentTimeMillis)
+                             line-or-signal)
+        {:done? false})
+
+    :else
+    (timeout-signal last-line-at line-timeout-ms out-lines)))
+
 (defn process-stream-lines [out-reader monitor on-line]
   (let [out-lines (atom [])
         timeout-reason (atom nil)
-        line-timeout-ms stream-line-timeout-ms
+        line-timeout-ms (stream-line-timeout-ms)
         last-line-at (atom (System/currentTimeMillis))
-        dump-path (System/getenv "MF_STREAM_DUMP")
-        dump-writer (when dump-path
-                      (java.io.PrintWriter.
-                       (java.io.FileWriter. dump-path true)))
+        dump-writer (open-stream-dump-writer)
         line-queue (LinkedBlockingQueue.)
-        reader-future (future
-                        (try
-                          (loop []
-                            (if-some [line (.readLine out-reader)]
-                              (do (.put line-queue line)
-                                  (recur))
-                              (.put line-queue eof-sentinel)))
-                          (catch Exception e
-                            (.put line-queue e))))]
-    (try
+        reader-future (start-stream-reader! out-reader line-queue)]
+    (try+
       (loop []
         (if-let [t (pm/check-timeout monitor)]
           (reset! timeout-reason t)
-          (let [line-or-signal (.poll line-queue stream-poll-interval-ms TimeUnit/MILLISECONDS)
-                now (System/currentTimeMillis)]
+          (let [{:keys [done? timeout]}
+                (process-stream-signal (stream-poll-signal line-queue)
+                                       out-lines
+                                       monitor
+                                       dump-writer
+                                       on-line
+                                       last-line-at
+                                       line-timeout-ms)]
             (cond
-              (instance? Exception line-or-signal)
-              (throw line-or-signal)
-
-              (identical? line-or-signal eof-sentinel)
-              nil
-
-              (some? line-or-signal)
-              (do (reset! last-line-at now)
-                  (swap! out-lines conj line-or-signal)
-                  (pm/record-chunk! monitor line-or-signal)
-                  (when dump-writer (.println dump-writer line-or-signal) (.flush dump-writer))
-                  (on-line line-or-signal)
-                  (recur))
-
-              (>= (- now @last-line-at) line-timeout-ms)
-              (reset! timeout-reason
-                      {:type :stream-idle
-                       :message (str "No stream output for " line-timeout-ms "ms")
-                       :elapsed-ms (- now @last-line-at)
-                       :stats {:lines-read (count @out-lines)}})
-
-              :else
-              (recur)))))
+              done? nil
+              timeout (reset! timeout-reason timeout)
+              :else (recur)))))
       (finally
         (future-cancel reader-future)
         (try (.close out-reader) (catch Exception _))
