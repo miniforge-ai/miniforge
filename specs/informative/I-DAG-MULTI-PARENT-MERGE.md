@@ -6,9 +6,22 @@
 
 # I-DAG-MULTI-PARENT-MERGE — Multi-Parent DAG Merge Strategy (v2 of Per-Task Base Chaining)
 
-**Status:** Informative — design draft, awaiting iteration before implementation.
+**Status:** Informative — iteration round 1 complete; ready for implementation.
 **Date:** 2026-05-03
-**Version:** 0.1.0
+**Version:** 0.2.0
+
+**Changelog:**
+
+- **0.2.0** — Iteration round 1: settled all five §10 open questions.
+  Branches now ephemeral (Q1). Cherry-pick order pinned to plan
+  declaration (Q2). Criss-cross histories silently fall back to
+  recursive merges (Q3). **Conflict-resolution agent loop pulled
+  in-scope** (Q4) — both pre-task octopus failures and mid-PR-
+  lifecycle MERGEABLE→NON_MERGEABLE transitions trigger an automated
+  resolution sub-workflow rather than failing to a human.
+  **Strict-forest opt-out flag dropped entirely** (Q5) — v2's
+  always-on conflict handling makes plan-time fail-loud unnecessary.
+- **0.1.0** — Initial draft.
 
 Specifies how a DAG task with multiple completed parents acquires a base for its
 scratch worktree. Closes the gap left open by per-task base chaining v1
@@ -59,15 +72,23 @@ too strict for real workloads. **Real specs naturally produce fan-in.**
 > orchestrator at the boundary where v1 currently aborts; the sub-workflow
 > sees a single ref like any single-parent task does.
 
-Three properties this preserves:
+Four properties this preserves:
 
 1. **Each task still has one base branch from its sub-workflow's
    perspective.** No protocol change to `acquire-environment!` /
    `task-sub-opts` / the scratch-worktree contract.
 2. **The merge happens once, at orchestration time.** Sub-agents never see
    half-merged state.
-3. **Failure is loud.** Conflicts surface as a typed anomaly with the
-   conflicting parents and paths, not silent overwrites.
+3. **Conflicts are resolved automatically, not punted to humans.** Both
+   pre-task octopus failures and mid-PR-lifecycle
+   MERGEABLE→NON_MERGEABLE transitions trigger a resolution sub-workflow
+   (§6.1) rather than blocking on a human. HIL is a fallback for the
+   resolution sub-workflow itself failing, not the default path. Each
+   incidental HIL ask makes miniforge less useful.
+4. **Failure is loud when it does occur.** When the resolution sub-
+   workflow can't produce a clean merge, the result surfaces as a typed
+   anomaly with the conflicting parents and paths — never as a silent
+   overwrite.
 
 ### 3.1 Determinism
 
@@ -131,6 +152,10 @@ git cherry-pick $(git merge-base parent-A parent-B)..parent-B
 git cherry-pick $(git merge-base parent-A parent-C)..parent-C
 ```
 
+Parents are applied in **plan-declaration order** (same source as octopus
+parent ordering — see §3.1). Deterministic, author-controlled, and
+matches what an author would write if they listed deps in priority order.
+
 **Pros:**
 
 - Linear history.
@@ -180,43 +205,80 @@ Plan emits `:task/merge-strategy` per multi-parent task; default to one of
 **Default to 4.1 octopus merge. Allow per-task override via 4.4
 `:task/merge-strategy`.** Concretely:
 
-| Strategy keyword               | Behavior                                             |
-| ------------------------------ | ---------------------------------------------------- |
-| `:octopus` (default)           | §4.1; fall back to anomaly on conflict (§6).         |
-| `:sequential-cherry-pick`      | §4.2; same fallback.                                 |
-| `:fail-on-multi-parent`        | Today's v1 behavior — emits the canonical            |
-|                                | `:anomalies/dag-non-forest` anomaly. Useful for      |
-|                                | plans that **must** be forests (e.g. release         |
-|                                | trains).                                             |
+| Strategy keyword          | Behavior                                          |
+| ------------------------- | ------------------------------------------------- |
+| `:octopus` (default)      | §4.1; on conflict, spawn resolution sub-          |
+|                           | workflow per §6.1 — does NOT fail to a human.     |
+| `:sequential-cherry-pick` | §4.2; same conflict path.                         |
 
-`:last-parent-wins` is intentionally not exposed.
+`:last-parent-wins` is intentionally not exposed (would reproduce the
+v0 silent-overwrite class).
+
+**No `:fail-on-multi-parent` mode.** The v0.1 draft proposed a
+`:plan/strict-forest?` opt-in that emitted the v1
+`:anomalies/dag-non-forest` anomaly. The iteration round dropped it:
+v2's always-on automated conflict resolution makes plan-time fail-loud
+unnecessary, and it muddied the contract — every additional knob is a
+foot-gun. If a workflow truly needs linear history (formal-verification
+batches, regulatory pipelines), the right answer is to author plans
+that are forests by construction, not to add a runtime mode that turns
+the orchestrator back into v1.
 
 ---
 
-## 6. Failure Modes and Edge Cases
+## 6. Conflict Handling and Edge Cases
 
-Multi-parent merges have one **failure mode** that the orchestrator must
-surface as a typed anomaly (§6.1, the only state where the merge cannot
-complete) and two **degenerate edge cases** where the merge succeeds
-trivially but the topology is informational and worth logging
-(§6.2/§6.3). The two are deliberately separated: anomalies stop work,
-edge-case logs do not.
+Multi-parent merges have one **conflict path** that triggers an automated
+resolution sub-workflow (§6.1) and two **degenerate edge cases** where
+the merge succeeds trivially but the topology is informational and worth
+logging (§6.2/§6.3). The two are deliberately separated: §6.1 invokes
+real work, edge-case logs do not.
 
-### 6.1 Merge conflict (anomaly)
+A second conflict surface — mid-PR-lifecycle MERGEABLE→NON_MERGEABLE
+transitions — is handled by the same resolution path; see §6.4.
+
+### 6.1 Merge conflict — automated resolution
+
+When octopus (or `:sequential-cherry-pick`) hits a conflict, the
+orchestrator does NOT auto-pick `-X ours` / `-X theirs` (would reproduce
+v0 silent overwrites) and does NOT fail to a human. It spawns a
+**resolution sub-workflow** seeded with:
 
 ```clojure
-{:anomaly/category :anomalies/dag-multi-parent-conflict
- :anomaly/message  "Octopus merge of N parents conflicted on M paths"
+{:resolution/parents    [{:task/id ... :branch ...} ...]
+ :resolution/conflicts  [{:path ... :parents [...]} ...]
+ :resolution/strategy   :octopus  ; or :sequential-cherry-pick
+ :resolution/parent-task :task/id ; the multi-parent task this is for
+ :resolution/budget     <iterations | tokens>}
+```
+
+The resolution sub-workflow's contract:
+
+- **Goal:** produce a merge commit that resolves all conflicts and
+  passes the task's verify gates.
+- **Pipeline:** `implement` (agent edits the conflicted files) →
+  `verify` (project tests) → terminate when verify passes or budget
+  exhausts.
+- **Output (success):** a ref name on the task's persisted branch, with
+  the merge commit at the tip. The orchestrator continues the original
+  task using this ref as `:branch`.
+- **Output (failure, budget exhausted or verify never passes):** the
+  terminal anomaly below — only path that surfaces to a human.
+
+```clojure
+{:anomaly/category :anomalies/dag-multi-parent-unresolvable
+ :anomaly/message  "Octopus merge conflict could not be auto-resolved within budget"
  :task/id          ...
  :merge/parents    [{:task/id ... :branch ...} ...]
  :merge/conflicts  [{:path ... :parents [...]} ...]
- :merge/strategy   :octopus}
+ :merge/strategy   :octopus
+ :resolution/last-attempt-ref ...
+ :resolution/reason :budget-exhausted | :verify-never-passed}
 ```
 
-The orchestrator MUST NOT auto-resolve. Auto-resolution (e.g.
-`-X ours` / `-X theirs`) chooses arbitrarily and reproduces the v0 silent-
-overwrite class. Surface the conflict, fail the task, let a human or a
-follow-up agent decide.
+The unresolvable anomaly carries the last-attempt ref so an operator
+inspecting the dashboard can see exactly what state the resolution
+agent left the merge in.
 
 ### 6.2 Ancestor parent (informational, not an anomaly)
 
@@ -236,11 +298,43 @@ base), proceed as if single-parent against any of them. Emit a
 `:dag/multi-parent-no-op` log entry. **No anomaly** — the merge
 succeeded.
 
+### 6.4 Mid-PR-lifecycle conflict (NON_MERGEABLE)
+
+A PR that was MERGEABLE when opened can drift to NON_MERGEABLE when
+something else lands on the base branch first. The release-flow PR
+lifecycle today is:
+
+```text
+open PR
+  → respond to comments (fix, push, resolve)
+  → wait for comments to settle
+  → ensure GitHub merge-state is MERGEABLE
+  → merge
+```
+
+A NON_MERGEABLE state at the "ensure mergeable" gate is the same
+problem class as §6.1: a multi-parent fan-in (the PR's branch + main's
+new state) with conflicts. v2 reuses the §6.1 resolution sub-workflow
+verbatim — same input shape, same agent contract, same terminal
+anomaly. The only differences:
+
+- **Trigger:** PR-lifecycle monitor detects the MERGEABLE→NON_MERGEABLE
+  transition rather than an octopus-merge fault.
+- **Parent set:** `[{:branch <pr-branch>} {:branch <pr-base>}]` —
+  always two-parent, never N-parent.
+- **Output success:** push the resolution commit onto the PR branch;
+  let GitHub re-evaluate mergeability; resume the lifecycle.
+
+Sharing the resolution sub-workflow across the two surfaces is the
+whole point: one merge-conflict-resolution agent, two trigger sites.
+Without this, miniforge would have a hole in the release flow large
+enough to make every multi-day workflow fragile.
+
 ---
 
 ## 7. Integration Points (where it lands in the code)
 
-All on the dag-executor / dag-orchestrator stack from PR #755:
+Five surfaces touch:
 
 - **`branch-registry`** (`components/dag-executor/src/.../branch_registry.clj`):
   - Replace `resolve-base-branch`'s multi-parent anomaly path with a
@@ -252,20 +346,35 @@ All on the dag-executor / dag-orchestrator stack from PR #755:
     `forest?` as informational helpers for plan-quality reporting.
 
 - **`dag-orchestrator`** (`components/workflow/src/.../dag_orchestrator.clj`):
-  - New helper `merge-parent-branches!` that performs the chosen strategy
-    in a temporary worktree, returns either a freshly-created
-    `task-N-base` branch ref or one of the §6 anomalies.
+  - New helper `merge-parent-branches!` that performs the chosen
+    strategy in an **ephemeral** worktree (see §11), returns either the
+    new merge-commit ref OR triggers the resolution sub-workflow per
+    §6.1 on conflict.
   - `task-sub-opts` calls it for multi-parent tasks; `:branch` becomes
-    the merged ref's name. Single-parent tasks keep their current path
+    the merge-commit ref. Single-parent tasks keep their current path
     unchanged.
-  - `execute-plan-as-dag` no longer rejects non-forest plans by default.
-    It rejects when the plan opts in via
-    `:plan/strict-forest? true`, preserving today's behavior for callers
-    that need it (release trains, formal-verification batches).
+  - `execute-plan-as-dag` no longer rejects non-forest plans. v1's
+    forest validator is dropped from the gate path; `validate-forest`
+    survives as an informational helper.
+
+- **Resolution sub-workflow** (new — likely a workflow definition under
+  `components/workflow/src/.../merge_resolution.clj` or a specialized
+  invocation of the standard implement/verify pipeline with a curated
+  agent prompt). Inputs and outputs per §6.1. Reused by both the
+  pre-task path (§6.1 trigger) and the PR-lifecycle path (§6.4 trigger).
+
+- **`pr-lifecycle`** (`components/pr-lifecycle/src/...`):
+  - The PR monitor loop already detects state transitions. Hook the
+    MERGEABLE→NON_MERGEABLE transition to invoke the resolution
+    sub-workflow with the two-parent input shape from §6.4. On success,
+    push the resolution commit and let the lifecycle resume. On
+    `dag-multi-parent-unresolvable`, surface to the human review path
+    that already exists for other lifecycle failures.
 
 - **Plan schema:**
-  - New optional `:task/merge-strategy` enum.
-  - New optional plan-level `:plan/strict-forest?` boolean.
+  - New optional `:task/merge-strategy` enum
+    (`#{:octopus :sequential-cherry-pick}`).
+  - **No** `:plan/strict-forest?` flag (dropped per §5).
 
 ---
 
@@ -286,72 +395,171 @@ multi-task workflows.
 ## 9. Migration / Rollback
 
 - **No data migration.** Plans authored under v1 are forests by
-  construction (the validator rejected anything else); they keep working.
-- **Rollback path:** set `:plan/strict-forest? true` at plan time, or
-  default the strategy to `:fail-on-multi-parent` via config. Either
-  reverts the orchestrator to v1 behavior.
+  construction (the validator rejected anything else); they keep working
+  unchanged in v2.
+- **No rollback flag.** v0.1 proposed a `:plan/strict-forest?` opt-in
+  preserving v1 behavior; iteration round 1 dropped it (§5). If a
+  workflow truly needs forest-only, it should be authored as a forest;
+  no runtime mode duplicates the constraint.
 - **Test additions:**
   - Unit: `merge-parent-branches!` happy path / each anomaly shape /
-    each strategy.
+    each strategy / criss-cross fallback path (§10.3).
   - Integration: 4-task diamond plan running end-to-end through the
     orchestrator with mocked parent branches on a real test git repo.
+  - Integration: induced merge conflict that the resolution sub-workflow
+    succeeds on (round-trip test of §6.1 happy path).
+  - Integration: induced merge conflict that exhausts the resolution
+    budget (round-trip test of the `dag-multi-parent-unresolvable`
+    anomaly).
 
 ---
 
-## 10. Open Questions
+## 10. Iteration Round 1 — Resolved Decisions
 
-1. **Should the merged base be persisted as a permanent branch, or only
-   exist for the lifetime of the task's worktree?** Permanent makes resume
-   easier; ephemeral keeps the branch namespace clean. Lean ephemeral; the
-   commit is reachable from the task's persisted branch via parentage.
+The five §10 questions in v0.1 are all settled in v0.2. Captured here
+for the audit trail; the design above already reflects the answers.
 
-2. **For `:sequential-cherry-pick`, what order do we apply parents?**
-   Probably plan-declaration order (deterministic, author-controlled).
-   Need to specify.
+### 10.1 Merged base lives on an ephemeral branch
 
-3. **Octopus refuses on criss-cross histories.** Do we silently fall back
-   to recursive (two-parent merges chained), or surface the topology and
-   ask the user? Lean fall-back-with-log; criss-cross is rare on
-   well-decomposed work but real.
+- **Decision:** ephemeral.
+- **Rationale:** the merge commit is reachable from the task's persisted
+  branch via parentage — that's the contract the task makes when it
+  pushes its branch with the merge as part of its history. On resume,
+  the commit's parents (and its tree) are recoverable from the persisted
+  branch alone; no separate ref is needed for checkpointing.
+- **Implication for `merge-parent-branches!`:** create the merge commit
+  in a temporary worktree on a temp ref, hand the commit-sha to the
+  caller, then drop the temp ref. The branch namespace stays clean.
+- **Mitigation if a future replay path needs the ref:** if we later
+  discover that some replay or audit flow can't navigate to the merge
+  commit purely via parentage, we add a deterministic `merges/<task-id>`
+  ref written at the same time as the persisted branch. That's a
+  schema-additive change; not a redesign.
 
-4. **Conflict-resolution agent loop?** Future-future: when octopus fails,
-   spawn a sub-workflow whose only job is to land a merge commit
-   resolving the conflict, then re-attempt. Out of scope for v2 but the
-   anomaly shape in §6.1 should leave room for it.
+### 10.2 Cherry-pick order = plan declaration order
 
-5. **What's the right metric for "this is a strict release train, fail
-   on multi-parent"?** A workflow-level config, a per-plan flag, both?
-   Lean per-plan flag; release-train workflows can default-set it.
+- **Decision:** plan-declaration order, same source as octopus parent
+  ordering (§3.1). Deterministic, author-controlled.
+
+### 10.3 Criss-cross histories: silent fallback to recursive merges
+
+- **Decision:** when octopus refuses on a criss-cross topology, the
+  orchestrator silently chains two-parent recursive merges in
+  declaration order (`merge p0 + p1 → tmp`, `merge tmp + p2 → tmp`, …)
+  and emits a `:dag/multi-parent-recursive-fallback` log entry naming
+  the criss-cross detection signal. **No HIL ask.** Each incidental HIL
+  ask is a tax on miniforge's usefulness; criss-cross is rare on
+  well-decomposed plans, and the fallback is well-defined.
+
+### 10.4 Conflict-resolution agent loop is in-scope
+
+- **Decision:** in-scope for v2, not future-future. v0.1 proposed
+  surfacing conflicts as a terminal anomaly to a human; the user
+  pointed out that this would let HIL drive everyday merge-conflict
+  resolution, eroding miniforge's autonomy guarantee. The redesign
+  (§6.1) makes the conflict path automated: spawn a resolution
+  sub-workflow, only surface to a human when the sub-workflow itself
+  exhausts its budget.
+- **Reuse:** the same resolution sub-workflow handles the §6.4
+  PR-lifecycle MERGEABLE→NON_MERGEABLE case. One agent, two trigger
+  sites.
+
+### 10.5 No strict-forest flag
+
+- **Decision:** dropped entirely (§5). Per the user, "not sure why we
+  would want this" — and they're right. v2's automated conflict
+  resolution makes plan-time fail-loud unnecessary. Workflows that
+  genuinely need linear history author plans as forests; no runtime
+  mode duplicates the constraint.
 
 ---
 
-## 11. Out of Scope
+## 11. Open Questions for Iteration Round 2
 
-- Conflict-resolution agent loops (see §10.4).
-- Cross-repo / multi-repo DAGs (orthogonal; covered by repo-dag).
-- Plan-time DAG simplification (e.g., auto-linearizing fan-in into chains
-  when the parents are commutative). Could be a v3 optimization.
-- N-way diff visualization / merge-conflict UI on the dashboard.
+These surfaced during the round-1 design pass and weren't pre-existing
+in v0.1.
+
+1. **Resolution sub-workflow budget shape.** Iteration count? Token
+   budget? Wall-clock? Lean iteration-bounded with a token cap, since
+   that's how the rest of the implementer/verify loops are gated.
+   Default budget needs picking. Lean small (e.g., 3 iterations) since
+   merge-conflict resolution is a focused task — if the agent can't
+   converge in a few rounds the conflict probably needs human eyes.
+
+2. **Resolution sub-workflow's verify gate.** Project-test-suite seems
+   right for the §6.1 pre-task path (the merge has to compile/test
+   before the dependent task runs). For the §6.4 PR-lifecycle path,
+   project tests are also right but slower than just "does git think
+   it's mergeable now?" Should §6.4 short-circuit on
+   GitHub-says-MERGEABLE before running tests, and only run tests
+   if there's a substantive content change?
+
+3. **Curator role for the resolution agent.** Current implement-phase
+   curators check that files were actually written by the agent (the
+   `:curator/no-files-written` failure mode). Does the resolution agent
+   need a specialized curator that also checks the merge-conflict
+   markers were resolved? Lean yes; otherwise budget exhaustion can
+   happen with markers still in the tree.
+
+4. **Per-task-id telemetry for the resolution path.** The
+   per-task-base-chaining v1 events already carry `:task/id`; the
+   resolution sub-workflow's events should be tagged with both the
+   parent task-id (the multi-parent task whose merge needed resolving)
+   and a sub-workflow id, so the dashboard can show "this task needed
+   merge resolution for N iterations" without conflating it with the
+   parent task's own implement work.
+
+5. **Out-of-band conflicts on the persisted branch.** If a parent task
+   force-pushes to its persisted branch between batch completion and
+   the merge attempt (rare in normal flow, possible during retries),
+   the merge sees a different tip than the registry recorded. Detect
+   and refresh, or fail with a fresh anomaly? Lean detect-and-refresh
+   with a log; matches the no-HIL-by-default principle from §10.3.
 
 ---
 
-## 12. Summary
+## 12. Out of Scope
 
-The dogfood proved per-task base chaining v1 works: zero token waste, the
-gate fires before any task runs. It also proved the v1 forest restriction
-blocks every non-trivial spec, because real plans fan in. v2 closes that
-gap by performing a deterministic octopus merge of multi-parent task bases
-at orchestration time, with a per-task override and an explicit fail-loud
-mode for callers that need v1 strictness.
+- **Cross-repo / multi-repo DAGs** — orthogonal; covered by repo-dag.
+- **Plan-time DAG simplification** — auto-linearizing fan-in into
+  chains when the parents are commutative. Could be a v3 optimization
+  once we have data on which fan-ins compose vs. conflict in practice.
+- **N-way diff visualization / merge-conflict UI on the dashboard** —
+  the resolution sub-workflow makes this less urgent (the dashboard
+  shows the resolution agent's edits naturally), but a dedicated
+  conflict view would be a nice-to-have once the substrate is in place.
+- **Conflict-resolution agent loops** were in this list in v0.1; they
+  are now in scope (§6.1 / §10.4).
 
-The work this spec covers is roughly:
+---
 
-1. Extend the plan schema with `:task/merge-strategy` and
-   `:plan/strict-forest?`.
+## 13. Summary
+
+The dogfood proved per-task base chaining v1 works: zero token waste,
+the gate fires before any task runs. It also proved the v1 forest
+restriction blocks every non-trivial spec, because real plans fan in.
+
+v2 closes that gap by performing a deterministic octopus merge of
+multi-parent task bases at orchestration time. When the merge
+conflicts, an automated resolution sub-workflow takes the parents and
+the conflicts as input and produces a clean merge commit; only when
+the sub-workflow itself exhausts its budget does anything surface to
+a human. The same sub-workflow handles mid-PR-lifecycle
+MERGEABLE→NON_MERGEABLE transitions, so the release flow is closed
+end-to-end without HIL touch points in the common case.
+
+The work this spec covers, roughly:
+
+1. Extend the plan schema with `:task/merge-strategy`
+   (`#{:octopus :sequential-cherry-pick}`).
 2. Replace `resolve-base-branch`'s multi-parent anomaly with the new
-   `resolve-multi-parent-base` data shape.
+   `resolve-multi-parent-base` data shape; drop the v1 forest gate.
 3. Implement `merge-parent-branches!` in the orchestrator (octopus +
-   sequential-cherry-pick).
-4. Wire `task-sub-opts` to call the new helper.
-5. Update `execute-plan-as-dag` to gate on `:plan/strict-forest?`.
-6. Tests + a re-run of the 2026-05-03 dogfood to prove the gap closes.
+   sequential-cherry-pick + criss-cross fallback to recursive).
+4. Build the merge-conflict resolution sub-workflow (§6.1 contract).
+5. Wire `task-sub-opts` to call `merge-parent-branches!` for
+   multi-parent tasks.
+6. Hook `pr-lifecycle`'s monitor loop on MERGEABLE→NON_MERGEABLE to
+   invoke the resolution sub-workflow per §6.4.
+7. Tests + a re-run of the 2026-05-03 dogfood (against the same
+   `I-CLASSIFICATION-RUNTIME.md` plan) to prove the gap closes.
