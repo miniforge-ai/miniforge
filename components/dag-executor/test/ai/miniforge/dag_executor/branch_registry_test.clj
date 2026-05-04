@@ -164,16 +164,16 @@
             ordering is the user-controlled ordering source per spec §3.1
             and downstream collapse + first-parent-rule depend on it."
     (let [reg (-> (br/create-registry)
-                  (br/register-branch :a {:branch "task-a" :sha "aaa111"})
-                  (br/register-branch :b {:branch "task-b" :sha "bbb222"})
-                  (br/register-branch :c {:branch "task-c" :sha "ccc333"}))
+                  (br/register-branch :a {:branch "task-a" :commit-sha "aaa111"})
+                  (br/register-branch :b {:branch "task-b" :commit-sha "bbb222"})
+                  (br/register-branch :c {:branch "task-c" :commit-sha "ccc333"}))
           result (br/resolve-multi-parent-base reg [:a :b :c])
           parents (:merge/parents result)]
       (is (= 3 (count parents)))
       (is (= [:a :b :c] (mapv :task/id parents)))
       (is (= [0 1 2] (mapv :order parents)))
       (is (= "task-a" (:branch (first parents))))
-      (is (= "aaa111" (:sha (first parents)))))))
+      (is (= "aaa111" (:commit-sha (first parents)))))))
 
 (deftest resolve-multi-parent-base-skips-unregistered-test
   (testing "resolve-multi-parent-base silently skips unregistered deps —
@@ -181,9 +181,9 @@
             orchestrator detects the size mismatch via :order indices
             and decides whether to fall back or anomaly per its policy."
     (let [reg (-> (br/create-registry)
-                  (br/register-branch :a {:branch "task-a" :sha "aaa"})
+                  (br/register-branch :a {:branch "task-a" :commit-sha "aaa"})
                   ;; :b not registered
-                  (br/register-branch :c {:branch "task-c" :sha "ccc"}))
+                  (br/register-branch :c {:branch "task-c" :commit-sha "ccc"}))
           result (br/resolve-multi-parent-base reg [:a :b :c])
           parents (:merge/parents result)]
       (is (= 2 (count parents)))
@@ -200,8 +200,8 @@
 
 (deftest collapse-duplicate-tips-no-duplicates-test
   (testing "collapse-duplicate-tips is identity when all SHAs are distinct"
-    (let [parents [{:task/id :a :branch "ta" :sha "aaa" :order 0}
-                   {:task/id :b :branch "tb" :sha "bbb" :order 1}]
+    (let [parents [{:task/id :a :branch "ta" :commit-sha "aaa" :order 0}
+                   {:task/id :b :branch "tb" :commit-sha "bbb" :order 1}]
           result (br/collapse-duplicate-tips parents)]
       (is (= parents (:parents result)))
       (is (empty? (:collapsed result))))))
@@ -210,21 +210,21 @@
   (testing "collapse-duplicate-tips keeps the first parent at a SHA and
             drops later parents at the same SHA, recording which absorbed
             which so the orchestrator can log the collapse."
-    (let [parents [{:task/id :a :branch "ta" :sha "shared-sha" :order 0}
-                   {:task/id :b :branch "tb" :sha "unique-sha" :order 1}
-                   {:task/id :c :branch "tc" :sha "shared-sha" :order 2}]
+    (let [parents [{:task/id :a :branch "ta" :commit-sha "shared-sha" :order 0}
+                   {:task/id :b :branch "tb" :commit-sha "unique-sha" :order 1}
+                   {:task/id :c :branch "tc" :commit-sha "shared-sha" :order 2}]
           result (br/collapse-duplicate-tips parents)]
       (is (= [:a :b] (mapv :task/id (:parents result)))
           "first parent at each unique SHA survives")
       (is (= [{:dropped :c :duplicate-of :a}] (:collapsed result))
           "the dropped parent and its absorber are recorded for logging"))))
 
-(deftest collapse-duplicate-tips-treats-nil-sha-as-unknown-test
-  (testing "collapse-duplicate-tips never collapses against a nil :sha —
-            unknown is unknown; the orchestrator must populate SHAs before
-            relying on duplicate collapse."
-    (let [parents [{:task/id :a :branch "ta" :sha nil :order 0}
-                   {:task/id :b :branch "tb" :sha nil :order 1}]
+(deftest collapse-duplicate-tips-treats-nil-commit-sha-as-unknown-test
+  (testing "collapse-duplicate-tips never collapses against a nil
+            :commit-sha — unknown is unknown; the orchestrator must
+            populate SHAs before relying on duplicate collapse."
+    (let [parents [{:task/id :a :branch "ta" :commit-sha nil :order 0}
+                   {:task/id :b :branch "tb" :commit-sha nil :order 1}]
           result (br/collapse-duplicate-tips parents)]
       (is (= 2 (count (:parents result)))
           "two unknown SHAs do not count as duplicates of each other")
@@ -232,7 +232,7 @@
 
 (deftest compute-input-key-is-deterministic-test
   (testing "compute-input-key returns the same hash for the same inputs"
-    (let [parents [{:sha "aaa"} {:sha "bbb"}]
+    (let [parents [{:commit-sha "aaa"} {:commit-sha "bbb"}]
           k1 (br/compute-input-key :task-x :git-merge parents)
           k2 (br/compute-input-key :task-x :git-merge parents)]
       (is (= k1 k2))
@@ -245,9 +245,9 @@
   (testing "compute-input-key produces distinct keys for distinct inputs —
             this is what makes the namespaced ref name stable across
             replays AND distinguishable across different plans / parents."
-    (let [parents-1 [{:sha "aaa"} {:sha "bbb"}]
-          parents-2 [{:sha "aaa"} {:sha "ccc"}]
-          parents-reordered [{:sha "bbb"} {:sha "aaa"}]]
+    (let [parents-1 [{:commit-sha "aaa"} {:commit-sha "bbb"}]
+          parents-2 [{:commit-sha "aaa"} {:commit-sha "ccc"}]
+          parents-reordered [{:commit-sha "bbb"} {:commit-sha "aaa"}]]
       (is (not= (br/compute-input-key :t :git-merge parents-1)
                 (br/compute-input-key :t :git-merge parents-2))
           "different parent SHAs ⇒ different key")
@@ -262,3 +262,22 @@
           "parent ORDER matters — first-parent rule means a different
            order would produce a different merge commit, so the key
            must reflect the order"))))
+
+(deftest compute-input-key-throws-on-nil-commit-sha-test
+  (testing "compute-input-key fails fast when any parent's :commit-sha is
+            nil. This is a programming error — the orchestrator must
+            populate commit SHAs at registration time. Silently producing
+            a key from an ambiguous input would let two genuinely different
+            merges collide on the same ref."
+    (let [bad-parents [{:task/id :a :commit-sha "aaa"}
+                       {:task/id :b :commit-sha nil}]]
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                            #"parent commit-sha is nil"
+                            (br/compute-input-key :task-x :git-merge bad-parents)))
+      (try
+        (br/compute-input-key :task-x :git-merge bad-parents)
+        (catch clojure.lang.ExceptionInfo e
+          (let [data (ex-data e)]
+            (is (= [:b] (:parents-with-nil-sha data))
+                "ex-data names the offending parents so the orchestrator
+                 can log/escalate without re-deriving them")))))))

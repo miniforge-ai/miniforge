@@ -35,11 +35,16 @@
 
    Layer 0: Pure registry operations (create / register / lookup)
    Layer 1: Resolution (turn a task's dep set into a base-branch decision)
-   Layer 2: Forest validation (informational helpers; the v1 plan-time
-            gate is dropped in v2 — multi-parent DAGs are now the
-            normal path, see I-DAG-MULTI-PARENT-MERGE.md)
+   Layer 2: Forest validation. v1 used these as a hard plan-time gate;
+            v2 (per I-DAG-MULTI-PARENT-MERGE.md) drops the gate. As of
+            this Stage 1A, however, the orchestrator still calls
+            `validate-dag-forest` for plan-time rejection — the gate
+            is dropped in Stage 1B, alongside the orchestrator wiring
+            that consumes Layer 3. After 1B these become informational
+            helpers for plan-quality reporting.
    Layer 3: Multi-parent base resolution primitives (v2 — pure-data
-            inputs to the orchestrator's git-using `merge-parent-branches!`)"
+            inputs to the orchestrator's git-using `merge-parent-branches!`).
+            Helpers ship in 1A; orchestrator consumes them in 1B."
   (:require [ai.miniforge.messages.interface :as messages]
             [clojure.string :as str])
   (:import (java.security MessageDigest)))
@@ -210,12 +215,18 @@
 
    Returns:
 
-       {:merge/parents [{:task/id <id> :branch <name> :sha <sha> :order N}]}
+       {:merge/parents
+         [{:task/id <id> :branch <name> :commit-sha <sha> :order N}]}
 
    Parents appear in `task-deps` declaration order (the user-controlled
    ordering source per spec §3.1). The orchestrator's git layer is
    responsible for ancestor collapse (which needs `git merge-base
    --is-ancestor`); this function returns the full pre-collapse list.
+
+   Uses the `:commit-sha` key to match the existing branch/workspace
+   plumbing convention (`workspace.clj`'s persist result, the OCI/docker
+   adapters, etc. all use `:commit-sha`). The orchestrator must register
+   each completed task's commit SHA under that key.
 
    Any dep not registered yet is skipped — same fail-soft posture as
    `resolve-base-branch`'s single-parent path. The orchestrator can
@@ -230,17 +241,18 @@
   (let [resolved (->> task-deps
                       (map-indexed (fn [order task-id]
                                      (when-let [info (lookup-branch registry task-id)]
-                                       {:task/id task-id
-                                        :branch  (:branch info)
-                                        :sha     (:sha info)
-                                        :order   order})))
+                                       {:task/id    task-id
+                                        :branch     (:branch info)
+                                        :commit-sha (:commit-sha info)
+                                        :order      order})))
                       (keep identity)
                       vec)]
     (when (seq resolved)
       {:merge/parents resolved})))
 
 (defn collapse-duplicate-tips
-  "Drop later parents whose `:sha` matches an earlier parent's `:sha`.
+  "Drop later parents whose `:commit-sha` matches an earlier parent's
+   `:commit-sha`.
 
    Returns:
 
@@ -250,16 +262,16 @@
    `:order` indices on the surviving parents are unchanged so callers
    can detect collapse by comparing input/output counts.
 
-   Treats nil `:sha` as 'unknown' — never collapses against an
+   Treats nil `:commit-sha` as 'unknown' — never collapses against an
    unknown SHA. Callers that want strict collapse should ensure SHAs
    are populated first."
   [parents]
   (loop [remaining parents
-         seen-shas {}                   ; sha → task-id (the absorber)
+         seen-shas {}                   ; commit-sha → task-id (the absorber)
          survivors (transient [])
          collapsed (transient [])]
     (if-let [p (first remaining)]
-      (let [sha (:sha p)]
+      (let [sha (:commit-sha p)]
         (if (and (some? sha) (contains? seen-shas sha))
           (recur (rest remaining)
                  seen-shas
@@ -294,11 +306,24 @@
    new ones.
 
    Truncated to 16 hex chars (64 bits) — enough collision resistance
-   for the per-task ref namespace, short enough to read in logs."
+   for the per-task ref namespace, short enough to read in logs.
+
+   Throws when any parent's `:commit-sha` is nil — this is a
+   programming error (the orchestrator must populate commit SHAs
+   before computing the key) and silently producing a key from an
+   ambiguous input would let two genuinely different merges collide
+   on the same ref. `pr-str` is used per-component so the
+   canonical encoding stays unambiguous across all input types."
   [task-id strategy parents]
-  (let [canonical (str (pr-str task-id) "|"
-                       (pr-str strategy) "|"
-                       (str/join "," (map :sha parents)))]
+  (when-let [missing (seq (filter (comp nil? :commit-sha) parents))]
+    (throw (ex-info "compute-input-key: parent commit-sha is nil"
+                    {:task-id task-id
+                     :strategy strategy
+                     :parents-with-nil-sha (mapv :task/id missing)})))
+  (let [canonical (str/join "|"
+                            [(pr-str task-id)
+                             (pr-str strategy)
+                             (str/join "," (map (comp pr-str :commit-sha) parents))])]
     (subs (hex-digest canonical) 0 16)))
 
 ;------------------------------------------------------------------------------ Rich Comment
