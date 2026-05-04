@@ -76,3 +76,15 @@
       (is (str/includes? output "Upstream: origin/main"))
       (is (str/includes? output "detached HEAD"))
       (is (str/includes? output "uncommitted changes")))))
+
+(deftest assert-runtime-alignment-normalizes-parent-segments-test
+  (testing "source-dir alignment accepts normalized paths under the source root"
+    (let [source-root (temp-repo-root)
+          nested-work (str (fs/path source-root "work" "nested"))]
+      (fs/create-dirs nested-work)
+      (#'sut/assert-runtime-alignment!
+       {:spec/source-dir (str (fs/path nested-work ".."))}
+       {:source-root source-root
+        :worktree-path "/tmp/runtime-worktree"
+        :execution/opts {:worktree-path "/tmp/runtime-worktree"}})
+      (is true))))

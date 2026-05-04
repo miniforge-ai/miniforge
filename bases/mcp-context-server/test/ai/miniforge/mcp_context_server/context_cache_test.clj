@@ -237,6 +237,21 @@
             (is (re-find #"components/alpha/src/demo/core\.clj"
                          (get-in result [:content 0 :text])))))))))
 
+(deftest handle-context-glob-source-root-fallback-prunes-git-test
+  (testing "filesystem glob fallback ignores .git contents"
+    (with-temp-dir
+      (fn [dir]
+        (let [repo-root (str dir "/repo")]
+          (.mkdirs (io/file (str repo-root "/components/alpha/src/demo")))
+          (.mkdirs (io/file (str repo-root "/.git/objects/aa")))
+          (spit (str repo-root "/components/alpha/src/demo/core.clj") "(ns demo.core)")
+          (spit (str repo-root "/.git/objects/aa/hidden.clj") "(ns hidden)")
+          (cache/load-cache! dir repo-root)
+          (let [result (cache/handle-context-glob {"pattern" "**/*.clj"})
+                text (get-in result [:content 0 :text])]
+            (is (re-find #"components/alpha/src/demo/core\.clj" text))
+            (is (not (re-find #"\.git/objects/aa/hidden\.clj" text)))))))))
+
 (deftest flush-misses-roundtrip-test
   (testing "flush-misses! writes misses to context-misses.edn"
     (with-temp-dir

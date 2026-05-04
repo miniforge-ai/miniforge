@@ -104,7 +104,7 @@
   (try
     (let [args (cond-> ["rg" "--no-heading" "-n" pattern-str]
                  path-or-glob (conj path-or-glob))
-          {:keys [out]} (apply shell/sh (concat [:dir (source-root)] args))]
+          {:keys [out]} (apply shell/sh (concat args [:dir (source-root)]))]
       (when-not (str/blank? out)
         (->> (str/split-lines out)
              (map (fn [line]
@@ -124,12 +124,18 @@
   [pattern]
   (try
     (let [root (io/file (source-root))
-          root-path (.getCanonicalPath root)
-          prefix-len (inc (count root-path))
-          matches (->> (file-seq root)
+          root-path (.toPath (.getAbsoluteFile root))
+          matches (->> (tree-seq (fn [^java.io.File file]
+                                   (and (.isDirectory file)
+                                        (not= ".git" (.getName file))))
+                                 #(.listFiles ^java.io.File %)
+                                 root)
+                       rest
                        (filter #(.isFile ^java.io.File %))
-                       (map #(.getCanonicalPath ^java.io.File %))
-                       (map #(subs % prefix-len))
+                       (map (fn [^java.io.File file]
+                              (-> root-path
+                                  (.relativize (.toPath (.getAbsoluteFile file)))
+                                  str)))
                        (filter #(glob-matches? pattern %))
                        sort
                        vec)]

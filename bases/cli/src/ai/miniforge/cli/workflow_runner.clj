@@ -148,12 +148,18 @@
 
 (defn- normalize-path
   [path]
-  (some-> path fs/absolutize str))
+  (when path
+    (let [resolved (-> path
+                       fs/path
+                       fs/absolutize)]
+      (str (if (fs/exists? resolved)
+             (fs/canonicalize resolved)
+             (.normalize resolved))))))
 
 (defn- source-dir-under-root?
   [source-dir source-root]
-  (let [source-dir-path (some-> source-dir fs/absolutize fs/path)
-        source-root-path (some-> source-root fs/absolutize fs/path)]
+  (let [source-dir-path (some-> source-dir normalize-path fs/path)
+        source-root-path (some-> source-root normalize-path fs/path)]
     (or (nil? source-dir-path)
         (nil? source-root-path)
         (.startsWith source-dir-path source-root-path))))
