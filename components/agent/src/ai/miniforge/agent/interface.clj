@@ -186,6 +186,12 @@
   "Collect files written during the agent session into a synthetic code artifact."
   file-artifacts/collect-written-files)
 
+(def rehydrate-files
+  "Reconstitute :code/files from recorded paths by reading the worktree.
+   Used by downstream phases when the implement phase persisted only
+   paths-as-metadata and the worktree has since been committed clean."
+  file-artifacts/rehydrate-files)
+
 ;------------------------------------------------------------------------------ Layer 3
 ;; Tool supervision
 

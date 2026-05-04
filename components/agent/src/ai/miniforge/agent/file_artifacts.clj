@@ -196,6 +196,49 @@
       (catch Exception _
         nil))))
 
+(defn rehydrate-files
+  "Read file content from `working-dir` for each path in `paths`,
+   producing the `:code/files` vector callers expect.
+
+   Used when an upstream phase persisted only paths-as-metadata
+   (`:code/file-paths` / `:code/file-actions` from
+   `lightweight-curated-artifact`) and a downstream phase needs the
+   content reconstituted. After the implement phase boundary persists
+   dirty work as a commit on the task branch, the worktree is clean
+   at HEAD — `git status --porcelain` returns empty and the existing
+   `collect-written-files` fallback yields no content. This function
+   reads the still-on-disk content directly so the reviewer (and any
+   later phase) can see what landed.
+
+   `paths` is the sequence of file paths to read (relative to
+   `working-dir`). `actions` is the parallel sequence of action
+   keywords (`:create` / `:modify` / `:delete`); when omitted, every
+   present path is treated as `:modify`. For `:delete` actions the
+   content is the empty string. Files recorded in `paths` but absent
+   from disk are skipped — better to under-report than to invent
+   content that no longer exists.
+
+   Returns a vector of `{:path :content :action}` maps, possibly
+   empty. Returns nil when `working-dir` is nil."
+  ([working-dir paths]
+   (rehydrate-files working-dir paths nil))
+  ([working-dir paths actions]
+   (when working-dir
+     (let [action-by-path (zipmap paths (or actions (repeat :modify)))]
+       (->> paths
+            (keep (fn [path]
+                    (let [action (get action-by-path path :modify)
+                          file   (io/file working-dir path)]
+                      (cond
+                        (= :delete action)
+                        {:path path :content "" :action :delete}
+
+                        (.exists file)
+                        {:path path :content (slurp file) :action action}
+
+                        :else nil))))
+            vec)))))
+
 (defn- read-file-via-executor
   "Read a file's content from the capsule. Returns empty string on failure."
   [exec! executor env-id working-dir path]

@@ -141,6 +141,58 @@
         (finally
           (delete-tree! dir))))))
 
+(deftest rehydrate-files-test
+  (testing "reads file content from disk for each recorded path"
+    (let [dir (temp-dir)]
+      (try
+        (write-file! dir "src/new.clj" "(ns new)")
+        (write-file! dir "src/changed.clj" "(ns changed)")
+        (is (= [{:path "src/new.clj"     :content "(ns new)"     :action :create}
+                {:path "src/changed.clj" :content "(ns changed)" :action :modify}]
+               (sut/rehydrate-files dir
+                                    ["src/new.clj" "src/changed.clj"]
+                                    [:create :modify])))
+        (finally
+          (delete-tree! dir)))))
+
+  (testing "delete actions emit empty content without touching disk"
+    (let [dir (temp-dir)]
+      (try
+        (is (= [{:path "src/gone.clj" :content "" :action :delete}]
+               (sut/rehydrate-files dir ["src/gone.clj"] [:delete])))
+        (finally
+          (delete-tree! dir)))))
+
+  (testing "paths absent from disk are skipped rather than invented"
+    (let [dir (temp-dir)]
+      (try
+        (write-file! dir "src/here.clj" "(ns here)")
+        (is (= [{:path "src/here.clj" :content "(ns here)" :action :modify}]
+               (sut/rehydrate-files dir
+                                    ["src/here.clj" "src/missing.clj"]
+                                    [:modify :modify])))
+        (finally
+          (delete-tree! dir)))))
+
+  (testing "default action is :modify when no actions are supplied"
+    (let [dir (temp-dir)]
+      (try
+        (write-file! dir "src/x.clj" "(ns x)")
+        (is (= [{:path "src/x.clj" :content "(ns x)" :action :modify}]
+               (sut/rehydrate-files dir ["src/x.clj"])))
+        (finally
+          (delete-tree! dir)))))
+
+  (testing "returns nil for nil working-dir"
+    (is (nil? (sut/rehydrate-files nil ["src/x.clj"] [:modify]))))
+
+  (testing "returns empty vector when no recorded path is present on disk"
+    (let [dir (temp-dir)]
+      (try
+        (is (= [] (sut/rehydrate-files dir ["src/missing.clj"] [:modify])))
+        (finally
+          (delete-tree! dir))))))
+
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
   (test/run-tests 'ai.miniforge.agent.file-artifacts-test)
