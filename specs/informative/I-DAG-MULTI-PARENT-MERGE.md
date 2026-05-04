@@ -6,12 +6,37 @@
 
 # I-DAG-MULTI-PARENT-MERGE — Multi-Parent DAG Merge Strategy (v2 of Per-Task Base Chaining)
 
-**Status:** Informative — iteration round 2 complete; ready for implementation.
+**Status:** Informative — iteration round 3 complete; ready for implementation.
 **Date:** 2026-05-03
-**Version:** 0.3.0
+**Version:** 0.4.0
 
 **Changelog:**
 
+- **0.4.0** — Iteration round 3: settled the five §11 open questions
+  from v0.3. Smaller revision than round-2; mostly captures decisions
+  rather than reshaping the design.
+  - **Curator is an extension** of the existing curator multimethod
+    (§7.3), not a new component. If a future need forces a split, it
+    will require refactoring the existing polymorphism — accepted
+    cost; don't pre-emptively split.
+  - **Policy trumps default agent prompts** (§6.1.3 added). Build
+    descriptive defaults, but the resolution agent's instructions
+    are policy-overridable so governed deployments can substitute
+    their own.
+  - **No artificial max-concurrent cap on resolution sub-workflows.**
+    Use Clojure's concurrency primitives correctly and trust default
+    pools (§3.4 added). Documents the side-effect-free constraint
+    on `dosync` and the agent-pattern for controlled side effects.
+  - **Per-run cache key path is correct for v2.** Highest-value
+    duplication is intra-run replay/retry, which the per-run path
+    serves perfectly. Cross-run sharing is a schema-additive v3
+    optimization (a `global/<input-key>` ref under the same
+    namespace), not a correctness issue today (§10.15).
+  - **Granular cost breakdown preserved** (§3.5 added). Multi-
+    dimensional cost views require the components to be visible
+    distinctly, not rolled up into aggregates. Resolution sub-
+    workflow tokens roll into the parent task's totals AND surface
+    separately under `:cost/breakdown :task/merge-resolution`.
 - **0.3.0** — Iteration round 2: settled all five §11 open questions
   (resolution budget shape, verify gate, curator role, telemetry
   tagging, out-of-band parent tip changes) AND folded in a technical
@@ -246,6 +271,85 @@ run-id as the "datacenter" component and plan-id/task-id as the
 upper-bit slots) would give the same ordering naturally. Either path
 is acceptable; the contract is the dashboard-sortable
 `<run>.<plan>.<task>.<resolution>` key.
+
+### 3.4 Concurrency model
+
+Multiple resolution sub-workflows can run simultaneously when
+sibling multi-parent tasks at the same stratum each hit a conflict.
+The orchestrator does NOT impose a max-concurrent cap; instead, it
+relies on Clojure's concurrency primitives matched to the access
+pattern:
+
+- **Atoms** for the registry's `task-id → branch-info` map and any
+  per-workflow shared state with synchronous, independent updates.
+- **Refs + STM (`dosync`)** for any case where multiple registry
+  updates must compose atomically (e.g. registering a multi-parent
+  merge result alongside the parents' per-task entries). Critical
+  caveat: aborted transactions retry, so the body of a `dosync` MUST
+  be side-effect free. Any IO (event emission, log writes, git
+  invocations) belongs OUTSIDE the transaction or inside an agent
+  send invoked from within it.
+
+  ```clojure
+  (dosync
+    ;; pure transactional updates only:
+    (alter task-registry assoc task-id branch-info)
+    (alter merge-cache assoc input-key resolution-ref)
+    ;; controlled side effect — agent send is queued and executed
+    ;; only after the transaction commits, so retries are safe:
+    (send log-agent emit-event {:event/path ... :merge/input-key ...}))
+  ```
+
+- **Agents** for the resolution-sub-workflow scheduling pool.
+  Asynchronous, independent dispatch. Each resolution sub-workflow
+  runs on its own thread via `send-off` (it does blocking IO — git,
+  agent calls, file system); the JVM thread pool sizing is the
+  default, not orchestrator-tuned.
+- **Vars** for context-thread-local config (e.g. `*current-run-id*`
+  bound around a workflow execution).
+
+Avoid blocking primary core.async go-blocks on long-running work;
+the resolution sub-workflow uses `send-off` or a dedicated thread,
+not the core.async dispatch pool.
+
+The reason for no max-concurrent cap: artificial caps starve
+legitimate work as often as they prevent overload, and they hide
+the real cost signal (which would otherwise show up as LLM rate-
+limit anomalies on a real bottleneck rather than as queue depth on
+an arbitrary line in the orchestrator). If telemetry surfaces a
+case where the runtime IS being overwhelmed by parallel resolution
+sub-workflows, that's the signal to tune — not pre-emptively cap
+without data.
+
+### 3.5 Cost telemetry shape
+
+Each task's metrics include a `:cost/breakdown` keyed by phase or
+sub-phase, NOT just a single rolled-up token total:
+
+```clojure
+{:cost/total      <tokens>
+ :cost/breakdown  {:task/explore           N
+                   :task/plan              M
+                   :task/implement         K
+                   :task/verify            L
+                   :task/merge-resolution  P
+                   :task/release           Q}
+ :cost/iterations {:task/implement         I-implement
+                   :task/merge-resolution  I-resolution}}
+```
+
+The resolution sub-workflow's tokens roll into the parent task's
+`:task/merge-resolution` slot AND remain visible separately on the
+sub-workflow's own metrics record (events tagged per §3.3). This
+gives multi-dimensional cost views: per-run aggregate, per-task
+breakdown, per-phase aggregate, per-stratum aggregate.
+
+The dashboard surfacing this answers questions like "what fraction
+of run cost is coming from merge-conflict resolution?" without
+requiring the operator to drill into individual task records.
+Granular components are preserved on purpose — rolling them up
+into aggregates loses the placement-of-attention signal that's the
+whole reason for collecting the data.
 
 ---
 
@@ -512,6 +616,26 @@ checks:
 
 Both checks are pure-data inspections of the worktree state; they
 don't need the agent's narration to fire.
+
+#### 6.1.3 Agent prompt scaffolding (policy-overridable)
+
+The resolution agent ships with descriptive default instructions
+(roughly: "Here are the conflicting paths, the parent SHAs, the raw
+git stderr, and the on-disk worktree with conflict markers. Resolve
+the markers and explain each resolution. Don't pick `ours`/`theirs`
+without justification."). These defaults are tunable based on
+iteration-count telemetry from §10.6 once we have dogfood data.
+
+**Policy trumps defaults.** When a workflow loads under a policy
+pack that defines a merge-resolution prompt template, that template
+overrides the default. Governed deployments often have specific
+language they need the resolution agent to produce (e.g., compliance-
+flavored explanations of every resolution decision, or restrictions
+on what the agent can do during resolution). The policy interface
+already governs prompts elsewhere; the resolution agent reuses that
+plumbing rather than introducing its own override surface.
+
+This is the round-3 question 2 answer — see §10.13.
 
 ### 6.2 Ancestor parent (informational, not an anomaly)
 
@@ -976,58 +1100,106 @@ all answers; this section preserves the reasoning trail.
     Replays of the same effective input reuse the same ref instead
     of accumulating new ones.
 
+### 10.12 Curator integration is an extension, not a new component
+
+- **User direction:** "Extension. If we need to move to components
+  then we would need refactoring of the existing polymorphism."
+- **Decision:** the merge-resolution curator extends the existing
+  curator multimethod with the §6.1.2 checks
+  (`:curator/markers-not-resolved`, `:curator/recurring-conflict`).
+  No new component. Default-on for the resolution sub-workflow only;
+  the existing implement loop doesn't see the new checks (where they
+  would just be noise — there are no conflict markers in normal
+  implement output).
+- **Refactor cost accepted:** if a future need forces a curator
+  split into a separate component, the existing polymorphism will
+  need refactoring. That's accepted as future cost; don't pre-
+  emptively split.
+
+### 10.13 Resolution agent prompt: descriptive defaults, policy-overridable
+
+- **User direction:** "I am not sure. It is tempting to give
+  descriptive instructions. Although I am also aware that policy
+  should trump our defaults if policy exists."
+- **Decision:** ship descriptive default prompt scaffolding (§6.1.3),
+  tune it via dogfood telemetry from §10.6 (iteration counts,
+  resolution success rates). When a policy pack is loaded that
+  defines a merge-resolution prompt template, the policy template
+  takes precedence — same plumbing the policy interface already uses
+  to govern other agent prompts. Governed deployments often need
+  specific resolution-justification language (compliance, audit) or
+  restrictions on agent behavior; this gives them a hook without
+  miniforge defaults getting in the way.
+
+### 10.14 No artificial max-concurrent cap; use Clojure primitives correctly
+
+- **User direction:** "Unsure we should have a max concurrent cap
+  vs a sane management of thread pools .. or use core async well
+  and trust default pools. Avoid starvation, avoid blocking all
+  that much. Clojure has great concurrency primitives we can use
+  for these. [Refs / Agents / Atoms / Vars / STM, with note that
+  aborted transactions replay so dosync must be side-effect free.]"
+- **Decision:** §3.4 documents the concurrency model. No
+  max-concurrent cap; each resolution sub-workflow runs on its own
+  thread (`send-off`) with default JVM thread-pool sizing.
+  Clojure primitives are matched to access pattern (atoms / refs+STM
+  / agents / vars). The side-effect-free constraint on `dosync`
+  bodies is documented explicitly with the agent-send pattern for
+  controlled side effects.
+- **Why no cap:** artificial caps starve legitimate work as often
+  as they prevent overload, and they hide the real cost signal.
+  Cost surfaces correctly via §3.5 telemetry; LLM rate limits
+  surface as their own anomalies. If telemetry shows the runtime IS
+  being overwhelmed in practice, that's the signal to tune — not
+  pre-emptively cap without data.
+
+### 10.15 Per-run cache key is correct for v2; cross-run is a v3 optimization
+
+- **User direction:** "Cache keys should be chosen for optimal
+  caching, is `:merge/input-key` better than a more specialized
+  key? Or would it result in a high rate of cache breaks? .. where
+  is the duplication the highest value to eliminate?"
+- **Decision:** `refs/miniforge/dag-base/<run-id>/<task-id>/<input-key>`
+  stays as v2's cache path. Reasoning:
+  - **Highest-value duplication is intra-run:** resume from
+    checkpoint, retry after a transient failure, replay of the same
+    workflow run. The per-run path serves these perfectly.
+  - **Cross-run cache hits** (re-running the same plan from scratch)
+    require stable plan-id / task-id across runs, which depends on
+    plan compilation reproducibility — true for some plan sources,
+    not all. Hit rate would be low and unpredictable.
+  - **Stale-cache risk:** a cross-run cache shadows under-tested
+    older resolutions when policy or agent versions change.
+    Per-run scoping eliminates that whole class of footgun.
+- **Schema-additive v3 path:** a global content-addressable ref
+  (`refs/miniforge/dag-base/global/<input-key>`) under the same
+  namespace would let cross-run sharing happen explicitly when
+  something opts in. Defer until v2 telemetry shows whether the
+  duplication exists in practice.
+
+### 10.16 Cost breakdown preserves granular components
+
+- **User direction:** "We should have the ability to view cost along
+  many dimensions. So preserve the components, it is how we can see
+  where to place our attention on performance and cost improvements.
+  If it is not granular enough, we will be missing the data needed
+  to identify where the problem is."
+- **Decision:** §3.5 shape preserves per-phase components in
+  `:cost/breakdown`. Resolution sub-workflow tokens roll into the
+  parent task's `:task/merge-resolution` slot AND remain visible
+  separately on the sub-workflow's own metrics. Multi-dimensional
+  views (per-run, per-task, per-phase, per-stratum) can all be
+  derived without losing the placement-of-attention signal.
+
 ---
 
-## 11. Open Questions for Iteration Round 3
+## 11. Iteration Closure
 
-Round 1's five questions and Round 2's five questions are all settled
-(§10.1–§10.10) plus the GPT-5.5 review issues (§10.11). These are the
-remaining design questions surfaced during the v0.3 pass:
-
-1. **Curator integration shape.** The §6.1.2 curator wraps the
-   resolution agent's iteration loop. Is it a new component (a
-   sibling to `phase-software-factory`'s implementer curator) or an
-   extension of the existing curator multimethod? Lean extension —
-   the merge-resolution checks (`:curator/markers-not-resolved`,
-   `:curator/recurring-conflict`) compose naturally with the existing
-   `:curator/no-files-written` check. Default-on for the resolution
-   sub-workflow only; off for the regular implement loop where it
-   would be noise.
-
-2. **Resolution agent prompt scaffolding.** The agent gets the
-   conflict info, the parent SHAs, the strategy. What prompt-template
-   gives the best resolution rate? Open question for the
-   implementation phase — start with a literal "here are the
-   conflicts, resolve them and explain the resolution" prompt, tune
-   based on iteration-count telemetry from §10.6.
-
-3. **Concurrent resolution sub-workflows.** Two sibling tasks at the
-   same stratum could both hit conflicts and trigger resolution
-   sub-workflows simultaneously. Each gets its own ephemeral worktree
-   (different paths) and its own resolution agent (different sub-
-   workflow ids), so they don't fight. But they may compete for LLM
-   rate-limit budget. Worth a max-concurrent cap on the resolution
-   pool? Defer to dogfood telemetry.
-
-4. **Resolution success — should we also push the resolution to a
-   persistent ref?** §7.2's namespaced ref already lives at
-   `refs/miniforge/dag-base/<run-id>/<task-id>/<input-key>`, which is
-   per-run. If a future replay of the same run hits the same input-
-   key, it reuses. But cross-run replay (e.g., re-running an entire
-   workflow from scratch with the same plan) gets a different
-   `<run-id>` and re-resolves from scratch. Acceptable for v2 (the
-   resolution work isn't free but isn't catastrophic), but worth
-   considering whether the input-key alone (without `<run-id>`) is a
-   better cache key.
-
-5. **Resolution-sub-workflow telemetry attribution to the parent
-   task's cost report.** The parent task's metrics include implement
-   tokens, verify wall-clock, etc. Resolution-sub-workflow tokens
-   should roll up into the parent task's totals (the merge IS work
-   the parent task incurred), but ALSO be visible separately so the
-   dashboard can answer "where is the cost coming from in this run?"
-   Likely a `:cost/breakdown {:task/implement N :task/verify M
-   :task/merge-resolution K}` shape. Worth specifying explicitly?
+Three rounds of iteration captured 16 design decisions (§10.1–§10.16).
+The remaining work is implementation, not further design. Any new
+questions surfaced during implementation should land as PR review
+comments on the v2 work-spec PR rather than as another spec round —
+the design is settled enough to start coding against.
 
 ---
 
