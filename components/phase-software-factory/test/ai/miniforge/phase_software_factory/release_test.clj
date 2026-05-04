@@ -32,6 +32,7 @@
    [clojure.java.shell :as shell]
    [babashka.fs :as fs]
    [ai.miniforge.event-stream.interface :as es]
+   [ai.miniforge.logging.interface :as log]
    [ai.miniforge.phase-software-factory.release :as release]
    [ai.miniforge.phase.interface :as phase]
    [ai.miniforge.release-executor.interface :as release-executor]))
@@ -218,7 +219,126 @@
           (is (false? (get-in result [:phase :result :success]))
               "Release should fail when write fails")
           (is (some? (get-in result [:phase :result :error]))
-              "Error should be present in result")))))))
+              "Error should be present in result")
+          (is (seq (get-in result [:phase :result :error :data :errors]))
+              "Executor :errors must surface in :phase :result :error :data so the next dogfood run can diagnose without staring at the snapshot")))))))
+
+(deftest release-surfaces-thrown-exception-in-result-test
+  (testing "release phase preserves the exception class+message+ex-data when execute-release-phase throws"
+    ;; Pre-2026-05-04 the (catch Exception e (response/failure e)) wrapped the
+    ;; exception but emitted no log line, so the dogfood saw a 0ms phase fail
+    ;; with no actionable detail. The diagnostic-logging change keeps the same
+    ;; wrap-and-return behavior — we just guard that the exception-shaped
+    ;; failure carries enough data on it for a post-mortem.
+    (with-test-worktree
+      (fn [worktree]
+        (with-redefs [release-executor/execute-release-phase
+                      (fn [_ws _ec _opts]
+                        (throw (ex-info "release-executor blew up"
+                                        {:reason :gh-cli-missing
+                                         :tried [:gh-auth-status]})))]
+          (let [ctx (create-base-context worktree)
+                ctx-with-config (assoc ctx :phase-config {:phase :release})
+                interceptor (phase/get-phase-interceptor {:phase :release})
+                result ((:enter interceptor) ctx-with-config)
+                error (get-in result [:phase :result :error])]
+            (is (= "release-executor blew up" (:message error))
+                "exception message must be preserved")
+            (is (= :gh-cli-missing (get-in error [:data :reason]))
+                "ex-data must be preserved on the wrapped failure")))))))
+
+;------------------------------------------------------------------------------ Layer 1: Diagnostic-emission regression tests
+;;
+;; These tests pin the observability behavior added 2026-05-04. The
+;; production fix for the dogfood release-phase silent fail is two-part:
+;;   1. Ensure the release-executor receives a non-nil logger even when
+;;      the workflow ctx is missing :execution/logger.
+;;   2. Emit log/error entries around the failure paths in enter-release
+;;      so the next dogfood run yields the actual cause instead of a
+;;      generic :anomalies.phase/agent-failed.
+;; A future refactor that drops either guarantee should fail here, not
+;; only surface during the next dogfood post-mortem.
+
+(defn- capturing-logger
+  "Build a logger whose entries are appended to `entries-atom`. Used by
+   the diagnostic-emission regression tests to assert log/error fires
+   on the failure paths of enter-release."
+  [entries-atom]
+  (log/create-logger
+    {:min-level :debug
+     :output    (fn [entry] (swap! entries-atom conj entry))}))
+
+(defn- entry-events
+  "Pull the :log/event keyword off every captured log entry — what the
+   tests assert against."
+  [entries-atom]
+  (into #{} (keep :log/event) @entries-atom))
+
+(deftest release-passes-non-nil-logger-to-executor-when-ctx-logger-absent-test
+  (testing "build-executor-context falls back to the phase-local logger when :execution/logger is absent"
+    ;; Pre-fix the release-executor ran with logger=nil whenever the
+    ;; workflow ctx did not include :execution/logger, which silenced
+    ;; the executor's entire phase-started → fail → phase-completed log
+    ;; chain (observed: 2026-05-03 dogfood, release fail in 0ms with no
+    ;; release-executor lines emitted at all).
+    (with-test-worktree
+      (fn [worktree]
+        (let [captured-context (atom nil)]
+          (with-redefs [release-executor/execute-release-phase
+                        (fn [_ws ec _opts]
+                          (reset! captured-context ec)
+                          {:success? true
+                           :artifacts [{:artifact/id (random-uuid)
+                                        :artifact/type :release
+                                        :artifact/content {}}]
+                           :metrics {:files-written 0}})]
+            (let [ctx (-> (create-base-context worktree)
+                          (dissoc :execution/logger))
+                  ctx-with-config (assoc ctx :phase-config {:phase :release})
+                  interceptor (phase/get-phase-interceptor {:phase :release})]
+              ((:enter interceptor) ctx-with-config)
+              (is (some? @captured-context)
+                  "executor must be invoked")
+              (is (some? (:logger @captured-context))
+                  ":logger must be non-nil even though the workflow ctx had no :execution/logger"))))))))
+
+(deftest release-logs-executor-failure-test
+  (testing ":release/executor-failed log/error fires when execute-release-phase returns {:success? false}"
+    (with-test-worktree
+      (fn [worktree]
+        (let [entries (atom [])
+              logger  (capturing-logger entries)]
+          (with-redefs [release-executor/execute-release-phase
+                        (fn [_ws _ec _opts]
+                          {:success? false
+                           :errors [{:type :gh-auth-failed
+                                     :message "gh CLI not authenticated"}]
+                           :metrics {:files-written 0}})]
+            (let [ctx (-> (create-base-context worktree)
+                          (assoc :execution/logger logger)
+                          (assoc :phase-config {:phase :release}))
+                  interceptor (phase/get-phase-interceptor {:phase :release})]
+              ((:enter interceptor) ctx)
+              (is (contains? (entry-events entries) :release/executor-failed)
+                  "log/error :release/executor-failed must fire on the :success? false branch — guards the next dogfood post-mortem"))))))))
+
+(deftest release-logs-thrown-exception-test
+  (testing ":release/executor-threw log/error fires when execute-release-phase throws"
+    (with-test-worktree
+      (fn [worktree]
+        (let [entries (atom [])
+              logger  (capturing-logger entries)]
+          (with-redefs [release-executor/execute-release-phase
+                        (fn [_ws _ec _opts]
+                          (throw (ex-info "release-executor blew up"
+                                          {:reason :gh-cli-missing})))]
+            (let [ctx (-> (create-base-context worktree)
+                          (assoc :execution/logger logger)
+                          (assoc :phase-config {:phase :release}))
+                  interceptor (phase/get-phase-interceptor {:phase :release})]
+              ((:enter interceptor) ctx)
+              (is (contains? (entry-events entries) :release/executor-threw)
+                  "log/error :release/executor-threw must fire in the catch block — without it, the dogfood loses the actual exception"))))))))
 
 (deftest release-verifies-files-exist-after-writing-test
   (testing "release phase verifies files exist on disk after writing"
