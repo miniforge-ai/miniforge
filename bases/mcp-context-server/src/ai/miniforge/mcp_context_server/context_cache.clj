@@ -95,6 +95,8 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Shell fallbacks
 
+(declare source-root)
+
 (defn shell-grep
   "Fall back to ripgrep for files not in cache.
    Returns vector of {:path :line-number :text} or nil."
@@ -102,7 +104,7 @@
   (try
     (let [args (cond-> ["rg" "--no-heading" "-n" pattern-str]
                  path-or-glob (conj path-or-glob))
-          {:keys [out]} (apply shell/sh args)]
+          {:keys [out]} (apply shell/sh (concat [:dir (source-root)] args))]
       (when-not (str/blank? out)
         (->> (str/split-lines out)
              (map (fn [line]
@@ -117,16 +119,22 @@
     (catch Exception _e nil)))
 
 (defn shell-glob
-  "Fall back to filesystem glob via find.
+  "Fall back to filesystem glob by walking source-root.
    Returns vector of relative file paths or nil."
   [pattern]
   (try
-    (let [{:keys [out]} (shell/sh "find" "." "-path" (str "./" pattern) "-type" "f")]
-      (when-not (str/blank? out)
-        (->> (str/split-lines out)
-             (map #(str/replace-first % #"^\.\/" ""))
-             (filter #(not (str/blank? %)))
-             vec)))
+    (let [root (io/file (source-root))
+          root-path (.getCanonicalPath root)
+          prefix-len (inc (count root-path))
+          matches (->> (file-seq root)
+                       (filter #(.isFile ^java.io.File %))
+                       (map #(.getCanonicalPath ^java.io.File %))
+                       (map #(subs % prefix-len))
+                       (filter #(glob-matches? pattern %))
+                       sort
+                       vec)]
+      (when (seq matches)
+        matches))
     (catch Exception _e nil)))
 
 ;------------------------------------------------------------------------------ Layer 1
@@ -134,27 +142,40 @@
 
 ;; Cache atom holding :files (path → content) and :misses (recorded cache misses).
 (defonce cache-state
-  (atom {:files {} :misses []}))
+  (atom {:files {} :misses [] :source-root nil}))
 
 (defn reset-state!
   "Reset cache state. Intended for test isolation."
   []
-  (reset! cache-state {:files {} :misses []}))
+  (reset! cache-state {:files {} :misses [] :source-root nil}))
+
+(defn- source-root
+  []
+  (or (:source-root @cache-state) "."))
+
+(defn- resolve-source-path
+  [path]
+  (let [f (io/file path)]
+    (if (.isAbsolute f)
+      (.getPath f)
+      (.getPath (io/file (source-root) path)))))
 
 (defn load-cache!
   "Load context-cache.edn from artifact-dir into the cache atom."
-  [artifact-dir]
-  (let [path (str artifact-dir "/context-cache.edn")
-        f (io/file path)]
-    (when (.exists f)
-      (try
-        (let [data (edn/read-string (slurp f))]
-          (swap! cache-state assoc :files (get data :files {}))
-          (binding [*out* *err*]
-            (println (msg/t :cache/loaded {:count (count (:files data))}))))
-        (catch Exception e
-          (binding [*out* *err*]
-            (println (msg/t :cache/load-failed {:error (ex-message e)}))))))))
+  ([artifact-dir] (load-cache! artifact-dir nil))
+  ([artifact-dir source-root]
+   (let [path (str artifact-dir "/context-cache.edn")
+         f (io/file path)]
+     (swap! cache-state assoc :source-root source-root)
+     (when (.exists f)
+       (try
+         (let [data (edn/read-string (slurp f))]
+           (swap! cache-state assoc :files (get data :files {}))
+           (binding [*out* *err*]
+             (println (msg/t :cache/loaded {:count (count (:files data))}))))
+         (catch Exception e
+           (binding [*out* *err*]
+             (println (msg/t :cache/load-failed {:error (ex-message e)})))))))))
 
 (defn flush-misses!
   "Write accumulated cache misses to context-misses.edn in artifact-dir."
@@ -199,7 +220,7 @@
   [path]
   (or (cache-get path)
       (try
-        (let [content (slurp path)]
+        (let [content (slurp (resolve-source-path path))]
           (cache-put! path content)
           (record-miss! "context_read" {:path path} (estimate-tokens content))
           content)
@@ -252,7 +273,7 @@
   (doseq [path (distinct (map :path results))
           :when (not (contains? known-files path))]
     (try
-      (let [content (slurp path)]
+      (let [content (slurp (resolve-source-path path))]
         (cache-put! path content)
         (record-miss! "context_grep" {:path path :pattern pattern-str}
                       (estimate-tokens content)))

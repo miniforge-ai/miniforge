@@ -235,12 +235,14 @@
 
 (deftest server-command-test
   (testing "returns a map with :command and :args including --artifact-dir"
-    (let [result (session/server-command "/tmp/artifacts")]
+    (let [result (session/server-command "/tmp/artifacts" "/tmp/source-root")]
       (is (map? result))
       (is (string? (:command result)))
       (is (vector? (:args result)))
       (is (some #(= "--artifact-dir" %) (:args result)))
       (is (some #(= "/tmp/artifacts" %) (:args result)))
+      (is (some #(= "--source-root" %) (:args result)))
+      (is (some #(= "/tmp/source-root" %) (:args result)))
       (is (some #(= "mcp-context-server" %) (:args result))))))
 
 ;------------------------------------------------------------------------------ Layer 2

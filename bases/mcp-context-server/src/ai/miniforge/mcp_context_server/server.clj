@@ -124,10 +124,11 @@
    4. Flush accumulated cache misses to artifact-dir
 
    Arguments:
-   - artifact-dir — directory path for context cache and miss tracking"
-  [artifact-dir]
-  (log-stderr "miniforge-context MCP server started, artifact-dir:" artifact-dir)
-  (context-cache/load-cache! artifact-dir)
+   - artifact-dir — directory path for context cache and miss tracking
+   - source-root — repo root for filesystem fallback"
+  [artifact-dir source-root]
+  (log-stderr "miniforge-context MCP server started, artifact-dir:" artifact-dir "source-root:" source-root)
+  (context-cache/load-cache! artifact-dir source-root)
   (register-context-handlers!)
   (try
     (let [reader (java.io.BufferedReader. (java.io.InputStreamReader. System/in "UTF-8"))]

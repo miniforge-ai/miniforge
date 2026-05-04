@@ -27,7 +27,8 @@
 
 (deftest run-spec-workflow-propagates-worktree-into-execution-opts-test
   (testing "--worktree becomes authoritative execution worktree metadata"
-    (let [captured-opts (atom nil)]
+    (let [captured-spec (atom nil)
+          captured-opts (atom nil)]
       (with-redefs [display/print-info (fn [& _])
                     messages/t (fn
                                  ([k] (name k))
@@ -36,12 +37,16 @@
                                                   {:spec/title "Behavioral Verification"})
                     spec-parser/validate-spec (fn [_]
                                                 {:valid? true})
-                    workflow-runner/run-workflow-from-spec! (fn [_ opts]
+                    workflow-runner/run-workflow-from-spec! (fn [spec opts]
+                                                              (reset! captured-spec spec)
                                                               (reset! captured-opts opts)
                                                               :ok)]
         (#'sut/run-spec-workflow "/tmp/behavioral.md" {:worktree "/tmp/custom-worktree"})
         (is (= {:worktree-path "/tmp/custom-worktree"}
-               (:execution-opts @captured-opts)))))))
+               (:execution-opts @captured-opts)))
+        (is (= "/tmp"
+               (:spec/source-dir @captured-spec))
+            "source-dir should stay anchored to the spec's repo, not the execution worktree")))))
 
 (deftest detect-input-type-and-markdown-spec-regression-test
   (testing "markdown-spec? recognizes markdown spec files"

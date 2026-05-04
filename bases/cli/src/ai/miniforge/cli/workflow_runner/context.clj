@@ -70,6 +70,10 @@
     (when (zero? exit)
       (some-> out str/trim not-empty))))
 
+(defn- resolve-git-bool
+  [dir & args]
+  (boolean (apply resolve-git-field dir args)))
+
 (defn get-git-info
   ([] (get-git-info nil))
   ([start-path]
@@ -82,9 +86,33 @@
             :git-commit commit})))
      (catch Exception _ nil))))
 
+(defn get-git-state
+  ([] (get-git-state nil))
+  ([start-path]
+   (try
+     (when-let [root (worktree/worktree-root start-path)]
+       (let [branch (resolve-git-field root "rev-parse" "--abbrev-ref" "HEAD")
+             commit (resolve-git-field root "rev-parse" "--short" "HEAD")
+             upstream (resolve-git-field root "rev-parse" "--abbrev-ref" "--symbolic-full-name" "@{upstream}")
+             dirty? (resolve-git-bool root "status" "--porcelain")]
+         (when (and branch commit)
+           {:git-branch branch
+            :git-commit commit
+            :git-upstream upstream
+            :git-dirty? dirty?
+            :git-detached? (= "HEAD" branch)})))
+     (catch Exception _ nil))))
+
 (defn- execution-worktree-path
   [execution-opts]
   (get execution-opts :worktree-path))
+
+(defn- source-root-path
+  [source-dir]
+  (or (worktree/worktree-root source-dir)
+      source-dir
+      (worktree/worktree-root)
+      (System/getProperty "user.dir")))
 
 (defn get-files-in-scope
   "Resolve scope paths to actual file paths.
@@ -168,9 +196,11 @@
 (defn create-workflow-context [{:keys [callbacks artifact-store event-stream workflow-id
                                        workflow-type workflow-version llm-client quiet
                                        spec-title control-state skip-lifecycle-events
-                                       execution-opts]}]
+                                       execution-opts source-dir]}]
   (let [on-chunk (es/create-streaming-callback event-stream workflow-id :agent
                                                {:print? (not quiet) :quiet? quiet})
+        source-root (source-root-path source-dir)
+        git-info (get-git-state source-root)
         worktree-path (or (execution-worktree-path execution-opts)
                           (worktree/worktree-root)
                           (System/getProperty "user.dir"))]
@@ -186,4 +216,6 @@
       control-state (assoc :control-state control-state)
       skip-lifecycle-events (assoc :skip-lifecycle-events true)
       execution-opts (assoc :execution/opts execution-opts)
+      source-root (assoc :source-root source-root)
+      git-info (merge git-info)
       true (assoc :worktree-path worktree-path))))

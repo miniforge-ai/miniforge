@@ -61,6 +61,14 @@
       (is (vector? (:execution/artifacts ctx)))
       (is (number? (:execution/started-at ctx))))))
 
+(deftest create-context-preserves-source-root-test
+  (testing "create-context preserves :source-root passthrough options"
+    (let [workflow {:workflow/id :test
+                    :workflow/version "1.0.0"}
+          source-root "/tmp/miniforge-source-root"
+          ctx (ctx/create-context workflow {:task "Test"} {:source-root source-root})]
+      (is (= source-root (:source-root ctx))))))
+
 ;; ============================================================================
 ;; Pipeline building tests
 ;; ============================================================================
