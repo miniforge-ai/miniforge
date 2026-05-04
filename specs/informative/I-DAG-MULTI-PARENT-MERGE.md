@@ -69,6 +69,29 @@ Three properties this preserves:
 3. **Failure is loud.** Conflicts surface as a typed anomaly with the
    conflicting parents and paths, not silent overwrites.
 
+### 3.1 Determinism
+
+"Deterministic" means the same plan + the same parent commits always
+produces the same merge commit, including the same git parent ordering
+in that commit. The ordering source is the task's
+`:task/dependencies` vector **as authored in the plan**, not the runtime
+completion order of those parents. Concretely:
+
+- The first parent of the merge commit is `:task/dependencies[0]`'s
+  registered branch — this becomes the base (`git checkout -b ... <p0>`).
+- Subsequent parents are passed to `git merge` in
+  `:task/dependencies[1..N]` order.
+- Octopus merges are commutative for non-conflicting changes (git
+  computes the same tree regardless of the order of the second-and-after
+  parents), so the order matters only for the human-visible parent
+  sequence in the merge commit; we pin it anyway so logs and history
+  match across replays.
+- If `:task/dependencies` is a set rather than a vector at the schema
+  layer (the plan/task schema currently allows either), the orchestrator
+  sorts by `str` of the task-id before merging — same convention as
+  `task-defs->forest-shape` in the orchestrator today, which sorts deps
+  for deterministic anomaly payloads.
+
 ---
 
 ## 4. Strategy Options
@@ -101,8 +124,11 @@ git merge parent-B parent-C ...           # one commit
 
 ```bash
 git checkout -b task-N-base parent-A
-git cherry-pick parent-B-tip..parent-A-merge-base
-git cherry-pick parent-C-tip..parent-A-merge-base
+# Cherry-pick the commits unique to each non-chosen parent.
+# git's A..B selects commits reachable from B but not A, so the range
+# is (merge-base ↔ parent-tip), NOT the reverse.
+git cherry-pick $(git merge-base parent-A parent-B)..parent-B
+git cherry-pick $(git merge-base parent-A parent-C)..parent-C
 ```
 
 **Pros:**
@@ -158,22 +184,27 @@ Plan emits `:task/merge-strategy` per multi-parent task; default to one of
 | ------------------------------ | ---------------------------------------------------- |
 | `:octopus` (default)           | §4.1; fall back to anomaly on conflict (§6).         |
 | `:sequential-cherry-pick`      | §4.2; same fallback.                                 |
-| `:fail-on-multi-parent`        | Today's v1 behavior — emits the dag-non-forest      |
-|                                | anomaly. Useful for plans that **must** be forests   |
-|                                | (e.g. release trains).                              |
+| `:fail-on-multi-parent`        | Today's v1 behavior — emits the canonical            |
+|                                | `:anomalies/dag-non-forest` anomaly. Useful for      |
+|                                | plans that **must** be forests (e.g. release         |
+|                                | trains).                                             |
 
 `:last-parent-wins` is intentionally not exposed.
 
 ---
 
-## 6. Failure Modes
+## 6. Failure Modes and Edge Cases
 
-Multi-parent merges have three failure shapes the orchestrator must surface
-as typed anomalies, not let escape as raw git errors:
+Multi-parent merges have one **failure mode** that the orchestrator must
+surface as a typed anomaly (§6.1, the only state where the merge cannot
+complete) and two **degenerate edge cases** where the merge succeeds
+trivially but the topology is informational and worth logging
+(§6.2/§6.3). The two are deliberately separated: anomalies stop work,
+edge-case logs do not.
 
-### 6.1 Merge conflict
+### 6.1 Merge conflict (anomaly)
 
-```clj
+```clojure
 {:anomaly/category :anomalies/dag-multi-parent-conflict
  :anomaly/message  "Octopus merge of N parents conflicted on M paths"
  :task/id          ...
@@ -187,18 +218,23 @@ The orchestrator MUST NOT auto-resolve. Auto-resolution (e.g.
 overwrite class. Surface the conflict, fail the task, let a human or a
 follow-up agent decide.
 
-### 6.2 Ancestor parent
+### 6.2 Ancestor parent (informational, not an anomaly)
 
 If parent B is an ancestor of parent A (i.e., B's tip is reachable from A),
-B contributes nothing. Treat as single-parent against A; emit
-`:dag/multi-parent-ancestor-collapsed` log so the user knows the plan was
-implicitly simpler than declared.
+B contributes nothing — A already includes B's work. The merge is a no-op
+relative to A. Treat as single-parent against A; emit a
+`:dag/multi-parent-ancestor-collapsed` log entry naming the collapsed
+parent and the parent it collapsed into, so the operator knows the plan
+was implicitly simpler than declared. **No anomaly** — the merge
+succeeded; this case only matters for plan-quality observability.
 
-### 6.3 Empty parent intersection
+### 6.3 Empty parent intersection (informational, not an anomaly)
 
-When parents have a merge-base but the merge is a no-op (parents are
-identical), proceed as if single-parent against any of them. No anomaly;
-log only.
+When parents share a merge-base and the merge is a no-op because the
+parents are identical (no commits unique to any of them since the merge-
+base), proceed as if single-parent against any of them. Emit a
+`:dag/multi-parent-no-op` log entry. **No anomaly** — the merge
+succeeded.
 
 ---
 
