@@ -30,6 +30,7 @@
    [ai.miniforge.artifact.interface :as artifact]
    [ai.miniforge.agent.interface :as agent]
    [ai.miniforge.cli.messages :as messages]
+   [ai.miniforge.cli.resource-config :as resource-config]
    [ai.miniforge.cli.workflow-recommender :as recommender]
    [ai.miniforge.cli.workflow-runner.display :as display]
    [ai.miniforge.cli.workflow-runner.context :as context]
@@ -205,30 +206,54 @@
   (assert-execution-worktree! context)
   (assert-source-dir-alignment! spec context))
 
+(defn- print-colored-lines!
+  [quiet lines]
+  (when-not quiet
+    (doseq [[color line] lines]
+      (println (display/colorize color line)))))
+
+(defn- runtime-provenance-lines
+  [context]
+  (concat
+   [[:cyan (messages/t :workflow-runner/runtime-source
+                       {:path (:source-root context)})]
+    [:cyan (messages/t :workflow-runner/runtime-worktree
+                       {:path (:worktree-path context)})]]
+   (when-let [branch (:git-branch context)]
+     [[:cyan (messages/t :workflow-runner/runtime-branch {:branch branch})]])
+   (when-let [commit (:git-commit context)]
+     [[:cyan (messages/t :workflow-runner/runtime-commit {:commit commit})]])
+   (when-let [upstream (:git-upstream context)]
+     [[:cyan (messages/t :workflow-runner/runtime-upstream {:upstream upstream})]])
+   (when (:git-detached? context)
+     [[:yellow (messages/t :workflow-runner/runtime-detached-warning)]])
+   (when (:git-dirty? context)
+     [[:yellow (messages/t :workflow-runner/runtime-dirty-warning)]])))
+
 (defn- print-runtime-provenance!
   [quiet context]
-  (when-not quiet
-    (println (display/colorize :cyan (str "   Source: " (:source-root context))))
-    (println (display/colorize :cyan (str "   Worktree: " (:worktree-path context))))
-    (when-let [branch (:git-branch context)]
-      (println (display/colorize :cyan (str "   Branch: " branch))))
-    (when-let [commit (:git-commit context)]
-      (println (display/colorize :cyan (str "   Commit: " commit))))
-    (when-let [upstream (:git-upstream context)]
-      (println (display/colorize :cyan (str "   Upstream: " upstream))))
-    (when (:git-detached? context)
-      (println (display/colorize :yellow "   Warning: source checkout is detached HEAD")))
-    (when (:git-dirty? context)
-      (println (display/colorize :yellow "   Warning: source checkout has uncommitted changes")))))
+  (print-colored-lines! quiet (runtime-provenance-lines context)))
 
-(def ^:private backend-preflight-prompt
-  "Reply with exactly {\"ok\":true}")
+(def ^:private workflow-runner-config
+  (delay
+    (resource-config/merged-resource-config "config/cli/workflow-runner.edn"
+                                            :workflow-runner
+                                            {})))
 
-(def ^:private backend-preflight-timeout-ms
-  10000)
+(defn- backend-preflight-config []
+  (:backend-preflight @workflow-runner-config))
 
-(def ^:private backend-version-timeout-ms
-  5000)
+(defn- backend-preflight-prompt []
+  (:prompt (backend-preflight-config)))
+
+(defn- backend-preflight-timeout-ms []
+  (:timeout-ms (backend-preflight-config)))
+
+(defn- backend-version-timeout-ms []
+  (:version-timeout-ms (backend-preflight-config)))
+
+(defn- claude-preflight-args []
+  (:claude-args (backend-preflight-config)))
 
 (defn- executable-file?
   [path]
@@ -237,6 +262,16 @@
          (fs/exists? file)
          (not (fs/directory? file))
          (fs/executable? file))))
+
+(defn- path-entries
+  []
+  (str/split (or (System/getenv "PATH") "") #":"))
+
+(defn- matching-command-path
+  [entry cmd]
+  (let [candidate (fs/path entry cmd)]
+    (when (executable-file? candidate)
+      (str candidate))))
 
 (defn- resolve-cli-command-path
   [cmd]
@@ -247,11 +282,7 @@
       (str (fs/absolutize cmd)))
 
     :else
-    (some (fn [entry]
-            (let [candidate (fs/path entry cmd)]
-              (when (executable-file? candidate)
-                (str candidate))))
-          (str/split (or (System/getenv "PATH") "") #":"))))
+    (some #(matching-command-path % cmd) (path-entries))))
 
 (defn- cli-process-env
   []

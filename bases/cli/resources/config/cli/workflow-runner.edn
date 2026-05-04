@@ -1,0 +1,7 @@
+{:workflow-runner
+ {:backend-preflight
+  {:prompt "Reply with exactly {\"ok\":true}"
+   :timeout-ms 10000
+   :version-timeout-ms 5000
+   :claude-args ["--output-format" "json"
+                 "--max-turns" "1"]}}}
