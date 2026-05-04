@@ -457,6 +457,36 @@
       (is (not= original edited)
           "different description ⇒ different fingerprint"))))
 
+(deftest review-fingerprint-survives-whitespace-reformatting-test
+  (testing "trivial whitespace differences in the description don't read as progress"
+    (let [base    (reviewer/review-fingerprint
+                   {:review/issues [(assoc blocking-issue-a
+                                           :description "Null pointer access")]})
+          reflowed (reviewer/review-fingerprint
+                    {:review/issues [(assoc blocking-issue-a
+                                            :description "  Null   pointer\n access  ")]})]
+      (is (= base reflowed)
+          "whitespace normalization keeps the fingerprint stable across reformats"))))
+
+(deftest review-fingerprint-includes-failed-gates-test
+  (testing "gate-only mode: failed gate-results contribute to the fingerprint"
+    ;; Critical for gate-only mode: the reviewer populates :review/gate-results
+    ;; without filling :review/issues, so an :issues-only fingerprint would
+    ;; be empty and the stagnation guard would never fire on a looping
+    ;; gate failure. Failed gates must surface as virtual issues.
+    (let [fp (reviewer/review-fingerprint
+              {:review/gate-results [{:gate-id :syntax
+                                      :passed? false
+                                      :errors [{:message "Unbalanced paren at line 8"}]}
+                                     {:gate-id :lint
+                                      :passed? true
+                                      :errors []}]})]
+      (is (= 1 (count fp)) "only the failed gate contributes")
+      (is (= :blocking (-> fp first first))
+          "failed gates fingerprint as :blocking severity")
+      (is (= ":gate/syntax" (-> fp first second))
+          "gate id is the file slot for sortable identification"))))
+
 (deftest stagnated?-true-on-identical-fingerprints-test
   (testing "two consecutive identical fingerprints with non-empty issues ⇒ stagnated"
     (let [fp (reviewer/review-fingerprint

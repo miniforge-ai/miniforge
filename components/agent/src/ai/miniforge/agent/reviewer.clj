@@ -763,36 +763,64 @@
    normal long tail of style polish."
   #{:blocking :warning})
 
+(defn- normalize-text
+  "Trim and collapse internal whitespace. Used so trivial reformatting
+   of an issue's description (added space, line wrap) doesn't read as
+   progress between repair iterations."
+  [s]
+  (-> (or s "")
+      str/trim
+      (str/replace #"\s+" " ")))
+
 (defn- issue-fingerprint
-  "Stable per-issue tuple [severity file line description-hash].
-   description-hash uses Clojure's `hash` because the description is
-   the only sizeable part — keeping it as the integer hash makes the
-   tuple cheap to compare across iterations and trivial to log."
+  "Stable per-issue tuple [severity file line description].
+   Stores the whitespace-normalized description in full — earlier
+   versions used `hash` to keep the tuple compact, but Clojure's
+   `hash` (and the underlying String hashCode) is not collision-free
+   and a hash collision would surface as a false-positive stagnation."
   [{:keys [severity file line description]}]
   [severity
    (or file "")
    (or line 0)
-   (hash (or description ""))])
+   (normalize-text description)])
+
+(defn- failed-gate-fingerprint
+  "Convert a failed gate-feedback entry into a virtual issue tuple so
+   stagnation also catches gate-only-mode loops. In gate-only mode
+   the reviewer populates :review/gate-results without :review/issues,
+   so a fingerprint that only consulted :review/issues would be empty
+   and the stagnation guard would never fire."
+  [{:keys [gate-id errors]}]
+  [:blocking
+   (str ":gate/" (name (or gate-id :unknown)))
+   0
+   (normalize-text (str/join " | " (map :message errors)))])
 
 (defn review-fingerprint
   "Reduce a review artifact to a stable, comparable fingerprint of its
-   actionable issues. Returns a sorted vector of `[severity file line
-   description-hash]` tuples — order-independent because the inputs
-   are sorted before comparison.
+   actionable items. Returns a sorted vector of `[severity file line
+   description]` tuples — order-independent because the inputs are
+   sorted before comparison.
 
-   Issues at severity :nit are excluded; they reflect normal long-tail
-   polish, not progress signal. A review with no actionable issues
-   returns the empty vector.
+   Two sources contribute:
+   - LLM-surfaced :review/issues at severity :blocking or :warning
+     (:nit is intentionally excluded — long-tail polish, not
+     progress signal).
+   - Failed entries in :review/gate-results — covers gate-only mode
+     where :review/issues is empty but the review is still blocked.
 
-   Used by the phase runner's stagnation detector to decide whether a
-   repair iteration produced any movement on the reviewer's blocking
-   complaints."
+   A review with neither actionable LLM issues nor failed gates
+   returns the empty vector."
   [review]
-  (->> (get review :review/issues [])
-       (filter (comp actionable-severities :severity))
-       (map issue-fingerprint)
-       sort
-       vec))
+  (let [llm-issues   (->> (get review :review/issues [])
+                          (filter (comp actionable-severities :severity))
+                          (map issue-fingerprint))
+        failed-gates (->> (get review :review/gate-results [])
+                          (remove :passed?)
+                          (map failed-gate-fingerprint))]
+    (->> (concat llm-issues failed-gates)
+         sort
+         vec)))
 
 (defn stagnated?
   "True when a review's fingerprint matches the prior review's
