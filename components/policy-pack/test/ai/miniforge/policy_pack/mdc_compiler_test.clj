@@ -249,7 +249,28 @@
       ;; Should preserve first 3 bullets when condensing
       (is (str/includes? result "First bullet"))
       (is (str/includes? result "Second bullet"))
-      (is (str/includes? result "Third bullet")))))
+      (is (str/includes? result "Third bullet"))))
+
+  (testing "preserves numbered lists when condensing — regression for dewey-211 rule"
+    ;; The dewey-211 (clojure-exception-handling) rule's first compiled
+    ;; output truncated mid-sentence at "4." because the bullet regex
+    ;; matched `[-*]` only and numbered lines fell through to prose
+    ;; condensation. This guards against re-introducing that.
+    (let [body (str "## Agent behavior\n\n"
+                    "1. First numbered step that should survive.\n"
+                    "2. Second numbered step that should survive.\n"
+                    "3. Third numbered step that should survive.\n"
+                    "4. Fourth numbered step.\n"
+                    "5. Fifth numbered step.")
+          result (sut/extract-agent-behavior body)]
+      (is (str/includes? result "First numbered step")
+          "first numbered item must be preserved")
+      (is (str/includes? result "Second numbered step")
+          "second numbered item must be preserved")
+      (is (str/includes? result "Third numbered step")
+          "third numbered item must be preserved")
+      (is (not (re-find #"\d+\.\s*$" (str/trim result)))
+          "compiled output must not end with a bare numbered prefix (mid-sentence truncation)"))))
 
 ;; ============================================================================
 ;; Layer 2 — mdc->rule compilation tests
