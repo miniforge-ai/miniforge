@@ -66,8 +66,10 @@
   (when-let [paths (and outer-artifact
                         worktree-path
                         (seq (:code/file-paths outer-artifact)))]
-    (let [files (agent/rehydrate-files worktree-path paths
-                                       (:code/file-actions outer-artifact))]
+    (let [files (try
+                  (agent/rehydrate-files worktree-path paths
+                                         (:code/file-actions outer-artifact))
+                  (catch Exception _ nil))]
       (when (seq files)
         (assoc outer-artifact :code/files files)))))
 

@@ -191,6 +191,47 @@
       (try
         (is (= [] (sut/rehydrate-files dir ["src/missing.clj"] [:modify])))
         (finally
+          (delete-tree! dir)))))
+
+  (testing "absolute paths are rejected (no read outside working-dir)"
+    (let [dir    (temp-dir)
+          escape (temp-dir)]
+      (try
+        (write-file! escape "secret.txt" "outside-the-worktree")
+        (let [outside (str (io/file escape "secret.txt"))]
+          (is (= [] (sut/rehydrate-files dir [outside] [:modify]))
+              "Absolute path outside working-dir must be skipped"))
+        (finally
+          (delete-tree! dir)
+          (delete-tree! escape)))))
+
+  (testing "../ escapes are rejected after canonicalization"
+    (let [dir    (temp-dir)
+          parent (.getParent (io/file dir))]
+      (try
+        (spit (io/file parent "leak.txt") "outside-the-worktree")
+        (try
+          (is (= [] (sut/rehydrate-files dir ["../leak.txt"] [:modify]))
+              "../ path resolving outside working-dir must be skipped")
+          (finally
+            (.delete (io/file parent "leak.txt"))))
+        (finally
+          (delete-tree! dir)))))
+
+  (testing "directories at a path are skipped (not slurped)"
+    (let [dir (temp-dir)]
+      (try
+        (.mkdirs (io/file dir "src" "is-a-dir"))
+        (is (= [] (sut/rehydrate-files dir ["src/is-a-dir"] [:modify]))
+            "Directories must not be passed to slurp")
+        (finally
+          (delete-tree! dir)))))
+
+  (testing "blank/nil paths are skipped"
+    (let [dir (temp-dir)]
+      (try
+        (is (= [] (sut/rehydrate-files dir ["" "   "] [:modify :modify])))
+        (finally
           (delete-tree! dir))))))
 
 ;------------------------------------------------------------------------------ Rich Comment

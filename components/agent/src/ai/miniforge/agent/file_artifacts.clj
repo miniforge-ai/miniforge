@@ -196,6 +196,52 @@
       (catch Exception _
         nil))))
 
+(defn- safe-resolve
+  "Resolve `path` under `working-dir` defensively. Returns a regular-file
+   `java.io.File` when:
+   - `path` is non-blank
+   - the canonical target stays inside `working-dir` (rejects absolute
+     paths, `..` escapes, and symlinks pointing outside)
+   - the target exists and is a regular file (not a directory)
+   Returns nil otherwise. Paths come from agent-produced artifacts, so
+   this is a real boundary check, not paranoia."
+  [working-dir path]
+  (try
+    (when (and (string? path) (not (str/blank? path)))
+      (let [base   (.getCanonicalFile (io/file working-dir))
+            target (.getCanonicalFile (io/file working-dir path))]
+        (when (and (.exists target)
+                   (.isFile target)
+                   (.startsWith (.toPath target) (.toPath base)))
+          target)))
+    (catch java.io.IOException _ nil)
+    (catch SecurityException _ nil)
+    (catch IllegalArgumentException _ nil)))
+
+(defn- read-rehydrated-file
+  "Read one rehydration entry. Returns the file map or nil for any
+   failure (path traversal, missing/non-regular file, permissions,
+   read errors). Skipping unreadable paths is preferable to bubbling
+   an exception that fails the entire review phase."
+  [working-dir path action]
+  (if (= :delete action)
+    {:path path :content "" :action :delete}
+    (when-let [file (safe-resolve working-dir path)]
+      (try
+        {:path path :content (slurp file) :action action}
+        (catch java.io.IOException _ nil)
+        (catch SecurityException _ nil)))))
+
+(defn- rehydration-entry
+  "Build one `:code/files` entry for `path` under `working-dir`,
+   honoring the action recorded in `action-by-path` (defaulting to
+   `:modify`). Named so callers can pass it via `partial` instead of
+   hoisting the closure into an inline `fn`."
+  [working-dir action-by-path path]
+  (read-rehydrated-file working-dir
+                        path
+                        (get action-by-path path :modify)))
+
 (defn rehydrate-files
   "Read file content from `working-dir` for each path in `paths`,
    producing the `:code/files` vector callers expect.
@@ -214,9 +260,12 @@
    `working-dir`). `actions` is the parallel sequence of action
    keywords (`:create` / `:modify` / `:delete`); when omitted, every
    present path is treated as `:modify`. For `:delete` actions the
-   content is the empty string. Files recorded in `paths` but absent
-   from disk are skipped — better to under-report than to invent
-   content that no longer exists.
+   content is the empty string.
+
+   Paths that fail validation (absolute, `..` escape, symlink-out,
+   directory at path), do not exist, or are unreadable for any reason
+   are skipped — better to under-report than to invent content or
+   fail a downstream phase on a stray path produced by an agent.
 
    Returns a vector of `{:path :content :action}` maps, possibly
    empty. Returns nil when `working-dir` is nil."
@@ -226,17 +275,7 @@
    (when working-dir
      (let [action-by-path (zipmap paths (or actions (repeat :modify)))]
        (->> paths
-            (keep (fn [path]
-                    (let [action (get action-by-path path :modify)
-                          file   (io/file working-dir path)]
-                      (cond
-                        (= :delete action)
-                        {:path path :content "" :action :delete}
-
-                        (.exists file)
-                        {:path path :content (slurp file) :action action}
-
-                        :else nil))))
+            (keep (partial rehydration-entry working-dir action-by-path))
             vec)))))
 
 (defn- read-file-via-executor
