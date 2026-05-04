@@ -186,14 +186,35 @@
 (def ^:private different-blocking-issue
   {:severity :blocking :file "src/bar.clj" :line 4 :description "Worse"})
 
+(def ^:private first-iteration
+  "Iteration counter at the very first review."
+  1)
+
+(def ^:private second-iteration
+  "Iteration counter when the first repair has already happened."
+  2)
+
+(def ^:private default-max-iterations
+  "Iteration cap that lets the test reach the second review without
+   bumping into the budget — only stagnation should short-circuit."
+  4)
+
+(def ^:private mock-token-count    100)
+(def ^:private mock-duration-ms    5000)
+(def ^:private mock-elapsed-ms     1000)
+(def ^:private one-fingerprint     1)
+(def ^:private two-fingerprints    2)
+
 (defn- run-leave-review
   "Run leave-review against a custom ctx and return the resulting full ctx."
   [{:keys [issues iterations max-iterations prior-fingerprints]
-    :or   {iterations 1 max-iterations 4 prior-fingerprints []}}]
+    :or   {iterations          first-iteration
+           max-iterations      default-max-iterations
+           prior-fingerprints  []}}]
   (let [result {:output  {:review/decision :changes-requested
                           :review/issues issues}
-                :metrics {:tokens 100 :duration-ms 5000}}
-        ctx {:phase {:started-at (- (System/currentTimeMillis) 1000)
+                :metrics {:tokens mock-token-count :duration-ms mock-duration-ms}}
+        ctx {:phase {:started-at (- (System/currentTimeMillis) mock-elapsed-ms)
                      :iterations iterations
                      :budget {:iterations max-iterations}
                      :result result}
@@ -208,10 +229,11 @@
 (deftest stagnation-terminates-instead-of-redirecting-test
   (testing "two consecutive identical fingerprints ⇒ no redirect, anomaly attached"
     (let [issues          [blocking-issue]
-          first-pass-ctx  (run-leave-review {:issues issues :iterations 1})
+          first-pass-ctx  (run-leave-review {:issues issues
+                                             :iterations first-iteration})
           first-fp        (peek (get-in first-pass-ctx [:execution :review-fingerprints]))
           stagnated-ctx   (run-leave-review {:issues issues
-                                             :iterations 2
+                                             :iterations second-iteration
                                              :prior-fingerprints [first-fp]})
           phase           (:phase stagnated-ctx)]
       (is (true? (:stagnated? phase))
@@ -221,16 +243,18 @@
       (is (= :anomalies.review/stagnation
              (get-in phase [:error :anomaly/category]))
           ":anomalies.review/stagnation anomaly attached to :phase :error")
-      (is (>= (count (get-in phase [:error :review/fingerprint-history])) 2)
+      (is (some? (get-in phase [:error :message]))
+          "message key set so display/diagnostic consumers don't show blank")
+      (is (>= (count (get-in phase [:error :review/fingerprint-history])) two-fingerprints)
           "fingerprint history carries the chain that proved stagnation"))))
 
 (deftest non-stagnant-progress-still-redirects-test
   (testing "fingerprint changed between iterations ⇒ ordinary repair redirect"
     (let [first-fp     (run-leave-review {:issues [blocking-issue]
-                                          :iterations 1})
+                                          :iterations first-iteration})
           first-print  (peek (get-in first-fp [:execution :review-fingerprints]))
           progressed   (run-leave-review {:issues [different-blocking-issue]
-                                          :iterations 2
+                                          :iterations second-iteration
                                           :prior-fingerprints [first-print]})
           phase        (:phase progressed)]
       (is (not (:stagnated? phase))
@@ -243,7 +267,7 @@
 (deftest first-iteration-never-stagnates-test
   (testing "no prior fingerprint history ⇒ first review must not short-circuit"
     (let [phase (:phase (run-leave-review {:issues [blocking-issue]
-                                           :iterations 1
+                                           :iterations first-iteration
                                            :prior-fingerprints []}))]
       (is (not (:stagnated? phase))
           "first review iteration is never stagnation")
@@ -252,12 +276,13 @@
 
 (deftest fingerprint-recorded-on-every-review-test
   (testing "every review iteration appends its fingerprint to the execution history"
-    (let [final-ctx (run-leave-review {:issues [blocking-issue] :iterations 1})]
-      (is (= 1 (count (get-in final-ctx [:execution :review-fingerprints])))
+    (let [final-ctx (run-leave-review {:issues [blocking-issue]
+                                       :iterations first-iteration})]
+      (is (= one-fingerprint (count (get-in final-ctx [:execution :review-fingerprints])))
           "first iteration appends one fingerprint"))
-    (let [seed-fp [[:blocking "src/seed.clj" 1 (hash "seed")]]
+    (let [seed-fp   [[:blocking "src/seed.clj" 1 "seed-description"]]
           final-ctx (run-leave-review {:issues [different-blocking-issue]
-                                       :iterations 2
+                                       :iterations second-iteration
                                        :prior-fingerprints [seed-fp]})]
-      (is (= 2 (count (get-in final-ctx [:execution :review-fingerprints])))
+      (is (= two-fingerprints (count (get-in final-ctx [:execution :review-fingerprints])))
           "second iteration appends without dropping prior history"))))
