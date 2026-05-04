@@ -34,12 +34,17 @@
 
 (defn- build-step
   "Build a canonical step map. `an` may be nil. The step's
-   `:succeeded?` is true iff `an` is nil."
-  [operation an response]
-  {:operation  operation
-   :succeeded? (nil? an)
-   :anomaly    an
-   :response   response})
+   `:succeeded?` is true iff `an` is nil. When `request` is non-nil it
+   is attached as `:request` metadata; when nil the key is omitted so
+   the step shape stays minimal for callers that don't need it."
+  ([operation an response]
+   (build-step operation an response nil))
+  ([operation an response request]
+   (cond-> {:operation  operation
+            :succeeded? (nil? an)
+            :anomaly    an
+            :response   response}
+     (some? request) (assoc :request request))))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Operation-key coercion
@@ -138,17 +143,25 @@
 (defn append-step
   "Append a step to `chain` for `operation`.
 
-   With three arguments: a successful step carrying `response`.
-   With four arguments: a step carrying `anomaly` (which may be nil) and
-   `response`. When `anomaly` is non-nil, the step's `:succeeded?` is
-   false and the chain's `:succeeded?` is recomputed accordingly.
+   - 3-arity: a successful step carrying `response`.
+   - 4-arity: a step carrying `anomaly` (which may be nil) and
+     `response`. When `anomaly` is non-nil, the step's `:succeeded?` is
+     false and the chain's `:succeeded?` is recomputed accordingly.
+   - 5-arity: same as 4-arity but also carries `request` as `:request`
+     metadata on the step. `request` is the input that produced the
+     step (e.g. the map a kg-retrieval call received); downstream
+     consumers like an inference-evidence bridge can read it to
+     reconstruct what was asked. Pass `nil` when no request is
+     applicable.
 
    Returns the updated chain. Never throws: malformed inputs (including
    a non-keyword `operation`) are recorded as `:invalid-input` anomaly
    steps and the chain stays well-formed."
   ([chain operation response]
-   (append-step chain operation nil response))
+   (append-step chain operation nil response nil))
   ([chain operation an response]
+   (append-step chain operation an response nil))
+  ([chain operation an response request]
    (let [op (coerce-operation operation)
          eff-anomaly (if (keyword? operation)
                        an
@@ -157,7 +170,7 @@
                         "response-chain/append-step received non-keyword operation"
                         {:operation         operation
                          :original-anomaly  an}))]
-     (guarded-append chain op (build-step op eff-anomaly response)))))
+     (guarded-append chain op (build-step op eff-anomaly response request)))))
 
 ;------------------------------------------------------------------------------ Layer 3
 ;; Predicate

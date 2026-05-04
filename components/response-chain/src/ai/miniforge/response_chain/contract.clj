@@ -42,12 +42,21 @@
    - :operation  — keyword identifying the function/operation that ran
    - :succeeded? — true when the step completed without an anomaly
    - :anomaly    — Anomaly map when the step failed; nil otherwise
-   - :response   — the value the operation produced (may be nil)"
+   - :response   — the value the operation produced (may be nil)
+   - :request    — optional input that produced this step (e.g. the
+                   request map a kg-retrieval call received). Carried as
+                   metadata so downstream consumers (e.g. an
+                   inference-evidence bridge) can reconstruct what was
+                   asked, not just what came back. Absent on most steps;
+                   populated only when the call site has the request and
+                   wants it preserved. Not surfaced in normal
+                   LLM-visible chain renderings."
   [:map {:closed true}
    [:operation  :keyword]
    [:succeeded? :boolean]
    [:anomaly    [:maybe anomaly-contract/Anomaly]]
-   [:response   :any]])
+   [:response   :any]
+   [:request    {:optional true} :any]])
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Chain

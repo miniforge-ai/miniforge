@@ -91,13 +91,24 @@
        is false and the chain's `:succeeded?` is recomputed as the
        conjunction across every step in the resulting chain.
 
+   - 5-arity `(append-step chain operation-key anomaly response request)`
+       Same as the 4-arity, plus the original `request` is recorded on
+       the step as `:request` metadata. Use this when a downstream
+       consumer (e.g. an inference-evidence bridge) needs to
+       reconstruct what was asked, not just what came back. Pass `nil`
+       to omit the metadata. The `:request` key is intentionally
+       absent on steps that don't carry one — chains stay minimal for
+       LLM-visible renderings.
+
    This function never throws. Malformed input is recorded as an
    `:invalid-input` anomaly step rather than raising; the chain remains
    well-formed."
   ([chain operation-key response]
    (core/append-step chain operation-key response))
   ([chain operation-key anomaly response]
-   (core/append-step chain operation-key anomaly response)))
+   (core/append-step chain operation-key anomaly response))
+  ([chain operation-key anomaly response request]
+   (core/append-step chain operation-key anomaly response request)))
 
 ;------------------------------------------------------------------------------ Layer 3
 ;; Predicate
