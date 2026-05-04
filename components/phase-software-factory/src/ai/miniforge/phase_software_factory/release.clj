@@ -226,8 +226,14 @@
 (defn build-executor-context
   "Build context for the release executor from phase context.
    Includes :github-token so the release executor can inject GH_TOKEN
-   into the capsule's environment for gh CLI authentication."
-  [ctx config]
+   into the capsule's environment for gh CLI authentication.
+
+   The phase-local `logger` is threaded in so the release executor's
+   log calls (phase-started / fail / phase-completed) are emitted
+   even when the workflow ctx lacks :execution/logger — observed in
+   the 2026-05-03 dogfood, where release failed in 0ms with zero
+   visible log lines because the executor's logger was nil."
+  [ctx config logger]
   (let [on-chunk (phase/create-streaming-callback ctx :release)]
     (cond-> {:worktree-path (or (get-in ctx [:execution/worktree-path])
                                 (get-in ctx [:worktree-path])
@@ -236,7 +242,7 @@
                                 (System/getProperty "user.dir"))
              :executor (get-in ctx [:execution/executor])
              :environment-id (get-in ctx [:execution/environment-id])
-             :logger (get-in ctx [:execution/logger])
+             :logger (or (get-in ctx [:execution/logger]) logger)
              :llm-backend (get-in ctx [:execution/llm-backend])
              :artifact-store (get-in ctx [:execution/artifact-store])
              :event-stream (:event-stream ctx)
@@ -288,11 +294,18 @@
                      {:data {:artifact-count (count (:workflow/artifacts workflow-state))
                              :file-count (count (get-in (first (:workflow/artifacts workflow-state))
                                                         [:artifact/content :code/files]))}})
-        exec-context (build-executor-context ctx config)
+        exec-context (build-executor-context ctx config logger)
         releaser-agent (get config :releaser-agent)
         ;; Execute the release phase
         ;; Emit agent-started telemetry event for release executor
         _ (phase/emit-agent-started! ctx :release :releaser)
+        _ (log/info logger :release :release/executor-invoked
+                    {:data {:worktree-path (:worktree-path exec-context)
+                            :executor (some-> (:executor exec-context) type str)
+                            :environment-id (:environment-id exec-context)
+                            :create-pr? (:create-pr? exec-context)
+                            :releaser-agent? (some? releaser-agent)
+                            :artifact-count (count (:workflow/artifacts workflow-state))}})
 
         result (try
                  (let [exec-result (release-executor/execute-release-phase
@@ -314,12 +327,27 @@
                                                :branch (:branch content)
                                                :commit-sha (:commit-sha content)}})
                          {:release/metrics (:metrics exec-result)})))
-                     ;; Execution failed
-                     (response/failure
-                      (ex-info (messages/t :release/phase-failed)
-                               {:errors (:errors exec-result)
-                                :metrics (:metrics exec-result)}))))
+                     ;; Execution failed — surface the executor's :errors
+                     ;; so the next dogfood run can diagnose root cause from
+                     ;; the event log instead of staring at a generic
+                     ;; :anomalies.phase/agent-failed.
+                     (do
+                       (log/error logger :release :release/executor-failed
+                                  {:data {:errors (:errors exec-result)
+                                          :metrics (:metrics exec-result)}})
+                       (response/failure
+                        (ex-info (messages/t :release/phase-failed)
+                                 {:errors (:errors exec-result)
+                                  :metrics (:metrics exec-result)})))))
                  (catch Exception e
+                   ;; The 2026-05-03 dogfood lost the actual exception here —
+                   ;; the bare (response/failure e) wraps it but no log line
+                   ;; ever fired, leaving the phase-completed event with
+                   ;; :phase/duration-ms 0 and no actionable detail.
+                   (log/error logger :release :release/executor-threw
+                              {:message (ex-message e)
+                               :data (cond-> {:exception/class (.getName (class e))}
+                                       (ex-data e) (assoc :exception/data (ex-data e)))})
                    (response/failure e)))
 
         ;; Emit agent-completed telemetry event for release executor

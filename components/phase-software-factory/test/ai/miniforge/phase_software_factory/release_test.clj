@@ -218,7 +218,33 @@
           (is (false? (get-in result [:phase :result :success]))
               "Release should fail when write fails")
           (is (some? (get-in result [:phase :result :error]))
-              "Error should be present in result")))))))
+              "Error should be present in result")
+          (is (seq (get-in result [:phase :result :error :data :errors]))
+              "Executor :errors must surface in :phase :result :error :data so the next dogfood run can diagnose without staring at the snapshot")))))))
+
+(deftest release-surfaces-thrown-exception-in-result-test
+  (testing "release phase preserves the exception class+message+ex-data when execute-release-phase throws"
+    ;; Pre-2026-05-04 the (catch Exception e (response/failure e)) wrapped the
+    ;; exception but emitted no log line, so the dogfood saw a 0ms phase fail
+    ;; with no actionable detail. The diagnostic-logging change keeps the same
+    ;; wrap-and-return behavior — we just guard that the exception-shaped
+    ;; failure carries enough data on it for a post-mortem.
+    (with-test-worktree
+      (fn [worktree]
+        (with-redefs [release-executor/execute-release-phase
+                      (fn [_ws _ec _opts]
+                        (throw (ex-info "release-executor blew up"
+                                        {:reason :gh-cli-missing
+                                         :tried [:gh-auth-status]})))]
+          (let [ctx (create-base-context worktree)
+                ctx-with-config (assoc ctx :phase-config {:phase :release})
+                interceptor (phase/get-phase-interceptor {:phase :release})
+                result ((:enter interceptor) ctx-with-config)
+                error (get-in result [:phase :result :error])]
+            (is (= "release-executor blew up" (:message error))
+                "exception message must be preserved")
+            (is (= :gh-cli-missing (get-in error [:data :reason]))
+                "ex-data must be preserved on the wrapped failure")))))))
 
 (deftest release-verifies-files-exist-after-writing-test
   (testing "release phase verifies files exist on disk after writing"
