@@ -43,17 +43,19 @@
 
 (deftest five-arity-anomaly-attaches-request-to-step
   (testing "5-arity anomaly path also records :request on the step"
-    (let [request {:lookup []}
-          an      (anomaly/anomaly :invalid-input "empty lookup" {})
-          c0      (chain/create-chain :flow)
-          c1      (chain/append-step c0
-                                     :db/find-user
-                                     an
-                                     request
-                                     request)
-          step    (last (chain/steps c1))]
+    (let [request  {:lookup []}
+          response {:error :lookup-empty}
+          an       (anomaly/anomaly :invalid-input "empty lookup" {})
+          c0       (chain/create-chain :flow)
+          c1       (chain/append-step c0
+                                      :db/find-user
+                                      an
+                                      response
+                                      request)
+          step     (last (chain/steps c1))]
       (is (false? (chain/succeeded? c1)))
       (is (= request (:request step)))
+      (is (= response (:response step)))
       (is (= an (:anomaly step))))))
 
 (deftest three-arity-omits-request-key
