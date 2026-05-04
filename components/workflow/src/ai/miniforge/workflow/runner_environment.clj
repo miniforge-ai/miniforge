@@ -22,6 +22,7 @@
    Manages worktree and Docker capsule acquisition, release, and
    workspace persistence at phase boundaries. Extracted from runner.clj."
   (:require
+   [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.dag-executor.interface :as dag]
    [ai.miniforge.event-stream.interface :as es]
    [ai.miniforge.logging.interface :as log]
@@ -69,14 +70,36 @@
     (when-not (and (= :governed mode) raw (= :worktree (executor-type raw)))
       raw)))
 
-(defn assert-executor-for-mode!
-  "Throws for :governed mode when no capsule executor is available."
+(defn check-executor-for-mode-anomaly
+  "Anomaly-returning variant of [[assert-executor-for-mode!]].
+
+   Returns nil when the `executor`/`mode` pair is acceptable, or an
+   `:unavailable` anomaly when `:governed` mode was requested but no
+   capsule executor was supplied. The anomaly's `:anomaly/data` carries
+   `:mode` and a `:hint` string for surface code that wants to suggest
+   remediation.
+
+   Prefer this over [[assert-executor-for-mode!]] in non-boundary code."
   [executor mode]
   (when (and (nil? executor) (= :governed mode))
+    (anomaly/anomaly :unavailable
+                     (messages/t :governed/no-capsule)
+                     {:mode :governed
+                      :hint (messages/t :governed/no-capsule-hint)})))
+
+(defn assert-executor-for-mode!
+  "Throws for :governed mode when no capsule executor is available.
+
+   DEPRECATED: prefer [[check-executor-for-mode-anomaly]], which returns
+   an anomaly map instead of throwing. Retained for backward compatibility
+   with callers that rely on the slingshot throw shape."
+  {:deprecated "exceptions-as-data — prefer check-executor-for-mode-anomaly"}
+  [executor mode]
+  (when-let [a (check-executor-for-mode-anomaly executor mode)]
     (response/throw-anomaly! :anomalies.executor/unavailable
-                             (messages/t :governed/no-capsule)
-                             {:anomaly.executor/mode :governed
-                              :hint (messages/t :governed/no-capsule-hint)})))
+                             (:anomaly/message a)
+                             {:anomaly.executor/mode (get-in a [:anomaly/data :mode])
+                              :hint (get-in a [:anomaly/data :hint])})))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Environment record construction

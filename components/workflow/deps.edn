@@ -3,6 +3,7 @@
         ai.miniforge/schema {:local/root "../schema"}
         ai.miniforge/logging {:local/root "../logging"}
         ai.miniforge/messages {:local/root "../messages"}
+        ai.miniforge/anomaly {:local/root "../anomaly"}    ; Canonical anomaly maps for exceptions-as-data
         ai.miniforge/response {:local/root "../response"}  ; Response chains
         ai.miniforge/fsm {:local/root "../fsm"}            ; State machines
         ai.miniforge/agent {:local/root "../agent"}

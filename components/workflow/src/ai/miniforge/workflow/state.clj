@@ -22,6 +22,7 @@
    Uses a formal FSM (see fsm.clj) for state transitions.
    Tracks runtime state separately from workflow configuration."
   (:require
+   [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.phase.interface :as phase]
    [ai.miniforge.response.interface :as response]
    [ai.miniforge.workflow.fsm :as fsm]))
@@ -91,6 +92,33 @@
         (update :execution/history conj transition)
         (assoc :execution/updated-at (System/currentTimeMillis)))))
 
+(defn transition-status-anomaly
+  "Anomaly-returning variant of [[transition-status]].
+
+   Returns the updated execution state on success, or an
+   `:invalid-input` anomaly when the FSM rejects the transition.
+
+   The anomaly's `:anomaly/data` carries:
+   - `:current-status` — the status the run was in at call time
+   - `:event`          — the rejected event keyword
+   - `:error`          — the FSM error keyword
+   - `:fsm-message`    — the FSM-supplied diagnostic message
+
+   Prefer this over [[transition-status]] in non-boundary code."
+  [state event]
+  (let [current-status (:execution/status state)
+        result (fsm/transition current-status event)]
+    (if (fsm/succeeded? result)
+      (-> state
+          (assoc :execution/status (:state result))
+          (record-fsm-transition current-status (:state result) event))
+      (anomaly/anomaly :invalid-input
+                       "Invalid state transition"
+                       {:current-status current-status
+                        :event event
+                        :error (:error result)
+                        :fsm-message (:message result)}))))
+
 (defn transition-status
   "Transition workflow status using FSM.
 
@@ -100,20 +128,23 @@
 
    Returns:
    - Updated state if transition valid
-   - Throws ex-info if transition invalid"
+   - Throws ex-info if transition invalid
+
+   DEPRECATED: prefer [[transition-status-anomaly]], which returns an
+   anomaly map instead of throwing. Retained for backward compatibility
+   with callers that rely on the slingshot throw shape."
+  {:deprecated "exceptions-as-data — prefer transition-status-anomaly"}
   [state event]
-  (let [current-status (:execution/status state)
-        result (fsm/transition current-status event)]
-    (if (fsm/succeeded? result)
-      (-> state
-          (assoc :execution/status (:state result))
-          (record-fsm-transition current-status (:state result) event))
-      (response/throw-anomaly! :anomalies.workflow/invalid-transition
-                              "Invalid state transition"
-                              {:current-status current-status
-                               :event event
-                               :error (:error result)
-                               :message (:message result)}))))
+  (let [result (transition-status-anomaly state event)]
+    (if (anomaly/anomaly? result)
+      (let [data (:anomaly/data result)]
+        (response/throw-anomaly! :anomalies.workflow/invalid-transition
+                                 "Invalid state transition"
+                                 {:current-status (:current-status data)
+                                  :event (:event data)
+                                  :error (:error data)
+                                  :message (:fsm-message data)}))
+      result)))
 
 (defn transition-to-phase
   "Transition execution to a new phase.
