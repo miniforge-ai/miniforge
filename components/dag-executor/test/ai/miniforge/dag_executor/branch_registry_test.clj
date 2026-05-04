@@ -147,3 +147,118 @@
     (is (false? (br/forest? [{:task/id :a :task/dependencies []}
                              {:task/id :b :task/dependencies []}
                              {:task/id :c :task/dependencies [:a :b]}])))))
+
+;------------------------------------------------------------------------------ Layer 3
+;; Multi-parent base resolution primitives (v2)
+
+(deftest multi-parent-predicate-test
+  (testing "multi-parent? distinguishes task dep counts"
+    (is (false? (br/multi-parent? [])))
+    (is (false? (br/multi-parent? [:a])))
+    (is (true?  (br/multi-parent? [:a :b])))
+    (is (true?  (br/multi-parent? [:a :b :c])))))
+
+(deftest resolve-multi-parent-base-preserves-order-test
+  (testing "resolve-multi-parent-base returns parents in declaration order
+            with :order indices matching the input vector position — that
+            ordering is the user-controlled ordering source per spec §3.1
+            and downstream collapse + first-parent-rule depend on it."
+    (let [reg (-> (br/create-registry)
+                  (br/register-branch :a {:branch "task-a" :sha "aaa111"})
+                  (br/register-branch :b {:branch "task-b" :sha "bbb222"})
+                  (br/register-branch :c {:branch "task-c" :sha "ccc333"}))
+          result (br/resolve-multi-parent-base reg [:a :b :c])
+          parents (:merge/parents result)]
+      (is (= 3 (count parents)))
+      (is (= [:a :b :c] (mapv :task/id parents)))
+      (is (= [0 1 2] (mapv :order parents)))
+      (is (= "task-a" (:branch (first parents))))
+      (is (= "aaa111" (:sha (first parents)))))))
+
+(deftest resolve-multi-parent-base-skips-unregistered-test
+  (testing "resolve-multi-parent-base silently skips unregistered deps —
+            fail-soft (matches the single-parent path's behavior). The
+            orchestrator detects the size mismatch via :order indices
+            and decides whether to fall back or anomaly per its policy."
+    (let [reg (-> (br/create-registry)
+                  (br/register-branch :a {:branch "task-a" :sha "aaa"})
+                  ;; :b not registered
+                  (br/register-branch :c {:branch "task-c" :sha "ccc"}))
+          result (br/resolve-multi-parent-base reg [:a :b :c])
+          parents (:merge/parents result)]
+      (is (= 2 (count parents)))
+      (is (= [:a :c] (mapv :task/id parents))
+          "registered-only deps survive")
+      (is (= [0 2] (mapv :order parents))
+          ":order preserves the input position so the caller can detect the gap"))))
+
+(deftest resolve-multi-parent-base-empty-when-nothing-registered-test
+  (testing "resolve-multi-parent-base returns nil when no deps resolve,
+            matching the spec §3.2 'caller should use single-parent fast
+            path before calling' guidance."
+    (is (nil? (br/resolve-multi-parent-base (br/create-registry) [:a :b])))))
+
+(deftest collapse-duplicate-tips-no-duplicates-test
+  (testing "collapse-duplicate-tips is identity when all SHAs are distinct"
+    (let [parents [{:task/id :a :branch "ta" :sha "aaa" :order 0}
+                   {:task/id :b :branch "tb" :sha "bbb" :order 1}]
+          result (br/collapse-duplicate-tips parents)]
+      (is (= parents (:parents result)))
+      (is (empty? (:collapsed result))))))
+
+(deftest collapse-duplicate-tips-drops-later-duplicates-test
+  (testing "collapse-duplicate-tips keeps the first parent at a SHA and
+            drops later parents at the same SHA, recording which absorbed
+            which so the orchestrator can log the collapse."
+    (let [parents [{:task/id :a :branch "ta" :sha "shared-sha" :order 0}
+                   {:task/id :b :branch "tb" :sha "unique-sha" :order 1}
+                   {:task/id :c :branch "tc" :sha "shared-sha" :order 2}]
+          result (br/collapse-duplicate-tips parents)]
+      (is (= [:a :b] (mapv :task/id (:parents result)))
+          "first parent at each unique SHA survives")
+      (is (= [{:dropped :c :duplicate-of :a}] (:collapsed result))
+          "the dropped parent and its absorber are recorded for logging"))))
+
+(deftest collapse-duplicate-tips-treats-nil-sha-as-unknown-test
+  (testing "collapse-duplicate-tips never collapses against a nil :sha —
+            unknown is unknown; the orchestrator must populate SHAs before
+            relying on duplicate collapse."
+    (let [parents [{:task/id :a :branch "ta" :sha nil :order 0}
+                   {:task/id :b :branch "tb" :sha nil :order 1}]
+          result (br/collapse-duplicate-tips parents)]
+      (is (= 2 (count (:parents result)))
+          "two unknown SHAs do not count as duplicates of each other")
+      (is (empty? (:collapsed result))))))
+
+(deftest compute-input-key-is-deterministic-test
+  (testing "compute-input-key returns the same hash for the same inputs"
+    (let [parents [{:sha "aaa"} {:sha "bbb"}]
+          k1 (br/compute-input-key :task-x :git-merge parents)
+          k2 (br/compute-input-key :task-x :git-merge parents)]
+      (is (= k1 k2))
+      (is (string? k1))
+      (is (= 16 (count k1))
+          "16-hex-char truncation: enough collision resistance for the
+           per-task namespace, short enough to read in logs"))))
+
+(deftest compute-input-key-changes-with-inputs-test
+  (testing "compute-input-key produces distinct keys for distinct inputs —
+            this is what makes the namespaced ref name stable across
+            replays AND distinguishable across different plans / parents."
+    (let [parents-1 [{:sha "aaa"} {:sha "bbb"}]
+          parents-2 [{:sha "aaa"} {:sha "ccc"}]
+          parents-reordered [{:sha "bbb"} {:sha "aaa"}]]
+      (is (not= (br/compute-input-key :t :git-merge parents-1)
+                (br/compute-input-key :t :git-merge parents-2))
+          "different parent SHAs ⇒ different key")
+      (is (not= (br/compute-input-key :t1 :git-merge parents-1)
+                (br/compute-input-key :t2 :git-merge parents-1))
+          "different task-ids ⇒ different key")
+      (is (not= (br/compute-input-key :t :git-merge      parents-1)
+                (br/compute-input-key :t :sequential-merge parents-1))
+          "different strategies ⇒ different key")
+      (is (not= (br/compute-input-key :t :git-merge parents-1)
+                (br/compute-input-key :t :git-merge parents-reordered))
+          "parent ORDER matters — first-parent rule means a different
+           order would produce a different merge commit, so the key
+           must reflect the order"))))

@@ -35,8 +35,14 @@
 
    Layer 0: Pure registry operations (create / register / lookup)
    Layer 1: Resolution (turn a task's dep set into a base-branch decision)
-   Layer 2: Forest validation (reject multi-parent DAGs at plan time)"
-  (:require [ai.miniforge.messages.interface :as messages]))
+   Layer 2: Forest validation (informational helpers; the v1 plan-time
+            gate is dropped in v2 — multi-parent DAGs are now the
+            normal path, see I-DAG-MULTI-PARENT-MERGE.md)
+   Layer 3: Multi-parent base resolution primitives (v2 — pure-data
+            inputs to the orchestrator's git-using `merge-parent-branches!`)"
+  (:require [ai.miniforge.messages.interface :as messages]
+            [clojure.string :as str])
+  (:import (java.security MessageDigest)))
 
 ;------------------------------------------------------------------------------ Translator
 ;; All user-facing strings — even ones that only ever flow into anomaly
@@ -178,6 +184,122 @@
   "Predicate form of `validate-forest`. True when the DAG is a forest."
   [tasks]
   (nil? (validate-forest tasks)))
+
+;------------------------------------------------------------------------------ Layer 3
+;; Multi-parent base resolution primitives (v2)
+;;
+;; These are pure-data inputs to the orchestrator's git-using
+;; `merge-parent-branches!`. The split is deliberate: ancestor collapse
+;; needs git (`git merge-base --is-ancestor`) and lives in the
+;; orchestrator; everything before that lives here.
+;;
+;; See specs/informative/I-DAG-MULTI-PARENT-MERGE.md §3.2 for the full
+;; algorithm.
+
+(defn multi-parent?
+  "True when `task-deps` declares more than one dependency.
+
+   Callers gate on this BEFORE choosing between `resolve-base-branch`
+   (single-parent fast path, returns a branch string) and
+   `resolve-multi-parent-base` (returns the v2 ordered-parents shape)."
+  [task-deps]
+  (> (count task-deps) 1))
+
+(defn resolve-multi-parent-base
+  "Build the ordered, SHA-pinned parent list for a multi-parent task.
+
+   Returns:
+
+       {:merge/parents [{:task/id <id> :branch <name> :sha <sha> :order N}]}
+
+   Parents appear in `task-deps` declaration order (the user-controlled
+   ordering source per spec §3.1). The orchestrator's git layer is
+   responsible for ancestor collapse (which needs `git merge-base
+   --is-ancestor`); this function returns the full pre-collapse list.
+
+   Any dep not registered yet is skipped — same fail-soft posture as
+   `resolve-base-branch`'s single-parent path. The orchestrator can
+   detect this via the `:order` indices: if the count of returned
+   parents differs from `(count task-deps)`, some deps were missing,
+   and the orchestrator can either fall back to the spec branch or
+   surface an anomaly per its policy.
+
+   Returns nil when zero deps would resolve (caller should use the
+   single-parent fast path before calling)."
+  [registry task-deps]
+  (let [resolved (->> task-deps
+                      (map-indexed (fn [order task-id]
+                                     (when-let [info (lookup-branch registry task-id)]
+                                       {:task/id task-id
+                                        :branch  (:branch info)
+                                        :sha     (:sha info)
+                                        :order   order})))
+                      (keep identity)
+                      vec)]
+    (when (seq resolved)
+      {:merge/parents resolved})))
+
+(defn collapse-duplicate-tips
+  "Drop later parents whose `:sha` matches an earlier parent's `:sha`.
+
+   Returns:
+
+       {:parents   [<surviving parents in original order>]
+        :collapsed [{:dropped <task-id> :duplicate-of <task-id>}]}
+
+   `:order` indices on the surviving parents are unchanged so callers
+   can detect collapse by comparing input/output counts.
+
+   Treats nil `:sha` as 'unknown' — never collapses against an
+   unknown SHA. Callers that want strict collapse should ensure SHAs
+   are populated first."
+  [parents]
+  (loop [remaining parents
+         seen-shas {}                   ; sha → task-id (the absorber)
+         survivors (transient [])
+         collapsed (transient [])]
+    (if-let [p (first remaining)]
+      (let [sha (:sha p)]
+        (if (and (some? sha) (contains? seen-shas sha))
+          (recur (rest remaining)
+                 seen-shas
+                 survivors
+                 (conj! collapsed {:dropped       (:task/id p)
+                                   :duplicate-of  (get seen-shas sha)}))
+          (recur (rest remaining)
+                 (if (some? sha) (assoc seen-shas sha (:task/id p)) seen-shas)
+                 (conj! survivors p)
+                 collapsed)))
+      {:parents   (persistent! survivors)
+       :collapsed (persistent! collapsed)})))
+
+(defn- hex-digest
+  "SHA-256 hex digest of a UTF-8-encoded string. Used for input-key."
+  [^String s]
+  (let [md (MessageDigest/getInstance "SHA-256")
+        bs (.digest md (.getBytes s "UTF-8"))]
+    (apply str (map #(format "%02x" %) bs))))
+
+(defn compute-input-key
+  "Deterministic idempotency hash for a multi-parent merge.
+
+   Per spec §3.2 step 6, the key is computed from
+   `[task-id, strategy, ordered parent SHAs]`. Same inputs always
+   produce the same key; different inputs always produce different
+   keys (probabilistically — SHA-256 collision resistance).
+
+   Used to name the merge ref:
+   `refs/miniforge/dag-base/<run-id>/<task-id>/<input-key>`. Replays of
+   the same effective input reuse the same ref instead of accumulating
+   new ones.
+
+   Truncated to 16 hex chars (64 bits) — enough collision resistance
+   for the per-task ref namespace, short enough to read in logs."
+  [task-id strategy parents]
+  (let [canonical (str (pr-str task-id) "|"
+                       (pr-str strategy) "|"
+                       (str/join "," (map :sha parents)))]
+    (subs (hex-digest canonical) 0 16)))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

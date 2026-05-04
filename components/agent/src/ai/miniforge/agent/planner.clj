@@ -48,7 +48,15 @@
    [:task/estimated-effort {:optional true} [:enum :small :medium :large :xlarge]]
    [:task/component {:optional true} [:string {:min 1}]]
    [:task/exclusive-files {:optional true} [:vector [:string {:min 1}]]]
-   [:task/stratum {:optional true} [:int {:min 0}]]])
+   [:task/stratum {:optional true} [:int {:min 0}]]
+   ;; Multi-parent merge strategy — only meaningful when
+   ;; `:task/dependencies` has 2+ entries. Default `:git-merge` (ort for
+   ;; 2 effective parents, octopus for 3+). `:sequential-merge` applies
+   ;; parents one-at-a-time as pairwise merges in declaration order.
+   ;; See specs/informative/I-DAG-MULTI-PARENT-MERGE.md §4. Single-
+   ;; parent and zero-dep tasks ignore this key.
+   [:task/merge-strategy {:optional true}
+    [:enum :git-merge :sequential-merge]]])
 
 (def Plan
   "Schema for the planner's output."

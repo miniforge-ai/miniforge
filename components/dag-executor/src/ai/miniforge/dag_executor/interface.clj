@@ -571,13 +571,49 @@
 
 (def validate-dag-forest
   "Plan-time validator: nil when every task has ≤1 dependency,
-   `:anomalies/dag-non-forest` map otherwise. Multi-parent merge is a
-   v2 follow-up; v1 single-parent restriction is enforced here."
+   `:anomalies/dag-non-forest` map otherwise.
+
+   In v1 this was used as a hard plan-time gate. In v2 the gate is
+   dropped — multi-parent DAGs are the normal path now (see
+   I-DAG-MULTI-PARENT-MERGE.md). `validate-dag-forest` survives as an
+   informational helper for plan-quality reporting."
   branch-registry/validate-forest)
 
 (def dag-forest?
-  "Predicate form of `validate-dag-forest`."
+  "Predicate form of `validate-dag-forest`. Informational only in v2;
+   see [[validate-dag-forest]]."
   branch-registry/forest?)
+
+;------------------------------------------------------------------------------ Layer 9
+;; Multi-parent base resolution primitives (v2)
+;; Pure-data inputs to the orchestrator's git-using `merge-parent-branches!`.
+;; See I-DAG-MULTI-PARENT-MERGE.md §3.2.
+
+(def multi-parent?
+  "True when a task's `:task/dependencies` declares more than one entry.
+   Callers gate on this before choosing between [[resolve-base-branch]]
+   (single-parent fast path, returns a string) and
+   [[resolve-multi-parent-base]] (returns the v2 ordered-parents shape)."
+  branch-registry/multi-parent?)
+
+(def resolve-multi-parent-base
+  "Build the ordered, SHA-pinned parent list for a multi-parent task.
+   Returns `{:merge/parents [{:task/id :branch :sha :order}]}` in
+   declaration order. The orchestrator's git layer is responsible for
+   ancestor collapse (`merge-base --is-ancestor`); this returns the
+   pre-collapse list."
+  branch-registry/resolve-multi-parent-base)
+
+(def collapse-duplicate-tips
+  "Drop later parents whose `:sha` matches an earlier parent's `:sha`.
+   Returns `{:parents [...] :collapsed [{:dropped :duplicate-of}]}`."
+  branch-registry/collapse-duplicate-tips)
+
+(def compute-merge-input-key
+  "Deterministic idempotency hash from `[task-id, strategy, ordered
+   parent SHAs]`. Used to name the merge ref under
+   `refs/miniforge/dag-base/<run-id>/<task-id>/<input-key>`."
+  branch-registry/compute-input-key)
 
 (defn create-dag-from-tasks
   "Create a complete DAG run state from a sequence of task definitions.
