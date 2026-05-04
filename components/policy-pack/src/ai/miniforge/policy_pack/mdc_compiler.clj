@@ -390,10 +390,27 @@
     (when-not (str/blank? content)
       content)))
 
+(def ^:private bullet-line-pattern
+  "Markdown list-item line: leading whitespace, then either `-` / `*`
+   or a numbered prefix like `1.` / `42.`, then a space. Numbered
+   prefixes are recognized so MDC authors can write `1. … 2. …` lists
+   in `## Agent behavior` sections without the compiler silently
+   falling through to prose-mode condensation and truncating
+   mid-sentence (regression observed on the dewey-211
+   `clojure-exception-handling` rule, copilot review on
+   miniforge#765)."
+  #"^\s*(?:[-*]|\d+\.)\s+.*")
+
+(defn- bullet-line?
+  "True when `line` is a markdown list-item — `-`/`*` bullet OR
+   numbered prefix."
+  [line]
+  (boolean (re-matches bullet-line-pattern line)))
+
 (defn- condense-bullets
   "Keep first 3 bullets from lines, hard-truncating to target-length."
   [lines target-length]
-  (let [bullets (filterv #(re-matches #"^\s*[-*]\s+.*" %) lines)
+  (let [bullets (filterv bullet-line? lines)
         result  (str/trim (str/join "\n" (take 3 bullets)))]
     (if (<= (count result) target-length)
       result
@@ -414,12 +431,13 @@
 
 (defn- condense-to-length
   "Condense text to approximately target-length characters.
-   Bullet lists: keeps first 3 bullets. Prose: keeps complete sentences."
+   Bullet lists (including numbered): keeps first 3 bullets.
+   Prose: keeps complete sentences."
   [text target-length]
   (if (<= (count text) target-length)
     text
     (let [lines   (str/split-lines text)
-          bullets (filterv #(re-matches #"^\s*[-*]\s+.*" %) lines)]
+          bullets (filterv bullet-line? lines)]
       (if (>= (count bullets) 2)
         (condense-bullets lines target-length)
         (condense-prose text target-length)))))
