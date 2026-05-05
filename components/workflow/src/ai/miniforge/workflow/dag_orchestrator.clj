@@ -415,16 +415,23 @@
 ;; consumer only needs to look for :branch and (optionally) :commit-sha.
 
 (defn- merge-ok-result
-  "Successful merge commit on the namespaced ref. Includes the input-key
-   and a `:cache-hit?` flag for observability."
-  [{:keys [ref-name commit-sha input-key strategy parents collapsed cache-hit?]}]
+  "Successful merge commit on the namespaced ref. Includes the
+   input-key and observability flags. `:resolved?` and
+   `:resolution-iterations` are set when the success came via the
+   resolution sub-workflow (Stage 2B+); absent for direct-merge
+   successes."
+  [{:keys [ref-name commit-sha input-key strategy parents collapsed
+           cache-hit? resolved? resolution-iterations]}]
   (dag/ok (cond-> {:branch       ref-name
                    :commit-sha   commit-sha
                    :input-key    input-key
                    :strategy     strategy
                    :parents      parents
                    :cache-hit?   (boolean cache-hit?)}
-            (seq collapsed) (assoc :collapsed collapsed))))
+            (seq collapsed)             (assoc :collapsed collapsed)
+            resolved?                   (assoc :resolved? true)
+            resolution-iterations       (assoc :resolution-iterations
+                                               resolution-iterations))))
 
 (defn- single-parent-fast-path-result
   "Successful resolution where collapse left exactly one effective
@@ -728,7 +735,9 @@
   "After a merge or resolution lands a commit-sha, write it to the
    namespaced ref and either return the standard merge-success shape
    or the typed ref-write-failed anomaly. Shared between the
-   no-conflict happy path and the resolution-success path."
+   no-conflict happy path and the resolution-success path. `extras`
+   may contain :resolved? / :resolution-iterations for the resolution
+   path (merge-ok-result destructures them explicitly so they survive)."
   [host-repo task-id ref-name commit-sha input-key strategy parents collapsed extras]
   (let [upd (run-git host-repo "update-ref" ref-name commit-sha)]
     (if (zero? (:exit upd))
@@ -800,24 +809,39 @@
         (if-not (zero? (:exit setup))
           (do (cleanup-worktree! host-repo worktree)
               (worktree-setup-failed-anomaly task-id setup))
-          (let [outcome (run-merge! worktree task-id strategy parents input-key)]
-            (if (:ok? outcome)
+          (let [outcome (run-merge! worktree task-id strategy parents input-key)
+                anomaly (:anomaly outcome)
+                anomaly-category (:anomaly/category anomaly)]
+            (cond
+              (:ok? outcome)
               (let [success (write-ref-and-build-success
                              host-repo task-id ref-name (:commit-sha outcome)
                              input-key strategy parents collapsed nil)]
                 (cleanup-worktree! host-repo worktree)
                 success)
-              ;; Conflict path — spawn the resolution sub-workflow on the
-              ;; same worktree. The conflict-info has the parents, paths,
+
+              ;; Conflict — spawn the resolution sub-workflow on the same
+              ;; worktree. The conflict anomaly has parents, paths,
               ;; strategy, input-key, exit-code, stderr — everything the
               ;; resolution agent (or its mock) needs.
+              (= anomaly-category :anomalies/dag-multi-parent-conflict)
               (let [result (attempt-resolution!
                             host-repo task-id ref-name input-key strategy
                             parents collapsed
-                            (:anomaly outcome) worktree
-                            resolution-overrides)]
+                            anomaly worktree resolution-overrides)]
                 (cleanup-worktree! host-repo worktree)
-                result))))))))
+                result)
+
+              ;; Non-conflict failure (e.g. rev-parse HEAD failed after a
+              ;; successful merge — `:dag-multi-parent-merge-failed`).
+              ;; This is an infrastructure error, not a conflict to
+              ;; resolve. Surface it directly so the operator sees the
+              ;; real cause; routing it through the resolution loop
+              ;; would hide the original git failure behind a generic
+              ;; `:dag-multi-parent-unresolvable`.
+              :else
+              (do (cleanup-worktree! host-repo worktree)
+                  anomaly))))))))
 
 (defn merge-parent-branches!
   "Multi-parent merge entry point per spec §6.1.

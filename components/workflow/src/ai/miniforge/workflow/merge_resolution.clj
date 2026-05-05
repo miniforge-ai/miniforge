@@ -223,12 +223,22 @@
     :or   {budget         default-budget
            agent-edit-fn  no-op-agent-edit-fn
            verify-fn      always-pass-verify-fn}}]
-  (let [parents (:merge/parents conflict-input)]
+  (let [parents (:merge/parents conflict-input)
+        max-iterations (:max-iterations budget)
+        ;; Per spec §10.6: stagnation-cap is the consecutive-recurrence
+        ;; count that terminates the loop. Default 2 (one extra chance
+        ;; after the first stuck-frame). Setting to 1 makes recurrence
+        ;; terminal on first detection (the v0.1 behavior); higher
+        ;; values give the agent more recovery attempts at the cost of
+        ;; budget. We clamp at 1 because zero or negative would never
+        ;; terminate.
+        stagnation-cap (max 1 (or (:stagnation-cap budget) 1))]
     (loop [iteration 0
-           prior-paths nil]
+           prior-paths nil
+           consecutive-recurrence 0]
       (cond
         ;; Budget exhausted before resolution.
-        (>= iteration (:max-iterations budget))
+        (>= iteration max-iterations)
         (terminal-result {:conflict-input conflict-input
                           :reason :budget-exhausted
                           :iterations iteration
@@ -241,10 +251,29 @@
           (let [curator (run-curator-check worktree-path prior-paths)
                 code    (curator-error-code curator)]
             (cond
-              ;; Curator declared the agent stuck.
+              ;; Curator: agent is stuck on the same path set. Track
+              ;; consecutive recurrences and only terminate when we hit
+              ;; the stagnation cap — gives the agent a chance to break
+              ;; out (relevant once Stage 2C wires the real LLM).
               (= code :curator/recurring-conflict)
+              (let [stagnated (inc consecutive-recurrence)]
+                (if (>= stagnated stagnation-cap)
+                  (terminal-result {:conflict-input conflict-input
+                                    :reason :curator/recurring-conflict
+                                    :iterations (inc iteration)
+                                    :last-attempt-ref worktree-path})
+                  ;; Below the cap — loop with same prior-paths so a
+                  ;; subsequent identical iteration counts as another
+                  ;; consecutive recurrence.
+                  (recur (inc iteration) prior-paths stagnated)))
+
+              ;; Curator: worktree is missing or some other infrastructure
+              ;; fault. Surface immediately rather than spinning to
+              ;; budget exhaustion — the operator needs the original
+              ;; error category, not a generic unresolvable.
+              (= code :curator/worktree-missing)
               (terminal-result {:conflict-input conflict-input
-                                :reason :curator/recurring-conflict
+                                :reason :curator/worktree-missing
                                 :iterations (inc iteration)
                                 :last-attempt-ref worktree-path})
 
@@ -261,18 +290,30 @@
                                         :iterations (inc iteration)
                                         :last-attempt-ref worktree-path})))
                   ;; Verify failed: the agent's edits broke tests.
-                  ;; Loop again; same paths since markers are gone — but
-                  ;; rather than risk infinite-loop on always-failing
-                  ;; verify, we treat this as a no-progress iteration
-                  ;; and let budget-exhausted catch it.
-                  (recur (inc iteration) prior-paths)))
+                  ;; Loop again; markers are gone (path set is empty)
+                  ;; so recurrence can't fire — let budget-exhausted
+                  ;; catch always-failing verify.
+                  (recur (inc iteration) prior-paths 0)))
 
-              ;; Curator says markers-not-resolved (or worktree-missing).
-              ;; Loop with the new path set so recurrence can fire next
-              ;; iteration.
-              :else
+              ;; Curator: markers-not-resolved. Loop with the new path
+              ;; set so recurrence can fire next iteration. Reset the
+              ;; consecutive-recurrence counter — this iteration showed
+              ;; a different path set than the prior, so the agent is
+              ;; making progress (or at least churning differently).
+              (= code :curator/markers-not-resolved)
               (recur (inc iteration)
-                     (set (curator-conflicted-paths curator))))))))))
+                     (set (curator-conflicted-paths curator))
+                     0)
+
+              ;; Unknown curator code — surface as a resolution-loop
+              ;; fault rather than spinning. The catch-all is intentional;
+              ;; new curator error codes added later should land an
+              ;; explicit branch above.
+              :else
+              (terminal-result {:conflict-input conflict-input
+                                :reason (or code :curator/unknown-error)
+                                :iterations (inc iteration)
+                                :last-attempt-ref worktree-path}))))))))
 
 ;; Rich Comment --------------------------------------------------------
 (comment

@@ -233,6 +233,50 @@
           "no-op stub agent → curator finds the same conflict path on
            iteration 2 → recurring-conflict early-out per spec §6.1.2"))))
 
+(deftest conflict-resolves-end-to-end-via-injected-agent-test
+  (testing "Full end-to-end success path through merge-parent-branches!:
+            a conflicted merge whose resolution-overrides inject a mock
+            agent that resolves the markers should write the resolution
+            commit to the namespaced ref and return dag/ok with
+            :resolved? true and :resolution-iterations populated. This
+            is the success contract Stage 2C's real LLM agent will hit;
+            until then, this test pins that the wiring works end-to-end
+            with a mock."
+    (run-git! *repo* "checkout" "-b" "task-a" "main")
+    (commit-file! *repo* "src/conflict.txt" "from a\n" "a edit")
+    (run-git! *repo* "checkout" "-b" "task-b" "main")
+    (commit-file! *repo* "src/conflict.txt" "from b\n" "b edit")
+    (run-git! *repo* "checkout" "main")
+    (let [task-def {:task/id "task-c" :task/deps [:a :b]}
+          mock-edit (fn [worktree _conflict _iteration]
+                      ;; Mock resolves the conflict by overwriting the
+                      ;; file with a clean merged version. A real LLM
+                      ;; agent would pick the actual content.
+                      (spit (str worktree "/src/conflict.txt")
+                            "from a\nfrom b\n")
+                      ;; Stage the fix so the resolution commit picks it up.
+                      (run-git! worktree "add" "src/conflict.txt")
+                      {:edits/applied 1})
+          ctx (-> (ctx-with-registry {:a {:branch "task-a"}
+                                      :b {:branch "task-b"}})
+                  (assoc :dag/resolution-overrides
+                         {:agent-edit-fn mock-edit}))
+          result (dag-orch/merge-parent-branches! ctx task-def)
+          data (:data result)]
+      (is (dag/ok? result)
+          "successful resolution returns dag/ok, not an anomaly")
+      (is (true? (:resolved? data))
+          ":resolved? observability flag set when success came via the
+           resolution loop (vs. direct merge)")
+      (is (pos-int? (:resolution-iterations data))
+          ":resolution-iterations carries through to the final result")
+      (is (str/starts-with? (:branch data) "refs/miniforge/dag-base/")
+          "the namespaced ref still names the merge base — downstream
+           tasks fork off this ref the same way they would for a
+           conflict-free merge")
+      (is (string? (:commit-sha data))
+          "the resolution commit's SHA is the new merge base"))))
+
 ;------------------------------------------------------------------------------ Tests: branch unresolvable
 
 (deftest unregistered-branch-falls-back-to-default-test
