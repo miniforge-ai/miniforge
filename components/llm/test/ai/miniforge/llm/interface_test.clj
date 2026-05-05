@@ -191,7 +191,30 @@
     (let [line (json/generate-string {:type "system" :subtype "init"})
           parsed (impl/parse-claude-stream-line line)]
       (is (true? (:heartbeat parsed))
-          "system init refreshes liveness once at the start of the stream"))))
+          "system init refreshes liveness once at the start of the stream")
+      (is (false? (:done? parsed))))))
+
+(deftest record-parsed-progress-heartbeat-liveness-test
+  (testing "heartbeat-only Claude stream events are recorded as activity"
+    ;; This guards the production regression path more directly than the
+    ;; parser-shape test above: if parsing still succeeds but progress
+    ;; supervision stops treating heartbeats as activity, these assertions
+    ;; fail and catch the 60s false-timeout behavior.
+    (doseq [[label line] [["rate_limit_event"
+                           (json/generate-string
+                            {:type "rate_limit_event"
+                             :rate_limit_info {:status "allowed"}})]
+                          ["system/init"
+                           (json/generate-string
+                            {:type "system" :subtype "init"})]]]
+      (let [parsed (impl/parse-claude-stream-line line)
+            monitor (atom {})
+            before @monitor]
+        (is (true? (:heartbeat parsed))
+            (str label " should parse as a heartbeat prerequisite"))
+        (impl/record-parsed-progress! monitor parsed)
+        (is (not= before @monitor)
+            (str label " heartbeat must advance progress supervision state"))))))
 
 (deftest parse-claude-stream-assistant-stop-reason-test
   (testing "assistant message with text carries stop_reason"
