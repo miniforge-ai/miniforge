@@ -92,8 +92,8 @@
         (update :execution/history conj transition)
         (assoc :execution/updated-at (System/currentTimeMillis)))))
 
-(defn transition-status-anomaly
-  "Anomaly-returning variant of [[transition-status]].
+(defn transition-status
+  "Transition workflow status using the FSM.
 
    Returns the updated execution state on success, or an
    `:invalid-input` anomaly when the FSM rejects the transition.
@@ -104,7 +104,12 @@
    - `:error`          — the FSM error keyword
    - `:fsm-message`    — the FSM-supplied diagnostic message
 
-   Prefer this over [[transition-status]] in non-boundary code."
+   This is the canonical, anomaly-returning entry point. The in-component
+   helpers `mark-completed`, `mark-failed`, `transition-to-phase` use
+   the private `transition-status!` boundary wrapper that throws when
+   the FSM rejects a transition that the workflow definition asserts
+   should always be valid (programmer-error guard, per the
+   exceptions-as-data rule's carve-out)."
   [state event]
   (let [current-status (:execution/status state)
         result (fsm/transition current-status event)]
@@ -119,23 +124,15 @@
                         :error (:error result)
                         :fsm-message (:message result)}))))
 
-(defn transition-status
-  "Transition workflow status using FSM.
-
-   Arguments:
-   - state: Current execution state
-   - event: Event keyword (:start, :complete, :fail, :pause, :resume, :cancel)
-
-   Returns:
-   - Updated state if transition valid
-   - Throws ex-info if transition invalid
-
-   DEPRECATED: prefer [[transition-status-anomaly]], which returns an
-   anomaly map instead of throwing. Retained for backward compatibility
-   with callers that rely on the slingshot throw shape."
-  {:deprecated "exceptions-as-data — prefer transition-status-anomaly"}
+(defn- transition-status!
+  "In-component boundary helper. Calls `transition-status`; on anomaly
+   result raises via slingshot. Used by `mark-completed`, `mark-failed`,
+   and `transition-to-phase` — which represent workflow-definition
+   invariants the FSM is supposed to satisfy at the call site. A
+   rejection here is a programmer error in the workflow shape, not a
+   runtime anomaly to be carried forward as data."
   [state event]
-  (let [result (transition-status-anomaly state event)]
+  (let [result (transition-status state event)]
     (if (anomaly/anomaly? result)
       (let [data (:anomaly/data result)]
         (response/throw-anomaly! :anomalies.workflow/invalid-transition
@@ -161,7 +158,7 @@
    (let [current-phase (:execution/current-phase state)
          ;; Ensure workflow is running when transitioning phases
          state-with-status (if (= :pending (:execution/status state))
-                            (transition-status state :start)
+                            (transition-status! state :start)
                             state)]
      (-> state-with-status
          (assoc :execution/current-phase phase-id)
@@ -205,10 +202,10 @@
   [state]
   (let [;; Ensure workflow is running before completing
         state-with-running (if (= :pending (:execution/status state))
-                            (transition-status state :start)
+                            (transition-status! state :start)
                             state)]
     (-> state-with-running
-        (transition-status :complete)
+        (transition-status! :complete)
         (assoc :execution/completed-at (System/currentTimeMillis)))))
 
 (defn mark-failed
@@ -229,10 +226,10 @@
                     error)
         ;; Ensure workflow is running before failing
         state-with-running (if (= :pending (:execution/status state))
-                            (transition-status state :start)
+                            (transition-status! state :start)
                             state)]
     (-> state-with-running
-        (transition-status :fail)
+        (transition-status! :fail)
         (update :execution/errors conj error-map)
         (assoc :execution/failed-at (System/currentTimeMillis)))))
 
