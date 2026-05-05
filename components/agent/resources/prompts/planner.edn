@@ -5,7 +5,7 @@
 ;; creates detailed implementation plans.
 
 {:prompt/id :planner
- :prompt/version "2.4.0"
+ :prompt/version "2.4.1"
  :prompt/agent :planner
 
  ;; Hard turn cap passed to the backend CLI. Observed 2026-04-18: at 40
@@ -30,8 +30,8 @@
  ;; is one Write call.
  :prompt/submission-retry-max-turns 4
  :prompt/submission-retry-monitor
- {:stagnation-threshold-ms     30000
-  :max-total-ms                120000
+ {:stagnation-threshold-ms     90000
+  :max-total-ms                180000
   :min-activity-interval-ms    2000}
 
  ;; User-turn template wrapped around every spec the planner sees.

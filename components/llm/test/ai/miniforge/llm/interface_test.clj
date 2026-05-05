@@ -718,6 +718,28 @@
                :content "fallback answer"}]
              @chunks)))))
 
+(deftest complete-stream-impl-silent-timeout-fallback-test
+  (testing "streaming timeout with only startup noise falls back to non-streaming completion"
+    (let [chunks (atom [])
+          client (ai.miniforge.llm.protocols.records.llm-client/create-client
+                  {:backend :claude
+                   :stream-exec-fn (fn [_cmd _on-line _opts]
+                                     {:out "{\"type\":\"system\"}\n{\"type\":\"rate_limit_event\"}"
+                                      :err "Adaptive timeout: Stagnation timeout"
+                                      :exit -1
+                                      :timeout {:type :stagnation
+                                                :message "Stagnation timeout: no progress for 30027ms"
+                                                :elapsed-ms 30027}})
+                   :exec-fn (fn [_cmd]
+                              {:out "fallback after timeout" :err "" :exit 0})})
+          resp (llm/complete-stream client {:prompt "test"} #(swap! chunks conj %))]
+      (is (:success resp))
+      (is (= "fallback after timeout" (:content resp)))
+      (is (= [{:delta "fallback after timeout"
+               :done? true
+               :content "fallback after timeout"}]
+             @chunks)))))
+
 ;------------------------------------------------------------------------------ Layer 5
 ;; Claude backend args-fn budget tests (PR #288)
 

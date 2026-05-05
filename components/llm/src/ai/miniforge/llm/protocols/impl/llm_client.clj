@@ -957,6 +957,22 @@
        (zero? tool-call-count)
        (nil? usage)))
 
+(defn- silent-stream-timeout?
+  "True when the streaming transport timed out before any semantic Claude output
+   arrived.
+
+   This is a different failure shape from blank-streaming-success:
+   the subprocess stayed alive long enough to hit the adaptive timeout, but the
+   parser never observed assistant text, tool-use, or usage/result events. In
+   that case we retry once through the non-streaming path before classifying the
+   invocation as failed."
+  [exit-code timeout-info final-content tool-call-count usage]
+  (and (= -1 exit-code)
+       timeout-info
+       (str/blank? final-content)
+       (zero? tool-call-count)
+       (nil? usage)))
+
 (defn streaming-error-response
   "Build a streaming error response with diagnostic metadata.
 
@@ -1025,10 +1041,20 @@
           tool-call-count (count tools)
           final-message-preview (message-preview diagnostic-content)
           usage @accumulated-usage
-          fallback-response (when (blank-streaming-success? exit-code
-                                                            final-content
-                                                            tool-call-count
-                                                            usage)
+          fallback-reason (cond
+                            (blank-streaming-success? exit-code
+                                                      final-content
+                                                      tool-call-count
+                                                      usage)
+                            :empty-stream-success
+
+                            (silent-stream-timeout? exit-code
+                                                    timeout-info
+                                                    final-content
+                                                    tool-call-count
+                                                    usage)
+                            :silent-stream-timeout)
+          fallback-response (when fallback-reason
                               (complete-impl client request))]
       (if fallback-response
         (do
@@ -1039,7 +1065,7 @@
           (when logger
             (log/info logger :system :agent/streaming-fallback
                       {:data {:backend backend
-                              :reason :empty-stream-success
+                              :reason fallback-reason
                               :stderr (:err result)}}))
           fallback-response)
         (do
