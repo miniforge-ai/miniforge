@@ -114,11 +114,12 @@
 
 (def workflow-anomalies
   "Workflow orchestration anomalies."
-  #{:anomalies.workflow/empty-pipeline   ; No phases in pipeline
-    :anomalies.workflow/invalid-config   ; Invalid workflow configuration
-    :anomalies.workflow/max-phases       ; Exceeded max phase iterations
-    :anomalies.workflow/invalid-transition  ; Invalid phase transition
-    :anomalies.workflow/rollback-limit}) ; Exceeded max rollbacks
+  #{:anomalies.workflow/empty-pipeline       ; No phases in pipeline
+    :anomalies.workflow/invalid-config       ; Invalid workflow configuration
+    :anomalies.workflow/max-phases           ; Exceeded max phase iterations
+    :anomalies.workflow/invalid-transition   ; Invalid phase transition
+    :anomalies.workflow/no-capsule-executor  ; Governed mode requested without pre-acquired capsule (N11 §7.4)
+    :anomalies.workflow/rollback-limit})     ; Exceeded max rollbacks
 
 ;------------------------------------------------------------------------------ Layer 2
 ;; Anomaly utilities
