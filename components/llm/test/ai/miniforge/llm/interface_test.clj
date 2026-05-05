@@ -170,6 +170,29 @@
       (is (= 42 (:num-turns parsed)))
       (is (= "max_turns" (:stop-reason parsed))))))
 
+(deftest parse-claude-stream-liveness-event-test
+  (testing "rate_limit_event parses as a heartbeat — keeps stream supervision alive"
+    ;; 2026-05-04 dogfood regression: parse-claude-stream-line returned nil
+    ;; for rate_limit_event, so 60s of 'allowed' rate-limit notifications
+    ;; (the only thing the CLI emits while Opus thinks on a heavy first
+    ;; turn) refreshed nothing and stagnation killed an actively-working
+    ;; planner with zero assistant output produced.
+    (let [line (json/generate-string
+                 {:type "rate_limit_event"
+                  :rate_limit_info {:status "allowed"}})
+          parsed (impl/parse-claude-stream-line line)]
+      (is (some? parsed)
+          "rate_limit_event must not parse to nil")
+      (is (true? (:heartbeat parsed))
+          "rate_limit_event must be a heartbeat so the progress monitor refreshes")
+      (is (false? (:done? parsed)))))
+
+  (testing "system init event parses as a heartbeat"
+    (let [line (json/generate-string {:type "system" :subtype "init"})
+          parsed (impl/parse-claude-stream-line line)]
+      (is (true? (:heartbeat parsed))
+          "system init refreshes liveness once at the start of the stream"))))
+
 (deftest parse-claude-stream-assistant-stop-reason-test
   (testing "assistant message with text carries stop_reason"
     (let [line (json/generate-string

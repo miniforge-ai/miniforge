@@ -202,9 +202,18 @@
             {:delta "" :done? false :tool-use true
              :tool-name tool-name})
 
-          ;; System and rate_limit_event are known no-ops
+          ;; System init and rate-limit notifications carry no content,
+          ;; but they ARE liveness signals from the CLI. While Claude is
+          ;; thinking on a heavy first turn (Opus on a multi-thousand-
+          ;; token planner prompt can take 30-60s before the first
+          ;; assistant chunk), `rate_limit_event` is often the only
+          ;; thing arriving on stdout. Treat both as heartbeats so the
+          ;; adaptive timeout doesn't fire on a model that's actively
+          ;; working — observed in the 2026-05-04 dogfood: 7 rate-limit
+          ;; events + 1 system init in 60s, stagnation killed the run
+          ;; with zero assistant output produced.
           ("system" "rate_limit_event")
-          nil
+          {:delta "" :done? false :heartbeat true}
 
           ;; Any other unrecognised event type — emit a heartbeat so the
           ;; stream stays alive during tool-heavy phases
