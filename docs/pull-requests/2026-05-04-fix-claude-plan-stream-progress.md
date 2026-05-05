@@ -24,11 +24,18 @@ out even though the agent was still active.
 - record planner/LLM progress from parsed stream events instead of raw stdout
   lines
 - treat tool-use, heartbeat, and result events as semantic progress signals
+- refresh progress for repeated semantic activity even when the marker text is
+  unchanged
 - preserve raw streamed stdout in timeout error payloads when parsed content is
   empty
+- accept wrapped Claude preflight success output only when the outer result
+  envelope is itself successful
 - add regression coverage for:
   - tool-use progress preventing false stagnation
+  - repeated heartbeat activity extending liveness correctly
   - raw stdout preservation on streaming timeout failures
+  - rejecting wrapped preflight error envelopes that contain an inner
+    `{"ok":true}`
 
 ## Validation
 

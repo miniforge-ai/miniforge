@@ -446,8 +446,17 @@
     (let [parsed (parse-preflight-payload candidate)
           nested (or (some-> parsed :result str/trim not-empty)
                      (some-> parsed :content str/trim not-empty))]
-      (if (and nested (not= nested candidate))
+      (cond
+        (and (:result parsed)
+             (not (and (= "result" (:type parsed))
+                       (= "success" (:subtype parsed))
+                       (not (:is_error parsed)))))
+        nil
+
+        (and nested (not= nested candidate))
         (recur nested)
+
+        :else
         candidate))))
 
 (defn- preflight-success?

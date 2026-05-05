@@ -159,6 +159,28 @@
       (is (str/includes? output "Backend Path: /opt/homebrew/bin/claude"))
       (is (str/includes? output "Backend Version: 2.1.118 (Claude Code)")))))
 
+(deftest run-backend-preflight-rejects-claude-error-wrapper-test
+  (testing "Claude preflight rejects wrapped payloads when the outer result envelope is not successful"
+    (let [llm-client (llm/mock-client {:output "{\"ok\":true}"})]
+      (try+
+        (with-redefs-fn {#'sut/resolve-cli-command-path (fn [_] "/opt/homebrew/bin/claude")
+                         #'sut/read-cli-version (fn [_] {:success true :version "2.1.118 (Claude Code)"})
+                         #'sut/run-cli-command (fn [_cmd _timeout-ms & _]
+                                                 {:out "{\"type\":\"result\",\"subtype\":\"error\",\"is_error\":true,\"result\":\"{\\\"ok\\\":true}\"}"
+                                                  :err ""
+                                                  :exit 0})}
+          (fn []
+            (#'sut/run-backend-preflight!
+             false
+             llm-client
+             {:worktree-path "/tmp/runtime-worktree"})))
+        (is false "expected wrapped error result to fail preflight")
+        (catch [:anomaly/category :anomalies/unavailable]
+               {:keys [probe-response]}
+          (is (= "backend_preflight_unexpected_output"
+                 (get-in probe-response [:error :data :type])))
+          (is (nil? (:content probe-response))))))))
+
 (deftest run-backend-preflight-exercises-generic-cli-success-path-test
   (testing "non-Claude CLI backends decode streamed CLI output and accept the canonical ok payload"
     (let [llm-client (llm/create-client {:backend :codex})

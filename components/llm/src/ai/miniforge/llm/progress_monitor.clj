@@ -98,6 +98,24 @@
                     :stagnant-cycles 0
                     :file-writes (conj (:file-writes state) file-path))))))
 
+(defn record-activity!
+  "Record semantic activity that should keep the monitor alive even when
+   repeated events do not produce new substantive text.
+
+   Arguments:
+   - monitor - Progress monitor atom
+   - activity-key - Stable keyword/string describing the activity type"
+  [monitor activity-key]
+  (let [now (System/currentTimeMillis)]
+    (swap! monitor
+           (fn [state]
+             (-> state
+                 (assoc :last-activity-at now
+                        :stagnant-cycles 0)
+                 (update :chunk-count inc)
+                 (update :unique-chunks conj activity-key)))))
+  true)
+
 (defn check-timeout
   "Check if the monitor has timed out.
 

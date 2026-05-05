@@ -842,7 +842,7 @@
   [progress-monitor parsed accumulated-content]
   (cond
     (:tool-use parsed)
-    (pm/record-chunk!
+    (pm/record-activity!
      progress-monitor
      (str "tool-use:"
           (or (:tool-name parsed)
@@ -850,10 +850,10 @@
               "unknown")))
 
     (:heartbeat parsed)
-    (pm/record-chunk! progress-monitor "stream-heartbeat")
+    (pm/record-activity! progress-monitor :stream-heartbeat)
 
     (contains? parsed :done?)
-    (pm/record-chunk! progress-monitor "stream-result")
+    (pm/record-activity! progress-monitor :stream-result)
 
     :else
     (pm/record-chunk! progress-monitor @accumulated-content)))
