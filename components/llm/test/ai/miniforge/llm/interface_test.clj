@@ -208,13 +208,23 @@
                            (json/generate-string
                             {:type "system" :subtype "init"})]]]
       (let [parsed (impl/parse-claude-stream-line line)
-            monitor (atom {})
-            before @monitor]
+            monitor (pm/create-progress-monitor {:stagnation-threshold-ms 1000
+                                                 :max-total-ms 1000
+                                                 :min-activity-interval-ms 1})
+            before-ts (:last-activity-at @monitor)]
         (is (true? (:heartbeat parsed))
             (str label " should parse as a heartbeat prerequisite"))
-        (impl/record-parsed-progress! monitor parsed)
-        (is (not= before @monitor)
-            (str label " heartbeat must advance progress supervision state"))))))
+        (Thread/sleep 5)
+        (#'impl/record-parsed-progress! monitor parsed (atom ""))
+        ;; Specifically assert the activity timestamp moved — a weaker
+        ;; (not= before @monitor) check passes even if heartbeats stop
+        ;; refreshing :last-activity-at (e.g. if the code regresses to
+        ;; record-chunk! which mutates other fields without updating
+        ;; the timestamp the stagnation timer reads).
+        (is (< before-ts (:last-activity-at @monitor))
+            (str label " heartbeat must advance :last-activity-at"))
+        (is (nil? (pm/check-timeout monitor))
+            (str label " heartbeat must keep monitor below stagnation threshold"))))))
 
 (deftest parse-claude-stream-assistant-stop-reason-test
   (testing "assistant message with text carries stop_reason"

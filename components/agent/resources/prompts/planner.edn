@@ -15,13 +15,20 @@
  ;; work/n07-opsv-agent-budgets.spec.edn.
  :prompt/max-turns 80
 
- ;; Main-turn progress monitor. Planner runs should converge quickly
- ;; once exploration is done. A shorter hard limit keeps us from
- ;; burning a full 10+ minutes after the model has gathered enough
- ;; context but failed to submit the plan.
+ ;; Main-turn progress monitor. The planner sees a user prompt that
+ ;; embeds the spec PLUS the explore phase's existing-files section —
+ ;; on real specs that's typically 100k+ tokens. Opus on a 100k-token
+ ;; first turn empirically takes 90-180s to emit its first assistant
+ ;; chunk; while it's thinking the Claude CLI emits one rate_limit_event
+ ;; early in the stream and then nothing more until tokens come back.
+ ;; The 60s stagnation threshold this used to carry fired BEFORE the
+ ;; model had any chance to respond on the event-log-tool-visibility
+ ;; dogfood (2026-05-04, run5: 0 tokens, 0 cost, killed at 60s).
+ ;; 180s gives Opus room for its pre-first-chunk think; 600s overall
+ ;; covers the longest historical successful planner run (6.6m).
  :prompt/progress-monitor
- {:stagnation-threshold-ms     60000
-  :max-total-ms                240000
+ {:stagnation-threshold-ms     180000
+  :max-total-ms                600000
   :min-activity-interval-ms    3000}
 
  ;; Submission-retry runs after the main planner turn already produced

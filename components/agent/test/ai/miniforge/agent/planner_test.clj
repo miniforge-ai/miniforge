@@ -493,6 +493,67 @@
                  (:disallowed-tools @captured))
               ":disallowed-tools opt must equal the planner's role-scoped list"))))))
 
+(deftest planner-progress-monitor-thresholds-loaded-test
+  ;; Guards the 2026-05-04 stagnation-threshold fix at the planner
+  ;; boundary: a regression in prompt loading or
+  ;; create-planner-progress-monitor would otherwise let the threshold
+  ;; values silently drift back to a too-tight default. Asserts the
+  ;; loaded :progress-monitor opt carries the resources/prompts/planner.edn
+  ;; values that give Opus room to think on heavy first turns.
+  (testing ":progress-monitor passed to LLM reflects planner.edn thresholds"
+    (let [captured (atom nil)
+          fake-llm-client {:type :fake}
+          fake-plan {:plan/id (random-uuid)
+                     :plan/name "stub"
+                     :plan/tasks [{:task/id (random-uuid)
+                                   :task/description "t"
+                                   :task/type :implement
+                                   :task/acceptance-criteria ["ok"]
+                                   :task/estimated-effort :small}]}]
+      (with-redefs [llm/success? (constantly true)
+                    llm/get-content (constantly (str "```clojure\n"
+                                                     (pr-str fake-plan)
+                                                     "\n```"))
+                    llm/chat (fn [_client _prompt opts]
+                               (reset! captured opts)
+                               {:status :success})
+                    llm/chat-stream (fn [_client _prompt _on-chunk opts]
+                                      (reset! captured opts)
+                                      {:status :success})
+                    model/resolve-llm-client-for-role
+                    (fn [_role provided] provided)
+                    artifact-session/with-session
+                    (fn [_context body-fn]
+                      (let [result (body-fn {:dir "/tmp/fake-session"
+                                             :workdir "/tmp/fake-workdir"
+                                             :mcp-config-path "/tmp/fake-session/mcp-config.json"
+                                             :mcp-allowed-tools []
+                                             :supervision {}
+                                             :pre-session-snapshot {}})]
+                        {:llm-result result
+                         :artifact nil
+                         :worktree-artifacts {}
+                         :context-misses nil
+                         :pre-session-snapshot {}
+                         :session-mode :host}))]
+        (let [agent (planner/create-planner {:llm-backend fake-llm-client})]
+          (try
+            (core/invoke agent {:llm-backend fake-llm-client
+                                :title "t"
+                                :description "t"
+                                :intent "t"}
+                         "build a thing")
+            (catch Exception _))
+          (is (some? @captured) "LLM client should have been called")
+          (let [monitor (:progress-monitor @captured)]
+            (is (some? monitor)
+                ":progress-monitor opt must reach the LLM client")
+            (let [state @monitor]
+              (is (>= (:stagnation-threshold-ms state) 180000)
+                  "Stagnation threshold must be ≥180s — Opus needs room for the pre-first-chunk think on heavy planner prompts")
+              (is (>= (:max-total-ms state) 600000)
+                  "Total budget must be ≥10min — covers the longest historical successful planner run"))))))))
+
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
   (test/run-tests 'ai.miniforge.agent.planner-test)
