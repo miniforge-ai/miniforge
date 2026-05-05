@@ -30,6 +30,7 @@
    [clojure.edn :as edn]
    [clojure.java.io :as io]
    [clojure.string :as str]
+   [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.response.interface :as response]
    [ai.miniforge.workflow.messages :as messages]
    [ai.miniforge.workflow.validator :as validator]
@@ -90,21 +91,34 @@
    Arguments:
      resource-path - Path to workflow EDN file
 
-   Returns: Workflow map or nil if not found"
+   Returns:
+   - workflow definition map on success
+   - nil when no resource exists at `resource-path`
+   - a `:fault` anomaly when the resource exists but failed to parse
+     (carrying `:resource-path` and `:error`)
+
+   This is the canonical, anomaly-returning entry point. The
+   in-component caller `discover-workflows-from-resources` filters
+   anomalies out of its sequence rather than letting one bad resource
+   abort discovery."
   [resource-path]
   (when-let [resource (io/resource resource-path)]
     (try
       (edn/read-string (slurp resource))
       (catch Exception e
-        (response/throw-anomaly! :anomalies/fault
-                                (str "Failed to load workflow from " resource-path)
-                                {:resource-path resource-path
-                                 :error (ex-message e)})))))
+        (anomaly/anomaly :fault
+                         (str "Failed to load workflow from " resource-path)
+                         {:resource-path resource-path
+                          :error (ex-message e)})))))
 
 (defn discover-workflows-from-resources
   "Discover workflows from classpath resources.
    The active workflow families are determined by whichever components contribute
    `workflows/*.edn` files to the classpath.
+
+   Filters out resources that failed to parse (anomaly results from
+   `load-workflow-from-resource`) so a single corrupt EDN file does
+   not mask all workflows.
 
    Returns: Sequence of workflow maps"
   []
@@ -112,10 +126,58 @@
        (filter #(str/ends-with? % ".edn"))
        (sort)
        (map #(str "workflows/" %))
-       (keep load-workflow-from-resource)))
+       (keep load-workflow-from-resource)
+       (remove anomaly/anomaly?)))
 
 ;;------------------------------------------------------------------------------ Layer 2
 ;; Workflow characteristics
+
+(defn- compute-characteristics
+  "Compute the raw characteristics map from a workflow definition,
+   without schema validation. Pure data shaping."
+  [workflow]
+  (let [phases (:workflow/phases workflow)
+        phase-count (count phases)
+        max-iterations (get-in workflow [:workflow/config :max-total-iterations] 20)
+        task-types (:workflow/task-types workflow)
+        has-review? (some #(str/includes? (str (:phase/id %)) "review") phases)
+        has-testing? (some #(str/includes? (str (:phase/id %)) "test") phases)
+        complexity (cond
+                     (< phase-count 4) :simple
+                     (< phase-count 8) :medium
+                     :else :complex)]
+    {:id (:workflow/id workflow)
+     :version (:workflow/version workflow)
+     :name (:workflow/name workflow)
+     :description (:workflow/description workflow)
+     :phases phase-count
+     :max-iterations max-iterations
+     :task-types (or task-types [])
+     :complexity complexity
+     :has-review has-review?
+     :has-testing has-testing?}))
+
+(defn try-workflow-characteristics
+  "Anomaly-returning variant of `workflow-characteristics`.
+
+   Returns:
+   - on success: characteristics map validated against
+     `WorkflowCharacteristics`
+   - on schema failure: an `:invalid-input` anomaly carrying
+     `:characteristics` and `:errors` (humanized malli explanation)
+
+   This is the canonical, anomaly-returning entry point. The boundary
+   site `workflow-characteristics` inlines a `response/throw-anomaly!`
+   when an anomaly is observed, preserving the legacy thrown-exception
+   contract for external callers that depend on a plain map."
+  [workflow]
+  (let [characteristics (compute-characteristics workflow)]
+    (if (schemas/valid-characteristics? characteristics)
+      characteristics
+      (anomaly/anomaly :invalid-input
+                       "Invalid workflow characteristics"
+                       {:characteristics characteristics
+                        :errors (schemas/explain-characteristics characteristics)}))))
 
 (defn workflow-characteristics
   "Extract characteristics from workflow for selection.
@@ -133,35 +195,19 @@
       :task-types [keywords]
       :complexity :simple | :medium | :complex
       :has-review boolean
-      :has-testing boolean}"
+      :has-testing boolean}
+
+   Throws via `response/throw-anomaly!` with category
+   `:anomalies.workflow/invalid-config` when the computed
+   characteristics fail schema validation. Use
+   `try-workflow-characteristics` for an anomaly-returning equivalent."
   [workflow]
-  (let [phases (:workflow/phases workflow)
-        phase-count (count phases)
-        max-iterations (get-in workflow [:workflow/config :max-total-iterations] 20)
-        task-types (:workflow/task-types workflow)
-        has-review? (some #(str/includes? (str (:phase/id %)) "review") phases)
-        has-testing? (some #(str/includes? (str (:phase/id %)) "test") phases)
-        complexity (cond
-                     (< phase-count 4) :simple
-                     (< phase-count 8) :medium
-                     :else :complex)
-        characteristics {:id (:workflow/id workflow)
-                         :version (:workflow/version workflow)
-                         :name (:workflow/name workflow)
-                         :description (:workflow/description workflow)
-                         :phases phase-count
-                         :max-iterations max-iterations
-                         :task-types (or task-types [])
-                         :complexity complexity
-                         :has-review has-review?
-                         :has-testing has-testing?}]
-    ;; Validate against schema
-    (when-not (schemas/valid-characteristics? characteristics)
+  (let [result (try-workflow-characteristics workflow)]
+    (if (anomaly/anomaly? result)
       (response/throw-anomaly! :anomalies.workflow/invalid-config
-                              "Invalid workflow characteristics"
-                              {:characteristics characteristics
-                               :errors (schemas/explain-characteristics characteristics)}))
-    characteristics))
+                               (:anomaly/message result)
+                               (:anomaly/data result))
+      result)))
 
 ;;------------------------------------------------------------------------------ Layer 3
 ;; Registry operations
@@ -170,18 +216,40 @@
   [workflow]
   (:errors (validator/validate-workflow workflow)))
 
-(defn- validate-workflow-registration!
+(defn validate-workflow-registration
+  "Validate a workflow definition for registration.
+
+   Returns:
+   - the workflow itself when validation passes
+   - an `:invalid-input` anomaly carrying `:workflow-id` and
+     `:validation/errors` when the validator reports errors
+
+   This is the canonical, anomaly-returning entry point. The boundary
+   site `register-workflow!` inlines a `response/throw-anomaly!` when
+   an anomaly is observed."
   [workflow]
   (let [workflow-id (:workflow/id workflow)
         errors (registration-errors workflow)]
-    (when (seq errors)
-      (response/throw-anomaly!
-       :anomalies.workflow/invalid-config
-       (messages/t :status/invalid-workflow-registration
-                   {:workflow-id workflow-id})
-       {:workflow-id workflow-id
-        :validation/errors errors}))
-    workflow))
+    (if (seq errors)
+      (anomaly/anomaly :invalid-input
+                       (messages/t :status/invalid-workflow-registration
+                                   {:workflow-id workflow-id})
+                       {:workflow-id workflow-id
+                        :validation/errors errors})
+      workflow)))
+
+(defn missing-workflow-id-anomaly
+  "Return an `:invalid-input` anomaly describing a workflow missing
+   `:workflow/id`, or nil when the id is present.
+
+   This is the canonical, anomaly-returning entry point. The boundary
+   site `register-workflow!` inlines a `response/throw-anomaly!` on
+   anomaly."
+  [workflow]
+  (when-not (:workflow/id workflow)
+    (anomaly/anomaly :invalid-input
+                     (messages/t :status/missing-workflow-id)
+                     {:workflow workflow})))
 
 (defn register-workflow!
   "Register a workflow in the registry.
@@ -189,15 +257,26 @@
    Arguments:
      workflow - Workflow definition map
 
-  Returns: The registered workflow"
+   Returns: The registered workflow.
+
+   Throws via `response/throw-anomaly!` with category
+   `:anomalies/incorrect` when `:workflow/id` is missing, or
+   `:anomalies.workflow/invalid-config` when validator reports errors.
+
+   For anomaly-returning equivalents that callers can branch on as
+   data, use `missing-workflow-id-anomaly` and
+   `validate-workflow-registration`."
   [workflow]
-  (let [id (:workflow/id workflow)]
-    (when-not id
-      (response/throw-anomaly! :anomalies/incorrect
-                              (messages/t :status/missing-workflow-id)
-                              {:workflow workflow}))
-    (validate-workflow-registration! workflow)
-    (swap! registry assoc id workflow)
+  (when-let [a (missing-workflow-id-anomaly workflow)]
+    (response/throw-anomaly! :anomalies/incorrect
+                             (:anomaly/message a)
+                             (:anomaly/data a)))
+  (let [validated (validate-workflow-registration workflow)]
+    (when (anomaly/anomaly? validated)
+      (response/throw-anomaly! :anomalies.workflow/invalid-config
+                               (:anomaly/message validated)
+                               (:anomaly/data validated)))
+    (swap! registry assoc (:workflow/id workflow) workflow)
     workflow))
 
 (defn get-workflow
