@@ -188,6 +188,50 @@
       (is (nil? resolved)
           "Should return nil when implement-result is nil"))))
 
+(deftest resolve-rehydrate-from-paths-test
+  (testing "Strategy 5: paths-only outer artifact rehydrates content from worktree"
+    (let [outer-artifact {:code/summary "lightweight artifact"
+                          :code/file-paths ["src/core.clj" "src/util.clj"]
+                          :code/file-actions [:create :modify]
+                          :code/file-count 2}
+          impl-result {:status :completed :artifact outer-artifact}
+          ctx (make-ctx)
+          rehydrated [{:path "src/core.clj" :content "(ns core)"  :action :create}
+                      {:path "src/util.clj" :content "(ns util)" :action :modify}]
+          resolved (with-redefs [agent/rehydrate-files
+                                 (fn [working-dir paths actions]
+                                   (is (= "/tmp/test-worktree" working-dir))
+                                   (is (= ["src/core.clj" "src/util.clj"] paths))
+                                   (is (= [:create :modify] actions))
+                                   rehydrated)
+                                 agent/collect-written-files
+                                 (fn [_ _]
+                                   {:code/files [{:path "should-not-win.clj"
+                                                  :content "x" :action :create}]
+                                    :code/summary "should-not-win"})]
+                     (resolve-implement-artifact impl-result ctx))]
+      (is (= rehydrated (:code/files resolved)))
+      (is (= "lightweight artifact" (:code/summary resolved)))
+      (is (= ["src/core.clj" "src/util.clj"] (:code/file-paths resolved))
+          "Outer-artifact metadata is preserved alongside the rehydrated files")))
+
+  (testing "Strategy 5 falls through to strategy 6/7 when rehydration finds no files"
+    (let [outer-artifact {:code/summary "lightweight artifact"
+                          :code/file-paths ["src/missing.clj"]}
+          impl-result {:status :completed :artifact outer-artifact}
+          fallback-artifact {:code/files [{:path "src/picked.clj"
+                                           :content "(ns picked)"
+                                           :action :create}]
+                             :code/summary "from worktree"}
+          resolved (with-redefs [agent/rehydrate-files (fn [_ _ _] [])
+                                 agent/collect-written-files (fn [_ _] fallback-artifact)]
+                     (resolve-implement-artifact impl-result (make-ctx)))]
+      (is (= [{:path "src/picked.clj" :content "(ns picked)" :action :create}]
+             (:code/files resolved))
+          "Strategy 6 (worktree merge) takes over when strategy 5 returns nothing")
+      (is (= "lightweight artifact" (:code/summary resolved))
+          "Outer-artifact metadata still wins on the merge"))))
+
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
   (clojure.test/run-tests 'ai.miniforge.phase-software-factory.review-artifact-resolution-test)

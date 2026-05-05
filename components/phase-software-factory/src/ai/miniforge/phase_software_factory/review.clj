@@ -49,41 +49,62 @@
   [ctx phase-name]
   (phase/create-streaming-callback ctx phase-name))
 
+(defn- rehydrate-from-paths
+  "Reconstitute `:code/files` for an outer-artifact that was persisted as
+   paths-only metadata by `lightweight-curated-artifact`.
+
+   The implement phase boundary commits dirty work onto the task branch
+   immediately after `leave-implement`, so by the time review runs the
+   worktree is clean at HEAD and `git status --porcelain` reports
+   nothing — the prior fallback (`collect-written-files (empty-snapshot)
+   worktree-path`) returned an empty `:code/files` and the reviewer
+   reported 'no files were created in the worktree' even though the
+   committed branch had everything (observed: codex/event-log-tool-
+   visibility dogfood, 2026-05-04). Reading the recorded paths off disk
+   is cheap, deterministic, and avoids re-running git plumbing."
+  [outer-artifact worktree-path]
+  (when-let [paths (and outer-artifact
+                        worktree-path
+                        (seq (:code/file-paths outer-artifact)))]
+    (let [files (try
+                  (agent/rehydrate-files worktree-path paths
+                                         (:code/file-actions outer-artifact))
+                  (catch Exception _ nil))]
+      (when (seq files)
+        (assoc outer-artifact :code/files files)))))
+
 (defn- resolve-implement-artifact
-  "Resolve the implement-phase artifact using three strategies:
-   1. Serialized :artifact key in the implement result (legacy model)
-   2. The result itself when it already contains :code/files (it IS the artifact)
-   3. Serialized artifact under inner result :output
-   4. Fall back to collecting all changed files from the worktree on disk
-      (environment-promotion model where the agent writes directly to the worktree)
-   If the persisted outer artifact is metadata-only, merge that metadata over the
-   worktree-collected artifact so review sees full file content plus curator flags."
+  "Resolve the implement-phase artifact using ordered strategies, from
+   most-direct (full content already in the result) to last-resort
+   (rebuild from the worktree).
+
+   1. Outer `:artifact` already includes `:code/files`.
+   2. Inner result's `:artifact` already includes `:code/files`.
+   3. Result map IS the artifact (has `:code/files`).
+   4. Inner result's `:output` includes `:code/files`.
+   5. Lightweight outer artifact (paths-only) — read content from disk
+      using `:code/file-paths` so review sees what landed even though
+      the phase-boundary persist already cleaned the worktree.
+   6. Metadata-only outer artifact merged over a worktree
+      git-status snapshot (legacy fallback).
+   7. Worktree git-status snapshot alone (env-promotion model)."
   [implement-phase-result ctx]
-  (let [outer-artifact (:artifact implement-phase-result)
-        inner-artifact (get-in implement-phase-result [:result :artifact])
-        inner-output (get-in implement-phase-result [:result :output])
-        worktree-path (or (get ctx :execution/worktree-path)
-                          (get ctx :worktree-path))
-        worktree-artifact (when worktree-path
-                            (agent/collect-written-files (agent/empty-snapshot)
-                                                         worktree-path))]
+  (let [outer-artifact     (:artifact implement-phase-result)
+        inner-artifact     (get-in implement-phase-result [:result :artifact])
+        inner-output       (get-in implement-phase-result [:result :output])
+        worktree-path      (or (get ctx :execution/worktree-path)
+                               (get ctx :worktree-path))
+        worktree-artifact  (when worktree-path
+                             (agent/collect-written-files (agent/empty-snapshot)
+                                                          worktree-path))]
     (or
-     ;; Strategy 1 — persisted outer artifact already includes file content
-     (when (:code/files outer-artifact)
-       outer-artifact)
-     ;; Strategy 2 — explicit :artifact in inner result
-     (when (:code/files inner-artifact)
-       inner-artifact)
-     ;; Strategy 3 — result already is the artifact (has :code/files)
-     (when (:code/files implement-phase-result)
-       implement-phase-result)
-     ;; Strategy 4 — serialized artifact under inner :output
-     (when (:code/files inner-output)
-       inner-output)
-     ;; Strategy 5 — metadata-only outer artifact merged over worktree content
+     (when (:code/files outer-artifact)        outer-artifact)
+     (when (:code/files inner-artifact)        inner-artifact)
+     (when (:code/files implement-phase-result) implement-phase-result)
+     (when (:code/files inner-output)          inner-output)
+     (rehydrate-from-paths outer-artifact worktree-path)
      (when (and outer-artifact worktree-artifact)
        (merge worktree-artifact outer-artifact))
-     ;; Strategy 6 — read changed files from worktree (env-promotion model)
      worktree-artifact)))
 
 (defn- build-verify-review-input
