@@ -17,18 +17,18 @@
 ;; limitations under the License.
 
 (ns ai.miniforge.workflow.anomaly.build-initial-context-test
-  "Coverage for `runner/build-initial-context-anomaly` and its deprecated
-   throwing sibling `runner/build-initial-context`.
+  "Coverage for `runner/build-initial-context` (anomaly-returning) and
+   its boundary escalation in `runner/run-pipeline`.
 
-   The single failure mode this site protects is the N11 §7.4 invariant:
-   `:governed` execution-mode requires a pre-acquired capsule executor +
-   environment-id; missing either is `:invalid-input`. The happy path is
-   covered indirectly by the existing `runner_pipeline_test`; here we
-   only exercise the failure-path contract."
+   The single failure mode this site protects is the N11 §7.4
+   invariant: `:governed` execution-mode requires a pre-acquired
+   capsule executor + environment-id; missing either is
+   `:invalid-input`. The boundary at `run-pipeline` rethrows via
+   slingshot so external callers (CLI / MCP / orchestrator) keep
+   their existing exception-shaped contract."
   (:require [clojure.test :refer [deftest is testing]]
             [ai.miniforge.anomaly.interface :as anomaly]
-            [ai.miniforge.workflow.runner :as runner])
-  (:import (clojure.lang ExceptionInfo)))
+            [ai.miniforge.workflow.runner :as runner]))
 
 (def workflow
   {:workflow/id :test
@@ -38,74 +38,59 @@
 
 (def input {:repo-url "https://example.test/repo"})
 
-;------------------------------------------------------------------------------ Happy path
+;------------------------------------------------------------------------------ Anomaly-returning happy path
 ;;
 ;; :local mode bypasses the capsule check and assembles a context. We
 ;; only assert non-anomaly here because the assembled map's full shape
 ;; is the responsibility of the existing runner_pipeline_test suite.
 
-(deftest build-initial-context-anomaly-local-mode-returns-context
+(deftest build-initial-context-local-mode-returns-context
   (testing ":local mode produces a context map (not an anomaly)"
-    (let [result (runner/build-initial-context-anomaly workflow input
-                                                       {:execution-mode :local})]
+    (let [result (runner/build-initial-context workflow input
+                                                {:execution-mode :local})]
       (is (not (anomaly/anomaly? result)))
       (is (= :local (:execution/mode result))))))
 
-;------------------------------------------------------------------------------ Failure path
+;------------------------------------------------------------------------------ Anomaly-returning failure path
 
-(deftest build-initial-context-anomaly-governed-without-capsule
+(deftest build-initial-context-governed-without-capsule
   (testing ":governed mode with no executor + env-id yields :invalid-input anomaly"
-    (let [result (runner/build-initial-context-anomaly workflow input
-                                                       {:execution-mode :governed})]
+    (let [result (runner/build-initial-context workflow input
+                                                {:execution-mode :governed})]
       (is (anomaly/anomaly? result))
       (is (= :invalid-input (:anomaly/type result))))))
 
 (deftest build-initial-context-anomaly-data-carries-flags
   (testing "anomaly data carries enough triage info for the caller"
-    (let [result (runner/build-initial-context-anomaly workflow input
-                                                       {:execution-mode :governed})
+    (let [result (runner/build-initial-context workflow input
+                                                {:execution-mode :governed})
           data   (:anomaly/data result)]
       (is (= :governed (:execution-mode data)))
       (is (false? (:has-executor? data)))
       (is (false? (:has-environment-id? data))))))
 
-(deftest build-initial-context-anomaly-governed-with-executor-only
+(deftest build-initial-context-governed-with-executor-only
   (testing "executor without env-id is still an anomaly — both must be present"
-    (let [result (runner/build-initial-context-anomaly workflow input
-                                                       {:execution-mode :governed
-                                                        :executor :some-exec})]
+    (let [result (runner/build-initial-context workflow input
+                                                {:execution-mode :governed
+                                                 :executor :some-exec})]
       (is (anomaly/anomaly? result))
       (is (true? (get-in result [:anomaly/data :has-executor?])))
       (is (false? (get-in result [:anomaly/data :has-environment-id?]))))))
 
-;------------------------------------------------------------------------------ Throwing-variant compat
+;------------------------------------------------------------------------------ Boundary escalation
 ;;
-;; `build-initial-context` is `defn-` (private) — the runner namespace
-;; never intends it as a public API. We reach in via #'var to verify
-;; the slingshot throw shape preserved for backward compat.
+;; `run-pipeline` is the runner's escalation point: external callers
+;; expect either a final context map or a thrown exception. A governed
+;; misconfiguration becomes a slingshot
+;; `:anomalies.workflow/no-capsule-executor` ex-info at the
+;; `run-pipeline` boundary.
 ;;
-;; Important: in `runner/run-pipeline`, `initial-ctx` is built *before*
-;; the pipeline-loop `try+` is entered. The runner does NOT catch this
-;; throw itself; it propagates up to whatever boundary called
-;; `run-pipeline` (the CLI handler, MCP tool entry, or in-process
-;; orchestrator above). Those boundaries are responsible for
-;; converting the slingshot ex-data into a user-facing error. This
-;; test pins only the throw shape — not the catch site — because no
-;; runner-level catch participates.
-
-(deftest build-initial-context-still-throws-on-governed-without-capsule
-  (testing "deprecated throwing variant still throws via slingshot for legacy callers"
-    (let [build! @#'runner/build-initial-context]
-      (is (thrown? ExceptionInfo
-                   (build! workflow input {:execution-mode :governed}))))))
-
-(deftest build-initial-context-thrown-ex-data-preserves-slingshot-shape
-  (testing "ex-data carries :anomalies.workflow/no-capsule-executor for try+ catches"
-    (let [build! @#'runner/build-initial-context]
-      (try
-        (build! workflow input {:execution-mode :governed})
-        (is false "should have thrown")
-        (catch ExceptionInfo e
-          (let [data (ex-data e)]
-            (is (= :anomalies.workflow/no-capsule-executor
-                   (:anomaly/category data)))))))))
+;; That escalation is *not* exercised here because `run-pipeline`'s
+;; happy path runs `acquire-environment` first, which has its own
+;; governed-mode throw at `acquire-execution-environment!` (covered by
+;; `check_executor_for_mode_test.clj`). For an end-to-end test of the
+;; build-initial-context boundary throw specifically, the caller would
+;; need to stub `acquire-environment` so the no-capsule-executor path
+;; surfaces in `run-pipeline`'s let bindings rather than upstream. The
+;; runner's existing pipeline tests cover that integration.

@@ -17,11 +17,15 @@
 ;; limitations under the License.
 
 (ns ai.miniforge.workflow.anomaly.transition-status-test
-  "Coverage for `state/transition-status-anomaly` and its deprecated
-   throwing sibling `state/transition-status`. The FSM rejection path
-   becomes an `:invalid-input` anomaly; the throwing variant continues
-   to surface a slingshot `:anomalies.workflow/invalid-transition` for
-   legacy try+ callers."
+  "Coverage for `state/transition-status` (anomaly-returning) and the
+   private boundary helper `state/transition-status!` reached via
+   `mark-completed` / `mark-failed` / `transition-to-phase`.
+
+   The FSM rejection path returns an `:invalid-input` anomaly. The
+   in-component `*!` boundary helper escalates the anomaly to a
+   slingshot `:anomalies.workflow/invalid-transition` throw — only
+   used at workflow-definition-invariant boundaries where the FSM
+   rejecting is a programmer error, not a runtime condition."
   (:require [clojure.test :refer [deftest is testing]]
             [ai.miniforge.anomaly.interface :as anomaly]
             [ai.miniforge.workflow.state :as state])
@@ -35,21 +39,21 @@
 (defn- pending-state []
   (state/create-execution-state sample-workflow {:input "x"}))
 
-;------------------------------------------------------------------------------ Happy path
+;------------------------------------------------------------------------------ Happy path (anomaly-returning API)
 
-(deftest transition-status-anomaly-returns-state-on-valid-event
+(deftest transition-status-returns-state-on-valid-event
   (testing "valid :start event from :pending advances to :running"
-    (let [s (pending-state)
-          result (state/transition-status-anomaly s :start)]
+    (let [s      (pending-state)
+          result (state/transition-status s :start)]
       (is (not (anomaly/anomaly? result)))
       (is (= :running (:execution/status result))))))
 
-;------------------------------------------------------------------------------ Failure path
+;------------------------------------------------------------------------------ Failure path (anomaly-returning API)
 
-(deftest transition-status-anomaly-returns-anomaly-on-invalid-event
+(deftest transition-status-returns-anomaly-on-invalid-event
   (testing "invalid event yields :invalid-input anomaly with FSM diagnostics"
-    (let [s (pending-state)
-          result (state/transition-status-anomaly s :complete)]
+    (let [s      (pending-state)
+          result (state/transition-status s :complete)]
       (is (anomaly/anomaly? result))
       (is (= :invalid-input (:anomaly/type result)))
       (let [data (:anomaly/data result)]
@@ -58,47 +62,66 @@
         (is (some? (:error data)))
         (is (some? (:fsm-message data)))))))
 
-(deftest transition-status-anomaly-rejection-does-not-advance-status
-  (testing "rejected transition produces an anomaly whose data still reports the
-            pre-transition status — verifies the FSM did not partially advance
-            before flagging the rejection"
+(deftest transition-status-rejection-returns-anomaly-not-state
+  (testing "rejected transition returns the anomaly itself, not a partially-transitioned state map"
     (let [s      (pending-state)
-          result (state/transition-status-anomaly s :complete)
+          result (state/transition-status s :complete)
           data   (:anomaly/data result)]
       (is (anomaly/anomaly? result))
-      ;; The anomaly carries the status the FSM was in *at evaluation time*.
-      ;; If a buggy implementation advanced the status before deciding the
-      ;; transition was invalid, this would report the wrong current-status.
+      ;; Anomaly carries the status the FSM was in *at evaluation time*.
+      ;; A buggy implementation that advanced the status before flagging
+      ;; the rejection would report the wrong :current-status here.
       (is (= :pending (:current-status data)))
-      ;; Returned value is the anomaly itself, not a partially-transitioned
-      ;; state map — ie. the function does not return a map carrying both
-      ;; an updated :execution/status and the anomaly.
+      ;; Returned value is the anomaly itself, not a state map carrying
+      ;; both an updated :execution/status and the anomaly.
       (is (not (contains? result :execution/status))))))
 
-;------------------------------------------------------------------------------ Throwing-variant compat
+;------------------------------------------------------------------------------ Boundary helper escalates via slingshot
+;;
+;; `transition-status!` is private and reached via `mark-completed` /
+;; `mark-failed` / `transition-to-phase`. These helpers represent
+;; workflow-definition invariants — a rejection at one of them is a
+;; programmer error in the workflow shape, not a runtime anomaly.
+;; Escalating to a slingshot throw preserves the legacy ex-info shape
+;; that runner / supervisor consumers depend on.
 
-(deftest transition-status-still-returns-on-valid-event
-  (testing "deprecated throwing variant still returns updated state on success"
-    (let [s (pending-state)
-          result (state/transition-status s :start)]
-      (is (= :running (:execution/status result))))))
+(deftest mark-completed-throws-on-fsm-rejection
+  (testing "mark-completed escalates an FSM rejection to slingshot"
+    (let [;; Build a state already in :completed — :complete event from
+          ;; :completed should be rejected by the FSM.
+          s (assoc (pending-state) :execution/status :completed)]
+      (is (thrown? ExceptionInfo (state/mark-completed s))))))
 
-(deftest transition-status-still-throws-on-invalid-event
-  (testing "deprecated throwing variant still throws ExceptionInfo on FSM rejection"
-    (let [s (pending-state)]
-      (is (thrown-with-msg? ExceptionInfo #"Invalid state transition"
-            (state/transition-status s :complete))))))
+(deftest mark-failed-throws-on-fsm-rejection
+  (testing "mark-failed escalates an FSM rejection to slingshot"
+    (let [s (assoc (pending-state) :execution/status :completed)]
+      (is (thrown? ExceptionInfo (state/mark-failed s "boom"))))))
 
-(deftest transition-status-thrown-ex-data-preserves-shape
-  (testing "ex-data preserves the legacy slingshot anomaly shape"
-    (let [s (pending-state)]
+(deftest mark-completed-thrown-ex-data-preserves-slingshot-shape
+  (testing "ex-data carries :anomalies.workflow/invalid-transition for try+ catches"
+    (let [s (assoc (pending-state) :execution/status :completed)]
       (try
-        (state/transition-status s :complete)
+        (state/mark-completed s)
         (is false "should have thrown")
         (catch ExceptionInfo e
           (let [data (ex-data e)]
             (is (= :anomalies.workflow/invalid-transition (:anomaly/category data)))
-            (is (= :pending (:current-status data)))
+            (is (= :completed (:current-status data)))
             (is (= :complete (:event data)))
             (is (some? (:error data)))
             (is (some? (:message data)))))))))
+
+;------------------------------------------------------------------------------ Boundary helper happy path
+
+(deftest mark-completed-advances-pending-to-completed
+  (testing "from :pending, mark-completed transitions :pending → :running → :completed"
+    (let [result (state/mark-completed (pending-state))]
+      (is (= :completed (:execution/status result)))
+      (is (some? (:execution/completed-at result))))))
+
+(deftest mark-failed-advances-pending-to-failed
+  (testing "from :pending, mark-failed transitions :pending → :running → :failed"
+    (let [result (state/mark-failed (pending-state) {:type :test :message "boom"})]
+      (is (= :failed (:execution/status result)))
+      (is (some? (:execution/failed-at result)))
+      (is (= 1 (count (:execution/errors result)))))))

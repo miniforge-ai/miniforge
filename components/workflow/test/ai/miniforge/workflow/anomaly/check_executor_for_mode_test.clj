@@ -17,66 +17,80 @@
 ;; limitations under the License.
 
 (ns ai.miniforge.workflow.anomaly.check-executor-for-mode-test
-  "Coverage for `runner-environment/check-executor-for-mode-anomaly`
-   and its deprecated throwing sibling `assert-executor-for-mode!`.
-
-   The N11 §7.4 invariant — :governed mode must not silently downgrade
-   to a worktree fallback — is now expressed as an `:unavailable`
-   anomaly returnable from non-boundary code, with the throwing wrapper
-   preserved for slingshot callers."
+  "Coverage for `runner-environment/check-executor-for-mode`
+   (anomaly-returning) and the boundary throw inlined inside
+   `acquire-execution-environment!` (the only escalation site for the
+   N11 §7.4 invariant)."
   (:require [clojure.test :refer [deftest is testing]]
             [ai.miniforge.anomaly.interface :as anomaly]
             [ai.miniforge.workflow.runner-environment :as env])
   (:import (clojure.lang ExceptionInfo)))
 
-;------------------------------------------------------------------------------ Happy path
+;------------------------------------------------------------------------------ Anomaly-returning happy path
 
-(deftest check-executor-anomaly-nil-when-executor-present
+(deftest check-executor-nil-when-executor-present
   (testing ":governed mode with a capsule executor returns nil (no anomaly)"
-    (is (nil? (env/check-executor-for-mode-anomaly :some-executor :governed)))))
+    (is (nil? (env/check-executor-for-mode :some-executor :governed)))))
 
-(deftest check-executor-anomaly-nil-for-local-mode
+(deftest check-executor-nil-for-local-mode
   (testing ":local mode without a capsule is fine — returns nil"
-    (is (nil? (env/check-executor-for-mode-anomaly nil :local)))))
+    (is (nil? (env/check-executor-for-mode nil :local)))))
 
-;------------------------------------------------------------------------------ Failure path
+;------------------------------------------------------------------------------ Anomaly-returning failure path
 
 (deftest check-executor-anomaly-when-governed-without-capsule
   (testing ":governed mode with no capsule yields :unavailable anomaly"
-    (let [result (env/check-executor-for-mode-anomaly nil :governed)]
+    (let [result (env/check-executor-for-mode nil :governed)]
       (is (anomaly/anomaly? result))
       (is (= :unavailable (:anomaly/type result))))))
 
 (deftest check-executor-anomaly-data-carries-mode-and-hint
   (testing "anomaly data carries :mode and :hint for surface-level remediation"
-    (let [result (env/check-executor-for-mode-anomaly nil :governed)
+    (let [result (env/check-executor-for-mode nil :governed)
           data   (:anomaly/data result)]
       (is (= :governed (:mode data)))
       (is (string? (:hint data)))
       (is (seq (:hint data))))))
 
-;------------------------------------------------------------------------------ Throwing-variant compat
+;------------------------------------------------------------------------------ Boundary escalation via acquire-execution-environment!
+;;
+;; `acquire-execution-environment!` is the only place that escalates a
+;; check-executor-for-mode anomaly to a thrown exception. Tests pin
+;; the slingshot ex-info shape that legacy try+ callers above this
+;; boundary (CLI / MCP / orchestrator) depend on.
 
-(deftest assert-executor-still-noop-on-valid-args
-  (testing "deprecated throwing variant is a no-op when an executor is present"
-    (is (nil? (env/assert-executor-for-mode! :some-executor :governed)))))
+(deftest acquire-execution-environment-throws-on-governed-without-capsule
+  (testing "governed mode with no capsule available propagates a slingshot throw"
+    (with-redefs [env/dag-executor-fns
+                  (constantly
+                   {:create-registry (constantly :stub-registry)
+                    :select-exec     (constantly nil)        ; no executor
+                    :acquire-env!    (constantly nil)
+                    :executor-type   (constantly nil)
+                    :result-ok?      (constantly false)
+                    :result-unwrap   (constantly nil)})]
+      (is (thrown? ExceptionInfo
+                   (env/acquire-execution-environment!
+                    :workflow-id-1
+                    {:execution-mode :governed}))))))
 
-(deftest assert-executor-still-noop-on-local-mode
-  (testing "deprecated throwing variant is a no-op for :local mode"
-    (is (nil? (env/assert-executor-for-mode! nil :local)))))
-
-(deftest assert-executor-still-throws-when-governed-without-capsule
-  (testing "deprecated throwing variant still throws via slingshot for legacy callers"
-    (is (thrown? ExceptionInfo
-                 (env/assert-executor-for-mode! nil :governed)))))
-
-(deftest assert-executor-thrown-ex-data-preserves-slingshot-shape
+(deftest acquire-execution-environment-thrown-ex-data-preserves-slingshot-shape
   (testing "ex-data carries :anomalies.executor/unavailable for try+ catches"
-    (try
-      (env/assert-executor-for-mode! nil :governed)
-      (is false "should have thrown")
-      (catch ExceptionInfo e
-        (let [data (ex-data e)]
-          (is (= :anomalies.executor/unavailable (:anomaly/category data)))
-          (is (= :governed (:anomaly.executor/mode data)))
-          (is (string? (:hint data))))))))
+    (with-redefs [env/dag-executor-fns
+                  (constantly
+                   {:create-registry (constantly :stub-registry)
+                    :select-exec     (constantly nil)
+                    :acquire-env!    (constantly nil)
+                    :executor-type   (constantly nil)
+                    :result-ok?      (constantly false)
+                    :result-unwrap   (constantly nil)})]
+      (try
+        (env/acquire-execution-environment!
+         :workflow-id-1
+         {:execution-mode :governed})
+        (is false "should have thrown")
+        (catch ExceptionInfo e
+          (let [data (ex-data e)]
+            (is (= :anomalies.executor/unavailable (:anomaly/category data)))
+            (is (= :governed (:anomaly.executor/mode data)))
+            (is (string? (:hint data)))))))))

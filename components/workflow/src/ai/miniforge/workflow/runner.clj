@@ -339,31 +339,21 @@
                                                   (subs (str (random-uuid)) 0 8))))
                :execution/run-pipeline-fn run-pipeline))))
 
-(defn build-initial-context-anomaly
-  "Anomaly-returning variant of [[build-initial-context]].
+(defn build-initial-context
+  "Build the initial execution context from workflow, input, and opts.
 
    Returns the assembled execution context on success, or an
    `:invalid-input` anomaly when `:governed` mode is requested but no
    capsule executor + `:environment-id` were supplied in `opts`. Governed
-   mode forbids worktree fallback (N11 §7.4)."
+   mode forbids worktree fallback (N11 §7.4).
+
+   This is the canonical, anomaly-returning entry point. The single
+   in-component caller (`run-pipeline`) escalates the anomaly to a
+   slingshot throw at the boundary so external callers (CLI / MCP /
+   orchestrator) keep their existing exception-shaped contract."
   [workflow input opts]
   (or (governed-capsule-missing-anomaly opts)
       (assemble-initial-context workflow input opts)))
-
-(defn- build-initial-context
-  "Build the initial execution context from workflow, input, and opts.
-
-   DEPRECATED: prefer [[build-initial-context-anomaly]], which returns
-   an anomaly map instead of throwing. Retained for backward compatibility
-   with the orchestrator entry point."
-  {:deprecated "exceptions-as-data — prefer build-initial-context-anomaly"}
-  [workflow input opts]
-  (let [result (build-initial-context-anomaly workflow input opts)]
-    (if (anomaly/anomaly? result)
-      (response/throw-anomaly! :anomalies.workflow/no-capsule-executor
-                               (:anomaly/message result)
-                               {})
-      result)))
 
 (defn- execute-pipeline-loop
   "Execute the phase pipeline loop. Returns final context."
@@ -415,7 +405,19 @@
          event-stream        (:event-stream opts)
          callbacks           (wrap-phase-callbacks event-stream opts)
          skip-lifecycle?     (:skip-lifecycle-events opts)
-         initial-ctx         (build-initial-context workflow input opts)
+         ctx-or-anomaly      (build-initial-context workflow input opts)
+         _                   (when (anomaly/anomaly? ctx-or-anomaly)
+                               ;; Boundary throw: run-pipeline is the
+                               ;; runner's escalation point. External
+                               ;; callers (CLI / MCP / orchestrator)
+                               ;; expect either a final context map or
+                               ;; an exception, so a governed-mode
+                               ;; misconfiguration becomes a slingshot
+                               ;; throw with the legacy ex-info shape.
+                               (response/throw-anomaly! :anomalies.workflow/no-capsule-executor
+                                                        (:anomaly/message ctx-or-anomaly)
+                                                        {}))
+         initial-ctx         ctx-or-anomaly
          output-ctx-vol      (volatile! nil)
          exception-vol       (volatile! nil)]
 
