@@ -146,7 +146,7 @@
    Returns:
    - {:dir <path>, :mcp-config-path <path>, :artifact-path <path>}"
   ([] (create-session! nil))
-  ([{:keys [workdir]}]
+  ([{:keys [workdir source-root]}]
   (let [dir (str (Files/createTempDirectory
                   "miniforge-artifact-"
                   (into-array FileAttribute [])))
@@ -156,6 +156,7 @@
     {:dir dir
      :workdir working-dir
      :config-root (or workdir dir)
+     :source-root source-root
      :mcp-config-path config-path
      :artifact-path artifact-path
      :pre-session-snapshot (try
@@ -179,8 +180,9 @@
 
    The server reads context-cache.edn from artifact-dir on startup and
    serves context_read/context_grep/context_glob to the inner LLM agent."
-  [artifact-dir]
-  (let [mcp-args ["--artifact-dir" artifact-dir]
+  [artifact-dir source-root]
+  (let [mcp-args (cond-> ["--artifact-dir" artifact-dir]
+                   source-root (into ["--source-root" source-root]))
         bb-root  (find-bb-root)]
     (cond
       (System/getenv "MINIFORGE_MCP_CMD")
@@ -355,7 +357,7 @@
 
    Returns: session (for threading)"
   [session]
-  (let [srv-cmd       (server-command (:dir session))
+  (let [srv-cmd       (server-command (:dir session) (:source-root session))
         config-root   (:config-root session)
         mcp-config    {"mcpServers" {"context" {"command" (:command srv-cmd)
                                                 "args"    (:args srv-cmd)}}}
@@ -790,8 +792,9 @@
       (run-session session body-fn read-capsule-artifact cleanup-capsule-session! :capsule))
     (let [workdir (:execution/worktree-path context)
           session (-> (if workdir
-                        (create-session! {:workdir workdir})
-                        (create-session!))
+                        (create-session! {:workdir workdir
+                                          :source-root (:source-root context)})
+                        (create-session! {:source-root (:source-root context)}))
                       write-mcp-config!)]
       (run-session session body-fn read-artifact cleanup-session! :host))))
 

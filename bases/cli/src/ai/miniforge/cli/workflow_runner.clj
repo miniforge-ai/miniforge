@@ -140,6 +140,85 @@
         (println (display/colorize :yellow (messages/t :workflow-runner/artifact-store-warning))))
       nil)))
 
+(defn- valid-source-root?
+  [source-root]
+  (and source-root
+       (fs/exists? source-root)
+       (fs/exists? (fs/path source-root ".git"))))
+
+(defn- normalize-path
+  [path]
+  (when path
+    (let [resolved (-> path
+                       fs/path
+                       fs/absolutize)]
+      (str (if (fs/exists? resolved)
+             (fs/canonicalize resolved)
+             (.normalize resolved))))))
+
+(defn- source-dir-under-root?
+  [source-dir source-root]
+  (let [source-dir-path (some-> source-dir normalize-path fs/path)
+        source-root-path (some-> source-root normalize-path fs/path)]
+    (or (nil? source-dir-path)
+        (nil? source-root-path)
+        (.startsWith source-dir-path source-root-path))))
+
+(defn- assert-valid-source-root!
+  [context]
+  (let [source-root (:source-root context)]
+    (when-not (valid-source-root? source-root)
+      (response/throw-anomaly! :anomalies/incorrect
+                               (str "Invalid workflow source root: " source-root)
+                               {:source-root source-root
+                                :worktree-path (:worktree-path context)}))))
+
+(defn- assert-execution-worktree!
+  [context]
+  (let [expected (normalize-path (get-in context [:execution/opts :worktree-path]))
+        actual (normalize-path (:worktree-path context))]
+    (when (and expected actual (not= expected actual))
+      (response/throw-anomaly! :anomalies/incorrect
+                               (str "Execution worktree mismatch: expected "
+                                    expected " but runtime is using " actual)
+                               {:expected-worktree expected
+                                :actual-worktree actual
+                                :source-root (:source-root context)}))))
+
+(defn- assert-source-dir-alignment!
+  [spec context]
+  (let [source-dir (:spec/source-dir spec)
+        source-root (:source-root context)]
+    (when-not (source-dir-under-root? source-dir source-root)
+      (response/throw-anomaly! :anomalies/incorrect
+                               (str "Spec source directory is outside the workflow source root: "
+                                    source-dir)
+                               {:source-dir source-dir
+                                :source-root source-root
+                                :worktree-path (:worktree-path context)}))))
+
+(defn- assert-runtime-alignment!
+  [spec context]
+  (assert-valid-source-root! context)
+  (assert-execution-worktree! context)
+  (assert-source-dir-alignment! spec context))
+
+(defn- print-runtime-provenance!
+  [quiet context]
+  (when-not quiet
+    (println (display/colorize :cyan (str "   Source: " (:source-root context))))
+    (println (display/colorize :cyan (str "   Worktree: " (:worktree-path context))))
+    (when-let [branch (:git-branch context)]
+      (println (display/colorize :cyan (str "   Branch: " branch))))
+    (when-let [commit (:git-commit context)]
+      (println (display/colorize :cyan (str "   Commit: " commit))))
+    (when-let [upstream (:git-upstream context)]
+      (println (display/colorize :cyan (str "   Upstream: " upstream))))
+    (when (:git-detached? context)
+      (println (display/colorize :yellow "   Warning: source checkout is detached HEAD")))
+    (when (:git-dirty? context)
+      (println (display/colorize :yellow "   Warning: source checkout has uncommitted changes")))))
+
 (defn close-artifact-store [artifact-store]
   (when artifact-store
     (try
@@ -391,7 +470,8 @@
                               :spec-title (:spec/title spec)
                               :control-state control-state
                               :skip-lifecycle-events true
-                              :execution-opts (:execution-opts opts)})]
+                              :execution-opts (:execution-opts opts)
+                              :source-dir (:spec/source-dir spec)})]
                         ;; Assoc repo-url, branch, and (optionally) execution-mode
                         ;; so runner.clj can clone into Docker or create a worktree.
                         (cond-> (assoc ctx
@@ -405,6 +485,8 @@
       (when-not quiet
         (display/print-workflow-header (keyword (str "adhoc-" (hash spec))) "adhoc" quiet))
       (dashboard/print-dashboard-status! quiet)
+      (assert-runtime-alignment! spec context)
+      (print-runtime-provenance! quiet context)
       (let [provenance (move-spec-to-in-progress! (:spec/provenance enriched-spec))]
         (try
           (let [result (execute-with-events {:run-pipeline run-pipeline

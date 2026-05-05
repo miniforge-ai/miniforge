@@ -35,8 +35,10 @@
 
    Arguments:
    - artifact-dir — directory path for context cache and miss tracking"
-  [artifact-dir]
-  (server/run-server artifact-dir))
+  ([artifact-dir]
+   (server/run-server artifact-dir nil))
+  ([artifact-dir source-root]
+   (server/run-server artifact-dir source-root)))
 
 (defn handle-tool-call
   "Invoke a tool handler directly (for testing without JSON-RPC).

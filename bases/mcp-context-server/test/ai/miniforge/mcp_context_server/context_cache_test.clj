@@ -206,9 +206,51 @@
       (fn [dir]
         (spit (str dir "/context-cache.edn")
               (pr-str {:files {"src/a.clj" "(ns a)" "src/b.clj" "(ns b)"}}))
-        (cache/load-cache! dir)
+        (cache/load-cache! dir "/tmp/repo-root")
         (is (= "(ns a)" (get-in @cache/cache-state [:files "src/a.clj"])))
-        (is (= "(ns b)" (get-in @cache/cache-state [:files "src/b.clj"])))))))
+        (is (= "(ns b)" (get-in @cache/cache-state [:files "src/b.clj"])))
+        (is (= "/tmp/repo-root" (:source-root @cache/cache-state)))))))
+
+(deftest handle-context-read-source-root-fallback-test
+  (testing "relative file reads resolve from source-root when cache is empty"
+    (with-temp-dir
+      (fn [dir]
+        (let [repo-root (str dir "/repo")
+              file-path (str repo-root "/components/demo/core.clj")]
+          (.mkdirs (io/file (str repo-root "/components/demo")))
+          (spit file-path "(ns demo.core)")
+          (cache/load-cache! dir repo-root)
+          (let [result (cache/handle-context-read {"path" "components/demo/core.clj"})]
+            (is (= "(ns demo.core)" (get-in result [:content 0 :text])))
+            (is (= "(ns demo.core)"
+                   (get-in @cache/cache-state [:files "components/demo/core.clj"])))))))))
+
+(deftest handle-context-glob-source-root-fallback-test
+  (testing "relative glob fallback searches from source-root"
+    (with-temp-dir
+      (fn [dir]
+        (let [repo-root (str dir "/repo")]
+          (.mkdirs (io/file (str repo-root "/components/alpha/src/demo")))
+          (spit (str repo-root "/components/alpha/src/demo/core.clj") "(ns demo.core)")
+          (cache/load-cache! dir repo-root)
+          (let [result (cache/handle-context-glob {"pattern" "components/*/src/**/*.clj"})]
+            (is (re-find #"components/alpha/src/demo/core\.clj"
+                         (get-in result [:content 0 :text])))))))))
+
+(deftest handle-context-glob-source-root-fallback-prunes-git-test
+  (testing "filesystem glob fallback ignores .git contents"
+    (with-temp-dir
+      (fn [dir]
+        (let [repo-root (str dir "/repo")]
+          (.mkdirs (io/file (str repo-root "/components/alpha/src/demo")))
+          (.mkdirs (io/file (str repo-root "/.git/objects/aa")))
+          (spit (str repo-root "/components/alpha/src/demo/core.clj") "(ns demo.core)")
+          (spit (str repo-root "/.git/objects/aa/hidden.clj") "(ns hidden)")
+          (cache/load-cache! dir repo-root)
+          (let [result (cache/handle-context-glob {"pattern" "**/*.clj"})
+                text (get-in result [:content 0 :text])]
+            (is (re-find #"components/alpha/src/demo/core\.clj" text))
+            (is (not (re-find #"\.git/objects/aa/hidden\.clj" text)))))))))
 
 (deftest flush-misses-roundtrip-test
   (testing "flush-misses! writes misses to context-misses.edn"

@@ -35,8 +35,10 @@
                       :workflow-id (random-uuid)
                       :workflow-type :canonical-sdlc
                       :workflow-version "1.0.0"
+                      :source-dir "/tmp/repo-root/work"
                       :execution-opts {:worktree-path "/tmp/execution-worktree"}})]
         (is (= "/tmp/execution-worktree" (:worktree-path context)))
+        (is (= "/tmp/repo-root" (:source-root context)))
         (is (= {:worktree-path "/tmp/execution-worktree"}
                (:execution/opts context)))))))
 
@@ -52,4 +54,5 @@
                       :workflow-id (random-uuid)
                       :workflow-type :canonical-sdlc
                       :workflow-version "1.0.0"})]
-        (is (= "/tmp/repo-root" (:worktree-path context)))))))
+        (is (= "/tmp/repo-root" (:worktree-path context)))
+        (is (= "/tmp/repo-root" (:source-root context)))))))

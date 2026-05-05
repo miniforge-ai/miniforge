@@ -124,7 +124,8 @@
   [:llm-backend :artifact-store :knowledge-store
    :on-phase-start :on-phase-complete
    :executor :environment-id :sandbox-workdir
-   :on-chunk :event-stream :worktree-path])
+   :on-chunk :event-stream :worktree-path
+   :source-root])
 
 (defn- passthrough-option-values
   [opts]

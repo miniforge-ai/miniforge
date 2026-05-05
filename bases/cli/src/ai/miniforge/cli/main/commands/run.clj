@@ -86,9 +86,7 @@
    Returns the workflow result map, or nil on validation failure."
   [spec-path opts]
   (display/print-info (messages/t :run/parsing-spec {:path spec-path}))
-  (let [;; Resolve source-dir: --worktree flag > spec file's parent directory
-        source-dir (or (:worktree opts)
-                       (str (fs/parent (fs/absolutize spec-path))))
+  (let [source-dir (str (fs/parent (fs/absolutize spec-path)))
         execution-opts (cond-> {}
                          (:worktree opts) (assoc :worktree-path (:worktree opts)))
         parsed-spec (-> (spec-parser/parse-spec-file spec-path)
