@@ -295,6 +295,16 @@
     (is (some #{:Write} session/mcp-tools)
         "Write must stay auto-approved for container-promotion submissions"))
 
+  (testing "native Edit and MultiEdit are auto-approved — implementer patch path"
+    ;; 2026-05-04 dogfood — Edit / MultiEdit were never in --allowedTools.
+    ;; Implementer spent five repair iterations producing patch text the
+    ;; CLI refused to apply, then a sixth iter independently discovered
+    ;; Write worked while Edit did not. Both must be auto-approved.
+    (is (some #{:Edit} session/mcp-tools)
+        "Edit must be auto-approved for surgical patches")
+    (is (some #{:MultiEdit} session/mcp-tools)
+        "MultiEdit must be auto-approved for batched in-file patches"))
+
   (testing "never contains backend-specific wire strings (regression guard)"
     ;; Claude's `mcp__<server>__<tool>` form belongs in the Claude
     ;; adapter, not here. Native tools go through (name kw).
