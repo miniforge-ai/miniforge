@@ -27,7 +27,8 @@
    - context            — context management
    - execution          — phase execution
    - monitoring         — health monitoring"
-  (:require [ai.miniforge.dag-executor.interface :as dag-exec]
+  (:require [ai.miniforge.anomaly.interface :as anomaly]
+            [ai.miniforge.dag-executor.interface :as dag-exec]
             [ai.miniforge.llm.interface :as llm-impl]
             [ai.miniforge.logging.interface :as log]
             [ai.miniforge.phase.interface :as phase]
@@ -281,45 +282,88 @@
     {:on-phase-start on-phase-start
      :on-phase-complete on-phase-complete}))
 
-(defn- build-initial-context
-  "Build the initial execution context from workflow, input, and opts."
+(defn- governed-capsule-missing-anomaly
+  "Return an `:invalid-input` anomaly when `:governed` mode is requested
+   without a pre-acquired capsule executor + environment-id, otherwise nil.
+
+   Governed mode forbids worktree fallback (N11 §7.4); the runner refuses
+   to silently downgrade. Pre-flight check shared between the throwing
+   and anomaly-returning context builders."
+  [opts]
+  (let [mode      (get opts :execution-mode :local)
+        governed? (and (= :governed mode)
+                       (get opts :executor)
+                       (get opts :environment-id))]
+    (when (and (= :governed mode) (not governed?))
+      (anomaly/anomaly :invalid-input
+                       (messages/t :governed/no-capsule)
+                       {:execution-mode :governed
+                        :has-executor? (some? (get opts :executor))
+                        :has-environment-id? (some? (get opts :environment-id))}))))
+
+(defn- assemble-initial-context
+  "Construct the initial execution context map. Caller is responsible for
+   running [[governed-capsule-missing-anomaly]] first; reaching this function
+   with `:governed` mode but no capsule is a programmer error."
   [workflow input opts]
   (let [resume-machine-snapshot (:resume-machine-snapshot opts)
         resume-phase-results (:resume-phase-results opts)
         mode      (get opts :execution-mode :local)
         governed? (and (= :governed mode)
                        (get opts :executor)
-                       (get opts :environment-id))]
-    (when (and (= :governed mode) (not governed?))
+                       (get opts :environment-id))
+        capsule-exec-fn (when governed?
+                          (llm-impl/capsule-exec-fn
+                           dag-exec/execute!
+                           (get opts :executor)
+                           (get opts :environment-id)
+                           (get opts :worktree-path (defaults/default-workdir))))]
+    (-> (if (and resume-machine-snapshot resume-phase-results)
+          (ctx/restore-context workflow input
+                               resume-machine-snapshot
+                               resume-phase-results
+                               opts)
+          (ctx/create-context workflow input opts))
+        (assoc :execution/executor (get opts :executor)
+               :execution/environment-id (get opts :environment-id)
+               :execution/worktree-path (get opts :worktree-path
+                                             (get opts :sandbox-workdir))
+               :execution/mode mode
+               :execution/started-at (java.time.Instant/now)
+               :execution/environment-metadata (get opts :environment-metadata)
+               :execution/execute-fn (when governed? dag-exec/execute!)
+               :execution/exec-fn capsule-exec-fn
+               :execution/task-branch (when governed?
+                                        (str (defaults/task-branch-prefix)
+                                             (get opts :environment-id
+                                                  (subs (str (random-uuid)) 0 8))))
+               :execution/run-pipeline-fn run-pipeline))))
+
+(defn build-initial-context-anomaly
+  "Anomaly-returning variant of [[build-initial-context]].
+
+   Returns the assembled execution context on success, or an
+   `:invalid-input` anomaly when `:governed` mode is requested but no
+   capsule executor + `:environment-id` were supplied in `opts`. Governed
+   mode forbids worktree fallback (N11 §7.4)."
+  [workflow input opts]
+  (or (governed-capsule-missing-anomaly opts)
+      (assemble-initial-context workflow input opts)))
+
+(defn- build-initial-context
+  "Build the initial execution context from workflow, input, and opts.
+
+   DEPRECATED: prefer [[build-initial-context-anomaly]], which returns
+   an anomaly map instead of throwing. Retained for backward compatibility
+   with the orchestrator entry point."
+  {:deprecated "exceptions-as-data — prefer build-initial-context-anomaly"}
+  [workflow input opts]
+  (let [result (build-initial-context-anomaly workflow input opts)]
+    (if (anomaly/anomaly? result)
       (response/throw-anomaly! :anomalies.workflow/no-capsule-executor
-                               (messages/t :governed/no-capsule)
-                               {}))
-    (let [capsule-exec-fn (when governed?
-                            (llm-impl/capsule-exec-fn
-                             dag-exec/execute!
-                             (get opts :executor)
-                             (get opts :environment-id)
-                             (get opts :worktree-path (defaults/default-workdir))))]
-      (-> (if (and resume-machine-snapshot resume-phase-results)
-            (ctx/restore-context workflow input
-                                 resume-machine-snapshot
-                                 resume-phase-results
-                                 opts)
-            (ctx/create-context workflow input opts))
-          (assoc :execution/executor (get opts :executor)
-                 :execution/environment-id (get opts :environment-id)
-                 :execution/worktree-path (get opts :worktree-path
-                                               (get opts :sandbox-workdir))
-                 :execution/mode mode
-                 :execution/started-at (java.time.Instant/now)
-                 :execution/environment-metadata (get opts :environment-metadata)
-                 :execution/execute-fn (when governed? dag-exec/execute!)
-                 :execution/exec-fn capsule-exec-fn
-                 :execution/task-branch (when governed?
-                                          (str (defaults/task-branch-prefix)
-                                               (get opts :environment-id
-                                                    (subs (str (random-uuid)) 0 8))))
-                 :execution/run-pipeline-fn run-pipeline)))))
+                               (:anomaly/message result)
+                               {})
+      result)))
 
 (defn- execute-pipeline-loop
   "Execute the phase pipeline loop. Returns final context."
