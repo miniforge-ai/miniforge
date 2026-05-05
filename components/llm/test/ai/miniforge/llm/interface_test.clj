@@ -208,11 +208,14 @@
                            (json/generate-string
                             {:type "system" :subtype "init"})]]]
       (let [parsed (impl/parse-claude-stream-line line)
-            monitor (atom {})
+            monitor (pm/create-progress-monitor {:stagnation-threshold-ms 1000
+                                                 :max-total-ms 1000
+                                                 :min-activity-interval-ms 1})
             before @monitor]
         (is (true? (:heartbeat parsed))
             (str label " should parse as a heartbeat prerequisite"))
-        (impl/record-parsed-progress! monitor parsed)
+        (Thread/sleep 5)
+        (#'impl/record-parsed-progress! monitor parsed (atom ""))
         (is (not= before @monitor)
             (str label " heartbeat must advance progress supervision state"))))))
 
