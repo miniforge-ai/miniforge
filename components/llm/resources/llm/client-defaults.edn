@@ -1,0 +1,11 @@
+{:claude-cli
+ {:default-budget-usd "0.10"}
+
+ :stream
+ {:default-stagnation-threshold-ms 120000
+  :default-max-total-ms 600000
+  :default-min-activity-interval-ms 5000
+  :line-timeout-ms 180000
+  :process-join-timeout-ms 600000
+  :post-kill-join-timeout-ms 5000
+  :poll-interval-ms 250}}

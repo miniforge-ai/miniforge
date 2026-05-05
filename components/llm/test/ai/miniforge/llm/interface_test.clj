@@ -311,6 +311,12 @@
     (let [resp (impl/parse-cli-output "bad" 1 "stderr")]
       (is (not (:success resp)))
       (is (some? (:error resp)))
+      (is (some? (:anomaly resp)))))
+
+  (testing "blank successful output is classified as failure"
+    (let [resp (impl/parse-cli-output "" 0)]
+      (is (not (:success resp)))
+      (is (= "empty_success_output" (get-in resp [:error :type])))
       (is (some? (:anomaly resp))))))
 
 (deftest mock-client-response-includes-metrics-test
@@ -469,6 +475,11 @@
     (let [resp (impl/success-response "(defn hello [] \"world\")" 0)]
       (is (:success resp))))
 
+  (testing "blank content in success-response returns error"
+    (let [resp (impl/success-response "" 0)]
+      (is (not (:success resp)))
+      (is (= "empty_success_output" (get-in resp [:error :type])))))
+
   (testing "success-response preserves stderr for diagnostics"
     (let [resp (impl/success-response "ok" 0 "warning on stderr")]
       (is (:success resp))
@@ -560,6 +571,28 @@
           result (impl/process-stream-lines reader monitor (fn [_] nil))]
       (is (= [] (:lines result)))
       (is (nil? (:timeout result))))))
+
+(deftest process-stream-lines-honors-progress-monitor-while-waiting-for-output-test
+  (testing "progress-monitor timeout can fire while stdout is idle and still open"
+    (let [writer (java.io.PipedWriter.)
+          reader (java.io.BufferedReader. (java.io.PipedReader. writer))
+          calls (atom 0)
+          timeout {:type :stagnation
+                   :message "Backend preflight stalled"
+                   :elapsed-ms 1234}
+          monitor (pm/create-progress-monitor
+                   {:stagnation-threshold-ms 1000
+                    :max-total-ms 1000
+                    :min-activity-interval-ms 1})]
+      (try
+        (with-redefs [pm/check-timeout (fn [_]
+                                         (when (>= (swap! calls inc) 3)
+                                           timeout))]
+          (let [result (impl/process-stream-lines reader monitor (fn [_] nil))]
+            (is (= [] (:lines result)))
+            (is (= timeout (:timeout result)))))
+        (finally
+          (.close writer))))))
 
 (deftest message-preview-via-streaming-success-test
   (testing "short content is returned in full as preview"

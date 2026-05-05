@@ -22,6 +22,7 @@
    [clojure.string :as str]
    [clojure.test :refer [deftest is testing]]
    [slingshot.slingshot :refer [try+]]
+   [ai.miniforge.llm.interface :as llm]
    [ai.miniforge.cli.workflow-runner :as sut]))
 
 (defn- temp-repo-root []
@@ -88,3 +89,83 @@
         :worktree-path "/tmp/runtime-worktree"
         :execution/opts {:worktree-path "/tmp/runtime-worktree"}})
       (is true))))
+
+(deftest run-backend-preflight-stamps-resolved-cli-and-version-test
+  (testing "backend preflight resolves the inherited CLI path and prints the stamp"
+    (let [llm-client (llm/mock-client {:output "{\"ok\":true}"})
+          preflight-client (atom nil)
+          output (with-out-str
+                   (with-redefs-fn {#'sut/resolve-cli-command-path (fn [_] "/Users/chris/.local/bin/claude")
+                                    #'sut/read-cli-version (fn [_] {:success true :version "2.1.126"})
+                                    #'sut/run-claude-backend-preflight (fn [cmd-path workdir]
+                                                                         (is (= "/Users/chris/.local/bin/claude" cmd-path))
+                                                                         (is (= "/tmp/runtime-worktree" workdir))
+                                                                         {:success true :content "{\"ok\":true}" :exit-code 0})
+                                    #'llm/create-client (fn [opts]
+                                                         (reset! preflight-client opts)
+                                                         {:config {:backend (:backend opts) :model (:model opts)}})
+                                    #'llm/complete (fn [_client _request]
+                                                     (is false "Claude preflight should use the direct CLI probe path"))}
+                     (fn []
+                       (#'sut/run-backend-preflight!
+                        false
+                        llm-client
+                        {:worktree-path "/tmp/runtime-worktree"}))))]
+      (is (str/includes? output "Backend: claude"))
+      (is (str/includes? output "Backend Path: /Users/chris/.local/bin/claude"))
+      (is (str/includes? output "Backend Version: 2.1.126"))
+      (is (nil? @preflight-client)))))
+
+(deftest run-backend-preflight-fails-closed-on-bad-cli-health-test
+  (testing "backend preflight carries the resolved path and version when the probe fails"
+    (let [llm-client (llm/mock-client {:output "{\"ok\":true}"})]
+      (try+
+        (with-redefs-fn {#'sut/resolve-cli-command-path (fn [_] "/opt/homebrew/bin/claude")
+                         #'sut/read-cli-version (fn [_] {:success true :version "2.1.89"})
+                         #'sut/run-claude-backend-preflight (fn [_cmd-path _workdir]
+                                                              {:success false
+                                                               :error {:type "backend_preflight_timeout"
+                                                                       :message "Process timed out after 10000ms"}
+                                                               :exit-code -1})}
+          (fn []
+            (#'sut/run-backend-preflight!
+             true
+             llm-client
+             {:worktree-path "/tmp/runtime-worktree"})))
+        (is false "expected backend preflight anomaly")
+        (catch [:anomaly/category :anomalies/unavailable]
+               {:keys [backend cmd-path cmd-version probe-response]}
+          (is (= :claude backend))
+          (is (= "/opt/homebrew/bin/claude" cmd-path))
+          (is (= "2.1.89" cmd-version))
+          (is (= "backend_preflight_timeout" (get-in probe-response [:error :type]))))))))
+
+(deftest run-backend-preflight-exercises-generic-cli-success-path-test
+  (testing "non-Claude CLI backends decode streamed CLI output and accept the canonical ok payload"
+    (let [llm-client (llm/create-client {:backend :codex})
+          seen-cmd (atom nil)
+          seen-timeout (atom nil)
+          seen-workdir (atom nil)
+          output (with-out-str
+                   (with-redefs-fn {#'sut/resolve-cli-command-path (fn [_] "/Users/chris/.local/bin/codex")
+                                    #'sut/read-cli-version (fn [_] {:success true :version "1.2.3"})
+                                    #'sut/run-cli-command (fn [cmd timeout-ms & {:keys [workdir]}]
+                                                            (reset! seen-cmd cmd)
+                                                            (reset! seen-timeout timeout-ms)
+                                                            (reset! seen-workdir workdir)
+                                                            {:out "{\"type\":\"item.completed\",\"item\":{\"type\":\"agent_message\",\"text\":\"{\\\"ok\\\":true}\"}}\n{\"type\":\"turn.completed\",\"usage\":{\"input_tokens\":1,\"output_tokens\":1}}"
+                                                             :err ""
+                                                             :exit 0})}
+                     (fn []
+                       (#'sut/run-backend-preflight!
+                        false
+                        llm-client
+                        {:worktree-path "/tmp/runtime-worktree"}))))]
+      (is (str/includes? output "Backend: codex"))
+      (is (str/includes? output "Backend Path: /Users/chris/.local/bin/codex"))
+      (is (str/includes? output "Backend Version: 1.2.3"))
+      (is (= "/Users/chris/.local/bin/codex" (first @seen-cmd)))
+      (is (= ["exec" "--json"] (take 2 (rest @seen-cmd))))
+      (is (= "Reply with exactly {\"ok\":true}" (last @seen-cmd)))
+      (is (= 10000 @seen-timeout))
+      (is (= "/tmp/runtime-worktree" @seen-workdir)))))

@@ -19,15 +19,18 @@
 (ns ai.miniforge.cli.workflow-runner
   (:require
    [babashka.fs :as fs]
+   [babashka.process :as p]
    [clojure.string :as str]
    [clojure.edn :as edn]
    [cheshire.core :as json]
+   [ai.miniforge.llm.interface :as llm]
    [ai.miniforge.event-stream.interface :as es]
    [ai.miniforge.supervisory-state.interface :as supervisory]
    [ai.miniforge.workflow.interface :as workflow]
    [ai.miniforge.artifact.interface :as artifact]
    [ai.miniforge.agent.interface :as agent]
    [ai.miniforge.cli.messages :as messages]
+   [ai.miniforge.cli.resource-config :as resource-config]
    [ai.miniforge.cli.workflow-recommender :as recommender]
    [ai.miniforge.cli.workflow-runner.display :as display]
    [ai.miniforge.cli.workflow-runner.context :as context]
@@ -203,21 +206,420 @@
   (assert-execution-worktree! context)
   (assert-source-dir-alignment! spec context))
 
+(defn- print-colored-lines!
+  [quiet lines]
+  (when-not quiet
+    (doseq [[color line] lines]
+      (println (display/colorize color line)))))
+
+(defn- runtime-provenance-lines
+  [context]
+  (concat
+   [[:cyan (messages/t :workflow-runner/runtime-source
+                       {:path (:source-root context)})]
+    [:cyan (messages/t :workflow-runner/runtime-worktree
+                       {:path (:worktree-path context)})]]
+   (when-let [branch (:git-branch context)]
+     [[:cyan (messages/t :workflow-runner/runtime-branch {:branch branch})]])
+   (when-let [commit (:git-commit context)]
+     [[:cyan (messages/t :workflow-runner/runtime-commit {:commit commit})]])
+   (when-let [upstream (:git-upstream context)]
+     [[:cyan (messages/t :workflow-runner/runtime-upstream {:upstream upstream})]])
+   (when (:git-detached? context)
+     [[:yellow (messages/t :workflow-runner/runtime-detached-warning)]])
+   (when (:git-dirty? context)
+     [[:yellow (messages/t :workflow-runner/runtime-dirty-warning)]])))
+
 (defn- print-runtime-provenance!
   [quiet context]
-  (when-not quiet
-    (println (display/colorize :cyan (str "   Source: " (:source-root context))))
-    (println (display/colorize :cyan (str "   Worktree: " (:worktree-path context))))
-    (when-let [branch (:git-branch context)]
-      (println (display/colorize :cyan (str "   Branch: " branch))))
-    (when-let [commit (:git-commit context)]
-      (println (display/colorize :cyan (str "   Commit: " commit))))
-    (when-let [upstream (:git-upstream context)]
-      (println (display/colorize :cyan (str "   Upstream: " upstream))))
-    (when (:git-detached? context)
-      (println (display/colorize :yellow "   Warning: source checkout is detached HEAD")))
-    (when (:git-dirty? context)
-      (println (display/colorize :yellow "   Warning: source checkout has uncommitted changes")))))
+  (print-colored-lines! quiet (runtime-provenance-lines context)))
+
+(def ^:private workflow-runner-config
+  (delay
+    (resource-config/merged-resource-config "config/cli/workflow-runner.edn"
+                                            :workflow-runner
+                                            {})))
+
+(defn- backend-preflight-config []
+  (:backend-preflight @workflow-runner-config))
+
+(defn- backend-preflight-prompt []
+  (:prompt (backend-preflight-config)))
+
+(defn- backend-preflight-timeout-ms []
+  (:timeout-ms (backend-preflight-config)))
+
+(defn- backend-version-timeout-ms []
+  (:version-timeout-ms (backend-preflight-config)))
+
+(defn- claude-preflight-args []
+  (:claude-args (backend-preflight-config)))
+
+(defn- executable-file?
+  [path]
+  (let [file (some-> path fs/file)]
+    (and file
+         (fs/exists? file)
+         (not (fs/directory? file))
+         (fs/executable? file))))
+
+(defn- direct-command-path?
+  [cmd]
+  (boolean (re-find #"[\\/]" (or cmd ""))))
+
+(defn- normalize-command-path
+  [path]
+  (when (executable-file? path)
+    (str (-> path
+             fs/path
+             fs/absolutize))))
+
+(defn- portable-command-path
+  [cmd]
+  (some-> cmd
+          fs/which
+          normalize-command-path))
+
+(defn- path-entries
+  []
+  (str/split (or (System/getenv "PATH") "") #":"))
+
+(defn- matching-command-path
+  [entry cmd]
+  (let [candidate (fs/path entry cmd)]
+    (when (executable-file? candidate)
+      (str candidate))))
+
+(defn- resolve-cli-command-path
+  [cmd]
+  (cond
+    (str/blank? cmd) nil
+    (direct-command-path? cmd)
+    (normalize-command-path cmd)
+
+    :else
+    (or (portable-command-path cmd)
+        (some #(matching-command-path % cmd) (path-entries)))))
+
+(defn- cli-process-env
+  []
+  (when (System/getenv "CLAUDECODE")
+    (into {} (remove (fn [[k _]] (= k "CLAUDECODE"))) (System/getenv))))
+
+(defn- run-cli-command
+  [cmd timeout-ms & {:keys [workdir]}]
+  (let [empty-stdin (java.io.ByteArrayInputStream. (byte-array 0))
+        process (apply p/process
+                       (cond-> {:out :string
+                                :err :string
+                                :continue true
+                                :in empty-stdin}
+                         (cli-process-env) (assoc :env (cli-process-env))
+                         workdir (assoc :dir workdir))
+                       cmd)
+        result (deref process timeout-ms ::timeout)]
+    (if (= ::timeout result)
+      (do
+        (try
+          (when-let [^Process jp (:proc process)]
+            (.destroyForcibly jp))
+          (catch Exception _ nil))
+        {:out ""
+         :err (messages/t :workflow-runner/cli-process-timeout
+                          {:timeout-ms timeout-ms})
+         :exit -1
+         :timeout-ms timeout-ms})
+      {:out (:out result)
+       :err (:err result)
+       :exit (:exit result)})))
+
+(defn- success-response
+  [output]
+  (response/success output))
+
+(defn- failure-response
+  [category error-type message data]
+  (-> (response/failure message {:data (assoc data :type error-type)})
+      (assoc :anomaly (response/make-anomaly category message data))))
+
+(defn- response-output
+  [response]
+  (merge (select-keys response [:content :exit-code :version])
+         (or (:output response) {})))
+
+(defn- response-succeeded?
+  [response]
+  (or (true? (:success response))
+      (response/success? response)))
+
+(defn- response-summary
+  [response]
+  (merge
+   (select-keys response [:success :error :anomaly :exit-code])
+   (select-keys (response-output response)
+                [:content :exit-code :version])))
+
+(defn- read-cli-version
+  [cmd-path]
+  (let [{:keys [out err exit timeout-ms]} (run-cli-command [cmd-path "--version"] (backend-version-timeout-ms))]
+    (cond
+      timeout-ms
+      (failure-response :anomalies/unavailable
+                        "backend_version_timeout"
+                        (messages/t :workflow-runner/backend-version-timeout
+                                    {:timeout-ms timeout-ms})
+                        {:cmd-path cmd-path
+                         :timeout-ms timeout-ms})
+
+      (zero? exit)
+      (if-let [version (or (some-> out str/trim not-empty)
+                           (some-> err str/trim not-empty))]
+        (success-response {:version version})
+        (failure-response :anomalies/unavailable
+                          "backend_version_empty_output"
+                          (messages/t :workflow-runner/backend-version-empty)
+                          {:cmd-path cmd-path
+                           :exit-code exit}))
+
+      :else
+      (failure-response :anomalies/unavailable
+                        "backend_version_cli_error"
+                        (or (some-> err str/trim not-empty)
+                            (some-> out str/trim not-empty)
+                            (messages/t :workflow-runner/backend-version-exit
+                                        {:exit-code exit}))
+                        {:cmd-path cmd-path
+                         :exit-code exit}))))
+
+(defn- backend-stamp
+  [llm-client]
+  (when-let [backend (llm/client-backend llm-client)]
+    (let [backend-config (get llm/backends backend)
+          cmd (:cmd backend-config)
+          cmd-path (when (:requires-cli? backend-config)
+                     (resolve-cli-command-path cmd))]
+      {:backend backend
+       :backend-config backend-config
+       :cmd cmd
+       :cmd-path cmd-path})))
+
+(defn- with-backend-version
+  [stamp version]
+  (assoc stamp :cmd-version version))
+
+(defn- backend-provenance-lines
+  [{:keys [backend cmd-path cmd-version]}]
+  (concat
+   [[:cyan (messages/t :workflow-runner/backend-label
+                       {:backend (name backend)})]]
+   (when cmd-path
+     [[:cyan (messages/t :workflow-runner/backend-path {:path cmd-path})]])
+   (when cmd-version
+     [[:cyan (messages/t :workflow-runner/backend-version {:version cmd-version})]])))
+
+(defn- print-backend-provenance!
+  [quiet {:keys [backend cmd-path cmd-version]}]
+  (print-colored-lines! quiet (backend-provenance-lines {:backend backend
+                                                         :cmd-path cmd-path
+                                                         :cmd-version cmd-version})))
+
+(defn- claude-preflight-command
+  [cmd-path]
+  (into [cmd-path "-p" (backend-preflight-prompt)]
+        (claude-preflight-args)))
+
+(defn- cli-required-backend-stamp
+  [llm-client]
+  (when-let [stamp (backend-stamp llm-client)]
+    (when (:requires-cli? (:backend-config stamp))
+      stamp)))
+
+(defn- parse-preflight-payload
+  [content]
+  (try
+    (some-> content str/trim not-empty (json/parse-string true))
+    (catch Exception _ nil)))
+
+(defn- preflight-success?
+  [content]
+  (= {:ok true} (parse-preflight-payload content)))
+
+(defn- backend-stream-content
+  [stream-parser output]
+  (let [content (atom "")]
+    (doseq [line (str/split-lines (or output ""))]
+      (when-let [parsed (stream-parser line)]
+        (when-let [delta (:delta parsed)]
+          (swap! content str delta))))
+    (some-> @content str/trim not-empty)))
+
+(defn- decoded-preflight-content
+  [backend-config output]
+  (if-let [stream-parser (:stream-parser backend-config)]
+    (backend-stream-content stream-parser output)
+    (some-> output str/trim not-empty)))
+
+(defn- generic-preflight-command
+  [llm-client]
+  (let [{:keys [backend model]} (:config llm-client)
+        {:keys [cmd args-fn]} (get llm/backends backend)
+        request (cond-> {:prompt (backend-preflight-prompt)}
+                  model (assoc :model model))]
+    (into [cmd] (args-fn request))))
+
+(defn- run-generic-backend-preflight
+  [llm-client cmd-path workdir]
+  (let [{:keys [backend]} (:config llm-client)
+        backend-config (get llm/backends backend)
+        full-cmd (into [cmd-path] (rest (generic-preflight-command llm-client)))
+        {:keys [out err exit timeout-ms]} (run-cli-command full-cmd
+                                                           (backend-preflight-timeout-ms)
+                                                           :workdir workdir)
+        content (decoded-preflight-content backend-config out)]
+    (cond
+      timeout-ms
+      (failure-response :anomalies/unavailable
+                        "backend_preflight_timeout"
+                        err
+                        {:cmd-path cmd-path
+                         :timeout-ms timeout-ms
+                         :exit-code exit})
+
+      (not (zero? exit))
+      (failure-response :anomalies/unavailable
+                        "backend_preflight_cli_error"
+                        (or (some-> err str/trim not-empty)
+                            content
+                            (messages/t :workflow-runner/backend-preflight-exit
+                                        {:exit-code exit}))
+                        {:cmd-path cmd-path
+                         :stdout (some-> out str/trim not-empty)
+                         :stderr (some-> err str/trim not-empty)
+                         :exit-code exit})
+
+      (preflight-success? content)
+      (success-response {:content content
+                         :exit-code exit})
+
+      :else
+      (failure-response :anomalies/unavailable
+                        "backend_preflight_unexpected_output"
+                        (messages/t :workflow-runner/backend-preflight-failed
+                                    {:backend (name backend)})
+                        {:cmd-path cmd-path
+                         :stdout (some-> out str/trim not-empty)
+                         :stderr (some-> err str/trim not-empty)
+                         :content content
+                         :exit-code exit}))))
+
+(defn- run-claude-backend-preflight
+  [cmd-path workdir]
+  (let [{:keys [out err exit timeout-ms]} (run-cli-command (claude-preflight-command cmd-path)
+                                                           (backend-preflight-timeout-ms)
+                                                           :workdir workdir)
+        trimmed (some-> out str/trim)]
+    (cond
+      timeout-ms
+      (assoc (failure-response :anomalies/unavailable
+                               "backend_preflight_timeout"
+                               err
+                               {:cmd-path cmd-path
+                                :timeout-ms timeout-ms
+                                :exit-code exit})
+             :exit-code exit)
+
+      (not (zero? exit))
+      (assoc (failure-response :anomalies/unavailable
+                               "backend_preflight_cli_error"
+                               (or (some-> err str/trim not-empty)
+                                   trimmed
+                                   (messages/t :workflow-runner/backend-preflight-exit
+                                               {:exit-code exit}))
+                               {:cmd-path cmd-path
+                                :exit-code exit})
+             :exit-code exit)
+
+      (preflight-success? trimmed)
+      (-> (success-response {:content trimmed
+                             :exit-code exit})
+          (assoc :exit-code exit
+                 :content trimmed))
+
+      :else
+      (assoc (failure-response :anomalies/unavailable
+                               "backend_preflight_unexpected_output"
+                               (messages/t :workflow-runner/claude-preflight-unexpected-output)
+                               {:cmd-path cmd-path
+                                :stdout trimmed
+                                :stderr (some-> err str/trim not-empty)
+                                :exit-code exit})
+             :exit-code exit))))
+
+(defn- backend-cli-missing!
+  [{:keys [backend cmd]}]
+  (response/throw-anomaly! :anomalies/incorrect
+                           (messages/t :workflow-runner/cli-not-on-path {:cmd cmd})
+                           {:backend backend
+                            :cmd cmd
+                            :path (System/getenv "PATH")}))
+
+(defn- backend-version-failed!
+  [{:keys [backend cmd cmd-path]} version-response]
+  (response/throw-anomaly! :anomalies/unavailable
+                           (messages/t :workflow-runner/backend-version-failed
+                                       {:backend (name backend)})
+                           {:backend backend
+                            :cmd cmd
+                            :cmd-path cmd-path
+                            :version-error (get-in version-response [:error :message])
+                            :version-error-data (get-in version-response [:error :data])}))
+
+(defn- backend-preflight-failed!
+  [{:keys [backend cmd cmd-path cmd-version]} probe-response]
+  (response/throw-anomaly! :anomalies/unavailable
+                           (messages/t :workflow-runner/backend-preflight-failed
+                                       {:backend (name backend)})
+                           {:backend backend
+                            :cmd cmd
+                            :cmd-path cmd-path
+                            :cmd-version cmd-version
+                            :probe-response (response-summary probe-response)}))
+
+(defn- run-backend-probe
+  [llm-client {:keys [backend cmd-path]} workdir]
+  (if (= backend :claude)
+    (run-claude-backend-preflight cmd-path workdir)
+    (run-generic-backend-preflight llm-client cmd-path workdir)))
+
+(defn- ensure-cli-command-path!
+  [stamp]
+  (when-not (:cmd-path stamp)
+    (backend-cli-missing! stamp))
+  stamp)
+
+(defn- versioned-backend-stamp
+  [stamp]
+  (let [version-response (read-cli-version (:cmd-path stamp))
+        version (get-in (response-output version-response) [:version])]
+    (when-not (response-succeeded? version-response)
+      (backend-version-failed! stamp version-response))
+    (with-backend-version stamp version)))
+
+(defn- verify-backend-probe!
+  [llm-client stamp workdir]
+  (let [probe-response (run-backend-probe llm-client stamp workdir)]
+    (when-not (response-succeeded? probe-response)
+      (backend-preflight-failed! stamp probe-response))
+    stamp))
+
+(defn- run-backend-preflight!
+  [quiet llm-client context]
+  (when-let [stamp (cli-required-backend-stamp llm-client)]
+    (let [stamp (-> stamp
+                    ensure-cli-command-path!
+                    versioned-backend-stamp)]
+      (print-backend-provenance! quiet stamp)
+      (verify-backend-probe! llm-client stamp (:worktree-path context)))))
 
 (defn close-artifact-store [artifact-store]
   (when artifact-store
@@ -487,6 +889,7 @@
       (dashboard/print-dashboard-status! quiet)
       (assert-runtime-alignment! spec context)
       (print-runtime-provenance! quiet context)
+      (run-backend-preflight! quiet llm-client context)
       (let [provenance (move-spec-to-in-progress! (:spec/provenance enriched-spec))]
         (try
           (let [result (execute-with-events {:run-pipeline run-pipeline
@@ -623,6 +1026,7 @@
             progress-cleanup (display/start-progress! event-stream quiet)]
         (print-chain-header chain-id chain-def quiet)
         (dashboard/print-dashboard-status! quiet)
+        (run-backend-preflight! quiet llm-client context)
         (try
           (let [result (workflow/run-chain chain-def chain-input context)]
             (print-chain-result result quiet)

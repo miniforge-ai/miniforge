@@ -19,15 +19,19 @@
 (ns ai.miniforge.llm.protocols.impl.llm-client
   "Implementation functions for LLMClient protocol."
   (:require
+   [clojure.edn :as edn]
+   [clojure.java.io :as io]
    [clojure.string :as str]
    [cheshire.core :as json]
    [babashka.process :as p]
    [org.httpkit.client :as http]
    [ai.miniforge.logging.interface :as log]
    [ai.miniforge.llm.progress-monitor :as pm]
-   [ai.miniforge.response.interface :as response])
+   [ai.miniforge.response.interface :as response]
+   [slingshot.slingshot :refer [throw+ try+]])
   (:import
-   [java.io ByteArrayInputStream]))
+   [java.io ByteArrayInputStream]
+   [java.util.concurrent LinkedBlockingQueue TimeUnit]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; LLM response builders
@@ -39,10 +43,23 @@
 ;; These builders ensure consistent construction across all backends
 ;; (CLI, HTTP/OpenAI, HTTP/Ollama, streaming, non-streaming).
 
-(def ^:private default-claude-cli-budget-usd
-  "Default CLI budget cap used when a request is token-bounded but does not
-   supply an explicit dollar budget."
-  "0.10")
+(defn- load-client-defaults
+  []
+  (if-let [resource (io/resource "llm/client-defaults.edn")]
+    (edn/read-string (slurp resource))
+    (response/throw-anomaly! :anomalies/not-found
+                             "Missing llm/client-defaults.edn resource")))
+
+(def ^:private client-defaults
+  (delay (load-client-defaults)))
+
+(defn- client-default
+  [path]
+  (get-in @client-defaults path))
+
+(defn- default-claude-cli-budget-usd
+  []
+  (client-default [:claude-cli :default-budget-usd]))
 
 ;; ---------------------------------------------------------------------------
 ;; Stream-timing constants
@@ -51,40 +68,33 @@
 ;; not the what. Tuning history lives in inline doc-comments next to
 ;; each constant.
 
-(def ^:private default-stagnation-threshold-ms
-  "Progress-monitor stagnation cap. 120s lets Opus 4.6 think between
-   tool-call batches (observed: 20 tool calls, 0 text chunks, the
-   stream went quiet for 60-90s on ordinary reasoning) without
-   tripping a false timeout."
-  120000)
+(defn- default-stagnation-threshold-ms
+  []
+  (client-default [:stream :default-stagnation-threshold-ms]))
 
-(def ^:private default-max-total-ms
-  "Progress-monitor hard ceiling on total subprocess wall time."
-  600000)
+(defn- default-max-total-ms
+  []
+  (client-default [:stream :default-max-total-ms]))
 
-(def ^:private default-min-activity-interval-ms
-  "Progress-monitor minimum interval between activity checks."
-  5000)
+(defn- default-min-activity-interval-ms
+  []
+  (client-default [:stream :default-min-activity-interval-ms]))
 
-(def ^:private stream-line-timeout-ms
-  "Per-line read timeout. 180s — see default-stagnation-threshold-ms
-   for the same reasoning class. Hitting this cap classifies the
-   stream as :stream-idle (a stalled stream, not clean EOF)."
-  180000)
+(defn- stream-line-timeout-ms
+  []
+  (client-default [:stream :line-timeout-ms]))
 
-(def ^:private process-join-timeout-ms
-  "How long to wait on subprocess `deref` after the stream has ended
-   cleanly. Matches default-max-total-ms; the subprocess should have
-   exited by now."
-  600000)
+(defn- process-join-timeout-ms
+  []
+  (client-default [:stream :process-join-timeout-ms]))
 
-(def ^:private post-kill-join-timeout-ms
-  "How long to wait on subprocess `deref` after we already classified
-   a timeout and force-killed the process. The kill makes joining a
-   matter of seconds — without this, we paid an extra 10 minutes per
-   timeout (observed Claude dogfood 2026-05-02: 10-min planner cap
-   becoming an 18-min wall-clock failure)."
-  5000)
+(defn- post-kill-join-timeout-ms
+  []
+  (client-default [:stream :post-kill-join-timeout-ms]))
+
+(defn- stream-poll-interval-ms
+  []
+  (client-default [:stream :poll-interval-ms]))
 
 (defn llm-success
   "Build a successful LLM response."
@@ -320,7 +330,7 @@
   [{:keys [prompt system max-tokens streaming? mcp-config mcp-allowed-tools
            disallowed-tools supervision budget-usd max-turns model resume]}]
   (let [budget (or budget-usd
-                   (when max-tokens default-claude-cli-budget-usd))]
+                   (when max-tokens (default-claude-cli-budget-usd)))]
     (cond-> ["-p"]
       streaming?                   (conj "--output-format" "stream-json")
       streaming?                   (conj "--verbose")
@@ -562,10 +572,18 @@
    (success-response output exit-code nil))
   ([output exit-code stderr]
   (let [trimmed (str/trim output)]
-    (if (rate-limited? trimmed)
+    (cond
+      (str/blank? trimmed)
+      (llm-error :anomalies.agent/llm-error "empty_success_output"
+                 "CLI backend exited successfully but produced no output"
+                 {:exit-code exit-code :stderr stderr :stdout output})
+
+      (rate-limited? trimmed)
       (llm-error :anomalies.agent/rate-limited "rate_limit"
                  (str "Claude CLI rate limited: " trimmed)
                  {:exit-code exit-code :stdout output})
+
+      :else
       (cond-> (llm-success trimmed {:exit-code exit-code})
         (seq stderr) (assoc :stderr stderr))))))
 
@@ -584,9 +602,9 @@
 
 (defn default-progress-monitor []
   (pm/create-progress-monitor
-   {:stagnation-threshold-ms  default-stagnation-threshold-ms
-    :max-total-ms             default-max-total-ms
-    :min-activity-interval-ms default-min-activity-interval-ms}))
+   {:stagnation-threshold-ms  (default-stagnation-threshold-ms)
+    :max-total-ms             (default-max-total-ms)
+    :min-activity-interval-ms (default-min-activity-interval-ms)}))
 
 (defn format-timeout-error [{:keys [message type elapsed-ms]}]
   (format "Adaptive timeout: %s (type: %s, elapsed: %dms)"
@@ -605,60 +623,129 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
-(def ^:private read-timeout-sentinel
+(def ^:private eof-sentinel
   (Object.))
 
-(defn read-line-with-timeout
-  "Read one line from `reader`, returning `read-timeout-sentinel` if
-   nothing arrives within `timeout-ms`. On timeout the underlying
-   reader is closed so the blocked `.readLine` thread can return
-   instead of leaking. (`deref` with a timeout returns the supplied
-   default — it does not throw `TimeoutException` — so no
-   `catch` clause is needed.)"
-  [reader timeout-ms]
-  (let [read-future (future (.readLine reader))
-        result      (deref read-future timeout-ms read-timeout-sentinel)]
-    (when (identical? result read-timeout-sentinel)
-      (try (.close reader) (catch Exception _))
-      (future-cancel read-future))
-    result))
+(defn- open-stream-dump-writer
+  []
+  (when-let [dump-path (System/getenv "MF_STREAM_DUMP")]
+    (java.io.PrintWriter.
+     (java.io.FileWriter. dump-path true))))
+
+(defn- stream-read-failure
+  [ex]
+  (response/from-exception ex))
+
+(defn- enqueue-stream-line!
+  [line-queue line]
+  (.put line-queue line))
+
+(defn- read-stream-loop!
+  [out-reader line-queue]
+  (loop []
+    (if-some [line (.readLine out-reader)]
+      (do (enqueue-stream-line! line-queue line)
+          (recur))
+      (enqueue-stream-line! line-queue eof-sentinel))))
+
+(defn- start-stream-reader!
+  [out-reader line-queue]
+  (future
+    (try
+      (read-stream-loop! out-reader line-queue)
+      (catch Exception e
+        (enqueue-stream-line! line-queue (stream-read-failure e))))))
+
+(defn- record-stream-line!
+  [out-lines monitor dump-writer on-line last-line-at now line]
+  (reset! last-line-at now)
+  (swap! out-lines conj line)
+  (pm/record-chunk! monitor line)
+  (when dump-writer
+    (.println dump-writer line)
+    (.flush dump-writer))
+  (on-line line))
+
+(defn- stream-idle-timeout
+  [last-line-at line-timeout-ms out-lines now]
+  (when (>= (- now @last-line-at) line-timeout-ms)
+    {:type :stream-idle
+     :message (str "No stream output for " line-timeout-ms "ms")
+     :elapsed-ms (- now @last-line-at)
+     :stats {:lines-read (count @out-lines)}}))
+
+(defn- stream-poll-signal
+  [line-queue]
+  (.poll line-queue
+         (stream-poll-interval-ms)
+         TimeUnit/MILLISECONDS))
+
+(defn- anomaly-signal?
+  [line-or-signal]
+  (response/anomaly-map? line-or-signal))
+
+(defn- eof-signal?
+  [line-or-signal]
+  (identical? line-or-signal eof-sentinel))
+
+(defn- timeout-signal
+  [last-line-at line-timeout-ms out-lines]
+  {:done? false
+   :timeout (stream-idle-timeout last-line-at
+                                 line-timeout-ms
+                                 out-lines
+                                 (System/currentTimeMillis))})
+
+(defn- process-stream-signal
+  [line-or-signal out-lines monitor dump-writer on-line last-line-at line-timeout-ms]
+  (cond
+    (anomaly-signal? line-or-signal)
+    (throw+ line-or-signal)
+
+    (eof-signal? line-or-signal)
+    {:done? true}
+
+    (some? line-or-signal)
+    (do (record-stream-line! out-lines
+                             monitor
+                             dump-writer
+                             on-line
+                             last-line-at
+                             (System/currentTimeMillis)
+                             line-or-signal)
+        {:done? false})
+
+    :else
+    (timeout-signal last-line-at line-timeout-ms out-lines)))
 
 (defn process-stream-lines [out-reader monitor on-line]
   (let [out-lines (atom [])
         timeout-reason (atom nil)
-        line-timeout-ms stream-line-timeout-ms
-        dump-path (System/getenv "MF_STREAM_DUMP")
-        dump-writer (when dump-path
-                      (java.io.PrintWriter.
-                        (java.io.FileWriter. dump-path true)))]
-    (loop []
-      (if-let [t (pm/check-timeout monitor)]
-        ;; Progress-monitor timeout (stagnation or total-max)
-        (reset! timeout-reason t)
-        (let [line-or-timeout (read-line-with-timeout out-reader line-timeout-ms)]
-          (cond
-            (identical? line-or-timeout read-timeout-sentinel)
-            ;; Line-timeout: reader produced nothing for line-timeout-ms.
-            ;; Treat as stream-idle — a stalled stream, not clean EOF.
-            ;; Set an explicit reason so the caller reports it instead of
-            ;; waiting on `deref process` for the full 10 min and then
-            ;; reporting a bare "Process timed out" with no context.
-            (reset! timeout-reason
-                    {:type :stream-idle
-                     :message (str "No stream output for " line-timeout-ms "ms")
-                     :elapsed-ms line-timeout-ms
-                     :stats {:lines-read (count @out-lines)}})
-
-            (some? line-or-timeout)
-            (do (swap! out-lines conj line-or-timeout)
-                (pm/record-chunk! monitor line-or-timeout)
-                (when dump-writer (.println dump-writer line-or-timeout) (.flush dump-writer))
-                (on-line line-or-timeout)
-                (recur))
-
-            :else
-            nil))))
-    (when dump-writer (.close dump-writer))
+        line-timeout-ms (stream-line-timeout-ms)
+        last-line-at (atom (System/currentTimeMillis))
+        dump-writer (open-stream-dump-writer)
+        line-queue (LinkedBlockingQueue.)
+        reader-future (start-stream-reader! out-reader line-queue)]
+    (try+
+      (loop []
+        (if-let [t (pm/check-timeout monitor)]
+          (reset! timeout-reason t)
+          (let [{:keys [done? timeout]}
+                (process-stream-signal (stream-poll-signal line-queue)
+                                       out-lines
+                                       monitor
+                                       dump-writer
+                                       on-line
+                                       last-line-at
+                                       line-timeout-ms)]
+            (cond
+              done? nil
+              timeout (reset! timeout-reason timeout)
+              :else (recur)))))
+      (finally
+        (future-cancel reader-future)
+        (try (.close out-reader) (catch Exception _))
+        (when dump-writer (.close dump-writer))))
     {:lines @out-lines
      :timeout @timeout-reason}))
 
@@ -690,7 +777,7 @@
                (when-let [^Process jp (:proc process)]
                  (.destroyForcibly jp))
                (catch Exception _ nil)))
-         join-timeout (if timeout post-kill-join-timeout-ms process-join-timeout-ms)
+         join-timeout (if timeout (post-kill-join-timeout-ms) (process-join-timeout-ms))
          result (deref process join-timeout
                        {:exit -1 :err "Process timed out"})]
      (if timeout
@@ -947,8 +1034,8 @@
         {:keys [streaming? cmd api-key-var]} backend-config
         progress-monitor (or (:progress-monitor request)
                              (pm/create-progress-monitor
-                              {:stagnation-threshold-ms 120000
-                               :max-total-ms 600000}))]
+                              {:stagnation-threshold-ms (default-stagnation-threshold-ms)
+                               :max-total-ms (default-max-total-ms)}))]
 
     ;; Handle HTTP backends
     (if (= cmd "http")
