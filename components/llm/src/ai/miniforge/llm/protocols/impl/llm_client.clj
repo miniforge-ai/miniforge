@@ -131,14 +131,24 @@
   "Parse a line from Claude CLI streaming output.
 
    Claude CLI stream-json emits:
-   - {\"type\":\"system\"} — init event (ignored)
+   - {\"type\":\"system\"} — one-shot init event; parsed to a heartbeat
+     so it refreshes stream supervision once at session start
    - {\"type\":\"assistant\",\"message\":{\"content\":[{\"text\":\"...\"}]}} — content
-   - {\"type\":\"result\"} — final result with usage (ignored)
+   - {\"type\":\"tool_use\"} — tool invocation (carries :tool-use)
+   - {\"type\":\"rate_limit_event\"} — periodic liveness pulse from
+     the CLI; parsed to a heartbeat so it keeps the progress monitor
+     alive while the model is mid-think (no assistant chunks yet)
+   - {\"type\":\"result\"} — final usage / stop-reason envelope
+
+   Unrecognised event types also parse to a heartbeat — the stream
+   stays alive even when the CLI introduces new event shapes the
+   miniforge parser hasn't yet learned.
 
    Arguments:
      line - String line from stream
 
-   Returns: {:delta string :done? boolean} or nil"
+   Returns: {:delta string :done? boolean ...} or nil
+            (nil for blank lines or parse failures only)"
   [line]
   (try
     (when-not (str/blank? line)

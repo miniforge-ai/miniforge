@@ -691,6 +691,50 @@
       (is (= "" @accumulated-content))
       (is (= 1 (count @chunks))))))
 
+(deftest stream-with-parser-records-liveness-progress-test
+  ;; 2026-05-04 dogfood regression — Claude emits rate_limit_event
+  ;; while the model is mid-think (no assistant chunks yet). PR #774
+  ;; mapped these to nil, so they did not advance the activity
+  ;; timestamp. Adaptive stagnation killed the planner at 60s with
+  ;; zero output. This integration test exercises the same
+  ;; stream-with-parser path as production and verifies the activity
+  ;; timestamp moves forward — a parser-shape-only test cannot prove
+  ;; the supervisor actually got the heartbeat.
+  (let [setup (fn []
+                (let [monitor (pm/create-progress-monitor
+                               {:stagnation-threshold-ms 1000
+                                :max-total-ms 1000
+                                :min-activity-interval-ms 1})
+                      parse-line (:stream-parser (get impl/backends :claude))
+                      on-line (impl/stream-with-parser parse-line
+                                                       (fn [_] nil)
+                                                       monitor
+                                                       (atom "")
+                                                       (atom nil)
+                                                       (atom nil)
+                                                       (atom [])
+                                                       (atom nil)
+                                                       (atom nil)
+                                                       (atom nil))]
+                  {:monitor monitor :on-line on-line}))]
+    (testing "rate_limit_event advances the supervisor's activity timestamp"
+      (let [{:keys [monitor on-line]} (setup)
+            before (:last-activity-at @monitor)]
+        (Thread/sleep 5)
+        (on-line (json/generate-string
+                   {:type "rate_limit_event"
+                    :rate_limit_info {:status "allowed"}}))
+        (is (< before (:last-activity-at @monitor))
+            "rate_limit_event must keep the progress monitor alive")))
+
+    (testing "system init event advances the supervisor's activity timestamp"
+      (let [{:keys [monitor on-line]} (setup)
+            before (:last-activity-at @monitor)]
+        (Thread/sleep 5)
+        (on-line (json/generate-string {:type "system" :subtype "init"}))
+        (is (< before (:last-activity-at @monitor))
+            "system init must refresh liveness once at stream start")))))
+
 (deftest message-preview-via-streaming-success-test
   (testing "short content is returned in full as preview"
     (let [short-content "short response"
