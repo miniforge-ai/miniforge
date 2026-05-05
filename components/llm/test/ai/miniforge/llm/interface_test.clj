@@ -334,7 +334,8 @@
 
 (deftest stream-parser-accumulates-usage-test
   (testing "stream-with-parser stores usage from parsed events"
-    (let [content (atom "")
+    (let [monitor (pm/create-progress-monitor {:min-activity-interval-ms 1})
+          content (atom "")
           usage (atom nil)
           cost (atom nil)
           chunks (atom [])
@@ -345,6 +346,7 @@
           handler (impl/stream-with-parser
                     #'impl/parse-claude-stream-line
                     (fn [chunk] (swap! chunks conj chunk))
+                    monitor
                     content
                     usage
                     cost
@@ -369,7 +371,8 @@
 
 (deftest stream-parser-accumulates-stop-reason-and-turns-test
   (testing "latest stop_reason wins, num_turns captured from result event"
-    (let [content (atom "")
+    (let [monitor (pm/create-progress-monitor {:min-activity-interval-ms 1})
+          content (atom "")
           usage (atom nil)
           cost (atom nil)
           chunks (atom [])
@@ -380,6 +383,7 @@
           handler (impl/stream-with-parser
                     #'impl/parse-claude-stream-line
                     (fn [chunk] (swap! chunks conj chunk))
+                    monitor
                     content usage cost tools session-id stop-reason turns)]
       ;; First assistant message with tool_use (not the final stop)
       (handler (json/generate-string
@@ -404,7 +408,8 @@
 
 (deftest stream-parser-codex-increment-turns-test
   (testing "turn.completed events increment the turns accumulator"
-    (let [content (atom "")
+    (let [monitor (pm/create-progress-monitor {:min-activity-interval-ms 1})
+          content (atom "")
           usage (atom nil)
           cost (atom nil)
           chunks (atom [])
@@ -415,6 +420,7 @@
           handler (impl/stream-with-parser
                     #'impl/parse-codex-stream-line
                     (fn [chunk] (swap! chunks conj chunk))
+                    monitor
                     content usage cost tools session-id stop-reason turns)]
       ;; First turn.completed — turns goes from nil to 1
       (handler (json/generate-string
@@ -428,7 +434,8 @@
       (is (= 2 @turns))))
 
   (testing "turn.completed with finish_reason sets stop-reason accumulator"
-    (let [content (atom "")
+    (let [monitor (pm/create-progress-monitor {:min-activity-interval-ms 1})
+          content (atom "")
           usage (atom nil)
           cost (atom nil)
           chunks (atom [])
@@ -439,6 +446,7 @@
           handler (impl/stream-with-parser
                     #'impl/parse-codex-stream-line
                     (fn [chunk] (swap! chunks conj chunk))
+                    monitor
                     content usage cost tools session-id stop-reason turns)]
       (handler (json/generate-string
                  {:type "turn.completed"
@@ -542,24 +550,33 @@
 
 (deftest streaming-error-response-diagnostic-test
   (testing "tool-call-count is surfaced on error responses"
-    (let [resp (impl/streaming-error-response "" -1 "process died" nil nil nil 5 nil)]
+    (let [resp (impl/streaming-error-response "" -1 "process died" "" nil nil nil 5 nil)]
       (is (not (:success resp)))
       (is (= 5 (:tool-call-count resp)))))
 
   (testing "final-message-preview is surfaced on error responses"
-    (let [resp (impl/streaming-error-response "partial output" -1 "process died" nil nil nil nil "partial output")]
+    (let [resp (impl/streaming-error-response "partial output" -1 "process died" "partial output" nil nil nil nil "partial output")]
       (is (not (:success resp)))
       (is (= "partial output" (:final-message-preview resp)))))
 
   (testing "stop-reason and num-turns appear on error response top level"
     (let [resp (impl/streaming-error-response "" -1 "timed out"
+                                              ""
                                               {:type :stream-idle :message "idle" :elapsed-ms 1000}
                                               "max_turns" 12 3 "last bit")]
       (is (not (:success resp)))
       (is (= "max_turns" (:stop-reason resp)))
       (is (= 12 (:num-turns resp)))
       (is (= 3 (:tool-call-count resp)))
-      (is (= "last bit" (:final-message-preview resp))))))
+      (is (= "last bit" (:final-message-preview resp)))))
+
+  (testing "raw stdout is preserved when parsed content is empty"
+    (let [resp (impl/streaming-error-response "" -1 "timed out"
+                                              "{\"type\":\"system\"}"
+                                              {:type :stagnation :message "stalled" :elapsed-ms 1000}
+                                              nil nil nil nil)]
+      (is (not (:success resp)))
+      (is (= "{\"type\":\"system\"}" (get-in resp [:error :raw-stdout]))))))
 
 (deftest process-stream-lines-eof-is-not-timeout-test
   (testing "clean EOF with no lines does not synthesize a stream-idle timeout"
@@ -593,6 +610,40 @@
             (is (= timeout (:timeout result)))))
         (finally
           (.close writer))))))
+
+(deftest stream-with-parser-records-tool-progress-test
+  (testing "tool-use events reset semantic progress even without text deltas"
+    (let [monitor (pm/create-progress-monitor
+                   {:stagnation-threshold-ms 1000
+                    :max-total-ms 1000
+                    :min-activity-interval-ms 1})
+          chunks (atom [])
+          accumulated-content (atom "")
+          accumulated-usage (atom nil)
+          accumulated-cost (atom nil)
+          accumulated-tools (atom [])
+          accumulated-session-id (atom nil)
+          accumulated-stop-reason (atom nil)
+          accumulated-turns (atom nil)
+          parse-line (:stream-parser (get impl/backends :claude))
+          on-line (impl/stream-with-parser parse-line
+                                           #(swap! chunks conj %)
+                                           monitor
+                                           accumulated-content
+                                           accumulated-usage
+                                           accumulated-cost
+                                           accumulated-tools
+                                           accumulated-session-id
+                                           accumulated-stop-reason
+                                           accumulated-turns)
+          before (:last-activity-at @monitor)]
+      (Thread/sleep 5)
+      (on-line "{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"tool_use\",\"name\":\"mcp__context__grep\"}],\"stop_reason\":\"tool_use\"}}")
+      (is (= ["mcp__context__grep"] @accumulated-tools))
+      (is (= "tool_use" @accumulated-stop-reason))
+      (is (< before (:last-activity-at @monitor)))
+      (is (= "" @accumulated-content))
+      (is (= 1 (count @chunks))))))
 
 (deftest message-preview-via-streaming-success-test
   (testing "short content is returned in full as preview"

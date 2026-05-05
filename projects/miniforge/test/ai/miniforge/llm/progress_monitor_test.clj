@@ -77,6 +77,19 @@
       (pm/record-file-write! monitor "src/bar.clj")
       (is (zero? (:stagnant-cycles @monitor))))))
 
+(deftest record-activity-test
+  (testing "repeated semantic activity refreshes last-activity even with the same marker"
+    (let [monitor (pm/create-progress-monitor {:min-activity-interval-ms 1000})
+          before (:last-activity-at @monitor)]
+      (Thread/sleep 10)
+      (is (true? (pm/record-activity! monitor :stream-heartbeat)))
+      (let [after-first (:last-activity-at @monitor)]
+        (Thread/sleep 10)
+        (is (true? (pm/record-activity! monitor :stream-heartbeat)))
+        (is (< before after-first))
+        (is (< after-first (:last-activity-at @monitor))))
+      (is (zero? (:stagnant-cycles @monitor))))))
+
 (deftest check-timeout-test
   (testing "returns nil when making progress"
     (let [monitor (pm/create-progress-monitor {})]

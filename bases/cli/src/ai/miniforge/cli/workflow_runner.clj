@@ -440,9 +440,28 @@
     (some-> content str/trim not-empty (json/parse-string true))
     (catch Exception _ nil)))
 
+(defn- normalized-preflight-content
+  [content]
+  (loop [candidate (some-> content str/trim not-empty)]
+    (let [parsed (parse-preflight-payload candidate)
+          nested (or (some-> parsed :result str/trim not-empty)
+                     (some-> parsed :content str/trim not-empty))]
+      (cond
+        (and (:result parsed)
+             (not (and (= "result" (:type parsed))
+                       (= "success" (:subtype parsed))
+                       (not (:is_error parsed)))))
+        nil
+
+        (and nested (not= nested candidate))
+        (recur nested)
+
+        :else
+        candidate))))
+
 (defn- preflight-success?
   [content]
-  (= {:ok true} (parse-preflight-payload content)))
+  (= {:ok true} (parse-preflight-payload (normalized-preflight-content content))))
 
 (defn- backend-stream-content
   [stream-parser output]
@@ -509,7 +528,7 @@
                         {:cmd-path cmd-path
                          :stdout (some-> out str/trim not-empty)
                          :stderr (some-> err str/trim not-empty)
-                         :content content
+                         :content (normalized-preflight-content content)
                          :exit-code exit}))))
 
 (defn- run-claude-backend-preflight
@@ -517,7 +536,8 @@
   (let [{:keys [out err exit timeout-ms]} (run-cli-command (claude-preflight-command cmd-path)
                                                            (backend-preflight-timeout-ms)
                                                            :workdir workdir)
-        trimmed (some-> out str/trim)]
+        trimmed (some-> out str/trim)
+        content (normalized-preflight-content trimmed)]
     (cond
       timeout-ms
       (assoc (failure-response :anomalies/unavailable
@@ -539,11 +559,11 @@
                                 :exit-code exit})
              :exit-code exit)
 
-      (preflight-success? trimmed)
-      (-> (success-response {:content trimmed
+      (preflight-success? content)
+      (-> (success-response {:content content
                              :exit-code exit})
           (assoc :exit-code exit
-                 :content trimmed))
+                 :content content))
 
       :else
       (assoc (failure-response :anomalies/unavailable
@@ -551,6 +571,7 @@
                                (messages/t :workflow-runner/claude-preflight-unexpected-output)
                                {:cmd-path cmd-path
                                 :stdout trimmed
+                                :content content
                                 :stderr (some-> err str/trim not-empty)
                                 :exit-code exit})
              :exit-code exit))))
