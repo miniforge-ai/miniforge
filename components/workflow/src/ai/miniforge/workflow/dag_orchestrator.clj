@@ -39,7 +39,9 @@
    [ai.miniforge.dag-executor.interface :as dag]
    [ai.miniforge.logging.interface :as log]
    [ai.miniforge.phase.interface :as phase]
+   [ai.miniforge.response.interface :as response]
    [ai.miniforge.workflow.dag-resilience :as resilience]
+   [ai.miniforge.workflow.merge-resolution :as merge-resolution]
    [ai.miniforge.workflow.messages :as messages]
    [babashka.fs :as fs]
    [clojure.java.shell :as shell]
@@ -414,16 +416,23 @@
 ;; consumer only needs to look for :branch and (optionally) :commit-sha.
 
 (defn- merge-ok-result
-  "Successful merge commit on the namespaced ref. Includes the input-key
-   and a `:cache-hit?` flag for observability."
-  [{:keys [ref-name commit-sha input-key strategy parents collapsed cache-hit?]}]
+  "Successful merge commit on the namespaced ref. Includes the
+   input-key and observability flags. `:resolved?` and
+   `:resolution-iterations` are set when the success came via the
+   resolution sub-workflow (Stage 2B+); absent for direct-merge
+   successes."
+  [{:keys [ref-name commit-sha input-key strategy parents collapsed
+           cache-hit? resolved? resolution-iterations]}]
   (dag/ok (cond-> {:branch       ref-name
                    :commit-sha   commit-sha
                    :input-key    input-key
                    :strategy     strategy
                    :parents      parents
                    :cache-hit?   (boolean cache-hit?)}
-            (seq collapsed) (assoc :collapsed collapsed))))
+            (seq collapsed)             (assoc :collapsed collapsed)
+            resolved?                   (assoc :resolved? true)
+            resolution-iterations       (assoc :resolution-iterations
+                                               resolution-iterations))))
 
 (defn- single-parent-fast-path-result
   "Successful resolution where collapse left exactly one effective
@@ -631,8 +640,17 @@
 
 (defn- run-merge!
   "Invoke `git merge` in the temp worktree per spec §3.1 / §6.1.
-   Returns `{:ok? true :commit-sha ...}` or `{:ok? false :anomaly ...}`.
-   Caller is responsible for cleanup."
+   Returns either:
+   - `(response/success {:commit-sha <sha>})` when the merge lands a
+     real commit and rev-parse HEAD reports it cleanly.
+   - The conflict anomaly map (`:anomalies/dag-multi-parent-conflict`)
+     when git's exit code reports a conflict.
+   - The merge-failed anomaly map (`:anomalies/dag-multi-parent-merge-failed`)
+     when the merge succeeded but rev-parse HEAD failed (rare
+     infrastructure case).
+
+   Caller checks `response/success?` for the happy path and dispatches
+   on `:anomaly/category` for the failure path."
   [worktree-path task-id strategy parents input-key]
   (let [rest-parents (rest parents)
         message (deterministic-merge-message task-id parents)
@@ -643,13 +661,11 @@
     (if (zero? (:exit r))
       (let [head (run-git worktree-path "rev-parse" "HEAD")]
         (if (zero? (:exit head))
-          {:ok? true :commit-sha (str/trim (:out head))}
-          {:ok? false
-           :anomaly (ref-write-failed-anomaly task-id nil nil head)}))
-      {:ok? false
-       :anomaly (conflict-anomaly task-id strategy parents
-                                  (enumerate-conflicts worktree-path)
-                                  input-key r)})))
+          (response/success {:commit-sha (str/trim (:out head))} nil)
+          (ref-write-failed-anomaly task-id nil nil head)))
+      (conflict-anomaly task-id strategy parents
+                        (enumerate-conflicts worktree-path)
+                        input-key r))))
 
 (defn- ensure-clean-worktree!
   "Remove any pre-existing temp worktree at `path` and re-create it
@@ -723,12 +739,67 @@
               :else
               {:effective-parents parents :collapsed all-collapsed})))))))
 
+(defn- write-ref-and-build-success
+  "After a merge or resolution lands a commit-sha, write it to the
+   namespaced ref and either return the standard merge-success shape
+   or the typed ref-write-failed anomaly. Shared between the
+   no-conflict happy path and the resolution-success path. `extras`
+   may contain :resolved? / :resolution-iterations for the resolution
+   path (merge-ok-result destructures them explicitly so they survive)."
+  [host-repo task-id ref-name commit-sha input-key strategy parents collapsed extras]
+  (let [upd (run-git host-repo "update-ref" ref-name commit-sha)]
+    (if (zero? (:exit upd))
+      (merge-ok-result (merge {:ref-name   ref-name
+                               :commit-sha commit-sha
+                               :input-key  input-key
+                               :strategy   strategy
+                               :parents    parents
+                               :collapsed  collapsed}
+                              extras))
+      (ref-write-failed-anomaly task-id ref-name commit-sha upd))))
+
+(defn- attempt-resolution!
+  "Spec §6.1 conflict path. The merge produced a conflict; spawn the
+   resolution sub-workflow to try to resolve it. On success we land a
+   resolution commit, write the namespaced ref, and return the
+   standard merge-success shape (with `:resolved?` and `:resolution-
+   iterations` for observability). On failure we return the
+   `:dag-multi-parent-unresolvable` terminal anomaly.
+
+   Stage 2B's resolution loop uses a no-op stub agent-edit-fn by
+   default, so conflicts still terminate as unresolvable — just via
+   the loop rather than an immediate anomaly. Stage 2C will inject
+   the real LLM-driven implementer."
+  [host-repo task-id ref-name input-key strategy parents collapsed
+   conflict-anomaly worktree resolution-overrides]
+  (let [outcome (merge-resolution/resolve-conflict!
+                 (merge {:conflict-input conflict-anomaly
+                         :host-repo host-repo
+                         :worktree-path worktree
+                         :task-id task-id}
+                        resolution-overrides))]
+    (if (dag/ok? outcome)
+      (let [{:keys [commit-sha iterations]} (:data outcome)]
+        (write-ref-and-build-success
+         host-repo task-id ref-name commit-sha input-key strategy
+         parents collapsed
+         {:resolved? true :resolution-iterations iterations}))
+      ;; Outcome is the unresolvable anomaly itself — pass through.
+      outcome)))
+
 (defn- attempt-merge-with-cache!
   "Cache-aware merge attempt. Checks for an existing namespaced ref
    first (spec §7.2 idempotency); if present, reuses its SHA. Otherwise
    stages a temp worktree, runs the merge, writes the ref, and cleans
-   up. Returns a `dag/ok` result on success or an anomaly on failure."
-  [host-repo run-id task-id strategy parents collapsed]
+   up. On conflict, spawns the resolution sub-workflow per spec §6.1
+   instead of immediately surfacing the conflict — the resolution
+   loop's terminal anomaly is what reaches the caller when the agent
+   can't make the merge clean.
+
+   Returns a `dag/ok` result on success or an anomaly on terminal
+   failure."
+  [host-repo run-id task-id strategy parents collapsed
+   {:keys [resolution-overrides] :as _opts}]
   (let [input-key (dag/compute-merge-input-key task-id strategy parents)
         ref-name  (merge-base-ref-name run-id task-id input-key)
         cached    (existing-merge-ref-sha host-repo ref-name)]
@@ -747,20 +818,40 @@
           (do (cleanup-worktree! host-repo worktree)
               (worktree-setup-failed-anomaly task-id setup))
           (let [outcome (run-merge! worktree task-id strategy parents input-key)]
-            (if-not (:ok? outcome)
-              (do (cleanup-worktree! host-repo worktree)
-                  (:anomaly outcome))
-              (let [upd (run-git host-repo "update-ref" ref-name (:commit-sha outcome))]
+            (cond
+              ;; Merge succeeded — outcome is response/success carrying
+              ;; the commit-sha.
+              (response/success? outcome)
+              (let [success (write-ref-and-build-success
+                             host-repo task-id ref-name
+                             (get-in outcome [:output :commit-sha])
+                             input-key strategy parents collapsed nil)]
                 (cleanup-worktree! host-repo worktree)
-                (if (zero? (:exit upd))
-                  (merge-ok-result {:ref-name   ref-name
-                                    :commit-sha (:commit-sha outcome)
-                                    :input-key  input-key
-                                    :strategy   strategy
-                                    :parents    parents
-                                    :collapsed  collapsed})
-                  (ref-write-failed-anomaly task-id ref-name
-                                            (:commit-sha outcome) upd))))))))))
+                success)
+
+              ;; Conflict — spawn the resolution sub-workflow on the same
+              ;; worktree. The conflict anomaly carries parents, paths,
+              ;; strategy, input-key, exit-code, stderr — everything the
+              ;; resolution agent (or its mock) needs.
+              (= :anomalies/dag-multi-parent-conflict
+                 (:anomaly/category outcome))
+              (let [result (attempt-resolution!
+                            host-repo task-id ref-name input-key strategy
+                            parents collapsed
+                            outcome worktree resolution-overrides)]
+                (cleanup-worktree! host-repo worktree)
+                result)
+
+              ;; Non-conflict failure (e.g. rev-parse HEAD failed after a
+              ;; successful merge — `:dag-multi-parent-merge-failed`).
+              ;; This is an infrastructure error, not a conflict to
+              ;; resolve. Surface it directly so the operator sees the
+              ;; real cause; routing it through the resolution loop
+              ;; would hide the original git failure behind a generic
+              ;; `:dag-multi-parent-unresolvable`.
+              :else
+              (do (cleanup-worktree! host-repo worktree)
+                  outcome))))))))
 
 (defn merge-parent-branches!
   "Multi-parent merge entry point per spec §6.1.
@@ -813,7 +904,15 @@
           :else
           (attempt-merge-with-cache! host-repo run-id task-id strategy
                                      (:effective-parents prep)
-                                     (:collapsed prep)))))))
+                                     (:collapsed prep)
+                                     ;; Optional context override — tests
+                                     ;; inject mock agent-edit-fn / verify-fn
+                                     ;; here. Production paths leave this nil
+                                     ;; and the resolution loop uses its
+                                     ;; defaults (no-op stub agent until
+                                     ;; Stage 2C wires the real LLM agent).
+                                     {:resolution-overrides
+                                      (get context :dag/resolution-overrides)}))))))
 
 (defn task-sub-opts
   "Build execution opts for a DAG task's sub-workflow.

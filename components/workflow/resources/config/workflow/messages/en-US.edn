@@ -90,4 +90,17 @@
   ;; v2 multi-parent merge — system-locale strings (operator-internal,
   ;; never user-localized, but routed through the catalog so we have one
   ;; place to audit and change them).
-  :dag.merge.system/git-test-failure "git {args} failed: {err}"}}
+  :dag.merge.system/git-test-failure "git {args} failed: {err}"
+
+  ;; v2 multi-parent merge — resolution sub-workflow (Stage 2B, spec §6.1)
+  :dag.merge.resolution/unresolvable
+  "Multi-parent merge conflict could not be auto-resolved"
+
+  :dag.merge.resolution/commit-message-header
+  "miniforge dag-merge resolution for task {task-id}"
+
+  :dag.merge.resolution/commit-message-body
+  "Resolved conflicts on {parent-count}-parent merge after {iterations} iteration{s}."
+
+  :dag.merge.resolution/commit-failed
+  "Could not commit the resolution to the worktree"}}
