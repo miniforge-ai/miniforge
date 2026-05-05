@@ -140,6 +140,25 @@
           (is (= "2.1.89" cmd-version))
           (is (= "backend_preflight_timeout" (get-in probe-response [:error :type]))))))))
 
+(deftest run-backend-preflight-accepts-claude-result-wrapper-test
+  (testing "Claude preflight accepts success envelopes whose result field contains the canonical payload"
+    (let [llm-client (llm/mock-client {:output "{\"ok\":true}"})
+          output (with-out-str
+                   (with-redefs-fn {#'sut/resolve-cli-command-path (fn [_] "/opt/homebrew/bin/claude")
+                                    #'sut/read-cli-version (fn [_] {:success true :version "2.1.118 (Claude Code)"})
+                                    #'sut/run-cli-command (fn [_cmd _timeout-ms & _]
+                                                            {:out "{\"type\":\"result\",\"subtype\":\"success\",\"result\":\"{\\\"ok\\\":true}\"}"
+                                                             :err ""
+                                                             :exit 0})}
+                     (fn []
+                       (#'sut/run-backend-preflight!
+                        false
+                        llm-client
+                        {:worktree-path "/tmp/runtime-worktree"}))))]
+      (is (str/includes? output "Backend: claude"))
+      (is (str/includes? output "Backend Path: /opt/homebrew/bin/claude"))
+      (is (str/includes? output "Backend Version: 2.1.118 (Claude Code)")))))
+
 (deftest run-backend-preflight-exercises-generic-cli-success-path-test
   (testing "non-Claude CLI backends decode streamed CLI output and accept the canonical ok payload"
     (let [llm-client (llm/create-client {:backend :codex})
