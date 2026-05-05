@@ -61,6 +61,13 @@
       (run-git! repo "init" "-b" "main")
       (run-git! repo "config" "user.email" "test@miniforge.ai")
       (run-git! repo "config" "user.name" "miniforge-test")
+      ;; Defeat any global signing config (1Password, GPG agents, etc.)
+      ;; that would otherwise prompt or fail during commits in this
+      ;; ephemeral repo. Mirrors the orchestrator's --no-gpg-sign flag
+      ;; per spec §3.1: tests run hermetically regardless of dev-machine
+      ;; signing setup.
+      (run-git! repo "config" "commit.gpgsign" "false")
+      (run-git! repo "config" "tag.gpgsign" "false")
       (commit-file! repo "README.md" "initial\n" "init")
       (binding [*repo* repo]
         (f))
@@ -242,6 +249,63 @@
           result (dag-orch/merge-parent-branches! ctx task-def)]
       (is (= :anomalies/dag-multi-parent-branch-unresolvable
              (:anomaly/category result))))))
+
+;------------------------------------------------------------------------------ Tests: idempotency cache
+
+(deftest idempotency-second-call-reuses-merge-ref-test
+  (testing "Spec §7.2 idempotency: a second call to merge-parent-branches!
+            with the same effective inputs reuses the existing namespaced
+            ref instead of producing a fresh merge commit. Without the
+            cache check, merge commit timestamps would differ on every
+            call — same tree, different SHA — defeating the spec's
+            'replays of the same effective input reuse the same ref'
+            guarantee."
+    (create-parent-branch! "task-a" "src/a.txt" "from a\n")
+    (create-parent-branch! "task-b" "src/b.txt" "from b\n")
+    (let [task-def {:task/id "task-c" :task/deps [:a :b]}
+          ctx (ctx-with-registry {:a {:branch "task-a"}
+                                  :b {:branch "task-b"}})
+          first-result  (dag-orch/merge-parent-branches! ctx task-def)
+          second-result (dag-orch/merge-parent-branches! ctx task-def)]
+      (is (:merge/ok? first-result))
+      (is (:merge/ok? second-result))
+      (is (= (:merge/ref first-result) (:merge/ref second-result))
+          "same ref name (input-key is deterministic)")
+      (is (= (:merge/commit-sha first-result) (:merge/commit-sha second-result))
+          "same commit SHA — second call hit the cache, did NOT produce a
+           fresh merge commit. This is the property that justifies the
+           input-key derivation in spec §3.2 step 6.")
+      (is (true? (:merge/cache-hit? second-result))
+          "cache-hit flag exposed for observability — dashboard can show
+           how often replays are reusing existing merge work")
+      (is (not (contains? first-result :merge/cache-hit?))
+          "first call sets up the cache; cache-hit? only appears on
+           subsequent calls"))))
+
+;------------------------------------------------------------------------------ Tests: unsupported strategy
+
+(deftest unsupported-strategy-anomaly-test
+  (testing "Strategies other than :git-merge fail fast with a typed
+            anomaly rather than silently falling through. :sequential-merge
+            ships in Stage 4; until then plans that explicitly request it
+            should see the unsupported-strategy anomaly so they don't
+            silently get :git-merge behavior under a different label."
+    (create-parent-branch! "task-a" "src/a.txt" "from a\n")
+    (create-parent-branch! "task-b" "src/b.txt" "from b\n")
+    (let [task-def {:task/id "task-c"
+                    :task/deps [:a :b]
+                    :task/merge-strategy :sequential-merge}
+          ctx (ctx-with-registry {:a {:branch "task-a"}
+                                  :b {:branch "task-b"}})
+          result (dag-orch/merge-parent-branches! ctx task-def)]
+      (is (= :anomalies/dag-multi-parent-strategy-unsupported
+             (:anomaly/category result)))
+      (is (= :sequential-merge (:merge/strategy result))
+          "the requested strategy is echoed back in the anomaly so the
+           operator/dashboard knows what was rejected")
+      (is (contains? (:merge/supported result) :git-merge)
+          "the anomaly carries the supported-strategies set so the user
+           can see what's available right now"))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

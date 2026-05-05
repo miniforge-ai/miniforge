@@ -399,8 +399,15 @@
        "/miniforge-merge/" run-id "/" task-id "/" input-key))
 
 (defn- enumerate-conflicts
-  "Parse `git ls-files --unmerged` output into `[{:path ... :stage ...}]`."
-  [host-repo worktree-path]
+  "Parse `git ls-files --unmerged` output into a per-path summary
+   `[{:path <path> :stages [<stage>...]}]`.
+
+   `git ls-files --unmerged` emits one line per stage entry per
+   conflicted path (typically stages 1/2/3 = base/ours/theirs); we
+   collapse to one entry per path with the observed stages so the
+   resolution sub-workflow (Stage 2) sees each conflicted path once
+   alongside which stages git surfaced for it."
+  [worktree-path]
   (let [r (run-git worktree-path "ls-files" "--unmerged")
         lines (when (zero? (:exit r))
                 (->> (str/split-lines (str (:out r)))
@@ -445,7 +452,7 @@
                  :anomaly/message  "Multi-parent merge conflicted"
                  :task/id          task-id
                  :merge/parents    parents
-                 :merge/conflicts  (enumerate-conflicts host-repo worktree-path)
+                 :merge/conflicts  (enumerate-conflicts worktree-path)
                  :merge/strategy   strategy
                  :merge/input-key  input-key
                  :git/exit-code    (:exit r)
@@ -470,6 +477,28 @@
   (try (fs/delete-tree worktree-path) (catch Throwable _ nil))
   (run-git host-repo "worktree" "prune"))
 
+(def ^:private supported-merge-strategies
+  "Strategies `merge-parent-branches!` knows how to execute today.
+   `:git-merge` ships in Stage 1B; `:sequential-merge` is Stage 4
+   (per the spec §4 / §10.11 strategy table). Plans that explicitly
+   request an unsupported strategy get a typed anomaly rather than
+   silently falling through to `:git-merge` (which would misreport
+   the executed strategy in logs and the resolution-sub-workflow
+   payload)."
+  #{:git-merge})
+
+(defn- existing-merge-ref-sha
+  "If the namespaced merge ref already exists from a prior replay,
+   return its current SHA; else nil. Used for spec §7.2's
+   idempotency: replays of the same effective input MUST reuse the
+   same ref instead of producing a new merge commit (whose timestamp
+   would differ even though the tree is identical, defeating the
+   cache)."
+  [host-repo ref-name]
+  (let [r (run-git host-repo "rev-parse" "--verify" (str ref-name "^{commit}"))]
+    (when (zero? (:exit r))
+      (str/trim (:out r)))))
+
 (defn merge-parent-branches!
   "Multi-parent merge entry point per spec §6.1.
 
@@ -488,7 +517,9 @@
      §6.2 / §6.3 informational fast-path.
    - An anomaly map — `:dag-multi-parent-conflict`,
      `:dag-multi-parent-unrelated-histories`,
-     `:dag-multi-parent-branch-unresolvable`. Stage 2 will replace the
+     `:dag-multi-parent-branch-unresolvable`,
+     `:dag-multi-parent-strategy-unsupported`,
+     `:dag-multi-parent-merge-failed`. Stage 2 will replace the
      conflict path with the resolution sub-workflow; for Stage 1B,
      anomalies surface to the caller and the task fails."
   [context task-def]
@@ -501,29 +532,42 @@
         resolved (dag/resolve-multi-parent-base
                   (or registry (dag/create-branch-registry))
                   deps)]
-    (if-not (seq (:merge/parents resolved))
+    (cond
+      ;; Strategy guard — fail fast for unsupported strategies rather
+      ;; than silently executing a different one. :sequential-merge
+      ;; ships in Stage 4.
+      (not (contains? supported-merge-strategies strategy))
+      {:anomaly/category :anomalies/dag-multi-parent-strategy-unsupported
+       :anomaly/message  (str "Merge strategy " strategy " is not supported in this stage")
+       :task/id          task-id
+       :merge/strategy   strategy
+       :merge/supported  supported-merge-strategies}
+
       ;; No deps registered — fall back to default branch (matches the
       ;; single-parent fast-path's defensive semantics).
+      (not (seq (:merge/parents resolved)))
       {:merge/ok? true
        :merge/ref (default-spec-branch context)
        :merge/single-parent? true
        :merge/fallback-reason :no-registered-parents}
 
+      :else
       (let [snapshot (snapshot-parent-shas host-repo (:merge/parents resolved))]
         (if (:anomaly/category snapshot)
           snapshot
           (let [;; Spec §3.2 step 3 — pure-data dedupe (already in registry layer)
                 deduped (dag/collapse-duplicate-tips (:parents snapshot))
                 ;; Spec §3.2 step 4 — git-side ancestor collapse
-                {:keys [parents collapsed]} (collapse-ancestors host-repo (:parents deduped))]
+                {:keys [parents collapsed]} (collapse-ancestors host-repo (:parents deduped))
+                all-collapsed (vec (concat (:collapsed deduped) collapsed))]
             (cond
               ;; Single effective parent after collapse — no merge needed.
               (= 1 (count parents))
-              {:merge/ok? true
-               :merge/ref (:branch (first parents))
-               :merge/commit-sha (:commit-sha (first parents))
-               :merge/single-parent? true
-               :merge/collapsed (concat (:collapsed deduped) collapsed)}
+              (cond-> {:merge/ok? true
+                       :merge/ref (:branch (first parents))
+                       :merge/commit-sha (:commit-sha (first parents))
+                       :merge/single-parent? true}
+                (seq all-collapsed) (assoc :merge/collapsed all-collapsed))
 
               ;; No shared ancestry → unrelated-histories anomaly per §6.5.
               (not (shared-ancestry? host-repo parents))
@@ -536,29 +580,56 @@
               :else
               (let [input-key (dag/compute-merge-input-key task-id strategy parents)
                     ref-name (merge-base-ref-name run-id task-id input-key)
-                    worktree (temp-merge-worktree-path run-id task-id input-key)
-                    setup (ensure-clean-worktree! host-repo worktree (:commit-sha (first parents)))]
-                (if-not (zero? (:exit setup))
-                  (do (cleanup-worktree! host-repo worktree)
-                      {:anomaly/category :anomalies/dag-multi-parent-merge-failed
-                       :anomaly/message  "Could not create temp worktree for merge"
-                       :task/id          task-id
-                       :git/exit-code    (:exit setup)
-                       :git/stderr       (:err setup)})
-                  (let [outcome (run-merge! worktree host-repo task-id strategy parents input-key)]
-                    (cond-> (if (:ok? outcome)
-                              (do (run-git host-repo "update-ref" ref-name (:commit-sha outcome))
-                                  (cleanup-worktree! host-repo worktree)
-                                  {:merge/ok? true
-                                   :merge/ref ref-name
-                                   :merge/commit-sha (:commit-sha outcome)
-                                   :merge/input-key input-key
-                                   :merge/strategy strategy
-                                   :merge/parents parents})
-                              (do (cleanup-worktree! host-repo worktree)
-                                  (:anomaly outcome)))
-                      (seq (concat (:collapsed deduped) collapsed))
-                      (assoc :merge/collapsed (vec (concat (:collapsed deduped) collapsed))))))))))))))
+                    cached-sha (existing-merge-ref-sha host-repo ref-name)]
+                (if cached-sha
+                  ;; Spec §7.2 idempotency: ref already exists from a
+                  ;; prior replay with byte-identical input. Reuse it
+                  ;; instead of producing a fresh merge commit (which
+                  ;; would have a different timestamp despite the same
+                  ;; tree — defeating the cache and accumulating
+                  ;; duplicate refs).
+                  (cond-> {:merge/ok?         true
+                           :merge/ref         ref-name
+                           :merge/commit-sha  cached-sha
+                           :merge/input-key   input-key
+                           :merge/strategy    strategy
+                           :merge/parents     parents
+                           :merge/cache-hit?  true}
+                    (seq all-collapsed) (assoc :merge/collapsed all-collapsed))
+                  (let [worktree (temp-merge-worktree-path run-id task-id input-key)
+                        setup (ensure-clean-worktree! host-repo worktree (:commit-sha (first parents)))]
+                    (if-not (zero? (:exit setup))
+                      (do (cleanup-worktree! host-repo worktree)
+                          {:anomaly/category :anomalies/dag-multi-parent-merge-failed
+                           :anomaly/message  "Could not create temp worktree for merge"
+                           :task/id          task-id
+                           :git/exit-code    (:exit setup)
+                           :git/stderr       (:err setup)})
+                      (let [outcome (run-merge! worktree host-repo task-id strategy parents input-key)]
+                        (if (:ok? outcome)
+                          ;; Capture update-ref's exit code so a failed
+                          ;; ref write surfaces as an anomaly rather than
+                          ;; a false-positive success.
+                          (let [upd (run-git host-repo "update-ref"
+                                             ref-name (:commit-sha outcome))]
+                            (cleanup-worktree! host-repo worktree)
+                            (if (zero? (:exit upd))
+                              (cond-> {:merge/ok?        true
+                                       :merge/ref        ref-name
+                                       :merge/commit-sha (:commit-sha outcome)
+                                       :merge/input-key  input-key
+                                       :merge/strategy   strategy
+                                       :merge/parents    parents}
+                                (seq all-collapsed) (assoc :merge/collapsed all-collapsed))
+                              {:anomaly/category :anomalies/dag-multi-parent-merge-failed
+                               :anomaly/message  "Failed to write merge result to namespaced ref"
+                               :task/id          task-id
+                               :merge/ref        ref-name
+                               :merge/commit-sha (:commit-sha outcome)
+                               :git/exit-code    (:exit upd)
+                               :git/stderr       (:err upd)}))
+                          (do (cleanup-worktree! host-repo worktree)
+                              (:anomaly outcome)))))))))))))))
 
 (defn- merge-error?
   "True when `merge-parent-branches!` returned an anomaly rather than
@@ -576,15 +647,18 @@
    When `task-def` is supplied, resolves its dependency to a persisted
    branch and passes it as `:branch` so the sub-workflow's
    `acquire-environment!` forks off that branch instead of the spec
-   branch. `:branch` is ALWAYS set when task-def is given:
-   - Zero deps or single-dep unregistered → the spec branch.
-   - Single-dep registered → dep's branch (v1 chaining payoff).
-   - Multi-dep (v2) → the merged ref produced by `merge-parent-branches!`.
-     If the merge produces a typed anomaly (conflict / unrelated
-     histories / branch unresolvable), it propagates back to the caller
-     via `:dag/merge-anomaly` on opts; `execute-single-task` checks for
-     this and fails the task with the anomaly instead of running the
-     sub-workflow.
+   branch:
+   - Zero deps or single-dep unregistered → spec branch (`:branch` set).
+   - Single-dep registered → dep's branch (v1 chaining payoff;
+     `:branch` set).
+   - Multi-dep (v2), merge succeeds → the merged ref produced by
+     `merge-parent-branches!` (`:branch` set).
+   - Multi-dep (v2), merge produces a typed anomaly (conflict /
+     unrelated histories / branch unresolvable / strategy unsupported)
+     → `:branch` is OMITTED and the anomaly is surfaced via
+     `:dag/merge-anomaly` on opts. `run-mini-workflow` checks for this
+     and short-circuits with a structured failure rather than running a
+     doomed sub-workflow against a stale base.
 
    The single-arity form `(task-sub-opts context)` is for callers that
    don't yet thread task-def (kept for compatibility with the
@@ -700,11 +774,13 @@
         merge-anomaly (:dag/merge-anomaly sub-opts)]
     (if merge-anomaly
       ;; Multi-parent merge failed before we even entered the sub-workflow.
-      ;; Surface the anomaly directly; Stage 2 will replace conflicts with
-      ;; the resolution sub-workflow.
-      (workflow-failure (or (:anomaly/message merge-anomaly)
-                            "Multi-parent merge failed")
-                        nil)
+      ;; Surface the FULL typed anomaly map (not just its message) so
+      ;; downstream consumers — workflow-result->dag-result, the dashboard,
+      ;; the evidence bundle — can classify the failure by
+      ;; `:anomaly/category` and access the raw `:merge/conflicts`,
+      ;; `:merge/parents`, `:git/stderr` etc. Stage 2 will use this
+      ;; structured shape as the resolution sub-workflow's input.
+      (workflow-failure merge-anomaly nil)
       (let [run-pipeline (:execution/run-pipeline-fn context)
             result       (run-pipeline sub-workflow sub-input sub-opts)
             artifacts    (:execution/artifacts result)
