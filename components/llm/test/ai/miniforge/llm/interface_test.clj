@@ -198,6 +198,16 @@
       (is (= "" (:delta parsed)))
       (is (= "max_tokens" (:stop-reason parsed)))))
 
+  (testing "assistant message with thinking content emits semantic activity"
+    (let [line (json/generate-string
+                 {:type "assistant"
+                  :message {:content [{:type "thinking"
+                                       :thinking "Need to inspect one more file."
+                                       :signature "sig"}]}})
+          parsed (impl/parse-claude-stream-line line)]
+      (is (true? (:thinking parsed)))
+      (is (= "" (:delta parsed)))))
+
   (testing "assistant message without stop_reason has no :stop-reason key"
     (let [line (json/generate-string
                  {:type "assistant"
@@ -644,6 +654,40 @@
       (is (< before (:last-activity-at @monitor)))
       (is (= "" @accumulated-content))
       (is (= 1 (count @chunks))))))
+
+(deftest stream-with-parser-records-thinking-progress-test
+  (testing "thinking events reset semantic progress without surfacing thinking text"
+    (let [monitor (pm/create-progress-monitor
+                   {:stagnation-threshold-ms 1000
+                    :max-total-ms 1000
+                    :min-activity-interval-ms 1})
+          chunks (atom [])
+          accumulated-content (atom "")
+          accumulated-usage (atom nil)
+          accumulated-cost (atom nil)
+          accumulated-tools (atom [])
+          accumulated-session-id (atom nil)
+          accumulated-stop-reason (atom nil)
+          accumulated-turns (atom nil)
+          parse-line (:stream-parser (get impl/backends :claude))
+          on-line (impl/stream-with-parser parse-line
+                                           #(swap! chunks conj %)
+                                           monitor
+                                           accumulated-content
+                                           accumulated-usage
+                                           accumulated-cost
+                                           accumulated-tools
+                                           accumulated-session-id
+                                           accumulated-stop-reason
+                                           accumulated-turns)
+          before (:last-activity-at @monitor)]
+      (Thread/sleep 5)
+      (on-line "{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"thinking\",\"thinking\":\"Need one more file.\",\"signature\":\"sig\"}]}}")
+      (is (< before (:last-activity-at @monitor)))
+      (is (= "" @accumulated-content))
+      (is (= [] @accumulated-tools))
+      (is (= 1 (count @chunks)))
+      (is (true? (:thinking (first @chunks)))))))
 
 (deftest message-preview-via-streaming-success-test
   (testing "short content is returned in full as preview"

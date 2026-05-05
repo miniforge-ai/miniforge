@@ -150,6 +150,10 @@
                                     (when (= "text" (:type block))
                                       (:text block)))
                                   content-blocks)
+                thinking-block? (some (fn [block]
+                                        (contains? #{"thinking" "redacted_thinking"}
+                                                   (:type block)))
+                                      content-blocks)
                 tool-names (keep (fn [block]
                                    (when (= "tool_use" (:type block))
                                      (:name block)))
@@ -169,6 +173,10 @@
 
               (not (str/blank? text))
               (cond-> {:delta text :done? false}
+                stop-reason (assoc :stop-reason stop-reason))
+
+              thinking-block?
+              (cond-> {:delta "" :done? false :thinking true}
                 stop-reason (assoc :stop-reason stop-reason))
 
               ;; No text + no tool calls — still carry stop-reason if
@@ -852,6 +860,9 @@
     (:heartbeat parsed)
     (pm/record-activity! progress-monitor :stream-heartbeat)
 
+    (:thinking parsed)
+    (pm/record-activity! progress-monitor :stream-thinking)
+
     (contains? parsed :done?)
     (pm/record-activity! progress-monitor :stream-result)
 
@@ -877,8 +888,9 @@
       ;; emitting an absolute count — bump the accumulator on each one.
       (when (:increment-turns parsed)
         (swap! accumulated-turns (fnil inc 0)))
-      (if (or (:tool-use parsed) (:heartbeat parsed))
-        ;; Tool-use and heartbeat events: track tool names and fire on-chunk
+      (if (or (:tool-use parsed) (:heartbeat parsed) (:thinking parsed))
+        ;; Tool-use, heartbeat, and thinking events: track semantic
+        ;; liveness even without substantive text deltas.
         (do
           (when-let [tool-name (:tool-name parsed)]
             (swap! accumulated-tools conj tool-name))
