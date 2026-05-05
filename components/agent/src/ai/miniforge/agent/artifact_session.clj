@@ -334,8 +334,8 @@
    never added either; the implementer in the
    event-log-tool-visibility dogfood spent five repair iters
    producing patch text the CLI refused to apply, then a sixth
-   iter discovered Write worked while Edit did not. Both fixes back
-   to keeping the structured form honest and adapters translating
+   iter discovered Write worked while Edit did not. Both issues trace
+   back to keeping the structured form honest and adapters translating
    at the CLI boundary."
   [{:mcp/server :context :mcp/tool :context_read}
    {:mcp/server :context :mcp/tool :context_grep}
