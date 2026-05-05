@@ -422,6 +422,12 @@
                                  :tokens tokens
                                  :cost-usd cost-usd}})))
 
+(defn- code-artifact?
+  "True when the structured artifact is a code artifact payload."
+  [artifact]
+  (and (map? artifact)
+       (contains? artifact :code/files)))
+
 (defn- code-from-blocks
   "Build a code artifact map from extracted markdown code blocks."
   [content]
@@ -443,10 +449,11 @@
          (code-from-blocks content)))))
 
 (defn- process-llm-response
-  "Process a successful LLM response, returning the appropriate result."
-  [response artifact artifact-source context logger tokens cost-usd input]
+  "Normalize structured implementer outputs from any submission channel:
+   worktree metadata, MCP artifact, file fallback, or parseable stdout."
+  [response structured-artifact artifact-source context logger tokens cost-usd input]
   (let [content (llm/get-content response)
-        parsed (or artifact (parse-code-response content))]
+        parsed (or structured-artifact (parse-code-response content))]
     (let [tools (get response :tools-called [])]
       (when (nil? artifact-source)
         (log/warn logger :implementer :implementer/mcp-tool-not-called
@@ -454,8 +461,8 @@
                           :tools-called tools
                           :has-code-blocks? (boolean (re-find #"```" (or content "")))}})))
     (cond
-      artifact
-      (build-code-response artifact context tokens cost-usd)
+      (code-artifact? structured-artifact)
+      (build-code-response structured-artifact context tokens cost-usd)
 
       (= :already-implemented (:status parsed))
       (if (repair-attempt? input)
@@ -522,11 +529,13 @@
    existing-files input]
   (let [working-dir (or (:execution/worktree-path context)
                         (System/getProperty "user.dir"))
-        {:keys [llm-result artifact context-misses pre-session-snapshot session-mode]}
+        {:keys [llm-result artifact worktree-artifacts context-misses
+                pre-session-snapshot session-mode]}
         (artifact-session/with-session context
           #(invoke-implementer-session % llm-client user-prompt effective-system-prompt
                                        config context on-chunk existing-files working-dir))
         response llm-result
+        worktree-artifact (get worktree-artifacts :implement)
         file-artifact (when-not artifact
                         (if (= :capsule session-mode)
                           (file-artifacts/collect-written-files-via-executor
@@ -538,10 +547,11 @@
                           (file-artifacts/collect-written-files pre-session-snapshot
                                                                 working-dir)))
         artifact-source (cond
+                          worktree-artifact :worktree-metadata
                           artifact :mcp
                           file-artifact :file-fallback
                           :else nil)
-        effective-artifact (or artifact file-artifact)
+        structured-artifact (or worktree-artifact artifact file-artifact)
         tokens (get response :tokens 0)
         cost-usd (get response :cost-usd)
         content (llm/get-content response)]
@@ -571,10 +581,10 @@
     ;; successful stream of edits; the old path discarded a real
     ;; artifact because the LLM response was classified as failure.
     ;; Mirrors the planner fix in `(or worktree-plan (llm/success? …))`.
-    (if (or effective-artifact
+    (if (or structured-artifact
             (llm/success? response)
             (usable-llm-content? content))
-      (process-llm-response response effective-artifact artifact-source
+      (process-llm-response response structured-artifact artifact-source
                             context logger tokens cost-usd input)
       ;; LLM call failed, no artifact — preserve the full llm-error
       ;; shape into :data so the phase-completed event carries

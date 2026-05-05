@@ -506,6 +506,28 @@
                        (.getPath f) "—" (ex-message e)))
             nil))))))
 
+(defn read-capsule-worktree-artifact
+  "Read a role artifact from <workdir>/.miniforge/<role>.edn inside a capsule.
+
+   Returns the parsed artifact map or nil. Missing files and parse failures are
+   treated as non-fatal, matching host-mode read-worktree-artifact behavior."
+  [session role]
+  (when (and session role)
+    (let [path (str (:workdir session) "/.miniforge/" (name role) ".edn")
+          result ((:exec! session) (:executor session) (:environment-id session)
+                  (str "cat " path) {:workdir (:workdir session)})
+          content (get-in result [:data :stdout] "")]
+      (when (seq content)
+        (try
+          (-> content
+              edn/read-string
+              parse-uuid-strings)
+          (catch Exception e
+            (binding [*out* *err*]
+              (println "WARN: failed to parse capsule worktree artifact at"
+                       path "—" (ex-message e)))
+            nil))))))
+
 (defn read-artifact
   "Read the artifact EDN file from a session directory.
 
@@ -761,10 +783,14 @@
   (try
     (let [result (body-fn session)
           workdir (:workdir session)
-          worktree-artifacts (when (and (= :host mode) workdir)
+          read-role-artifact (case mode
+                               :capsule #(read-capsule-worktree-artifact session %)
+                               :host    #(read-worktree-artifact workdir %)
+                               (constantly nil))
+          worktree-artifacts (when workdir
                                (into {}
                                      (keep (fn [role]
-                                             (when-let [a (read-worktree-artifact workdir role)]
+                                             (when-let [a (read-role-artifact role)]
                                                [role a])))
                                      [:plan :implement :verify :review :release]))]
       {:llm-result result

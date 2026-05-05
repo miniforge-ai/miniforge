@@ -21,19 +21,14 @@
    read the same way across the umbrella and so tests can inspect
    exit/capture output uniformly.
 
-   Stratification (intra-namespace):
-   Layer 0 — pure data + helpers with no in-ns deps.
-   Layer 1 — composes Layer 0 (`command-candidates`, `run!`,
-             `run-bg!`, `sh`).
-   Layer 2 — `resolve-command` composes `command-candidates` + the L0
-             `first-resolved-command`.
-   Layer 3 — `clojure-command` (public single-purpose entry over L2)."
+   Layer 0: argument normalization and command-resolution planning (pure).
+   Layer 1: process invocations on top of Layer 0."
   (:refer-clojure :exclude [run!])
   (:require [babashka.fs :as fs]
             [babashka.process :as p]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; No in-namespace dependencies.
+;; Argument normalization and command planning (pure)
 
 (def ^:private windows-clojure-command
   "Fallback executable names for Clojure tooling on Windows runners."
@@ -47,6 +42,14 @@
     [(first args) (rest args)]
     [{} args]))
 
+(defn command-candidates
+  "Return candidate executable names for `cmd` on `os`."
+  [cmd os]
+  (let [candidates (if (and (= os :windows) (= cmd "clojure"))
+                     (into [cmd] windows-clojure-command)
+                     [cmd])]
+    (vec (distinct candidates))))
+
 (defn first-resolved-command
   "Return the first executable path found by `lookup-fn`, else the first
    candidate name unchanged."
@@ -55,6 +58,54 @@
               (some-> (lookup-fn candidate) str))
             candidates)
       (first candidates)))
+
+(defn resolve-command
+  "Resolve `cmd` to an executable path when possible."
+  [cmd]
+  (let [windows-os? (re-find #"(?i)windows" (System/getProperty "os.name" ""))
+        os          (if windows-os? :windows :unix)
+        candidates  (command-candidates cmd os)]
+    (first-resolved-command candidates fs/which)))
+
+(defn clojure-command
+  "Resolve the best Clojure executable for the current process."
+  []
+  (resolve-command "clojure"))
+
+(defn- resolved-cmd
+  "Resolve the executable token in `cmd`, preserving the remaining args."
+  [cmd]
+  (if (seq cmd)
+    (into [(resolve-command (first cmd))] (rest cmd))
+    []))
+
+;------------------------------------------------------------------------------ Layer 1
+;; Process invocations
+
+(defn run!
+  "Run a command inheriting stdio. Throws ex-info on non-zero exit.
+   Accepts an optional opts map as the first arg."
+  [& args]
+  (let [[opts cmd] (split-opts args)
+        result     (apply p/sh (merge {:continue true} opts) (resolved-cmd cmd))]
+    (when-not (zero? (:exit result))
+      (throw (ex-info (str "Command failed: " (pr-str cmd))
+                      {:exit (:exit result) :cmd cmd})))
+    result))
+
+(defn run-bg!
+  "Start a command in the background. Returns the process handle.
+   Caller is responsible for destroying it via `destroy!`."
+  [& args]
+  (let [[opts cmd] (split-opts args)]
+    (apply p/process (merge {:out :inherit :err :inherit} opts) (resolved-cmd cmd))))
+
+(defn sh
+  "Run a command, capture stdout/stderr, return the result map.
+   Never throws — caller inspects `:exit`."
+  [& args]
+  (let [[opts cmd] (split-opts args)]
+    (apply p/sh opts (resolved-cmd cmd))))
 
 (defn installed?
   "True if `cmd` resolves on PATH. Uses `babashka.fs/which`, which is
@@ -68,61 +119,6 @@
   (when proc
     (p/destroy proc)
     (try (deref proc 5000 nil) (catch Exception _ nil))))
-
-;------------------------------------------------------------------------------ Layer 1
-;; Composes Layer 0.
-
-(defn command-candidates
-  "Return candidate executable names for `cmd` on `os`."
-  [cmd os]
-  (let [candidates (if (and (= os :windows) (= cmd "clojure"))
-                     (into [cmd] windows-clojure-command)
-                     [cmd])]
-    (vec (distinct candidates))))
-
-(defn run!
-  "Run a command inheriting stdio. Throws ex-info on non-zero exit.
-   Accepts an optional opts map as the first arg (like `p/shell`)."
-  [& args]
-  (let [[opts cmd] (split-opts args)
-        result     (apply p/shell (merge {:continue true} opts) cmd)]
-    (when-not (zero? (:exit result))
-      (throw (ex-info (str "Command failed: " (pr-str cmd))
-                      {:exit (:exit result) :cmd cmd})))
-    result))
-
-(defn run-bg!
-  "Start a command in the background. Returns the process handle.
-   Caller is responsible for destroying it via `destroy!`."
-  [& args]
-  (let [[opts cmd] (split-opts args)]
-    (apply p/process (merge {:out :inherit :err :inherit} opts) cmd)))
-
-(defn sh
-  "Run a command, capture stdout/stderr, return the result map.
-   Never throws — caller inspects `:exit`."
-  [& args]
-  (let [[opts cmd] (split-opts args)]
-    (apply p/sh opts cmd)))
-
-;------------------------------------------------------------------------------ Layer 2
-;; Composes Layer 1.
-
-(defn resolve-command
-  "Resolve `cmd` to an executable path when possible."
-  [cmd]
-  (let [windows-os? (re-find #"(?i)windows" (System/getProperty "os.name" ""))
-        os          (if windows-os? :windows :unix)
-        candidates  (command-candidates cmd os)]
-    (first-resolved-command candidates fs/which)))
-
-;------------------------------------------------------------------------------ Layer 3
-;; Composes Layer 2.
-
-(defn clojure-command
-  "Resolve the best Clojure executable for the current process."
-  []
-  (resolve-command "clojure"))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

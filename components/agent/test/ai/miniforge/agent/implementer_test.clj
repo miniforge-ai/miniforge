@@ -312,7 +312,7 @@
                     :tokens 9
                     :cost-usd 0.01
                     :error {:type "cli_error"
-                            :message "artifact file not found"}} 
+                            :message "artifact file not found"}}
           result (with-redefs [artifact-session/create-session!
                                (fn [& _] (session-map))
                                artifact-session/write-mcp-config!
@@ -330,10 +330,42 @@
                                file-artifacts/collect-written-files
                                (fn [_ _] nil)]
                    (@#'implementer/invoke-with-llm
-                    nil "prompt" "system" {} {} nil logger [] {}))]
+                   nil "prompt" "system" {} {} nil logger [] {}))]
       (is (= :already-implemented (:status result)))
       (is (= "done" (:summary result)))
       (is (= [] (get-in result [:output :code/files]))))))
+
+  (testing "worktree metadata artifact is canonical for already-implemented outcomes"
+    (let [[logger _] (log/collecting-logger {:min-level :trace})
+          response {:success false
+                    :content "Plan submitted but no final artifact text"
+                    :tokens 7
+                    :cost-usd 0.01
+                    :error {:type "cli_error"
+                            :message "artifact file not found"}}
+          result (with-redefs [artifact-session/with-session
+                               (fn [_context body-fn]
+                                 {:llm-result (body-fn {})
+                                  :artifact nil
+                                  :worktree-artifacts {:implement {:status :already-implemented
+                                                                   :summary "found in worktree metadata"}}
+                                  :context-misses nil
+                                  :pre-session-snapshot {:untracked #{}
+                                                         :modified #{}
+                                                         :deleted #{}
+                                                         :added #{}}
+                                  :session-mode :host})
+                               budget/resolve-cost-budget-usd
+                               (fn [& _] 1.0)
+                               llm/chat
+                               (fn [& _] response)
+                               file-artifacts/collect-written-files
+                               (fn [_ _] nil)]
+                   (@#'implementer/invoke-with-llm
+                    nil "prompt" "system" {} {} nil logger [] {}))]
+      (is (= :already-implemented (:status result)))
+      (is (= "found in worktree metadata" (:summary result)))
+      (is (= [] (get-in result [:output :code/files])))))
 
 ;------------------------------------------------------------------------------ Layer 3
 ;; Validation tests

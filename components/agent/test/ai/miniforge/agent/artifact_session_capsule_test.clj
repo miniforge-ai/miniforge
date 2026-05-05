@@ -40,9 +40,16 @@
   [log]
   (fn [_executor _env-id command & [_opts]]
     (swap! log conj command)
-    (if (and (string? command) (str/starts-with? command "cat ") (str/includes? command "artifact.edn"))
+    (cond
+      (and (string? command) (str/starts-with? command "cat ") (str/includes? command "artifact.edn"))
       {:ok? true :data {:stdout "{:code/id \"a1b2c3d4-e5f6-7890-abcd-ef1234567890\" :code/description \"test\"}"
                         :stderr "" :exit-code 0}}
+
+      (and (string? command) (str/starts-with? command "cat ") (str/includes? command "implement.edn"))
+      {:ok? true :data {:stdout "{:status :already-implemented :summary \"already there\"}"
+                        :stderr "" :exit-code 0}}
+
+      :else
       {:ok? true :data {:stdout "" :stderr "" :exit-code 0}})))
 
 ;------------------------------------------------------------------------------ Layer 1
@@ -157,6 +164,18 @@
           artifact (session/read-capsule-artifact s)]
       (is (some? artifact))
       (is (uuid? (:code/id artifact))))))
+
+(deftest read-capsule-worktree-artifact-test
+  (testing "reads .miniforge/<role>.edn from inside the capsule worktree"
+    (let [log (atom [])
+          s {:capsule? true
+             :exec! (mock-execute-with-artifact! log)
+             :executor :mock
+             :environment-id "env-role"
+             :workdir "/workspace"}
+          artifact (session/read-capsule-worktree-artifact s :implement)]
+      (is (= :already-implemented (:status artifact)))
+      (is (= "already there" (:summary artifact))))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
