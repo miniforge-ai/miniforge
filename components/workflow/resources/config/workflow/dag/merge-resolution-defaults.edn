@@ -1,0 +1,22 @@
+;; Default tuning for the v2 multi-parent merge-resolution loop.
+;; Lives as data per the policy that configuration belongs in EDN, not
+;; embedded literals. The loop in `merge_resolution.clj` reads this
+;; file at namespace load time.
+;;
+;; Spec §10.6 calibration:
+;; - :max-iterations is the budget cap. Resolution is a focused task;
+;;   if the agent can't converge in a few rounds the conflict probably
+;;   needs human eyes. Small numbers are correct here.
+;; - :stagnation-cap is the consecutive-recurring-conflict count that
+;;   ends the loop early. Per user direction (spec §10.6): 'we want to
+;;   have telemetry that allows us accounting to extract places to
+;;   optimize... not [reduce work] using a hammer.' Stagnation-cap is
+;;   the actionable lever — it ends loops that aren't making progress,
+;;   where waste actually comes from.
+;; - :min-stagnation-cap floors the cap so a misconfigured zero or
+;;   negative value can't loop forever.
+
+{:default-budget    {:max-iterations 5
+                     :stagnation-cap 2}
+ :min-stagnation-cap 1
+ :no-recurrence-count 0}

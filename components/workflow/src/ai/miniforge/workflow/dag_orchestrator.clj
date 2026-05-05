@@ -39,6 +39,7 @@
    [ai.miniforge.dag-executor.interface :as dag]
    [ai.miniforge.logging.interface :as log]
    [ai.miniforge.phase.interface :as phase]
+   [ai.miniforge.response.interface :as response]
    [ai.miniforge.workflow.dag-resilience :as resilience]
    [ai.miniforge.workflow.merge-resolution :as merge-resolution]
    [ai.miniforge.workflow.messages :as messages]
@@ -639,8 +640,17 @@
 
 (defn- run-merge!
   "Invoke `git merge` in the temp worktree per spec §3.1 / §6.1.
-   Returns `{:ok? true :commit-sha ...}` or `{:ok? false :anomaly ...}`.
-   Caller is responsible for cleanup."
+   Returns either:
+   - `(response/success {:commit-sha <sha>})` when the merge lands a
+     real commit and rev-parse HEAD reports it cleanly.
+   - The conflict anomaly map (`:anomalies/dag-multi-parent-conflict`)
+     when git's exit code reports a conflict.
+   - The merge-failed anomaly map (`:anomalies/dag-multi-parent-merge-failed`)
+     when the merge succeeded but rev-parse HEAD failed (rare
+     infrastructure case).
+
+   Caller checks `response/success?` for the happy path and dispatches
+   on `:anomaly/category` for the failure path."
   [worktree-path task-id strategy parents input-key]
   (let [rest-parents (rest parents)
         message (deterministic-merge-message task-id parents)
@@ -651,13 +661,11 @@
     (if (zero? (:exit r))
       (let [head (run-git worktree-path "rev-parse" "HEAD")]
         (if (zero? (:exit head))
-          {:ok? true :commit-sha (str/trim (:out head))}
-          {:ok? false
-           :anomaly (ref-write-failed-anomaly task-id nil nil head)}))
-      {:ok? false
-       :anomaly (conflict-anomaly task-id strategy parents
-                                  (enumerate-conflicts worktree-path)
-                                  input-key r)})))
+          (response/success {:commit-sha (str/trim (:out head))} nil)
+          (ref-write-failed-anomaly task-id nil nil head)))
+      (conflict-anomaly task-id strategy parents
+                        (enumerate-conflicts worktree-path)
+                        input-key r))))
 
 (defn- ensure-clean-worktree!
   "Remove any pre-existing temp worktree at `path` and re-create it
@@ -809,26 +817,28 @@
         (if-not (zero? (:exit setup))
           (do (cleanup-worktree! host-repo worktree)
               (worktree-setup-failed-anomaly task-id setup))
-          (let [outcome (run-merge! worktree task-id strategy parents input-key)
-                anomaly (:anomaly outcome)
-                anomaly-category (:anomaly/category anomaly)]
+          (let [outcome (run-merge! worktree task-id strategy parents input-key)]
             (cond
-              (:ok? outcome)
+              ;; Merge succeeded — outcome is response/success carrying
+              ;; the commit-sha.
+              (response/success? outcome)
               (let [success (write-ref-and-build-success
-                             host-repo task-id ref-name (:commit-sha outcome)
+                             host-repo task-id ref-name
+                             (get-in outcome [:output :commit-sha])
                              input-key strategy parents collapsed nil)]
                 (cleanup-worktree! host-repo worktree)
                 success)
 
               ;; Conflict — spawn the resolution sub-workflow on the same
-              ;; worktree. The conflict anomaly has parents, paths,
+              ;; worktree. The conflict anomaly carries parents, paths,
               ;; strategy, input-key, exit-code, stderr — everything the
               ;; resolution agent (or its mock) needs.
-              (= anomaly-category :anomalies/dag-multi-parent-conflict)
+              (= :anomalies/dag-multi-parent-conflict
+                 (:anomaly/category outcome))
               (let [result (attempt-resolution!
                             host-repo task-id ref-name input-key strategy
                             parents collapsed
-                            anomaly worktree resolution-overrides)]
+                            outcome worktree resolution-overrides)]
                 (cleanup-worktree! host-repo worktree)
                 result)
 
@@ -841,7 +851,7 @@
               ;; `:dag-multi-parent-unresolvable`.
               :else
               (do (cleanup-worktree! host-repo worktree)
-                  anomaly))))))))
+                  outcome))))))))
 
 (defn merge-parent-branches!
   "Multi-parent merge entry point per spec §6.1.

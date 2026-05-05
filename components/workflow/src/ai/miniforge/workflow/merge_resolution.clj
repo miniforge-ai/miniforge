@@ -48,20 +48,48 @@
    [ai.miniforge.dag-executor.interface :as dag]
    [ai.miniforge.response.interface :as response]
    [ai.miniforge.workflow.messages :as messages]
+   [clojure.edn :as edn]
+   [clojure.java.io :as io]
    [clojure.java.shell :as shell]
    [clojure.string :as str]))
 
 ;; Constants -----------------------------------------------------------
+;; Configuration is data, not code. Tunables live under
+;; resources/config/workflow/dag/merge-resolution-defaults.edn so they
+;; can be audited and overridden without touching the namespace.
 
-(def ^:private default-budget
-  "Per spec §10.6: small iteration cap (resolution is a focused task;
-   if the agent can't converge in a few rounds the conflict probably
-   needs human eyes) plus a stagnation cap (the curator detects
-   recurring-conflict and terminates without burning the full budget).
-   The stagnation-cap is the actionable lever — it ends loops that
-   aren't making progress, where waste actually comes from."
-  {:max-iterations 5
-   :stagnation-cap 2})
+(def ^:private resolution-defaults-path
+  "config/workflow/dag/merge-resolution-defaults.edn")
+
+(def ^:private resolution-defaults
+  "Loaded once at namespace load. Throws (loud) if the resource is
+   missing — that would be a packaging bug, not a runtime condition."
+  (delay
+    (-> resolution-defaults-path
+        io/resource
+        slurp
+        edn/read-string)))
+
+(defn- default-budget
+  "Spec §10.6 budget shape: `{:max-iterations N :stagnation-cap M}`.
+   Loaded from the EDN config; see the comments there for the
+   calibration rationale."
+  []
+  (:default-budget @resolution-defaults))
+
+(defn- min-stagnation-cap
+  "Floor on the consecutive-recurrence count that terminates the
+   loop. Misconfigured zero or negative would never terminate; the
+   floor prevents that."
+  []
+  (:min-stagnation-cap @resolution-defaults))
+
+(defn- no-recurrence-count
+  "The 'no recurrence yet' value for the consecutive-recurrence
+   counter. Named so loop arity reads as intent rather than a stray
+   `0`."
+  []
+  (:no-recurrence-count @resolution-defaults))
 
 ;; Stub agent + verify --------------------------------------------------
 
@@ -82,9 +110,11 @@
   "Stage 2B's default `verify-fn`: assumes verify passes once markers
    are gone. Stage 4 will wire this to a real `bb test` invocation per
    spec §6.1.1. Until then, the curator's marker check IS the
-   resolution gate; verify is plumbed but trivial."
+   resolution gate; verify is plumbed but trivial. Returns the standard
+   response/success shape so the loop can use response/success? to
+   branch — no bespoke `{:ok? true}` map invented locally."
   [_worktree-path]
-  {:ok? true})
+  (response/success {:verify/skipped? true} nil))
 
 ;; Anomaly + result factories ------------------------------------------
 
@@ -125,14 +155,19 @@
 
 (defn- commit-resolution!
   "Stage the agent's edits and commit them in `worktree-path`. Returns
-   `{:ok? true :commit-sha <sha>}` or `{:ok? false :anomaly ...}`.
+   `(response/success {:commit-sha <sha>})` on success, or
+   `(response/error <message> {:data {:git-result ...}})` on failure.
    Uses the same pinned-flags convention as the upstream merge
    (no-edit / no-gpg-sign / no-verify) so the resolution commit's
    shape is consistent with the merge it's resolving."
   [worktree-path task-id parents iterations]
-  (let [add (run-git worktree-path "add" "-A")]
+  (let [commit-failed (fn commit-failed [git-result]
+                        (response/error
+                         (messages/t :dag.merge.resolution/commit-failed)
+                         {:data {:git-result git-result}}))
+        add (run-git worktree-path "add" "-A")]
     (if-not (zero? (:exit add))
-      {:ok? false :git-result add}
+      (commit-failed add)
       (let [header (messages/t :dag.merge.resolution/commit-message-header
                                {:task-id task-id})
             body   (messages/t :dag.merge.resolution/commit-message-body
@@ -144,11 +179,11 @@
                             "--no-edit" "--no-gpg-sign" "--no-verify"
                             "-m" message)]
         (if-not (zero? (:exit commit))
-          {:ok? false :git-result commit}
+          (commit-failed commit)
           (let [head (run-git worktree-path "rev-parse" "HEAD")]
             (if (zero? (:exit head))
-              {:ok? true :commit-sha (str/trim (:out head))}
-              {:ok? false :git-result head})))))))
+              (response/success {:commit-sha (str/trim (:out head))} nil)
+              (commit-failed head))))))))
 
 ;; Loop helpers --------------------------------------------------------
 
@@ -220,22 +255,21 @@
      resolution-commit fails)."
   [{:keys [conflict-input host-repo worktree-path task-id budget
            agent-edit-fn verify-fn]
-    :or   {budget         default-budget
-           agent-edit-fn  no-op-agent-edit-fn
+    :or   {agent-edit-fn  no-op-agent-edit-fn
            verify-fn      always-pass-verify-fn}}]
-  (let [parents (:merge/parents conflict-input)
+  (let [budget (or budget (default-budget))
+        parents (:merge/parents conflict-input)
         max-iterations (:max-iterations budget)
-        ;; Per spec §10.6: stagnation-cap is the consecutive-recurrence
-        ;; count that terminates the loop. Default 2 (one extra chance
-        ;; after the first stuck-frame). Setting to 1 makes recurrence
-        ;; terminal on first detection (the v0.1 behavior); higher
-        ;; values give the agent more recovery attempts at the cost of
-        ;; budget. We clamp at 1 because zero or negative would never
-        ;; terminate.
-        stagnation-cap (max 1 (or (:stagnation-cap budget) 1))]
+        stagnation-floor (min-stagnation-cap)
+        no-recurrence (no-recurrence-count)
+        ;; Spec §10.6: stagnation-cap is the consecutive-recurrence
+        ;; count that terminates the loop. Floored at min-stagnation-cap
+        ;; so a misconfigured zero or negative can't loop forever.
+        stagnation-cap (max stagnation-floor
+                            (or (:stagnation-cap budget) stagnation-floor))]
     (loop [iteration 0
            prior-paths nil
-           consecutive-recurrence 0]
+           consecutive-recurrence no-recurrence]
       (cond
         ;; Budget exhausted before resolution.
         (>= iteration max-iterations)
@@ -279,12 +313,13 @@
 
               ;; Markers gone — run verify.
               (response/success? curator)
-              (let [verify (verify-fn worktree-path)]
-                (if (:ok? verify)
+              (let [verify-result (verify-fn worktree-path)]
+                (if (response/success? verify-result)
                   (let [commit (commit-resolution! worktree-path task-id
                                                    parents (inc iteration))]
-                    (if (:ok? commit)
-                      (resolution-success (:commit-sha commit) (inc iteration))
+                    (if (response/success? commit)
+                      (resolution-success (get-in commit [:output :commit-sha])
+                                          (inc iteration))
                       (terminal-result {:conflict-input conflict-input
                                         :reason :resolution-commit-failed
                                         :iterations (inc iteration)
@@ -293,7 +328,7 @@
                   ;; Loop again; markers are gone (path set is empty)
                   ;; so recurrence can't fire — let budget-exhausted
                   ;; catch always-failing verify.
-                  (recur (inc iteration) prior-paths 0)))
+                  (recur (inc iteration) prior-paths no-recurrence)))
 
               ;; Curator: markers-not-resolved. Loop with the new path
               ;; set so recurrence can fire next iteration. Reset the
@@ -303,7 +338,7 @@
               (= code :curator/markers-not-resolved)
               (recur (inc iteration)
                      (set (curator-conflicted-paths curator))
-                     0)
+                     no-recurrence)
 
               ;; Unknown curator code — surface as a resolution-loop
               ;; fault rather than spinning. The catch-all is intentional;

@@ -212,7 +212,11 @@
                    :worktree-path *worktree*
                    :task-id "task-c"
                    :agent-edit-fn write-resolved-content!
-                   :verify-fn (constantly {:ok? false})
+                   ;; Use response/error so the loop's response/success?
+                   ;; check sees the failure, matching how a real
+                   ;; verify-fn (Stage 4) will signal a failed test run.
+                   :verify-fn (fn always-fails [_]
+                                (response/error "tests failed" nil))
                    :budget {:max-iterations 2 :stagnation-cap 2}})]
       (is (= :anomalies/dag-multi-parent-unresolvable
              (:anomaly/category result)))
