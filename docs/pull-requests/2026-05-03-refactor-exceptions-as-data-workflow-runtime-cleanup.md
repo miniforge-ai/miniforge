@@ -2,13 +2,17 @@
 
 ## Overview
 
-Migrates the runtime-side `:cleanup-needed` throw sites in the `workflow` component to anomaly-returning variants alongside the existing throwers. Three sites retired: `runner/build-initial-context`, `runner-environment/assert-executor-for-mode!`, and `state/transition-status`. Loader/registry-side sites (~9) are deferred to a follow-on PR per the inventory's recommended split.
+Migrates the runtime-side `:cleanup-needed` throw sites in the `workflow` component to a single anomaly-returning API per site. Three throwers killed (no deprecate-and-coexist): `runner/build-initial-context`, `runner-environment/assert-executor-for-mode!`, and `state/transition-status`. The boundary throws that need to escalate to the slingshot ex-info shape (for legacy `try+` callers above this layer) are inlined at their single call sites — so the throw still happens, but at the right architectural seam, not in a deprecated parallel API.
+
+Loader/registry-side sites (~9) are deferred to a follow-on PR per the inventory's recommended split.
 
 ## Motivation
 
-Per `work/exception-cleanup-inventory.md`, `workflow` is the second-highest-density cleanup target after `repo-dag` (now merged in PR #758). The inventory explicitly recommended a 2-PR split (runtime + loader/registry) due to the risk surface — this PR is the runtime side only.
+Per `work/exception-cleanup-inventory.md`, `workflow` is the second-highest-density cleanup target after `repo-dag` (merged in PR #758). The inventory explicitly recommended a 2-PR split (runtime + loader/registry) due to risk surface — this PR is the runtime side.
 
 Runtime cleanup has the highest downstream payoff: every workflow execution path now composes cleanly with response-chains and inference-evidence rather than relying on slingshot exceptions for non-control-flow failures.
+
+This PR also drops the deprecate-and-coexist pattern that earlier exceptions-as-data PRs established (#704 foundation, #758 repo-dag, #769's first iteration). For component-internal helpers like these — zero external callers across the repo — the pattern paid an ongoing tax in surface area, deprecation warnings, and reviewer overhead, and the savings (smaller individual PRs, cheap revert) didn't justify it. Single API per site; throws inlined at the boundary where they actually need to happen.
 
 ## Base Branch
 
@@ -31,17 +35,15 @@ Refactor / per-component cleanup tier. `workflow` runtime namespaces only — no
 
 Source files modified (3):
 
-- `components/workflow/src/ai/miniforge/workflow/runner.clj` — `build-initial-context-anomaly` added; private `governed-capsule-missing-anomaly` extracted; throwing variant delegates and re-wraps via `response/throw-anomaly!`
-- `components/workflow/src/ai/miniforge/workflow/runner_environment.clj` — `check-executor-for-mode-anomaly` added; throwing variant delegates
-- `components/workflow/src/ai/miniforge/workflow/state.clj` — `transition-status-anomaly` added; throwing variant delegates
+- `components/workflow/src/ai/miniforge/workflow/runner.clj` — `build-initial-context` is now anomaly-returning (canonical name; the deprecated thrower is gone). `governed-capsule-missing-anomaly` is the private pre-flight check. The boundary escalation throw is inlined in `run-pipeline`'s let bindings — `(when (anomaly? ctx-or-anomaly) (response/throw-anomaly! :anomalies.workflow/no-capsule-executor …))` — so the contract for external callers (CLI / MCP / orchestrator) is unchanged.
+- `components/workflow/src/ai/miniforge/workflow/runner_environment.clj` — `check-executor-for-mode` is anomaly-returning. The deprecated `assert-executor-for-mode!` is gone. The boundary escalation throw is inlined in `acquire-execution-environment!` at the single call site, preserving the slingshot `:anomalies.executor/unavailable` shape.
+- `components/workflow/src/ai/miniforge/workflow/state.clj` — `transition-status` is the canonical anomaly-returning fn. A private `transition-status!` boundary helper escalates an anomaly to a slingshot throw — used by `mark-completed`, `mark-failed`, and `transition-to-phase`, which represent workflow-definition invariants where an FSM rejection is a programmer error.
 
 New decomposed test files (3):
 
-- `components/workflow/test/.../anomaly/build_initial_context_test.clj`
-- `components/workflow/test/.../anomaly/check_executor_for_mode_test.clj`
-- `components/workflow/test/.../anomaly/transition_status_test.clj`
-
-Each pins happy-path / failure-path / throwing-variant-compatibility for its scope.
+- `components/workflow/test/.../anomaly/build_initial_context_test.clj` — happy + anomaly paths for `build-initial-context`; documents why the run-pipeline boundary integration test is left out (acquire-environment fails first along that path; coverage already exists in `check_executor_for_mode_test.clj`).
+- `components/workflow/test/.../anomaly/check_executor_for_mode_test.clj` — happy + anomaly paths for `check-executor-for-mode`; boundary throw exercised end-to-end through `acquire-execution-environment!` with stubbed registry fns.
+- `components/workflow/test/.../anomaly/transition_status_test.clj` — happy + anomaly paths for `transition-status`; boundary throw exercised through `mark-completed` / `mark-failed` (which use the private `transition-status!`).
 
 ## Cleavage line
 
@@ -78,17 +80,21 @@ The inventory flagged the dashboard-stop throw inside `runner.clj`'s `check-stop
 
 This is true cooperative cancellation control flow — the inner `try+` selectively unwinds when the dashboard issues a stop, then transitions the workflow to `:failed`. Rewriting it as a return value would require threading a sentinel through every layer between `check-stopped!` and the outer pipeline loop. Kept as-is; rationale documented in the commit body.
 
-## New API surface
-
-Added to public interfaces:
+## API surface
 
 ```clojure
-ai.miniforge.workflow.state/transition-status-anomaly
-ai.miniforge.workflow.runner-environment/check-executor-for-mode-anomaly
-ai.miniforge.workflow.runner/build-initial-context-anomaly
+;; Canonical, anomaly-returning. Component-internal — not exported in the
+;; workflow component's interface namespace.
+ai.miniforge.workflow.state/transition-status                  ; was *-anomaly; renamed
+ai.miniforge.workflow.runner-environment/check-executor-for-mode  ; was *-anomaly; renamed
+ai.miniforge.workflow.runner/build-initial-context             ; was *-anomaly; renamed
+
+;; Private boundary helper for in-component invariants. Used by mark-completed,
+;; mark-failed, and transition-to-phase.
+ai.miniforge.workflow.state/transition-status!                 ; private
 ```
 
-Throwing siblings retained, marked `^{:deprecated "exceptions-as-data — prefer *-anomaly"}`, and now delegate to the anomaly variants — re-wrapping the returned anomaly into the original `response/throw-anomaly!` shape so existing callers see no behavior change.
+The deprecated throwers (`transition-status` thrower, `assert-executor-for-mode!`, `build-initial-context` thrower wrapper) are **gone**. Boundary escalation to slingshot ex-info now lives inlined at the call sites that actually need to throw (`acquire-execution-environment!`, `run-pipeline`, the in-component `*-helpers` via `transition-status!`). External callers above the component see the same `:anomaly/category` shapes as before.
 
 ## Inventory delta
 
@@ -97,32 +103,35 @@ Throwing siblings retained, marked `^{:deprecated "exceptions-as-data — prefer
 
 ## Strata Affected
 
-- `ai.miniforge.workflow.runner` — `build-initial-context-anomaly` added; thrower delegates
-- `ai.miniforge.workflow.runner-environment` — `check-executor-for-mode-anomaly` added
-- `ai.miniforge.workflow.state` — `transition-status-anomaly` added; downstream `mark-completed` / `mark-failed` / `transition-to-phase` continue to call the deprecated thrower (out of scope)
+- `ai.miniforge.workflow.runner` — `build-initial-context` is now anomaly-returning; boundary throw inlined in `run-pipeline`
+- `ai.miniforge.workflow.runner-environment` — `check-executor-for-mode` is anomaly-returning; boundary throw inlined in `acquire-execution-environment!`
+- `ai.miniforge.workflow.state` — `transition-status` is anomaly-returning; private `transition-status!` boundary helper used by `mark-completed` / `mark-failed` / `transition-to-phase`
 
 ## Testing Plan
 
 - **`bb pre-commit` green:**
   - `lint:clj` — clean
   - `fmt:md` — clean
-  - `test` — **4930 tests / 22631 passes / 0 failures / 0 errors**
+  - `test` — **4928 tests / 22634 passes / 0 failures / 0 errors**
   - `test:graalvm` — 6 tests / 487 assertions / 0 failures
-- 16 expected clj-kondo deprecation warnings on the deprecated throwers; only fire from in-component callers that exercise the legacy path.
-- **Commit-budget overridden** (358 reportable lines > 200 threshold). Rationale recorded in commit body: protocol-body changes must be atomic; splitting leaves intermediate commits uncompilable. Same precedent as PR #758 (repo-dag).
+- No deprecation warnings emitted (no deprecated throwers remain).
+- **Commit-budget overridden** (rationale recorded in commit body: kill-the-deprecation cleanup is a coherent atomic change). Same precedent as PR #758 (repo-dag).
 
 ## Deployment Plan
 
-No migration required. Backward-compatible.
+No migration required for external callers — these helpers were component-internal (no `interface.clj` exports). External callers above the component continue to see the same slingshot `:anomaly/category` shapes when escalation happens at the boundaries.
 
-- Existing throwing-API callers see no change. Same signatures, same `slingshot` `:anomaly/category` shape on failure.
-- New code reaches for `*-anomaly` variants; existing call sites can migrate at their leisure or be migrated by follow-ons.
+- `acquire-execution-environment!` still throws `:anomalies.executor/unavailable` for governed-mode-without-capsule (now via inlined check, not a separate thrower).
+- `run-pipeline` still throws `:anomalies.workflow/no-capsule-executor` when build-initial-context returns an anomaly (now via inlined check on the anomaly return).
+- `mark-completed` / `mark-failed` / `transition-to-phase` still throw `:anomalies.workflow/invalid-transition` on FSM rejection (via private `transition-status!`).
 
 ## Notes / Surprises
 
-- **`:anomalies.workflow/no-capsule-executor` is not in `response/anomaly/workflow-anomalies` taxonomy.** Pre-existing latent bug — `throw-anomaly!` doesn't validate against the taxonomy. Preserved in the throwing wrapper to keep behavior identical; flagged for the loader-side cleanup or a separate hygiene pass.
-- **`runner-test` and `runner-extended-test` have 14 errors / 1 failure on `main` when run in isolation against the workflow component.** They require the broader phase registry loaded via the polylith development project. Confirmed by stashing changes and rerunning — not regressions caused by this PR; project-level `bb test` passes 4930/4930.
-- **Commit-budget gate friction.** Same pattern as repo-dag (PR #758): mechanical many-site refactor + delegated wrappers + decomposed tests trips the line budget. Override path documented and worked. Worth flagging again as repeating friction; an `:exceptions-as-data` budget profile would simplify.
+- **Policy change recorded mid-PR.** This PR initially landed with the deprecate-and-coexist pattern (anomaly variants alongside throwers, with deprecation markers). Reviewer feedback on a 17-star repo with one primary maintainer pointed out that pattern is over-cautious: it pays an ongoing surface-area + deprecation-warning tax that a small project doesn't get value from. PR rewritten to kill the throwers; only one API per site. Future component-scope cleanups follow this pattern; foundation-tier (>30 callers) keeps coexistence.
+- **`:anomalies.workflow/no-capsule-executor` is still not in `response/anomaly/workflow-anomalies` taxonomy.** Pre-existing latent quirk — `throw-anomaly!` doesn't validate against the taxonomy. Preserved at the new inlined boundary throw; flagged for the loader-side cleanup or a separate hygiene pass.
+- **`runner-test` and `runner-extended-test` have 14 errors / 1 failure on `main` when run in isolation against the workflow component.** They require the broader phase registry loaded via the polylith development project. Confirmed by stashing changes and rerunning — not regressions caused by this PR; project-level `bb test` passes.
+- **Run-pipeline boundary integration test omitted.** The build-initial-context throw escalation through `run-pipeline` is hard to exercise because `acquire-environment` runs first and has its own throw on the same governed-mode-without-capsule scenario. The boundary escalation pattern is tested via `acquire-execution-environment!` in `check_executor_for_mode_test.clj`. End-to-end coverage is the runner's existing pipeline tests.
+- **Commit-budget gate friction.** Same pattern as repo-dag (PR #758): mechanical many-site refactor + decomposed tests trips the line budget. Override path documented and worked. An `:exceptions-as-data` budget profile would eliminate the recurring friction.
 
 ## Related Issues/PRs
 
@@ -135,10 +144,10 @@ No migration required. Backward-compatible.
 ## Checklist
 
 - [x] All 3 runtime-side `:cleanup-needed` workflow sites retired
-- [x] Existing throwing API preserved (delegated, behavior identical)
-- [x] Anomaly-returning variants for every migrated site
-- [x] Deprecation markers on throwers + docstring pointers
-- [x] Decomposed test files (three new) — happy / failure / compat per scope
+- [x] Single API per site (no deprecate-and-coexist)
+- [x] Boundary throws inlined at the call sites that escalate (`acquire-execution-environment!`, `run-pipeline`, `transition-status!`)
+- [x] External caller contracts preserved — same slingshot `:anomaly/category` shapes
+- [x] Decomposed test files (three) — anomaly happy / anomaly failure / boundary-escalation per scope
 - [x] Slingshot control-flow site documented and kept as-is
 - [x] No new throws in anomaly-returning code paths
 - [x] `bb pre-commit` green

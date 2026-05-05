@@ -70,36 +70,24 @@
     (when-not (and (= :governed mode) raw (= :worktree (executor-type raw)))
       raw)))
 
-(defn check-executor-for-mode-anomaly
-  "Anomaly-returning variant of [[assert-executor-for-mode!]].
+(defn check-executor-for-mode
+  "Validate executor / mode pairing per the N11 §7.4 invariant.
 
-   Returns nil when the `executor`/`mode` pair is acceptable, or an
-   `:unavailable` anomaly when `:governed` mode was requested but no
-   capsule executor was supplied. The anomaly's `:anomaly/data` carries
-   `:mode` and a `:hint` string for surface code that wants to suggest
-   remediation.
+   Returns nil when the pair is acceptable, or an `:unavailable`
+   anomaly when `:governed` mode was requested but no capsule executor
+   was supplied. The anomaly's `:anomaly/data` carries `:mode` and a
+   `:hint` string for surface code that wants to suggest remediation.
 
-   Prefer this over [[assert-executor-for-mode!]] in non-boundary code."
+   This is the canonical, anomaly-returning entry point. Boundary
+   sites that need to escalate to a thrown error (e.g.
+   `acquire-execution-environment!`) inline a `response/throw-anomaly!`
+   at the call site rather than calling a separate thrower."
   [executor mode]
   (when (and (nil? executor) (= :governed mode))
     (anomaly/anomaly :unavailable
                      (messages/t :governed/no-capsule)
                      {:mode :governed
                       :hint (messages/t :governed/no-capsule-hint)})))
-
-(defn assert-executor-for-mode!
-  "Throws for :governed mode when no capsule executor is available.
-
-   DEPRECATED: prefer [[check-executor-for-mode-anomaly]], which returns
-   an anomaly map instead of throwing. Retained for backward compatibility
-   with callers that rely on the slingshot throw shape."
-  {:deprecated "exceptions-as-data — prefer check-executor-for-mode-anomaly"}
-  [executor mode]
-  (when-let [a (check-executor-for-mode-anomaly executor mode)]
-    (response/throw-anomaly! :anomalies.executor/unavailable
-                             (:anomaly/message a)
-                             {:anomaly.executor/mode (get-in a [:anomaly/data :mode])
-                              :hint (get-in a [:anomaly/data :hint])})))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Environment record construction
@@ -147,7 +135,15 @@
             env-config (cond-> {}
                          repo-url (assoc :repo-url repo-url)
                          branch   (assoc :branch branch))]
-        (assert-executor-for-mode! executor mode)
+        (when-let [a (check-executor-for-mode executor mode)]
+          ;; Boundary throw: acquire-execution-environment! is the
+          ;; runner's escalation point for governed-mode unavailability.
+          ;; The slingshot shape preserves the contract that legacy
+          ;; try+ callers above this layer rely on.
+          (response/throw-anomaly! :anomalies.executor/unavailable
+                                   (:anomaly/message a)
+                                   {:anomaly.executor/mode (get-in a [:anomaly/data :mode])
+                                    :hint (get-in a [:anomaly/data :hint])}))
         (when executor
           (if (= :governed mode)
             (acquire-worktree-and-capsule executor workflow-id mode env-config fns)
