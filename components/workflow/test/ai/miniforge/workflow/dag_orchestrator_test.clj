@@ -235,25 +235,39 @@
       (is (= "main" (:branch opts))
           "unregistered dep falls back to spec branch — no block"))))
 
-(deftest task-sub-opts-multi-dep-omits-branch-test
-  (testing "multi-parent task: registry returns an anomaly map; opts must
-            NOT carry :branch (we'd be passing a map where a string is
-            expected). v1 is supposed to reject these at plan time via
-            execute-plan-as-dag, so reaching this branch in production
-            is a bug — but the local fallback keeps the orchestrator
-            from crashing if validation is ever bypassed."
+(deftest task-sub-opts-multi-dep-attempts-merge-test
+  (testing "Multi-parent task: v2 invokes merge-parent-branches! instead of
+            rejecting at plan time. In a test context whose host repo
+            doesn't have these branches, the merge attempt fails fast with
+            a typed :anomalies/dag-multi-parent-branch-unresolvable
+            anomaly, which task-sub-opts surfaces via :dag/merge-anomaly.
+            The sub-workflow MUST NOT run with a stale :branch — opts
+            should not silently fall through to a default branch on the
+            multi-parent path. (Stage 2 will replace this anomaly path
+            with the resolution sub-workflow.)"
     (let [task-def {:task/id id-c :task/description "C" :task/deps #{id-a id-b}}
-          ctx (registry-context {id-a {:branch "task-a"}
-                                 id-b {:branch "task-b"}}
+          ctx (registry-context {id-a {:branch "task-a-not-in-test-repo"}
+                                 id-b {:branch "task-b-not-in-test-repo"}}
                                 "main")
           opts (dag-orch/task-sub-opts ctx task-def)]
       (is (not (contains? opts :branch))
-          "anomaly result must not be passed through as a branch name"))))
+          "merge anomaly must not produce a branch — sub-workflow would otherwise
+           fork off a stale value")
+      (is (some? (:dag/merge-anomaly opts))
+          "the anomaly is surfaced for the caller (run-mini-workflow) to
+           short-circuit on")
+      (is (= :anomalies/dag-multi-parent-branch-unresolvable
+             (get-in opts [:dag/merge-anomaly :anomaly/category]))
+          "branch-unresolvable is the right category — branches don't exist in
+           the test repo, so rev-parse fails before any merge is attempted"))))
 
 ;------------------------------------------------------------------------------ Layer 3
-;; Forest validation at plan time — multi-parent DAGs are rejected
-;; before any task starts so non-forest plans fail loud and early
-;; instead of after some tasks have already burned tokens.
+;; v2 multi-parent: forest gate is dropped (informational logging only).
+;; Diamond plans run end-to-end via merge-parent-branches!. With no
+;; llm-backend in the test context, sub-workflows resolve to placeholder
+;; results and don't actually invoke the merge path; the test below pins
+;; that the gate is dropped and the run reaches completion. Real merge
+;; behavior is exercised by the integration tests.
 
 (deftest execute-plan-as-dag-accepts-forest-test
   (testing "linear chain is a forest — orchestrator runs to completion"
@@ -268,13 +282,16 @@
       (is (:success? result) "forest plan should run to success")
       (is (= 2 (:tasks-completed result))))))
 
-(deftest execute-plan-as-dag-rejects-diamond-test
-  (testing "diamond (multi-parent) plan rejected before any task runs.
-            The orchestrator surfaces the anomaly at plan-validation
-            time rather than at task-execution time so callers can
-            linearize or split — and so we don't burn tokens on tasks
-            that will end up in a doomed merge."
-    (let [[logger _] (log/collecting-logger)
+(deftest execute-plan-as-dag-accepts-diamond-test-v2
+  (testing "v2: diamond (multi-parent) plan is no longer rejected at plan
+            time. The forest gate is dropped; multi-parent tasks run
+            through `merge-parent-branches!`. With placeholder execution
+            (no llm-backend) all four tasks complete; the merge code path
+            isn't exercised here because placeholder-result short-circuits
+            before sub-workflow invocation. Real merge behavior is in
+            the integration tests; this test is the unit-level pin that
+            v1's plan-time rejection is gone."
+    (let [[logger entries] (log/collecting-logger)
           plan {:plan/id (random-uuid)
                 :plan/name "diamond"
                 :plan/tasks [{:task/id id-a :task/description "A"
@@ -286,16 +303,13 @@
                              {:task/id id-d :task/description "D"
                               :task/type :implement :task/dependencies [id-b id-c]}]}
           result (dag-orch/execute-plan-as-dag plan {:logger logger})]
-      (is (false? (:success? result))
-          "non-forest plans must short-circuit the orchestrator")
-      (is (= 0 (:tasks-completed result))
-          "no tasks should run when the plan is rejected at validation time")
-      (is (= :anomalies/dag-non-forest
-             (get-in result [:error :anomaly/category]))
-          "error carries the canonical anomaly category for downstream surfaces")
-      (is (some #(= id-d (:task/id %))
-                (get-in result [:error :multi-parent-tasks]))
-          "the violation list pinpoints the offending task id"))))
+      (is (:success? result)
+          "v2 runs diamond plans end-to-end")
+      (is (= 4 (:tasks-completed result))
+          "all four tasks complete (placeholder execution, no real merge)")
+      (is (some #(= :dag/multi-parent-detected (:log/event %)) @entries)
+          "the multi-parent detection is logged for plan-quality observability —
+           dashboard surfaces fan-in even though it doesn't reject"))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
