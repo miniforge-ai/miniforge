@@ -17,25 +17,37 @@
 ;; limitations under the License.
 
 (ns ai.miniforge.agent.curator
-  "Curator agent — converts the implementer's environment writes into a
-   structured code artifact.
+  "Curator agent — extension surface for validating what an agent did
+   in the executor environment.
 
-   Background. In the environment-promotion model, the implementer writes
-   files directly into the executor environment (capsule or worktree); the
-   environment itself is the artifact. The curator reads the resulting
-   file diff and produces the structured metadata that downstream phases
-   (verify, review, release, PR-doc generation) expect: a :code/... map
-   with summary, file list, scope validation, and test-addition detection.
+   Background. The implement-style flow has the agent writing directly
+   into the executor environment (capsule or worktree); the environment
+   itself is the artifact. The curator runs after the agent, reads the
+   resulting state, and produces either a structured artifact (the
+   `:implement` path) or a verdict on the agent's iteration progress
+   (the `:merge-resolution` path added in v2 Stage 2 per spec §6.1.2).
 
-   Why a separate agent. The implementer's job is to code. Expecting it to
-   also emit a structured Clojure-map artifact via an MCP tool was brittle
-   (observed: implementer exhausts turn budget exploring the codebase and
-   never calls submit_code_artifact, producing no artifact at all). The
-   curator runs after the implementer, is specialized for structured
-   output, and fast-fails when no files were written — replacing silent
-   multi-retry failure with a single clear terminal error.
+   Multimethod surface. `curate` dispatches on `:curator/kind` so each
+   agent flow gets its own check pipeline without forcing a one-size-
+   fits-all shape on every call site:
 
-   Two-layer design:
+   - `:implement`         (default) — produces a CuratedArtifact;
+                          terminal `:curator/no-files-written` on empty
+                          diff.
+   - `:merge-resolution`  — validates the resolution agent's iteration:
+                          terminal `:curator/markers-not-resolved` when
+                          conflict markers remain in the worktree;
+                          `:curator/recurring-conflict` when the
+                          conflicted path set hasn't changed from the
+                          prior iteration (the agent is stuck and the
+                          loop should terminate before exhausting the
+                          full budget).
+
+   `curate-implement-output` is kept as a deprecated alias to
+   `(curate (assoc input :curator/kind :implement))` so existing
+   callers (`phase-software-factory.implement`) keep working unchanged.
+
+   Two-layer design (the `:implement` path):
    - Layer 1 is deterministic (git-diff parsing, path heuristics). This
      path alone produces a valid artifact and never fails when a diff
      exists.
@@ -53,6 +65,7 @@
    [ai.miniforge.repo-index.interface :as messages]
    [ai.miniforge.response.interface :as response]
    [ai.miniforge.schema.interface :as schema]
+   [babashka.fs :as fs]
    [clojure.edn :as edn]
    [clojure.string :as str]
    [malli.core :as m]))
@@ -353,25 +366,13 @@
            :env-id (:env-id input)
            :intent-scope (:intent-scope input)}}))
 
-(defn curate-implement-output
-  "Take an implementer's result + environment state → structured code artifact.
+(defmulti curate
+  "Curator entry point. Dispatches on `:curator/kind` so each agent
+   flow gets its own check pipeline. See namespace docstring for the
+   full method roster."
+  (fn [input] (or (:curator/kind input) :implement)))
 
-   Fast-fails when no files were written (replacing the silent-retry failure
-   mode where the implementer exhausts turns without producing output).
-
-   Input keys:
-     :implementer-result    (required)  the map returned by the implementer agent
-     :worktree-path         (required)  path to the environment's working dir
-     :pre-session-snapshot              enables accurate diff (recommended)
-     :env-id, :executor, :execute-fn    required for capsule-mode diff
-     :intent-scope                      vec of paths declared in :spec/intent :scope
-     :spec-description                  for LLM context
-     :llm-client                        optional pre-resolved LLM client
-     :logger                            optional
-
-   Output:
-     response/success with :output being a CuratedArtifact, or
-     response/error when the implementer wrote no files."
+(defmethod curate :implement
   [{:keys [intent-scope spec-description llm-client] :as input}]
   (let [files (collect-files input)]
     (if (empty? files)
@@ -394,6 +395,139 @@
         (response/success
          artifact
          {:metrics (artifact-metrics files deviations tests-added? source)})))))
+
+;------------------------------------------------------------------------------ Layer 4.5
+;; Merge-resolution method (v2 Stage 2 — spec §6.1.2)
+;;
+;; The resolution sub-workflow runs an implementer-style agent against a
+;; conflicted worktree. Between iterations, this curator method validates
+;; whether the agent's edits actually resolved the conflicts and whether
+;; it's making progress. The two terminal codes match the spec's curator
+;; contract:
+;;
+;; - :curator/markers-not-resolved — git's conflict markers
+;;   (`<<<<<<<`, `=======`, `>>>>>>>`) are still present in the worktree.
+;;   The agent terminated but didn't finish the job. The loop above
+;;   should re-prompt or, on persistent recurrence, terminate.
+;; - :curator/recurring-conflict — the conflicted path set this
+;;   iteration matches the prior iteration's path set, meaning the
+;;   agent isn't making progress. The loop above should terminate
+;;   instead of burning the rest of the budget.
+;;
+;; Both checks operate on pure-data inspections of the worktree state
+;; (file scan + path-set comparison). They don't need the agent's
+;; narration to fire.
+
+(def ^:private conflict-marker-re
+  "Match a line that begins (after optional whitespace) with one of
+   git's three conflict-marker tokens. The exact-7 form is git's
+   default; longer runs are also legal so we match `+`."
+  #"(?m)^[<>=]{7,}")
+
+(defn- file-has-conflict-markers?
+  "True when `path` contains git conflict markers. Returns false on
+   read failure (file gone, permission denied) — those failures are
+   the caller's problem (curator can only judge what it can read)."
+  [path]
+  (try
+    (and (fs/regular-file? path)
+         (boolean (re-find conflict-marker-re (slurp (str path)))))
+    (catch Throwable _ false)))
+
+(defn- scan-conflicted-paths
+  "Walk `worktree-path` and return the set of relative paths whose file
+   contents contain conflict markers. The return is a set so callers
+   can compare iterations directly."
+  [worktree-path]
+  (when (fs/directory? worktree-path)
+    (let [root (fs/canonicalize worktree-path)]
+      (->> (fs/glob root "**" {:hidden false})
+           (filter file-has-conflict-markers?)
+           (map (fn rel-path [p] (str (fs/relativize root p))))
+           set))))
+
+(defn- markers-not-resolved-error
+  "Terminal error when conflict markers remain after the agent's
+   iteration. `paths` is the set returned by `scan-conflicted-paths`."
+  [worktree-path paths]
+  (response/error
+   (messages/t :error/curator-markers-not-resolved
+               {:file-count (count paths)
+                :s (if (= 1 (count paths)) "" "s")})
+   {:data {:code :curator/markers-not-resolved
+           :worktree-path worktree-path
+           :conflicted-paths (vec (sort paths))}}))
+
+(defn- recurring-conflict-error
+  "Terminal error when the conflict path set is identical to the
+   prior iteration's. Signals that the agent has stopped making
+   progress; the resolution loop should terminate before exhausting
+   the full budget."
+  [worktree-path paths]
+  (response/error
+   (messages/t :error/curator-recurring-conflict
+               {:path-count (count paths)
+                :s (if (= 1 (count paths)) "" "s")})
+   {:data {:code :curator/recurring-conflict
+           :worktree-path worktree-path
+           :conflicted-paths (vec (sort paths))}}))
+
+(defmethod curate :merge-resolution
+  [{:keys [worktree-path prior-conflicted-paths]
+    :as input}]
+  (let [current-paths (scan-conflicted-paths worktree-path)]
+    (cond
+      ;; No markers remain — the agent did its job for this iteration.
+      ;; The verify gate above will then check whether tests pass; the
+      ;; curator's role is just the marker check.
+      (empty? current-paths)
+      (response/success
+       {:resolution/markers-cleared? true}
+       {:metrics {:conflicted-paths 0
+                  :curator-source :deterministic}})
+
+      ;; Markers still present AND the path set hasn't changed since
+      ;; the prior iteration — agent is stuck. Terminate early.
+      (and (set? prior-conflicted-paths)
+           (= prior-conflicted-paths current-paths))
+      (recurring-conflict-error worktree-path current-paths)
+
+      ;; Markers still present but the path set has changed (some
+      ;; resolved, others surfaced, or the conflict shape shifted).
+      ;; The loop should re-prompt; this is a "keep going" terminal
+      ;; for THIS iteration, not the whole loop.
+      :else
+      (markers-not-resolved-error worktree-path current-paths))))
+
+;------------------------------------------------------------------------------ Layer 5
+;; Backward-compatible entry point
+
+(defn curate-implement-output
+  "Take an implementer's result + environment state → structured code artifact.
+
+   Fast-fails when no files were written (replacing the silent-retry failure
+   mode where the implementer exhausts turns without producing output).
+
+   This is a thin wrapper around `(curate (assoc input :curator/kind :implement))`.
+   Existing callers (e.g. `phase-software-factory.implement`) keep working
+   unchanged; new callers should prefer `curate` directly so the dispatch
+   key is explicit.
+
+   Input keys:
+     :implementer-result    (required)  the map returned by the implementer agent
+     :worktree-path         (required)  path to the environment's working dir
+     :pre-session-snapshot              enables accurate diff (recommended)
+     :env-id, :executor, :execute-fn    required for capsule-mode diff
+     :intent-scope                      vec of paths declared in :spec/intent :scope
+     :spec-description                  for LLM context
+     :llm-client                        optional pre-resolved LLM client
+     :logger                            optional
+
+   Output:
+     response/success with :output being a CuratedArtifact, or
+     response/error when the implementer wrote no files."
+  [input]
+  (curate (assoc input :curator/kind :implement)))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
