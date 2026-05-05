@@ -5,7 +5,16 @@
  {:default-stagnation-threshold-ms 120000
   :default-max-total-ms 600000
   :default-min-activity-interval-ms 5000
-  :line-timeout-ms 180000
+  ;; Hard "no stdout line at all" timeout. Distinct from stagnation:
+  ;; stagnation tracks meaningful progress (parsed events that refresh
+  ;; activity), while line-timeout fires whenever stdout is empty for
+  ;; this long regardless of what the parser would have done with the
+  ;; line. Opus on a 100k-token first-turn prompt empirically goes
+  ;; silent on stdout for 180-300s after the initial system+rate_limit
+  ;; pair (next line is the first assistant chunk). 180s used to fire
+  ;; before the model could emit anything (event-log-tool-visibility
+  ;; dogfood, 2026-05-04). 360s gives long planner first turns room.
+  :line-timeout-ms 360000
   :process-join-timeout-ms 600000
   :post-kill-join-timeout-ms 5000
   :poll-interval-ms 250}}
