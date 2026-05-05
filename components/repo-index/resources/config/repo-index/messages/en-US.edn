@@ -72,6 +72,15 @@
   :error/curator-no-files-written
   "Curator: implementer wrote no files to the environment"
 
+  :error/curator-markers-not-resolved
+  "Curator: conflict markers still present in {file-count} file{s}"
+
+  :error/curator-recurring-conflict
+  "Curator: conflict set unchanged from prior iteration ({path-count} path{s}); agent making no progress"
+
+  :error/curator-worktree-missing
+  "Curator: worktree-path {path} is missing or not a directory"
+
   ;; Curator summaries (deterministic fallback)
   :curator/deterministic-summary
   "{total} file{s} changed ({created} created, {modified} modified, {deleted} deleted)"}}

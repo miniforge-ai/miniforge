@@ -40,9 +40,13 @@
 (def create-reviewer reviewer/create-reviewer)
 (def create-releaser releaser/create-releaser)
 
-;; Curator is a pure function (not an Agent record) — it post-processes the
-;; implementer's environment writes into a structured code artifact. Exposed
-;; here so phases and interop code can reach it via the standard interface.
+;; Curator is a multimethod (not an Agent record) — it post-processes the
+;; environment state an agent left behind. Dispatches on `:curator/kind`:
+;; - `:implement`        (default) — produces a CuratedArtifact.
+;; - `:merge-resolution` (v2 §6.1.2) — validates the resolution agent's
+;;                       iteration; surfaces :curator/markers-not-resolved
+;;                       and :curator/recurring-conflict terminals.
+(def curate curator/curate)
 (def curate-implement-output curator/curate-implement-output)
 (def CuratedArtifact curator/CuratedArtifact)
 (def CuratedFileEntry curator/FileEntry)

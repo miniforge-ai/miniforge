@@ -112,6 +112,7 @@
 (def create-tester specialized/create-tester)
 (def create-reviewer specialized/create-reviewer)
 (def create-releaser specialized/create-releaser)
+(def curate specialized/curate)
 (def curate-implement-output specialized/curate-implement-output)
 (def CuratedArtifact specialized/CuratedArtifact)
 (def CuratedFileEntry specialized/CuratedFileEntry)
