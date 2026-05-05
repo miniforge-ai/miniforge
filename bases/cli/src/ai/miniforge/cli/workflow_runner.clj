@@ -444,35 +444,73 @@
   [content]
   (= {:ok true} (parse-preflight-payload content)))
 
-(defn- create-preflight-client
-  [llm-client cmd-path workdir]
-  (let [{:keys [backend model]} (:config llm-client)]
-    (llm/create-client
-     (cond-> {:backend backend
-              :exec-fn (fn [[_cmd & args]]
-                         (run-cli-command (into [cmd-path] args)
-                                          (backend-preflight-timeout-ms)
-                                          :workdir workdir))}
-       model (assoc :model model)))))
+(defn- backend-stream-content
+  [stream-parser output]
+  (let [content (atom "")]
+    (doseq [line (str/split-lines (or output ""))]
+      (when-let [parsed (stream-parser line)]
+        (when-let [delta (:delta parsed)]
+          (swap! content str delta))))
+    (some-> @content str/trim not-empty)))
+
+(defn- decoded-preflight-content
+  [backend-config output]
+  (if-let [stream-parser (:stream-parser backend-config)]
+    (backend-stream-content stream-parser output)
+    (some-> output str/trim not-empty)))
+
+(defn- generic-preflight-command
+  [llm-client]
+  (let [{:keys [backend model]} (:config llm-client)
+        {:keys [cmd args-fn]} (get llm/backends backend)
+        request (cond-> {:prompt (backend-preflight-prompt)}
+                  model (assoc :model model))]
+    (into [cmd] (args-fn request))))
 
 (defn- run-generic-backend-preflight
   [llm-client cmd-path workdir]
-  (let [response (llm/complete (create-preflight-client llm-client cmd-path workdir)
-                               {:prompt (backend-preflight-prompt)
-                                :max-turns 1})]
-    (if (and (llm/success? response)
-             (preflight-success? (:content response)))
-      (success-response {:content (:content response)
-                         :exit-code (:exit-code response)})
+  (let [{:keys [backend]} (:config llm-client)
+        backend-config (get llm/backends backend)
+        full-cmd (into [cmd-path] (rest (generic-preflight-command llm-client)))
+        {:keys [out err exit timeout-ms]} (run-cli-command full-cmd
+                                                           (backend-preflight-timeout-ms)
+                                                           :workdir workdir)
+        content (decoded-preflight-content backend-config out)]
+    (cond
+      timeout-ms
       (failure-response :anomalies/unavailable
-                        "backend_preflight_failed"
-                        (messages/t :workflow-runner/backend-preflight-failed
-                                    {:backend (name (llm/client-backend llm-client))})
+                        "backend_preflight_timeout"
+                        err
                         {:cmd-path cmd-path
-                         :content (:content response)
-                         :error (:error response)
-                         :anomaly (:anomaly response)
-                         :exit-code (:exit-code response)}))))
+                         :timeout-ms timeout-ms
+                         :exit-code exit})
+
+      (not (zero? exit))
+      (failure-response :anomalies/unavailable
+                        "backend_preflight_cli_error"
+                        (or (some-> err str/trim not-empty)
+                            content
+                            (messages/t :workflow-runner/backend-preflight-exit
+                                        {:exit-code exit}))
+                        {:cmd-path cmd-path
+                         :stdout (some-> out str/trim not-empty)
+                         :stderr (some-> err str/trim not-empty)
+                         :exit-code exit})
+
+      (preflight-success? content)
+      (success-response {:content content
+                         :exit-code exit})
+
+      :else
+      (failure-response :anomalies/unavailable
+                        "backend_preflight_unexpected_output"
+                        (messages/t :workflow-runner/backend-preflight-failed
+                                    {:backend (name backend)})
+                        {:cmd-path cmd-path
+                         :stdout (some-> out str/trim not-empty)
+                         :stderr (some-> err str/trim not-empty)
+                         :content content
+                         :exit-code exit}))))
 
 (defn- run-claude-backend-preflight
   [cmd-path workdir]
