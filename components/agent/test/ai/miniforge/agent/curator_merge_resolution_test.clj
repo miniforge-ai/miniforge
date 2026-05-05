@@ -155,6 +155,63 @@
            empty-diff terminal — proving the multimethod refactor didn't
            change the legacy contract"))))
 
+(deftest merge-resolution-worktree-missing-test
+  (testing "Missing or invalid `worktree-path` surfaces a typed terminal
+            error, NOT a silent success. Pre-fix the curator returned
+            `:resolution/markers-cleared? true` whenever scanning
+            yielded no paths — including the case where it never
+            scanned anything because the path didn't exist. Now an
+            absent worktree is a typed `:curator/worktree-missing`
+            fault."
+    (let [result (sut/curate {:curator/kind :merge-resolution
+                              :worktree-path "/var/folders/this-path-does-not-exist-mpb"})]
+      (is (response/error? result))
+      (is (= :curator/worktree-missing
+             (get-in result [:error :data :code])))))
+
+  (testing "nil :worktree-path likewise surfaces the typed fault"
+    (let [result (sut/curate {:curator/kind :merge-resolution
+                              :worktree-path nil})]
+      (is (response/error? result))
+      (is (= :curator/worktree-missing
+             (get-in result [:error :data :code]))))))
+
+(deftest merge-resolution-prior-paths-coerced-from-vector-test
+  (testing "Recurrence detection accepts the curator's own
+            `:conflicted-paths` shape (sorted vector) as input — pre-fix
+            the gate was `(set? prior-conflicted-paths)` so feeding back
+            the prior iteration's `:conflicted-paths` directly never
+            triggered recurrence. Now any collection coerces to a set."
+    (write-file! "src/x.clj" conflict-marker-content)
+    (write-file! "src/y.clj" conflict-marker-content)
+    (let [;; Mimic what a loop driver would feed back: the prior
+          ;; iteration's :conflicted-paths from :error :data — a
+          ;; sorted vector of strings, not a set.
+          prior-as-vector ["src/x.clj" "src/y.clj"]
+          result (sut/curate {:curator/kind :merge-resolution
+                              :worktree-path *worktree*
+                              :prior-conflicted-paths prior-as-vector})]
+      (is (response/error? result))
+      (is (= :curator/recurring-conflict
+             (get-in result [:error :data :code]))
+          "vector input is coerced to a set internally; recurrence fires
+           the same way as if the caller had passed a set"))))
+
+(deftest conflict-marker-regex-only-matches-real-tokens-test
+  (testing "The regex `^(<{7,}|={7,}|>{7,})` rejects mixed/short runs.
+            Pre-fix `^[<>=]{7,}` would have matched a stray
+            '<>=<>=<>=' line, false-positiving on docs / fixtures /
+            non-conflict diffs. Lock the new behavior."
+    ;; Mixed-character run: not a conflict marker.
+    (write-file! "docs/decoration.md" "# Section\n<>=<>=<>=\nbody\n")
+    ;; Short run: not a conflict marker (git uses 7+).
+    (write-file! "src/short.clj" "<<<<<<\nfoo\n=====\nbar\n>>>>>>\n")
+    (let [result (sut/curate {:curator/kind :merge-resolution
+                              :worktree-path *worktree*})]
+      (is (response/success? result)
+          "neither file should be flagged — only real conflict markers
+           (7+ same-character runs at column 0) count"))))
+
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
   (clojure.test/run-tests 'ai.miniforge.agent.curator-merge-resolution-test)

@@ -67,6 +67,8 @@
    [ai.miniforge.schema.interface :as schema]
    [babashka.fs :as fs]
    [clojure.edn :as edn]
+   [clojure.java.io :as io]
+   [clojure.java.shell :as shell]
    [clojure.string :as str]
    [malli.core :as m]))
 
@@ -419,32 +421,102 @@
 ;; narration to fire.
 
 (def ^:private conflict-marker-re
-  "Match a line that begins (after optional whitespace) with one of
-   git's three conflict-marker tokens. The exact-7 form is git's
-   default; longer runs are also legal so we match `+`."
-  #"(?m)^[<>=]{7,}")
+  "Match a line that begins (column 0, no leading whitespace per git's
+   default emit format) with a run of 7+ identical conflict-marker
+   characters. The three valid tokens are <<<<<<<, =======, >>>>>>>;
+   we match each as a single-character run rather than `[<>=]{7,}`
+   so a stray `<>=<>=<` mid-line on a non-marker line doesn't false-
+   positive. The 7+ length matches git's default (exactly 7) plus the
+   variable-length form git's parser also accepts."
+  #"(?m)^(?:<{7,}|={7,}|>{7,})")
+
+(defn- line-matches-marker?
+  "True when `line` matches the conflict-marker pattern. Pulled out so
+   the file-streaming reducer below stays focused on the streaming
+   plumbing."
+  [line]
+  (boolean (re-find conflict-marker-re line)))
 
 (defn- file-has-conflict-markers?
-  "True when `path` contains git conflict markers. Returns false on
-   read failure (file gone, permission denied) — those failures are
-   the caller's problem (curator can only judge what it can read)."
+  "True when `path`'s contents contain a git conflict marker. Streams
+   the file line-by-line and short-circuits on the first match — the
+   first marker line answers the question, so we never load large
+   files into memory just to scan them. Returns false on any read
+   failure (file gone, permission denied, binary garbage) since the
+   curator can only judge what it can read."
   [path]
   (try
     (and (fs/regular-file? path)
-         (boolean (re-find conflict-marker-re (slurp (str path)))))
+         (with-open [r (io/reader (str path))]
+           (boolean (some line-matches-marker? (line-seq r)))))
     (catch Throwable _ false)))
 
-(defn- scan-conflicted-paths
-  "Walk `worktree-path` and return the set of relative paths whose file
-   contents contain conflict markers. The return is a set so callers
-   can compare iterations directly."
+(defn- conflicted-paths-via-git-grep
+  "Use `git grep` to find tracked files containing conflict markers.
+   When the worktree is a git tree (always true for v2 merge-resolution
+   runs — `merge-parent-branches!` creates the worktree via
+   `git worktree add`), this is much faster than walking the
+   filesystem: git grep skips ignored / untracked files, uses its own
+   indexed grep, and avoids slurping vendor / build dirs.
+
+   Returns the set of relative paths on success, or nil to signal
+   'fall back to the file walk' (worktree isn't a git tree, git grep
+   isn't available, or some other failure mode)."
   [worktree-path]
-  (when (fs/directory? worktree-path)
-    (let [root (fs/canonicalize worktree-path)]
-      (->> (fs/glob root "**" {:hidden false})
-           (filter file-has-conflict-markers?)
-           (map (fn rel-path [p] (str (fs/relativize root p))))
-           set))))
+  (let [r (try
+            (shell/sh "git" "-C" (str worktree-path)
+                      "grep" "--no-color" "-lE"
+                      "^(<<<<<<<|=======|>>>>>>>)")
+            (catch Throwable _ nil))]
+    (cond
+      ;; git grep convention: exit 0 = matches found; 1 = no matches.
+      ;; Both are valid 'this worktree is grep-scannable' outcomes.
+      (and r (zero? (:exit r)))
+      (->> (str/split-lines (str (:out r)))
+           (remove str/blank?)
+           set)
+
+      (and r (= 1 (:exit r)))
+      #{}
+
+      ;; Anything else — not a git tree, or git binary missing — bails
+      ;; to the caller's fallback path.
+      :else nil)))
+
+(defn- conflicted-paths-via-file-walk
+  "Fallback when git grep can't run (non-git worktree, etc.). Walks
+   the worktree and streams each file looking for markers. Slower
+   than git grep on large trees but correct."
+  [worktree-path]
+  (let [root (fs/canonicalize worktree-path)]
+    (->> (fs/glob root "**" {:hidden false})
+         (filter file-has-conflict-markers?)
+         (map (fn rel-path [p] (str (fs/relativize root p))))
+         set)))
+
+(defn- scan-conflicted-paths
+  "Return the set of relative paths in `worktree-path` whose contents
+   contain a git conflict marker. Returns nil when `worktree-path` is
+   not an existing directory — the caller (`:merge-resolution`
+   curator) treats nil as a fault and surfaces a typed error rather
+   than silently reporting 'no markers'."
+  [worktree-path]
+  (when (and (some? worktree-path) (fs/directory? worktree-path))
+    (or (conflicted-paths-via-git-grep worktree-path)
+        (conflicted-paths-via-file-walk worktree-path))))
+
+(defn- worktree-missing-error
+  "Terminal error when `worktree-path` is missing or not a directory.
+   Surfacing this prevents the silent-success failure mode where a
+   misconfigured input would report `:resolution/markers-cleared? true`
+   purely because the scanner couldn't find any files (it never
+   looked)."
+  [worktree-path]
+  (response/error
+   (messages/t :error/curator-worktree-missing
+               {:path (or worktree-path "<nil>")})
+   {:data {:code :curator/worktree-missing
+           :worktree-path worktree-path}}))
 
 (defn- markers-not-resolved-error
   "Terminal error when conflict markers remain after the agent's
@@ -475,8 +547,20 @@
 (defmethod curate :merge-resolution
   [{:keys [worktree-path prior-conflicted-paths]
     :as input}]
-  (let [current-paths (scan-conflicted-paths worktree-path)]
+  (let [current-paths (scan-conflicted-paths worktree-path)
+        ;; Coerce prior-conflicted-paths to a set so callers can feed
+        ;; the previous iteration's :conflicted-paths (a sorted vector
+        ;; in our error data) back in directly without a type
+        ;; mismatch hiding recurrence detection.
+        prior-set (when (some? prior-conflicted-paths)
+                    (set prior-conflicted-paths))]
     (cond
+      ;; Worktree missing or not a directory — fault, not "markers
+      ;; cleared". Surface explicitly so a misconfigured input doesn't
+      ;; silently report success.
+      (nil? current-paths)
+      (worktree-missing-error worktree-path)
+
       ;; No markers remain — the agent did its job for this iteration.
       ;; The verify gate above will then check whether tests pass; the
       ;; curator's role is just the marker check.
@@ -488,8 +572,7 @@
 
       ;; Markers still present AND the path set hasn't changed since
       ;; the prior iteration — agent is stuck. Terminate early.
-      (and (set? prior-conflicted-paths)
-           (= prior-conflicted-paths current-paths))
+      (and prior-set (= prior-set current-paths))
       (recurring-conflict-error worktree-path current-paths)
 
       ;; Markers still present but the path set has changed (some
