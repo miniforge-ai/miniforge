@@ -263,6 +263,23 @@
          (not (fs/directory? file))
          (fs/executable? file))))
 
+(defn- direct-command-path?
+  [cmd]
+  (boolean (re-find #"[\\/]" (or cmd ""))))
+
+(defn- normalize-command-path
+  [path]
+  (when (executable-file? path)
+    (str (-> path
+             fs/path
+             fs/absolutize))))
+
+(defn- portable-command-path
+  [cmd]
+  (some-> cmd
+          fs/which
+          normalize-command-path))
+
 (defn- path-entries
   []
   (str/split (or (System/getenv "PATH") "") #":"))
@@ -277,12 +294,12 @@
   [cmd]
   (cond
     (str/blank? cmd) nil
-    (str/includes? cmd "/")
-    (when (executable-file? cmd)
-      (str (fs/absolutize cmd)))
+    (direct-command-path? cmd)
+    (normalize-command-path cmd)
 
     :else
-    (some #(matching-command-path % cmd) (path-entries))))
+    (or (portable-command-path cmd)
+        (some #(matching-command-path % cmd) (path-entries)))))
 
 (defn- cli-process-env
   []

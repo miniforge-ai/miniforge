@@ -139,3 +139,33 @@
           (is (= "/opt/homebrew/bin/claude" cmd-path))
           (is (= "2.1.89" cmd-version))
           (is (= "backend_preflight_timeout" (get-in probe-response [:error :type]))))))))
+
+(deftest run-backend-preflight-exercises-generic-cli-success-path-test
+  (testing "non-Claude CLI backends probe through llm/complete and accept the canonical ok payload"
+    (let [llm-client (llm/create-client {:backend :codex})
+          created-client-opts (atom nil)
+          completion-request (atom nil)
+          output (with-out-str
+                   (with-redefs-fn {#'sut/resolve-cli-command-path (fn [_] "/Users/chris/.local/bin/codex")
+                                    #'sut/read-cli-version (fn [_] {:success true :version "1.2.3"})
+                                    #'llm/create-client (fn [opts]
+                                                         (reset! created-client-opts opts)
+                                                         {:config opts})
+                                    #'llm/complete (fn [_client request]
+                                                     (reset! completion-request request)
+                                                     {:success true
+                                                      :content "{\"ok\":true}"
+                                                      :exit-code 0})}
+                     (fn []
+                       (#'sut/run-backend-preflight!
+                        false
+                        llm-client
+                        {:worktree-path "/tmp/runtime-worktree"}))))]
+      (is (str/includes? output "Backend: codex"))
+      (is (str/includes? output "Backend Path: /Users/chris/.local/bin/codex"))
+      (is (str/includes? output "Backend Version: 1.2.3"))
+      (is (= :codex (:backend @created-client-opts)))
+      (is (fn? (:exec-fn @created-client-opts)))
+      (is (= {:prompt "Reply with exactly {\"ok\":true}"
+              :max-turns 1}
+             @completion-request)))))
