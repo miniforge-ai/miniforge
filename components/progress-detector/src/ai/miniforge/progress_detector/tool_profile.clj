@@ -36,7 +36,7 @@
    [clojure.java.io :as io]
    [ai.miniforge.progress-detector.schema :as schema]))
 
-;; ---------------------------------------------------------------------------
+;------------------------------------------------------------------------------ Layer 0
 ;; Resource loading
 
 (def ^:private default-resource-path
@@ -53,11 +53,11 @@
     (with-open [rdr (io/reader url)]
       (edn/read (java.io.PushbackReader. rdr)))))
 
-;; ---------------------------------------------------------------------------
+;------------------------------------------------------------------------------ Layer 1
 ;; Registry construction and validation
 
 (defn validate-all
-  "Validate every entry in registry against ToolProfile schema.
+  "Validate every entry in registry against the ToolProfile schema.
 
    Arguments:
      registry - map of tool-id -> profile
@@ -66,10 +66,13 @@
   [registry]
   (reduce-kv
    (fn [acc tool-id profile]
-     (assoc acc tool-id
-            {:valid?  (schema/valid-tool-profile? profile)
-             :errors  (when-not (schema/valid-tool-profile? profile)
-                        (schema/explain-anomaly profile))}))
+     (let [valid? (schema/valid-tool-profile? profile)]
+       (assoc acc tool-id
+              {:valid? valid?
+               :errors (when-not valid?
+                         ;; Use the ToolProfile humanizer — not Anomaly's —
+                         ;; so error messages cite the right schema's fields.
+                         (schema/explain-tool-profile profile))})))
    {}
    registry))
 
@@ -77,10 +80,15 @@
   "Load and return the tool-profile registry from classpath EDN.
 
    Optionally accepts a resource-path override (useful in tests).
-   Performs schema validation and emits warnings for invalid profiles;
-   does NOT throw on invalid profiles to avoid crashing at startup.
 
-   Returns: map of tool-id-keyword -> profile-map"
+   The loaded value MUST be a map; otherwise a fault anomaly throws
+   via ex-info with the resource path and observed type. Per-entry
+   schema validation is the caller's responsibility — invoke
+   `validate-all` on the returned registry when you need the
+   per-tool-id audit. We do NOT validate at load time so a single
+   malformed entry can't take the whole registry offline.
+
+   Returns: map of tool-id-keyword -> profile-map."
   ([]
    (load-registry default-resource-path))
   ([resource-path]
@@ -90,7 +98,7 @@
                        {:resource resource-path :actual-type (type raw)})))
      raw)))
 
-;; ---------------------------------------------------------------------------
+;------------------------------------------------------------------------------ Layer 1
 ;; Default registry (loaded once at startup; held in a var)
 
 (defonce ^:private default-registry
@@ -99,7 +107,7 @@
 (defn- get-default-registry []
   @default-registry)
 
-;; ---------------------------------------------------------------------------
+;------------------------------------------------------------------------------ Layer 2
 ;; Query API
 
 (defn lookup
@@ -156,7 +164,7 @@
   ([registry]
    (vec (sort (keys registry)))))
 
-;; ---------------------------------------------------------------------------
+;------------------------------------------------------------------------------ Layer 2
 ;; Registry manipulation (returns new registry, never mutates)
 
 (defn register
@@ -182,7 +190,7 @@
   [registry tool-id]
   (dissoc registry tool-id))
 
-;; ---------------------------------------------------------------------------
+;------------------------------------------------------------------------------ Rich Comment
 ;; Rich comment
 
 (comment

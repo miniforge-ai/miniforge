@@ -37,7 +37,7 @@
      effective-params  - extract merged :config/params map from resolved config"
   )
 
-;; ---------------------------------------------------------------------------
+;------------------------------------------------------------------------------ Layer 0
 ;; Directive resolution
 
 (def ^:private directive-precedence
@@ -51,7 +51,7 @@
   [layer]
   (get layer :config/directive :inherit))
 
-;; ---------------------------------------------------------------------------
+;------------------------------------------------------------------------------ Layer 0
 ;; Deep-merge helper
 
 (defn- deep-merge
@@ -61,7 +61,7 @@
     (merge-with deep-merge a b)
     b))
 
-;; ---------------------------------------------------------------------------
+;------------------------------------------------------------------------------ Layer 1
 ;; Single-layer overlay application
 
 (defn apply-directive
@@ -103,7 +103,7 @@
       ;; fallthrough: treat unknown directives as :inherit
       accumulated)))
 
-;; ---------------------------------------------------------------------------
+;------------------------------------------------------------------------------ Layer 1
 ;; Multi-layer resolution
 
 (defn merge-config
@@ -137,20 +137,27 @@
   (when (empty? layers)
     (throw (ex-info "merge-config requires at least one layer"
                     {:layers layers})))
-  (let [base {:detector/enabled? true
-              :config/params     {}
-              :config/directives []}
-        ;; Accumulate layers left-to-right
+  (let [;; The first layer is the base — its :config/params seed the
+        ;; accumulator. Without this seeding the base's params get
+        ;; dropped on its own implicit :inherit directive (see
+        ;; merge-config-tune-test, overlay-test, deep-merge-nested-test
+        ;; — all surfaced this when the base layer's params went
+        ;; missing from the resolved config). Subsequent layers apply
+        ;; via apply-directive normally.
+        [base-layer & overlay-layers] layers
+        seed (-> {:detector/enabled? (get base-layer :detector/enabled? true)
+                  :config/params     (deep-merge {} (get base-layer :config/params {}))
+                  :config/directives [(resolve-directive base-layer)]})
         resolved (reduce
                   (fn [acc layer]
                     (let [directive (resolve-directive layer)
                           acc'      (apply-directive acc layer)]
                       (update acc' :config/directives conj directive)))
-                  base
-                  layers)]
+                  seed
+                  overlay-layers)]
     resolved))
 
-;; ---------------------------------------------------------------------------
+;------------------------------------------------------------------------------ Layer 2
 ;; Query helpers
 
 (defn enabled?
@@ -179,7 +186,7 @@
   [resolved-config]
   (get resolved-config :config/directives []))
 
-;; ---------------------------------------------------------------------------
+;------------------------------------------------------------------------------ Layer 2
 ;; Convenience: merge two configs (parent -> child)
 
 (defn overlay
@@ -195,7 +202,7 @@
   [parent child]
   (merge-config [parent child]))
 
-;; ---------------------------------------------------------------------------
+;------------------------------------------------------------------------------ Rich Comment
 ;; Rich comment
 
 (comment

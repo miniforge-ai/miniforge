@@ -34,7 +34,7 @@
      MUST return identical state. Side effects are prohibited inside
      detectors; all I/O happens outside the reduce loop.")
 
-;; ---------------------------------------------------------------------------
+;------------------------------------------------------------------------------ Layer 0
 ;; Core protocol
 
 (defprotocol Detector
@@ -84,7 +84,7 @@
        - MUST return a map satisfying the same shape as init output
        - MUST NOT throw; anomalies surface in-band as data"))
 
-;; ---------------------------------------------------------------------------
+;------------------------------------------------------------------------------ Layer 1
 ;; Null detector — reference implementation (pass-through, never flags)
 
 (defrecord NullDetector []
@@ -105,7 +105,7 @@
   []
   (->NullDetector))
 
-;; ---------------------------------------------------------------------------
+;------------------------------------------------------------------------------ Layer 1
 ;; Multi-detector: fan observations through a seq of detectors
 
 (defrecord MultiDetector [detectors]
@@ -136,7 +136,7 @@
   [detectors]
   (->MultiDetector (vec detectors)))
 
-;; ---------------------------------------------------------------------------
+;------------------------------------------------------------------------------ Layer 2
 ;; Helper: reduce a seq of observations through a detector
 
 (defn reduce-observations
@@ -153,7 +153,7 @@
           (init detector config)
           observations))
 
-;; ---------------------------------------------------------------------------
+;------------------------------------------------------------------------------ Rich Comment
 ;; Rich comment — development examples
 
 (comment

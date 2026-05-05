@@ -35,7 +35,7 @@
    [malli.error   :as me]
    [malli.transform :as mt]))
 
-;; ---------------------------------------------------------------------------
+;------------------------------------------------------------------------------ Layer 0
 ;; Enumeration schemas (keywords only; closed sets)
 
 (def AnomalyCategory
@@ -81,7 +81,7 @@
    :volatile          ; output varies by time/environment
    :nondeterministic]) ; intentionally random or stochastic
 
-;; ---------------------------------------------------------------------------
+;------------------------------------------------------------------------------ Layer 1
 ;; Anomaly schema
 
 (def AnomalyEvidence
@@ -120,7 +120,7 @@
    [:anomaly/description {:optional true} :string]
    [:anomaly/context     {:optional true} [:map-of :keyword :any]]])
 
-;; ---------------------------------------------------------------------------
+;------------------------------------------------------------------------------ Layer 1
 ;; Observation schema
 
 (def Observation
@@ -134,7 +134,7 @@
    [:tool/output      {:optional true} :any]
    [:tool/error?      {:optional true} :boolean]])
 
-;; ---------------------------------------------------------------------------
+;------------------------------------------------------------------------------ Layer 1
 ;; Detector-config overlay schema
 
 (def ConfigDirective
@@ -159,7 +159,7 @@
    [:config/directive {:optional true} ConfigDirective]
    [:config/params    {:optional true} [:map-of :keyword :any]]])
 
-;; ---------------------------------------------------------------------------
+;------------------------------------------------------------------------------ Layer 1
 ;; Tool-profile schema
 
 (def ToolProfile
@@ -171,7 +171,7 @@
    [:timeout-ms             {:optional true} [:maybe :int]]
    [:config                 {:optional true} [:map-of :keyword :any]]])
 
-;; ---------------------------------------------------------------------------
+;------------------------------------------------------------------------------ Layer 2
 ;; Validation helpers
 
 (defn valid-anomaly?
@@ -206,12 +206,24 @@
   [m]
   (m/validate ToolProfile m))
 
+(defn explain-tool-profile
+  "Return humanized error map if m fails ToolProfile validation, else nil."
+  [m]
+  (when-let [exp (m/explain ToolProfile m)]
+    (me/humanize exp)))
+
 (defn valid-detector-config?
   "Return true if m satisfies the DetectorConfig schema."
   [m]
   (m/validate DetectorConfig m))
 
-;; ---------------------------------------------------------------------------
+(defn explain-detector-config
+  "Return humanized error map if m fails DetectorConfig validation, else nil."
+  [m]
+  (when-let [exp (m/explain DetectorConfig m)]
+    (me/humanize exp)))
+
+;------------------------------------------------------------------------------ Rich Comment
 ;; Rich comment
 
 (comment

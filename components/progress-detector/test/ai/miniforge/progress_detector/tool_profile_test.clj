@@ -9,7 +9,7 @@
    [clojure.test :refer [deftest is testing]]
    [ai.miniforge.progress-detector.tool-profile :as sut]))
 
-;; ---------------------------------------------------------------------------
+;------------------------------------------------------------------------------ Layer 0
 ;; In-memory registry for unit tests (no classpath dependency)
 
 (def ^:private test-registry
@@ -31,7 +31,7 @@
     :anomaly/categories #{:anomaly.category/cost-spike :anomaly.category/stall}
     :timeout-ms         600000}})
 
-;; ---------------------------------------------------------------------------
+;------------------------------------------------------------------------------ Layer 1
 ;; load-registry
 
 (deftest load-registry-from-classpath-test
@@ -46,7 +46,7 @@
   (testing "load-registry throws on missing resource"
     (is (thrown? Exception (sut/load-registry "no/such/resource.edn")))))
 
-;; ---------------------------------------------------------------------------
+;------------------------------------------------------------------------------ Layer 1
 ;; lookup
 
 (deftest lookup-test
@@ -59,7 +59,7 @@
   (testing "lookup returns nil for an unknown tool"
     (is (nil? (sut/lookup :tool/unknown test-registry)))))
 
-;; ---------------------------------------------------------------------------
+;------------------------------------------------------------------------------ Layer 1
 ;; determinism-of
 
 (deftest determinism-of-test
@@ -75,7 +75,7 @@
   (testing "returns :volatile default for unknown tool"
     (is (= :volatile (sut/determinism-of :tool/unknown-xyz test-registry)))))
 
-;; ---------------------------------------------------------------------------
+;------------------------------------------------------------------------------ Layer 1
 ;; categories-of
 
 (deftest categories-of-test
@@ -88,7 +88,7 @@
   (testing "returns empty set for unknown tool"
     (is (= #{} (sut/categories-of :tool/unknown test-registry)))))
 
-;; ---------------------------------------------------------------------------
+;------------------------------------------------------------------------------ Layer 1
 ;; detector-kind-of
 
 (deftest detector-kind-of-test
@@ -101,7 +101,7 @@
   (testing "returns :detector.kind/shell default for unknown tool"
     (is (= :detector.kind/shell (sut/detector-kind-of :tool/unknown test-registry)))))
 
-;; ---------------------------------------------------------------------------
+;------------------------------------------------------------------------------ Layer 1
 ;; all-tool-ids
 
 (deftest all-tool-ids-test
@@ -117,7 +117,7 @@
       (is (contains? ids :tool/write))
       (is (contains? ids :tool/agent)))))
 
-;; ---------------------------------------------------------------------------
+;------------------------------------------------------------------------------ Layer 1
 ;; register / unregister
 
 (deftest register-test
@@ -145,7 +145,7 @@
     (let [new-reg (sut/unregister test-registry :tool/does-not-exist)]
       (is (= 3 (count new-reg))))))
 
-;; ---------------------------------------------------------------------------
+;------------------------------------------------------------------------------ Layer 1
 ;; validate-all
 
 (deftest validate-all-test

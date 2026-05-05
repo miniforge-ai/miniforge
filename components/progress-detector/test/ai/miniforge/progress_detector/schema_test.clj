@@ -9,7 +9,7 @@
    [clojure.test :refer [deftest is testing]]
    [ai.miniforge.progress-detector.schema :as sut]))
 
-;; ---------------------------------------------------------------------------
+;------------------------------------------------------------------------------ Layer 0
 ;; Helpers
 
 (defn- now [] (java.time.Instant/now))
@@ -36,7 +36,7 @@
    :anomaly/categories #{:anomaly.category/stall}
    :timeout-ms         120000})
 
-;; ---------------------------------------------------------------------------
+;------------------------------------------------------------------------------ Layer 1
 ;; Anomaly schema
 
 (deftest valid-anomaly-test
@@ -78,7 +78,7 @@
     (let [errors (sut/explain-anomaly (dissoc (valid-anomaly) :anomaly/id))]
       (is (some? errors)))))
 
-;; ---------------------------------------------------------------------------
+;------------------------------------------------------------------------------ Layer 1
 ;; Observation schema
 
 (deftest valid-observation-test
@@ -109,7 +109,7 @@
   (testing "returns error map for invalid observation"
     (is (some? (sut/explain-observation {})))))
 
-;; ---------------------------------------------------------------------------
+;------------------------------------------------------------------------------ Layer 1
 ;; ToolProfile schema
 
 (deftest valid-tool-profile-test
@@ -131,7 +131,7 @@
   (testing "invalid :determinism value fails"
     (is (false? (sut/valid-tool-profile? (assoc (valid-tool-profile) :determinism :random))))))
 
-;; ---------------------------------------------------------------------------
+;------------------------------------------------------------------------------ Layer 1
 ;; DetectorConfig schema
 
 (deftest valid-detector-config-test
@@ -151,7 +151,7 @@
   (testing "invalid directive fails"
     (is (false? (sut/valid-detector-config? {:config/directive :overwrite})))))
 
-;; ---------------------------------------------------------------------------
+;------------------------------------------------------------------------------ Layer 1
 ;; Enumeration schemas
 
 (deftest anomaly-category-values-test

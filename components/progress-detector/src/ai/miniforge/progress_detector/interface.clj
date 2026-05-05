@@ -71,7 +71,7 @@
    [ai.miniforge.progress-detector.tool-profile :as tp]
    [ai.miniforge.progress-detector.config      :as cfg]))
 
-;; ---------------------------------------------------------------------------
+;------------------------------------------------------------------------------ Layer 0
 ;; Layer 0 — Detector protocol (re-exported)
 
 (def null-detector
@@ -105,12 +105,26 @@
 (defn observe
   "Pure reducer: fold one observation into accumulated detector state.
 
+   Argument order is [detector state observation] — detector first
+   so this works as a 2-arity reducer step via (partial observe det)
+   in reduce/transduce contexts. For pipelining a single state
+   forward, use `let` bindings (or `as->`) rather than `->` — `->`
+   would put state in the detector slot.
+
    Arguments:
-     detector    - Detector protocol implementation
-     state       - current state (result of init or prior observe)
+     detector    - Detector protocol implementation (NOT the state)
+     state       - current state (result of init or prior observe);
+                   the value to thread forward through the reduction
      observation - tool invocation event map
 
-   Returns: New state map with :anomalies updated."
+   Contract (per the spec's pure-reducer requirement):
+     - state argument MUST NOT be mutated
+     - return value MUST be threaded back into the next observe call
+     - implementations MUST NOT throw — anomalies surface as data on
+       the returned state's :anomalies vector
+
+   Returns: New state map (same shape as init's return) with
+   :anomalies updated to include any newly detected anomaly maps."
   [detector state observation]
   (proto/observe detector state observation))
 
@@ -125,7 +139,7 @@
    Returns: Final state after all observations are folded."
   proto/reduce-observations)
 
-;; ---------------------------------------------------------------------------
+;------------------------------------------------------------------------------ Layer 1
 ;; Layer 1 — Anomaly schema (re-exported)
 
 (def valid-anomaly?
@@ -148,9 +162,17 @@
   "Return true if m satisfies the ToolProfile schema."
   schema/valid-tool-profile?)
 
+(def explain-tool-profile
+  "Return humanized error map if m fails ToolProfile validation, else nil."
+  schema/explain-tool-profile)
+
 (def valid-detector-config?
   "Return true if m satisfies the DetectorConfig schema."
   schema/valid-detector-config?)
+
+(def explain-detector-config
+  "Return humanized error map if m fails DetectorConfig validation, else nil."
+  schema/explain-detector-config)
 
 ;; Expose schema vars directly for advanced usage
 (def Anomaly          schema/Anomaly)
@@ -158,7 +180,7 @@
 (def ToolProfile      schema/ToolProfile)
 (def DetectorConfig   schema/DetectorConfig)
 
-;; ---------------------------------------------------------------------------
+;------------------------------------------------------------------------------ Layer 2
 ;; Layer 2 — Tool-profile registry (re-exported)
 
 (def load-tool-registry
@@ -232,7 +254,7 @@
   [registry tool-id profile]
   (tp/register registry tool-id profile))
 
-;; ---------------------------------------------------------------------------
+;------------------------------------------------------------------------------ Layer 2
 ;; Layer 3 — Config merge semantics (re-exported)
 
 (def resolve-config
@@ -270,7 +292,7 @@
    Shorthand for (resolve-config [parent child])."
   cfg/overlay)
 
-;; ---------------------------------------------------------------------------
+;------------------------------------------------------------------------------ Layer 3
 ;; Layer 4 — Convenience constructors and helpers
 
 (defn make-observation
@@ -324,7 +346,7 @@
   [state]
   (anomalies-by-severity state :anomaly.severity/critical))
 
-;; ---------------------------------------------------------------------------
+;------------------------------------------------------------------------------ Rich Comment
 ;; Rich comment
 
 (comment

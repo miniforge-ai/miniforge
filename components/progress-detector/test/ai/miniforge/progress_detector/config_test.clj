@@ -9,7 +9,7 @@
    [clojure.test :refer [deftest is testing]]
    [ai.miniforge.progress-detector.config :as sut]))
 
-;; ---------------------------------------------------------------------------
+;------------------------------------------------------------------------------ Layer 0
 ;; apply-directive — unit tests for each directive
 
 (deftest apply-directive-inherit-test
@@ -71,7 +71,7 @@
                                            :config/params {}})]
       (is (true? (:detector/enabled? result))))))
 
-;; ---------------------------------------------------------------------------
+;------------------------------------------------------------------------------ Layer 1
 ;; merge-config — integration tests
 
 (deftest merge-config-single-layer-test
@@ -131,7 +131,7 @@
   (testing "empty layers seq throws"
     (is (thrown? Exception (sut/merge-config [])))))
 
-;; ---------------------------------------------------------------------------
+;------------------------------------------------------------------------------ Layer 1
 ;; enabled? / effective-params / directives-applied
 
 (deftest enabled-default-test
@@ -148,7 +148,7 @@
   (testing "returns the :config/params map"
     (is (= {:k 1} (sut/effective-params {:config/params {:k 1}})))))
 
-;; ---------------------------------------------------------------------------
+;------------------------------------------------------------------------------ Layer 1
 ;; overlay
 
 (deftest overlay-test
@@ -170,7 +170,7 @@
                                :config/params   {:y 2}})]
       (is (= {:x 1 :y 2} (sut/effective-params result))))))
 
-;; ---------------------------------------------------------------------------
+;------------------------------------------------------------------------------ Layer 1
 ;; Deep merge corner cases
 
 (deftest deep-merge-nested-test

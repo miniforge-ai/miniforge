@@ -9,7 +9,7 @@
    [clojure.test :refer [deftest is testing]]
    [ai.miniforge.progress-detector.interface :as pd]))
 
-;; ---------------------------------------------------------------------------
+;------------------------------------------------------------------------------ Layer 0
 ;; Detector lifecycle (init / observe / reduce-observations)
 
 (deftest interface-detector-lifecycle-test
@@ -20,11 +20,14 @@
       (is (empty?  (:anomalies state)))))
 
   (testing "observe accumulates observations"
-    (let [det  (pd/null-detector)
-          obs  (pd/make-observation :tool/bash 1 (java.time.Instant/now)
-                                    {:tool/duration-ms 80})
-          st   (-> (pd/init det {})
-                   (pd/observe det obs))]
+    (let [det (pd/null-detector)
+          obs (pd/make-observation :tool/bash 1 (java.time.Instant/now)
+                                   {:tool/duration-ms 80})
+          ;; observe takes [detector state observation] — detector first
+          ;; for protocol-dispatch + (partial observe det) reducer use.
+          ;; A `->` thread on (init …) would put state in detector slot.
+          st0 (pd/init det {})
+          st  (pd/observe det st0 obs)]
       (is (= 1 (count (:observations st))))
       (is (empty? (pd/current-anomalies st)))))
 
@@ -35,7 +38,7 @@
           stf  (pd/reduce-observations det {} obss)]
       (is (= 5 (count (:observations stf)))))))
 
-;; ---------------------------------------------------------------------------
+;------------------------------------------------------------------------------ Layer 1
 ;; multi-detector
 
 (deftest interface-multi-detector-test
@@ -47,7 +50,7 @@
       (is (= 2 (count (:sub-states st'))))
       (is (empty? (pd/current-anomalies st'))))))
 
-;; ---------------------------------------------------------------------------
+;------------------------------------------------------------------------------ Layer 1
 ;; Anomaly schema helpers
 
 (deftest interface-valid-anomaly-test
@@ -87,7 +90,7 @@
     (is (false? (pd/valid-observation?
                  {:tool/id :tool/bash :timestamp (java.time.Instant/now)})))))
 
-;; ---------------------------------------------------------------------------
+;------------------------------------------------------------------------------ Layer 1
 ;; Tool-profile registry
 
 (deftest interface-tool-profile-test
@@ -120,7 +123,7 @@
       (is (= :volatile (pd/tool-determinism :tool/bash reg))
           "original registry unchanged"))))
 
-;; ---------------------------------------------------------------------------
+;------------------------------------------------------------------------------ Layer 1
 ;; Config merge
 
 (deftest interface-resolve-config-test
@@ -141,7 +144,7 @@
           result (pd/config-overlay parent child)]
       (is (= {:a 1 :b 2} (pd/effective-config-params result))))))
 
-;; ---------------------------------------------------------------------------
+;------------------------------------------------------------------------------ Layer 1
 ;; make-observation
 
 (deftest make-observation-test
@@ -159,7 +162,7 @@
       (is (= 30    (:tool/duration-ms obs)))
       (is (= false (:tool/error? obs))))))
 
-;; ---------------------------------------------------------------------------
+;------------------------------------------------------------------------------ Layer 1
 ;; anomalies-by-severity / critical-anomalies
 
 (deftest anomalies-by-severity-test

@@ -9,7 +9,7 @@
    [clojure.test :refer [deftest is testing]]
    [ai.miniforge.progress-detector.protocol :as sut]))
 
-;; ---------------------------------------------------------------------------
+;------------------------------------------------------------------------------ Layer 0
 ;; Helpers
 
 (defn- make-obs
@@ -21,7 +21,7 @@
     :timestamp        (java.time.Instant/now)
     :tool/duration-ms 100}))
 
-;; ---------------------------------------------------------------------------
+;------------------------------------------------------------------------------ Layer 1
 ;; NullDetector
 
 (deftest null-detector-init-test
@@ -65,7 +65,7 @@
           result-b (sut/observe det state obs)]
       (is (= result-a result-b) "identical inputs produce identical outputs"))))
 
-;; ---------------------------------------------------------------------------
+;------------------------------------------------------------------------------ Layer 1
 ;; MultiDetector
 
 (deftest multi-detector-init-test
@@ -97,7 +97,7 @@
       (is (empty? (:sub-states st)))
       (is (empty? (:anomalies st))))))
 
-;; ---------------------------------------------------------------------------
+;------------------------------------------------------------------------------ Layer 1
 ;; reduce-observations
 
 (deftest reduce-observations-test
