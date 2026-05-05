@@ -78,6 +78,19 @@
   "System prompt for the reviewer agent."
   (delay (prompts/load-prompt :reviewer)))
 
+(def ^:private reviewer-prompt-data
+  "Full prompt data map for the reviewer agent.
+   Exposes knobs like :prompt/progress-monitor that gate stream supervision."
+  (delay (prompts/load-prompt-data :reviewer)))
+
+(defn- create-reviewer-progress-monitor
+  "Reviewer main-turn progress monitor. Thresholds live in
+   resources/prompts/reviewer.edn (:prompt/progress-monitor). Falls
+   back to the framework default when the EDN omits the block."
+  []
+  (when-let [config (get @reviewer-prompt-data :prompt/progress-monitor)]
+    (llm/create-progress-monitor config)))
+
 ;------------------------------------------------------------------------------ Layer 1
 ;; Gate running and feedback
 
@@ -582,13 +595,14 @@
           (if llm-client
             ;; LLM + gates review
             (let [user-prompt (build-review-prompt input)
+                  monitor (create-reviewer-progress-monitor)
+                  base-opts (cond-> {:system @reviewer-system-prompt
+                                     :max-turns 20}
+                              monitor (assoc :progress-monitor monitor))
                   response (if on-chunk
                              (llm/chat-stream llm-client user-prompt on-chunk
-                                              {:system @reviewer-system-prompt
-                                               :max-turns 20})
-                             (llm/chat llm-client user-prompt
-                                       {:system @reviewer-system-prompt
-                                        :max-turns 20}))
+                                              base-opts)
+                             (llm/chat llm-client user-prompt base-opts))
                   content (or (llm/get-content response) "")
                   tokens (get response :tokens 0)
                   cost-usd (get response :cost-usd)]
