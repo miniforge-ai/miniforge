@@ -330,16 +330,24 @@
    call got permission-denied. Iter-15 follow-on — `Write` wasn't in
    the allowlist at all, so the planner's `.miniforge/plan.edn`
    Write was silently denied (model then narrated 'let me try Edit'
-   and stalled). Both fix back to keeping the structured form honest
-   and adapters translating at the CLI boundary."
+   and stalled). 2026-05-04 follow-on — `Edit` / `MultiEdit` were
+   never added either; the implementer in the
+   event-log-tool-visibility dogfood spent five repair iters
+   producing patch text the CLI refused to apply, then a sixth
+   iter discovered Write worked while Edit did not. Both fixes back
+   to keeping the structured form honest and adapters translating
+   at the CLI boundary."
   [{:mcp/server :context :mcp/tool :context_read}
    {:mcp/server :context :mcp/tool :context_grep}
    {:mcp/server :context :mcp/tool :context_glob}
-   ;; Native tool: container-promotion submission path. Planner
-   ;; writes .miniforge/plan.edn; implementer writes source/tests;
-   ;; releaser writes PR-body drafts. Roles that shouldn't Write
-   ;; filter via :disallowed-tools separately.
-   :Write])
+   ;; Native write tools: implementer needs all three patch shapes.
+   ;; `Write` for full-file rewrites (planner's plan.edn, implementer
+   ;; new files, releaser PR drafts). `Edit` for single-region patches.
+   ;; `MultiEdit` for batched edits within one file. Roles that shouldn't
+   ;; modify files filter via :disallowed-tools separately.
+   :Write
+   :Edit
+   :MultiEdit])
 
 (defn write-mcp-config!
   "Write session config files for all supported CLI backends.
