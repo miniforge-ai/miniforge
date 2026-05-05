@@ -131,14 +131,24 @@
   "Parse a line from Claude CLI streaming output.
 
    Claude CLI stream-json emits:
-   - {\"type\":\"system\"} — init event (ignored)
+   - {\"type\":\"system\"} — one-shot init event; parsed to a heartbeat
+     so it refreshes stream supervision once at session start
    - {\"type\":\"assistant\",\"message\":{\"content\":[{\"text\":\"...\"}]}} — content
-   - {\"type\":\"result\"} — final result with usage (ignored)
+   - {\"type\":\"tool_use\"} — tool invocation (carries :tool-use)
+   - {\"type\":\"rate_limit_event\"} — periodic liveness pulse from
+     the CLI; parsed to a heartbeat so it keeps the progress monitor
+     alive while the model is mid-think (no assistant chunks yet)
+   - {\"type\":\"result\"} — final usage / stop-reason envelope
+
+   Unrecognised event types also parse to a heartbeat — the stream
+   stays alive even when the CLI introduces new event shapes the
+   miniforge parser hasn't yet learned.
 
    Arguments:
      line - String line from stream
 
-   Returns: {:delta string :done? boolean} or nil"
+   Returns: {:delta string :done? boolean ...} or nil
+            (nil for blank lines or parse failures only)"
   [line]
   (try
     (when-not (str/blank? line)
@@ -202,9 +212,18 @@
             {:delta "" :done? false :tool-use true
              :tool-name tool-name})
 
-          ;; System and rate_limit_event are known no-ops
+          ;; System init and rate-limit notifications carry no content,
+          ;; but they ARE liveness signals from the CLI. While Claude is
+          ;; thinking on a heavy first turn (Opus on a multi-thousand-
+          ;; token planner prompt can take 30-60s before the first
+          ;; assistant chunk), `rate_limit_event` is often the only
+          ;; thing arriving on stdout. Treat both as heartbeats so the
+          ;; adaptive timeout doesn't fire on a model that's actively
+          ;; working — observed in the 2026-05-04 dogfood: 7 rate-limit
+          ;; events + 1 system init in 60s, stagnation killed the run
+          ;; with zero assistant output produced.
           ("system" "rate_limit_event")
-          nil
+          {:delta "" :done? false :heartbeat true}
 
           ;; Any other unrecognised event type — emit a heartbeat so the
           ;; stream stays alive during tool-heavy phases
