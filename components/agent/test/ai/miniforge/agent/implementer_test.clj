@@ -303,7 +303,37 @@
                     {:task/review-feedback ["Fix the blocking issues"]}))]
       (is (response/error? result))
       (is (= :implementer/unverified-already-implemented
-             (get-in result [:error :data :code]))))))
+             (get-in result [:error :data :code])))))
+
+  (testing "parseable already-implemented content survives an unsuccessful backend wrapper"
+    (let [[logger _] (log/collecting-logger {:min-level :trace})
+          response {:success false
+                    :content "{:status :already-implemented :summary \"done\"}"
+                    :tokens 9
+                    :cost-usd 0.01
+                    :error {:type "cli_error"
+                            :message "artifact file not found"}} 
+          result (with-redefs [artifact-session/create-session!
+                               (fn [& _] (session-map))
+                               artifact-session/write-mcp-config!
+                               identity
+                               artifact-session/read-artifact
+                               (constantly nil)
+                               artifact-session/read-context-misses
+                               (constantly nil)
+                               artifact-session/cleanup-session!
+                               (constantly nil)
+                               budget/resolve-cost-budget-usd
+                               (fn [& _] 1.0)
+                               llm/chat
+                               (fn [& _] response)
+                               file-artifacts/collect-written-files
+                               (fn [_ _] nil)]
+                   (@#'implementer/invoke-with-llm
+                    nil "prompt" "system" {} {} nil logger [] {}))]
+      (is (= :already-implemented (:status result)))
+      (is (= "done" (:summary result)))
+      (is (= [] (get-in result [:output :code/files]))))))
 
 ;------------------------------------------------------------------------------ Layer 3
 ;; Validation tests

@@ -432,6 +432,16 @@
      :code/summary "Implementation from code blocks"
      :code/created-at (java.util.Date.)}))
 
+(defn- usable-llm-content?
+  "True when the LLM response content can still be normalized into an
+   implementer result even if the backend wrapper marked the turn unsuccessful."
+  [content]
+  (when (and (string? content)
+             (not (str/blank? content)))
+    (boolean
+     (or (parse-code-response content)
+         (code-from-blocks content)))))
+
 (defn- process-llm-response
   "Process a successful LLM response, returning the appropriate result."
   [response artifact artifact-source context logger tokens cost-usd input]
@@ -533,7 +543,8 @@
                           :else nil)
         effective-artifact (or artifact file-artifact)
         tokens (get response :tokens 0)
-        cost-usd (get response :cost-usd)]
+        cost-usd (get response :cost-usd)
+        content (llm/get-content response)]
     (when (seq context-misses)
       (log/info logger :implementer :implementer/context-cache-misses
                 {:data {:miss-count (count context-misses)
@@ -560,7 +571,9 @@
     ;; successful stream of edits; the old path discarded a real
     ;; artifact because the LLM response was classified as failure.
     ;; Mirrors the planner fix in `(or worktree-plan (llm/success? …))`.
-    (if (or effective-artifact (llm/success? response))
+    (if (or effective-artifact
+            (llm/success? response)
+            (usable-llm-content? content))
       (process-llm-response response effective-artifact artifact-source
                             context logger tokens cost-usd input)
       ;; LLM call failed, no artifact — preserve the full llm-error
