@@ -29,7 +29,8 @@
    [clojure.string :as str]
    [clojure.test :refer [deftest is testing use-fixtures]]
    [ai.miniforge.dag-executor.interface :as dag]
-   [ai.miniforge.workflow.dag-orchestrator :as dag-orch]))
+   [ai.miniforge.workflow.dag-orchestrator :as dag-orch]
+   [ai.miniforge.workflow.messages :as messages]))
 
 ;------------------------------------------------------------------------------ Fixture: temp git repo
 
@@ -37,11 +38,17 @@
 
 (defn- run-git!
   "Run a git command in `cwd`. Throws on non-zero exit so test setup
-   bugs surface immediately rather than as cryptic downstream failures."
+   bugs surface immediately rather than as cryptic downstream failures.
+   The throw is dev-internal — it never reaches a user — but the
+   message is still routed through the workflow message catalog
+   (system-locale entries) so we have one place to audit / change
+   error wording."
   [cwd & args]
   (let [r (apply shell/sh "git" "-C" cwd args)]
     (when-not (zero? (:exit r))
-      (throw (ex-info (str "git " (str/join " " args) " failed: " (:err r))
+      (throw (ex-info (messages/t :dag.merge.system/git-test-failure
+                                  {:args (str/join " " args)
+                                   :err  (:err r)})
                       {:cwd cwd :args args :result r})))
     r))
 
@@ -103,8 +110,8 @@
 (deftest two-parent-disjoint-files-happy-path-test
   (testing "Two parents touching disjoint files merge cleanly via -s ort.
             The result is a real merge commit; the namespaced ref points
-            at it; the orchestrator returns :merge/ok? true with the
-            ref name and commit SHA."
+            at it; the orchestrator returns dag/ok wrapping {:branch
+            :commit-sha ...}."
     (create-parent-branch! "task-a" "src/a.txt" "from a\n")
     (create-parent-branch! "task-b" "src/b.txt" "from b\n")
     (let [task-id "task-c"
@@ -112,21 +119,22 @@
                     :task/deps [:a :b]}
           ctx (ctx-with-registry {:a {:branch "task-a"}
                                   :b {:branch "task-b"}})
-          result (dag-orch/merge-parent-branches! ctx task-def)]
-      (is (:merge/ok? result))
-      (is (str/starts-with? (:merge/ref result) "refs/miniforge/dag-base/test-run/"))
-      (is (string? (:merge/commit-sha result)))
-      (is (= 40 (count (:merge/commit-sha result)))
+          result (dag-orch/merge-parent-branches! ctx task-def)
+          data (:data result)]
+      (is (dag/ok? result))
+      (is (str/starts-with? (:branch data) "refs/miniforge/dag-base/test-run/"))
+      (is (string? (:commit-sha data)))
+      (is (= 40 (count (:commit-sha data)))
           "commit SHA is full 40-char hex (rev-parse default)")
       ;; The merge commit should have two parents
       (let [parents-cmd (run-git! *repo* "rev-list" "--parents" "-n" "1"
-                                  (:merge/commit-sha result))
+                                  (:commit-sha data))
             parts (str/split (str/trim (:out parents-cmd)) #"\s+")]
         (is (= 3 (count parts))
             "merge commit + 2 parents = 3 SHAs"))
       ;; Both files should be present in the merged tree
       (let [tree (run-git! *repo* "ls-tree" "-r" "--name-only"
-                           (:merge/commit-sha result))
+                           (:commit-sha data))
             files (set (str/split-lines (str/trim (:out tree))))]
         (is (contains? files "src/a.txt"))
         (is (contains? files "src/b.txt"))))))
@@ -147,15 +155,16 @@
     (let [task-def {:task/id "task-c" :task/deps [:a :b]}
           ctx (ctx-with-registry {:a {:branch "task-a"}
                                   :b {:branch "task-b"}})
-          result (dag-orch/merge-parent-branches! ctx task-def)]
-      (is (:merge/ok? result))
-      (is (:merge/single-parent? result)
+          result (dag-orch/merge-parent-branches! ctx task-def)
+          data (:data result)]
+      (is (dag/ok? result))
+      (is (:single-parent? data)
           "after ancestor collapse, only task-b remains as effective parent")
-      (is (= "task-b" (:merge/ref result))
+      (is (= "task-b" (:branch data))
           "the surviving parent's branch is returned directly")
-      (is (some #(= :a (:dropped %)) (:merge/collapsed result))
+      (is (some #(= :a (:dropped %)) (:collapsed data))
           ":collapsed records what was absorbed")
-      (is (some #(= :b (:absorbed-into %)) (:merge/collapsed result))
+      (is (some #(= :b (:absorbed-into %)) (:collapsed data))
           "and which surviving parent absorbed it"))))
 
 ;------------------------------------------------------------------------------ Tests: duplicate parent tips
@@ -173,8 +182,8 @@
           ctx (ctx-with-registry {:a     {:branch "task-a"}
                                   :alias {:branch "task-a-alias"}})
           result (dag-orch/merge-parent-branches! ctx task-def)]
-      (is (:merge/ok? result))
-      (is (:merge/single-parent? result)
+      (is (dag/ok? result))
+      (is (:single-parent? (:data result))
           "duplicate tips collapse to one effective parent"))))
 
 ;------------------------------------------------------------------------------ Tests: unrelated histories
@@ -234,10 +243,11 @@
                :execution/opts {:branch "main"}
                :workflow-id "test-run"
                :dag/branch-registry (atom (dag/create-branch-registry))}
-          result (dag-orch/merge-parent-branches! ctx task-def)]
-      (is (:merge/ok? result))
-      (is (:merge/single-parent? result))
-      (is (= :no-registered-parents (:merge/fallback-reason result))))))
+          result (dag-orch/merge-parent-branches! ctx task-def)
+          data (:data result)]
+      (is (dag/ok? result))
+      (is (:single-parent? data))
+      (is (= :no-registered-parents (:fallback-reason data))))))
 
 (deftest registered-branch-not-in-repo-anomaly-test
   (testing "When a registered branch doesn't exist in the host repo
@@ -266,21 +276,22 @@
           ctx (ctx-with-registry {:a {:branch "task-a"}
                                   :b {:branch "task-b"}})
           first-result  (dag-orch/merge-parent-branches! ctx task-def)
-          second-result (dag-orch/merge-parent-branches! ctx task-def)]
-      (is (:merge/ok? first-result))
-      (is (:merge/ok? second-result))
-      (is (= (:merge/ref first-result) (:merge/ref second-result))
+          second-result (dag-orch/merge-parent-branches! ctx task-def)
+          first-data    (:data first-result)
+          second-data   (:data second-result)]
+      (is (dag/ok? first-result))
+      (is (dag/ok? second-result))
+      (is (= (:branch first-data) (:branch second-data))
           "same ref name (input-key is deterministic)")
-      (is (= (:merge/commit-sha first-result) (:merge/commit-sha second-result))
+      (is (= (:commit-sha first-data) (:commit-sha second-data))
           "same commit SHA — second call hit the cache, did NOT produce a
            fresh merge commit. This is the property that justifies the
            input-key derivation in spec §3.2 step 6.")
-      (is (true? (:merge/cache-hit? second-result))
+      (is (true? (:cache-hit? second-data))
           "cache-hit flag exposed for observability — dashboard can show
            how often replays are reusing existing merge work")
-      (is (not (contains? first-result :merge/cache-hit?))
-          "first call sets up the cache; cache-hit? only appears on
-           subsequent calls"))))
+      (is (false? (:cache-hit? first-data))
+          "first call sets up the cache; cache-hit? is false there"))))
 
 ;------------------------------------------------------------------------------ Tests: unsupported strategy
 

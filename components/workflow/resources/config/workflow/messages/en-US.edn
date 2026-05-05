@@ -75,4 +75,19 @@
   :env/acquisition-failed   "Environment acquisition failed: {error}"
   :env/release-failed       "Environment release failed: {error}"
   :env/persist-message      "{phase} phase completed"
-  :env/persist-failed       "Workspace persist failed: {error}"}}
+  :env/persist-failed       "Workspace persist failed: {error}"
+
+  ;; v2 multi-parent merge (DAG orchestrator) — anomaly + log messages
+  :dag.merge/branch-unresolvable     "Parent branch could not be resolved to a commit"
+  :dag.merge/unrelated-histories     "Parents share no common ancestor — refusing to merge"
+  :dag.merge/strategy-unsupported    "Merge strategy {strategy} is not supported in this stage"
+  :dag.merge/conflict                "Multi-parent merge conflicted"
+  :dag.merge/merge-failed-worktree   "Could not create temp worktree for merge"
+  :dag.merge/merge-failed-ref-write  "Failed to write merge result to namespaced ref"
+  :dag.merge/commit-message-header   "miniforge dag-merge for task {task-id}"
+  :dag.merge/commit-message-parent   "  {index}. {task-id} @ {commit-sha}"
+
+  ;; v2 multi-parent merge — system-locale strings (operator-internal,
+  ;; never user-localized, but routed through the catalog so we have one
+  ;; place to audit and change them).
+  :dag.merge.system/git-test-failure "git {args} failed: {err}"}}
