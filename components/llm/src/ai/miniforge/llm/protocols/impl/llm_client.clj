@@ -112,11 +112,12 @@
   "Build a failed LLM response with anomaly."
   ([category error-type message]
    (llm-error category error-type message nil))
-  ([category error-type message {:keys [exit-code stderr stdout timeout]}]
+  ([category error-type message {:keys [exit-code stderr stdout raw-stdout timeout]}]
    (cond-> {:success false
             :error (cond-> {:type error-type :message message}
                      stderr  (assoc :stderr stderr)
                      stdout  (assoc :stdout stdout)
+                     raw-stdout (assoc :raw-stdout raw-stdout)
                      timeout (assoc :timeout timeout))
             :anomaly (response/make-anomaly
                       category message
@@ -657,10 +658,9 @@
         (enqueue-stream-line! line-queue (stream-read-failure e))))))
 
 (defn- record-stream-line!
-  [out-lines monitor dump-writer on-line last-line-at now line]
+  [out-lines dump-writer on-line last-line-at now line]
   (reset! last-line-at now)
   (swap! out-lines conj line)
-  (pm/record-chunk! monitor line)
   (when dump-writer
     (.println dump-writer line)
     (.flush dump-writer))
@@ -697,7 +697,7 @@
                                  (System/currentTimeMillis))})
 
 (defn- process-stream-signal
-  [line-or-signal out-lines monitor dump-writer on-line last-line-at line-timeout-ms]
+  [line-or-signal out-lines dump-writer on-line last-line-at line-timeout-ms]
   (cond
     (anomaly-signal? line-or-signal)
     (throw+ line-or-signal)
@@ -707,7 +707,6 @@
 
     (some? line-or-signal)
     (do (record-stream-line! out-lines
-                             monitor
                              dump-writer
                              on-line
                              last-line-at
@@ -733,7 +732,6 @@
           (let [{:keys [done? timeout]}
                 (process-stream-signal (stream-poll-signal line-queue)
                                        out-lines
-                                       monitor
                                        dump-writer
                                        on-line
                                        last-line-at
@@ -840,7 +838,28 @@
                  :content (:content result)}))
     result))
 
-(defn stream-with-parser [stream-parser on-chunk accumulated-content accumulated-usage accumulated-cost accumulated-tools accumulated-session-id accumulated-stop-reason accumulated-turns]
+(defn- record-parsed-progress!
+  [progress-monitor parsed accumulated-content]
+  (cond
+    (:tool-use parsed)
+    (pm/record-chunk!
+     progress-monitor
+     (str "tool-use:"
+          (or (:tool-name parsed)
+              (some->> (:tool-names parsed) seq sort (str/join ","))
+              "unknown")))
+
+    (:heartbeat parsed)
+    (pm/record-chunk! progress-monitor "stream-heartbeat")
+
+    (contains? parsed :done?)
+    (pm/record-chunk! progress-monitor "stream-result")
+
+    :else
+    (pm/record-chunk! progress-monitor @accumulated-content)))
+
+(defn stream-with-parser
+  [stream-parser on-chunk progress-monitor accumulated-content accumulated-usage accumulated-cost accumulated-tools accumulated-session-id accumulated-stop-reason accumulated-turns]
   (fn [line]
     (when-let [parsed (stream-parser line)]
       (when-let [usage (:usage parsed)]
@@ -865,10 +884,12 @@
             (swap! accumulated-tools conj tool-name))
           (when-let [tool-names (:tool-names parsed)]
             (swap! accumulated-tools into tool-names))
+          (record-parsed-progress! progress-monitor parsed accumulated-content)
           (on-chunk (assoc parsed :content @accumulated-content)))
         ;; Normal text deltas
         (when-let [delta (:delta parsed)]
           (swap! accumulated-content str delta)
+          (record-parsed-progress! progress-monitor parsed accumulated-content)
           (on-chunk (assoc parsed :content @accumulated-content)))))))
 
 (defn log-streaming-result [logger timeout-info content-length]
@@ -932,14 +953,18 @@
    - :num-turns            — number of conversation turns consumed
    - :tool-call-count      — total number of tool invocations during the run
    - :final-message-preview — last 500 chars of accumulated content (post-mortem aid)"
-  [content exit-code err-result timeout-info stop-reason num-turns tool-call-count final-message-preview]
+  [content exit-code err-result raw-stdout timeout-info stop-reason num-turns tool-call-count final-message-preview]
   (let [error-message (or err-result
                           (when (str/blank? content) "Process failed with no output")
                           "Process failed")
         category (if timeout-info :anomalies/timeout :anomalies.agent/llm-error)
         error-type (if timeout-info "adaptive_timeout" "cli_error")]
     (cond-> (llm-error category error-type (str/trim error-message)
-                       {:exit-code exit-code :stderr err-result :stdout content :timeout timeout-info})
+                       {:exit-code exit-code
+                        :stderr err-result
+                        :stdout content
+                        :raw-stdout raw-stdout
+                        :timeout timeout-info})
       stop-reason                 (assoc :stop-reason stop-reason)
       num-turns                   (assoc :num-turns num-turns)
       (some? tool-call-count)     (assoc :tool-call-count tool-call-count)
@@ -967,7 +992,7 @@
                          :prompt-length (count prompt)}}))
     (let [result (stream-fn
                   full-cmd
-                  (stream-with-parser stream-parser on-chunk
+                  (stream-with-parser stream-parser on-chunk progress-monitor
                                       accumulated-content accumulated-usage
                                       accumulated-cost accumulated-tools
                                       accumulated-session-id
@@ -977,12 +1002,16 @@
           exit-code (:exit result)
           timeout-info (:timeout result)
           final-content @accumulated-content
+          raw-output (:out result)
+          diagnostic-content (if (str/blank? final-content)
+                               raw-output
+                               final-content)
           tools @accumulated-tools
           session-id @accumulated-session-id
           stop-reason @accumulated-stop-reason
           num-turns @accumulated-turns
           tool-call-count (count tools)
-          final-message-preview (message-preview final-content)
+          final-message-preview (message-preview diagnostic-content)
           usage @accumulated-usage
           fallback-response (when (blank-streaming-success? exit-code
                                                             final-content
@@ -1023,6 +1052,7 @@
               (seq tools) (assoc :tools-called tools)
               session-id  (assoc :session-id session-id))
             (cond-> (streaming-error-response final-content exit-code (:err result)
+                                              diagnostic-content
                                               timeout-info stop-reason num-turns
                                               tool-call-count final-message-preview)
               session-id (assoc :session-id session-id))))))))
