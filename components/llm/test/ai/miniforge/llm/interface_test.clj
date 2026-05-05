@@ -216,6 +216,16 @@
       (is (= "partial" (:delta parsed)))
       (is (nil? (:stop-reason parsed))))))
 
+(deftest parse-claude-stream-rate-limit-event-test
+  (testing "rate_limit_event is treated as stream liveness"
+    (let [line (json/generate-string
+                 {:type "rate_limit_event"
+                  :rate_limit_info {:status "allowed"}})
+          parsed (impl/parse-claude-stream-line line)]
+      (is (= "" (:delta parsed)))
+      (is (false? (:done? parsed)))
+      (is (true? (:heartbeat parsed))))))
+
 (deftest parse-codex-stream-line-test
   (testing "agent_message item extracts text delta"
     (let [line (json/generate-string

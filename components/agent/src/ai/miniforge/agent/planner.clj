@@ -229,13 +229,13 @@
   "True when a failed planner turn produced useful prose but no submitted plan."
   [llm-response submitted-plan parsed-plan]
   (let [err (llm/get-error llm-response)
-        stdout (:stdout err)
+        response-content (some-> (planner-response-content llm-response) str/trim not-empty)
         err-type (:type err)]
     (and (nil? submitted-plan)
          (nil? parsed-plan)
-         (not (llm/success? llm-response))
-         (seq stdout)
-         (#{"adaptive_timeout" "cli_error"} err-type))))
+         response-content
+         (or (llm/success? llm-response)
+             (#{"adaptive_timeout" "cli_error"} err-type)))))
 
 ;; make-fallback-plan removed — silent fallback masks real failures.
 ;; Plan generation now throws with evidence on failure (see invoke-fn below).
@@ -573,7 +573,9 @@
                                                                 submitted-plan
                                                                 parsed-plan)
                                  (log/info logger :planner :planner/submission-retry
-                                           {:data {:reason :missing-plan-submission
+                                           {:data {:reason (if (llm/success? llm-response)
+                                                             :non-edn-plan-response
+                                                             :missing-plan-submission)
                                                    :content-length (count response-content)}})
                                  (recover-submitted-plan llm-client spec-text
                                                          config context on-chunk

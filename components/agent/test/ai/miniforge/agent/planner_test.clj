@@ -227,6 +227,53 @@
           (is (not (str/includes? (first @prompts) "artifact submission MCP tool")))
           (is (str/includes? (first @prompts) ".miniforge/plan.edn"))
           (is (str/includes? (second @prompts) "Do NOT explore further"))
+          (is (str/includes? (second @prompts) "Write `.miniforge/plan.edn`"))))))
+
+  (testing "retries once when the planner returns prose-only success instead of plan EDN"
+    (let [fake-llm-client {:type :fake}
+          prompts (atom [])
+          call-count (atom 0)
+          submitted-plan {:plan/id (random-uuid)
+                          :plan/name "retry-plan"
+                          :plan/tasks []}
+          first-response {:status :success
+                          :content "Plan submitted. Four tasks, linear dependency chain."}
+          second-response {:status :success
+                           :content ""}
+          responses (atom [first-response second-response])
+          agent (planner/create-planner {:llm-backend fake-llm-client})]
+      (with-redefs [model/resolve-llm-client-for-role
+                    (fn [_role provided] provided)
+                    artifact-session/with-session
+                    (fn [_context body-fn]
+                      (let [n (swap! call-count inc)
+                            llm-result (body-fn {:dir "/tmp/fake-session"
+                                                 :workdir "/tmp/fake-workdir"
+                                                 :mcp-config-path "/tmp/fake-session/mcp-config.json"
+                                                 :mcp-allowed-tools []
+                                                 :supervision {}
+                                                 :pre-session-snapshot {}})]
+                        {:llm-result llm-result
+                         :artifact (when (= n 2) submitted-plan)
+                         :worktree-artifacts {}
+                         :context-misses nil
+                         :pre-session-snapshot {}
+                         :session-mode :host}))
+                    llm/chat (fn [_client prompt _opts]
+                               (swap! prompts conj prompt)
+                               (let [response (first @responses)]
+                                 (swap! responses rest)
+                                 response))
+                    llm/success? #(= :success (:status %))
+                    llm/get-content :content
+                    llm/get-error identity]
+        (let [result (core/invoke agent {:llm-backend fake-llm-client}
+                                  {:description "Plan this"})]
+          (is (= :success (:status result)))
+          (is (= "retry-plan" (get-in result [:output :plan/name])))
+          (is (= 2 @call-count))
+          (is (= 2 (count @prompts)))
+          (is (str/includes? (second @prompts) "Do NOT explore further"))
           (is (str/includes? (second @prompts) "Write `.miniforge/plan.edn`"))))))))
 
 ;------------------------------------------------------------------------------ Layer 3

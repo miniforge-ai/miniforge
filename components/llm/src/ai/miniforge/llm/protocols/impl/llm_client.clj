@@ -210,9 +210,15 @@
             {:delta "" :done? false :tool-use true
              :tool-name tool-name})
 
-          ;; System and rate_limit_event are known no-ops
-          ("system" "rate_limit_event")
+          ;; System init is a no-op.
+          "system"
           nil
+
+          ;; Claude emits rate_limit_event while a turn is still alive.
+          ;; Treat it as liveness so provider-side pacing does not look
+          ;; like a dead stream.
+          "rate_limit_event"
+          {:delta "" :done? false :heartbeat true}
 
           ;; Any other unrecognised event type — emit a heartbeat so the
           ;; stream stays alive during tool-heavy phases

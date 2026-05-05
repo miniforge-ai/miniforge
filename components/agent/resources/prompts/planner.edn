@@ -5,7 +5,7 @@
 ;; creates detailed implementation plans.
 
 {:prompt/id :planner
- :prompt/version "2.4.1"
+ :prompt/version "2.4.2"
  :prompt/agent :planner
 
  ;; Hard turn cap passed to the backend CLI. Observed 2026-04-18: at 40
@@ -20,8 +20,8 @@
  ;; burning a full 10+ minutes after the model has gathered enough
  ;; context but failed to submit the plan.
  :prompt/progress-monitor
- {:stagnation-threshold-ms     60000
-  :max-total-ms                240000
+ {:stagnation-threshold-ms     120000
+  :max-total-ms                360000
   :min-activity-interval-ms    3000}
 
  ;; Submission-retry runs after the main planner turn already produced
