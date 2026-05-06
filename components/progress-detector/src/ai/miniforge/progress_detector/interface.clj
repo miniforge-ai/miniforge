@@ -127,25 +127,24 @@
 ;------------------------------------------------------------------------------ Layer 1
 ;; Event-envelope normalizer
 
-(defn normalize-event
-  "Map a raw tool-use event to a validated Observation record.
+(def make-normalizer
+  "Return a per-agent-run event normalizer fn whose :seq counter
+   starts at 0. Each call to make-normalizer produces an isolated
+   counter so concurrent runs don't interleave seq numbers.
 
-   Assigns a monotonic :seq, copies :tool/id and :timestamp, redacts
-   :tool/input and :tool/output to bounded summaries (≤ 256 bytes),
-   passes through :tool/error? and :tool/duration-ms, and conditionally
-   attaches :resource/version-hash when tool-profile declares
-   :stable-with-resource-version determinism.
+   Returned arities:
+     (normalize event)
+     (normalize event tool-profile)
 
-   Arguments:
-     event        - raw tool-use event (see event-envelope/normalize)
-     tool-profile - (optional) ToolProfile map; pass nil to skip hash
+   Strings, structured values, and numbers in :tool/input /
+   :tool/output are replaced with a non-reversible 'hash:<hex>:len<n>'
+   token — raw content never reaches detector evidence. nil is
+   preserved (absence is meaningful).
 
-   Returns: validated Observation map.
-   Throws:  ex-info on schema validation failure."
-  ([event]
-   (envelope/normalize event))
-  ([event tool-profile]
-   (envelope/normalize event tool-profile)))
+   :resource/version-hash is attached only when tool-profile declares
+   :determinism :stable-with-resource-version AND the event carries
+   the field."
+  envelope/make-normalizer)
 
 (def valid-observation?            schema/valid-observation?)
 (def explain-observation           schema/explain-observation)

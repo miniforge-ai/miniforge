@@ -128,14 +128,15 @@
 
   Every parsed agent event becomes an Observation map (Stage 1 schema):
 
-    {:tool/id           :tool/read | :tool/bash | :tool/grep | …
-     :seq               <monotonic int, scoped per-agent-run>
+    {:tool/id           :tool/Read | :tool/Bash | :tool/Grep | …
+     :seq               <monotonic int, scoped per-agent-run, starts at 0>
      :timestamp         <inst>
      :tool/duration-ms  <int>
-     :tool/input        <args map; redaction-shaped>
-     :tool/output       <result; redaction-shaped>
+     :tool/input        <args, redaction-shaped to a non-reversible token>
+     :tool/output       <result, redaction-shaped to a non-reversible token>
      :tool/error?       <bool>
-     :resource/version-hash {<resource-id> <hash>}}
+     :resource/version-hash <opaque hash string for the resource the
+                             tool read or wrote, or nil/absent>}
 
   :resource/version-hash is computed only for tool classes that read or
   write a resource (filesystem reads/writes, git refs). For Bash, it is

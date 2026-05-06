@@ -38,7 +38,6 @@
    this is fine. The atom is for state-threading sugar, not
    concurrency."
   (:require
-   [ai.miniforge.progress-detector.messages   :as msg]
    [ai.miniforge.progress-detector.protocol   :as proto]
    [ai.miniforge.progress-detector.supervisor :as sup]))
 
@@ -64,12 +63,27 @@
 ;------------------------------------------------------------------------------ Layer 1
 ;; Construction
 
+(defn- effective-detectors
+  "Resolve the configured detector list. An empty list is valid —
+   the spec acceptance requires that disabling all detectors leaves
+   the runtime functional, so we substitute a single null-detector
+   that observes nothing and never emits anomalies."
+  [detectors]
+  (if (empty? detectors)
+    [(proto/null-detector)]
+    detectors))
+
 (defn make-runtime
   "Build a per-agent-run detector runtime.
 
    Arguments:
      opts - map with:
-       :detectors - non-empty seq of Detector implementations
+       :detectors - seq of Detector implementations. May be empty —
+                    an empty list is replaced with a single
+                    null-detector so the runtime stays usable when
+                    detectors are disabled (Stage 2 spec acceptance:
+                    'removing all detectors leaves the agent runtime
+                    functional and bounded by Layer 1 caps').
        :config    - (optional) detector config map passed to init
                     on each detector
        :policy    - (optional) supervisor policy map
@@ -79,10 +93,7 @@
    to drive it."
   [{:keys [detectors config policy]
     :or   {config {} policy sup/default-policy}}]
-  (when (empty? detectors)
-    (throw (ex-info (msg/t :runtime/empty-detectors)
-                    {:detectors detectors})))
-  (let [composed (proto/multi-detector detectors)
+  (let [composed (proto/multi-detector (effective-detectors detectors))
         d-state  (proto/init composed config)]
     (atom (initial-state composed d-state policy))))
 

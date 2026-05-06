@@ -168,6 +168,20 @@
 ;------------------------------------------------------------------------------ Layer 1
 ;; Heuristic-only path (:unstable)
 
+(deftest stable-with-version-but-nil-hash-degrades-to-heuristic-test
+  (testing ":stable-with-resource-version with nil version-hash → heuristic, not mechanical"
+    (let [reg   (registry-with [read-profile])
+          det   (sut/make-tool-loop-detector reg)
+          ;; Same path, but the envelope did not capture version-hash —
+          ;; nil on every match. Without resource-state evidence the
+          ;; detector cannot claim 'same call same answer'; degrade to
+          ;; heuristic per Copilot review on PR #788.
+          obs   (mapv #(read-event % "src/foo.clj" nil) (range 1 7))
+          final (run-observations det {} obs)]
+      (is (>= (count-anomalies final) 1))
+      (is (= :heuristic (first-anomaly-class final))
+          "missing version-hash evidence cannot promote to mechanical"))))
+
 (deftest websearch-repeat-fires-heuristic-only-test
   (testing "5 identical WebSearch calls → heuristic (never mechanical)"
     (let [reg   (registry-with [websearch-profile])

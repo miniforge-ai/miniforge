@@ -21,13 +21,15 @@
 
    ## Responsibilities
 
-   - Assigns a per-runtime monotonic :seq via an atom-backed counter.
+   - Assigns a per-agent-run monotonic :seq starting at 0. Each
+     normalizer instance owns its own counter so concurrent agent
+     runs do not interleave sequence numbers.
    - Copies :tool/id and :timestamp from the source event.
-   - Redacts :tool/input and :tool/output to bounded summaries:
-       - Strings   -> truncated to max-summary-chars characters + ellipsis.
-       - Structured -> replaced with a compact 'hash:<hex>' string.
-       - nil        -> preserved as nil.
-     Both summaries are guaranteed to fit within 256 bytes.
+   - Redacts :tool/input and :tool/output to a non-reversible token
+     so file content, secrets, and command args never reach detector
+     evidence:
+       - nil          -> preserved as nil
+       - any value    -> 'hash:<hex>:len<n>' token
    - Passes :tool/error? boolean through unchanged.
    - Optionally passes :tool/duration-ms through unchanged.
    - Attaches :resource/version-hash from the source event when the
@@ -38,149 +40,120 @@
 
    ## Usage
 
-     (normalize event)
-     (normalize event tool-profile)
+     (def normalize-run-a (make-normalizer))
+     (normalize-run-a event)
+     (normalize-run-a event tool-profile)
 
-   ## Counter lifecycle
-
-   seq-counter is a defonce atom. It survives namespace reloads but
-   resets to 0 on JVM restart. Tests must call reset-counter! in a
-   :each fixture to prevent cross-test seq coupling."
+   `make-normalizer` is the one production entry point. Each agent
+   run calls it once at session start and threads the returned
+   function through its event stream."
   (:require
    [malli.core :as m]
    [ai.miniforge.progress-detector.messages :as msg]
    [ai.miniforge.progress-detector.schema :as schema]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Per-runtime sequence counter
+;; Constants
 
-;; Atom incremented atomically on every normalize call.
-;; defonce ensures a single counter survives namespace reloads.
-(defonce ^:private seq-counter (atom 0))
-
-(def ^:private max-summary-chars
-  "Strings longer than this are truncated with a trailing ellipsis.
-   240 chars + one multi-byte ellipsis comfortably fits within 256 bytes."
-  240)
+(def ^:private seq-start
+  "Per-run sequence counters begin at this value; the first emitted
+   :seq advances to start+1 = 0."
+  -1)
 
 ;------------------------------------------------------------------------------ Layer 1
-;; Redaction helpers
-
-(defn- redact-string
-  "Truncate s to max-summary-chars, appending the ellipsis character when
-   truncation occurs."
-  [s]
-  (if (<= (count s) max-summary-chars)
-    s
-    (str (subs s 0 max-summary-chars) "…")))
-
-(defn- structural-hash
-  "Produce a compact hex string from the Clojure structural hash of v.
-   Output is always < 20 bytes (e.g. 'hash:7f3a9b2c')."
-  [v]
-  (str "hash:" (Integer/toHexString (hash v))))
+;; Redaction — always-hash, never preserve raw content
 
 (defn- redact-value
-  "Reduce v to a bounded summary guaranteed to fit within 256 bytes.
-   Strings are truncated; structured values become a hash token; nil -> nil."
+  "Reduce v to a non-reversible token. Strings, structured data,
+   numbers — everything non-nil becomes 'hash:<hex>:len<n>' so file
+   content, command args, and tokens never leak into detector
+   evidence. nil is preserved (absence is meaningful).
+
+   The length suffix preserves enough diagnostic signal (output got
+   shorter / longer) without exposing content."
   [v]
-  (cond
-    (nil? v)    nil
-    (string? v) (redact-string v)
-    :else       (structural-hash v)))
-
-;------------------------------------------------------------------------------ Layer 1
-;; Counter access
-
-(defn- next-seq!
-  "Return the next monotonic sequence number and advance the counter atomically."
-  []
-  (swap! seq-counter inc))
-
-(defn ^:test-only reset-counter!
-  "Reset the per-runtime sequence counter to 0.
-
-   Marked ^:test-only — intended exclusively for test fixtures.
-   Calling this in production code breaks seq monotonicity and will
-   cause downstream detectors relying on observation ordering to
-   produce incorrect results."
-  []
-  (reset! seq-counter 0))
+  (when (some? v)
+    (let [printed (if (string? v) v (pr-str v))]
+      (str "hash:" (Integer/toHexString (hash v)) ":len" (count printed)))))
 
 ;------------------------------------------------------------------------------ Layer 2
-;; Public API
+;; Normalization — per-run instance owns its own counter
 
-(defn normalize
-  "Map a raw tool-use event to an Observation record.
+(defn- build-observation
+  "Compose the Observation map for `event` against `tool-profile`,
+   stamping in the supplied `seq-num`. Pure — no I/O, no atoms."
+  [event tool-profile seq-num]
+  (let [attach-vh? (= :stable-with-resource-version
+                      (:determinism tool-profile))]
+    (cond-> {:tool/id   (:tool/id event)
+             :seq       seq-num
+             :timestamp (:timestamp event)}
+      (contains? event :tool/input)
+      (assoc :tool/input (redact-value (:tool/input event)))
 
-   Arguments:
-     event        - map representing one tool-use invocation.
-                    Required keys:
-                      :tool/id    qualified keyword (e.g. :tool/Read)
-                      :timestamp  java.time.Instant
-                    Optional keys carried through (redacted or passthrough):
-                      :tool/input       -> redacted to bounded summary
-                      :tool/output      -> redacted to bounded summary
-                      :tool/error?      -> boolean, passed through unchanged
-                      :tool/duration-ms -> int, passed through unchanged
-                      :resource/version-hash -> conditionally attached (see below)
+      (contains? event :tool/output)
+      (assoc :tool/output (redact-value (:tool/output event)))
 
-     tool-profile - (optional) ToolProfile map for the invoked tool.
-                    When :determinism equals :stable-with-resource-version
-                    AND event contains :resource/version-hash, that value
-                    (including nil) is included in the returned Observation.
-                    Pass nil or omit to skip hash attachment entirely.
+      (contains? event :tool/error?)
+      (assoc :tool/error? (:tool/error? event))
 
-   Returns: validated Observation map (satisfies schema/Observation).
+      (contains? event :tool/duration-ms)
+      (assoc :tool/duration-ms (:tool/duration-ms event))
+
+      (and attach-vh? (contains? event :resource/version-hash))
+      (assoc :resource/version-hash (:resource/version-hash event)))))
+
+(defn- validate-observation!
+  "Throw ex-info if obs fails Observation schema validation, else
+   return obs unchanged."
+  [event obs]
+  (if (m/validate schema/Observation obs)
+    obs
+    (throw (ex-info (msg/t :envelope/validation-failed)
+                    {:type   ::validation-failed
+                     :event  event
+                     :obs    obs
+                     :errors (m/explain schema/Observation obs)}))))
+
+(defn make-normalizer
+  "Return a per-run normalizer function. The returned fn closes over
+   its own monotonic :seq counter starting at 0; concurrent agent
+   runs do not interleave seq numbers because each holds its own
+   counter atom.
+
+   Returned fn arities:
+     (normalize event)               - no tool profile
+     (normalize event tool-profile)  - profile gates :resource/version-hash
+                                       attachment
+
+   Returns: validated Observation map.
    Throws:  ex-info with ::validation-failed when the result fails
-            Observation validation — indicates a bug in the caller or
-            an incompatible schema/event contract."
-  ([event]
-   (normalize event nil))
-  ([event tool-profile]
-   (let [seq-num    (next-seq!)
-         attach-vh? (= :stable-with-resource-version
-                       (:determinism tool-profile))
-         obs (cond-> {:tool/id   (:tool/id event)
-                      :seq       seq-num
-                      :timestamp (:timestamp event)}
-               (contains? event :tool/input)
-               (assoc :tool/input (redact-value (:tool/input event)))
-
-               (contains? event :tool/output)
-               (assoc :tool/output (redact-value (:tool/output event)))
-
-               (contains? event :tool/error?)
-               (assoc :tool/error? (:tool/error? event))
-
-               (contains? event :tool/duration-ms)
-               (assoc :tool/duration-ms (:tool/duration-ms event))
-
-               (and attach-vh? (contains? event :resource/version-hash))
-               (assoc :resource/version-hash (:resource/version-hash event)))]
-     (if (m/validate schema/Observation obs)
-       obs
-       (throw (ex-info (msg/t :envelope/validation-failed)
-                       {:type   ::validation-failed
-                        :event  event
-                        :obs    obs
-                        :errors (m/explain schema/Observation obs)}))))))
+            Observation validation — indicates a bug in the caller
+            or an incompatible schema/event contract."
+  []
+  (let [counter (atom seq-start)]
+    (fn normalize
+      ([event]
+       (normalize event nil))
+      ([event tool-profile]
+       (let [seq-num (swap! counter inc)
+             obs     (build-observation event tool-profile seq-num)]
+         (validate-observation! event obs))))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 
 (comment
-  ;; Reset counter for REPL experiments
-  (reset-counter!)
+  ;; Per-run normalizer — :seq starts at 0
+  (def normalize (make-normalizer))
 
-  ;; Basic normalization
   (normalize {:tool/id          :tool/Read
               :timestamp        (java.time.Instant/now)
               :tool/input       "src/foo.clj"
               :tool/output      "(ns foo)\n"
               :tool/error?      false
               :tool/duration-ms 42})
-  ;; => {:tool/id :tool/Read :seq 1 :timestamp #inst "..."
-  ;;     :tool/input "src/foo.clj" :tool/output "(ns foo)\n"
+  ;; => {:tool/id :tool/Read :seq 0 :timestamp #inst "..."
+  ;;     :tool/input "hash:abc123:len12" :tool/output "hash:def456:len9"
   ;;     :tool/error? false :tool/duration-ms 42}
 
   ;; Stable profile -> :resource/version-hash attached
@@ -189,14 +162,12 @@
               :resource/version-hash "sha256:abc123"}
              {:tool/id     :tool/Read
               :determinism :stable-with-resource-version})
-  ;; => {:tool/id :tool/Read :seq 2 :timestamp #inst "..."
+  ;; => {:tool/id :tool/Read :seq 1 :timestamp #inst "..."
   ;;     :resource/version-hash "sha256:abc123"}
 
-  ;; Structured input -> hash token
-  (normalize {:tool/id    :tool/Bash
-              :timestamp  (java.time.Instant/now)
-              :tool/input {:command "git" :args ["status"]}})
-  ;; => {:tool/id :tool/Bash :seq 3 :timestamp #inst "..."
-  ;;     :tool/input "hash:7f3a9b2c"}
+  ;; Concurrent runs each get their own counter from 0
+  (def normalize-a (make-normalizer))
+  (def normalize-b (make-normalizer))
+  ;; (normalize-a event) and (normalize-b event) both yield :seq 0
 
   :leave-this-here)

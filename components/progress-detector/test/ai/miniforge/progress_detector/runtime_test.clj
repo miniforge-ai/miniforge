@@ -63,10 +63,18 @@
 ;------------------------------------------------------------------------------ Layer 1
 ;; Construction
 
-(deftest empty-detectors-rejected-test
-  (testing "make-runtime throws when no detectors are provided"
-    (is (thrown? clojure.lang.ExceptionInfo
-                 (sut/make-runtime {:detectors []})))))
+(deftest empty-detectors-falls-back-to-null-detector-test
+  (testing "make-runtime accepts :detectors [] — substitutes a null-detector
+            so disabling all detectors leaves the runtime functional"
+    (let [rt (sut/make-runtime {:detectors []})]
+      (sut/observe! rt {:tool/id   :tool/Read
+                        :seq       1
+                        :timestamp now
+                        :tool/input "src/foo.clj"})
+      (is (= [] (sut/current-anomalies rt))
+          "null-detector observes events but never emits anomalies")
+      (is (= :continue (:action (sut/check rt)))
+          "supervisor sees no anomalies → :continue"))))
 
 (deftest fresh-runtime-no-anomalies-test
   (testing "new runtime has empty anomalies and continues"

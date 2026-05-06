@@ -73,12 +73,6 @@
 
 (def ^:private anomaly-category :anomalies.agent/tool-loop)
 
-(def ^:private mechanical-determinisms
-  "Determinism levels whose fingerprint repeat counts as a mechanical
-   signal without further evidence. :environment-dependent gets a
-   conditional rule (see classify-match-class)."
-  #{:stable-with-resource-version :stable-ish})
-
 ;------------------------------------------------------------------------------ Layer 1
 ;; Fingerprint composition (per determinism)
 
@@ -124,15 +118,38 @@
   [matches]
   (every? :tool/error? matches))
 
+(defn- stable-with-version-mechanical?
+  "True when a :stable-with-resource-version fingerprint group has
+   version-hash evidence on every match. A nil/absent version-hash
+   means the envelope didn't capture resource state for that call —
+   without that evidence we cannot claim 'same call, same answer',
+   so the group degrades to heuristic."
+  [matches]
+  (every? #(some? (:resource/version-hash %)) matches))
+
 (defn- classify-match-class
   "Return :mechanical or :heuristic for an above-threshold fingerprint
-   group, given the tool's :determinism and the matching observations."
+   group, given the tool's :determinism and the matching observations.
+
+   :stable-with-resource-version is mechanical only when every match
+   carries a non-nil :resource/version-hash — without that evidence
+   the matches share input but not resource state, which is
+   insufficient to claim the calls are equivalent."
   [determinism matches]
   (cond
-    (contains? mechanical-determinisms determinism) :mechanical
+    (and (= determinism :stable-with-resource-version)
+         (stable-with-version-mechanical? matches))
+    :mechanical
+
+    (= determinism :stable-ish)
+    :mechanical
+
     (and (= determinism :environment-dependent)
-         (env-dep-mechanical? matches))             :mechanical
-    :else                                           :heuristic))
+         (env-dep-mechanical? matches))
+    :mechanical
+
+    :else
+    :heuristic))
 
 (defn- class->severity
   "Severity stamped on the emitted anomaly. Mechanical loops are

@@ -35,10 +35,6 @@
   :supervisor/no-summary
   "controlling anomaly fired"
 
-  ;; Runtime (runtime.clj)
-  :runtime/empty-detectors
-  "make-runtime requires at least one detector"
-
   ;; Tool-profile registration (tool_profile.clj)
   :tool-profile/missing-id
   "Tool profile must include :tool/id"
