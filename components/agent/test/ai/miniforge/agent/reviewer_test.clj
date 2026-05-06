@@ -234,6 +234,54 @@
         (is (some #{"Needs changes"} (:review/blocking-issues review)))
         (is (= 7 (get-in result [:metrics :tokens])))))))
 
+(deftest test-reviewer-timeout-only-parseable-failure-is-agent-error
+  (testing "timeout-only parsed review failures do not become rejected code-review artifacts"
+    (with-redefs [model/resolve-llm-client-for-role (fn [_role client] client)
+                  llm/chat (fn [_client _prompt _opts]
+                             {:success? false
+                              :content "{:review/decision :rejected
+                                         :review/gate-results [{:gate-id :unknown :gate-type :unknown :passed? true :errors [] :warnings [] :duration-ms 0}]
+                                         :review/blocking-issues [\"Adaptive timeout: Stagnation timeout: no progress for 120183ms\"]
+                                         :review/recommendations []}"
+                              :tokens 9
+                              :error {:message "Adaptive timeout: Stagnation timeout: no progress for 120183ms"}})
+                  llm/success? :success?
+                  llm/get-content :content
+                  llm/get-error :error]
+      (let [reviewer (reviewer/create-reviewer {:llm-backend ::mock-backend
+                                                :gates []})
+            result (core/invoke reviewer {} sample-artifact)]
+        (is (= :error (:status result)))
+        (is (= "Adaptive timeout: Stagnation timeout: no progress for 120183ms"
+               (get-in result [:error :message])))
+        (is (= :reviewer/backend-timeout
+               (get-in result [:error :data :code])))
+        (is (= 9 (get-in result [:metrics :tokens])))))))
+
+(deftest test-reviewer-timeout-only-parseable-success-wrapper-is-agent-error
+  (testing "timeout-only parsed review failures are treated as backend errors even when the wrapper reports success"
+    (with-redefs [model/resolve-llm-client-for-role (fn [_role client] client)
+                  llm/chat (fn [_client _prompt _opts]
+                             {:success? true
+                              :content "{:review/decision :rejected
+                                         :review/gate-results [{:gate-id :unknown :gate-type :unknown :passed? true :errors [] :warnings [] :duration-ms 0}
+                                                                {:gate-id :unknown :gate-type :unknown :passed? true :errors [] :warnings [] :duration-ms 0}]
+                                         :review/blocking-issues [\"Adaptive timeout: Stagnation timeout: no progress for 120228ms (type: stagnation, elapsed: 120228ms)\"]
+                                         :review/recommendations []}"
+                              :tokens 11})
+                  llm/success? :success?
+                  llm/get-content :content
+                  llm/get-error (constantly nil)]
+      (let [reviewer (reviewer/create-reviewer {:llm-backend ::mock-backend
+                                                :gates []})
+            result (core/invoke reviewer {} sample-artifact)]
+        (is (= :error (:status result)))
+        (is (= "Adaptive timeout: Stagnation timeout: no progress for 120228ms (type: stagnation, elapsed: 120228ms)"
+               (get-in result [:error :message])))
+        (is (= :reviewer/backend-timeout
+               (get-in result [:error :data :code])))
+        (is (= 11 (get-in result [:metrics :tokens])))))))
+
 (deftest test-reviewer-rejects-degraded-implement-handoff
   (testing "default reviewer rejects curated artifacts marked as degraded handoffs"
     (let [reviewer (reviewer/create-reviewer {:llm-backend nil})
