@@ -180,6 +180,49 @@
    :task/existing-files    (mapv :path (:merge/conflicts conflict-input))
    :task/worktree-path     worktree-path})
 
+;; Resolution agent invocation (Stage 2C) ------------------------------
+;; The agent-driven edit-fn invokes the existing implementer agent
+;; (agent/create-implementer + agent/invoke) on the synthetic task
+;; built above. The implementer's tool-call plumbing (Edit/Write) does
+;; the actual file edits in the worktree; the agent-edit-fn just
+;; builds the task input and reports the invocation result up to the
+;; resolution loop, which checks markers cleared on the next pass.
+
+(defn agent-driven-edit-fn
+  "Construct an `agent-edit-fn` that delegates to the existing
+   implementer agent for actual conflict resolution. Spec §6.1.
+
+   `agent-context` is a map carrying at least `:llm-backend` (resolved
+   LLM client) and optionally `:logger`. The closure captures a single
+   implementer agent at construction so multiple iterations share its
+   config; the agent's `agent/invoke` is called per iteration with
+   the per-iteration task built from the conflict info.
+
+   Returns the agent's response on success (the implementer wrote
+   files via Edit/Write tool calls; the curator's marker scan picks
+   up the worktree state on the next iteration). Returns
+   response/error on agent invocation failure — the loop counts that
+   as a no-progress iteration and lets the budget catch it.
+
+   The max-iterations argument feeds the prompt so the agent knows
+   its budget; falls back to the default-budget if absent."
+  [{:keys [llm-backend logger max-iterations]}]
+  (let [max-iters (or max-iterations (:max-iterations (default-budget)))
+        impl     (agent/create-implementer (cond-> {}
+                                             logger (assoc :logger logger)))]
+    (fn agent-edit-step [worktree-path conflict-input iteration]
+      (let [task (build-resolution-task conflict-input worktree-path
+                                        iteration max-iters)
+            invoke-ctx (cond-> {:execution/worktree-path worktree-path}
+                         llm-backend (assoc :llm-backend llm-backend))]
+        (try (agent/invoke impl task invoke-ctx)
+             (catch Exception e
+               (response/error
+                (messages/t :dag.merge.resolution.prompt/agent-error
+                            {:error (str e)})
+                {:data {:exception/class (.getName (class e))
+                        :iteration iteration}})))))))
+
 ;; Anomaly + result factories ------------------------------------------
 
 (defn- unresolvable-anomaly

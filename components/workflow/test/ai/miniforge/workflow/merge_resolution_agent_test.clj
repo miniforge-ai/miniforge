@@ -17,12 +17,16 @@
 ;; limitations under the License.
 
 (ns ai.miniforge.workflow.merge-resolution-agent-test
-  "Stage 2C: tests for the resolution-prompt builders. The agent-
-   invocation closure (`agent-driven-edit-fn`) lands in a follow-up
-   slice with its own mock-based tests; this file pins the pure-data
-   prompt + task assembly used by both Stage 2C and any future policy
-   pack that swaps catalog templates per spec §6.1.3."
+  "Stage 2C: tests for the resolution-prompt builders and the
+   agent-driven `agent-edit-fn` closure. The implementer agent itself
+   is mocked via `with-redefs` so we exercise the wiring without
+   requiring an LLM backend or real tool execution. Production
+   behaviour (the implementer actually editing files via Edit/Write
+   tool calls) is covered by the merge-parent-branches integration
+   tests through the auto-default-llm-backend path."
   (:require
+   [ai.miniforge.agent.interface :as agent]
+   [ai.miniforge.response.interface :as response]
    [ai.miniforge.workflow.merge-resolution :as sut]
    [clojure.string :as str]
    [clojure.test :refer [deftest is testing]]))
@@ -103,6 +107,79 @@
       (is (= ["src/conflict.txt" "src/other.clj"] (:task/existing-files task))
           "existing-files mirrors the conflict paths in declaration order")
       (is (= "/tmp/wt" (:task/worktree-path task))))))
+
+;------------------------------------------------------------------------------ agent-driven-edit-fn — happy path
+
+(deftest agent-driven-edit-fn-invokes-implementer-with-task-test
+  (testing "agent-driven-edit-fn returns a closure that calls
+            agent/invoke with a task derived from the conflict-input.
+            We mock create-implementer and invoke; we assert that the
+            mocked invoke received a task whose description includes
+            the conflict info, and that the closure returns whatever
+            the mock returned."
+    (let [captured (atom nil)
+          mock-impl ::mock-impl
+          mock-invoke (fn [agent task ctx]
+                        (reset! captured {:agent agent :task task :ctx ctx})
+                        (response/success {:edits/applied 1
+                                           :edits/files ["src/conflict.txt"]}
+                                          nil))]
+      (with-redefs [agent/create-implementer (fn [& _] mock-impl)
+                    agent/invoke mock-invoke]
+        (let [edit-fn (sut/agent-driven-edit-fn
+                       {:llm-backend ::mock-backend})
+              result (edit-fn "/tmp/wt" sample-conflict-input 0)]
+          (is (response/success? result))
+          (let [{:keys [agent task ctx]} @captured]
+            (is (= mock-impl agent)
+                "captured implementer is the one passed to invoke")
+            (is (= :merge-resolution (:task/type task)))
+            (is (str/includes? (:task/description task) ":a"))
+            (is (str/includes? (:task/description task) "src/conflict.txt"))
+            (is (= "/tmp/wt" (:execution/worktree-path ctx)))
+            (is (= ::mock-backend (:llm-backend ctx))
+                "llm-backend is forwarded to the agent invocation context")))))))
+
+;------------------------------------------------------------------------------ agent-driven-edit-fn — failure paths
+
+(deftest agent-driven-edit-fn-wraps-thrown-exception-test
+  (testing "If agent/invoke throws (LLM client crash, transport error,
+            etc.), the closure catches it and returns response/error
+            with an exception-class data tag. Lets the resolution
+            loop count it as a no-progress iteration without
+            propagating the raw exception up the orchestrator."
+    (with-redefs [agent/create-implementer (fn [& _] ::impl)
+                  agent/invoke (fn [_ _ _]
+                                 (throw (ex-info "boom" {:source ::test})))]
+      (let [edit-fn (sut/agent-driven-edit-fn
+                     {:llm-backend ::mock-backend})
+            result (edit-fn "/tmp/wt" sample-conflict-input 1)]
+        (is (response/error? result))
+        (let [data (get-in result [:error :data])]
+          (is (str/includes? (:exception/class data) "ExceptionInfo")
+              "exception class recorded for diagnosis")
+          (is (= 1 (:iteration data))
+              "iteration index preserved for telemetry"))))))
+
+;------------------------------------------------------------------------------ agent-driven-edit-fn — implementer construction
+
+(deftest agent-driven-edit-fn-constructs-implementer-once-test
+  (testing "create-implementer fires once at closure construction,
+            not once per iteration — constructing an implementer
+            loads the system prompt and validates config and shouldn't
+            repeat across the loop's iterations."
+    (let [construct-count (atom 0)]
+      (with-redefs [agent/create-implementer (fn [& _]
+                                               (swap! construct-count inc)
+                                               ::impl)
+                    agent/invoke (fn [_ _ _] (response/success {} nil))]
+        (let [edit-fn (sut/agent-driven-edit-fn
+                       {:llm-backend ::mock-backend})]
+          (edit-fn "/tmp/wt" sample-conflict-input 0)
+          (edit-fn "/tmp/wt" sample-conflict-input 1)
+          (edit-fn "/tmp/wt" sample-conflict-input 2)
+          (is (= 1 @construct-count)
+              "implementer constructed once, not per iteration"))))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
