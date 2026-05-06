@@ -24,6 +24,7 @@
    [ai.miniforge.agent.budget :as budget]
    [ai.miniforge.agent.model :as model]
    [ai.miniforge.agent.prompts :as prompts]
+   [ai.miniforge.agent.result-boundary :as result-boundary]
    [ai.miniforge.agent.role-config :as role-config]
    [ai.miniforge.agent.specialized :as specialized]
    [ai.miniforge.response.interface :as response]
@@ -333,65 +334,61 @@
                                "\n\nWrite your tests directly to the appropriate test files. "
                                "Include complete test code, not placeholders.")]
           (if llm-client
-            ;; Use the real LLM with artifact session for MCP tool support
-            (let [{:keys [llm-result artifact context-misses]}
+            (let [{:keys [llm-result artifact worktree-artifacts context-misses]}
                   (artifact-session/with-session context
                     #(invoke-tester-session % llm-client user-prompt config context
                                            on-chunk code-artifact))
                   response llm-result
-                  tokens (get response :tokens 0)
-                  cost-usd (get response :cost-usd)]
+                  normalized (result-boundary/normalize-llm-result
+                              {:role :verify
+                               :response response
+                               :worktree-artifacts worktree-artifacts
+                               :artifact artifact
+                               :parse-response parse-test-response
+                               :derive-artifact (fn [content]
+                                                  (when-let [files (extract-test-code-blocks content)]
+                                                    {:test/id (random-uuid)
+                                                     :test/files files
+                                                     :test/type :unit
+                                                     :test/summary "Tests from code blocks"
+                                                     :test/created-at (java.util.Date.)}))})]
               (when (seq context-misses)
                 (log/info logger :tester :tester/context-cache-misses
                           {:data {:miss-count (count context-misses)
                                   :misses context-misses}}))
               (log/info logger :tester :tester/llm-called
                         {:data {:success (llm/success? response)
-                                :tokens tokens
+                                :tokens (:tokens normalized)
                                 :streaming? (boolean on-chunk)}})
-              (if (llm/success? response)
-                ;; Check for MCP artifact first, then fall back to text parsing
-                (let [content (llm/get-content response)
-                      parsed (or artifact (parse-test-response content))
-                      ;; Try multiple parsing strategies (no fallback — fail explicitly)
-                      tests (or parsed
-                                (when-let [files (extract-test-code-blocks content)]
-                                  {:test/id (random-uuid)
-                                   :test/files files
-                                   :test/type :unit
-                                   :test/summary "Tests from code blocks"
-                                   :test/created-at (java.util.Date.)}))]
-                  (if tests
-                    (let [tests-with-meta (-> tests
-                                          (update :test/id #(or % (random-uuid)))
-                                          (assoc :test/framework (extract-test-framework (:test/files tests) context))
-                                          (assoc :test/assertions-count
-                                                 (or (:test/assertions-count tests)
-                                                     (->> (:test/files tests)
-                                                          (map :content)
-                                                          (map count-assertions)
-                                                          (reduce +))))
-                                          (assoc :test/cases-count
-                                                 (or (:test/cases-count tests)
-                                                     (->> (:test/files tests)
-                                                          (map :content)
-                                                          (map count-test-cases)
-                                                          (reduce +))))
-                                          (assoc :test/created-at (java.util.Date.)))]
-                  (response/success tests-with-meta
-                                    {:tokens tokens
-                                     :metrics {:test-files (count (:test/files tests-with-meta))
-                                               :test-type (:test/type tests-with-meta)
-                                               :assertions (:test/assertions-count tests-with-meta)
-                                               :cases (:test/cases-count tests-with-meta)
-                                               :tokens tokens
-                                               :cost-usd cost-usd}}))
-                    ;; LLM returned content but no parseable tests — fail explicitly
-                    (response/error "LLM response could not be parsed as test artifact"
-                                    {:tokens tokens})))
-                ;; LLM call failed — propagate error, no fallback
-                (response/error (or (:message (llm/get-error response))
-                                    "LLM call failed"))))
+              (if (result-boundary/usable-content? normalized)
+                (if-let [tests (result-boundary/authoritative-payload normalized)]
+                  (let [tests-with-meta (-> tests
+                                            (update :test/id #(or % (random-uuid)))
+                                            (assoc :test/framework (extract-test-framework (:test/files tests) context))
+                                            (assoc :test/assertions-count
+                                                   (or (:test/assertions-count tests)
+                                                       (->> (:test/files tests)
+                                                            (map :content)
+                                                            (map count-assertions)
+                                                            (reduce +))))
+                                            (assoc :test/cases-count
+                                                   (or (:test/cases-count tests)
+                                                       (->> (:test/files tests)
+                                                            (map :content)
+                                                            (map count-test-cases)
+                                                            (reduce +))))
+                                            (assoc :test/created-at (java.util.Date.)))]
+                    (response/success tests-with-meta
+                                      {:tokens (:tokens normalized)
+                                       :metrics {:test-files (count (:test/files tests-with-meta))
+                                                 :test-type (:test/type tests-with-meta)
+                                                 :assertions (:test/assertions-count tests-with-meta)
+                                                 :cases (:test/cases-count tests-with-meta)
+                                                 :tokens (:tokens normalized)
+                                                 :cost-usd (:cost-usd normalized)}}))
+                  (response/error "LLM response could not be parsed as test artifact"
+                                  {:tokens (:tokens normalized)}))
+                (result-boundary/error-response normalized "LLM call failed")))
             ;; No LLM client — fail explicitly
             (response/error "No LLM backend provided"))))
 

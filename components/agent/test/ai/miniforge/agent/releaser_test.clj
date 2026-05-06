@@ -20,8 +20,11 @@
   "Tests for the Releaser agent."
   (:require
    [clojure.test :as test :refer [deftest testing is]]
+   [ai.miniforge.agent.artifact-session :as artifact-session]
    [ai.miniforge.agent.core :as core]
+   [ai.miniforge.agent.model :as model]
    [ai.miniforge.agent.releaser :as releaser]
+   [ai.miniforge.llm.interface :as llm]
    [ai.miniforge.logging.interface :as log]
    [ai.miniforge.response.interface :as response]))
 
@@ -83,7 +86,34 @@
     (let [agent (releaser/create-releaser)
           result (core/invoke agent {} code-artifact-input)]
       (is (= :error (:status result)))
-      (is (some? (:error result))))))
+      (is (some? (:error result)))))
+
+  (testing "accepts parseable release content even when backend flags failure"
+    (let [fake-llm-client {:type :fake}
+          parsed-release {:release/id (random-uuid)
+                          :release/branch-name "feature/already-ready"
+                          :release/commit-message "feat: ship"
+                          :release/pr-title "feat: ship"
+                          :release/pr-description "## Summary\nReady"
+                          :release/files-summary "No file changes required"}
+          agent (releaser/create-releaser {:llm-backend fake-llm-client})]
+      (with-redefs [model/resolve-llm-client-for-role (fn [_role provided] provided)
+                    artifact-session/with-session
+                    (fn [_context _body-fn]
+                      {:llm-result {:success false
+                                    :content (pr-str parsed-release)
+                                    :error {:message "Adaptive timeout"}}
+                       :artifact nil
+                       :worktree-artifacts {}
+                       :session-mode :host})
+                    llm/success? :success
+                    llm/get-content :content
+                    llm/get-error :error]
+        (let [result (core/invoke agent {:llm-backend fake-llm-client}
+                                  code-artifact-input)]
+          (is (= :success (:status result)))
+          (is (= "feature/already-ready"
+                 (get-in result [:output :release/branch-name]))))))))
 
 ;------------------------------------------------------------------------------ Layer 3
 ;; Validation tests

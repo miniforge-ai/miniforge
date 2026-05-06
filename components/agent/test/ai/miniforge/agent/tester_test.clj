@@ -20,8 +20,11 @@
   "Tests for the Tester agent."
   (:require
    [clojure.test :as test :refer [deftest testing is]]
+   [ai.miniforge.agent.artifact-session :as artifact-session]
    [ai.miniforge.agent.core :as core]
+   [ai.miniforge.agent.model :as model]
    [ai.miniforge.agent.tester :as tester]
+   [ai.miniforge.llm.interface :as llm]
    [ai.miniforge.logging.interface :as log]
    [ai.miniforge.response.interface :as response]))
 
@@ -80,7 +83,34 @@
     (let [agent (tester/create-tester)
           result (core/invoke agent {} {:code sample-code-artifact})]
       (is (= :error (:status result)))
-      (is (some? (:error result))))))
+      (is (some? (:error result)))))
+
+  (testing "accepts parseable test artifact content even when backend flags failure"
+    (let [fake-llm-client {:type :fake}
+          agent (tester/create-tester {:llm-backend fake-llm-client})
+          stdout-tests {:test/id (random-uuid)
+                        :test/files [{:path "test/auth/login_test.clj"
+                                      :content "(ns auth.login-test)\n(deftest login-test (is true))"}]
+                        :test/type :unit}]
+      (with-redefs [model/resolve-llm-client-for-role (fn [_role provided] provided)
+                    artifact-session/with-session
+                    (fn [_context _body-fn]
+                      {:llm-result {:success false
+                                    :content (pr-str stdout-tests)
+                                    :error {:message "Adaptive timeout"}}
+                       :artifact nil
+                       :worktree-artifacts {}
+                       :context-misses nil
+                       :pre-session-snapshot {}
+                       :session-mode :host})
+                    llm/success? :success
+                    llm/get-content :content
+                    llm/get-error :error]
+        (let [result (core/invoke agent {:llm-backend fake-llm-client}
+                                  {:code sample-code-artifact})]
+          (is (= :success (:status result)))
+          (is (= :unit (get-in result [:output :test/type])))
+          (is (= 1 (count (get-in result [:output :test/files])))))))))
 
 ;------------------------------------------------------------------------------ Layer 3
 ;; Validation tests

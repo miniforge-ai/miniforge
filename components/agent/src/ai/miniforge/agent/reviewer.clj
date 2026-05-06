@@ -23,6 +23,7 @@
   (:require
    [ai.miniforge.agent.model :as model]
    [ai.miniforge.agent.prompts :as prompts]
+   [ai.miniforge.agent.result-boundary :as result-boundary]
    [ai.miniforge.agent.role-config :as role-config]
    [ai.miniforge.agent.specialized :as specialized]
    [ai.miniforge.schema.interface :as schema]
@@ -612,9 +613,12 @@
                              (llm/chat-stream llm-client user-prompt on-chunk
                                               base-opts)
                              (llm/chat llm-client user-prompt base-opts))
-                  content (or (llm/get-content response) "")
-                  tokens (get response :tokens 0)
-                  cost-usd (get response :cost-usd)]
+                  normalized (result-boundary/normalize-llm-result
+                              {:response response
+                               :parse-response parse-review-response})
+                  content (:content normalized)
+                  tokens (:tokens normalized)
+                  cost-usd (:cost-usd normalized)]
 
               (log/info logger :reviewer :reviewer/llm-called
                         {:data {:success (llm/success? response)
@@ -622,8 +626,7 @@
                                 :streaming? (boolean on-chunk)}})
 
               (let [;; Parse LLM review
-                    llm-review (when-not (str/blank? content)
-                                 (parse-review-response content))
+                    llm-review (:parsed-content normalized)
                     failure-message (review-failure-message response content)
                     parse-failed? (nil? llm-review)
                     llm-decision (cond
