@@ -50,11 +50,27 @@
       (let [result (loader/validate-and-cache-workflow valid-workflow
                                                        :test-anomaly-wf
                                                        "1.0.0"
+                                                       :resource
                                                        false)]
         (is (not (anomaly/anomaly? result)))
         (is (= valid-workflow (:workflow result)))
-        (is (contains? #{:resource :store} (:source result)))
+        ;; `:source` is now threaded explicitly from the caller — the
+        ;; fn no longer derives it via a redundant `load-from-resource`
+        ;; round-trip. We pass `:resource` here; the assertion echoes
+        ;; that.
+        (is (= :resource (:source result)))
         (is (true? (get-in result [:validation :valid?])))))))
+
+(deftest validate-and-cache-threads-store-source-when-supplied
+  (loader/clear-cache!)
+  (testing ":source argument is preserved verbatim — caller controls it"
+    (with-redefs [validator/validate-workflow always-valid]
+      (let [result (loader/validate-and-cache-workflow valid-workflow
+                                                       :test-anomaly-wf
+                                                       "1.0.0"
+                                                       :store
+                                                       false)]
+        (is (= :store (:source result)))))))
 
 (deftest validate-and-cache-skip-validation-bypasses-validator
   (loader/clear-cache!)
@@ -62,6 +78,7 @@
     (let [result (loader/validate-and-cache-workflow valid-workflow
                                                      :test-anomaly-wf
                                                      "1.0.0"
+                                                     :resource
                                                      true)]
       (is (not (anomaly/anomaly? result)))
       (is (= valid-workflow (:workflow result))))))
@@ -75,6 +92,7 @@
       (let [result (loader/validate-and-cache-workflow valid-workflow
                                                        :test-anomaly-wf
                                                        "1.0.0"
+                                                       :resource
                                                        false)]
         (is (anomaly/anomaly? result))
         (is (= :invalid-input (:anomaly/type result)))
@@ -87,7 +105,7 @@
   (loader/clear-cache!)
   (testing "failed validation must not write to the workflow cache"
     (with-redefs [validator/validate-workflow always-invalid]
-      (loader/validate-and-cache-workflow valid-workflow :test-anomaly-wf "1.0.0" false)
+      (loader/validate-and-cache-workflow valid-workflow :test-anomaly-wf "1.0.0" :resource false)
       (is (nil? (loader/try-load-from-cache [:test-anomaly-wf "1.0.0"] false))))))
 
 ;------------------------------------------------------------------------------ Boundary escalation through load-workflow

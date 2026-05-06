@@ -140,8 +140,12 @@
         phase-count (count phases)
         max-iterations (get-in workflow [:workflow/config :max-total-iterations] 20)
         task-types (:workflow/task-types workflow)
-        has-review? (some #(str/includes? (str (:phase/id %)) "review") phases)
-        has-testing? (some #(str/includes? (str (:phase/id %)) "test") phases)
+        ;; `some` returns true | nil; the WorkflowCharacteristics schema
+        ;; requires `boolean?`, so coerce the nil case to false. Without
+        ;; the wrap, workflows with no review/test phases would fail
+        ;; schema validation and emit a spurious :invalid-input anomaly.
+        has-review? (boolean (some #(str/includes? (str (:phase/id %)) "review") phases))
+        has-testing? (boolean (some #(str/includes? (str (:phase/id %)) "test") phases))
         complexity (cond
                      (< phase-count 4) :simple
                      (< phase-count 8) :medium

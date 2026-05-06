@@ -185,29 +185,46 @@
   "Try loading workflow from resource or store.
 
    Returns:
-   - workflow config map on success
+   - `{:workflow w :source :resource}` when found via `load-from-resource`
+   - `{:workflow w :source :store}` when found via `load-from-store`
    - nil if no matching resource or store entry was found
    - a `:fault` anomaly when a resource was found but failed to parse
-     (propagates the anomaly from `load-from-resource`)"
+     (propagates the anomaly from `load-from-resource`)
+
+   The result includes `:source` so the caller can thread it through
+   `validate-and-cache-workflow` without re-reading the resource."
   [workflow-id version opts]
   (let [from-resource (load-from-resource workflow-id version)]
     (cond
       (anomaly/anomaly? from-resource) from-resource
-      (some? from-resource)            from-resource
-      :else                            (load-from-store workflow-id version opts))))
+      (some? from-resource)            {:workflow from-resource :source :resource}
+      :else                            (when-let [w (load-from-store workflow-id version opts)]
+                                         {:workflow w :source :store}))))
 
 (defn validate-and-cache-workflow
   "Validate workflow and add to cache.
 
+   Arguments:
+   - workflow         — the workflow config map
+   - workflow-id      — keyword id
+   - version          — version string
+   - source           — `:resource` | `:store` (where the workflow was
+                        loaded from). Threaded by callers that already
+                        know — e.g. `try-load-from-sources` returns it
+                        in its result map. Avoids a second
+                        `load-from-resource` round-trip just to compute
+                        `:source`.
+   - skip-validation? — bypass the validator (still caches)
+
    Returns:
-   - on success: a result map `{:workflow :source :validation}`
+   - on success: `{:workflow :source :validation}`
    - on validation failure: an `:invalid-input` anomaly carrying
      `:workflow-id`, `:version`, `:errors`
 
    This is the canonical, anomaly-returning entry point. The boundary
    site `load-workflow` inlines a `response/throw-anomaly!` when an
    anomaly is observed."
-  [workflow workflow-id version skip-validation?]
+  [workflow workflow-id version source skip-validation?]
   (let [validation (if skip-validation?
                     {:valid? true :errors []}
                     (validator/validate-workflow workflow))]
@@ -221,10 +238,7 @@
         ;; Cache the validated workflow
         (swap! workflow-cache assoc [workflow-id version] workflow)
         {:workflow workflow
-         :source (let [from-resource (load-from-resource workflow-id version)]
-                   (if (and from-resource (not (anomaly/anomaly? from-resource)))
-                     :resource
-                     :store))
+         :source source
          :validation validation}))))
 
 (defn load-workflow
@@ -277,8 +291,13 @@
                                    (:anomaly/data from-sources))
 
           ;; Found — validate-and-cache may itself return an anomaly.
+          ;; `from-sources` is `{:workflow :source}` per
+          ;; `try-load-from-sources`; pass `:source` through directly so
+          ;; we don't re-read the resource.
           (some? from-sources)
-          (let [result (validate-and-cache-workflow from-sources workflow-id version skip-validation?)]
+          (let [{:keys [workflow source]} from-sources
+                result (validate-and-cache-workflow workflow workflow-id version
+                                                    source skip-validation?)]
             (if (anomaly/anomaly? result)
               (response/throw-anomaly! :anomalies.workflow/invalid-config
                                        (:anomaly/message result)
