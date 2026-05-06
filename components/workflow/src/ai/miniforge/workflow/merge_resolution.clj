@@ -122,9 +122,19 @@
   "Spec §6.1 terminal: the resolution sub-workflow couldn't produce a
    clean merge within budget / before the curator declared the agent
    stuck. Carries enough context for an operator dashboard to surface
-   what was tried and what state the worktree was last in."
-  [{:keys [task-id strategy parents conflicts input-key
-           reason iterations last-attempt-ref]}]
+   what was tried and what state the worktree was last in.
+
+   Inputs from the upstream conflict-anomaly are read with their
+   namespaced keys (`:task/id`, `:merge/strategy`, `:merge/parents`,
+   `:merge/conflicts`, `:merge/input-key`); resolution-loop bookkeeping
+   uses unnamespaced keys (`:reason`, `:iterations`, `:last-attempt-ref`)
+   added by `terminal-result`."
+  [{task-id   :task/id
+    strategy  :merge/strategy
+    parents   :merge/parents
+    conflicts :merge/conflicts
+    input-key :merge/input-key
+    :keys     [reason iterations last-attempt-ref]}]
   {:anomaly/category :anomalies/dag-multi-parent-unresolvable
    :anomaly/message  (messages/t :dag.merge.resolution/unresolvable)
    :task/id          task-id

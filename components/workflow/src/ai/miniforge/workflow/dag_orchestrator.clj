@@ -293,13 +293,22 @@
   "refs/miniforge/dag-base")
 
 (def ^:private supported-merge-strategies
-  "Strategies `merge-parent-branches!` knows how to execute today.
-   `:git-merge` ships in Stage 1B; `:sequential-merge` is Stage 4
-   (per spec §4 / §10.11). Plans that explicitly request an unsupported
-   strategy get a typed anomaly rather than silently falling through
-   to `:git-merge` (which would misreport the executed strategy in
-   logs and the resolution-sub-workflow payload)."
-  #{:git-merge})
+  "Strategies `merge-parent-branches!` knows how to execute. Per spec
+   §4:
+
+   - `:git-merge` (default): one git merge invocation; `ort` for 2
+     effective parents, `octopus` for 3+.
+   - `:sequential-merge`: pairwise `ort` merges in plan-declaration
+     order. Each merge is a two-parent merge (well-characterized);
+     handles parent branches that themselves contain merge commits;
+     preserves merge-resolution history across iterations. Slower
+     than octopus on 3+ parents with no conflicts but easier to
+     reason about per-step when conflicts do happen.
+
+   Plans that explicitly request an unsupported strategy get a typed
+   anomaly rather than silently falling through to a different
+   strategy."
+  #{:git-merge :sequential-merge})
 
 (def ^:private octopus-merge-min-parents
   "git's `octopus` strategy is required for 3+ parents. The default
@@ -638,20 +647,21 @@
          (map parse-unmerged-line)
          summarize-conflicts-by-path)))
 
-(defn- run-merge!
-  "Invoke `git merge` in the temp worktree per spec §3.1 / §6.1.
-   Returns either:
-   - `(response/success {:commit-sha <sha>})` when the merge lands a
-     real commit and rev-parse HEAD reports it cleanly.
-   - The conflict anomaly map (`:anomalies/dag-multi-parent-conflict`)
-     when git's exit code reports a conflict.
-   - The merge-failed anomaly map (`:anomalies/dag-multi-parent-merge-failed`)
-     when the merge succeeded but rev-parse HEAD failed (rare
-     infrastructure case).
+(defn- head-sha-or-anomaly
+  "After a merge invocation succeeds, read HEAD and return either a
+   response/success with the commit sha or the merge-failed anomaly.
+   Shared between :git-merge and :sequential-merge happy paths."
+  [worktree-path task-id]
+  (let [head (run-git worktree-path "rev-parse" "HEAD")]
+    (if (zero? (:exit head))
+      (response/success {:commit-sha (str/trim (:out head))} nil)
+      (ref-write-failed-anomaly task-id nil nil head))))
 
-   Caller checks `response/success?` for the happy path and dispatches
-   on `:anomaly/category` for the failure path."
-  [worktree-path task-id strategy parents input-key]
+(defn- run-git-merge!
+  "The :git-merge strategy: a single git merge invocation against the
+   collapsed parent set. Selects ort for 2 effective parents, octopus
+   for 3+. Spec §4.1."
+  [worktree-path task-id parents input-key strategy]
   (let [rest-parents (rest parents)
         message (deterministic-merge-message task-id parents)
         merge-args (concat ["merge" "-s" (merge-strategy-name parents)]
@@ -659,13 +669,76 @@
                            (map :commit-sha rest-parents))
         r (apply run-git worktree-path merge-args)]
     (if (zero? (:exit r))
-      (let [head (run-git worktree-path "rev-parse" "HEAD")]
-        (if (zero? (:exit head))
-          (response/success {:commit-sha (str/trim (:out head))} nil)
-          (ref-write-failed-anomaly task-id nil nil head)))
+      (head-sha-or-anomaly worktree-path task-id)
       (conflict-anomaly task-id strategy parents
                         (enumerate-conflicts worktree-path)
                         input-key r))))
+
+(defn- sequential-step-message
+  "Per-step commit message for the :sequential-merge strategy. Each
+   pairwise merge gets its own commit message so `git log` reads as a
+   sequence of named integration steps rather than identical headers."
+  [task-id step total parent]
+  (let [header (messages/t :dag.merge/sequential-step-header
+                           {:step  step
+                            :total total
+                            :task-id task-id})
+        body   (messages/t :dag.merge/sequential-step-body
+                           {:parent-task-id (:task/id parent)
+                            :parent-sha     (:commit-sha parent)})]
+    (str header "\n\n" body)))
+
+(defn- run-sequential-merge!
+  "The :sequential-merge strategy: pairwise merges in plan-declaration
+   order. Each step is a two-parent `ort` merge. Spec §4.2.
+
+   Returns response/success on the full chain (with HEAD's sha after
+   all parents merged) or the conflict anomaly on the first step that
+   conflicts. The conflict anomaly's :merge/strategy is preserved as
+   :sequential-merge so downstream consumers see what was actually
+   attempted."
+  [worktree-path task-id parents input-key strategy]
+  (let [pairwise-parents (rest parents)
+        total-steps      (count pairwise-parents)]
+    (loop [remaining pairwise-parents
+           step 1]
+      (if-not (seq remaining)
+        ;; All steps committed cleanly; HEAD is the final merge commit.
+        (head-sha-or-anomaly worktree-path task-id)
+        (let [parent (first remaining)
+              message (sequential-step-message task-id step total-steps parent)
+              merge-args (concat ["merge" "-s" "ort"]
+                                 (pinned-merge-flags message)
+                                 [(:commit-sha parent)])
+              r (apply run-git worktree-path merge-args)]
+          (if (zero? (:exit r))
+            (recur (rest remaining) (inc step))
+            (conflict-anomaly task-id strategy parents
+                              (enumerate-conflicts worktree-path)
+                              input-key r)))))))
+
+(defn- run-merge!
+  "Invoke the merge strategy in the temp worktree per spec §3.1 / §6.1.
+   Returns either:
+   - `(response/success {:commit-sha <sha>})` when the merge lands a
+     real commit and rev-parse HEAD reports it cleanly.
+   - The conflict anomaly map (`:anomalies/dag-multi-parent-conflict`)
+     when git's exit code reports a conflict (sequential-merge: on
+     the first step that conflicts; git-merge: on the single merge).
+   - The merge-failed anomaly map (`:anomalies/dag-multi-parent-merge-failed`)
+     when the merge succeeded but rev-parse HEAD failed (rare
+     infrastructure case).
+
+   Caller checks `response/success?` for the happy path and dispatches
+   on `:anomaly/category` for the failure path."
+  [worktree-path task-id strategy parents input-key]
+  (case strategy
+    :git-merge        (run-git-merge!        worktree-path task-id parents input-key strategy)
+    :sequential-merge (run-sequential-merge! worktree-path task-id parents input-key strategy)
+    ;; Defensive — supported-merge-strategies guards upstream stop us
+    ;; from reaching this branch in normal flow. If we do, surface a
+    ;; typed anomaly rather than silently picking a strategy.
+    (strategy-unsupported-anomaly task-id strategy)))
 
 (defn- ensure-clean-worktree!
   "Remove any pre-existing temp worktree at `path` and re-create it

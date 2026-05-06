@@ -86,6 +86,8 @@
   :dag.merge/merge-failed-ref-write  "Failed to write merge result to namespaced ref"
   :dag.merge/commit-message-header   "miniforge dag-merge for task {task-id}"
   :dag.merge/commit-message-parent   "  {index}. {task-id} @ {commit-sha}"
+  :dag.merge/sequential-step-header  "miniforge dag-merge step {step}/{total} for task {task-id}"
+  :dag.merge/sequential-step-body    "Merged parent {parent-task-id} @ {parent-sha}"
 
   ;; v2 multi-parent merge — system-locale strings (operator-internal,
   ;; never user-localized, but routed through the catalog so we have one
