@@ -44,6 +44,33 @@
    but legitimate reviews are killed mid-turn."
   600000)
 
+(def ^:private unparseable-output-token-count
+  42)
+
+(def ^:private parseable-backend-failure-token-count
+  7)
+
+(def ^:private timeout-review-token-count
+  9)
+
+(def ^:private timeout-success-wrapper-token-count
+  11)
+
+(def ^:private backend-timeout-elapsed-ms
+  120183)
+
+(def ^:private wrapped-timeout-elapsed-ms
+  120228)
+
+(def ^:private backend-timeout-stop-reason
+  "timeout")
+
+(def ^:private backend-timeout-num-turns
+  4)
+
+(def ^:private backend-timeout-type
+  "adaptive_timeout")
+
 ;------------------------------------------------------------------------------ Test fixtures
 
 (defn passing-gate
@@ -76,6 +103,53 @@
    :artifact/content {:code/files [{:path "src/example.clj"
                                     :content "(ns example)\n(defn hello [] \"world\")"
                                     :action :create}]}})
+
+(defn- review-gate-feedback
+  ([] (review-gate-feedback :unknown 0))
+  ([gate-id duration-ms]
+   {:gate-id gate-id
+    :gate-type :unknown
+    :passed? true
+    :errors []
+    :warnings []
+    :duration-ms duration-ms}))
+
+(defn- adaptive-timeout-message
+  [elapsed-ms]
+  (str "Adaptive timeout: Stagnation timeout: no progress for "
+       elapsed-ms
+       "ms"))
+
+(defn- wrapped-timeout-message
+  [elapsed-ms]
+  (str (adaptive-timeout-message elapsed-ms)
+       " (type: stagnation, elapsed: "
+       elapsed-ms
+       "ms)"))
+
+(defn- timeout-only-review-content
+  ([blocking-message]
+   (timeout-only-review-content blocking-message [(review-gate-feedback)]))
+  ([blocking-message gate-results]
+   (pr-str {:review/decision :rejected
+            :review/gate-results gate-results
+            :review/blocking-issues [blocking-message]
+            :review/recommendations []})))
+
+(defn- mock-llm-response
+  [content & {:as extra}]
+  (merge {:success? true
+          :content content
+          :tokens 1}
+         extra))
+
+(defn- backend-timeout-error
+  ([message]
+   (backend-timeout-error message nil))
+  ([message data]
+   (cond-> {:type backend-timeout-type
+            :message message}
+     data (assoc :data data))))
 
 ;------------------------------------------------------------------------------ Core functionality tests
 
@@ -202,9 +276,9 @@
   (testing "successful LLM calls that cannot be parsed fail closed"
     (with-redefs [model/resolve-llm-client-for-role (fn [_role client] client)
                   llm/chat (fn [_client _prompt _opts]
-                             {:success? true
-                              :content "not valid edn"
-                              :tokens 42})
+                             (mock-llm-response
+                              "not valid edn"
+                              :tokens unparseable-output-token-count))
                   llm/success? :success?
                   llm/get-content :content]
       (let [reviewer (reviewer/create-reviewer {:llm-backend ::mock-backend
@@ -214,16 +288,18 @@
         (is (= :rejected (:review/decision review)))
         (is (= ["Reviewer LLM output could not be parsed into a review artifact"]
                (:review/blocking-issues review)))
-        (is (= 42 (get-in result [:metrics :tokens])))))))
+        (is (= unparseable-output-token-count
+               (get-in result [:metrics :tokens])))))))
 
 (deftest test-reviewer-uses-parseable-content-even-when-backend-flags-failure
   (testing "parseable review content still drives the decision when backend success? is false"
     (with-redefs [model/resolve-llm-client-for-role (fn [_role client] client)
                   llm/chat (fn [_client _prompt _opts]
-                             {:success? false
-                              :content "```clojure\n{:review/decision :changes-requested\n :review/issues [{:severity :blocking :description \"Needs changes\"}]}\n```"
-                              :tokens 7
-                              :error {:message "artifact file not found"}})
+                             (mock-llm-response
+                              "```clojure\n{:review/decision :changes-requested\n :review/issues [{:severity :blocking :description \"Needs changes\"}]}\n```"
+                              :success? false
+                              :tokens parseable-backend-failure-token-count
+                              :error {:message "artifact file not found"}))
                   llm/success? :success?
                   llm/get-content :content
                   llm/get-error :error]
@@ -233,19 +309,19 @@
             review (:artifact result)]
         (is (= :changes-requested (:review/decision review)))
         (is (some #{"Needs changes"} (:review/blocking-issues review)))
-        (is (= 7 (get-in result [:metrics :tokens])))))))
+        (is (= parseable-backend-failure-token-count
+               (get-in result [:metrics :tokens])))))))
 
 (deftest test-reviewer-timeout-only-parseable-failure-is-agent-error
   (testing "timeout-only parsed review failures do not become rejected code-review artifacts"
     (with-redefs [model/resolve-llm-client-for-role (fn [_role client] client)
                   llm/chat (fn [_client _prompt _opts]
-                             {:success? false
-                              :content "{:review/decision :rejected
-                                         :review/gate-results [{:gate-id :unknown :gate-type :unknown :passed? true :errors [] :warnings [] :duration-ms 0}]
-                                         :review/blocking-issues [\"Adaptive timeout: Stagnation timeout: no progress for 120183ms\"]
-                                         :review/recommendations []}"
-                              :tokens 9
-                              :error {:message "Adaptive timeout: Stagnation timeout: no progress for 120183ms"}})
+                             (mock-llm-response
+                              (timeout-only-review-content
+                               (adaptive-timeout-message backend-timeout-elapsed-ms))
+                              :success? false
+                              :tokens timeout-review-token-count
+                              :error {:message (adaptive-timeout-message backend-timeout-elapsed-ms)}))
                   llm/success? :success?
                   llm/get-content :content
                   llm/get-error :error]
@@ -253,23 +329,24 @@
                                                 :gates []})
             result (core/invoke reviewer {} sample-artifact)]
         (is (= :error (:status result)))
-        (is (= "Adaptive timeout: Stagnation timeout: no progress for 120183ms"
+        (is (= (adaptive-timeout-message backend-timeout-elapsed-ms)
                (get-in result [:error :message])))
         (is (= :reviewer/backend-timeout
                (get-in result [:error :data :code])))
-        (is (= 9 (get-in result [:metrics :tokens])))))))
+        (is (= timeout-review-token-count
+               (get-in result [:metrics :tokens])))))))
 
 (deftest test-reviewer-timeout-only-parseable-success-wrapper-is-agent-error
   (testing "timeout-only parsed review failures are treated as backend errors even when the wrapper reports success"
     (with-redefs [model/resolve-llm-client-for-role (fn [_role client] client)
                   llm/chat (fn [_client _prompt _opts]
-                             {:success? true
-                              :content "{:review/decision :rejected
-                                         :review/gate-results [{:gate-id :unknown :gate-type :unknown :passed? true :errors [] :warnings [] :duration-ms 0}
-                                                                {:gate-id :unknown :gate-type :unknown :passed? true :errors [] :warnings [] :duration-ms 0}]
-                                         :review/blocking-issues [\"Adaptive timeout: Stagnation timeout: no progress for 120228ms (type: stagnation, elapsed: 120228ms)\"]
-                                         :review/recommendations []}"
-                              :tokens 11})
+                             (mock-llm-response
+                              (timeout-only-review-content
+                               (wrapped-timeout-message wrapped-timeout-elapsed-ms)
+                               [(review-gate-feedback)
+                                (review-gate-feedback)])
+                              :success? true
+                              :tokens timeout-success-wrapper-token-count))
                   llm/success? :success?
                   llm/get-content :content
                   llm/get-error (constantly nil)]
@@ -277,24 +354,25 @@
                                                 :gates []})
             result (core/invoke reviewer {} sample-artifact)]
         (is (= :error (:status result)))
-        (is (= "Adaptive timeout: Stagnation timeout: no progress for 120228ms (type: stagnation, elapsed: 120228ms)"
+        (is (= (wrapped-timeout-message wrapped-timeout-elapsed-ms)
                (get-in result [:error :message])))
         (is (= :reviewer/backend-timeout
                (get-in result [:error :data :code])))
-        (is (= 11 (get-in result [:metrics :tokens])))))))
+        (is (= timeout-success-wrapper-token-count
+               (get-in result [:metrics :tokens])))))))
 
 (deftest test-reviewer-timeout-only-shape-does-not-hide-real-gate-failures
   (testing "timeout-only classification requires the deterministic gates to approve"
     (with-redefs [model/resolve-llm-client-for-role (fn [_role client] client)
                   llm/chat (fn [_client _prompt _opts]
-                             {:success? false
-                              :content "{:review/decision :rejected
-                                         :review/gate-results []
-                                         :review/blocking-issues [\"Adaptive timeout: Stagnation timeout: no progress for 120183ms\"]
-                                         :review/recommendations []}"
-                              :tokens 9
-                              :error {:type "adaptive_timeout"
-                                      :message "Adaptive timeout: Stagnation timeout: no progress for 120183ms"}})
+                             (mock-llm-response
+                              (timeout-only-review-content
+                               (adaptive-timeout-message backend-timeout-elapsed-ms)
+                               [])
+                              :success? false
+                              :tokens timeout-review-token-count
+                              :error (backend-timeout-error
+                                      (adaptive-timeout-message backend-timeout-elapsed-ms))))
                   llm/success? :success?
                   llm/get-content :content
                   llm/get-error :error]
@@ -311,15 +389,14 @@
     (let [events (atom [])]
       (with-redefs [model/resolve-llm-client-for-role (fn [_role client] client)
                     llm/chat (fn [_client _prompt _opts]
-                               {:success? false
-                                :content "{:review/decision :rejected
-                                           :review/gate-results [{:gate-id :unknown :gate-type :unknown :passed? true :errors [] :warnings [] :duration-ms 0}]
-                                           :review/blocking-issues [\"Adaptive timeout: Stagnation timeout: no progress for 120183ms\"]
-                                           :review/recommendations []}"
-                                :tokens 9
-                                :error {:type "adaptive_timeout"
-                                        :message "Adaptive timeout: Stagnation timeout: no progress for 120183ms"
-                                        :data {:elapsed-ms 120183}}})
+                               (mock-llm-response
+                                (timeout-only-review-content
+                                 (adaptive-timeout-message backend-timeout-elapsed-ms))
+                                :success? false
+                                :tokens timeout-review-token-count
+                                :error (backend-timeout-error
+                                        (adaptive-timeout-message backend-timeout-elapsed-ms)
+                                        {:elapsed-ms backend-timeout-elapsed-ms})))
                     llm/success? :success?
                     llm/get-content :content
                     llm/get-error :error
@@ -342,17 +419,16 @@
   (testing "timeout-only backend errors preserve normalized backend metadata for post-mortem"
     (with-redefs [model/resolve-llm-client-for-role (fn [_role client] client)
                   llm/chat (fn [_client _prompt _opts]
-                             {:success? false
-                              :content "{:review/decision :rejected
-                                         :review/gate-results [{:gate-id :unknown :gate-type :unknown :passed? true :errors [] :warnings [] :duration-ms 0}]
-                                         :review/blocking-issues [\"Adaptive timeout: Stagnation timeout: no progress for 120183ms\"]
-                                         :review/recommendations []}"
-                              :tokens 9
-                              :stop-reason "timeout"
-                              :num-turns 4
-                              :error {:type "adaptive_timeout"
-                                      :message "Adaptive timeout: Stagnation timeout: no progress for 120183ms"
-                                      :data {:elapsed-ms 120183}}})
+                             (mock-llm-response
+                              (timeout-only-review-content
+                               (adaptive-timeout-message backend-timeout-elapsed-ms))
+                              :success? false
+                              :tokens timeout-review-token-count
+                              :stop-reason backend-timeout-stop-reason
+                              :num-turns backend-timeout-num-turns
+                              :error (backend-timeout-error
+                                      (adaptive-timeout-message backend-timeout-elapsed-ms)
+                                      {:elapsed-ms backend-timeout-elapsed-ms})))
                   llm/success? :success?
                   llm/get-content :content
                   llm/get-error :error]
@@ -362,13 +438,13 @@
         (is (= :error (:status result)))
         (is (= :reviewer/backend-timeout
                (get-in result [:error :data :code])))
-        (is (= "adaptive_timeout"
+        (is (= backend-timeout-type
                (get-in result [:error :data :type])))
-        (is (= 120183
+        (is (= backend-timeout-elapsed-ms
                (get-in result [:error :data :elapsed-ms])))
-        (is (= "timeout"
+        (is (= backend-timeout-stop-reason
                (get-in result [:error :data :stop-reason])))
-        (is (= 4
+        (is (= backend-timeout-num-turns
                (get-in result [:error :data :num-turns])))))))
 
 (deftest test-reviewer-rejects-degraded-implement-handoff
