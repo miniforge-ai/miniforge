@@ -24,6 +24,7 @@
    [ai.miniforge.agent.budget :as budget]
    [ai.miniforge.agent.model :as model]
    [ai.miniforge.agent.prompts :as prompts]
+   [ai.miniforge.agent.result-boundary :as result-boundary]
    [ai.miniforge.agent.role-config :as role-config]
    [ai.miniforge.agent.specialized :as specialized]
    [ai.miniforge.schema.interface :as schema]
@@ -457,24 +458,23 @@
       (llm/chat llm-client user-prompt
                 (merge {:system @planner-system-prompt} mcp-opts)))))
 
-(defn- planner-plan-artifact
-  "Select the planner artifact authority for the session."
-  [worktree-artifacts artifact]
-  {:worktree-plan (get worktree-artifacts :plan)
-   :artifact artifact})
-
-(defn- effective-plan
-  "Return the authoritative submitted plan when one exists."
-  [{:keys [worktree-plan artifact]}]
-  (or worktree-plan artifact))
+(defn- normalize-planner-result
+  [response worktree-artifacts artifact]
+  (result-boundary/normalize-llm-result
+   {:role :plan
+    :response response
+    :worktree-artifacts worktree-artifacts
+    :artifact artifact
+    :content-fn planner-response-content
+    :parse-response parse-plan-response}))
 
 (defn- planner-log-data
   "Build planner invocation telemetry data."
-  [llm-response on-chunk plan-artifact]
-  (let [plan-source (cond
-                      (:worktree-plan plan-artifact) :worktree
-                      (:artifact plan-artifact) :mcp-artifact
-                      :else :final-message)]
+  [llm-response on-chunk normalized]
+  (let [plan-source (case (:artifact-source normalized)
+                      :worktree-metadata :worktree
+                      :mcp :mcp-artifact
+                      :final-message)]
     (cond-> {:success (llm/success? llm-response)
              :tokens (get llm-response :tokens 0)
              :streaming? (boolean on-chunk)
@@ -516,12 +516,12 @@
                           % llm-client retry-prompt config context on-chunk)
         {:keys [llm-result artifact worktree-artifacts]}
         (artifact-session/with-session context run-retry)
-        plan-artifact  (planner-plan-artifact worktree-artifacts artifact)
-        submitted-plan (effective-plan plan-artifact)
+        normalized     (normalize-planner-result llm-result worktree-artifacts artifact)
+        submitted-plan (:structured-artifact normalized)
         parsed-plan    (when-not submitted-plan
-                         (parse-plan-response (planner-response-content llm-result)))]
+                         (:parsed-content normalized))]
     {:llm-response   llm-result
-     :plan-artifact  plan-artifact
+     :normalized     normalized
      :submitted-plan submitted-plan
      :parsed-plan    parsed-plan}))
 
@@ -564,11 +564,11 @@
                     #(invoke-planner-session % llm-client user-prompt config context
                                              on-chunk existing-files))
                   llm-response llm-result
-                  plan-artifact (planner-plan-artifact worktree-artifacts artifact)
-                  submitted-plan (effective-plan plan-artifact)
-                  response-content (planner-response-content llm-response)
+                  normalized (normalize-planner-result llm-response worktree-artifacts artifact)
+                  submitted-plan (:structured-artifact normalized)
+                  response-content (:content normalized)
                   parsed-plan (when-not submitted-plan
-                                (parse-plan-response response-content))
+                                (:parsed-content normalized))
                   retry-result (when (planner-submission-retry? llm-response
                                                                 submitted-plan
                                                                 parsed-plan)
@@ -579,7 +579,7 @@
                                                          config context on-chunk
                                                          response-content))
                   final-llm-response   (or (:llm-response retry-result) llm-response)
-                  final-plan-artifact  (or (:plan-artifact retry-result) plan-artifact)
+                  final-normalized     (or (:normalized retry-result) normalized)
                   final-submitted-plan (or (:submitted-plan retry-result) submitted-plan)
                   final-parsed-plan    (or (:parsed-plan retry-result) parsed-plan)
                   retry-tokens         (if (identical? final-llm-response llm-response)
@@ -591,7 +591,7 @@
                           {:data {:miss-count (count context-misses)
                                   :misses context-misses}}))
               (log/info logger :planner :planner/llm-called
-                        {:data (planner-log-data final-llm-response on-chunk final-plan-artifact)})
+                        {:data (planner-log-data final-llm-response on-chunk final-normalized)})
               ;; Container-promotion preempts CLI error classification:
               ;; if the agent wrote a valid plan.edn into the worktree,
               ;; or submitted a plan through the MCP artifact path,
@@ -601,9 +601,7 @@
               ;; successful Write — the plan existed, but the old
               ;; success-branch-only logic ignored it because the LLM
               ;; response was classified as failure.
-              (if (or final-submitted-plan
-                      final-parsed-plan
-                      (llm/success? final-llm-response))
+              (if (result-boundary/usable-content? final-normalized)
                 (let [content (planner-response-content final-llm-response)
                       stop-reason (:stop-reason final-llm-response)
                       num-turns   (:num-turns final-llm-response)
@@ -651,14 +649,7 @@
                 ;; post-mortem. Iters 11-12 lost this context and
                 ;; produced undiagnosable \"Unknown error\" / bare
                 ;; \"Process timed out\" phase errors.
-                (let [llm-err (llm/get-error final-llm-response)
-                      error-msg (or (:message llm-err) "LLM call failed")
-                      stop-reason (:stop-reason final-llm-response)
-                      num-turns   (:num-turns final-llm-response)]
-                  (response/error error-msg
-                                  {:data (cond-> (or llm-err {})
-                                           stop-reason (assoc :stop-reason stop-reason)
-                                           num-turns   (assoc :num-turns num-turns))}))))
+                (result-boundary/error-response final-normalized "LLM call failed")))
                ;; No LLM client — hard failure
             (response/throw-anomaly! :anomalies.agent/llm-error
                                     "No LLM backend provided for planner agent"
