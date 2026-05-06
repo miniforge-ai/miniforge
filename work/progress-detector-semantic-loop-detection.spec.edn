@@ -1,0 +1,407 @@
+;; =============================================================================
+;; Spec: Progress detector stage 1 — tool-loop and repair-loop detection
+;; =============================================================================
+;;
+;; The 2026-05-04 / 2026-05-05 dogfood-fix series (#779, #781, #782, #783)
+;; was a cycle of timeout bumps:
+;;
+;;   60s → 180s          (planner stagnation, #781)
+;;   180s → 360s         (stream line-timeout, #782)
+;;   120s → 180s         (reviewer stagnation, #783)
+;;
+;; Each bump calibrated to whichever spec broke us last. Prompt size,
+;; model latency, and tool-call depth are not knowable from a spec EDN
+;; — every threshold value is a guess that needs re-tuning per spec.
+;;
+;; PR #762 already showed the right primitive at the review-implement
+;; repair-loop level: fingerprint actionable issues, terminate when
+;; the fingerprint stops changing. That's loop detection — observing
+;; what the agent produces, not how long it takes.
+;;
+;; This spec is Stage 1 of a multi-stage rebuild of agent-supervision
+;; semantics. It lands the detector framework + the two mechanical
+;; detectors that directly attack the timeout-bump cycle, plus the
+;; minimal supervisor needed to act on their anomalies. Phase
+;; contracts, progress ledgers, the no-information-gain detector,
+;; and the full supervisor policy map are explicitly deferred to
+;; Stages 2 and 3.
+
+{:spec/title "Progress detector stage 1 — tool-loop and repair-loop anomaly detection"
+
+ :spec/description
+ "Land the agent-supervision substrate: a detector component, a
+  normalized anomaly schema, a tool capability registry, two
+  mechanical detectors (tool-loop, repair-loop), and the minimal
+  supervisor needed to terminate agents on mechanical anomalies.
+  Rename the wallclock guards to :prompt/liveness-watchdog so their
+  meaning matches their behavior. Defer phase contracts, progress
+  ledgers, and full :on-anomaly policy mapping to Stages 2 and 3.
+
+  Layer cake — full target architecture, for orientation:
+
+    Layer 1 — Budget + liveness     (cost, tokens, turns, OS-wedge)
+    Layer 2 — Event normalization   (envelope, tool profile, fingerprints)
+    Layer 3 — Progress / anomaly    (reducer detectors, anomaly facts)
+    Layer 4 — Supervisor policy     (anomaly composition, lifecycle)
+    Layer 5 — Phase contracts       (admissibility validation)
+
+  Stage 1 lands a usable subset:
+
+    Layer 1: rename :prompt/progress-monitor → :prompt/liveness-watchdog;
+             keep cost / token / turn budgets unchanged.
+    Layer 2: minimal tool profile registry; richer tool fingerprints
+             for tool-loop. Full event-envelope normalization deferred
+             to Stage 2.
+    Layer 3: detector framework (reducer protocol), anomaly schema,
+             :detector/tool-loop, :detector/repair-loop refactored
+             from PR #762.
+    Layer 4: minimal supervisor — mechanical anomaly defaults to
+             :terminate; heuristic to :warn; no per-category :on-anomaly
+             policy map yet.
+    Layer 5: not in this stage.
+
+  ## Why three layers instead of one threshold
+
+  Today's progress monitor conflates three different questions:
+  'Is this agent over its blast-radius cap?' (budget),
+  'Is this agent making semantic progress?' (progress detection),
+  'Did this phase produce an admissible artifact?' (phase contract).
+  All three answered with a wallclock check. That's why every dogfood
+  reveals a new threshold to bump. Stage 1 doesn't fix all three —
+  it fixes the second by making it event-driven, and renames Layer 1
+  honestly. Stage 3 will close the third.
+
+  ## Component layout (Stage 1 actual)
+
+  New: components/progress-detector/
+    src/ai/miniforge/progress_detector/
+      interface.clj          ;; public Layer 0/1 boundary
+      protocol.clj           ;; Detector protocol (reducer shape)
+                             ;;   + NullDetector + MultiDetector
+      schema.clj             ;; DetectorAnomalyData / Observation /
+                             ;;   ToolProfile / DetectorConfig schemas
+                             ;;   (anomaly schema lives on
+                             ;;    components/anomaly — re-exported)
+      tool_profile.clj       ;; registration API (register! / lookup)
+      config.clj             ;; layered config merge
+    test/...
+
+  Stage 1 explicitly does NOT ship:
+
+    detectors/tool_loop.clj    — Stage 2 (depends on event envelope)
+    detectors/repair_loop.clj  — Stage 2 (port of PR #762)
+    supervisor.clj             — Stage 3 (full :on-anomaly map)
+    resources/.../tool-profiles.edn — gone; per the user-review on PR
+                                      #784, tool profiles are
+                                      contributed by the components
+                                      that vendor each tool, not held
+                                      centrally here. Stage 2 wires
+                                      adapter-claude-code etc. to
+                                      register their profiles at load.
+
+  ## Detector protocol (Layer 3)
+
+  Detectors are pure reducers over a bounded state. The framework
+  invokes init once per agent run, then observe-event after every
+  parsed agent event. Detectors must NOT scan the event log; the
+  framework gives them events one at a time and bounded windows are
+  the detector's responsibility.
+
+    (defprotocol Detector
+      (init       [this config]                     => state)
+      (observe    [this state event]                => {:state state'
+                                                        :anomalies [...]}))
+
+  Total detector overhead per parsed event: < 5ms across all
+  registered detectors at the framework's default detector set.
+  Measured via criterium with a fixture that replays the
+  event-log-tool-visibility dogfood's recorded event sequence.
+
+  ## Anomaly schema (Layer 3)
+
+  Detectors emit pure description, no lifecycle:
+
+    {:anomaly/id          uuid?
+     :anomaly/category    keyword?           ;; :anomalies.agent/tool-loop, …
+     :anomaly/class       #{:mechanical :heuristic}
+     :anomaly/severity    #{:info :warn :error :fatal}
+     :detector/kind       keyword?
+     :detector/version    string?
+     :anomaly/evidence    {:summary       string?
+                           :event-ids     [uuid?]
+                           :fingerprint   string?
+                           :threshold     {:n int? :window int?}
+                           :raw-log-ref   string?
+                           :redacted?     boolean?}}
+
+  No :recommended-action key — lifecycle is the supervisor's job,
+  not the detector's. No :confidence — Stage 1 uses :class and
+  :severity only; composite signals are a Stage 3 concern.
+
+  Evidence is bounded: summary + event-id pointers + fingerprint +
+  threshold metadata + a pointer to the local event log via
+  :raw-log-ref. Raw tool args, raw assistant text, and raw file
+  content do NOT appear in evidence. The redaction is
+  best-effort against accidental leakage, not a soundness claim
+  against adversarial content.
+
+  ## Tool capability registry (Layer 2 minimum)
+
+  Each known tool has a profile declaring how to fingerprint a call:
+
+    {:tool/name 'Read'
+     :tool/class :filesystem/read
+     :fingerprint/dimensions [:tool/name :args/hash :resource/id
+                              :resource/version-hash :result/hash]
+     :determinism :stable-with-resource-version}
+
+    {:tool/name 'Bash'
+     :tool/class :process/exec
+     :fingerprint/dimensions [:tool/name :cwd/hash :command/hash
+                              :exit-code :failure/fingerprint]
+     :determinism :environment-dependent}
+
+    {:tool/name 'Grep'
+     :tool/class :filesystem/search
+     :fingerprint/dimensions [:tool/name :args/hash :result/hash]
+     :determinism :stable-ish}
+
+    {:tool/name 'WebSearch'
+     :tool/class :network/search
+     :fingerprint/dimensions [:tool/name :args/hash :result/hash :time/window]
+     :determinism :unstable}
+
+  The :determinism field tells the tool-loop detector what kind of
+  signal a fingerprint repeat IS:
+
+    :stable-with-resource-version → mechanical (resource hash unchanged
+                                                = same call same answer)
+    :stable-ish                   → mechanical with bounded false-positives
+    :environment-dependent        → mechanical only when failure
+                                    fingerprint also matches
+    :unstable                     → heuristic only — fingerprint repeats
+                                    are weak signal
+
+  Profiles for unknown tools fall back to a permissive default
+  (:fingerprint/dimensions [:tool/name :args/hash], :determinism
+  :unstable) — they participate as heuristic signals only, never
+  trigger mechanical termination.
+
+  ## :detector/tool-loop (mechanical)
+
+  Fingerprints each tool call from the tool's :fingerprint/dimensions.
+  Tracks a sliding window of recent fingerprints (default size 10).
+  When the same fingerprint appears > N times in the window
+  (default N=5) AND the tool's :determinism is mechanical-eligible
+  (:stable-with-resource-version, :stable-ish, or
+  :environment-dependent with matching :failure/fingerprint),
+  emits :anomalies.agent/tool-loop:
+
+    {:anomaly/category :anomalies.agent/tool-loop
+     :anomaly/class    :mechanical
+     :anomaly/severity :error
+     :detector/kind    :detector/tool-loop
+     :detector/version 'stage-1.0'
+     :anomaly/evidence {:summary       'Read \"src/foo.clj\" 6 times,
+                                       resource hash unchanged'
+                        :event-ids     [uuid uuid uuid uuid uuid uuid]
+                        :fingerprint   '<hex>'
+                        :threshold     {:n 5 :window 10}
+                        :raw-log-ref   'local://runs/<wf>/events.log'
+                        :redacted?     true}}
+
+  Re-reading a file after an Edit changes :resource/version-hash —
+  fingerprint differs, no anomaly. Re-reading the same unchanged
+  file 6 times — fingerprint matches, anomaly fires.
+
+  For tools with :determinism :unstable (WebSearch, etc.), the
+  detector keeps tracking but emits :class :heuristic instead.
+
+  ## :detector/repair-loop (mechanical, port of PR #762)
+
+  PR #762's review-fingerprint logic moves into the new component
+  unchanged. Same anomaly category (:anomalies.review/stagnation),
+  same termination semantics, same regression test. The agent
+  code path becomes a thin call into the detector. One namespace
+  owns 'is the agent making progress?' across both within-turn
+  (tool-loop) and across-turn (repair-loop) cases.
+
+  ## Minimal supervisor (Layer 4)
+
+  Stage 1 supervisor consumes detector anomalies and applies a
+  simple default policy:
+
+    :anomaly/class :mechanical → :terminate
+    :anomaly/class :heuristic  → :warn (logged, no action)
+
+  Stage 3 will replace this with a per-category :on-anomaly map
+  + composite-rules for combining heuristics into mechanical
+  promotions. Stage 1 keeps the policy hard-coded at the class
+  level — enough to make the detectors actually do something
+  without committing to the full policy surface.
+
+  ## :prompt/liveness-watchdog (Layer 1 rename)
+
+  The existing :prompt/progress-monitor block is renamed to
+  :prompt/liveness-watchdog and its semantics are clarified:
+  it's a process-wedge timer, not a progress check. New default
+  values reflect the change in meaning:
+
+    {:no-event-timeout-ms      600000   ;; 10 min — process is dead
+     :process-start-timeout-ms  60000}  ;; 1 min — spawn never produced
+
+  Existing :prompt/progress-monitor blocks keep parsing — but the
+  loader emits a deprecation warning and reinterprets the values
+  conservatively (using the larger of {old-config, new-default} so
+  no existing config gets STRICTER by accident). This is explicit
+  migration, not silent reinterpretation. A bb migration command
+  rewrites old configs in-tree.
+
+  ## Per-agent / per-phase / per-spec detector config
+
+  Detector registration is layered:
+
+    :detectors/defaults [:tool-loop :repair-loop]
+
+    :agent/detectors {…}      ;; per-agent overlay
+    :phase/detectors {…}      ;; per-phase overlay
+    :spec/detectors  {…}      ;; per-spec overlay (escape hatch)
+
+  Merge semantics, applied outermost-to-innermost:
+
+    {:inherit  true                      ;; default true
+     :disable  [:detector-kind …]        ;; remove
+     :enable   [{:kind … :config {…}}]   ;; add
+     :tune     {:detector-kind {…}}}     ;; modify config keys
+
+  Disable beats tune in conflict. Inherit=false at any level
+  drops everything from outer layers. This is the mechanism for
+  the future no-information-gain detector to be tuned per phase
+  (Stage 2 will add it; Stage 1 wires the config plumbing now).
+
+  ## What Stage 1 explicitly does NOT land
+
+  Deferred to Stage 2:
+    - Full normalized event envelope (:event/seq scoped per
+      agent-run, :resource/version-hash on every tool result,
+      richer event kinds)
+    - :detector/no-information-gain (depends on the progress ledger)
+    - Progress ledger reducer + :progress/advanced events
+    - :detector/repeated-failure (depends on parsed-failure
+      fingerprint extraction)
+
+  Deferred to Stage 3:
+    - Phase contracts (:phase/contract block per phase)
+    - Phase status taxonomy (:succeeded / :failed-contract /
+      :failed-anomaly / :failed-budget / :failed-liveness /
+      :failed-tool / :cancelled / :requires-human)
+    - Full supervisor :on-anomaly policy map
+    - Composite-rules for promoting combined heuristics to
+      mechanical anomalies
+    - :detector/text-similarity and :detector/event-motif-loop
+    - Workflow runner enforcement of contracts at phase
+      boundaries"
+
+ :spec/intent
+ {:type  :feature
+  :scope ["components/progress-detector/src"
+          "components/progress-detector/resources"
+          "components/progress-detector/test"
+          "components/llm/src/ai/miniforge/llm/protocols/impl/llm_client.clj"
+          "components/llm/src/ai/miniforge/llm/progress_monitor.clj"
+          "components/llm/resources/llm/client-defaults.edn"
+          "components/agent/src/ai/miniforge/agent/reviewer.clj"
+          "components/agent/src/ai/miniforge/agent/planner.clj"
+          "components/agent/src/ai/miniforge/agent/implementer.clj"
+          "components/agent/resources/prompts/planner.edn"
+          "components/agent/resources/prompts/implementer.edn"
+          "components/agent/resources/prompts/reviewer.edn"
+          "components/agent/resources/prompts/tester.edn"
+          "components/agent/resources/prompts/releaser.edn"
+          "components/agent/resources/prompts/curator.edn"
+          "components/anomaly/src"]}
+
+ :spec/constraints
+ ["Detectors are pure reducers (init / observe-event), not stream rescans — total detector overhead per parsed event must stay under 5ms across all registered detectors at the framework's default detector set, measured via criterium with a recorded event-fixture"
+  "Detectors emit pure-description anomalies. No :recommended-action key in the anomaly schema. Lifecycle policy lives only in the supervisor"
+  "Anomaly evidence is bounded: summary + event-id pointers + fingerprint + threshold metadata + :raw-log-ref. No raw tool args, raw assistant text, or raw file content in evidence payloads. Redaction is best-effort, not a soundness guarantee"
+  "Tool fingerprint dimensions come from the tool capability registry, not from per-detector logic. Adding a new tool to the registry must NOT require a code change in any detector"
+  "PR #762's review-fingerprint behavior is preserved end-to-end when ported into the new component as :detector/repair-loop — same anomaly category (:anomalies.review/stagnation), same termination semantics, verified against PR #762's existing regression test"
+  "Backward compat: :prompt/progress-monitor blocks parse with a deprecation warning. The reinterpreted values cannot make an existing config stricter than its declared values implied. A bb migration command rewrites old configs to :prompt/liveness-watchdog"
+  "Removing all detectors must still leave Layer 1 (cost / token / turn / liveness) caps enforced — Stage 1 detectors are additive guards, not the only safety net"
+  "Mechanical anomalies default to supervisor action :terminate. Heuristic anomalies default to :warn (logged, no action). The full per-category :on-anomaly policy map is explicitly Stage 3"
+  "Detector / supervisor behavior is data-driven via :detectors and :prompt/liveness-watchdog config blocks. Per-agent / per-phase / per-spec overlays merge with explicit semantics (:inherit / :disable / :enable / :tune)"
+  "Anomaly composition (multiple anomalies in the same turn) follows a deterministic rule: all anomalies are recorded in the event log; supervisor selects one controlling anomaly using order = :fatal > :error > :warn > :info, ties broken by :class :mechanical > :heuristic, further ties broken by earliest :event/seq. The full composite-rules system is Stage 3"]
+
+ :spec/acceptance-criteria
+ [;; Detector framework
+  "components/progress-detector/ exists and exports the Detector protocol, the anomaly schema, the tool capability registry, and the registered detector kinds"
+  "Detectors implement Detector via init / observe-event reducer shape — no detector calls into the event log directly; the framework feeds events one at a time"
+
+  ;; Tool-loop, mechanical positives
+  ":detector/tool-loop fires :anomalies.agent/tool-loop (class :mechanical, severity :error) when an agent calls Read on the same path 6 times AND :resource/version-hash is unchanged each time — verified by integration test"
+  ":detector/tool-loop fires when an agent calls Bash with the same command and the same parsed :failure/fingerprint 6 times in a row — verified by integration test"
+  ":detector/tool-loop fires when an agent calls Glob with the same pattern 6 times AND the matched-paths hash is unchanged — verified by integration test"
+
+  ;; Tool-loop, mechanical negatives
+  ":detector/tool-loop does NOT fire when the same Read args return a different :resource/version-hash after an Edit — verified by integration test"
+  ":detector/tool-loop does NOT fire when an agent calls Read on 6 different files (distinct fingerprints)"
+  ":detector/tool-loop does NOT fire when an agent calls Bash with the same command but the failure fingerprint changes between runs (different parsed errors)"
+  ":detector/tool-loop emits :class :heuristic (not :mechanical) for repeated WebSearch calls — :determinism :unstable disqualifies mechanical termination"
+
+  ;; Repair-loop refactor
+  ":detector/repair-loop reproduces PR #762's :anomalies.review/stagnation behavior end-to-end — same fingerprint composition, same termination semantics, verified against PR #762's existing regression test (no behavior change visible to the agent code path)"
+
+  ;; Supervisor minimal policy
+  "An agent that triggers a mechanical anomaly is terminated by the supervisor. The terminating anomaly is recorded in the event log with full schema (:category, :class, :severity, :detector/kind, :detector/version, :evidence)"
+  "An agent that triggers a heuristic anomaly is logged but NOT terminated by the supervisor (Stage 1's heuristic default is :warn)"
+
+  ;; Layered config
+  "Layered detector config merges correctly: a planner with {:disable [:tool-loop]} must not fire that detector; a tester with {:tune {:tool-loop {:n 8}}} must use the bumped threshold; a per-spec overlay with :inherit false drops outer layers"
+
+  ;; Liveness watchdog rename
+  "Existing :prompt/progress-monitor blocks parse with a deprecation warning — verified by test that asserts the warning fires once per loaded prompt-data"
+  "The reinterpreted :prompt/progress-monitor → :prompt/liveness-watchdog values are never STRICTER than the declared values implied (verified by property test over arbitrary legacy configs)"
+  "bb miniforge migrate-prompts rewrites :prompt/progress-monitor blocks in tree to :prompt/liveness-watchdog with the new keys"
+
+  ;; Performance
+  "Per-event detector overhead in the criterium benchmark suite stays under 5ms total across the framework's default detector set ([:tool-loop :repair-loop]) over a recorded fixture of the event-log-tool-visibility dogfood's event sequence"
+
+  ;; Evidence bounding
+  "Anomaly :evidence does not contain raw tool args, raw assistant text, or raw file content — verified by a fuzzer test that injects synthetic 'secret-shaped' content into agent inputs and asserts none of those strings appear in any emitted anomaly's evidence map"
+
+  ;; Anomaly composition
+  "When multiple anomalies fire in the same turn, all are recorded; the supervisor selects one controlling anomaly using the documented order; the controlling-anomaly choice is reproducible across runs given the same event sequence"
+
+  ;; Dogfood viability
+  "A dogfood run on event-log-tool-visibility EITHER (a) completes through the full SDLC, OR (b) terminates with a detector-emitted anomaly that names which detector fired and includes reproducible evidence — never a bare wallclock timeout from the renamed liveness watchdog (those are reserved for true OS-level wedges with default no-event-timeout-ms 600000)"]
+
+ :spec/deferred
+ [{:stage :stage-2
+   :scope ["full normalized event envelope (:event/seq per agent-run,
+            :resource/version-hash on every tool result,
+            richer event kinds)"
+           ":detector/no-information-gain (depends on progress ledger)"
+           "progress ledger reducer + :progress/advanced events"
+           ":detector/repeated-failure (depends on parsed-failure fingerprints)"]}
+  {:stage :stage-3
+   :scope ["phase contracts (:phase/contract block per phase)"
+           "phase status taxonomy (:succeeded / :failed-contract /
+            :failed-anomaly / :failed-budget / :failed-liveness /
+            :failed-tool / :cancelled / :requires-human)"
+           "full supervisor :on-anomaly policy map per category"
+           "composite-rules for promoting combined heuristics
+            to mechanical anomalies"
+           ":detector/text-similarity"
+           ":detector/event-motif-loop"
+           "workflow runner enforcement of contracts at phase boundaries"]}]
+
+ :spec/priority
+ {:tier        :critical
+  :axes        #{:agent-quality :dogfood-enabler :supervision}
+  :theme       :semantic-supervision
+  :rationale   "Replaces the threshold-bump cycle with semantic loop detection at the within-turn level — the failure mode the dogfood-fix series #779/#781/#782/#783 has been chasing. Tool-loop detection is the dogfood-blocking bottleneck; phase contracts (Stage 3) are required for full success-funnel correctness but Stage 1 alone unblocks the immediate iteration. The minimal supervisor in Stage 1 is enough to make the detectors actually act; the full :on-anomaly policy surface is staged separately to avoid landing runtime constitution alongside detector mechanics."
+  :blocks      ["agent-stream-watchdog-and-resume.spec.edn"]
+  :blocked-by  []}
+
+ :spec/workflow-type :canonical-sdlc}
