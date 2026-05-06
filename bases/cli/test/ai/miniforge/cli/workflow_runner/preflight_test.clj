@@ -41,6 +41,16 @@
       (is (= "warn" (:err result)))
       (is (= 0 (:exit result))))))
 
+(deftest await-stream-waits-for-reader-completion-test
+  (testing "stream join waits for a completed reader instead of dropping late output"
+    (let [started-at (System/currentTimeMillis)
+          result (#'sut/await-stream (future
+                                       (Thread/sleep 1100)
+                                       "late-output"))
+          elapsed-ms (- (System/currentTimeMillis) started-at)]
+      (is (= "late-output" result))
+      (is (<= 1000 elapsed-ms)))))
+
 (deftest run-cli-command-times-out-fast-test
   (testing "probe helper returns a timeout result instead of hanging the caller"
     (let [result (#'sut/run-cli-command [(shell-path) "-lc" "sleep 1"] 10)]

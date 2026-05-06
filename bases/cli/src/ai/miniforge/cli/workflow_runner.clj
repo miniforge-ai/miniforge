@@ -332,7 +332,9 @@
 
 (defn- await-stream
   [stream-future]
-  (deref stream-future 1000 ""))
+  (try
+    @stream-future
+    (catch Exception _ "")))
 
 (defn- run-cli-command
   [cmd timeout-ms & {:keys [workdir]}]
