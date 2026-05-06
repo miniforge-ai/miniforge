@@ -48,6 +48,7 @@
    :each fixture to prevent cross-test seq coupling."
   (:require
    [malli.core :as m]
+   [ai.miniforge.progress-detector.messages :as msg]
    [ai.miniforge.progress-detector.schema :as schema]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -159,7 +160,7 @@
                (assoc :resource/version-hash (:resource/version-hash event)))]
      (if (m/validate schema/Observation obs)
        obs
-       (throw (ex-info "Normalized event failed Observation schema validation"
+       (throw (ex-info (msg/t :envelope/validation-failed)
                        {:type   ::validation-failed
                         :event  event
                         :obs    obs

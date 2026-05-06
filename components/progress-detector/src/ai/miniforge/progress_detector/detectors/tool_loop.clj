@@ -47,6 +47,7 @@
   (:require
    [ai.miniforge.anomaly.interface         :as anomaly]
    [ai.miniforge.progress-detector.config  :as cfg]
+   [ai.miniforge.progress-detector.messages :as msg]
    [ai.miniforge.progress-detector.protocol :as proto]
    [ai.miniforge.progress-detector.tool-profile :as tp]))
 
@@ -149,14 +150,16 @@
   "Human-readable summary line for an anomaly. Tool-id and the
    match count are the two non-redacted facts a reviewer needs."
   [tool-id match-count]
-  (str "Tool " tool-id " repeated " match-count " times in window"))
+  (msg/t :tool-loop/loop-detected
+         {:tool-id tool-id :count match-count}))
 
 (defn- build-anomaly
   "Construct a canonical anomaly map for an above-threshold group."
   [{:keys [tool-id matches anomaly-class threshold-n window-size
            fingerprint]}]
   (let [match-count (count matches)
-        evidence    {:summary     (evidence-summary tool-id match-count)
+        summary     (evidence-summary tool-id match-count)
+        evidence    {:summary     summary
                      :event-ids   (mapv :seq matches)
                      :fingerprint (str fingerprint)
                      :threshold   {:n threshold-n :window window-size}
@@ -167,9 +170,7 @@
                      :anomaly/severity  (class->severity anomaly-class)
                      :anomaly/category  anomaly-category
                      :anomaly/evidence  evidence}]
-    (anomaly/anomaly :fault
-                     (evidence-summary tool-id match-count)
-                     data)))
+    (anomaly/anomaly :fault summary data)))
 
 ;------------------------------------------------------------------------------ Layer 2
 ;; Window helpers

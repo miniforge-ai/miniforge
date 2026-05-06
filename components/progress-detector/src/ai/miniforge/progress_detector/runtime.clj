@@ -38,6 +38,7 @@
    this is fine. The atom is for state-threading sugar, not
    concurrency."
   (:require
+   [ai.miniforge.progress-detector.messages   :as msg]
    [ai.miniforge.progress-detector.protocol   :as proto]
    [ai.miniforge.progress-detector.supervisor :as sup]))
 
@@ -79,7 +80,7 @@
   [{:keys [detectors config policy]
     :or   {config {} policy sup/default-policy}}]
   (when (empty? detectors)
-    (throw (ex-info "make-runtime requires at least one detector"
+    (throw (ex-info (msg/t :runtime/empty-detectors)
                     {:detectors detectors})))
   (let [composed (proto/multi-detector detectors)
         d-state  (proto/init composed config)]
@@ -88,16 +89,20 @@
 ;------------------------------------------------------------------------------ Layer 1
 ;; Observation
 
+(defn- step-detector-state
+  "Single reducer step over the runtime state map: thread one event
+   through the composed detector and return the updated state."
+  [state event]
+  (let [det     (:detector state)
+        d-state (proto/observe det (:detector-state state) event)]
+    (assoc state :detector-state d-state)))
+
 (defn observe!
   "Feed one event into the runtime's detector pipeline. Returns the
    runtime atom for chaining. The detector reducer state is threaded
    internally; callers do not see it."
   [runtime event]
-  (swap! runtime
-         (fn [state]
-           (let [det     (:detector state)
-                 d-state (proto/observe det (:detector-state state) event)]
-             (assoc state :detector-state d-state))))
+  (swap! runtime step-detector-state event)
   runtime)
 
 ;------------------------------------------------------------------------------ Layer 2

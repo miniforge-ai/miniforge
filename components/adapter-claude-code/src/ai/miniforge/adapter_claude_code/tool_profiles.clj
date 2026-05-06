@@ -19,66 +19,53 @@
 (ns ai.miniforge.adapter-claude-code.tool-profiles
   "Tool profile contributions for the Claude CLI native toolset.
 
-   Registers determinism + anomaly-category data for the eight tools
-   the Claude CLI ships natively (Read, Bash, Grep, Glob, Edit, Write,
-   WebSearch, WebFetch) so progress-detector's tool-loop detector
-   knows which fingerprint repeats are mechanical-eligible vs
-   heuristic-only.
+   Profile data lives in
+   resources/config/adapter_claude_code/tool-profiles.edn — this
+   namespace loads it and contributes the entries to
+   progress-detector's default tool registry at namespace load.
 
-   Architectural intent: progress-detector ships zero hardcoded tool
-   data — components that vendor a tool contribute their own profile.
-   This namespace is the contribution from the Claude CLI adapter.
+   Architectural intent: progress-detector ships zero hardcoded
+   tool data — components that vendor a tool contribute their own
+   profile. This namespace is the contribution from the Claude CLI
+   adapter.
 
-   Registration happens at namespace load via a defonce side-effect.
-   `register-profiles!` is idempotent (it overwrites by :tool/id) so
-   re-loading or explicit re-invocation is safe."
+   Registration is via a defonce side-effect at namespace load.
+   `register-profiles!` is itself idempotent (each entry overwrites
+   by :tool/id) so re-invocation in tests or after reload is safe."
   (:require
-   [ai.miniforge.progress-detector.interface :as pd]))
+   [ai.miniforge.progress-detector.interface :as pd]
+   [clojure.edn                              :as edn]
+   [clojure.java.io                          :as io]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Profile data
+;; Profile data loader
+
+(def ^:private profiles-resource-path
+  "Classpath path to the EDN holding the eight Claude CLI tool
+   profiles. Pulled to a constant so tests and REPL exploration
+   reference the same string."
+  "config/adapter_claude_code/tool-profiles.edn")
+
+(def ^:private profiles-section-key
+  "Top-level EDN key the catalog is filed under."
+  :adapter-claude-code/tool-profiles)
+
+(defn- load-profiles
+  "Read the tool-profiles EDN catalog from the classpath and return
+   the profile vector. Returns nil if the resource is missing — that
+   is a packaging error, not a runtime condition the caller should
+   handle."
+  []
+  (when-let [res (io/resource profiles-resource-path)]
+    (-> res slurp edn/read-string (get profiles-section-key))))
 
 (def claude-cli-profiles
-  "Profile entries for the eight Claude CLI native tools.
-
-   :determinism choices, per the Stage 1 spec's tool capability registry:
-
-     :stable-with-resource-version - mechanical when the resource
-       hash matches across calls (Read of an unchanged file, or
-       Edit/Write that produces a hash-equal post-state — i.e. a
-       no-op patch — counts as a loop).
-     :stable-ish - mostly-deterministic, mechanical with bounded
-       false-positives (same Grep pattern, same Glob input).
-     :environment-dependent - mechanical only when the parsed
-       failure fingerprint matches across calls (Bash with the
-       same command failing the same way is a loop; Bash with
-       different exit codes or different parsed errors is not).
-     :unstable - heuristic only (network calls return different
-       payloads even for identical inputs)."
-  [{:tool/id            :tool/Read
-    :determinism        :stable-with-resource-version
-    :anomaly/categories #{:anomalies.agent/tool-loop}}
-   {:tool/id            :tool/Bash
-    :determinism        :environment-dependent
-    :anomaly/categories #{:anomalies.agent/tool-loop}}
-   {:tool/id            :tool/Grep
-    :determinism        :stable-ish
-    :anomaly/categories #{:anomalies.agent/tool-loop}}
-   {:tool/id            :tool/Glob
-    :determinism        :stable-ish
-    :anomaly/categories #{:anomalies.agent/tool-loop}}
-   {:tool/id            :tool/Edit
-    :determinism        :stable-with-resource-version
-    :anomaly/categories #{:anomalies.agent/tool-loop}}
-   {:tool/id            :tool/Write
-    :determinism        :stable-with-resource-version
-    :anomaly/categories #{:anomalies.agent/tool-loop}}
-   {:tool/id            :tool/WebSearch
-    :determinism        :unstable
-    :anomaly/categories #{:anomalies.agent/tool-loop}}
-   {:tool/id            :tool/WebFetch
-    :determinism        :unstable
-    :anomaly/categories #{:anomalies.agent/tool-loop}}])
+  "Loaded profile entries for the eight Claude CLI native tools.
+   Resolved at namespace load from
+   resources/config/adapter_claude_code/tool-profiles.edn — the
+   data lives in EDN, not in this code, so changes to determinism
+   or category sets don't require a code change here."
+  (load-profiles))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Registration
@@ -90,7 +77,7 @@
    leaves the registry shape unchanged.
 
    Arguments:
-     registry - registry atom (defaults to pd/default-registry)
+     registry - registry atom (defaults to pd/default-tool-registry)
 
    Returns: the final registry map."
   ([]

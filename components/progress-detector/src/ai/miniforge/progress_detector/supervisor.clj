@@ -40,7 +40,7 @@
    All anomalies (controlling and not) are surfaced to the caller;
    the supervisor names which one drives the decision."
   (:require
-   [ai.miniforge.progress-detector.protocol :as proto]))
+   [ai.miniforge.progress-detector.messages :as msg]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Severity + class ranking
@@ -124,12 +124,15 @@
       :anomalies anomalies}
      (let [controlling (select-controlling anomalies)
            action      (get policy (anomaly-class controlling) :continue)
-           summary     (get-in controlling [:anomaly/data :anomaly/evidence :summary])]
+           summary     (get-in controlling
+                               [:anomaly/data :anomaly/evidence :summary]
+                               (msg/t :supervisor/no-summary))
+           reason      (msg/t :supervisor/terminate-reason {:summary summary})]
        (cond-> {:action    action
                 :anomalies anomalies
                 :anomaly   controlling}
          (= action :terminate)
-         (assoc :reason (str "Terminating run: " (or summary "controlling anomaly fired"))))))))
+         (assoc :reason reason))))))
 
 (defn terminate?
   "Convenience predicate over a `handle` decision map."

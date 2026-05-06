@@ -39,6 +39,7 @@
    in a MultiDetector and silently ignores tool-event observations."
   (:require
    [ai.miniforge.anomaly.interface          :as anomaly]
+   [ai.miniforge.progress-detector.messages :as msg]
    [ai.miniforge.progress-detector.protocol :as proto]
    [clojure.string                          :as str]))
 
@@ -53,6 +54,19 @@
 (def ^:private detector-kind :detector/repair-loop)
 
 (def ^:private anomaly-category :anomalies.review/stagnation)
+
+(def ^:private stagnation-match-count
+  "Number of consecutive identical fingerprints required to declare
+   stagnation. Stamped onto :anomaly/evidence :threshold so the
+   downstream caller (supervisor + reviewer) can see the rule that
+   fired without consulting the detector source."
+  2)
+
+(def ^:private stagnation-window-size
+  "Size of the sliding window the repair-loop detector observes
+   over. Two consecutive reviews are the operative comparison —
+   the detector only retains the prior fingerprint, so window = 2."
+  2)
 
 (def ^:private actionable-severities
   "Severities that count as 'something the implementer should fix.'
@@ -143,16 +157,18 @@
 (defn- evidence-summary
   "Human-readable summary line for an emitted anomaly."
   [match-count]
-  (str "Review fingerprint repeated — " match-count " actionable items unchanged across repair iterations"))
+  (msg/t :repair-loop/stagnation {:count match-count}))
 
 (defn- build-anomaly
   "Construct a canonical anomaly map for a stagnation event."
   [fingerprint event]
   (let [match-count (count fingerprint)
-        evidence    {:summary     (evidence-summary match-count)
+        summary     (evidence-summary match-count)
+        evidence    {:summary     summary
                      :event-ids   (filterv some? [(:seq event)])
                      :fingerprint (str fingerprint)
-                     :threshold   {:n 2 :window 2}
+                     :threshold   {:n      stagnation-match-count
+                                   :window stagnation-window-size}
                      :redacted?   true}
         data        {:detector/kind     detector-kind
                      :detector/version  detector-version
@@ -160,9 +176,7 @@
                      :anomaly/severity  :error
                      :anomaly/category  anomaly-category
                      :anomaly/evidence  evidence}]
-    (anomaly/anomaly :fault
-                     (evidence-summary match-count)
-                     data)))
+    (anomaly/anomaly :fault summary data)))
 
 ;------------------------------------------------------------------------------ Layer 3
 ;; Detector record
