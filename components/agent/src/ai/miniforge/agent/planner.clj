@@ -421,8 +421,8 @@
   "Planner main-turn progress monitor. Thresholds live in
    resources/prompts/planner.edn (:prompt/progress-monitor)."
   []
-  (llm/create-progress-monitor
-   (get @planner-prompt-data :prompt/progress-monitor)))
+  (prompts/load-progress-monitor @planner-prompt-data
+                                 :prompt/progress-monitor))
 
 (defn- invoke-planner-session
   "Session body for the planner: build mcp-opts with model hint, call LLM."
@@ -494,8 +494,8 @@
   (let [prompt-data    @planner-prompt-data
         budget-usd     (budget/resolve-cost-budget-usd :planner config context)
         retry-max-turns (get prompt-data :prompt/submission-retry-max-turns)
-        retry-monitor  (llm/create-progress-monitor
-                        (get prompt-data :prompt/submission-retry-monitor))
+        retry-monitor  (prompts/load-progress-monitor
+                        prompt-data :prompt/submission-retry-monitor)
         mcp-opts       (cond-> (artifact-session/session->mcp-opts session budget-usd retry-max-turns)
                          true (assoc :model (model/default-model-for-role :planner)
                                      :disallowed-tools planner-disallowed-tools

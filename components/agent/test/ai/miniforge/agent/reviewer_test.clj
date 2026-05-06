@@ -27,6 +27,22 @@
    [ai.miniforge.loop.interface :as loop]
    [ai.miniforge.response.interface :as response]))
 
+;------------------------------------------------------------------------------ Regression-floor constants
+
+(def ^:private min-stagnation-threshold-ms
+  "Floor for the reviewer main-turn :stagnation-threshold-ms. Below this,
+   Opus's pre-first-chunk think on heavy review prompts (8+ files,
+   50–100k tokens) trips stagnation before the first structured-EDN
+   chunk lands. This is the regression floor PR #783 establishes; a
+   future drop below it would reintroduce the false-stagnation
+   rejection observed on the 2026-05-04 dogfood."
+  180000)
+
+(def ^:private min-total-budget-ms
+  "Floor for the reviewer main-turn :max-total-ms. Below this, long
+   but legitimate reviews are killed mid-turn."
+  600000)
+
 ;------------------------------------------------------------------------------ Test fixtures
 
 (defn passing-gate
@@ -553,7 +569,8 @@
             (is (some? monitor)
                 ":progress-monitor opt must reach the LLM client")
             (let [state @monitor]
-              (is (>= (:stagnation-threshold-ms state) 180000)
-                  "Stagnation threshold must be ≥180s — Opus needs room for the pre-first-chunk think on heavy review prompts (8+ files, 50–100k tokens)")
-              (is (>= (:max-total-ms state) 600000)
-                  "Total budget must be ≥10min — covers heavy reviews"))))))))
+              (is (>= (:stagnation-threshold-ms state)
+                      min-stagnation-threshold-ms)
+                  "Stagnation threshold must be ≥ min-stagnation-threshold-ms — Opus needs room for the pre-first-chunk think on heavy review prompts (8+ files, 50–100k tokens)")
+              (is (>= (:max-total-ms state) min-total-budget-ms)
+                  "Total budget must be ≥ min-total-budget-ms — covers heavy reviews"))))))))

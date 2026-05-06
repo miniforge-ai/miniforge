@@ -20,6 +20,7 @@
   "Agent prompt loading utilities.
    Loads system prompts from EDN resources for configurability."
   (:require
+   [ai.miniforge.llm.interface :as llm]
    [ai.miniforge.response.interface :as response]
    [clojure.edn :as edn]
    [clojure.java.io :as io]))
@@ -72,6 +73,29 @@
                                 {:agent-type agent-type
                                  :resource-path resource-path}))))
 
+;------------------------------------------------------------------------------ Layer 1
+;; Progress-monitor factory
+
+(defn load-progress-monitor
+  "Build a progress monitor from a prompt-data map's monitor-config
+   key. Returns nil when the key is absent so callers can `cond->`
+   the option onto LLM opts only when configured.
+
+   Single source of truth for the EDN → llm/create-progress-monitor
+   adapter; planner and reviewer call this rather than each rolling
+   their own factory.
+
+   Arguments:
+     prompt-data  - map returned by load-prompt-data
+     monitor-key  - keyword pointing at the monitor config block
+                    (e.g. :prompt/progress-monitor,
+                          :prompt/submission-retry-monitor)
+
+   Returns: progress-monitor atom, or nil when block is absent."
+  [prompt-data monitor-key]
+  (when-let [config (get prompt-data monitor-key)]
+    (llm/create-progress-monitor config)))
+
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
   (load-prompt :implementer)
@@ -79,4 +103,6 @@
   (load-prompt :planner)
   (load-prompt :releaser)
   (load-prompt-data :implementer)
+  (load-progress-monitor (load-prompt-data :reviewer)
+                         :prompt/progress-monitor)
   :leave-this-here)

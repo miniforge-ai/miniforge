@@ -88,8 +88,14 @@
    resources/prompts/reviewer.edn (:prompt/progress-monitor). Falls
    back to the framework default when the EDN omits the block."
   []
-  (when-let [config (get @reviewer-prompt-data :prompt/progress-monitor)]
-    (llm/create-progress-monitor config)))
+  (prompts/load-progress-monitor @reviewer-prompt-data
+                                 :prompt/progress-monitor))
+
+(def ^:private default-reviewer-max-turns
+  "Fallback when reviewer.edn omits :prompt/max-turns. Authority is
+   the EDN; this constant only protects against malformed prompt
+   resources."
+  20)
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Gate running and feedback
@@ -596,8 +602,11 @@
             ;; LLM + gates review
             (let [user-prompt (build-review-prompt input)
                   monitor (create-reviewer-progress-monitor)
+                  max-turns (get @reviewer-prompt-data
+                                 :prompt/max-turns
+                                 default-reviewer-max-turns)
                   base-opts (cond-> {:system @reviewer-system-prompt
-                                     :max-turns 20}
+                                     :max-turns max-turns}
                               monitor (assoc :progress-monitor monitor))
                   response (if on-chunk
                              (llm/chat-stream llm-client user-prompt on-chunk
