@@ -30,6 +30,24 @@
     (fs/create-dirs (fs/path root ".git"))
     root))
 
+(defn- shell-path []
+  (or (some-> (fs/which "sh") str)
+      "/bin/sh"))
+
+(deftest run-cli-command-captures-short-lived-process-output-test
+  (testing "probe helper captures stdout, stderr, and exit code for short-lived commands"
+    (let [result (#'sut/run-cli-command [(shell-path) "-lc" "printf ok; printf warn >&2"] 5000)]
+      (is (= "ok" (:out result)))
+      (is (= "warn" (:err result)))
+      (is (= 0 (:exit result))))))
+
+(deftest run-cli-command-times-out-fast-test
+  (testing "probe helper returns a timeout result instead of hanging the caller"
+    (let [result (#'sut/run-cli-command [(shell-path) "-lc" "sleep 1"] 10)]
+      (is (= -1 (:exit result)))
+      (is (= 10 (:timeout-ms result)))
+      (is (str/includes? (:err result) "10")))))
+
 (deftest assert-runtime-alignment-rejects-worktree-mismatch-test
   (testing "explicit execution worktree must survive into runtime context"
     (let [source-root (temp-repo-root)
