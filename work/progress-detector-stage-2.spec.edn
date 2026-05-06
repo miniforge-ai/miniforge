@@ -1,0 +1,378 @@
+;; =============================================================================
+;; Spec: Progress detector stage 2 — event envelope, tool-loop + repair-loop
+;;       detectors, minimal supervisor, agent-runtime wiring
+;; =============================================================================
+;;
+;; Stage 1 (work/progress-detector-semantic-loop-detection.spec.edn,
+;; landed via PR #783/#784) shipped the substrate:
+;;
+;;   - components/progress-detector/ — Detector protocol, anomaly schema
+;;     (re-exporting components/anomaly), DetectorAnomalyData / Observation /
+;;     ToolProfile / DetectorConfig schemas, tool-profile registration API,
+;;     layered config merge, NullDetector + MultiDetector
+;;
+;; Substrate alone does not retire the threshold-bump cycle. No detector
+;; actually fires; no observations are produced; no supervisor consumes
+;; anomalies. The agent-runtime path still falls back to wallclock
+;; stagnation-threshold + max-total guards (#779/#781/#782/#783 series).
+;;
+;; Stage 2 lands the smallest set that lets a real dogfood replace
+;; wallclock thresholds with named, evidence-bearing anomalies:
+;;
+;;   - Normalized event envelope so detectors receive consistent input
+;;   - Component-vendored tool profiles populating Stage 1's registry
+;;   - :detector/tool-loop  (mechanical, fingerprint sliding-window)
+;;   - :detector/repair-loop (port of PR #762's review-fingerprint logic
+;;                            into the new component)
+;;   - Minimal supervisor (:mechanical → :terminate, :heuristic → :warn)
+;;   - Agent-runtime wiring so the detectors actually run on every
+;;     parsed agent event for the planner, implementer, reviewer, tester
+;;
+;; Stage 3 still owns: phase contracts, status taxonomy, full :on-anomaly
+;; policy map, composite-rules, the :prompt/liveness-watchdog rename
+;; + bb migrate-prompts command, :detector/no-information-gain (which
+;; needs a progress ledger), :detector/repeated-failure (parsed-failure
+;; fingerprints), :detector/text-similarity, :detector/event-motif-loop.
+
+{:spec/title "Progress detector stage 2 — event envelope + tool-loop + repair-loop + supervisor wiring"
+
+ :spec/description
+ "Land the smallest set of additions on top of the Stage 1 substrate
+  that lets the agent-runtime emit named anomalies instead of wallclock
+  timeouts. Concretely: a normalized event envelope on the existing
+  agent event stream, the two mechanical detectors (:tool-loop,
+  :repair-loop), tool-profile contributions from each tool-vendoring
+  component, a minimal supervisor that consumes anomalies via the
+  Stage 1 default policy (:mechanical → :terminate, :heuristic → :warn),
+  and wiring at the agent.invoke boundary so detectors actually run.
+
+  Layer cake — Stage 2 contributions in **bold**:
+
+    Layer 1 — Budget + liveness     (cost, tokens, turns, OS-wedge)
+                                    [unchanged from Stage 1]
+    Layer 2 — **Event normalization**   (envelope, tool profile,
+                                         fingerprints) — Stage 2
+    Layer 3 — **Progress / anomaly**    (reducer detectors, anomaly facts)
+                                        Stage 1 framework, Stage 2
+                                        adds :tool-loop + :repair-loop
+    Layer 4 — **Supervisor policy**     (anomaly composition, lifecycle)
+                                        Stage 2 ships the minimal
+                                        class-default policy; Stage 3
+                                        owns the per-category map
+    Layer 5 — Phase contracts           [Stage 3]
+
+  ## Why this scope and not more
+
+  The threshold-bump cycle (#779/#781/#782/#783) is a within-turn loop
+  problem: agents call the same tool with the same args repeatedly,
+  burning real wallclock until a wallclock threshold catches it.
+  :detector/tool-loop attacks that directly. :detector/repair-loop
+  attacks the same problem one level up — across-turn — and is a
+  pure refactor of code that already ships (PR #762).
+
+  The supervisor minimum is the smallest amount of policy needed to
+  make detectors *do* something. Heuristic anomalies just log; only
+  mechanical ones terminate. That is the Stage 1 spec's documented
+  default, ported here to the actual code path.
+
+  Everything else — :detector/no-information-gain, repeated-failure,
+  text-similarity, motif-loop — depends on infrastructure (progress
+  ledger, parsed-failure fingerprints, similarity indexers) we do not
+  need to retire the immediate threshold-bump cycle. They land in
+  Stage 3 alongside the policy surface they require.
+
+  ## Component layout (Stage 2 additions)
+
+    components/progress-detector/src/ai/miniforge/progress_detector/
+      detectors/
+        tool_loop.clj         ;; mechanical, fingerprint sliding-window
+        repair_loop.clj       ;; port of PR #762's review-fingerprint
+                              ;;   logic — agent.reviewer/review-fingerprint
+                              ;;   + stagnated? move here intact
+      supervisor.clj          ;; minimal policy: mechanical→terminate,
+                              ;;   heuristic→warn; selects controlling
+                              ;;   anomaly via :fatal>:error>:warn>:info,
+                              ;;   ties broken :mechanical>:heuristic,
+                              ;;   then earliest :event/seq
+      event_envelope.clj      ;; normalize :tool/* events into the
+                              ;;   Observation schema; assign
+                              ;;   :event/seq per-agent-run; compute
+                              ;;   :resource/version-hash for filesystem
+                              ;;   reads/writes; carry :tool/error?
+      runtime.clj             ;; the bind-detectors-to-an-agent-run
+                              ;;   helper used by agent.invoke; owns
+                              ;;   the per-run reducer state for the
+                              ;;   composed MultiDetector
+
+    components/adapter-claude-code/src/.../tool_profiles.clj
+      register-profiles!      ;; called at component load; contributes
+                              ;;   Read / Bash / Grep / Glob / Edit /
+                              ;;   Write / WebSearch / WebFetch profiles
+                              ;;   to progress-detector/tool-profile
+
+    components/agent/src/ai/miniforge/agent/
+      reviewer.clj            ;; deletes review-fingerprint /
+                              ;;   stagnated? / actionable-severities
+                              ;;   / issue-fingerprint / failed-gate-
+                              ;;   fingerprint — they move to the
+                              ;;   detector. Repair-loop call site
+                              ;;   becomes (detector/observe ...)
+      runtime.clj             ;; agent.invoke gains a detector pipeline:
+                              ;;   open detector state at session start,
+                              ;;   call observe on each parsed agent
+                              ;;   event, hand anomalies to supervisor,
+                              ;;   honor :terminate by cancelling the
+                              ;;   in-flight LLM stream
+
+  ## Event envelope
+
+  Every parsed agent event becomes an Observation map (Stage 1 schema):
+
+    {:tool/id           :tool/read | :tool/bash | :tool/grep | …
+     :seq               <monotonic int, scoped per-agent-run>
+     :timestamp         <inst>
+     :tool/duration-ms  <int>
+     :tool/input        <args map; redaction-shaped>
+     :tool/output       <result; redaction-shaped>
+     :tool/error?       <bool>
+     :resource/version-hash {<resource-id> <hash>}}
+
+  :resource/version-hash is computed only for tool classes that read or
+  write a resource (filesystem reads/writes, git refs). For Bash, it is
+  computed against the working directory's git tree-hash before and
+  after the call (the Stage 1 spec calls this out as the gating field
+  for mechanical-eligibility on :determinism :environment-dependent).
+  For tools without a meaningful resource (WebSearch), the field is
+  absent and the detector treats fingerprint repeats as :heuristic
+  per the tool-profile :determinism.
+
+  Redaction-shaped means: arg values longer than a per-key budget are
+  hashed; field values matching secret-shaped regex are replaced with
+  a marker. Detectors never need raw content — they hash for
+  fingerprinting and hash for evidence.
+
+  ## :detector/tool-loop
+
+  Fingerprint dimensions come from the tool profile (Stage 1's
+  ToolProfile schema, populated in Stage 2). Sliding window of recent
+  fingerprints (default size 10). When the same fingerprint appears
+  > N times in the window (default N=5):
+
+    :determinism :stable-with-resource-version
+      → emit anomaly with :class :mechanical :severity :error
+        when :resource/version-hash is unchanged across the matches
+    :determinism :stable-ish
+      → emit :class :mechanical :severity :error unconditionally
+        (small false-positive rate is acceptable; the agent can
+         recover by varying the call)
+    :determinism :environment-dependent
+      → emit :class :mechanical only when :tool/error? is true on
+        every match AND the parsed failure-fingerprint is identical
+        (parsed-failure fingerprint is not in the envelope yet —
+         Stage 2 ships a stub that hashes :tool/error message text;
+         Stage 3 replaces with structured :failure/fingerprint)
+      → otherwise emit :class :heuristic :severity :warn
+    :determinism :unstable
+      → emit :class :heuristic :severity :warn
+
+  Defaults are configurable via the Stage 1 layered config:
+
+    {:config/params {:tool-loop {:window-size 10
+                                 :threshold-n 5}}}
+
+  ## :detector/repair-loop (port of PR #762)
+
+  agent.reviewer's review-fingerprint, stagnated?, actionable-severities,
+  issue-fingerprint, failed-gate-fingerprint move to
+  components/progress-detector/.../detectors/repair_loop.clj unchanged
+  in algorithm. The agent code path becomes:
+
+    - At review boundary: detector observes a synthetic
+      :review/completed event with the review map; the detector
+      computes the fingerprint and stores it in its reducer state.
+    - On the next review boundary: detector observes the new event,
+      compares to prior fingerprint, emits
+      :anomalies.review/stagnation when matched.
+
+  The agent.reviewer namespace keeps zero copies of fingerprint logic
+  after the port. The existing PR #762 regression tests (in
+  agent/test/.../reviewer_test.clj) move to the detector's test ns
+  and continue to pass without behavior change.
+
+  ## Minimal supervisor
+
+  components/progress-detector/.../supervisor.clj exports a tiny
+  surface used by the agent runtime:
+
+    (start  [config]                       => state)
+    (handle [state anomalies]              => {:state state'
+                                               :decision <…>})
+
+  Decision is one of:
+    {:action :continue}                       — no anomalies or all warn
+    {:action :terminate
+     :anomaly <controlling anomaly map>
+     :reason  <string for the event log>}
+
+  Controlling-anomaly selection (Stage 1 spec, lifted verbatim):
+    :fatal > :error > :warn > :info
+    ties broken: :mechanical > :heuristic
+    further ties: earliest :event/seq
+
+  All anomalies (controlling and not) are recorded in the event log;
+  only the controlling anomaly drives termination. The supervisor
+  does NOT yet consult a per-category :on-anomaly map (Stage 3) —
+  the policy is hard-coded at the class level here.
+
+  ## Agent-runtime wiring
+
+  agent.invoke gains, on the LLM-bearing path:
+
+    1. Build the detector list per the layered config
+       (:detectors/defaults [:tool-loop :repair-loop] + per-agent
+       overlays read from each agent's prompt EDN)
+    2. Initialize MultiDetector + supervisor state at session start
+    3. Stream agent events through event-envelope normalization,
+       feed Observations to MultiDetector via observe-event
+    4. Hand emitted anomalies to supervisor; on :terminate,
+       cancel the in-flight LLM call and record the controlling
+       anomaly as the run's terminating event
+    5. Persist all anomalies (controlling + non-controlling) to the
+       run's local event log via :raw-log-ref
+
+  Wiring is agent-agnostic — planner, implementer, reviewer, tester
+  share the same agent.invoke path; per-agent overlays come from
+  prompt EDN, not from N copies of the wiring code.
+
+  ## What Stage 2 explicitly does NOT land
+
+  Deferred to Stage 3:
+    - :prompt/liveness-watchdog rename + bb miniforge migrate-prompts
+      command (the rename is a sweeping migration; we keep
+      :prompt/progress-monitor through Stage 2 and rename in one
+      Stage 3 commit alongside the policy surface it gates)
+    - Full :on-anomaly per-category policy map
+    - Composite-rules for promoting combined heuristics → mechanical
+    - Phase contracts (:phase/contract block per phase)
+    - Phase status taxonomy (:succeeded / :failed-contract /
+      :failed-anomaly / :failed-budget / :failed-liveness /
+      :failed-tool / :cancelled / :requires-human)
+    - Workflow runner enforcement of contracts at phase boundaries
+    - :detector/no-information-gain (depends on progress ledger)
+    - :detector/repeated-failure (depends on structured
+      :failure/fingerprint extraction)
+    - :detector/text-similarity, :detector/event-motif-loop
+    - Replacing the Stage 2 stub failure-fingerprint with a
+      structured parser per tool class"
+
+ :spec/intent
+ {:type  :feature
+  :scope ["components/progress-detector/src"
+          "components/progress-detector/resources"
+          "components/progress-detector/test"
+          "components/adapter-claude-code/src"
+          "components/adapter-claude-code/resources"
+          "components/adapter-claude-code/test"
+          "components/agent/src/ai/miniforge/agent/reviewer.clj"
+          "components/agent/src/ai/miniforge/agent/runtime.clj"
+          "components/agent/test/ai/miniforge/agent/reviewer_test.clj"
+          "components/agent/test/ai/miniforge/agent/runtime_test.clj"
+          "components/agent/resources/prompts/planner.edn"
+          "components/agent/resources/prompts/implementer.edn"
+          "components/agent/resources/prompts/reviewer.edn"
+          "components/agent/resources/prompts/tester.edn"]}
+
+ :spec/constraints
+ ["Detectors stay pure reducers — observe takes (state, observation) and returns a state map with new anomalies appended; no detector reads from the event log, the registry, or any external state during observe"
+  "Per-event detector overhead in the criterium benchmark stays under 5ms across the framework's default detector set ([:tool-loop :repair-loop]) on a recorded event-fixture from the event-log-tool-visibility dogfood (Stage 1 budget, preserved)"
+  "Anomaly evidence remains bounded per Stage 1: summary + event-id pointers + fingerprint + threshold metadata + :raw-log-ref. No raw tool args, raw assistant text, or raw file content in evidence — verified by an extension of Stage 1's fuzzer test that injects synthetic 'secret-shaped' content into agent inputs and asserts no synthetic strings appear in any emitted anomaly"
+  "Tool fingerprint dimensions come from the tool capability registry (Stage 1's tool-profile API), not from per-detector logic. Adding a new tool to the registry must NOT require a code change in any detector"
+  "PR #762's review-fingerprint behavior is preserved end-to-end after the port to :detector/repair-loop — same anomaly category (:anomalies.review/stagnation), same termination semantics, verified by porting PR #762's existing regression tests to the detector test ns and asserting they pass without modification beyond namespace changes"
+  "Removing all detectors must still leave Layer 1 (cost / token / turn / liveness) caps enforced — Stage 2 detectors are additive guards, not the only safety net"
+  "Mechanical anomalies default to supervisor action :terminate. Heuristic anomalies default to :warn (logged, no action). The full per-category :on-anomaly policy map is explicitly Stage 3"
+  "Anomaly composition (multiple anomalies in the same turn) follows the Stage 1 deterministic rule: all anomalies recorded, supervisor selects one controlling anomaly using :fatal>:error>:warn>:info, ties broken :mechanical>:heuristic, further ties broken by earliest :event/seq. The full composite-rules system is Stage 3"
+  "Tool profile registration happens at the vendoring component's load time — adapter-claude-code registers Read/Bash/Grep/Glob/Edit/Write/WebSearch/WebFetch in its own ns, not in progress-detector. progress-detector ships zero hardcoded profile data"
+  "Event envelope assigns :event/seq monotonically per agent run, NOT globally. Two concurrent agent runs each emit their own seq starting from 0 — no cross-run sequence collision"
+  ":resource/version-hash is computed only for tool classes that read/write a resource — absence is meaningful (the tool has no meaningful resource), not an error"
+  "Detector wiring is agent-agnostic. The same agent.invoke code path serves planner / implementer / reviewer / tester — per-agent detector overlays come from each agent's prompt EDN, not from N copies of the wiring"
+  "Reviewer's existing fingerprint helpers (review-fingerprint, stagnated?, actionable-severities, issue-fingerprint, failed-gate-fingerprint) are MOVED to progress-detector, not duplicated. The reviewer namespace ends Stage 2 with zero local copies of fingerprint logic"]
+
+ :spec/acceptance-criteria
+ [;; Event envelope
+  "Every tool-call agent event entering the detector pipeline is normalized to the Stage 1 Observation schema (:tool/id, :seq, :timestamp, :tool/duration-ms, :tool/input, :tool/output, :tool/error?, optional :resource/version-hash) — verified by a property test over a recorded fixture of the event-log-tool-visibility dogfood's event sequence asserting every Observation validates against the schema"
+  ":event/seq is monotonic per agent run and starts at 0 — verified by an integration test that runs two concurrent fake agent runs and asserts each one's seq starts at 0 and increases monotonically without cross-run collision"
+  ":resource/version-hash is present on filesystem reads/writes and absent on tools without a meaningful resource — verified by integration tests over Read/Edit/Write (present) and WebSearch (absent)"
+
+  ;; Tool profile contributions
+  "components/adapter-claude-code registers tool profiles for Read, Bash, Grep, Glob, Edit, Write, WebSearch, WebFetch at component load — verified by a load-order test that asserts (tool-profile/lookup :tool/read) returns a non-nil ToolProfile after adapter-claude-code is loaded and nil before"
+  "Tool profile registration is idempotent — calling register-profiles! twice does not corrupt the registry or duplicate entries — verified by unit test"
+  "components/progress-detector ships ZERO hardcoded tool profile data — verified by a structural test that scans progress-detector's resources and asserts no tool-profile-shaped EDN is present"
+
+  ;; :detector/tool-loop, mechanical positives
+  ":detector/tool-loop fires :anomalies.agent/tool-loop (class :mechanical, severity :error) when an agent calls Read on the same path 6 times AND :resource/version-hash is unchanged each time — integration test"
+  ":detector/tool-loop fires :class :mechanical when an agent calls Bash with the same command 6 times AND :tool/error? is true on every call AND the failure-fingerprint stub matches each time — integration test"
+  ":detector/tool-loop fires :class :mechanical when an agent calls Glob with the same pattern 6 times AND the matched-paths hash is unchanged — integration test"
+
+  ;; :detector/tool-loop, mechanical negatives
+  ":detector/tool-loop does NOT fire when an agent re-reads a file after Edit changes its :resource/version-hash (different fingerprint) — integration test"
+  ":detector/tool-loop does NOT fire when an agent calls Read on 6 different files (distinct fingerprints) — integration test"
+  ":detector/tool-loop does NOT fire when Bash calls share the command but the failure-fingerprint stub differs between runs — integration test"
+  ":detector/tool-loop emits :class :heuristic (not :mechanical) for repeated WebSearch calls — :determinism :unstable disqualifies mechanical termination — integration test"
+
+  ;; :detector/repair-loop port
+  "PR #762's existing review-stagnation regression tests, ported to the new detector test ns, pass without modification beyond namespace changes — diff between old and new test files shows only ns renames and require-list updates"
+  "agent.reviewer no longer contains review-fingerprint, stagnated?, actionable-severities, issue-fingerprint, or failed-gate-fingerprint — verified by a structural test that grep-asserts those symbols are absent from agent/src/ai/miniforge/agent/reviewer.clj"
+  ":detector/repair-loop emits :anomalies.review/stagnation (class :mechanical, severity :error) when consecutive review fingerprints match exactly — integration test using the same fixture as the ported PR #762 tests"
+
+  ;; Minimal supervisor
+  "An agent run that triggers a mechanical anomaly is terminated by the supervisor — the in-flight LLM stream is cancelled, the controlling anomaly is recorded in the run's event log with the full Stage 1 schema (:category, :class, :severity, :detector/kind, :detector/version, :evidence) — integration test"
+  "An agent run that triggers a heuristic anomaly is logged but NOT terminated — verified by integration test that asserts the LLM call completes and the anomaly is present in the event log with :class :heuristic"
+  "When multiple anomalies fire in the same observation step, all are recorded; the controlling anomaly is selected via :fatal>:error>:warn>:info, ties broken :mechanical>:heuristic, further ties broken by earliest :event/seq — verified by a property test that constructs anomaly sets with deliberate ties at every level and asserts the selection is reproducible"
+  "Removing all detectors from the configured set leaves the agent runtime functional and bounded by Layer 1 (cost/token/turn/liveness) caps only — integration test"
+
+  ;; Agent-runtime wiring
+  "agent.invoke (LLM-bearing path) builds the per-agent detector pipeline from layered config (:detectors/defaults + per-agent overlay from prompt EDN) and feeds every parsed agent event through the pipeline — verified by integration test that captures the supervisor's seen-anomalies for a recorded event sequence and asserts the expected anomaly fires"
+  "Per-agent detector overlays come from each agent's prompt EDN — a planner with prompt :detectors {:disable [:tool-loop]} does not fire that detector; a tester with :detectors {:tune {:tool-loop {:threshold-n 8}}} uses the bumped threshold — integration test per overlay shape"
+  "Wiring is shared across planner / implementer / reviewer / tester — a code search asserts a single agent.invoke detector-wiring code path, not per-agent copies"
+
+  ;; Performance
+  "Per-event detector overhead in the criterium benchmark stays under 5ms total across :tool-loop and :repair-loop on the event-log-tool-visibility dogfood event-fixture — verified by a benchmark test that fails on regression"
+
+  ;; Evidence bounding
+  "Anomaly :evidence does not contain raw tool args, raw assistant text, or raw file content — verified by extending Stage 1's fuzzer to inject 'secret-shaped' values into Bash command args, Read result content, and Edit patch text and asserting none of those strings appear in any emitted anomaly's evidence"
+
+  ;; Dogfood viability
+  "A dogfood run on event-log-tool-visibility EITHER (a) completes through the full SDLC, OR (b) terminates with a detector-emitted anomaly that names which detector fired and includes reproducible evidence — never a bare wallclock stagnation timeout from :prompt/progress-monitor (those become true Layer 1 :liveness watchdogs in Stage 3, but Stage 2 already replaces the within-turn loop case with named anomalies)"]
+
+ :spec/deferred
+ [{:stage :stage-3
+   :scope [":prompt/progress-monitor → :prompt/liveness-watchdog rename
+            (semantic clarification — these are OS-wedge timers, not
+            progress checks)"
+           "bb miniforge migrate-prompts command that rewrites old
+            :prompt/progress-monitor blocks to the new shape"
+           "full supervisor :on-anomaly per-category policy map"
+           "composite-rules for promoting combined heuristics
+            to mechanical anomalies"
+           "phase contracts (:phase/contract block per phase)"
+           "phase status taxonomy (:succeeded / :failed-contract /
+            :failed-anomaly / :failed-budget / :failed-liveness /
+            :failed-tool / :cancelled / :requires-human)"
+           "workflow runner enforcement of contracts at phase boundaries"
+           ":detector/no-information-gain (depends on progress ledger)"
+           "progress ledger reducer + :progress/advanced events"
+           ":detector/repeated-failure (depends on structured
+            :failure/fingerprint extraction per tool class — replaces
+            the Stage 2 stub that hashes :tool/error message text)"
+           ":detector/text-similarity"
+           ":detector/event-motif-loop"]}]
+
+ :spec/priority
+ {:tier        :critical
+  :axes        #{:agent-quality :dogfood-enabler :supervision}
+  :theme       :semantic-supervision
+  :rationale   "Stage 1 shipped substrate but no firing detectors. The threshold-bump cycle (#779/#781/#782/#783) is still the operative supervision mechanism. Stage 2 turns the substrate on: tool-loop and repair-loop fire on real agent events; the supervisor terminates on mechanical anomalies; reviewer's local fingerprint code consolidates into one component. Without Stage 2, Stage 1 is dead weight. Stage 3 (phase contracts, full :on-anomaly map, liveness rename) sits on top of a working detection pipeline — building it without Stage 2 would mean designing policy for a system that does not yet emit the events policy reacts to."
+  :blocks      ["agent-stream-watchdog-and-resume.spec.edn"]
+  :blocked-by  ["progress-detector-semantic-loop-detection.spec.edn"]}
+
+ :spec/workflow-type :canonical-sdlc}
