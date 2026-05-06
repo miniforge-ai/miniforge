@@ -27,6 +27,22 @@
    [ai.miniforge.loop.interface :as loop]
    [ai.miniforge.response.interface :as response]))
 
+;------------------------------------------------------------------------------ Regression-floor constants
+
+(def ^:private min-stagnation-threshold-ms
+  "Floor for the reviewer main-turn :stagnation-threshold-ms. Below this,
+   Opus's pre-first-chunk think on heavy review prompts (8+ files,
+   50–100k tokens) trips stagnation before the first structured-EDN
+   chunk lands. This is the regression floor PR #783 establishes; a
+   future drop below it would reintroduce the false-stagnation
+   rejection observed on the 2026-05-04 dogfood."
+  180000)
+
+(def ^:private min-total-budget-ms
+  "Floor for the reviewer main-turn :max-total-ms. Below this, long
+   but legitimate reviews are killed mid-turn."
+  600000)
+
 ;------------------------------------------------------------------------------ Test fixtures
 
 (defn passing-gate
@@ -515,3 +531,46 @@
                {:review/issues [blocking-issue-b]})]
       (is (false? (boolean (reviewer/stagnated? fp1 fp2)))
           "one issue resolved between iterations is real progress"))))
+
+(deftest reviewer-progress-monitor-thresholds-loaded-test
+  ;; Guards the 2026-05-04 reviewer stagnation-threshold fix at the
+  ;; reviewer boundary: a regression in prompt loading or
+  ;; create-reviewer-progress-monitor would otherwise let the threshold
+  ;; values silently drift back to the framework default 120s and
+  ;; reintroduce the false-stagnation rejection that PR #783 fixes.
+  ;; Mirrors planner-progress-monitor-thresholds-loaded-test in
+  ;; planner_test.clj (Copilot review on PR #783 called for parity).
+  (testing ":progress-monitor passed to LLM reflects reviewer.edn thresholds"
+    (let [captured (atom nil)
+          parseable-review (str "```clojure\n"
+                                "{:review/decision :approved\n"
+                                " :review/summary \"ok\"}\n"
+                                "```")]
+      (with-redefs [model/resolve-llm-client-for-role
+                    (fn [_role provided] provided)
+                    llm/chat (fn [_client _prompt opts]
+                               (reset! captured opts)
+                               {:success? true
+                                :content parseable-review
+                                :tokens 1})
+                    llm/chat-stream (fn [_client _prompt _on-chunk opts]
+                                      (reset! captured opts)
+                                      {:success? true
+                                       :content parseable-review
+                                       :tokens 1})
+                    llm/success? :success?
+                    llm/get-content :content]
+        (let [reviewer (reviewer/create-reviewer
+                        {:llm-backend ::mock-backend
+                         :gates       []})]
+          (core/invoke reviewer {} sample-artifact)
+          (is (some? @captured) "LLM client should have been called")
+          (let [monitor (:progress-monitor @captured)]
+            (is (some? monitor)
+                ":progress-monitor opt must reach the LLM client")
+            (let [state @monitor]
+              (is (>= (:stagnation-threshold-ms state)
+                      min-stagnation-threshold-ms)
+                  "Stagnation threshold must be ≥ min-stagnation-threshold-ms — Opus needs room for the pre-first-chunk think on heavy review prompts (8+ files, 50–100k tokens)")
+              (is (>= (:max-total-ms state) min-total-budget-ms)
+                  "Total budget must be ≥ min-total-budget-ms — covers heavy reviews"))))))))

@@ -6,8 +6,29 @@
 ;; and error handling.
 
 {:prompt/id :reviewer
- :prompt/version "1.0.0"
+ :prompt/version "1.2.0"
  :prompt/agent :reviewer
+
+ ;; Turn cap for the reviewer's main session. Reviewer reads the
+ ;; implement artifact + spec, runs Read/Grep, and emits one
+ ;; structured EDN review — much shorter agentic loop than planner
+ ;; (80) or implementer (40). 20 is the empirical observed ceiling
+ ;; on the 2026-05-04 event-log-tool-visibility dogfood.
+ :prompt/max-turns 20
+
+ ;; Main-turn progress monitor. The reviewer sees the full implement
+ ;; artifact (often 8+ files of newly-created or modified source) plus
+ ;; the spec; on real planner-decomposed tasks that's typically a 50-
+ ;; 100k-token first turn. Opus then does heavy Read/Grep before
+ ;; emitting structured EDN. The framework's 120s default was firing
+ ;; mid-think on the 2026-05-04 event-log-tool-visibility dogfood
+ ;; (review #1: 4/4 gates passed but :rejected with the only blocking
+ ;; issue being "Stagnation timeout: no progress for 120119ms"). 180s
+ ;; matches the planner threshold; 600s overall covers heavy reviews.
+ :prompt/progress-monitor
+ {:stagnation-threshold-ms     180000
+  :max-total-ms                600000
+  :min-activity-interval-ms    3000}
 
  :prompt/system
  "You are a Code Review Agent for an autonomous software development team.

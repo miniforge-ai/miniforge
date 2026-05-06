@@ -28,6 +28,20 @@
    [ai.miniforge.llm.interface :as llm]
    [ai.miniforge.logging.interface :as log]))
 
+;------------------------------------------------------------------------------ Regression-floor constants
+
+(def ^:private min-stagnation-threshold-ms
+  "Floor for the planner main-turn :stagnation-threshold-ms. Below
+   this, Opus's pre-first-chunk think on heavy planner prompts trips
+   stagnation before the first structured-EDN chunk lands. This is the
+   regression floor PR #781 establishes."
+  180000)
+
+(def ^:private min-total-budget-ms
+  "Floor for the planner main-turn :max-total-ms. Covers the longest
+   historical successful planner run."
+  600000)
+
 ;------------------------------------------------------------------------------ Layer 0
 ;; Test fixtures
 
@@ -549,10 +563,11 @@
             (is (some? monitor)
                 ":progress-monitor opt must reach the LLM client")
             (let [state @monitor]
-              (is (>= (:stagnation-threshold-ms state) 180000)
-                  "Stagnation threshold must be ≥180s — Opus needs room for the pre-first-chunk think on heavy planner prompts")
-              (is (>= (:max-total-ms state) 600000)
-                  "Total budget must be ≥10min — covers the longest historical successful planner run"))))))))
+              (is (>= (:stagnation-threshold-ms state)
+                      min-stagnation-threshold-ms)
+                  "Stagnation threshold must be ≥ min-stagnation-threshold-ms — Opus needs room for the pre-first-chunk think on heavy planner prompts")
+              (is (>= (:max-total-ms state) min-total-budget-ms)
+                  "Total budget must be ≥ min-total-budget-ms — covers the longest historical successful planner run"))))))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
