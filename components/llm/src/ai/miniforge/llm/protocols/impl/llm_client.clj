@@ -131,6 +131,7 @@
           "result"
           (let [usage (or (:usage data) (get-in data [:result :usage]))]
             (cond-> {:delta "" :done? true
+                     :final-content (:result data)
                      :usage {:input-tokens (:input_tokens usage)
                              :output-tokens (:output_tokens usage)}
                      :cost-usd (:total_cost_usd data)}
@@ -732,6 +733,14 @@
       ;; Claude surfaces num_turns as an absolute count on the result event.
       (when-let [nt (:num-turns parsed)]
         (reset! accumulated-turns nt))
+      ;; Claude may surface the final assistant text only on the terminal
+      ;; result event. Preserve previously streamed content when present,
+      ;; but recover result-only output when no assistant delta arrived.
+      (when-let [final-content (:final-content parsed)]
+        (when (and (string? final-content)
+                   (str/blank? @accumulated-content)
+                   (not (str/blank? final-content)))
+          (reset! accumulated-content final-content)))
       ;; Codex signals each completed turn via :increment-turns rather than
       ;; emitting an absolute count — bump the accumulator on each one.
       (when (:increment-turns parsed)
