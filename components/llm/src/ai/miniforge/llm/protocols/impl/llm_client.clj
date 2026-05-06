@@ -127,6 +127,15 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Stream parser functions
 
+(defn- parsed-usage
+  [usage]
+  (let [input-tokens (:input_tokens usage)
+        output-tokens (:output_tokens usage)]
+    (when (or (number? input-tokens)
+              (number? output-tokens))
+      {:input-tokens input-tokens
+       :output-tokens output-tokens})))
+
 (defn parse-claude-stream-line
   "Parse a line from Claude CLI streaming output.
 
@@ -192,11 +201,12 @@
             {:delta delta-text :done? false})
 
           "result"
-          (let [usage (or (:usage data) (get-in data [:result :usage]))]
+          (let [usage (parsed-usage (or (:usage data)
+                                        (get-in data [:result :usage])))]
             (cond-> {:delta "" :done? true
-                     :usage {:input-tokens (:input_tokens usage)
-                             :output-tokens (:output_tokens usage)}
+                     :final-content (:result data)
                      :cost-usd (:total_cost_usd data)}
+              usage (assoc :usage usage)
               (:session_id data) (assoc :session-id (:session_id data))
               (:num_turns data)  (assoc :num-turns (:num_turns data))
               ;; Claude Code surfaces a top-level stop_reason on the
@@ -892,6 +902,14 @@
       ;; Claude surfaces num_turns as an absolute count on the result event.
       (when-let [nt (:num-turns parsed)]
         (reset! accumulated-turns nt))
+      ;; Claude may surface the final assistant text only on the terminal
+      ;; result event. Preserve previously streamed content when present,
+      ;; but recover result-only output when no assistant delta arrived.
+      (when-let [final-content (:final-content parsed)]
+        (when (and (string? final-content)
+                   (str/blank? @accumulated-content)
+                   (not (str/blank? final-content)))
+          (reset! accumulated-content final-content)))
       ;; Codex signals each completed turn via :increment-turns rather than
       ;; emitting an absolute count — bump the accumulator on each one.
       (when (:increment-turns parsed)

@@ -146,11 +146,13 @@
   (testing "result event extracts usage tokens"
     (let [line (json/generate-string
                  {:type "result"
-                  :result {:usage {:input_tokens 1234
-                                   :output_tokens 567}}})
+                  :result "final text"
+                  :usage {:input_tokens 1234
+                          :output_tokens 567}})
           parsed (impl/parse-claude-stream-line line)]
       (is (= "" (:delta parsed)))
       (is (true? (:done? parsed)))
+      (is (= "final text" (:final-content parsed)))
       (is (= 1234 (get-in parsed [:usage :input-tokens])))
       (is (= 567 (get-in parsed [:usage :output-tokens])))))
 
@@ -158,7 +160,16 @@
     (let [line (json/generate-string {:type "result" :result {}})
           parsed (impl/parse-claude-stream-line line)]
       (is (true? (:done? parsed)))
-      (is (nil? (get-in parsed [:usage :input-tokens])))))
+      (is (nil? (:usage parsed)))))
+
+  (testing "result event with usage map present but nil token fields omits :usage"
+    (let [line (json/generate-string
+                 {:type "result"
+                  :usage {:input_tokens nil
+                          :output_tokens nil}})
+          parsed (impl/parse-claude-stream-line line)]
+      (is (true? (:done? parsed)))
+      (is (nil? (:usage parsed)))))
 
   (testing "result event captures num_turns and top-level stop_reason"
     (let [line (json/generate-string
@@ -419,11 +430,36 @@
       ;; Feed a result event with usage (top-level format from Claude CLI)
       (handler (json/generate-string
                  {:type "result"
+                  :result "Hello"
                   :usage {:input_tokens 100
                           :output_tokens 50}
                   :total_cost_usd 0.0045}))
       (is (= {:input-tokens 100 :output-tokens 50} @usage))
       (is (= 0.0045 @cost)))))
+
+(deftest stream-parser-recovers-result-only-content-test
+  (testing "result-only content is recovered when no assistant delta arrived"
+    (let [content (atom "")
+          usage (atom nil)
+          cost (atom nil)
+          chunks (atom [])
+          tools (atom [])
+          session-id (atom nil)
+          stop-reason (atom nil)
+          turns (atom nil)
+          handler (impl/stream-with-parser
+                   #'impl/parse-claude-stream-line
+                   (fn [chunk] (swap! chunks conj chunk))
+                   content usage cost tools session-id stop-reason turns)]
+      (handler (json/generate-string
+                {:type "result"
+                 :result "{\"ok\":true}"
+                 :stop_reason "end_turn"
+                 :usage {:input_tokens 9 :output_tokens 3}}))
+      (is (= "{\"ok\":true}" @content))
+      (is (= {:input-tokens 9 :output-tokens 3} @usage))
+      (is (= "end_turn" @stop-reason))
+      (is (= "{\"ok\":true}" (:content (last @chunks)))))))
 
 (deftest stream-parser-accumulates-stop-reason-and-turns-test
   (testing "latest stop_reason wins, num_turns captured from result event"
