@@ -111,7 +111,17 @@
                 (assoc (valid-observation)
                        :tool/input  {:cmd "ls"}
                        :tool/output "file.txt\n"
-                       :tool/error? false))))))
+                       :tool/error? false)))))
+
+  (testing "observation with :resource/version-hash string is valid"
+    (is (true? (sut/valid-observation?
+                (assoc (valid-observation)
+                       :resource/version-hash "sha256:abc123")))))
+
+  (testing "observation with :resource/version-hash nil is valid ([:maybe :string])"
+    (is (true? (sut/valid-observation?
+                (assoc (valid-observation)
+                       :resource/version-hash nil))))))
 
 (deftest invalid-observation-test
   (testing "missing :tool/id fails"

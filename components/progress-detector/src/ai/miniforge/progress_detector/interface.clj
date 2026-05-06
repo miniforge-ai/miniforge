@@ -58,11 +58,12 @@
    **Config layers** compose via overlay resolution:
      :inherit / :disable / :enable / :tune"
   (:require
-   [ai.miniforge.anomaly.interface             :as anomaly]
-   [ai.miniforge.progress-detector.protocol    :as proto]
-   [ai.miniforge.progress-detector.schema      :as schema]
-   [ai.miniforge.progress-detector.tool-profile :as tp]
-   [ai.miniforge.progress-detector.config      :as cfg]))
+   [ai.miniforge.anomaly.interface                    :as anomaly]
+   [ai.miniforge.progress-detector.event-envelope     :as envelope]
+   [ai.miniforge.progress-detector.protocol           :as proto]
+   [ai.miniforge.progress-detector.schema             :as schema]
+   [ai.miniforge.progress-detector.tool-profile       :as tp]
+   [ai.miniforge.progress-detector.config             :as cfg]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Detector protocol (re-exported)
@@ -122,6 +123,29 @@
 (def DetectorConfig      schema/DetectorConfig)
 (def ToolProfile         schema/ToolProfile)
 (def DetectorAnomalyData schema/DetectorAnomalyData)
+
+;------------------------------------------------------------------------------ Layer 1
+;; Event-envelope normalizer
+
+(defn normalize-event
+  "Map a raw tool-use event to a validated Observation record.
+
+   Assigns a monotonic :seq, copies :tool/id and :timestamp, redacts
+   :tool/input and :tool/output to bounded summaries (≤ 256 bytes),
+   passes through :tool/error? and :tool/duration-ms, and conditionally
+   attaches :resource/version-hash when tool-profile declares
+   :stable-with-resource-version determinism.
+
+   Arguments:
+     event        - raw tool-use event (see event-envelope/normalize)
+     tool-profile - (optional) ToolProfile map; pass nil to skip hash
+
+   Returns: validated Observation map.
+   Throws:  ex-info on schema validation failure."
+  ([event]
+   (envelope/normalize event))
+  ([event tool-profile]
+   (envelope/normalize event tool-profile)))
 
 (def valid-observation?            schema/valid-observation?)
 (def explain-observation           schema/explain-observation)
