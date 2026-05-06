@@ -84,6 +84,8 @@
   :dag.merge/conflict                "Multi-parent merge conflicted"
   :dag.merge/merge-failed-worktree   "Could not create temp worktree for merge"
   :dag.merge/merge-failed-ref-write  "Failed to write merge result to namespaced ref"
+  :dag.merge/merge-failed-head-read  "Merge succeeded but rev-parse HEAD failed"
+  :dag.merge/merge-failed-fatal      "git merge failed (non-conflict): {git-exit}"
   :dag.merge/commit-message-header   "miniforge dag-merge for task {task-id}"
   :dag.merge/commit-message-parent   "  {index}. {task-id} @ {commit-sha}"
   :dag.merge/sequential-step-header  "miniforge dag-merge step {step}/{total} for task {task-id}"

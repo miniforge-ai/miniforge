@@ -409,6 +409,37 @@
    :git/exit-code    (:exit git-result)
    :git/stderr       (:err git-result)})
 
+(defn- head-read-failed-anomaly
+  "Anomaly: merge succeeded but `git rev-parse HEAD` failed. Distinct
+   from `ref-write-failed-anomaly` because no ref write has been
+   attempted yet (the merge commit exists in HEAD but we couldn't
+   read it back to write the namespaced ref). No `:merge/ref` /
+   `:merge/commit-sha` fields — they don't exist at this point."
+  [task-id git-result]
+  {:anomaly/category :anomalies/dag-multi-parent-merge-failed
+   :anomaly/message  (messages/t :dag.merge/merge-failed-head-read)
+   :task/id          task-id
+   :git/exit-code    (:exit git-result)
+   :git/stderr       (:err git-result)})
+
+(defn- merge-fatal-anomaly
+  "Anomaly: `git merge` exited non-zero AND there are no unmerged
+   entries in the index — meaning git failed for an infrastructure
+   reason (dirty worktree, repo corruption, fatal error) rather than
+   producing conflict markers. Routing this through the conflict-
+   resolution loop would mask the original cause; surface as a
+   merge-failed anomaly so the operator sees the real problem."
+  [task-id strategy parents input-key git-result]
+  {:anomaly/category :anomalies/dag-multi-parent-merge-failed
+   :anomaly/message  (messages/t :dag.merge/merge-failed-fatal
+                                 {:git-exit (:exit git-result)})
+   :task/id          task-id
+   :merge/parents    parents
+   :merge/strategy   strategy
+   :merge/input-key  input-key
+   :git/exit-code    (:exit git-result)
+   :git/stderr       (:err git-result)})
+
 (defn- merge-error?
   "True when a value is one of our merge anomalies (the canonical
    shape with :anomaly/category). Lets callers branch on the result
@@ -649,13 +680,36 @@
 
 (defn- head-sha-or-anomaly
   "After a merge invocation succeeds, read HEAD and return either a
-   response/success with the commit sha or the merge-failed anomaly.
-   Shared between :git-merge and :sequential-merge happy paths."
+   response/success with the commit sha or the head-read-failed
+   anomaly. Shared between :git-merge and :sequential-merge happy
+   paths. Uses `head-read-failed-anomaly` (not `ref-write-failed-anomaly`)
+   because no ref write has been attempted yet — the misuse would
+   mislead operators with an irrelevant message and nil ref/sha
+   fields."
   [worktree-path task-id]
   (let [head (run-git worktree-path "rev-parse" "HEAD")]
     (if (zero? (:exit head))
       (response/success {:commit-sha (str/trim (:out head))} nil)
-      (ref-write-failed-anomaly task-id nil nil head))))
+      (head-read-failed-anomaly task-id head))))
+
+(defn- merge-failure-anomaly
+  "Classify a non-zero `git merge` exit code:
+   - If the index has unmerged entries, the merge produced conflict
+     markers — return the conflict-anomaly so the resolution loop
+     can attempt to fix it.
+   - Otherwise, git failed for an infrastructure reason (fatal
+     error, dirty worktree, etc.) — return the merge-fatal anomaly
+     so the operator sees the real cause without it being masked
+     by the resolution loop's generic unresolvable terminal.
+
+   `git merge`'s exit code is documented as 1 for conflicts but
+   other versions/conditions can return non-zero without conflicts;
+   the unmerged-index check is the reliable signal."
+  [worktree-path task-id strategy parents input-key git-result]
+  (let [conflicts (enumerate-conflicts worktree-path)]
+    (if (seq conflicts)
+      (conflict-anomaly task-id strategy parents conflicts input-key git-result)
+      (merge-fatal-anomaly task-id strategy parents input-key git-result))))
 
 (defn- run-git-merge!
   "The :git-merge strategy: a single git merge invocation against the
@@ -670,9 +724,8 @@
         r (apply run-git worktree-path merge-args)]
     (if (zero? (:exit r))
       (head-sha-or-anomaly worktree-path task-id)
-      (conflict-anomaly task-id strategy parents
-                        (enumerate-conflicts worktree-path)
-                        input-key r))))
+      (merge-failure-anomaly worktree-path task-id strategy parents
+                             input-key r))))
 
 (defn- sequential-step-message
   "Per-step commit message for the :sequential-merge strategy. Each
@@ -713,9 +766,8 @@
               r (apply run-git worktree-path merge-args)]
           (if (zero? (:exit r))
             (recur (rest remaining) (inc step))
-            (conflict-anomaly task-id strategy parents
-                              (enumerate-conflicts worktree-path)
-                              input-key r)))))))
+            (merge-failure-anomaly worktree-path task-id strategy parents
+                                   input-key r)))))))
 
 (defn- run-merge!
   "Invoke the merge strategy in the temp worktree per spec §3.1 / §6.1.

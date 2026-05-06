@@ -370,11 +370,12 @@
 
 (deftest sequential-merge-three-parent-disjoint-test
   (testing "Three parents touching disjoint files merge cleanly via the
-            :sequential-merge strategy: three pairwise `ort` merges in
-            plan-declaration order. Final HEAD is a chain of two merge
-            commits (p1 merged into p0-base, then p2 merged into the
-            result), each with two parents. All three files end up in
-            the tree."
+            :sequential-merge strategy: TWO pairwise `ort` merges
+            (N parents → N-1 merge invocations), each one a two-parent
+            merge against the running result, in plan-declaration order.
+            Final HEAD is a chain of two merge commits (p1 merged into
+            p0-base, then p2 merged into the result), each with two
+            parents. All three files end up in the tree."
     (create-parent-branch! "task-a" "src/a.txt" "from a\n")
     (create-parent-branch! "task-b" "src/b.txt" "from b\n")
     (create-parent-branch! "task-c" "src/c.txt" "from c\n")
@@ -405,14 +406,12 @@
         (is (= 3 (count parts))
             "final merge commit + 2 parents (sequential always 2-parent steps)")))))
 
-(deftest sequential-merge-conflict-on-second-step-test
-  (testing "When the second step in the sequential chain conflicts, the
-            anomaly surfaces with :merge/strategy :sequential-merge.
-            (The first parent merges cleanly, then the second parent
-            conflicts on the same file the first parent edited.) Tests
-            that the strategy keyword echoes through the conflict
-            anomaly so resolution-loop telemetry shows what was
-            attempted."
+(deftest sequential-merge-conflict-on-the-merge-step-test
+  (testing "Two parents conflicting on the same file produce a conflict
+            on the (single, since N=2 → N-1=1) merge step. The
+            unresolvable anomaly's :merge/strategy preserves
+            :sequential-merge so resolution-loop telemetry shows what
+            was attempted."
     (run-git! *repo* "checkout" "-b" "task-a" "main")
     (commit-file! *repo* "src/conflict.txt" "from a\n" "a edit")
     (run-git! *repo* "checkout" "-b" "task-b" "main")
