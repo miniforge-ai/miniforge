@@ -4,158 +4,161 @@
 ;; Licensed under the Apache License, Version 2.0
 
 (ns ai.miniforge.progress-detector.tool-profile-test
-  "Tests for the EDN-driven tool-profile registry."
+  "Tests for the tool-profile registration API.
+
+   The API is registration-based — components contribute profiles via
+   register!. There is no built-in EDN-driven default registry."
   (:require
    [clojure.test :refer [deftest is testing]]
    [ai.miniforge.progress-detector.tool-profile :as sut]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; In-memory registry for unit tests (no classpath dependency)
+;; Test factories
 
-(def ^:private test-registry
-  {:tool/bash
-   {:detector/kind      :detector.kind/shell
-    :determinism        :volatile
-    :anomaly/categories #{:anomaly.category/stall :anomaly.category/error}
-    :timeout-ms         120000}
+(defn- make-profile
+  "Build a valid ToolProfile for tests."
+  [tool-id determinism & {:as opts}]
+  (merge {:tool/id tool-id :determinism determinism} opts))
 
-   :tool/write
-   {:detector/kind      :detector.kind/fs-mutation
-    :determinism        :stable
-    :anomaly/categories #{:anomaly.category/stall}
-    :timeout-ms         30000}
-
-   :tool/agent
-   {:detector/kind      :detector.kind/llm
-    :determinism        :nondeterministic
-    :anomaly/categories #{:anomaly.category/cost-spike :anomaly.category/stall}
-    :timeout-ms         600000}})
+(defn- seeded-registry
+  "Build a fresh registry pre-populated with three test profiles."
+  []
+  (let [reg (sut/make-registry)]
+    (sut/register! reg (make-profile :tool/Read :stable-with-resource-version
+                                     :anomaly/categories #{:anomalies.agent/tool-loop}
+                                     :timeout-ms 30000))
+    (sut/register! reg (make-profile :tool/Bash :environment-dependent
+                                     :anomaly/categories #{:anomalies.agent/repeated-failure}
+                                     :timeout-ms 120000))
+    (sut/register! reg (make-profile :tool/WebSearch :unstable))
+    reg))
 
 ;------------------------------------------------------------------------------ Layer 1
-;; load-registry
+;; make-registry
 
-(deftest load-registry-from-classpath-test
-  (testing "load-registry returns a non-empty map from the bundled EDN"
-    (let [reg (sut/load-registry)]
-      (is (map? reg))
-      (is (pos? (count reg)) "registry should not be empty")
-      (is (contains? reg :tool/bash)  ":tool/bash should be present")
-      (is (contains? reg :tool/agent) ":tool/agent should be present"))))
+(deftest make-registry-test
+  (testing "make-registry returns an atom seeded with empty map"
+    (let [reg (sut/make-registry)]
+      (is (instance? clojure.lang.IDeref reg))
+      (is (= {} @reg)))))
 
-(deftest load-registry-bad-path-test
-  (testing "load-registry throws on missing resource"
-    (is (thrown? Exception (sut/load-registry "no/such/resource.edn")))))
+;------------------------------------------------------------------------------ Layer 1
+;; register! / unregister!
+
+(deftest register!-test
+  (testing "register! adds the profile keyed by :tool/id"
+    (let [reg (sut/make-registry)
+          profile (make-profile :tool/Read :stable-with-resource-version)]
+      (sut/register! reg profile)
+      (is (= profile (sut/lookup :tool/Read reg)))))
+
+  (testing "register! overwrites an existing profile"
+    (let [reg (sut/make-registry)]
+      (sut/register! reg (make-profile :tool/Read :stable-ish))
+      (sut/register! reg (make-profile :tool/Read :stable-with-resource-version))
+      (is (= :stable-with-resource-version
+             (sut/determinism-of :tool/Read reg)))))
+
+  (testing "register! throws on profile missing :tool/id"
+    (is (thrown? clojure.lang.ExceptionInfo
+                 (sut/register! (sut/make-registry)
+                                {:determinism :unstable}))))
+
+  (testing "register! throws on profile failing schema validation"
+    (is (thrown? clojure.lang.ExceptionInfo
+                 (sut/register! (sut/make-registry)
+                                {:tool/id :tool/Bad
+                                 :determinism :NOT_A_VALID_LEVEL})))))
+
+(deftest unregister!-test
+  (testing "unregister! removes the profile"
+    (let [reg (seeded-registry)]
+      (sut/unregister! reg :tool/Read)
+      (is (nil? (sut/lookup :tool/Read reg)))
+      (is (= 2 (count @reg)))))
+
+  (testing "unregister! of a missing tool-id is a no-op"
+    (let [reg (seeded-registry)]
+      (sut/unregister! reg :tool/DoesNotExist)
+      (is (= 3 (count @reg))))))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; lookup
 
 (deftest lookup-test
-  (testing "lookup returns the profile for a known tool"
-    (let [profile (sut/lookup :tool/bash test-registry)]
+  (testing "lookup returns the profile for a registered tool"
+    (let [reg (seeded-registry)
+          profile (sut/lookup :tool/Read reg)]
       (is (map? profile))
-      (is (= :detector.kind/shell (:detector/kind profile)))
-      (is (= :volatile (:determinism profile)))))
+      (is (= :tool/Read (:tool/id profile)))
+      (is (= :stable-with-resource-version (:determinism profile)))))
 
-  (testing "lookup returns nil for an unknown tool"
-    (is (nil? (sut/lookup :tool/unknown test-registry)))))
+  (testing "lookup returns nil for an unregistered tool"
+    (is (nil? (sut/lookup :tool/Unknown (seeded-registry)))))
+
+  (testing "lookup accepts an unwrapped registry map (not just an atom)"
+    (let [reg (seeded-registry)
+          unwrapped @reg]
+      (is (= (sut/lookup :tool/Read reg)
+             (sut/lookup :tool/Read unwrapped))))))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; determinism-of
 
 (deftest determinism-of-test
-  (testing "returns :volatile for volatile tool"
-    (is (= :volatile (sut/determinism-of :tool/bash test-registry))))
+  (testing "returns the registered determinism level"
+    (let [reg (seeded-registry)]
+      (is (= :stable-with-resource-version (sut/determinism-of :tool/Read reg)))
+      (is (= :environment-dependent       (sut/determinism-of :tool/Bash reg)))
+      (is (= :unstable                    (sut/determinism-of :tool/WebSearch reg)))))
 
-  (testing "returns :stable for stable tool"
-    (is (= :stable (sut/determinism-of :tool/write test-registry))))
-
-  (testing "returns :nondeterministic for LLM tool"
-    (is (= :nondeterministic (sut/determinism-of :tool/agent test-registry))))
-
-  (testing "returns :volatile default for unknown tool"
-    (is (= :volatile (sut/determinism-of :tool/unknown-xyz test-registry)))))
+  (testing "returns :unstable for unknown tools — safe heuristic-only default"
+    (is (= :unstable (sut/determinism-of :tool/UnknownToolXyz (seeded-registry))))))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; categories-of
 
 (deftest categories-of-test
-  (testing "returns categories set for known tool"
-    (let [cats (sut/categories-of :tool/bash test-registry)]
-      (is (set? cats))
-      (is (contains? cats :anomaly.category/stall))
-      (is (contains? cats :anomaly.category/error))))
+  (testing "returns the registered category set"
+    (let [reg (seeded-registry)]
+      (is (= #{:anomalies.agent/tool-loop}
+             (sut/categories-of :tool/Read reg)))
+      (is (= #{:anomalies.agent/repeated-failure}
+             (sut/categories-of :tool/Bash reg)))))
 
-  (testing "returns empty set for unknown tool"
-    (is (= #{} (sut/categories-of :tool/unknown test-registry)))))
+  (testing "returns #{} for tool with no :anomaly/categories field"
+    (is (= #{} (sut/categories-of :tool/WebSearch (seeded-registry)))))
 
-;------------------------------------------------------------------------------ Layer 1
-;; detector-kind-of
-
-(deftest detector-kind-of-test
-  (testing "returns shell kind for bash"
-    (is (= :detector.kind/shell (sut/detector-kind-of :tool/bash test-registry))))
-
-  (testing "returns fs-mutation kind for write"
-    (is (= :detector.kind/fs-mutation (sut/detector-kind-of :tool/write test-registry))))
-
-  (testing "returns :detector.kind/shell default for unknown tool"
-    (is (= :detector.kind/shell (sut/detector-kind-of :tool/unknown test-registry)))))
+  (testing "returns #{} for unknown tools"
+    (is (= #{} (sut/categories-of :tool/Unknown (seeded-registry))))))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; all-tool-ids
 
 (deftest all-tool-ids-test
-  (testing "returns sorted vector of all keys"
-    (let [ids (sut/all-tool-ids test-registry)]
+  (testing "returns sorted vector of registered tool-ids"
+    (let [reg (seeded-registry)
+          ids (sut/all-tool-ids reg)]
       (is (vector? ids))
       (is (= 3 (count ids)))
-      (is (= ids (vec (sort ids))) "result must be sorted")))
-
-  (testing "contains all expected keys"
-    (let [ids (set (sut/all-tool-ids test-registry))]
-      (is (contains? ids :tool/bash))
-      (is (contains? ids :tool/write))
-      (is (contains? ids :tool/agent)))))
-
-;------------------------------------------------------------------------------ Layer 1
-;; register / unregister
-
-(deftest register-test
-  (testing "adds a new profile and does not mutate original"
-    (let [new-profile {:detector/kind :detector.kind/network
-                       :determinism   :volatile}
-          new-reg (sut/register test-registry :tool/fetch new-profile)]
-      (is (= 4 (count new-reg)) "new registry should have 4 entries")
-      (is (= 3 (count test-registry)) "original registry should be unchanged")
-      (is (= new-profile (sut/lookup :tool/fetch new-reg)))))
-
-  (testing "overwrites existing profile"
-    (let [override {:detector/kind :detector.kind/composite
-                    :determinism   :deterministic}
-          new-reg  (sut/register test-registry :tool/bash override)]
-      (is (= override (sut/lookup :tool/bash new-reg))))))
-
-(deftest unregister-test
-  (testing "removes a profile"
-    (let [new-reg (sut/unregister test-registry :tool/bash)]
-      (is (nil? (sut/lookup :tool/bash new-reg)))
-      (is (= 2 (count new-reg)))))
-
-  (testing "unregister of non-existent key is a no-op"
-    (let [new-reg (sut/unregister test-registry :tool/does-not-exist)]
-      (is (= 3 (count new-reg))))))
+      (is (= ids (vec (sort ids))))
+      (is (= #{:tool/Read :tool/Bash :tool/WebSearch} (set ids))))))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; validate-all
 
 (deftest validate-all-test
-  (testing "all profiles in test-registry are valid"
-    (let [results (sut/validate-all test-registry)]
-      (is (every? :valid? (vals results))
-          "all profiles should be valid against ToolProfile schema")))
+  (testing "all registered profiles report :valid? true"
+    (let [results (sut/validate-all (seeded-registry))]
+      (is (every? :valid? (vals results)))
+      (is (every? nil? (map :errors (vals results))))))
 
-  (testing "invalid profiles are flagged"
-    (let [bad-reg   (assoc test-registry :tool/bad {:determinism :???})
-          results   (sut/validate-all bad-reg)]
-      (is (false? (get-in results [:tool/bad :valid?]))
-          "bad profile should not be valid"))))
+  (testing "validate-all surfaces ToolProfile errors via the right humanizer"
+    ;; Bypass register!'s validation by constructing the registry map
+    ;; directly and feeding it to validate-all.
+    (let [bad-reg (atom {:tool/Bad {:tool/id :tool/Bad
+                                    :determinism :NOT_A_VALID_LEVEL}})
+          results (sut/validate-all bad-reg)]
+      (is (false? (get-in results [:tool/Bad :valid?])))
+      (is (some? (get-in results [:tool/Bad :errors]))
+          "errors must include humanized schema feedback"))))

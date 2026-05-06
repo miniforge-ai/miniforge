@@ -110,19 +110,25 @@
   "Resolve a sequence of overlay layers into a final config map.
 
    Layers are applied left-to-right (base first, most-specific last).
-   Each layer is folded via apply-directive. The base layer bootstraps
-   the accumulated config; subsequent layers overlay it.
+   The base layer's `:config/params` and `:detector/enabled?` seed the
+   accumulator. **Directives are only applied to overlay layers** —
+   the base layer's `:config/directive` is recorded in
+   `:config/directives` for audit but never executed (a base
+   `:config/directive :disable` would be self-defeating; if a caller
+   wants a disabled config they should set `:detector/enabled? false`
+   on the base directly). Subsequent layers fold via `apply-directive`.
 
    Arguments:
      layers - seq of config maps. Each may have:
                 :config/directive - :inherit | :disable | :enable | :tune
+                                    (overlays only; base records but ignores)
                 :config/params    - map of detector-specific knobs
                 :detector/enabled? - explicit boolean (overrides directive for :tune)
 
    Returns: Resolved config map with:
      :detector/enabled? - final boolean (default true if never set)
      :config/params     - deeply merged tuning parameters
-     :config/directives - vector of applied directives (audit trail)
+     :config/directives - vector of recorded directives (audit trail)
 
    Example:
      (merge-config

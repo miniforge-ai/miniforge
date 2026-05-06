@@ -116,14 +116,27 @@
      :sub-states   (mapv #(init % config) detectors)})
 
   (observe [_detector state observation]
-    (let [sub-states' (mapv #(observe %1 %2 observation)
-                            detectors
-                            (:sub-states state))
-          new-anomalies (into [] (mapcat :anomalies) sub-states')]
+    ;; Compute the DELTA per sub-state — newly emitted anomalies in
+    ;; this step only. The previous implementation appended each
+    ;; sub-state's full :anomalies history on every observe, growing
+    ;; the top-level vector quadratically (Copilot review on PR #784).
+    ;; subvec gives an O(1) view over the trailing slice.
+    (let [old-sub-states  (:sub-states state)
+          old-counts      (mapv #(count (:anomalies %)) old-sub-states)
+          new-sub-states  (mapv (fn [sub-det sub-state]
+                                  (observe sub-det sub-state observation))
+                                detectors
+                                old-sub-states)
+          delta-anomalies (into []
+                                (mapcat (fn [sub-state old-count]
+                                          (subvec (:anomalies sub-state)
+                                                  old-count))
+                                        new-sub-states
+                                        old-counts))]
       (-> state
           (update :observations conj observation)
-          (assoc  :sub-states sub-states')
-          (update :anomalies into new-anomalies)))))
+          (assoc  :sub-states new-sub-states)
+          (update :anomalies into delta-anomalies)))))
 
 (defn multi-detector
   "Compose multiple detectors into one.

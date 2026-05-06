@@ -24,7 +24,6 @@
                        "components/agent-runtime/resources"
                        "components/anomaly/src"
                        "components/progress-detector/src"
-                       "components/progress-detector/resources"
                        "components/clock/src"
                        "components/coerce/src"
                        "components/response-chain/src"

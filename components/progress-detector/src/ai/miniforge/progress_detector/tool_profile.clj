@@ -17,52 +17,136 @@
 ;; limitations under the License.
 
 (ns ai.miniforge.progress-detector.tool-profile
-  "EDN-driven tool-profile registry.
+  "Tool-profile registration API.
 
-   Loads tool profiles from resources/config/progress_detector/tool-profiles.edn.
-   Each profile describes a known tool's determinism level and anomaly
-   detection characteristics.
+   Architectural intent: progress-detector does NOT own knowledge of
+   which tools exist or what their characteristics are. Each component
+   that vendors a tool the agent can call (LLM client, MCP servers, the
+   adapter layer) is responsible for contributing a profile via
+   `register!` at startup.
 
-   Public API:
-     load-registry   - parse EDN resource into validated registry map
-     lookup          - retrieve a profile by tool-id keyword
-     determinism-of  - return the :determinism level for a tool
-     categories-of   - return the anomaly category set for a tool
-     all-tool-ids    - return all registered tool keyword ids
-     register        - add/override a profile at runtime (returns new registry)
-     validate-all    - validate all entries against ToolProfile schema"
+   Stage 1 ships an empty default registry. The component layout for
+   tool-profile data lives with the components that vendor each tool —
+   `adapter-claude-code` for the Claude CLI native tools, `agent` for
+   MCP-driven tools, etc. (Stage 2 wires the contributions; Stage 1
+   provides the registration mechanism.)
+
+   Public API (pure unless suffixed with `!`):
+     make-registry         - create a new empty registry atom
+     register!             - add or override a profile (returns new value)
+     unregister!           - remove a profile by tool-id
+     lookup                - retrieve profile by tool-id (or nil)
+     determinism-of        - :determinism level (defaults to :unstable)
+     categories-of         - anomaly category set (defaults to #{})
+     all-tool-ids          - sorted vector of registered ids
+     validate-all          - per-entry ToolProfile validation report
+
+   The framework holds a process-wide `default-registry` atom for
+   convenience; components contribute to it at load time. Tests
+   should use `make-registry` and pass the result explicitly to the
+   2-arity query functions to avoid global state."
   (:require
-   [clojure.edn  :as edn]
-   [clojure.java.io :as io]
    [ai.miniforge.progress-detector.schema :as schema]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Resource loading
+;; Registry construction
 
-(def ^:private default-resource-path
-  "config/progress_detector/tool-profiles.edn")
+(defn make-registry
+  "Create a fresh empty registry atom. Components contribute via
+   `register!`; queries use `lookup` / `determinism-of` / etc."
+  []
+  (atom {}))
 
-(defn- load-edn-resource
-  "Load and parse an EDN resource from the classpath.
-   Returns parsed EDN value or throws ex-info on failure."
-  [resource-path]
-  (let [url (io/resource resource-path)]
-    (when-not url
-      (throw (ex-info "Tool-profile resource not found"
-                      {:resource resource-path})))
-    (with-open [rdr (io/reader url)]
-      (edn/read (java.io.PushbackReader. rdr)))))
+(defonce default-registry
+  ;; Process-wide registry. Components contribute at load time:
+  ;;   (tool-profile/register! tool-profile/default-registry
+  ;;                           {:tool/id :tool/Read :determinism ...})
+  ;; Tests should NOT use this — make their own via make-registry.
+  (make-registry))
 
 ;------------------------------------------------------------------------------ Layer 1
-;; Registry construction and validation
+;; Mutating API (registration)
 
-(defn validate-all
-  "Validate every entry in registry against the ToolProfile schema.
+(defn register!
+  "Add or overwrite a profile for `(:tool/id profile)` in `registry-atom`.
 
    Arguments:
-     registry - map of tool-id -> profile
+     registry-atom - atom holding the registry map
+     profile       - map satisfying the ToolProfile schema
 
-   Returns: Map of tool-id -> {:valid? bool :errors humanized-errors-or-nil}"
+   Returns the new registry map. Throws via ex-info if profile is
+   missing :tool/id or fails schema validation — caller bug."
+  [registry-atom profile]
+  (let [tool-id (:tool/id profile)]
+    (when-not tool-id
+      (throw (ex-info "Tool profile must include :tool/id"
+                      {:profile profile})))
+    (when-not (schema/valid-tool-profile? profile)
+      (throw (ex-info "Tool profile fails ToolProfile schema validation"
+                      {:profile profile
+                       :errors  (schema/explain-tool-profile profile)}))))
+  (swap! registry-atom assoc (:tool/id profile) profile))
+
+(defn unregister!
+  "Remove the profile for `tool-id` from `registry-atom`.
+   Returns the new registry map."
+  [registry-atom tool-id]
+  (swap! registry-atom dissoc tool-id))
+
+;------------------------------------------------------------------------------ Layer 2
+;; Query API (pure; accepts atom or unwrapped map)
+
+(defn- registry-value
+  "Unwrap an atom-or-map registry argument."
+  [registry-or-atom]
+  (if (instance? clojure.lang.IDeref registry-or-atom)
+    @registry-or-atom
+    registry-or-atom))
+
+(defn lookup
+  "Return the profile for `tool-id` from `registry`, or nil.
+
+   Arguments:
+     tool-id  - qualified keyword e.g. :tool/Read
+     registry - registry atom or unwrapped map (defaults to default-registry)"
+  ([tool-id]
+   (lookup tool-id default-registry))
+  ([tool-id registry]
+   (get (registry-value registry) tool-id)))
+
+(defn determinism-of
+  "Return the :determinism level for `tool-id`, or :unstable if unknown.
+
+   :unstable is the safe default — unknown tools are treated as heuristic
+   signals only, never as mechanical-eligible loops."
+  ([tool-id]
+   (determinism-of tool-id default-registry))
+  ([tool-id registry]
+   (get (lookup tool-id registry) :determinism :unstable)))
+
+(defn categories-of
+  "Return the set of anomaly categories for `tool-id`, or #{} if unknown."
+  ([tool-id]
+   (categories-of tool-id default-registry))
+  ([tool-id registry]
+   (get (lookup tool-id registry) :anomaly/categories #{})))
+
+(defn all-tool-ids
+  "Return sorted vector of all registered tool-id keywords."
+  ([]
+   (all-tool-ids default-registry))
+  ([registry]
+   (vec (sort (keys (registry-value registry))))))
+
+;------------------------------------------------------------------------------ Layer 2
+;; Audit
+
+(defn validate-all
+  "Validate every entry in `registry` against the ToolProfile schema.
+
+   Returns: Map of tool-id -> {:valid? bool :errors humanized-or-nil}.
+   Uses the ToolProfile humanizer (NOT the Anomaly one) so error
+   messages cite the right schema's fields."
   [registry]
   (reduce-kv
    (fn [acc tool-id profile]
@@ -70,158 +154,30 @@
        (assoc acc tool-id
               {:valid? valid?
                :errors (when-not valid?
-                         ;; Use the ToolProfile humanizer — not Anomaly's —
-                         ;; so error messages cite the right schema's fields.
                          (schema/explain-tool-profile profile))})))
    {}
-   registry))
-
-(defn load-registry
-  "Load and return the tool-profile registry from classpath EDN.
-
-   Optionally accepts a resource-path override (useful in tests).
-
-   The loaded value MUST be a map; otherwise a fault anomaly throws
-   via ex-info with the resource path and observed type. Per-entry
-   schema validation is the caller's responsibility — invoke
-   `validate-all` on the returned registry when you need the
-   per-tool-id audit. We do NOT validate at load time so a single
-   malformed entry can't take the whole registry offline.
-
-   Returns: map of tool-id-keyword -> profile-map."
-  ([]
-   (load-registry default-resource-path))
-  ([resource-path]
-   (let [raw (load-edn-resource resource-path)]
-     (when-not (map? raw)
-       (throw (ex-info "Tool-profile registry must be a map"
-                       {:resource resource-path :actual-type (type raw)})))
-     raw)))
-
-;------------------------------------------------------------------------------ Layer 1
-;; Default registry (loaded once at startup; held in a var)
-
-(defonce ^:private default-registry
-  (delay (load-registry)))
-
-(defn- get-default-registry []
-  @default-registry)
-
-;------------------------------------------------------------------------------ Layer 2
-;; Query API
-
-(defn lookup
-  "Return the profile map for tool-id from registry, or nil if unknown.
-
-   Arguments:
-     tool-id  - qualified keyword, e.g. :tool/bash
-     registry - (optional) registry map; defaults to built-in EDN registry"
-  ([tool-id]
-   (lookup tool-id (get-default-registry)))
-  ([tool-id registry]
-   (get registry tool-id)))
-
-(defn determinism-of
-  "Return the :determinism level for tool-id, or :volatile if unknown.
-
-   Arguments:
-     tool-id  - qualified keyword
-     registry - (optional) registry map"
-  ([tool-id]
-   (determinism-of tool-id (get-default-registry)))
-  ([tool-id registry]
-   (get (lookup tool-id registry) :determinism :volatile)))
-
-(defn categories-of
-  "Return the set of anomaly categories for tool-id, or #{} if unknown.
-
-   Arguments:
-     tool-id  - qualified keyword
-     registry - (optional) registry map"
-  ([tool-id]
-   (categories-of tool-id (get-default-registry)))
-  ([tool-id registry]
-   (get (lookup tool-id registry) :anomaly/categories #{})))
-
-(defn detector-kind-of
-  "Return the :detector/kind for tool-id, or :detector.kind/shell if unknown.
-
-   Arguments:
-     tool-id  - qualified keyword
-     registry - (optional) registry map"
-  ([tool-id]
-   (detector-kind-of tool-id (get-default-registry)))
-  ([tool-id registry]
-   (get (lookup tool-id registry) :detector/kind :detector.kind/shell)))
-
-(defn all-tool-ids
-  "Return sorted vector of all registered tool-id keywords.
-
-   Arguments:
-     registry - (optional) registry map"
-  ([]
-   (all-tool-ids (get-default-registry)))
-  ([registry]
-   (vec (sort (keys registry)))))
-
-;------------------------------------------------------------------------------ Layer 2
-;; Registry manipulation (returns new registry, never mutates)
-
-(defn register
-  "Return a new registry with profile added/overwritten for tool-id.
-
-   Arguments:
-     registry - existing registry map
-     tool-id  - qualified keyword to register
-     profile  - profile map (should satisfy ToolProfile schema)
-
-   Returns: New registry map."
-  [registry tool-id profile]
-  (assoc registry tool-id profile))
-
-(defn unregister
-  "Return a new registry with tool-id removed.
-
-   Arguments:
-     registry - existing registry map
-     tool-id  - qualified keyword to remove
-
-   Returns: New registry map."
-  [registry tool-id]
-  (dissoc registry tool-id))
+   (registry-value registry)))
 
 ;------------------------------------------------------------------------------ Rich Comment
-;; Rich comment
 
 (comment
-  (def reg (load-registry))
+  ;; Test-style: explicit registry, no global state
+  (def reg (make-registry))
+  (register! reg {:tool/id :tool/Read
+                  :determinism :stable-with-resource-version
+                  :anomaly/categories #{:anomalies.agent/tool-loop}})
+  (lookup :tool/Read reg)
+  ;; => {:tool/id :tool/Read :determinism ... :anomaly/categories #{...}}
 
-  (keys reg)
-  ;; => (:tool/bash :tool/write :tool/edit ...)
+  (determinism-of :tool/Read reg)        ; => :stable-with-resource-version
+  (determinism-of :tool/UnknownTool reg) ; => :unstable (safe default)
 
-  (lookup :tool/bash reg)
-  ;; => {:detector/kind :detector.kind/shell
-  ;;     :determinism :volatile
-  ;;     :anomaly/categories #{:anomaly.category/stall ...}
-  ;;     :timeout-ms 120000}
+  ;; Production-style: components contribute to default-registry at load
+  (register! default-registry
+             {:tool/id :tool/Bash
+              :determinism :environment-dependent})
 
-  (determinism-of :tool/agent reg)
-  ;; => :nondeterministic
-
-  (determinism-of :tool/unknown reg)
-  ;; => :volatile   (safe default)
-
-  (categories-of :tool/read reg)
-  ;; => #{:anomaly.category/loop}
-
-  (all-tool-ids reg)
-  ;; => [:tool/agent :tool/bash :tool/edit ...]
-
-  (-> reg
-      (register :tool/custom {:detector/kind :detector.kind/shell
-                              :determinism   :stable
-                              :anomaly/categories #{:anomaly.category/error}})
-      (lookup :tool/custom))
-  ;; => {:detector/kind :detector.kind/shell ...}
+  (validate-all reg)
+  ;; => {:tool/Read {:valid? true :errors nil}}
 
   :leave-this-here)

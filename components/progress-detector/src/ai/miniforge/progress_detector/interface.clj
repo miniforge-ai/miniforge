@@ -17,88 +17,68 @@
 ;; limitations under the License.
 
 (ns ai.miniforge.progress-detector.interface
-  "Progress-detector public API.
+  "Progress-detector public API — Stage 1 framework.
 
-   Integrates the Detector protocol, anomaly schema, tool-profile registry,
-   and config merge semantics into a single cohesive surface.
+   ## Architectural intent
+
+   progress-detector is a *framework + registry mechanism*, not a source
+   of truth for tool behavior or anomaly shape:
+
+   - The canonical anomaly map lives on `ai.miniforge.anomaly.interface`.
+     Detector-specific structure (`:detector/kind`, `:anomaly/class`,
+     `:anomaly/severity`, `:anomaly/category`, `:anomaly/evidence`)
+     goes inside the anomaly's `:anomaly/data` field per the
+     `DetectorAnomalyData` schema below.
+   - Tool profiles are *contributed* by the components that vendor
+     each tool, via `register-tool-profile!`. Stage 1 ships an empty
+     default registry; Stage 2 wires `adapter-claude-code`, `agent`,
+     etc. to contribute their profiles at load time.
 
    ## Concepts
 
    An **observation** describes one tool-invocation event:
-     {:tool/id :tool/bash :seq 1 :timestamp inst :tool/duration-ms 80}
+     {:tool/id :tool/Read :seq 1 :timestamp inst :tool/duration-ms 80}
 
    A **detector** implements the Detector protocol — a pure reducer:
-     init    : config -> initial-state
-     observe : (state, observation) -> state'
+     init    : config → initial-state
+     observe : (detector, state, observation) → state'
 
-   An **anomaly** is a validated map surfaced in state :anomalies:
-     {:anomaly/id \"uuid\" :anomaly/category :anomaly.category/loop ...}
-
-   The **tool-profile registry** maps tool-id keywords to profiles that
-   describe each tool's determinism level and detectable anomaly categories.
+   An **anomaly** is a canonical anomaly map (per anomaly/Anomaly) whose
+   `:anomaly/data` carries `DetectorAnomalyData`:
+     {:anomaly/type :fault
+      :anomaly/message \"…\"
+      :anomaly/data {:detector/kind :detector/tool-loop
+                     :detector/version \"stage-1.0\"
+                     :anomaly/class :mechanical
+                     :anomaly/severity :error
+                     :anomaly/category :anomalies.agent/tool-loop
+                     :anomaly/evidence {:summary \"…\" …}}
+      :anomaly/at #inst …}
 
    **Config layers** compose via overlay resolution:
-     :inherit / :disable / :enable / :tune
-
-   ## Quick start
-
-     (require '[ai.miniforge.progress-detector.interface :as pd])
-
-     ;; 1. Prepare detector
-     (def det (pd/null-detector))
-     (def state (pd/init det {}))
-
-     ;; 2. Feed observations
-     (def obs {:tool/id :tool/bash :seq 1
-               :timestamp (java.time.Instant/now)
-               :tool/duration-ms 120})
-     (def state' (pd/observe det state obs))
-
-     ;; 3. Read anomalies
-     (:anomalies state')    ; => []
-
-     ;; 4. Tool profile lookup
-     (pd/tool-determinism :tool/agent)   ; => :nondeterministic
-
-     ;; 5. Config merge
-     (pd/resolve-config
-       [{:config/params {:window-size 5}}
-        {:config/directive :tune :config/params {:window-size 10}}])
-     ;; => {:detector/enabled? true :config/params {:window-size 10} ...}"
+     :inherit / :disable / :enable / :tune"
   (:require
+   [ai.miniforge.anomaly.interface             :as anomaly]
    [ai.miniforge.progress-detector.protocol    :as proto]
    [ai.miniforge.progress-detector.schema      :as schema]
    [ai.miniforge.progress-detector.tool-profile :as tp]
    [ai.miniforge.progress-detector.config      :as cfg]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Layer 0 — Detector protocol (re-exported)
+;; Detector protocol (re-exported)
 
 (def null-detector
   "Return a NullDetector that never flags any anomaly.
-   Useful as a no-op placeholder or base for detector pipelines.
-
-   Returns: NullDetector record satisfying the Detector protocol."
+   Useful as a no-op placeholder or base for detector pipelines."
   proto/null-detector)
 
 (def multi-detector
   "Compose multiple detectors into one fanout detector.
-   Observations are forwarded to all children; anomalies are merged.
-
-   Arguments:
-     detectors - seq of Detector implementations
-
-   Returns: MultiDetector record."
+   Observations are forwarded to all children; anomalies are merged."
   proto/multi-detector)
 
 (defn init
-  "Produce initial detector state from config.
-
-   Arguments:
-     detector - Detector protocol implementation
-     config   - map of detector-specific configuration
-
-   Returns: Initial state map with :anomalies [] and :observations []."
+  "Produce initial detector state from config."
   [detector config]
   (proto/init detector config))
 
@@ -111,171 +91,136 @@
    forward, use `let` bindings (or `as->`) rather than `->` — `->`
    would put state in the detector slot.
 
-   Arguments:
-     detector    - Detector protocol implementation (NOT the state)
-     state       - current state (result of init or prior observe);
-                   the value to thread forward through the reduction
-     observation - tool invocation event map
-
    Contract (per the spec's pure-reducer requirement):
      - state argument MUST NOT be mutated
      - return value MUST be threaded back into the next observe call
      - implementations MUST NOT throw — anomalies surface as data on
-       the returned state's :anomalies vector
-
-   Returns: New state map (same shape as init's return) with
-   :anomalies updated to include any newly detected anomaly maps."
+       the returned state's :anomalies vector"
   [detector state observation]
   (proto/observe detector state observation))
 
 (def reduce-observations
-  "Fold a seq of observations through a detector, returning final state.
-
-   Arguments:
-     detector     - Detector implementation
-     config       - config map passed to init
-     observations - seq of observation maps
-
-   Returns: Final state after all observations are folded."
+  "Fold a seq of observations through a detector, returning final state."
   proto/reduce-observations)
 
 ;------------------------------------------------------------------------------ Layer 1
-;; Layer 1 — Anomaly schema (re-exported)
+;; Schema re-exports — anomaly validation lives on the anomaly component
+
+(def Anomaly
+  "Canonical anomaly schema (re-exported from ai.miniforge.anomaly).
+   progress-detector does NOT define a parallel Anomaly schema."
+  anomaly/Anomaly)
 
 (def valid-anomaly?
-  "Return true if m satisfies the Anomaly schema."
-  schema/valid-anomaly?)
+  "Return true if m satisfies the canonical anomaly contract.
+   Re-exported from ai.miniforge.anomaly.interface — progress-detector
+   does NOT validate against a parallel schema."
+  anomaly/anomaly?)
 
-(def explain-anomaly
-  "Return humanized error map if m fails Anomaly validation, else nil."
-  schema/explain-anomaly)
+;; Progress-detector-local schemas (not duplicates of anomaly/*).
+(def Observation         schema/Observation)
+(def DetectorConfig      schema/DetectorConfig)
+(def ToolProfile         schema/ToolProfile)
+(def DetectorAnomalyData schema/DetectorAnomalyData)
 
-(def valid-observation?
-  "Return true if m satisfies the Observation schema."
-  schema/valid-observation?)
-
-(def explain-observation
-  "Return humanized error map if m fails Observation validation, else nil."
-  schema/explain-observation)
-
-(def valid-tool-profile?
-  "Return true if m satisfies the ToolProfile schema."
-  schema/valid-tool-profile?)
-
-(def explain-tool-profile
-  "Return humanized error map if m fails ToolProfile validation, else nil."
-  schema/explain-tool-profile)
-
-(def valid-detector-config?
-  "Return true if m satisfies the DetectorConfig schema."
-  schema/valid-detector-config?)
-
-(def explain-detector-config
-  "Return humanized error map if m fails DetectorConfig validation, else nil."
-  schema/explain-detector-config)
-
-;; Expose schema vars directly for advanced usage
-(def Anomaly          schema/Anomaly)
-(def Observation      schema/Observation)
-(def ToolProfile      schema/ToolProfile)
-(def DetectorConfig   schema/DetectorConfig)
+(def valid-observation?            schema/valid-observation?)
+(def explain-observation           schema/explain-observation)
+(def valid-tool-profile?           schema/valid-tool-profile?)
+(def explain-tool-profile          schema/explain-tool-profile)
+(def valid-detector-config?        schema/valid-detector-config?)
+(def explain-detector-config       schema/explain-detector-config)
+(def valid-detector-anomaly-data?  schema/valid-detector-anomaly-data?)
+(def explain-detector-anomaly-data schema/explain-detector-anomaly-data)
 
 ;------------------------------------------------------------------------------ Layer 2
-;; Layer 2 — Tool-profile registry (re-exported)
+;; Tool-profile registration (no built-in profiles — components contribute)
 
-(def load-tool-registry
-  "Load the EDN-driven tool-profile registry from classpath.
+(def make-tool-registry
+  "Create a fresh empty tool-profile registry atom. Tests should use
+   this instead of the global default-registry to avoid cross-test
+   leakage."
+  tp/make-registry)
 
-   Optionally accepts a resource-path override.
+(def default-tool-registry
+  "Process-wide tool-profile registry. Components that vendor tools
+   contribute via `register-tool-profile!` at namespace-load time.
+   Stage 1 ships this empty; Stage 2 wires the contributions."
+  tp/default-registry)
 
-   Returns: map of tool-id-keyword -> profile-map."
-  tp/load-registry)
+(defn register-tool-profile!
+  "Add or overwrite a tool profile in `registry-atom`.
 
-(defn tool-lookup
-  "Return the profile for tool-id from the registry, or nil.
+   Throws via ex-info if the profile fails ToolProfile schema
+   validation — caller bug. Returns the new registry map.
 
    Arguments:
-     tool-id  - qualified keyword e.g. :tool/bash
-     registry - (optional) registry map; defaults to built-in registry"
+     registry-atom - atom holding the registry (typically the
+                     default-tool-registry)
+     profile       - map satisfying ToolProfile schema:
+                       :tool/id            (required, qualified keyword)
+                       :determinism        (required, see schema/determinisms)
+                       :anomaly/categories (optional, set of keywords)
+                       :timeout-ms         (optional, int)"
+  [registry-atom profile]
+  (tp/register! registry-atom profile))
+
+(defn unregister-tool-profile!
+  "Remove the profile for `tool-id` from `registry-atom`.
+   Returns the new registry map."
+  [registry-atom tool-id]
+  (tp/unregister! registry-atom tool-id))
+
+(defn tool-lookup
+  "Return the registered profile for `tool-id`, or nil.
+
+   Arguments:
+     tool-id  - qualified keyword e.g. :tool/Read
+     registry - registry atom or unwrapped map (defaults to
+                default-tool-registry)"
   ([tool-id]
    (tp/lookup tool-id))
   ([tool-id registry]
    (tp/lookup tool-id registry)))
 
 (defn tool-determinism
-  "Return the :determinism level for tool-id, or :volatile if unknown.
-
-   Arguments:
-     tool-id  - qualified keyword
-     registry - (optional) registry map"
+  "Return the :determinism level for `tool-id`, or :unstable if unknown.
+   :unstable is the safe default — unknown tools are treated as
+   heuristic signals only, never as mechanical-eligible loops."
   ([tool-id]
    (tp/determinism-of tool-id))
   ([tool-id registry]
    (tp/determinism-of tool-id registry)))
 
 (defn tool-categories
-  "Return the anomaly category set for tool-id, or #{} if unknown.
-
-   Arguments:
-     tool-id  - qualified keyword
-     registry - (optional) registry map"
+  "Return the anomaly category set for `tool-id`, or #{} if unknown."
   ([tool-id]
    (tp/categories-of tool-id))
   ([tool-id registry]
    (tp/categories-of tool-id registry)))
 
-(defn tool-detector-kind
-  "Return the :detector/kind for tool-id, or :detector.kind/shell if unknown.
-
-   Arguments:
-     tool-id  - qualified keyword
-     registry - (optional) registry map"
-  ([tool-id]
-   (tp/detector-kind-of tool-id))
-  ([tool-id registry]
-   (tp/detector-kind-of tool-id registry)))
-
 (def all-tool-ids
-  "Return sorted vector of all registered tool-id keywords.
-
-   Arguments:
-     registry - (optional) registry map"
+  "Return sorted vector of all registered tool-id keywords."
   tp/all-tool-ids)
 
-(defn register-tool
-  "Return a new registry with a profile added/overwritten for tool-id.
-
-   Arguments:
-     registry - existing registry map
-     tool-id  - qualified keyword
-     profile  - profile map (should satisfy ToolProfile schema)
-
-   Returns: New registry map."
-  [registry tool-id profile]
-  (tp/register registry tool-id profile))
+(def validate-tool-registry
+  "Per-entry ToolProfile validation report for `registry`.
+   Returns: {tool-id -> {:valid? bool :errors humanized-or-nil}}."
+  tp/validate-all)
 
 ;------------------------------------------------------------------------------ Layer 2
-;; Layer 3 — Config merge semantics (re-exported)
+;; Config merge semantics (re-exported)
 
 (def resolve-config
   "Resolve a seq of overlay layers into a final config map.
 
-   Layers are applied left-to-right; each may declare:
-     :config/directive - :inherit | :disable | :enable | :tune
-     :config/params    - detector-specific tuning knobs
-
-   Returns: Resolved config map with :detector/enabled?, :config/params,
-   :config/directives."
+   Layers apply left-to-right; the base layer's :config/params seed
+   the accumulator. Directives are applied to OVERLAY layers only —
+   the base layer's :config/directive is recorded for audit but never
+   executed (a base :disable would be self-defeating)."
   cfg/merge-config)
 
 (def apply-config-directive
-  "Apply one overlay layer onto an accumulated config map.
-
-   Arguments:
-     accumulated - current resolved config
-     layer       - overlay map
-
-   Returns: New config map."
+  "Apply one overlay layer onto an accumulated config map."
   cfg/apply-directive)
 
 (def config-enabled?
@@ -293,13 +238,13 @@
   cfg/overlay)
 
 ;------------------------------------------------------------------------------ Layer 3
-;; Layer 4 — Convenience constructors and helpers
+;; Convenience constructors and helpers
 
 (defn make-observation
   "Construct a valid observation map with required fields.
 
    Arguments:
-     tool-id      - qualified keyword (e.g. :tool/bash)
+     tool-id      - qualified keyword (e.g. :tool/Read)
      seq-num      - monotonic integer sequence number
      timestamp    - java.time.Instant of this observation
      opts         - (optional) map of additional fields:
@@ -317,65 +262,58 @@
 (defn current-anomalies
   "Extract the :anomalies vector from detector state.
 
-   Arguments:
-     state - detector state map
-
-   Returns: Vector of anomaly maps (possibly empty)."
+   Returns: Vector of anomaly maps (possibly empty); each map conforms
+   to the canonical anomaly contract with detector specifics under
+   :anomaly/data."
   [state]
   (get state :anomalies []))
 
 (defn anomalies-by-severity
   "Return anomalies from state filtered to the given severity.
 
+   Severity reads from `[:anomaly/data :anomaly/severity]` because
+   severity is detector metadata, not part of the canonical anomaly
+   shape. Valid severities (per schema/severities): :info :warn
+   :error :fatal.
+
    Arguments:
      state    - detector state map
-     severity - :anomaly.severity/critical | :warning | :info
+     severity - one of #{:info :warn :error :fatal}
 
    Returns: Vector of matching anomaly maps."
   [state severity]
-  (filterv #(= severity (:anomaly/severity %))
+  (filterv #(= severity (get-in % [:anomaly/data :anomaly/severity]))
            (current-anomalies state)))
 
-(defn critical-anomalies
-  "Return only :anomaly.severity/critical anomalies from state.
-
-   Arguments:
-     state - detector state map
-
-   Returns: Vector of critical anomaly maps."
+(defn fatal-anomalies
+  "Return only severity :fatal anomalies from state."
   [state]
-  (anomalies-by-severity state :anomaly.severity/critical))
+  (anomalies-by-severity state :fatal))
 
 ;------------------------------------------------------------------------------ Rich Comment
-;; Rich comment
 
 (comment
-  ;; Smoke-test the full pipeline
+  ;; Smoke-test the framework
   (let [det  (null-detector)
         cfg  (resolve-config [{:config/params {:window-size 5}}
                               {:config/directive :tune
                                :config/params {:window-size 10}}])
         st0  (init det (effective-config-params cfg))
-        obs1 (make-observation :tool/bash 1 (java.time.Instant/now)
+        obs1 (make-observation :tool/Read 1 (java.time.Instant/now)
                                {:tool/duration-ms 120})
-        obs2 (make-observation :tool/write 2 (java.time.Instant/now)
-                               {:tool/duration-ms 30})
-        stf  (reduce-observations det (effective-config-params cfg) [obs1 obs2])]
+        stf  (reduce-observations det (effective-config-params cfg) [obs1])]
     {:enabled?  (config-enabled? cfg)
      :params    (effective-config-params cfg)
      :anomalies (current-anomalies stf)})
   ;; => {:enabled? true :params {:window-size 10} :anomalies []}
 
-  ;; Tool-profile queries
-  (tool-determinism :tool/agent)    ; => :nondeterministic
-  (tool-categories  :tool/bash)     ; => #{:anomaly.category/stall ...}
-  (all-tool-ids)                    ; => [:tool/agent :tool/bash ...]
-
-  ;; Config disable then re-enable
-  (-> (resolve-config [{:config/params {:t 5}}
-                        {:config/directive :disable}
-                        {:config/directive :enable}])
-      config-enabled?)
-  ;; => true
+  ;; Register a tool profile (test-style — explicit registry)
+  (def reg (make-tool-registry))
+  (register-tool-profile! reg
+                          {:tool/id :tool/Read
+                           :determinism :stable-with-resource-version
+                           :anomaly/categories #{:anomalies.agent/tool-loop}})
+  (tool-determinism :tool/Read reg)        ; => :stable-with-resource-version
+  (tool-determinism :tool/Unknown reg)     ; => :unstable (safe default)
 
   :leave-this-here)

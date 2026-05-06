@@ -7,9 +7,30 @@
   "Integration tests for the progress-detector public interface."
   (:require
    [clojure.test :refer [deftest is testing]]
+   [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.progress-detector.interface :as pd]))
 
 ;------------------------------------------------------------------------------ Layer 0
+;; Test factories
+
+(defn- detector-anomaly-data
+  "Build a valid DetectorAnomalyData payload."
+  [& {:keys [class severity category]
+      :or {class :mechanical severity :error category :anomalies.agent/tool-loop}}]
+  {:detector/kind     :detector/test
+   :detector/version  "test-1.0"
+   :anomaly/class     class
+   :anomaly/severity  severity
+   :anomaly/category  category
+   :anomaly/evidence  {:summary "test evidence"}})
+
+(defn- canonical-anomaly
+  "Build a valid canonical anomaly with detector data under :anomaly/data."
+  [& {:as opts}]
+  (anomaly/anomaly :fault "test failure" (apply detector-anomaly-data
+                                                (mapcat identity opts))))
+
+;------------------------------------------------------------------------------ Layer 1
 ;; Detector lifecycle (init / observe / reduce-observations)
 
 (deftest interface-detector-lifecycle-test
@@ -21,7 +42,7 @@
 
   (testing "observe accumulates observations"
     (let [det (pd/null-detector)
-          obs (pd/make-observation :tool/bash 1 (java.time.Instant/now)
+          obs (pd/make-observation :tool/Bash 1 (java.time.Instant/now)
                                    {:tool/duration-ms 80})
           ;; observe takes [detector state observation] — detector first
           ;; for protocol-dispatch + (partial observe det) reducer use.
@@ -33,7 +54,7 @@
 
   (testing "reduce-observations folds a seq"
     (let [det  (pd/null-detector)
-          obss (map #(pd/make-observation :tool/read % (java.time.Instant/now))
+          obss (map #(pd/make-observation :tool/Read % (java.time.Instant/now))
                     (range 1 6))
           stf  (pd/reduce-observations det {} obss)]
       (is (= 5 (count (:observations stf)))))))
@@ -46,82 +67,86 @@
     (let [det (pd/multi-detector [(pd/null-detector) (pd/null-detector)])
           st  (pd/init det {})
           st' (pd/observe det st
-                          (pd/make-observation :tool/write 1 (java.time.Instant/now)))]
+                          (pd/make-observation :tool/Write 1 (java.time.Instant/now)))]
       (is (= 2 (count (:sub-states st'))))
       (is (empty? (pd/current-anomalies st'))))))
 
 ;------------------------------------------------------------------------------ Layer 1
-;; Anomaly schema helpers
+;; Anomaly validation — delegates to the anomaly component
 
 (deftest interface-valid-anomaly-test
-  (testing "valid-anomaly? accepts a well-formed anomaly"
-    (let [anomaly {:anomaly/id          "abc"
-                   :anomaly/category    :anomaly.category/stall
-                   :anomaly/class       :anomaly.class/soft
-                   :anomaly/severity    :anomaly.severity/info
-                   :detector/kind       :detector.kind/shell
-                   :anomaly/evidence    []
-                   :anomaly/detected-at (java.time.Instant/now)}]
-      (is (true? (pd/valid-anomaly? anomaly)))))
+  (testing "valid-anomaly? accepts a canonical anomaly with detector data"
+    (is (true? (pd/valid-anomaly? (canonical-anomaly)))))
 
-  (testing "valid-anomaly? rejects malformed anomaly"
-    (is (false? (pd/valid-anomaly? {:anomaly/id 123}))))
+  (testing "valid-anomaly? rejects malformed input"
+    (is (false? (pd/valid-anomaly? {:not "an anomaly"})))
+    (is (false? (pd/valid-anomaly? {})))
+    (is (false? (pd/valid-anomaly? nil)))))
 
-  (testing "explain-anomaly returns nil for valid anomaly"
-    (let [good {:anomaly/id          "x"
-                :anomaly/category    :anomaly.category/loop
-                :anomaly/class       :anomaly.class/hard
-                :anomaly/severity    :anomaly.severity/critical
-                :detector/kind       :detector.kind/llm
-                :anomaly/evidence    []
-                :anomaly/detected-at (java.time.Instant/now)}]
-      (is (nil? (pd/explain-anomaly good)))))
+(deftest interface-detector-anomaly-data-test
+  (testing "valid-detector-anomaly-data? accepts a complete payload"
+    (is (true? (pd/valid-detector-anomaly-data?
+                {:detector/kind     :detector/tool-loop
+                 :detector/version  "stage-1.0"
+                 :anomaly/class     :mechanical
+                 :anomaly/severity  :error
+                 :anomaly/category  :anomalies.agent/tool-loop
+                 :anomaly/evidence  {:summary "x"}}))))
 
-  (testing "explain-anomaly returns errors for invalid anomaly"
-    (is (some? (pd/explain-anomaly {})))))
+  (testing "rejects unknown :anomaly/class value"
+    (is (false? (pd/valid-detector-anomaly-data?
+                 {:detector/kind     :detector/tool-loop
+                  :detector/version  "stage-1.0"
+                  :anomaly/class     :NOT_A_VALID_CLASS
+                  :anomaly/severity  :error
+                  :anomaly/category  :anomalies.agent/tool-loop
+                  :anomaly/evidence  {:summary "x"}}))))
+
+  (testing "rejects unknown :anomaly/severity value"
+    (is (false? (pd/valid-detector-anomaly-data?
+                 {:detector/kind     :detector/tool-loop
+                  :detector/version  "stage-1.0"
+                  :anomaly/class     :mechanical
+                  :anomaly/severity  :NOT_A_VALID_SEVERITY
+                  :anomaly/category  :anomalies.agent/tool-loop
+                  :anomaly/evidence  {:summary "x"}})))))
 
 (deftest interface-valid-observation-test
   (testing "valid-observation? accepts well-formed observation"
     (is (true? (pd/valid-observation?
-                {:tool/id :tool/bash :seq 1
+                {:tool/id :tool/Bash :seq 1
                  :timestamp (java.time.Instant/now)}))))
 
   (testing "valid-observation? rejects missing :seq"
     (is (false? (pd/valid-observation?
-                 {:tool/id :tool/bash :timestamp (java.time.Instant/now)})))))
+                 {:tool/id :tool/Bash :timestamp (java.time.Instant/now)})))))
 
 ;------------------------------------------------------------------------------ Layer 1
-;; Tool-profile registry
+;; Tool-profile registration
 
 (deftest interface-tool-profile-test
-  (testing "tool-determinism returns expected level for known tools"
-    (is (= :volatile      (pd/tool-determinism :tool/bash)))
-    (is (= :nondeterministic (pd/tool-determinism :tool/agent))))
+  (testing "make-tool-registry returns an empty atom-backed registry"
+    (let [reg (pd/make-tool-registry)]
+      (is (instance? clojure.lang.IDeref reg))
+      (is (= [] (pd/all-tool-ids reg)))))
 
-  (testing "tool-determinism returns :volatile for unknown tool"
-    (is (= :volatile (pd/tool-determinism :tool/totally-unknown))))
+  (testing "register-tool-profile! + tool-determinism round-trip"
+    (let [reg (pd/make-tool-registry)]
+      (pd/register-tool-profile! reg
+                                 {:tool/id :tool/Read
+                                  :determinism :stable-with-resource-version
+                                  :anomaly/categories #{:anomalies.agent/tool-loop}})
+      (is (= :stable-with-resource-version (pd/tool-determinism :tool/Read reg)))
+      (is (= #{:anomalies.agent/tool-loop} (pd/tool-categories  :tool/Read reg)))))
 
-  (testing "tool-categories returns a set of category keywords"
-    (let [cats (pd/tool-categories :tool/bash)]
-      (is (set? cats))
-      (is (pos? (count cats)))))
+  (testing "tool-determinism returns :unstable for unregistered tools"
+    (is (= :unstable (pd/tool-determinism :tool/Unknown (pd/make-tool-registry)))))
 
-  (testing "tool-detector-kind returns a keyword"
-    (is (keyword? (pd/tool-detector-kind :tool/bash))))
-
-  (testing "all-tool-ids returns sorted vector"
-    (let [ids (pd/all-tool-ids)]
-      (is (vector? ids))
-      (is (= ids (vec (sort ids))))))
-
-  (testing "register-tool adds profile to registry"
-    (let [reg (pd/load-tool-registry)
-          new-reg (pd/register-tool reg :tool/custom
-                                    {:detector/kind :detector.kind/shell
-                                     :determinism   :stable})]
-      (is (= :stable (get-in new-reg [:tool/custom :determinism])))
-      (is (= :volatile (pd/tool-determinism :tool/bash reg))
-          "original registry unchanged"))))
+  (testing "register-tool-profile! validates against ToolProfile schema"
+    (is (thrown? clojure.lang.ExceptionInfo
+                 (pd/register-tool-profile! (pd/make-tool-registry)
+                                            {:tool/id :tool/Bad
+                                             :determinism :NOT_VALID})))))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Config merge
@@ -150,39 +175,30 @@
 (deftest make-observation-test
   (testing "make-observation creates valid observation"
     (let [now (java.time.Instant/now)
-          obs (pd/make-observation :tool/bash 1 now)]
-      (is (= :tool/bash (:tool/id obs)))
+          obs (pd/make-observation :tool/Bash 1 now)]
+      (is (= :tool/Bash (:tool/id obs)))
       (is (= 1 (:seq obs)))
       (is (= now (:timestamp obs)))
       (is (pd/valid-observation? obs))))
 
   (testing "make-observation merges optional fields"
-    (let [obs (pd/make-observation :tool/write 2 (java.time.Instant/now)
+    (let [obs (pd/make-observation :tool/Write 2 (java.time.Instant/now)
                                    {:tool/duration-ms 30 :tool/error? false})]
       (is (= 30    (:tool/duration-ms obs)))
       (is (= false (:tool/error? obs))))))
 
 ;------------------------------------------------------------------------------ Layer 1
-;; anomalies-by-severity / critical-anomalies
+;; anomalies-by-severity / fatal-anomalies — read severity from :anomaly/data
 
 (deftest anomalies-by-severity-test
-  (testing "anomalies-by-severity filters correctly"
-    (let [state {:anomalies [{:anomaly/severity :anomaly.severity/critical :x 1}
-                              {:anomaly/severity :anomaly.severity/warning  :x 2}
-                              {:anomaly/severity :anomaly.severity/critical :x 3}]}]
-      (is (= 2 (count (pd/anomalies-by-severity state :anomaly.severity/critical))))
-      (is (= 1 (count (pd/anomalies-by-severity state :anomaly.severity/warning))))
-      (is (= 0 (count (pd/anomalies-by-severity state :anomaly.severity/info))))))
-
-  (testing "critical-anomalies returns only critical ones"
-    (let [state {:anomalies [{:anomaly/severity :anomaly.severity/critical}
-                              {:anomaly/severity :anomaly.severity/info}]}]
-      (is (= 1 (count (pd/critical-anomalies state)))))))
-
-(deftest current-anomalies-test
-  (testing "returns empty vector when no anomalies"
-    (is (= [] (pd/current-anomalies {}))))
-
-  (testing "returns anomalies vector"
-    (let [a {:anomaly/id "x"}]
-      (is (= [a] (pd/current-anomalies {:anomalies [a]}))))))
+  (testing "anomalies-by-severity reads severity from :anomaly/data"
+    (let [state {:anomalies
+                 [{:anomaly/data {:anomaly/severity :error :x 1}}
+                  {:anomaly/data {:anomaly/severity :warn  :x 2}}
+                  {:anomaly/data {:anomaly/severity :error :x 3}}
+                  {:anomaly/data {:anomaly/severity :fatal :x 4}}]}]
+      (is (= 2 (count (pd/anomalies-by-severity state :error))))
+      (is (= 1 (count (pd/anomalies-by-severity state :warn))))
+      (is (= 1 (count (pd/anomalies-by-severity state :fatal))))
+      (is (= [{:anomaly/data {:anomaly/severity :fatal :x 4}}]
+             (pd/fatal-anomalies state))))))

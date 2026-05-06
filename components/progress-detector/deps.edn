@@ -1,5 +1,6 @@
-{:paths ["src" "resources"]
- :deps {metosin/malli {:mvn/version "0.16.4"}}
+{:paths ["src"]
+ :deps {metosin/malli            {:mvn/version "0.16.4"}
+        ai.miniforge/anomaly     {:local/root "../anomaly"}}
  :aliases
  {:test {:extra-paths ["test"]
          :extra-deps {io.github.cognitect-labs/test-runner

@@ -71,21 +71,33 @@
   it fixes the second by making it event-driven, and renames Layer 1
   honestly. Stage 3 will close the third.
 
-  ## Component layout
+  ## Component layout (Stage 1 actual)
 
   New: components/progress-detector/
     src/ai/miniforge/progress_detector/
       interface.clj          ;; public Layer 0/1 boundary
       protocol.clj           ;; Detector protocol (reducer shape)
-      anomaly.clj            ;; anomaly schema + ctor
-      tool_profile.clj       ;; tool capability registry
-      detectors/
-        tool_loop.clj        ;; :detector/tool-loop
-        repair_loop.clj      ;; :detector/repair-loop (port of PR #762)
-      supervisor.clj         ;; minimal: mechanical → terminate
-    resources/
-      tool-profiles.edn      ;; profile data for known tools
+                             ;;   + NullDetector + MultiDetector
+      schema.clj             ;; DetectorAnomalyData / Observation /
+                             ;;   ToolProfile / DetectorConfig schemas
+                             ;;   (anomaly schema lives on
+                             ;;    components/anomaly — re-exported)
+      tool_profile.clj       ;; registration API (register! / lookup)
+      config.clj             ;; layered config merge
     test/...
+
+  Stage 1 explicitly does NOT ship:
+
+    detectors/tool_loop.clj    — Stage 2 (depends on event envelope)
+    detectors/repair_loop.clj  — Stage 2 (port of PR #762)
+    supervisor.clj             — Stage 3 (full :on-anomaly map)
+    resources/.../tool-profiles.edn — gone; per the user-review on PR
+                                      #784, tool profiles are
+                                      contributed by the components
+                                      that vendor each tool, not held
+                                      centrally here. Stage 2 wires
+                                      adapter-claude-code etc. to
+                                      register their profiles at load.
 
   ## Detector protocol (Layer 3)
 

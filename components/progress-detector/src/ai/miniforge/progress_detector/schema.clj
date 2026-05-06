@@ -17,114 +17,123 @@
 ;; limitations under the License.
 
 (ns ai.miniforge.progress-detector.schema
-  "Malli specs for progress-detector anomaly and observation data shapes.
+  "Malli schemas for progress-detector data shapes.
 
-   Canonical schemas:
-     ::anomaly          - a single detected anomaly
-     ::observation      - a tool invocation event fed to detectors
-     ::detector-config  - per-detector configuration overlay
-     ::tool-profile     - registry entry for a known tool
+   The canonical anomaly shape lives in `ai.miniforge.anomaly.contract`
+   and is re-exported here verbatim — progress-detector does NOT define
+   its own parallel Anomaly schema. Detector-specific structure
+   (severity, class, category, evidence, fingerprint) goes inside
+   `:anomaly/data` as a `DetectorAnomalyData` map.
 
-   Validation helpers:
-     valid-anomaly?       - boolean check
-     explain-anomaly      - humanized error report
-     coerce-anomaly       - parse+validate, returning anomaly or nil
-     valid-observation?   - boolean check"
+   Vocabularies (defined here, not in the anomaly contract):
+     ::detector-class    - :mechanical | :heuristic
+     ::detector-severity - :info | :warn | :error | :fatal
+     ::anomaly-category  - :anomalies.agent/tool-loop | …
+     ::determinism       - :stable-with-resource-version | … (per spec)
+
+   Schemas defined here:
+     DetectorAnomalyData - structure under :anomaly/data
+     Observation         - tool invocation event fed to detectors
+     DetectorConfig      - per-detector configuration overlay
+     ToolProfile         - registry entry for a known tool
+
+   Anomaly validation helpers live on `ai.miniforge.anomaly.interface`.
+   Use those, not parallel ones here."
   (:require
    [malli.core    :as m]
-   [malli.error   :as me]
-   [malli.transform :as mt]))
+   [malli.error   :as me]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Enumeration schemas (keywords only; closed sets)
+;; Detector vocabularies (mechanical/heuristic + severity ladder)
 
-(def AnomalyCategory
-  "Categories of detectable anomalies."
-  [:enum
-   :anomaly.category/stall           ; no forward progress observed
-   :anomaly.category/loop            ; repeated identical tool calls detected
-   :anomaly.category/regression      ; output quality declining
-   :anomaly.category/error           ; tool returned error signal
-   :anomaly.category/cost-spike      ; token/time budget exceeded threshold
-   :anomaly.category/timeout])       ; tool exceeded expected duration
+(def detector-classes
+  "Detector classification per the Stage 1 spec — mechanical detectors
+   produce hard signals (recommended action defaults to terminate);
+   heuristic detectors produce probabilistic signals (default action
+   :warn unless promoted by composite-rules in Stage 3)."
+  #{:mechanical :heuristic})
 
-(def AnomalyClass
-  "Structural class of the anomaly within its category."
-  [:enum
-   :anomaly.class/hard               ; definitive, high-confidence signal
-   :anomaly.class/soft               ; probabilistic / heuristic signal
-   :anomaly.class/advisory])         ; informational, does not require action
+(def DetectorClass
+  "Schema enum for detector classification."
+  (into [:enum] detector-classes))
 
-(def AnomalySeverity
-  "Urgency level of the anomaly."
-  [:enum
-   :anomaly.severity/critical        ; workflow likely broken; escalate now
-   :anomaly.severity/warning         ; degraded progress; monitor closely
-   :anomaly.severity/info])          ; noteworthy but not actionable
+(def severities
+  "Severity ladder for detector-emitted anomalies. Matches the Stage 1
+   spec's severity vocabulary (:info :warn :error :fatal)."
+  #{:info :warn :error :fatal})
 
-(def DetectorKind
-  "Identifies the detector implementation responsible for an anomaly."
-  [:enum
-   :detector.kind/shell
-   :detector.kind/fs-mutation
-   :detector.kind/fs-read
-   :detector.kind/llm
-   :detector.kind/network
-   :detector.kind/state-mutation
-   :detector.kind/composite])
+(def DetectorSeverity
+  "Schema enum for detector severity."
+  (into [:enum] severities))
+
+(def determinisms
+  "Tool determinism levels per the Stage 1 spec's tool capability
+   registry. The level gates whether a fingerprint repeat counts as
+   mechanical or heuristic.
+
+     :stable-with-resource-version - same call, same resource hash, same
+                                     result; mechanical-eligible
+     :stable-ish                   - mostly-deterministic; mechanical with
+                                     bounded false-positives
+     :environment-dependent        - depends on env/state; mechanical only
+                                     when failure fingerprint also matches
+     :unstable                     - inherently variable (network, time);
+                                     heuristic only"
+  #{:stable-with-resource-version
+    :stable-ish
+    :environment-dependent
+    :unstable})
 
 (def Determinism
-  "Describes output stability of a tool across identical inputs."
-  [:enum
-   :deterministic     ; always identical output for identical input
-   :stable            ; same output for same environment state
-   :volatile          ; output varies by time/environment
-   :nondeterministic]) ; intentionally random or stochastic
+  "Schema enum for tool determinism."
+  (into [:enum] determinisms))
 
 ;------------------------------------------------------------------------------ Layer 1
-;; Anomaly schema
+;; Detector-specific anomaly payload (lives under :anomaly/data)
 
 (def AnomalyEvidence
-  "A single piece of supporting evidence for an anomaly."
+  "Bounded evidence for a detector anomaly. Per the Stage 1 spec:
+   summary + event-id pointers + fingerprint + threshold metadata
+   + a pointer to the local event log via :raw-log-ref. Raw tool args,
+   raw assistant text, and raw file content do NOT appear here."
   [:map
-   [:evidence/kind  [:enum
-                     :evidence.kind/observation  ; one tool call snapshot
-                     :evidence.kind/window       ; slice of observation history
-                     :evidence.kind/diff         ; delta between two states
-                     :evidence.kind/metric]]     ; computed numeric metric
-   [:evidence/data  :any]])                      ; kind-specific payload
+   [:summary       :string]
+   [:event-ids     {:optional true} [:vector :any]]
+   [:fingerprint   {:optional true} :string]
+   [:threshold     {:optional true} [:map-of :any :any]]
+   [:raw-log-ref   {:optional true} :string]
+   [:redacted?     {:optional true} :boolean]])
 
-(def Anomaly
-  "A detected progress anomaly.
+(def DetectorAnomalyData
+  "Structure that goes inside `:anomaly/data` when a detector emits an
+   anomaly via `ai.miniforge.anomaly.interface/anomaly`. Detectors
+   classify (the keys here); the supervisor disposes (lifecycle action
+   policy lives elsewhere — Stage 3).
 
-   Required fields:
-     :anomaly/id         - unique string identifier (UUID recommended)
-     :anomaly/category   - broad classification (AnomalyCategory)
-     :anomaly/class      - structural class (AnomalyClass)
-     :anomaly/severity   - urgency level (AnomalySeverity)
-     :detector/kind      - which detector produced this (DetectorKind)
-     :anomaly/evidence   - vector of supporting evidence maps
-     :anomaly/detected-at - inst of detection
-
-   Optional fields:
-     :anomaly/description - human-readable summary
-     :anomaly/context     - arbitrary map for debugging"
+   Required:
+     :detector/kind     - keyword identifying which detector fired
+     :detector/version  - string version of the detector implementation
+     :anomaly/class     - :mechanical | :heuristic
+     :anomaly/severity  - :info | :warn | :error | :fatal
+     :anomaly/category  - keyword like :anomalies.agent/tool-loop
+     :anomaly/evidence  - bounded evidence map"
   [:map
-   [:anomaly/id          :string]
-   [:anomaly/category    AnomalyCategory]
-   [:anomaly/class       AnomalyClass]
-   [:anomaly/severity    AnomalySeverity]
-   [:detector/kind       DetectorKind]
-   [:anomaly/evidence    [:vector AnomalyEvidence]]
-   [:anomaly/detected-at inst?]
-   [:anomaly/description {:optional true} :string]
-   [:anomaly/context     {:optional true} [:map-of :keyword :any]]])
+   [:detector/kind       :keyword]
+   [:detector/version    :string]
+   [:anomaly/class       DetectorClass]
+   [:anomaly/severity    DetectorSeverity]
+   [:anomaly/category    :keyword]
+   [:anomaly/evidence    AnomalyEvidence]])
 
 ;------------------------------------------------------------------------------ Layer 1
-;; Observation schema
+;; Observation schema (input to detectors)
 
 (def Observation
-  "A single tool-invocation event fed into the detector reduce loop."
+  "A single tool-invocation event fed into the detector reduce loop.
+
+   Stage 1 carries the minimum the tool-loop and repair-loop detectors
+   need; Stage 2 will extend with :resource/version-hash, :semantic/epoch,
+   and richer event kinds."
   [:map
    [:tool/id          :keyword]
    [:seq              :int]
@@ -135,7 +144,7 @@
    [:tool/error?      {:optional true} :boolean]])
 
 ;------------------------------------------------------------------------------ Layer 1
-;; Detector-config overlay schema
+;; Detector-config overlay schema (per-layer in the merge stack)
 
 (def ConfigDirective
   "A single overlay directive in a detector config merge."
@@ -146,11 +155,11 @@
    :tune])    ; merge user-supplied overrides onto parent defaults
 
 (def DetectorConfig
-  "Per-detector configuration, supporting overlay resolution.
+  "Per-detector configuration overlay layer.
 
-   :config/directive controls how this config merges with parent:
-     :inherit - use parent values; local map is empty or additive
-     :disable - detector is suppressed; all other keys are ignored
+   :config/directive controls how this layer merges with parent:
+     :inherit - use parent values; local map adds nothing
+     :disable - detector is suppressed; all other keys ignored
      :enable  - force-enable detector; overrides parent :disable
      :tune    - deep-merge this map onto parent defaults
 
@@ -160,35 +169,24 @@
    [:config/params    {:optional true} [:map-of :keyword :any]]])
 
 ;------------------------------------------------------------------------------ Layer 1
-;; Tool-profile schema
+;; Tool-profile schema (entries the registration API accepts)
 
 (def ToolProfile
-  "Registry entry describing a known tool's anomaly-detection characteristics."
+  "Profile entry that components contribute via
+   `ai.miniforge.progress-detector.tool-profile/register!` to describe
+   the determinism + fingerprint shape of a tool the agent calls.
+
+   Stage 1 keeps this shape minimal; Stage 2 will add per-tool
+   :fingerprint/dimensions + :failure/fingerprint-extractor refs."
   [:map
-   [:detector/kind          DetectorKind]
-   [:determinism            Determinism]
-   [:anomaly/categories     {:optional true} [:set AnomalyCategory]]
-   [:timeout-ms             {:optional true} [:maybe :int]]
-   [:config                 {:optional true} [:map-of :keyword :any]]])
+   [:tool/id            :keyword]
+   [:determinism        Determinism]
+   [:anomaly/categories {:optional true} [:set :keyword]]
+   [:timeout-ms         {:optional true} [:maybe :int]]
+   [:config             {:optional true} [:map-of :keyword :any]]])
 
 ;------------------------------------------------------------------------------ Layer 2
-;; Validation helpers
-
-(defn valid-anomaly?
-  "Return true if m satisfies the Anomaly schema."
-  [m]
-  (m/validate Anomaly m))
-
-(defn explain-anomaly
-  "Return humanized error map if m fails Anomaly validation, else nil."
-  [m]
-  (when-let [exp (m/explain Anomaly m)]
-    (me/humanize exp)))
-
-(defn coerce-anomaly
-  "Attempt to decode m into an Anomaly, returning the decoded value or nil."
-  [m]
-  (m/decode Anomaly m (mt/default-value-transformer)))
+;; Validation helpers (delegate to anomaly component for top-level Anomaly)
 
 (defn valid-observation?
   "Return true if m satisfies the Observation schema."
@@ -223,23 +221,33 @@
   (when-let [exp (m/explain DetectorConfig m)]
     (me/humanize exp)))
 
+(defn valid-detector-anomaly-data?
+  "Return true if m satisfies the DetectorAnomalyData schema (the shape
+   that goes inside :anomaly/data on a detector-emitted anomaly)."
+  [m]
+  (m/validate DetectorAnomalyData m))
+
+(defn explain-detector-anomaly-data
+  "Return humanized error map if m fails DetectorAnomalyData validation."
+  [m]
+  (when-let [exp (m/explain DetectorAnomalyData m)]
+    (me/humanize exp)))
+
 ;------------------------------------------------------------------------------ Rich Comment
-;; Rich comment
 
 (comment
-  (valid-anomaly?
-   {:anomaly/id          "123e4567-e89b-12d3-a456-426614174000"
-    :anomaly/category    :anomaly.category/loop
-    :anomaly/class       :anomaly.class/hard
-    :anomaly/severity    :anomaly.severity/warning
-    :detector/kind       :detector.kind/fs-read
-    :anomaly/evidence    [{:evidence/kind :evidence.kind/window
-                           :evidence/data {:window-size 5 :unique-calls 1}}]
-    :anomaly/detected-at (java.time.Instant/now)})
+  ;; Validate detector-specific anomaly data
+  (valid-detector-anomaly-data?
+   {:detector/kind     :detector/tool-loop
+    :detector/version  "stage-1.0"
+    :anomaly/class     :mechanical
+    :anomaly/severity  :error
+    :anomaly/category  :anomalies.agent/tool-loop
+    :anomaly/evidence  {:summary "Read \"src/foo.clj\" 6 times"
+                        :fingerprint "abc123"
+                        :threshold {:n 5 :window 10}
+                        :redacted? true}})
   ;; => true
-
-  (explain-anomaly {:anomaly/id 42})
-  ;; => {:anomaly/id ["should be a string"] ...}
 
   (valid-observation?
    {:tool/id   :tool/bash
