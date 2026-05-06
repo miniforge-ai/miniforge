@@ -25,7 +25,8 @@
    [ai.miniforge.agent.releaser :as releaser]
    [ai.miniforge.agent.reviewer :as reviewer]
    [ai.miniforge.agent.tester :as tester]
-   [ai.miniforge.agent.protocols.records.specialized :as specialized-records]))
+   [ai.miniforge.agent.protocols.records.specialized :as specialized-records]
+   [ai.miniforge.progress-detector.detectors.repair-loop :as repair-loop]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Specialized agent support
@@ -88,7 +89,11 @@
 (def get-review-issues reviewer/get-issues)
 (def get-review-strengths reviewer/get-strengths)
 (def validate-review-artifact reviewer/validate-review-artifact)
-(def review-fingerprint reviewer/review-fingerprint)
-(def review-stagnated? reviewer/stagnated?)
+;; Repair-loop fingerprint helpers — moved to
+;; components/progress-detector/.../detectors/repair-loop in Stage 2.
+;; These re-exports stay for backward compatibility; phase-software-factory
+;; reads them through this interface.
+(def review-fingerprint repair-loop/review-fingerprint)
+(def review-stagnated?  repair-loop/stagnated?)
 (def release-summary releaser/release-summary)
 (def validate-release-artifact releaser/validate-release-artifact)

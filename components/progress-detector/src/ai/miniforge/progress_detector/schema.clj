@@ -132,16 +132,23 @@
   "A single tool-invocation event fed into the detector reduce loop.
 
    Stage 1 carries the minimum the tool-loop and repair-loop detectors
-   need; Stage 2 will extend with :resource/version-hash, :semantic/epoch,
-   and richer event kinds."
+   need. Stage 2 adds :resource/version-hash for determinism-gated
+   fingerprint tracking (see Determinism vocabulary and EventEnvelope
+   normalizer).
+
+   :resource/version-hash is attached by the event-envelope normalizer
+   only when the triggering tool's profile declares
+   :stable-with-resource-version determinism and the source event
+   carries the hash."
   [:map
-   [:tool/id          :keyword]
-   [:seq              :int]
-   [:timestamp        inst?]
-   [:tool/duration-ms {:optional true} [:maybe :int]]
-   [:tool/input       {:optional true} :any]
-   [:tool/output      {:optional true} :any]
-   [:tool/error?      {:optional true} :boolean]])
+   [:tool/id               :keyword]
+   [:seq                   :int]
+   [:timestamp             inst?]
+   [:tool/duration-ms      {:optional true} [:maybe :int]]
+   [:tool/input            {:optional true} :any]
+   [:tool/output           {:optional true} :any]
+   [:tool/error?           {:optional true} :boolean]
+   [:resource/version-hash {:optional true} [:maybe :string]]])
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Detector-config overlay schema (per-layer in the merge stack)
