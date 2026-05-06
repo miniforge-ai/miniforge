@@ -159,7 +159,16 @@
     (let [line (json/generate-string {:type "result" :result {}})
           parsed (impl/parse-claude-stream-line line)]
       (is (true? (:done? parsed)))
-      (is (nil? (get-in parsed [:usage :input-tokens])))))
+      (is (nil? (:usage parsed)))))
+
+  (testing "result event with usage map present but nil token fields omits :usage"
+    (let [line (json/generate-string
+                 {:type "result"
+                  :usage {:input_tokens nil
+                          :output_tokens nil}})
+          parsed (impl/parse-claude-stream-line line)]
+      (is (true? (:done? parsed)))
+      (is (nil? (:usage parsed)))))
 
   (testing "result event captures num_turns and top-level stop_reason"
     (let [line (json/generate-string

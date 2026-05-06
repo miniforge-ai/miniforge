@@ -74,6 +74,15 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Stream parser functions
 
+(defn- parsed-usage
+  [usage]
+  (let [input-tokens (:input_tokens usage)
+        output-tokens (:output_tokens usage)]
+    (when (or (number? input-tokens)
+              (number? output-tokens))
+      {:input-tokens input-tokens
+       :output-tokens output-tokens})))
+
 (defn parse-claude-stream-line
   "Parse a line from Claude CLI streaming output.
 
@@ -129,12 +138,12 @@
             {:delta delta-text :done? false})
 
           "result"
-          (let [usage (or (:usage data) (get-in data [:result :usage]))]
+          (let [usage (parsed-usage (or (:usage data)
+                                        (get-in data [:result :usage])))]
             (cond-> {:delta "" :done? true
                      :final-content (:result data)
-                     :usage {:input-tokens (:input_tokens usage)
-                             :output-tokens (:output_tokens usage)}
                      :cost-usd (:total_cost_usd data)}
+              usage (assoc :usage usage)
               (:session_id data) (assoc :session-id (:session_id data))
               (:num_turns data)  (assoc :num-turns (:num_turns data))
               ;; Claude Code surfaces a top-level stop_reason on the
