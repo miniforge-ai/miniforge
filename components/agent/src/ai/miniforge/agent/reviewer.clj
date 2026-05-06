@@ -571,6 +571,41 @@
   [logger data]
   (log/info logger :reviewer :reviewer/phase-completed {:data data}))
 
+(defn- timeout-only-error-result
+  "Normalize the reviewer exit path when the LLM only reports its own timeout.
+
+   This preserves backend timeout metadata, emits the standard phase-completed
+   telemetry, and reports the deterministic gate outcome instead of converting
+   the backend failure into a bogus code-review rejection."
+  [logger normalized llm-review gate-result counts duration tokens cost-usd timeout-failure-message]
+  (log/warn logger :reviewer :reviewer/backend-timeout-only
+            {:data {:llm-decision (:review/decision llm-review)
+                    :gate-decision (:decision gate-result)
+                    :blocking-issues (:review/blocking-issues llm-review)
+                    :duration-ms duration}})
+  (leave-review logger {:review/decision (:decision gate-result)
+                        :duration-ms duration
+                        :gates-passed (:passed counts)
+                        :gates-failed (:failed counts)
+                        :llm? true
+                        :status :error
+                        :error-code :reviewer/backend-timeout})
+  (assoc
+   (result-boundary/error-response
+    normalized
+    timeout-failure-message
+    {:data (merge (or (some-> normalized :llm-error :data) {})
+                  {:code :reviewer/backend-timeout
+                   :blocking-issues (:review/blocking-issues llm-review)})})
+   :metrics
+   (cond-> {:decision (:decision gate-result)
+            :gates-passed (:passed counts)
+            :gates-failed (:failed counts)
+            :gates-total (:total counts)
+            :duration-ms duration
+            :tokens tokens}
+     cost-usd (assoc :cost-usd cost-usd))))
+
 ;------------------------------------------------------------------------------ Layer 5
 ;; Agent creation
 
@@ -709,34 +744,9 @@
                     duration (- (System/currentTimeMillis) start-time)]
 
                 (if timeout-only-review?
-                  (do
-                    (log/warn logger :reviewer :reviewer/backend-timeout-only
-                              {:data {:llm-decision (:review/decision llm-review)
-                                      :gate-decision (:decision gate-result)
-                                      :blocking-issues (:review/blocking-issues llm-review)
-                                      :duration-ms duration}})
-                    (leave-review logger {:review/decision (:decision gate-result)
-                                          :duration-ms duration
-                                          :gates-passed (:passed counts)
-                                          :gates-failed (:failed counts)
-                                          :llm? true
-                                          :status :error
-                                          :error-code :reviewer/backend-timeout})
-                    (assoc
-                     (result-boundary/error-response
-                      normalized
-                      timeout-failure-message
-                      {:data (merge (or (some-> normalized :llm-error :data) {})
-                                    {:code :reviewer/backend-timeout
-                                     :blocking-issues (:review/blocking-issues llm-review)})})
-                     :metrics
-                     (cond-> {:decision (:decision gate-result)
-                              :gates-passed (:passed counts)
-                              :gates-failed (:failed counts)
-                              :gates-total (:total counts)
-                              :duration-ms duration
-                              :tokens tokens}
-                       cost-usd (assoc :cost-usd cost-usd))))
+                  (timeout-only-error-result
+                   logger normalized llm-review gate-result counts duration tokens cost-usd
+                   timeout-failure-message)
                   (do
                     (log/info logger :reviewer :reviewer/review-complete
                               {:data {:decision final-decision
