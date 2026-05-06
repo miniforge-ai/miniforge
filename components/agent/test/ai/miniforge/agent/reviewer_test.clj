@@ -23,6 +23,7 @@
    [ai.miniforge.agent.model :as model]
    [ai.miniforge.agent.reviewer :as reviewer]
    [ai.miniforge.agent.core :as core]
+   [ai.miniforge.logging.interface :as log]
    [ai.miniforge.llm.interface :as llm]
    [ai.miniforge.loop.interface :as loop]
    [ai.miniforge.response.interface :as response]))
@@ -281,6 +282,94 @@
         (is (= :reviewer/backend-timeout
                (get-in result [:error :data :code])))
         (is (= 11 (get-in result [:metrics :tokens])))))))
+
+(deftest test-reviewer-timeout-only-shape-does-not-hide-real-gate-failures
+  (testing "timeout-only classification requires the deterministic gates to approve"
+    (with-redefs [model/resolve-llm-client-for-role (fn [_role client] client)
+                  llm/chat (fn [_client _prompt _opts]
+                             {:success? false
+                              :content "{:review/decision :rejected
+                                         :review/gate-results []
+                                         :review/blocking-issues [\"Adaptive timeout: Stagnation timeout: no progress for 120183ms\"]
+                                         :review/recommendations []}"
+                              :tokens 9
+                              :error {:type "adaptive_timeout"
+                                      :message "Adaptive timeout: Stagnation timeout: no progress for 120183ms"}})
+                  llm/success? :success?
+                  llm/get-content :content
+                  llm/get-error :error]
+      (let [reviewer (reviewer/create-reviewer {:llm-backend ::mock-backend
+                                                :gates [(failing-gate :gate1 "Gate failure")]})
+            result (core/invoke reviewer {} sample-artifact)]
+        (is (= :success (:status result)))
+        (is (not= :reviewer/backend-timeout
+                  (get-in result [:error :data :code])))
+        (is (= :rejected (get-in result [:artifact :review/decision])))))))
+
+(deftest test-reviewer-timeout-only-error-emits-phase-completed
+  (testing "timeout-only backend errors still emit review phase completion telemetry"
+    (let [events (atom [])]
+      (with-redefs [model/resolve-llm-client-for-role (fn [_role client] client)
+                    llm/chat (fn [_client _prompt _opts]
+                               {:success? false
+                                :content "{:review/decision :rejected
+                                           :review/gate-results [{:gate-id :unknown :gate-type :unknown :passed? true :errors [] :warnings [] :duration-ms 0}]
+                                           :review/blocking-issues [\"Adaptive timeout: Stagnation timeout: no progress for 120183ms\"]
+                                           :review/recommendations []}"
+                                :tokens 9
+                                :error {:type "adaptive_timeout"
+                                        :message "Adaptive timeout: Stagnation timeout: no progress for 120183ms"
+                                        :data {:elapsed-ms 120183}}})
+                    llm/success? :success?
+                    llm/get-content :content
+                    llm/get-error :error
+                    log/info (fn [_logger category event payload]
+                               (swap! events conj {:category category
+                                                   :event event
+                                                   :payload payload}))]
+        (let [reviewer (reviewer/create-reviewer {:llm-backend ::mock-backend
+                                                  :gates []})
+              result (core/invoke reviewer {} sample-artifact)
+              completed-event (some #(when (= :reviewer/phase-completed (:event %)) %) @events)]
+          (is (= :error (:status result)))
+          (is completed-event)
+          (is (= :reviewer/backend-timeout
+                 (get-in completed-event [:payload :data :error-code])))
+          (is (= :error
+                 (get-in completed-event [:payload :data :status]))))))))
+
+(deftest test-reviewer-timeout-only-error-preserves-backend-metadata
+  (testing "timeout-only backend errors preserve normalized backend metadata for post-mortem"
+    (with-redefs [model/resolve-llm-client-for-role (fn [_role client] client)
+                  llm/chat (fn [_client _prompt _opts]
+                             {:success? false
+                              :content "{:review/decision :rejected
+                                         :review/gate-results [{:gate-id :unknown :gate-type :unknown :passed? true :errors [] :warnings [] :duration-ms 0}]
+                                         :review/blocking-issues [\"Adaptive timeout: Stagnation timeout: no progress for 120183ms\"]
+                                         :review/recommendations []}"
+                              :tokens 9
+                              :stop-reason "timeout"
+                              :num-turns 4
+                              :error {:type "adaptive_timeout"
+                                      :message "Adaptive timeout: Stagnation timeout: no progress for 120183ms"
+                                      :data {:elapsed-ms 120183}}})
+                  llm/success? :success?
+                  llm/get-content :content
+                  llm/get-error :error]
+      (let [reviewer (reviewer/create-reviewer {:llm-backend ::mock-backend
+                                                :gates []})
+            result (core/invoke reviewer {} sample-artifact)]
+        (is (= :error (:status result)))
+        (is (= :reviewer/backend-timeout
+               (get-in result [:error :data :code])))
+        (is (= "adaptive_timeout"
+               (get-in result [:error :data :type])))
+        (is (= 120183
+               (get-in result [:error :data :elapsed-ms])))
+        (is (= "timeout"
+               (get-in result [:error :data :stop-reason])))
+        (is (= 4
+               (get-in result [:error :data :num-turns])))))))
 
 (deftest test-reviewer-rejects-degraded-implement-handoff
   (testing "default reviewer rejects curated artifacts marked as degraded handoffs"

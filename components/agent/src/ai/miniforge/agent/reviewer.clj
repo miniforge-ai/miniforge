@@ -394,19 +394,17 @@
 (defn- timeout-only-review?
   "True when a parsed review artifact is just reflecting the reviewer backend's
    own timeout rather than providing actionable code-review findings."
-  [_response llm-review]
+  [llm-review gate-result]
   (let [blocking-issues (vec (:review/blocking-issues llm-review))
         recommendations (vec (:review/recommendations llm-review))
         issues (vec (:review/issues llm-review))
-        gate-results (vec (:review/gate-results llm-review))
         negative-decision? (contains? #{:rejected :changes-requested}
-                                      (:review/decision llm-review))
-        all-gates-passed? (every? :passed? gate-results)]
+                                      (:review/decision llm-review))]
     (and negative-decision?
+         (= :approved (:decision gate-result))
          (seq blocking-issues)
          (empty? recommendations)
          (empty? issues)
-         all-gates-passed?
          (every? backend-timeout-issue? blocking-issues))))
 
 (defn llm-issues->recommendations
@@ -662,9 +660,13 @@
               (let [;; Parse LLM review
                     llm-review (:parsed-content normalized)
                     parse-failure-message (review-failure-message response content)
-                    timeout-failure-message (backend-failure-message response llm-review)
                     parse-failed? (nil? llm-review)
-                    timeout-only-review? (timeout-only-review? response llm-review)
+                    ;; Run deterministic gates
+                    gate-feedbacks (run-gates-on-artifact gates artifact context logger)
+                    gate-result (make-review-decision gate-feedbacks config)
+                    counts (calculate-gate-counts gate-feedbacks)
+                    timeout-failure-message (backend-failure-message response llm-review)
+                    timeout-only-review? (timeout-only-review? llm-review gate-result)
                     llm-decision (cond
                                    timeout-only-review? nil
                                    parse-failed? :rejected
@@ -672,11 +674,6 @@
                     llm-issues (get llm-review :review/issues [])
                     llm-strengths (get llm-review :review/strengths [])
                     llm-summary (:review/summary llm-review)
-
-                    ;; Run deterministic gates
-                    gate-feedbacks (run-gates-on-artifact gates artifact context logger)
-                    gate-result (make-review-decision gate-feedbacks config)
-                    counts (calculate-gate-counts gate-feedbacks)
 
                     ;; Merge decisions: gates can override LLM
                     final-decision (if llm-decision
@@ -715,19 +712,31 @@
                   (do
                     (log/warn logger :reviewer :reviewer/backend-timeout-only
                               {:data {:llm-decision (:review/decision llm-review)
+                                      :gate-decision (:decision gate-result)
                                       :blocking-issues (:review/blocking-issues llm-review)
                                       :duration-ms duration}})
-                    {:status :error
-                     :error {:message timeout-failure-message
-                             :data {:code :reviewer/backend-timeout
-                                    :blocking-issues (:review/blocking-issues llm-review)}}
-                     :metrics (cond-> {:decision (:decision gate-result)
-                                       :gates-passed (:passed counts)
-                                       :gates-failed (:failed counts)
-                                       :gates-total (:total counts)
-                                       :duration-ms duration
-                                       :tokens tokens}
-                                cost-usd (assoc :cost-usd cost-usd))})
+                    (leave-review logger {:review/decision (:decision gate-result)
+                                          :duration-ms duration
+                                          :gates-passed (:passed counts)
+                                          :gates-failed (:failed counts)
+                                          :llm? true
+                                          :status :error
+                                          :error-code :reviewer/backend-timeout})
+                    (assoc
+                     (result-boundary/error-response
+                      normalized
+                      timeout-failure-message
+                      {:data (merge (or (some-> normalized :llm-error :data) {})
+                                    {:code :reviewer/backend-timeout
+                                     :blocking-issues (:review/blocking-issues llm-review)})})
+                     :metrics
+                     (cond-> {:decision (:decision gate-result)
+                              :gates-passed (:passed counts)
+                              :gates-failed (:failed counts)
+                              :gates-total (:total counts)
+                              :duration-ms duration
+                              :tokens tokens}
+                       cost-usd (assoc :cost-usd cost-usd))))
                   (do
                     (log/info logger :reviewer :reviewer/review-complete
                               {:data {:decision final-decision
