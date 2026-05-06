@@ -116,6 +116,70 @@
   [_worktree-path]
   (response/success {:verify/skipped? true} nil))
 
+;; Resolution prompt builders (Stage 2C, spec §6.1.3) ------------------
+;; Pure-data assembly of the task input that the implementer agent
+;; will receive when Stage 2C's `agent-driven-edit-fn` lands in a
+;; follow-up slice. Splitting the prompt-building helpers from the
+;; agent-invocation closure keeps each slice independently reviewable
+;; and lets a policy pack swap catalog templates without touching the
+;; invocation wiring.
+;;
+;; Spec §6.1.3 — policy-overridable prompts. The default prompt
+;; templates live in the workflow message catalog under
+;; :dag.merge.resolution.prompt/*. A loaded policy pack can substitute
+;; its own templates through the same plumbing the policy interface
+;; already uses for other agent prompts — that override happens at the
+;; messages/t lookup layer, not here.
+
+(defn- format-parent-line
+  [parent]
+  (messages/t :dag.merge.resolution.prompt/parent-line
+              {:task-id    (:task/id parent)
+               :commit-sha (:commit-sha parent)}))
+
+(defn- format-conflict-line
+  [conflict]
+  (messages/t :dag.merge.resolution.prompt/conflict-line
+              {:path   (:path conflict)
+               :stages (str/join "/" (:stages conflict))}))
+
+(defn- build-resolution-prompt
+  "Build the resolution-task description from the conflict-input.
+   Iteration count and max-iterations let the prompt give the agent
+   awareness of its budget. Returns a string suitable for
+   `:task/description` on the implementer's task input."
+  [conflict-input iteration max-iterations]
+  (let [parents (:merge/parents conflict-input)
+        conflicts (:merge/conflicts conflict-input)
+        strategy (:merge/strategy conflict-input)]
+    (str/join "\n\n"
+              [(messages/t :dag.merge.resolution.prompt/header
+                           {:parent-count (count parents)})
+               (messages/t :dag.merge.resolution.prompt/iteration
+                           {:iteration (inc iteration)
+                            :max-iterations max-iterations})
+               (messages/t :dag.merge.resolution.prompt/strategy-line
+                           {:strategy strategy})
+               (str (messages/t :dag.merge.resolution.prompt/parents-header)
+                    "\n"
+                    (str/join "\n" (map format-parent-line parents)))
+               (str (messages/t :dag.merge.resolution.prompt/conflicts-header)
+                    "\n"
+                    (str/join "\n" (map format-conflict-line conflicts)))
+               (messages/t :dag.merge.resolution.prompt/instructions)])))
+
+(defn- build-resolution-task
+  "Build the task map agent.implementer expects. The conflicted file
+   paths go in `:task/existing-files` so the implementer's prompt
+   builder includes them in the LLM's context. The description carries
+   the prompt built from the catalog templates."
+  [conflict-input worktree-path iteration max-iterations]
+  {:task/description       (build-resolution-prompt conflict-input
+                                                    iteration max-iterations)
+   :task/type              :merge-resolution
+   :task/existing-files    (mapv :path (:merge/conflicts conflict-input))
+   :task/worktree-path     worktree-path})
+
 ;; Anomaly + result factories ------------------------------------------
 
 (defn- unresolvable-anomaly
