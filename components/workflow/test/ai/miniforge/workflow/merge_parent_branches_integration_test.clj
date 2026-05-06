@@ -343,27 +343,94 @@
 ;------------------------------------------------------------------------------ Tests: unsupported strategy
 
 (deftest unsupported-strategy-anomaly-test
-  (testing "Strategies other than :git-merge fail fast with a typed
-            anomaly rather than silently falling through. :sequential-merge
-            ships in Stage 4; until then plans that explicitly request it
-            should see the unsupported-strategy anomaly so they don't
-            silently get :git-merge behavior under a different label."
+  (testing "Strategies not in supported-merge-strategies fail fast with
+            a typed anomaly. As of Stage 4a, :git-merge and
+            :sequential-merge are supported; any OTHER value still
+            surfaces :anomalies/dag-multi-parent-strategy-unsupported."
     (create-parent-branch! "task-a" "src/a.txt" "from a\n")
     (create-parent-branch! "task-b" "src/b.txt" "from b\n")
+    (let [task-def {:task/id "task-c"
+                    :task/deps [:a :b]
+                    ;; Bogus strategy keyword — never supported.
+                    :task/merge-strategy :pile-on-merge}
+          ctx (ctx-with-registry {:a {:branch "task-a"}
+                                  :b {:branch "task-b"}})
+          result (dag-orch/merge-parent-branches! ctx task-def)]
+      (is (= :anomalies/dag-multi-parent-strategy-unsupported
+             (:anomaly/category result)))
+      (is (= :pile-on-merge (:merge/strategy result))
+          "the requested strategy is echoed back in the anomaly so the
+           operator/dashboard knows what was rejected")
+      (is (contains? (:merge/supported result) :git-merge)
+          "the anomaly carries the supported-strategies set")
+      (is (contains? (:merge/supported result) :sequential-merge)
+          ":sequential-merge is now in the supported set"))))
+
+;------------------------------------------------------------------------------ Tests: :sequential-merge
+
+(deftest sequential-merge-three-parent-disjoint-test
+  (testing "Three parents touching disjoint files merge cleanly via the
+            :sequential-merge strategy: TWO pairwise `ort` merges
+            (N parents → N-1 merge invocations), each one a two-parent
+            merge against the running result, in plan-declaration order.
+            Final HEAD is a chain of two merge commits (p1 merged into
+            p0-base, then p2 merged into the result), each with two
+            parents. All three files end up in the tree."
+    (create-parent-branch! "task-a" "src/a.txt" "from a\n")
+    (create-parent-branch! "task-b" "src/b.txt" "from b\n")
+    (create-parent-branch! "task-c" "src/c.txt" "from c\n")
+    (let [task-def {:task/id "task-d"
+                    :task/deps [:a :b :c]
+                    :task/merge-strategy :sequential-merge}
+          ctx (ctx-with-registry {:a {:branch "task-a"}
+                                  :b {:branch "task-b"}
+                                  :c {:branch "task-c"}})
+          result (dag-orch/merge-parent-branches! ctx task-def)
+          data (:data result)]
+      (is (dag/ok? result))
+      (is (= :sequential-merge (:strategy data)))
+      (is (str/starts-with? (:branch data) "refs/miniforge/dag-base/"))
+      (is (= 40 (count (:commit-sha data))))
+      (let [tree (run-git! *repo* "ls-tree" "-r" "--name-only" (:commit-sha data))
+            files (set (str/split-lines (str/trim (:out tree))))]
+        (is (contains? files "src/a.txt"))
+        (is (contains? files "src/b.txt"))
+        (is (contains? files "src/c.txt")))
+      ;; Final HEAD has two parents (the sequential-step before it +
+      ;; the last parent merged in). The previous step's commit has two
+      ;; parents too. Walking back two steps gets us to the original
+      ;; checked-out p0 SHA, single-parent root.
+      (let [parents-cmd (run-git! *repo* "rev-list" "--parents" "-n" "1"
+                                  (:commit-sha data))
+            parts (str/split (str/trim (:out parents-cmd)) #"\s+")]
+        (is (= 3 (count parts))
+            "final merge commit + 2 parents (sequential always 2-parent steps)")))))
+
+(deftest sequential-merge-conflict-on-the-merge-step-test
+  (testing "Two parents conflicting on the same file produce a conflict
+            on the (single, since N=2 → N-1=1) merge step. The
+            unresolvable anomaly's :merge/strategy preserves
+            :sequential-merge so resolution-loop telemetry shows what
+            was attempted."
+    (run-git! *repo* "checkout" "-b" "task-a" "main")
+    (commit-file! *repo* "src/conflict.txt" "from a\n" "a edit")
+    (run-git! *repo* "checkout" "-b" "task-b" "main")
+    (commit-file! *repo* "src/conflict.txt" "from b\n" "b edit")
+    (run-git! *repo* "checkout" "main")
     (let [task-def {:task/id "task-c"
                     :task/deps [:a :b]
                     :task/merge-strategy :sequential-merge}
           ctx (ctx-with-registry {:a {:branch "task-a"}
                                   :b {:branch "task-b"}})
           result (dag-orch/merge-parent-branches! ctx task-def)]
-      (is (= :anomalies/dag-multi-parent-strategy-unsupported
+      ;; With the no-op stub agent (Stage 2B's default), the resolution
+      ;; loop hits recurring-conflict and terminates as unresolvable.
+      ;; The :merge/strategy on the underlying conflict-anomaly carries
+      ;; through into the unresolvable anomaly's :merge/strategy too.
+      (is (= :anomalies/dag-multi-parent-unresolvable
              (:anomaly/category result)))
       (is (= :sequential-merge (:merge/strategy result))
-          "the requested strategy is echoed back in the anomaly so the
-           operator/dashboard knows what was rejected")
-      (is (contains? (:merge/supported result) :git-merge)
-          "the anomaly carries the supported-strategies set so the user
-           can see what's available right now"))))
+          "strategy keyword preserved through resolution loop terminal"))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
