@@ -36,19 +36,33 @@
    the shape exists now so downstream code has a stable target to write
    to.
 
-   The shape (per spec §3.5):
+   The canonical shape (extends spec §3.5 — see notes below):
 
-       {:cost/total      <tokens>            ; rolled up; sum of breakdown
-        :cost/breakdown  {:task/explore           N    ; per-phase token cost
+       {:cost/total      <tokens>            ; spec §3.5 — rolled up
+        :cost/breakdown  {:task/explore           N    ; spec §3.5 — per-phase
                           :task/plan              M
                           :task/implement         K
                           :task/verify            L
                           :task/merge-resolution  P
                           :task/release           Q}
-        :cost/iterations {:task/implement         I-implement   ; per-phase
-                          :task/merge-resolution  I-resolution} ; iteration count
-        :cost/duration-ms <ms>                                  ; wall-clock
-        :cost/usd         <decimal>}                            ; estimated $
+        :cost/iterations {:task/implement         I-implement   ; spec §3.5 — only
+                          :task/merge-resolution  I-resolution} ; for iterating phases
+        :cost/duration-ms <ms>                                  ; extension: wall-clock
+        :cost/usd         <decimal>}                            ; extension: estimated $
+
+   Spec §3.5 defines `:cost/total`, `:cost/breakdown`, and
+   `:cost/iterations`. `:cost/duration-ms` and `:cost/usd` are
+   extensions added here because the existing zero-metrics shape
+   already tracked them and dropping them at the v2 boundary would
+   regress observability. If the spec is updated later to formalize
+   these keys, this docstring should drop the 'extension' wording.
+
+   `:cost/iterations` is restricted to phases that have an iteration
+   loop (`:task/implement` and `:task/merge-resolution` per spec §3.5).
+   Other phases either run a single shot (`:task/release`) or have
+   their iteration semantics tracked elsewhere (e.g., `:task/verify`'s
+   retry budget). Adding iteration counts for non-iterating phases is
+   a programming error and `add-phase-cost` rejects it.
 
    Granular components are preserved on purpose — rolling them up into
    aggregates loses the placement-of-attention signal that's the whole
@@ -60,30 +74,61 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Schema
 
+(def phase-key-order
+  "Ordered vector of `:task/*` phase keys. Used for deterministic
+   error-message rendering (sets have no iteration order across runs;
+   `(pr-str some-set)` would print differently in different
+   invocations and pollute logs). Membership checks use the derived
+   `phase-keys` set."
+  [:task/explore
+   :task/plan
+   :task/implement
+   :task/verify
+   :task/merge-resolution
+   :task/release])
+
 (def phase-keys
-  "The set of `:task/*` phase keys the breakdown / iterations maps key
-   on. Adding a new phase requires adding it here so consumers see one
-   complete vocabulary; `:closed`-schema validation will reject unknown
-   keys at the boundary."
-  #{:task/explore
-    :task/plan
-    :task/implement
-    :task/verify
-    :task/merge-resolution
-    :task/release})
+  "Set of all valid phase keys for the breakdown. Adding a new phase
+   requires adding it here AND to `phase-key-order` so consumers see
+   one complete vocabulary; `:closed`-schema validation will reject
+   unknown keys at the boundary."
+  (set phase-key-order))
+
+(def iteration-phase-keys
+  "Subset of `phase-keys` whose phases run an iteration loop. Per spec
+   §3.5, `:cost/iterations` is keyed only by these. Adding iteration
+   counts for non-iterating phases is a programming error caught by
+   `add-phase-cost` and the schema."
+  #{:task/implement
+    :task/merge-resolution})
+
+(defn- non-negative-finite?
+  "True when `x` is a non-negative finite number (no NaN / Infinity).
+   Used for `:cost/usd` since cost is always ≥ 0 and a NaN getting
+   into the dashboard rendering would corrupt the summary."
+  [x]
+  (and (number? x)
+       (not (Double/isNaN (double x)))
+       (not (Double/isInfinite (double x)))
+       (>= (double x) 0.0)))
 
 (def CostBreakdown
   "Malli schema for the canonical cost-breakdown shape. Closed maps so
    typos / unknown keys fail validation rather than silently slip
-   through into the telemetry pipeline."
+   through into the telemetry pipeline.
+
+   `:cost/iterations` keys are restricted to the iteration-phase
+   subset (spec §3.5) so a verify or release phase's iteration count
+   can't sneak in by mistake."
   [:map {:closed true}
    [:cost/total       {:default 0}    [:int {:min 0}]]
-   [:cost/breakdown   {:default {}}   [:map-of (into [:enum] phase-keys)
+   [:cost/breakdown   {:default {}}   [:map-of (into [:enum] phase-key-order)
                                        [:int {:min 0}]]]
-   [:cost/iterations  {:default {}}   [:map-of (into [:enum] phase-keys)
+   [:cost/iterations  {:default {}}   [:map-of (into [:enum] (sort iteration-phase-keys))
                                        [:int {:min 0}]]]
    [:cost/duration-ms {:default 0}    [:int {:min 0}]]
-   [:cost/usd         {:default 0.0}  number?]])
+   [:cost/usd         {:default 0.0}  [:fn {:error/message "must be a non-negative finite number"}
+                                       non-negative-finite?]]])
 
 (defn valid?
   "True when `value` matches `CostBreakdown`."
@@ -116,21 +161,34 @@
 
    - `:phase`           — required keyword from `phase-keys`
    - `:tokens`          — optional non-negative integer
-   - `:iterations`      — optional non-negative integer
+   - `:iterations`      — optional non-negative integer; rejected for
+                          phases not in `iteration-phase-keys`
    - `:duration-ms`     — optional non-negative integer
-   - `:usd`             — optional non-negative number
+   - `:usd`             — optional non-negative finite number
 
    Tokens roll into both `:cost/breakdown` (per-phase) and `:cost/total`
    (sum). Iterations are per-phase only — a per-phase total is
    meaningful (`how many iterations did the implement loop need?`) but
    a cross-phase sum isn't (`5 implement iterations + 2 verify
-   iterations = 7 of what?`)."
+   iterations = 7 of what?`).
+
+   Throws on unknown phase or iterations-on-non-iteration-phase. Both
+   are programming errors at telemetry-emitter sites; failing here
+   surfaces them at the call site rather than at downstream
+   schema-validation time."
   [breakdown {:keys [phase tokens iterations duration-ms usd]
               :or   {tokens 0 iterations 0 duration-ms 0 usd 0.0}}]
   (when-not (contains? phase-keys phase)
     (throw (ex-info (str "Unknown phase " (pr-str phase) " — must be one of "
-                         (pr-str phase-keys))
-                    {:phase phase :known phase-keys})))
+                         (pr-str phase-key-order))
+                    {:phase phase :known phase-key-order})))
+  (when (and (pos? iterations)
+             (not (contains? iteration-phase-keys phase)))
+    (throw (ex-info (str "Phase " (pr-str phase) " does not iterate; "
+                         ":iterations may only be set for "
+                         (pr-str (sort iteration-phase-keys)))
+                    {:phase phase :iterations iterations
+                     :allowed (sort iteration-phase-keys)})))
   (-> breakdown
       (update :cost/total + tokens)
       (update-in [:cost/breakdown phase] (fnil + 0) tokens)

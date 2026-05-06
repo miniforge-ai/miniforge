@@ -58,16 +58,24 @@
   (testing "Tokens add to :cost/total (sum) AND :cost/breakdown[phase]
             (per-phase). Both views must stay in sync — the dashboard
             uses :cost/total for the run-level number and
-            :cost/breakdown for the placement-of-attention drill-in."
+            :cost/breakdown for the placement-of-attention drill-in.
+            Duration and USD also accumulate, asserted alongside
+            tokens so the four cumulative fields don't drift."
     (let [b (-> (cb/empty-breakdown)
-                (cb/add-phase-cost {:phase :task/implement :tokens 1200})
-                (cb/add-phase-cost {:phase :task/verify    :tokens 200}))]
+                (cb/add-phase-cost {:phase :task/implement
+                                    :tokens 1200 :duration-ms 8500 :usd 0.024})
+                (cb/add-phase-cost {:phase :task/verify
+                                    :tokens 200  :duration-ms 2200 :usd 0.004}))]
       (is (cb/valid? b))
       (is (= 1400 (:cost/total b)))
       (is (= 1200 (cb/phase-tokens b :task/implement)))
       (is (= 200  (cb/phase-tokens b :task/verify)))
       (is (= 0    (cb/phase-tokens b :task/release))
-          "phase-tokens returns 0 for unseen phases (no nil in the API)"))))
+          "phase-tokens returns 0 for unseen phases (no nil in the API)")
+      (is (= 10700 (:cost/duration-ms b))
+          "duration-ms is the wall-clock sum across phases")
+      (is (= 0.028 (:cost/usd b))
+          "usd is the dollar sum across phases"))))
 
 (deftest add-phase-cost-accumulates-iterations-test
   (testing "Iterations are per-phase only; cross-phase sums aren't
@@ -118,18 +126,29 @@
 (deftest merge-breakdowns-sums-corresponding-fields-test
   (testing "Merging two breakdowns sums totals, per-phase tokens,
             iterations, duration, and dollars. Used at sub-workflow
-            boundaries to roll a child's cost into a parent's report."
+            boundaries to roll a child's cost into a parent's report.
+            All four cumulative fields are asserted so a regression
+            in any one of them surfaces here."
     (let [a (-> (cb/empty-breakdown)
-                (cb/add-phase-cost {:phase :task/implement :tokens 1000 :iterations 2}))
+                (cb/add-phase-cost {:phase :task/implement
+                                    :tokens 1000 :iterations 2
+                                    :duration-ms 5000 :usd 0.020}))
           b (-> (cb/empty-breakdown)
-                (cb/add-phase-cost {:phase :task/implement :tokens 500  :iterations 1})
-                (cb/add-phase-cost {:phase :task/verify    :tokens 200}))
+                (cb/add-phase-cost {:phase :task/implement
+                                    :tokens 500  :iterations 1
+                                    :duration-ms 2500 :usd 0.010})
+                (cb/add-phase-cost {:phase :task/verify
+                                    :tokens 200 :duration-ms 1000 :usd 0.004}))
           merged (cb/merge-breakdowns a b)]
       (is (= 1700 (:cost/total merged)))
       (is (= 1500 (cb/phase-tokens merged :task/implement)))
       (is (= 200  (cb/phase-tokens merged :task/verify)))
       (is (= 3    (cb/phase-iterations merged :task/implement))
-          "iteration counts sum — total implement iterations across the run"))))
+          "iteration counts sum — total implement iterations across the run")
+      (is (= 8500 (:cost/duration-ms merged))
+          "duration-ms sums across child and parent")
+      (is (= 0.034 (:cost/usd merged))
+          "usd sums across child and parent"))))
 
 (deftest merge-breakdowns-empty-is-identity-test
   (testing "merge-breakdowns with empty-breakdown is the identity. Lets
@@ -139,6 +158,64 @@
                 (cb/add-phase-cost {:phase :task/implement :tokens 1000}))]
       (is (= b (cb/merge-breakdowns (cb/empty-breakdown) b)))
       (is (= b (cb/merge-breakdowns b (cb/empty-breakdown)))))))
+
+(deftest add-phase-cost-rejects-iterations-on-non-iteration-phase-test
+  (testing "Per spec §3.5, :cost/iterations is keyed only by phases
+            that run an iteration loop (`:task/implement`,
+            `:task/merge-resolution`). Setting :iterations on any
+            other phase throws — programming-error catch at the
+            telemetry-emitter site rather than letting bogus
+            iteration counts flow into the dashboard."
+    (is (thrown-with-msg?
+         clojure.lang.ExceptionInfo #"does not iterate"
+         (cb/add-phase-cost (cb/empty-breakdown)
+                            {:phase :task/release :iterations 3}))
+        ":task/release runs once; iterations on it is meaningless")
+    (is (thrown-with-msg?
+         clojure.lang.ExceptionInfo #"does not iterate"
+         (cb/add-phase-cost (cb/empty-breakdown)
+                            {:phase :task/explore :iterations 1}))))
+  (testing "Zero iterations on a non-iterating phase is fine — the
+            check fires on positive counts only, so callers passing
+            an explicit zero (e.g. uniform call shape from a metrics
+            collector) don't get spurious throws."
+    (let [b (cb/add-phase-cost (cb/empty-breakdown)
+                               {:phase :task/release :iterations 0
+                                :tokens 50})]
+      (is (= 50 (cb/phase-tokens b :task/release))
+          "tokens still accumulate; just no iteration entry"))))
+
+(deftest schema-rejects-negative-or-non-finite-usd-test
+  (testing "Cost in USD is non-negative and finite; the schema rejects
+            negative numbers, NaN, and Infinity. Without this guard a
+            corrupted upstream calculation could pollute dashboard
+            totals (NaN propagates) or display nonsense ('-$3.14
+            for the run')."
+    (let [base (cb/empty-breakdown)]
+      (is (false? (cb/valid? (assoc base :cost/usd -1.0)))
+          "negative USD rejected")
+      (is (false? (cb/valid? (assoc base :cost/usd Double/NaN)))
+          "NaN USD rejected")
+      (is (false? (cb/valid? (assoc base :cost/usd Double/POSITIVE_INFINITY)))
+          "Infinity USD rejected")
+      (is (true? (cb/valid? (assoc base :cost/usd 0.0)))
+          "zero USD accepted")
+      (is (true? (cb/valid? (assoc base :cost/usd 12.34)))
+          "positive USD accepted"))))
+
+(deftest schema-rejects-iterations-for-non-iteration-phases-test
+  (testing "Even if a caller bypasses add-phase-cost and constructs a
+            map directly, the schema rejects :cost/iterations entries
+            for non-iteration phases. Belt-and-suspenders defense
+            against telemetry-pipeline mistakes."
+    (let [bad {:cost/total       0
+               :cost/breakdown   {}
+               ;; :task/release is in phase-keys but NOT in iteration-phase-keys
+               :cost/iterations  {:task/release 1}
+               :cost/duration-ms 0
+               :cost/usd         0.0}]
+      (is (false? (cb/valid? bad)))
+      (is (some? (cb/explain bad))))))
 
 ;------------------------------------------------------------------------------ Layer 2
 ;; Read accessors
