@@ -1,5 +1,7 @@
 {:paths ["src" "resources"]
- :deps {ai.miniforge/messages {:local/root "../messages"}}
+ :deps {ai.miniforge/messages {:local/root "../messages"}
+        ai.miniforge/anomaly  {:local/root "../anomaly"}   ; Canonical anomaly maps for exceptions-as-data
+        ai.miniforge/response {:local/root "../response"}} ; Slingshot throw-anomaly! at boundary helpers
  :aliases
  {:test {:extra-paths ["test"]
          :extra-deps {io.github.cognitect-labs/test-runner
