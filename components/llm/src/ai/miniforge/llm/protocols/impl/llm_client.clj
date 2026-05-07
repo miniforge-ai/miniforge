@@ -355,15 +355,50 @@
                    (str "mcp__" (name server) "__" (name tool))))))
        (str/join ",")))
 
+(def ^:private claude-input-format-flag
+  "Claude CLI flag that selects how the user prompt is delivered. Paired
+   with `claude-input-format-stdin` (the only value we use today), this
+   tells the CLI to read the prompt from stdin instead of argv."
+  "--input-format")
+
+(def ^:private claude-input-format-stdin
+  "Argument value for `claude-input-format-flag` that switches the CLI
+   to text-on-stdin input mode."
+  "text")
+
 (defn- claude-args
-  "Build CLI arguments for the Claude backend."
+  "Build CLI arguments for the Claude backend.
+
+   Prompt delivery is controlled by `:prompt-via` on the request map:
+
+     :argv  (default) — prompt is conjoined as a positional argv arg.
+                        Legacy behavior; kept for tests + backends that
+                        do not invoke the planner-sized prompt path.
+     :stdin           — prompt is omitted from argv; `--input-format text`
+                        tells claude to read the user prompt from stdin.
+                        Required for the planner / implementer path
+                        because system-prompt + spec text +
+                        existing-files context regularly exceeds POSIX
+                        ARG_MAX once combined into argv (observed
+                        2026-05-07 stage-3 dogfood: \"Argument list too
+                        long\" on plan phase).
+
+   Callers (handle-streaming / complete-impl) read `:prompt-via` from
+   the backend config and thread it into the request map before
+   invoking this fn; for :stdin they additionally pipe the prompt
+   string into the process via the exec layer's `:stdin` option."
   [{:keys [prompt system max-tokens streaming? mcp-config mcp-allowed-tools
-           disallowed-tools supervision budget-usd max-turns model resume]}]
+           disallowed-tools supervision budget-usd max-turns model resume
+           prompt-via]
+    :or   {prompt-via :argv}}]
   (let [budget (or budget-usd
-                   (when max-tokens (default-claude-cli-budget-usd)))]
+                   (when max-tokens (default-claude-cli-budget-usd)))
+        stdin? (= prompt-via :stdin)]
     (cond-> ["-p"]
       streaming?                   (conj "--output-format" "stream-json")
       streaming?                   (conj "--verbose")
+      stdin?                       (conj claude-input-format-flag
+                                         claude-input-format-stdin)
       mcp-config                   (into ["--mcp-config" mcp-config])
       (seq mcp-allowed-tools)      (into ["--allowedTools" (claude-mcp-allowlist-string mcp-allowed-tools)])
       (seq disallowed-tools)       (into ["--disallowedTools" (str/join "," disallowed-tools)])
@@ -373,7 +408,7 @@
       max-turns                    (into ["--max-turns" (str max-turns)])
       model                        (into ["--model" model])
       resume                       (into ["--resume" resume])
-      true                         (conj prompt))))
+      (not stdin?)                 (conj prompt))))
 
 (defn- codex-args
   "Build CLI arguments for the Codex backend."
@@ -409,7 +444,12 @@
             :requires-cli? true
             :api-key-var "ANTHROPIC_API_KEY"
             :stream-parser parse-claude-stream-line
-            :args-fn claude-args}
+            :args-fn claude-args
+            ;; Prompt delivery: stdin. The planner path's system-prompt +
+            ;; spec text + existing-files context regularly pushes argv
+            ;; past POSIX ARG_MAX. Claude CLI supports --input-format text
+            ;; to read the user prompt from stdin; we use that instead.
+            :prompt-via :stdin}
 
    :codex {:cmd "codex"
            :streaming? true
@@ -418,7 +458,10 @@
            :requires-cli? true
            :api-key-var nil
            :stream-parser parse-codex-stream-line
-           :args-fn codex-args}
+           :args-fn codex-args
+           ;; Prompt delivery: argv. Codex CLI takes a positional prompt;
+           ;; flip to :stdin if its prompt envelope grows past ARG_MAX.
+           :prompt-via :argv}
 
    :openai {:cmd "http"
             :streaming? true
@@ -446,7 +489,8 @@
             :provider "Cursor"
             :requires-cli? true
             :api-key-var nil
-            :args-fn cursor-args}
+            :args-fn cursor-args
+            :prompt-via :argv}
 
    :echo {:cmd "echo"
           :streaming? false
@@ -454,7 +498,8 @@
           :provider "Test"
           :requires-cli? false
           :api-key-var nil
-          :args-fn echo-args}})
+          :args-fn echo-args
+          :prompt-via :argv}})
 
 (defn build-messages-prompt [messages]
   (->> messages
@@ -783,13 +828,23 @@
   (when (System/getenv "CLAUDECODE")
     (into {} (remove (fn [[k _]] (= k "CLAUDECODE"))) (System/getenv))))
 
+(defn- ->stdin-stream
+  "Build the InputStream passed as the subprocess's stdin. A non-blank
+   :stdin string becomes a ByteArrayInputStream over its UTF-8 bytes;
+   absent or blank stdin maps to a zero-length stream so the
+   subprocess sees EOF immediately (legacy behavior for argv backends)."
+  [stdin-str]
+  (if (and (string? stdin-str) (not (.isEmpty ^String stdin-str)))
+    (ByteArrayInputStream. (.getBytes ^String stdin-str "UTF-8"))
+    (ByteArrayInputStream. (byte-array 0))))
+
 (defn stream-exec-fn
   ([cmd on-line]
    (stream-exec-fn cmd on-line {}))
-  ([cmd on-line {:keys [progress-monitor workdir]}]
+  ([cmd on-line {:keys [progress-monitor workdir stdin]}]
    (let [monitor (or progress-monitor (default-progress-monitor))
-         empty-stdin (ByteArrayInputStream. (byte-array 0))
-         process (apply p/process (cond-> {:err :string :in empty-stdin}
+         in-stream (->stdin-stream stdin)
+         process (apply p/process (cond-> {:err :string :in in-stream}
                                           (clean-env) (assoc :env (clean-env))
                                           workdir     (assoc :dir workdir)) cmd)
          out-reader (java.io.BufferedReader.
@@ -816,6 +871,71 @@
 (defn build-request-prompt [request]
   (or (:prompt request)
       (build-messages-prompt (:messages request))))
+
+(defn- resolve-prompt-via
+  "Read the backend's declared prompt-delivery mode. Defaults to :argv
+   so backends that pre-date the :prompt-via knob keep their legacy
+   behavior."
+  [backend-config]
+  (get backend-config :prompt-via :argv))
+
+(defn- exec-opts-for-prompt-via
+  "Build the exec-layer opts map for a given prompt-via + prompt.
+
+   :stdin → {:stdin prompt} so the exec layer pipes the prompt to the
+            subprocess's stdin.
+   :argv  → {} (prompt rides in argv via the args-fn).
+
+   Returning an empty map for :argv lets call sites use `(seq opts)`
+   to decide between the 1-arity and 2-arity exec-fn calls — preserves
+   back-compat with caller-supplied 1-arity exec-fns documented as a
+   public test hook on CLIClient."
+  [prompt-via prompt]
+  (cond-> {} (= prompt-via :stdin) (assoc :stdin prompt)))
+
+(defn- run-cli-exec
+  "Invoke a CLI exec-fn with cmd plus optional opts. The 1-arity
+   branch keeps caller-supplied exec-fns from the days before opts
+   existed working unchanged; the 2-arity branch threads opts in
+   when they carry signal (e.g. :stdin)."
+  [exec-fn cmd opts]
+  (if (seq opts)
+    (exec-fn cmd opts)
+    (exec-fn cmd)))
+
+(defn normalize-exec-fn
+  "Wrap an exec-fn so it accepts both 1-arity (cmd) and 2-arity
+   (cmd opts) call patterns.
+
+   `:exec-fn` on `create-client` is a documented public test hook.
+   Pre-:prompt-via callers supplied 1-arity functions; once the
+   :stdin path landed the impl started invoking exec-fn 2-arity for
+   the :claude backend. Without this wrapper a 1-arity user fn
+   would throw ArityException the first time the new code path
+   ran.
+
+   The wrapper probes 2-arity on first 2-arity call and caches the
+   decision in an atom so subsequent calls dispatch directly. The
+   probe only happens when the caller actually passes opts; pure
+   1-arity invocations stay one indirection.
+
+   Returns a fn equivalent to `f` for callers that already accept
+   both arities."
+  [f]
+  (let [arity (atom :unknown)]
+    (fn
+      ([cmd] (f cmd))
+      ([cmd opts]
+       (case @arity
+         :one (f cmd)
+         :two (f cmd opts)
+         (try
+           (let [r (f cmd opts)]
+             (reset! arity :two)
+             r)
+           (catch clojure.lang.ArityException _
+             (reset! arity :one)
+             (f cmd))))))))
 
 (defn log-prompt-sent [logger backend prompt]
   (when logger
@@ -850,11 +970,15 @@
             response)))
 
       ;; CLI backend
-      (let [prompt (build-request-prompt request)
+      (let [prompt     (build-request-prompt request)
+            prompt-via (resolve-prompt-via backend-config)
             request-with-model (cond-> request model (assoc :model model))
-            args (args-fn (assoc request-with-model :prompt prompt))
+            args     (args-fn (assoc request-with-model
+                                     :prompt prompt
+                                     :prompt-via prompt-via))
             full-cmd (into [cmd] args)
-            result (exec-fn full-cmd)
+            opts     (exec-opts-for-prompt-via prompt-via prompt)
+            result   (run-cli-exec exec-fn full-cmd opts)
             response (parse-cli-output (:out result) (:exit result) (:err result))]
         (log-response logger response)
         response))))
@@ -1012,9 +1136,13 @@
         stream-fn (or (:stream-exec-fn client) stream-exec-fn)
         {:keys [backend model]} config
         {:keys [cmd args-fn stream-parser]} backend-config
-        prompt (build-request-prompt request)
+        prompt     (build-request-prompt request)
+        prompt-via (resolve-prompt-via backend-config)
         request-with-model (cond-> request model (assoc :model model))
-        args (args-fn (assoc request-with-model :prompt prompt :streaming? true))
+        args     (args-fn (assoc request-with-model
+                                 :prompt prompt
+                                 :streaming? true
+                                 :prompt-via prompt-via))
         full-cmd (into [cmd] args)
         accumulated-content (atom "")
         accumulated-usage (atom nil)
@@ -1027,15 +1155,18 @@
       (log/debug logger :system :agent/streaming-prompt-sent
                  {:data {:backend backend
                          :prompt-length (count prompt)}}))
-    (let [result (stream-fn
+    (let [base-opts {:progress-monitor progress-monitor
+                     :workdir (:workdir request)}
+          stream-opts (merge base-opts
+                             (exec-opts-for-prompt-via prompt-via prompt))
+          result (stream-fn
                   full-cmd
                   (stream-with-parser stream-parser on-chunk progress-monitor
                                       accumulated-content accumulated-usage
                                       accumulated-cost accumulated-tools
                                       accumulated-session-id
                                       accumulated-stop-reason accumulated-turns)
-                  {:progress-monitor progress-monitor
-                   :workdir (:workdir request)})
+                  stream-opts)
           exit-code (:exit result)
           timeout-info (:timeout result)
           final-content @accumulated-content
@@ -1122,15 +1253,21 @@
 
 ;------------------------------------------------------------------------------ Layer 3
 
-(defn default-exec-fn [cmd]
-  (let [timeout-ms 600000
-        empty-stdin (ByteArrayInputStream. (byte-array 0))
-        result (apply p/shell (cond-> {:out :string :err :string :continue true
-                                       :in empty-stdin :timeout timeout-ms}
-                                (clean-env) (assoc :env (clean-env))) cmd)]
-    {:out (:out result)
-     :err (:err result)
-     :exit (:exit result)}))
+(defn default-exec-fn
+  "Run `cmd` with `p/shell`, capturing :out / :err / :exit.
+
+   2-arity opts map supports `:stdin` — a string piped to the
+   subprocess's stdin. Absent or blank => zero-length stdin (legacy)."
+  ([cmd] (default-exec-fn cmd {}))
+  ([cmd {:keys [stdin]}]
+   (let [timeout-ms 600000
+         in-stream  (->stdin-stream stdin)
+         result (apply p/shell (cond-> {:out :string :err :string :continue true
+                                        :in in-stream :timeout timeout-ms}
+                                 (clean-env) (assoc :env (clean-env))) cmd)]
+     {:out (:out result)
+      :err (:err result)
+      :exit (:exit result)})))
 
 (defn capsule-exec-fn
   "Returns an exec-fn that routes CLI commands through a task capsule executor.
@@ -1155,17 +1292,17 @@
          :exit 1}))))
 
 (defn mock-exec-fn [output & {:keys [exit] :or {exit 0}}]
-  (fn [_cmd]
-    {:out output
-     :err ""
-     :exit exit}))
+  (fn
+    ([_cmd]      {:out output :err "" :exit exit})
+    ([_cmd _opts] {:out output :err "" :exit exit})))
 
 (defn mock-exec-fn-multi [outputs]
-  (let [call-count (atom 0)]
-    (fn [_cmd]
-      (let [idx @call-count
-            output (get outputs idx (last outputs))]
-        (swap! call-count inc)
-        {:out output
-         :err ""
-         :exit 0}))))
+  (let [call-count (atom 0)
+        respond    (fn []
+                     (let [idx @call-count
+                           output (get outputs idx (last outputs))]
+                       (swap! call-count inc)
+                       {:out output :err "" :exit 0}))]
+    (fn
+      ([_cmd]       (respond))
+      ([_cmd _opts] (respond)))))

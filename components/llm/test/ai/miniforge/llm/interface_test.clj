@@ -801,8 +801,9 @@
                   {:backend :claude
                    :stream-exec-fn (fn [_cmd _on-line _opts]
                                      {:out "" :err "stream stderr" :exit 0})
-                   :exec-fn (fn [_cmd]
-                              {:out "fallback answer" :err "" :exit 0})})
+                   :exec-fn (fn
+                              ([_cmd]      {:out "fallback answer" :err "" :exit 0})
+                              ([_cmd _opts] {:out "fallback answer" :err "" :exit 0}))})
           resp (llm/complete-stream client {:prompt "test"} #(swap! chunks conj %))]
       (is (:success resp))
       (is (= "fallback answer" (:content resp)))
@@ -850,6 +851,124 @@
     (testing "max-turns flag omitted when not provided"
       (let [args (args-fn {:prompt "test" :budget-usd 1.0})]
         (is (not (some #{"--max-turns"} args)))))))
+
+;------------------------------------------------------------------------------ Layer 5
+;; Claude backend prompt delivery (argv vs stdin) — argv-overflow guard
+;;
+;; The Stage 3 dogfood (2026-05-07) hit "Argument list too long" because
+;; the planner's system-prompt + spec text + existing-files context
+;; pushed the argv past POSIX ARG_MAX. The :claude backend now declares
+;; :prompt-via :stdin and the args-fn omits the positional prompt while
+;; adding --input-format text. These tests lock that contract.
+
+(def ^:private sample-prompt
+  "Synthetic prompt used to assert the prompt content's *placement*
+   (argv vs not-argv). Same shape (string) as a real planner prompt;
+   size is small because the assertions hinge on identity-of-content,
+   not length."
+  "this should arrive on stdin not in argv")
+
+(deftest claude-args-fn-prompt-via-argv-default-test
+  (testing "prompt-via defaults to :argv — prompt is the last argv element"
+    (let [args-fn (:args-fn (get impl/backends :claude))
+          args (args-fn {:prompt sample-prompt})]
+      (is (= sample-prompt (last args))
+          "prompt is conjoined as positional argv arg")
+      (is (not (some #{"--input-format"} args))
+          "no --input-format flag in argv mode"))))
+
+(deftest claude-args-fn-prompt-via-argv-explicit-test
+  (testing "prompt-via :argv (explicit) keeps current argv shape"
+    (let [args-fn (:args-fn (get impl/backends :claude))
+          args (args-fn {:prompt sample-prompt :prompt-via :argv})]
+      (is (= sample-prompt (last args))
+          "prompt is conjoined as positional argv arg")
+      (is (not (some #{"--input-format"} args))))))
+
+(deftest claude-args-fn-prompt-via-stdin-omits-argv-test
+  (testing "prompt-via :stdin drops the positional prompt"
+    (let [args-fn (:args-fn (get impl/backends :claude))
+          args (args-fn {:prompt sample-prompt :prompt-via :stdin})]
+      (is (not (some #{sample-prompt} args))
+          "prompt content must NOT appear in argv when :prompt-via :stdin")
+      (is (some #{"--input-format"} args)
+          "--input-format text flag must be present so claude reads stdin")
+      (is (= "text" (nth args (inc (.indexOf args "--input-format"))))
+          "--input-format value is 'text'"))))
+
+(deftest claude-backend-declares-prompt-via-stdin-test
+  (testing ":claude backend config declares :prompt-via :stdin"
+    (is (= :stdin (:prompt-via (get impl/backends :claude)))
+        "claude must default to stdin to avoid POSIX ARG_MAX overflow")))
+
+(deftest non-claude-backends-default-to-argv-test
+  (testing "codex / cursor / echo backends keep :prompt-via :argv"
+    (is (= :argv (:prompt-via (get impl/backends :codex))))
+    (is (= :argv (:prompt-via (get impl/backends :cursor))))
+    (is (= :argv (:prompt-via (get impl/backends :echo))))))
+
+;------------------------------------------------------------------------------ Layer 5
+;; default-exec-fn / stream-exec-fn — :stdin opt is piped to the subprocess
+;;
+;; Use `cat` as the subprocess: stdin is echoed verbatim to stdout, so we
+;; can assert the bytes the exec layer wrote without depending on a
+;; real LLM CLI.
+
+(deftest default-exec-fn-pipes-stdin-test
+  (testing ":stdin opt is written to subprocess stdin"
+    (let [{:keys [out exit]} (impl/default-exec-fn ["cat"] {:stdin "hello stdin"})]
+      (is (zero? exit))
+      (is (= "hello stdin" out)))))
+
+(deftest default-exec-fn-no-stdin-default-test
+  (testing "no :stdin opt → empty stdin (legacy behavior)"
+    (let [{:keys [out exit]} (impl/default-exec-fn ["cat"])]
+      (is (zero? exit))
+      (is (= "" out)))))
+
+(deftest legacy-1-arity-exec-fn-survives-stdin-path-test
+  (testing "1-arity user-supplied :exec-fn keeps working when impl invokes 2-arity"
+    ;; Backward-compat guard: PR #798 review pointed out that callers
+    ;; predating :prompt-via supplied 1-arity exec-fns. The :claude
+    ;; backend now invokes 2-arity (it declares :prompt-via :stdin).
+    ;; create-client wraps user fns through normalize-exec-fn so the
+    ;; legacy contract still works.
+    (let [seen (atom nil)
+          legacy-1-arity (fn [cmd]
+                           (reset! seen cmd)
+                           {:out "ok" :err "" :exit 0})
+          client (ai.miniforge.llm.protocols.records.llm-client/create-client
+                  {:backend :claude :exec-fn legacy-1-arity})
+          resp (llm/complete client {:prompt "hello"})]
+      (is (llm/success? resp)
+          "complete succeeds even though impl tried 2-arity first")
+      (is (some? @seen)
+          "legacy 1-arity fn was eventually invoked"))))
+
+(deftest normalize-exec-fn-passes-opts-to-2-arity-fn-test
+  (testing "2-arity user-supplied exec-fn receives opts unchanged"
+    (let [seen-opts (atom nil)
+          two-arity (fn
+                      ([cmd] {:out "" :err "" :exit 0 :seen-cmd cmd})
+                      ([cmd opts]
+                       (reset! seen-opts opts)
+                       {:out "ok" :err "" :exit 0}))
+          wrapped (impl/normalize-exec-fn two-arity)]
+      (wrapped ["claude" "-p"] {:stdin "the-prompt"})
+      (is (= {:stdin "the-prompt"} @seen-opts)
+          "opts must reach a 2-arity-capable fn unchanged"))))
+
+(deftest stream-exec-fn-pipes-stdin-test
+  (testing ":stdin opt is written to subprocess stdin in streaming path"
+    (let [seen (atom [])
+          handler (fn [line] (swap! seen conj line))
+          monitor (pm/create-progress-monitor {:min-activity-interval-ms 1})
+          {:keys [exit]} (impl/stream-exec-fn ["cat"] handler
+                                              {:stdin "line1\nline2\n"
+                                               :progress-monitor monitor})]
+      (is (zero? exit))
+      (is (= ["line1" "line2"] @seen)
+          "subprocess saw stdin content split by line"))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
