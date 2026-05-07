@@ -63,11 +63,28 @@
 
 ;; --------------------------------------------------------------------------- Brick-parallel test execution
 
-(def ^:private isolated-bricks
+(def ^:private isolated-bricks-env-var
+  "Environment variable that overrides the isolated brick set.
+   Value should be a comma-separated list such as:
+   MINIFORGE_TEST_ISOLATED_BRICKS=pipeline-pack-store,artifact"
+  "MINIFORGE_TEST_ISOLATED_BRICKS")
+
+(def ^:private default-isolated-bricks
   "Bricks that should run in their own test JVM.
    Some native-backed stores are reliable in isolation but can fail inside the
    large aggregate JVM used for changed-brick testing."
   #{"pipeline-pack-store"})
+
+(defn configured-isolated-bricks
+  "Return the configured isolated brick set.
+   A comma-separated MINIFORGE_TEST_ISOLATED_BRICKS overrides the defaults."
+  []
+  (if-let [raw (some-> (System/getenv isolated-bricks-env-var) str/trim seq)]
+    (->> (str/split raw #",")
+         (map str/trim)
+         (remove str/blank?)
+         set)
+    default-isolated-bricks))
 
 (defn build-test-expr
   "Build a Clojure expression that runs brick groups in a single test JVM.
@@ -141,11 +158,12 @@
 (defn partition-isolated-bricks
   "Split brick-groups into {:isolated ... :parallel ...} by brick name."
   [brick-groups]
-  (reduce-kv
-   (fn [acc brick nses]
-     (update acc (if (isolated-bricks brick) :isolated :parallel) assoc brick nses))
-   {:isolated {} :parallel {}}
-   brick-groups))
+  (let [isolated-bricks (configured-isolated-bricks)]
+    (reduce-kv
+     (fn [acc brick nses]
+       (update acc (if (isolated-bricks brick) :isolated :parallel) assoc brick nses))
+     {:isolated {} :parallel {}}
+     brick-groups)))
 
 (defn run-test-jvm!
   "Run the given brick groups in a dedicated Clojure test JVM.

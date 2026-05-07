@@ -45,6 +45,7 @@ jobs:
 
       - name: Run Polylith workspace check
         run: |
+          set -o pipefail
           echo "::group::Polylith Structure"
           bb poly:check 2>&1 | tee poly-check.log
           echo "::endgroup::"
