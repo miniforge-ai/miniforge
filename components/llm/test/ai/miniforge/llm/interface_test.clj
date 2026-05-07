@@ -926,6 +926,38 @@
       (is (zero? exit))
       (is (= "" out)))))
 
+(deftest legacy-1-arity-exec-fn-survives-stdin-path-test
+  (testing "1-arity user-supplied :exec-fn keeps working when impl invokes 2-arity"
+    ;; Backward-compat guard: PR #798 review pointed out that callers
+    ;; predating :prompt-via supplied 1-arity exec-fns. The :claude
+    ;; backend now invokes 2-arity (it declares :prompt-via :stdin).
+    ;; create-client wraps user fns through normalize-exec-fn so the
+    ;; legacy contract still works.
+    (let [seen (atom nil)
+          legacy-1-arity (fn [cmd]
+                           (reset! seen cmd)
+                           {:out "ok" :err "" :exit 0})
+          client (ai.miniforge.llm.protocols.records.llm-client/create-client
+                  {:backend :claude :exec-fn legacy-1-arity})
+          resp (llm/complete client {:prompt "hello"})]
+      (is (llm/success? resp)
+          "complete succeeds even though impl tried 2-arity first")
+      (is (some? @seen)
+          "legacy 1-arity fn was eventually invoked"))))
+
+(deftest normalize-exec-fn-passes-opts-to-2-arity-fn-test
+  (testing "2-arity user-supplied exec-fn receives opts unchanged"
+    (let [seen-opts (atom nil)
+          two-arity (fn
+                      ([cmd] {:out "" :err "" :exit 0 :seen-cmd cmd})
+                      ([cmd opts]
+                       (reset! seen-opts opts)
+                       {:out "ok" :err "" :exit 0}))
+          wrapped (impl/normalize-exec-fn two-arity)]
+      (wrapped ["claude" "-p"] {:stdin "the-prompt"})
+      (is (= {:stdin "the-prompt"} @seen-opts)
+          "opts must reach a 2-arity-capable fn unchanged"))))
+
 (deftest stream-exec-fn-pipes-stdin-test
   (testing ":stdin opt is written to subprocess stdin in streaming path"
     (let [seen (atom [])

@@ -903,6 +903,40 @@
     (exec-fn cmd opts)
     (exec-fn cmd)))
 
+(defn normalize-exec-fn
+  "Wrap an exec-fn so it accepts both 1-arity (cmd) and 2-arity
+   (cmd opts) call patterns.
+
+   `:exec-fn` on `create-client` is a documented public test hook.
+   Pre-:prompt-via callers supplied 1-arity functions; once the
+   :stdin path landed the impl started invoking exec-fn 2-arity for
+   the :claude backend. Without this wrapper a 1-arity user fn
+   would throw ArityException the first time the new code path
+   ran.
+
+   The wrapper probes 2-arity on first 2-arity call and caches the
+   decision in an atom so subsequent calls dispatch directly. The
+   probe only happens when the caller actually passes opts; pure
+   1-arity invocations stay one indirection.
+
+   Returns a fn equivalent to `f` for callers that already accept
+   both arities."
+  [f]
+  (let [arity (atom :unknown)]
+    (fn
+      ([cmd] (f cmd))
+      ([cmd opts]
+       (case @arity
+         :one (f cmd)
+         :two (f cmd opts)
+         (try
+           (let [r (f cmd opts)]
+             (reset! arity :two)
+             r)
+           (catch clojure.lang.ArityException _
+             (reset! arity :one)
+             (f cmd))))))))
+
 (defn log-prompt-sent [logger backend prompt]
   (when logger
     (log/debug logger :system :agent/prompt-sent
