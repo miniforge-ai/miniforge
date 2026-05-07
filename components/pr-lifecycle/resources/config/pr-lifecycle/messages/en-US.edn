@@ -41,6 +41,16 @@
   :controller/criterion-line
   "- {criterion}"
 
+  ;; Conflict resolution (spec §6.4 — MERGEABLE→NON_MERGEABLE)
+  :conflict-resolution/starting
+  "Starting PR conflict resolution"
+  :conflict-resolution/no-conflicts
+  "extract-conflict-paths returned an empty path set; nothing to resolve"
+  :conflict-resolution/resolved
+  "PR conflicts resolved and pushed"
+  :conflict-resolution/unresolvable
+  "PR conflicts could not be auto-resolved; surfaced to human review"
+
   ;; FSM
   :fsm/invalid-state
   "Invalid controller status: {status}"
