@@ -59,11 +59,13 @@
      :inherit / :disable / :enable / :tune"
   (:require
    [ai.miniforge.anomaly.interface                    :as anomaly]
+   [ai.miniforge.progress-detector.config             :as cfg]
    [ai.miniforge.progress-detector.event-envelope     :as envelope]
    [ai.miniforge.progress-detector.protocol           :as proto]
+   [ai.miniforge.progress-detector.runtime            :as runtime]
    [ai.miniforge.progress-detector.schema             :as schema]
-   [ai.miniforge.progress-detector.tool-profile       :as tp]
-   [ai.miniforge.progress-detector.config             :as cfg]))
+   [ai.miniforge.progress-detector.supervisor         :as sup]
+   [ai.miniforge.progress-detector.tool-profile       :as tp]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Detector protocol (re-exported)
@@ -259,6 +261,93 @@
   "Overlay child config onto parent config.
    Shorthand for (resolve-config [parent child])."
   cfg/overlay)
+
+;------------------------------------------------------------------------------ Layer 3
+;; Supervisor re-exports
+
+(def default-policy
+  "Stage 2 class-default policy map: {:mechanical :terminate :heuristic :warn}.
+   Pass as the policy arg to handle when you want no overrides."
+  sup/default-policy)
+
+(def select-controlling
+  "Choose the controlling anomaly from a seq using severity→class→seq ranking.
+   Re-exported from supervisor for callers that need the selection logic
+   without a full handle decision."
+  sup/select-controlling)
+
+(defn handle
+  "Supervisor decision over a vector of anomalies.
+
+   Arities:
+
+     (handle anomalies)
+       Uses default-policy and no category overrides.
+
+     (handle policy anomalies)
+       Uses caller-supplied class-default policy, no category overrides.
+
+     (handle policy on-anomaly anomalies)
+       Full 3-arity form. Resolution order for action:
+         1. (get on-anomaly (anomaly-category controlling))
+         2. (get policy     (anomaly-class    controlling))
+         3. :continue
+
+   Returns:
+     {:action     :continue | :terminate | :warn
+      :anomalies  all anomalies
+      :anomaly    controlling anomaly map (absent when input is empty)
+      :reason     termination reason string (present only when :terminate)}"
+  ([anomalies]                    (sup/handle anomalies))
+  ([policy anomalies]             (sup/handle policy anomalies))
+  ([policy on-anomaly anomalies]  (sup/handle policy on-anomaly anomalies)))
+
+(def supervisor-terminate?
+  "Convenience predicate over a `handle` decision map — true iff :action is :terminate."
+  sup/terminate?)
+
+;------------------------------------------------------------------------------ Layer 3
+;; Runtime re-exports
+
+(defn make-runtime
+  "Build a per-agent-run detector runtime.
+
+   Arguments:
+     opts - map with:
+       :detectors  - seq of Detector implementations (may be empty)
+       :config     - (optional) detector config map
+       :policy     - (optional) class-default supervisor policy map
+       :on-anomaly - (optional) per-category action override map.
+                     Consulted before :policy in supervisor/handle.
+                     Example: {:anomalies.agent/tool-loop :terminate
+                               :anomalies.review/stagnation :continue}
+
+   Returns: runtime atom. Drive it with observe! / check."
+  [opts]
+  (runtime/make-runtime opts))
+
+(def observe!
+  "Feed one event into the runtime's detector pipeline. Returns the atom."
+  runtime/observe!)
+
+(defn check
+  "Run the supervisor over unseen anomalies; mark them as seen.
+   Returns a handle decision map.
+   Threads both :policy and :on-anomaly through to supervisor/handle."
+  [rt]
+  (runtime/check rt))
+
+(def runtime-terminate?
+  "Peek at the supervisor decision without consuming the unseen window."
+  runtime/terminate?)
+
+(def current-anomalies-rt
+  "Vector of every anomaly emitted so far on this runtime."
+  runtime/current-anomalies)
+
+(def new-anomalies
+  "Anomalies emitted since the last check call."
+  runtime/new-anomalies)
 
 ;------------------------------------------------------------------------------ Layer 3
 ;; Convenience constructors and helpers

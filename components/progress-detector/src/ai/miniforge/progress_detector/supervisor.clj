@@ -25,10 +25,12 @@
      :anomaly/class :mechanical → :terminate
      :anomaly/class :heuristic  → :warn (logged, no action)
 
-   Stage 3 will replace this with a per-category :on-anomaly policy
-   map plus composite-rules for promoting combined heuristics to
-   mechanical anomalies. The Stage 2 surface is intentionally tiny
-   — just enough to make the detectors *do* something.
+   Stage 3 adds a per-category on-anomaly map for finer-grained control.
+   Resolution order in the 3-arity handle:
+
+     1. category lookup in on-anomaly  (e.g. {:tool-loop :terminate})
+     2. class-default from policy       (e.g. {:mechanical :terminate})
+     3. :continue                       (catch-all safe default)
 
    Controlling-anomaly selection (when multiple anomalies fire in
    the same observe step):
@@ -65,6 +67,7 @@
 
 (defn- anomaly-severity [a] (get-in a [:anomaly/data :anomaly/severity]))
 (defn- anomaly-class    [a] (get-in a [:anomaly/data :anomaly/class]))
+(defn- anomaly-category [a] (get-in a [:anomaly/data :anomaly/category]))
 
 (defn- anomaly-event-seq
   "First :seq from :anomaly/data :anomaly/evidence :event-ids — used as
@@ -103,11 +106,29 @@
 (defn handle
   "Decide what to do given a vector of anomalies.
 
-   Arguments:
-     policy    - map of :anomaly/class → action keyword
-                 (default: default-policy = mechanical→:terminate,
-                                            heuristic→:warn)
-     anomalies - vector of anomaly maps emitted by the detector pipeline
+   Arities:
+
+     (handle anomalies)
+       1-arity convenience — uses default-policy and empty on-anomaly.
+
+     (handle policy anomalies)
+       2-arity back-compat — delegates to (handle policy {} anomalies).
+
+     (handle policy on-anomaly anomalies)
+       3-arity canonical form. Arguments:
+         policy     - map of :anomaly/class → action keyword
+                      (default: default-policy = mechanical→:terminate,
+                                                 heuristic→:warn)
+         on-anomaly - map of :anomaly/category → action keyword,
+                      consulted BEFORE the class-default policy.
+                      Example: {:anomalies.agent/tool-loop :terminate
+                                :anomalies.review/stagnation :continue}
+         anomalies  - vector of anomaly maps emitted by the detector pipeline
+
+   Resolution order for action:
+     1. (get on-anomaly (anomaly-category controlling))
+     2. (get policy     (anomaly-class    controlling))
+     3. :continue
 
    Returns:
      {:action     :continue | :terminate | :warn
@@ -117,13 +138,17 @@
 
    The result is data — no side effects. The caller (typically
    runtime.clj wired into agent.invoke) drives any actual cancellation."
-  ([anomalies] (handle default-policy anomalies))
-  ([policy anomalies]
+  ([anomalies]           (handle default-policy {} anomalies))
+  ([policy anomalies]    (handle policy {} anomalies))
+  ([policy on-anomaly anomalies]
    (if (empty? anomalies)
      {:action    :continue
       :anomalies anomalies}
      (let [controlling (select-controlling anomalies)
-           action      (get policy (anomaly-class controlling) :continue)
+           category    (anomaly-category controlling)
+           action      (or (get on-anomaly category)
+                           (get policy (anomaly-class controlling))
+                           :continue)
            summary     (get-in controlling
                                [:anomaly/data :anomaly/evidence :summary]
                                (msg/t :supervisor/no-summary))
@@ -146,16 +171,25 @@
   (handle [])
   ;; => {:action :continue :anomalies []}
 
-  ;; A mechanical error → terminate
+  ;; A mechanical error → terminate (1-arity, uses default-policy)
   (def err-anomaly
     {:anomaly/type :fault
      :anomaly/data {:detector/kind    :detector/tool-loop
                     :anomaly/class    :mechanical
+                    :anomaly/category :anomalies.agent/tool-loop
                     :anomaly/severity :error
                     :anomaly/evidence {:summary "Read foo.clj 6 times"
                                        :event-ids [1]}}})
   (handle [err-anomaly])
   ;; => {:action :terminate :anomaly {...} :reason "Terminating run: ..."}
+
+  ;; 3-arity: category overrides class-default
+  ;; on-anomaly says :tool-loop → :continue → no termination even though
+  ;; the class-default policy would say :terminate
+  (handle default-policy
+          {:anomalies.agent/tool-loop :continue}
+          [err-anomaly])
+  ;; => {:action :continue ...}
 
   ;; Heuristic warn → don't terminate
   (def warn-anomaly
