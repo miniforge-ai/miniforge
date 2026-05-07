@@ -861,18 +861,18 @@
 ;; :prompt-via :stdin and the args-fn omits the positional prompt while
 ;; adding --input-format text. These tests lock that contract.
 
-(def ^:private giant-prompt
-  "Synthetic prompt used to assert the prompt content is NOT placed in
-   the argv when :prompt-via :stdin. Same shape (string) as a real
-   planner prompt; size is small but the assertions hinge on
-   identity-of-content, not length."
+(def ^:private sample-prompt
+  "Synthetic prompt used to assert the prompt content's *placement*
+   (argv vs not-argv). Same shape (string) as a real planner prompt;
+   size is small because the assertions hinge on identity-of-content,
+   not length."
   "this should arrive on stdin not in argv")
 
 (deftest claude-args-fn-prompt-via-argv-default-test
   (testing "prompt-via defaults to :argv — prompt is the last argv element"
     (let [args-fn (:args-fn (get impl/backends :claude))
-          args (args-fn {:prompt giant-prompt})]
-      (is (= giant-prompt (last args))
+          args (args-fn {:prompt sample-prompt})]
+      (is (= sample-prompt (last args))
           "prompt is conjoined as positional argv arg")
       (is (not (some #{"--input-format"} args))
           "no --input-format flag in argv mode"))))
@@ -880,16 +880,16 @@
 (deftest claude-args-fn-prompt-via-argv-explicit-test
   (testing "prompt-via :argv (explicit) keeps current argv shape"
     (let [args-fn (:args-fn (get impl/backends :claude))
-          args (args-fn {:prompt giant-prompt :prompt-via :argv})]
-      (is (= giant-prompt (last args))
+          args (args-fn {:prompt sample-prompt :prompt-via :argv})]
+      (is (= sample-prompt (last args))
           "prompt is conjoined as positional argv arg")
       (is (not (some #{"--input-format"} args))))))
 
 (deftest claude-args-fn-prompt-via-stdin-omits-argv-test
   (testing "prompt-via :stdin drops the positional prompt"
     (let [args-fn (:args-fn (get impl/backends :claude))
-          args (args-fn {:prompt giant-prompt :prompt-via :stdin})]
-      (is (not (some #{giant-prompt} args))
+          args (args-fn {:prompt sample-prompt :prompt-via :stdin})]
+      (is (not (some #{sample-prompt} args))
           "prompt content must NOT appear in argv when :prompt-via :stdin")
       (is (some #{"--input-format"} args)
           "--input-format text flag must be present so claude reads stdin")

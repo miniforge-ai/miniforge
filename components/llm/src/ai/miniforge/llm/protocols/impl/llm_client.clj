@@ -355,6 +355,17 @@
                    (str "mcp__" (name server) "__" (name tool))))))
        (str/join ",")))
 
+(def ^:private claude-input-format-flag
+  "Claude CLI flag that selects how the user prompt is delivered. Paired
+   with `claude-input-format-stdin` (the only value we use today), this
+   tells the CLI to read the prompt from stdin instead of argv."
+  "--input-format")
+
+(def ^:private claude-input-format-stdin
+  "Argument value for `claude-input-format-flag` that switches the CLI
+   to text-on-stdin input mode."
+  "text")
+
 (defn- claude-args
   "Build CLI arguments for the Claude backend.
 
@@ -386,7 +397,8 @@
     (cond-> ["-p"]
       streaming?                   (conj "--output-format" "stream-json")
       streaming?                   (conj "--verbose")
-      stdin?                       (conj "--input-format" "text")
+      stdin?                       (conj claude-input-format-flag
+                                         claude-input-format-stdin)
       mcp-config                   (into ["--mcp-config" mcp-config])
       (seq mcp-allowed-tools)      (into ["--allowedTools" (claude-mcp-allowlist-string mcp-allowed-tools)])
       (seq disallowed-tools)       (into ["--disallowedTools" (str/join "," disallowed-tools)])
@@ -860,6 +872,37 @@
   (or (:prompt request)
       (build-messages-prompt (:messages request))))
 
+(defn- resolve-prompt-via
+  "Read the backend's declared prompt-delivery mode. Defaults to :argv
+   so backends that pre-date the :prompt-via knob keep their legacy
+   behavior."
+  [backend-config]
+  (get backend-config :prompt-via :argv))
+
+(defn- exec-opts-for-prompt-via
+  "Build the exec-layer opts map for a given prompt-via + prompt.
+
+   :stdin → {:stdin prompt} so the exec layer pipes the prompt to the
+            subprocess's stdin.
+   :argv  → {} (prompt rides in argv via the args-fn).
+
+   Returning an empty map for :argv lets call sites use `(seq opts)`
+   to decide between the 1-arity and 2-arity exec-fn calls — preserves
+   back-compat with caller-supplied 1-arity exec-fns documented as a
+   public test hook on CLIClient."
+  [prompt-via prompt]
+  (cond-> {} (= prompt-via :stdin) (assoc :stdin prompt)))
+
+(defn- run-cli-exec
+  "Invoke a CLI exec-fn with cmd plus optional opts. The 1-arity
+   branch keeps caller-supplied exec-fns from the days before opts
+   existed working unchanged; the 2-arity branch threads opts in
+   when they carry signal (e.g. :stdin)."
+  [exec-fn cmd opts]
+  (if (seq opts)
+    (exec-fn cmd opts)
+    (exec-fn cmd)))
+
 (defn log-prompt-sent [logger backend prompt]
   (when logger
     (log/debug logger :system :agent/prompt-sent
@@ -893,18 +936,15 @@
             response)))
 
       ;; CLI backend
-      (let [prompt (build-request-prompt request)
-            prompt-via (get backend-config :prompt-via :argv)
+      (let [prompt     (build-request-prompt request)
+            prompt-via (resolve-prompt-via backend-config)
             request-with-model (cond-> request model (assoc :model model))
-            args (args-fn (assoc request-with-model
-                                 :prompt prompt
-                                 :prompt-via prompt-via))
+            args     (args-fn (assoc request-with-model
+                                     :prompt prompt
+                                     :prompt-via prompt-via))
             full-cmd (into [cmd] args)
-            exec-opts (cond-> {}
-                        (= prompt-via :stdin) (assoc :stdin prompt))
-            result (if (seq exec-opts)
-                     (exec-fn full-cmd exec-opts)
-                     (exec-fn full-cmd))
+            opts     (exec-opts-for-prompt-via prompt-via prompt)
+            result   (run-cli-exec exec-fn full-cmd opts)
             response (parse-cli-output (:out result) (:exit result) (:err result))]
         (log-response logger response)
         response))))
@@ -1062,13 +1102,13 @@
         stream-fn (or (:stream-exec-fn client) stream-exec-fn)
         {:keys [backend model]} config
         {:keys [cmd args-fn stream-parser]} backend-config
-        prompt (build-request-prompt request)
-        prompt-via (get backend-config :prompt-via :argv)
+        prompt     (build-request-prompt request)
+        prompt-via (resolve-prompt-via backend-config)
         request-with-model (cond-> request model (assoc :model model))
-        args (args-fn (assoc request-with-model
-                             :prompt prompt
-                             :streaming? true
-                             :prompt-via prompt-via))
+        args     (args-fn (assoc request-with-model
+                                 :prompt prompt
+                                 :streaming? true
+                                 :prompt-via prompt-via))
         full-cmd (into [cmd] args)
         accumulated-content (atom "")
         accumulated-usage (atom nil)
@@ -1081,16 +1121,18 @@
       (log/debug logger :system :agent/streaming-prompt-sent
                  {:data {:backend backend
                          :prompt-length (count prompt)}}))
-    (let [result (stream-fn
+    (let [base-opts {:progress-monitor progress-monitor
+                     :workdir (:workdir request)}
+          stream-opts (merge base-opts
+                             (exec-opts-for-prompt-via prompt-via prompt))
+          result (stream-fn
                   full-cmd
                   (stream-with-parser stream-parser on-chunk progress-monitor
                                       accumulated-content accumulated-usage
                                       accumulated-cost accumulated-tools
                                       accumulated-session-id
                                       accumulated-stop-reason accumulated-turns)
-                  (cond-> {:progress-monitor progress-monitor
-                           :workdir (:workdir request)}
-                    (= prompt-via :stdin) (assoc :stdin prompt)))
+                  stream-opts)
           exit-code (:exit result)
           timeout-info (:timeout result)
           final-content @accumulated-content
