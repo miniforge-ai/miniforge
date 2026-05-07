@@ -19,7 +19,6 @@
 (ns ai.miniforge.cli.workflow-runner
   (:require
    [babashka.fs :as fs]
-   [babashka.process :as p]
    [clojure.string :as str]
    [clojure.edn :as edn]
    [cheshire.core :as json]
@@ -306,32 +305,57 @@
   (when (System/getenv "CLAUDECODE")
     (into {} (remove (fn [[k _]] (= k "CLAUDECODE"))) (System/getenv))))
 
+(defn- start-cli-process
+  [cmd workdir]
+  (let [builder (ProcessBuilder. ^java.util.List cmd)]
+    (when-let [process-env (cli-process-env)]
+      (let [env (.environment builder)]
+        (.clear env)
+        (doseq [[k v] process-env]
+          (.put env k v))))
+    (when workdir
+      (.directory builder (java.io.File. workdir)))
+    (.start builder)))
+
+(defn- stream-reader
+  [stream]
+  (future
+    (with-open [stream stream]
+      (slurp stream))))
+
+(defn- destroy-cli-process!
+  [^Process process]
+  (try
+    (.destroyForcibly process)
+    (.waitFor process 1000 java.util.concurrent.TimeUnit/MILLISECONDS)
+    (catch Exception _ nil)))
+
+(defn- await-stream
+  [stream-future]
+  (try
+    @stream-future
+    (catch Exception _ "")))
+
 (defn- run-cli-command
   [cmd timeout-ms & {:keys [workdir]}]
-  (let [empty-stdin (java.io.ByteArrayInputStream. (byte-array 0))
-        process (apply p/process
-                       (cond-> {:out :string
-                                :err :string
-                                :continue true
-                                :in empty-stdin}
-                         (cli-process-env) (assoc :env (cli-process-env))
-                         workdir (assoc :dir workdir))
-                       cmd)
-        result (deref process timeout-ms ::timeout)]
-    (if (= ::timeout result)
+  (let [^Process process (start-cli-process cmd workdir)
+        _ (.close (.getOutputStream process))
+        out-future (stream-reader (.getInputStream process))
+        err-future (stream-reader (.getErrorStream process))
+        completed? (.waitFor process timeout-ms java.util.concurrent.TimeUnit/MILLISECONDS)]
+    (if-not completed?
       (do
-        (try
-          (when-let [^Process jp (:proc process)]
-            (.destroyForcibly jp))
-          (catch Exception _ nil))
+        (destroy-cli-process! process)
+        (future-cancel out-future)
+        (future-cancel err-future)
         {:out ""
          :err (messages/t :workflow-runner/cli-process-timeout
                           {:timeout-ms timeout-ms})
          :exit -1
          :timeout-ms timeout-ms})
-      {:out (:out result)
-       :err (:err result)
-       :exit (:exit result)})))
+      {:out (await-stream out-future)
+       :err (await-stream err-future)
+       :exit (.exitValue process)})))
 
 (defn- success-response
   [output]

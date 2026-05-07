@@ -158,6 +158,14 @@
                                 :execution/workflow-version "2.0.0"}}
             (constantly nil))))))
 
+(deftest resolve-workflow-identity-ignores-synthetic-dag-task-workflow-id-test
+  (testing "synthetic DAG task workflow ids fall back to a loadable top-level workflow type"
+    (is (= {:workflow-type :default-sdlc :workflow-version "2.0.0"}
+           (core/resolve-workflow-identity
+            {:machine-snapshot {:execution/workflow-id :dag-task-a0000001-0001-4000-8000-000000000001
+                                :execution/workflow-version "2.0.0"}}
+            (constantly :default-sdlc))))))
+
 (deftest resolve-workflow-identity-fallback-test
   (testing "no spec → fallback-fn result used as :workflow-type"
     (is (= {:workflow-type :default-sdlc :workflow-version "latest"}

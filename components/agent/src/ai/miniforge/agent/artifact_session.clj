@@ -48,6 +48,23 @@
    [:mcp-config-path [:string {:min 1}]]
    [:artifact-path [:string {:min 1}]]])
 
+(def ^:private system-message-templates
+  "System-localized stderr message templates for artifact-session I/O."
+  {:warn/worktree-artifact-parse
+   "WARN: failed to parse worktree artifact at %s — %s"
+
+   :warn/capsule-worktree-artifact-parse
+   "WARN: failed to parse capsule worktree artifact at %s — %s"
+
+   :error/artifact-file-missing
+   "ERROR: artifact file not found at %s — MCP tool was likely not called by the LLM"
+
+   :warn/artifact-parse
+   "WARN: failed to parse artifact at %s — %s"
+
+   :warn/context-misses-parse
+   "WARN: failed to parse context misses at %s — %s"})
+
 (defn validate-session
   "Validate a session map against the Session schema.
 
@@ -103,6 +120,37 @@
       ;; 4. Last-resort fallback
       :else
       ["bb" "miniforge"])))
+
+(defn- emit-system-message!
+  "Render a system-scoped stderr message from a shared template."
+  [message-key & args]
+  (binding [*out* *err*]
+    (println (apply format (get system-message-templates message-key) args))))
+
+(defn- artifact-filename
+  "Canonical filename for a role artifact in .miniforge/."
+  [role]
+  (str (name role) ".edn"))
+
+(defn- worktree-artifact-file
+  "Resolve the canonical .miniforge artifact file for a role."
+  [workdir role]
+  (io/file workdir ".miniforge" (artifact-filename role)))
+
+(defn- parse-edn-content
+  "Parse EDN content with a transform, logging failures as system messages."
+  [content transform warning-key path]
+  (try
+    (-> content
+        transform)
+    (catch Exception e
+      (emit-system-message! warning-key path (ex-message e))
+      nil)))
+
+(defn- parse-edn-file
+  "Read and parse an EDN file with a transform, logging failures consistently."
+  [f transform warning-key]
+  (parse-edn-content (slurp f) transform warning-key (.getPath f)))
 
 (def ^:private codex-artifact-table-pattern
   #"^\[mcp_servers\.artifact(?:\..+)?\]\s*$")
@@ -493,18 +541,28 @@
    unreadable, or parse failure — all logged to stderr, never thrown)."
   [workdir role]
   (when (and workdir role)
-    (let [filename (str (name role) ".edn")
-          f (io/file workdir ".miniforge" filename)]
+    (let [f (worktree-artifact-file workdir role)]
       (when (.exists f)
-        (try
-          (-> (slurp f)
-              edn/read-string
-              parse-uuid-strings)
-          (catch Exception e
-            (binding [*out* *err*]
-              (println "WARN: failed to parse worktree artifact at"
-                       (.getPath f) "—" (ex-message e)))
-            nil))))))
+        (parse-edn-file f
+                        (comp parse-uuid-strings edn/read-string)
+                        :warn/worktree-artifact-parse)))))
+
+(defn read-capsule-worktree-artifact
+  "Read a role artifact from <workdir>/.miniforge/<role>.edn inside a capsule.
+
+  Returns the parsed artifact map or nil. Missing files and parse failures are
+   treated as non-fatal, matching host-mode read-worktree-artifact behavior."
+  [session role]
+  (when (and session role)
+    (let [path (.getPath (worktree-artifact-file (:workdir session) role))
+          result ((:exec! session) (:executor session) (:environment-id session)
+                  (str "cat " path) {:workdir (:workdir session)})
+          content (get-in result [:data :stdout] "")]
+      (when (seq content)
+        (parse-edn-content content
+                           (comp parse-uuid-strings edn/read-string)
+                           :warn/capsule-worktree-artifact-parse
+                           path)))))
 
 (defn read-artifact
   "Read the artifact EDN file from a session directory.
@@ -512,26 +570,19 @@
    Arguments:
    - session - Session map from create-session!
 
-   Returns:
-   - Parsed artifact map with proper UUID types, or nil if not found.
+  Returns:
+  - Parsed artifact map with proper UUID types, or nil if not found.
      Logs warnings on missing file or parse failure instead of silently returning nil."
   [session]
   (let [f (io/file (:artifact-path session))]
     (if-not (.exists f)
       (do
-        (binding [*out* *err*]
-          (println "ERROR: artifact file not found at" (:artifact-path session)
-                   "— MCP tool was likely not called by the LLM"))
+        (emit-system-message! :error/artifact-file-missing
+                              (:artifact-path session))
         nil)
-      (try
-        (-> (slurp f)
-            edn/read-string
-            parse-uuid-strings)
-        (catch Exception e
-          (binding [*out* *err*]
-            (println "WARN: failed to parse artifact at" (:artifact-path session)
-                     "—" (ex-message e)))
-          nil)))))
+      (parse-edn-file f
+                      (comp parse-uuid-strings edn/read-string)
+                      :warn/artifact-parse))))
 
 (defn read-context-misses
   "Read context cache misses from the session directory.
@@ -544,12 +595,7 @@
   (let [path (str (:dir session) "/context-misses.edn")
         f (io/file path)]
     (when (.exists f)
-      (try
-        (edn/read-string (slurp f))
-        (catch Exception e
-          (binding [*out* *err*]
-            (println "WARN: failed to parse context misses:" (ex-message e)))
-          nil)))))
+      (parse-edn-file f edn/read-string :warn/context-misses-parse))))
 
 ;------------------------------------------------------------------------------ Layer 3
 ;; High-level session helpers
@@ -761,10 +807,14 @@
   (try
     (let [result (body-fn session)
           workdir (:workdir session)
-          worktree-artifacts (when (and (= :host mode) workdir)
+          read-role-artifact (case mode
+                               :capsule #(read-capsule-worktree-artifact session %)
+                               :host    #(read-worktree-artifact workdir %)
+                               (constantly nil))
+          worktree-artifacts (when workdir
                                (into {}
                                      (keep (fn [role]
-                                             (when-let [a (read-worktree-artifact workdir role)]
+                                             (when-let [a (read-role-artifact role)]
                                                [role a])))
                                      [:plan :implement :verify :review :release]))]
       {:llm-result result

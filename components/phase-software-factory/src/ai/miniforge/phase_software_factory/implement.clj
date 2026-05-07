@@ -286,6 +286,8 @@
         curator-terminal?
         (= :curator/no-files-written
            (get-in curator-result [:error :data :code]))
+        already-implemented-noop?
+        (= :already-implemented (:status impl-result))
         ;; "Degraded handoff" means the implementer agent reported a hard
         ;; error but the curator recovered files anyway. :already-implemented
         ;; is a deliberate skip (work was completed in a prior turn) — the
@@ -314,6 +316,15 @@
                               :raw-error (:error impl-result)))
                      (dissoc :error)
                      (update :metrics merge (:metrics curator-result)))
+                 ;; A verified no-op is legitimate implement success-by-prior-work.
+                 ;; The curator only sees an empty diff, so its terminal
+                 ;; :curator/no-files-written verdict cannot distinguish
+                 ;; "task already satisfied" from "agent did nothing." Preserve
+                 ;; the implementer's normalized :already-implemented result here
+                 ;; and let the outer phase boundary apply the usual repair-loop
+                 ;; guards in leave-implement.
+                 (and already-implemented-noop? curator-terminal?)
+                 impl-result
                  ;; Curator said no-files (terminal). This wins over any
                  ;; implementer error — the implementer's error is the symptom,
                  ;; the empty diff is the root cause the phase runner needs.
