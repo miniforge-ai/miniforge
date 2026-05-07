@@ -38,8 +38,14 @@
   "Directory where decisions are dropped for Claude Code agents."
   (str (config/miniforge-home) "/decisions"))
 
-(defn- ensure-decisions-dir! [agent-id]
-  (let [dir (io/file decisions-dir (str agent-id))]
+(defn- adapter-decisions-dir
+  [{:keys [decisions-dir]}]
+  (or decisions-dir
+      (str (config/miniforge-home) "/decisions")))
+
+(defn- ensure-decisions-dir!
+  [config agent-id]
+  (let [dir (io/file (adapter-decisions-dir config) (str agent-id))]
     (.mkdirs dir)
     dir))
 
@@ -86,7 +92,7 @@
     (try
       (let [agent-id (:agent/id agent-record)
             decision-id (:decision/id decision-resolution)
-            dir (ensure-decisions-dir! agent-id)
+            dir (ensure-decisions-dir! config agent-id)
             file (io/file dir (str decision-id ".edn"))]
         (spit file (pr-str decision-resolution))
         {:delivered? true})

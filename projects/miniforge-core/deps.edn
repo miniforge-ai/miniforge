@@ -57,6 +57,8 @@ ai.miniforge/messages {:local/root "../../components/messages"}
         ai.miniforge/control-plane-adapter {:local/root "../../components/control-plane-adapter"}
         ai.miniforge/dag-primitives {:local/root "../../components/dag-primitives"}
         ai.miniforge/decision {:local/root "../../components/decision"}
+        ai.miniforge/failure-classifier {:local/root "../../components/failure-classifier"}
+        ai.miniforge/progress-detector {:local/root "../../components/progress-detector"}
         ai.miniforge/reporting {:local/root "../../components/reporting"}
         ai.miniforge/release-executor {:local/root "../../components/release-executor"}
         ai.miniforge/pr-lifecycle {:local/root "../../components/pr-lifecycle"}

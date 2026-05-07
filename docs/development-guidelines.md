@@ -326,6 +326,8 @@ $ git commit -m "feat: add new feature"
 **Guidelines:**
 
 - Pre-commit hooks are not suggestions
+- Structural workspace checks are part of pre-commit and CI: `bb poly:check`
+- `poly check` failures are blocking architecture regressions, not optional warnings
 - If check is broken, fix the check, don't disable it
 - "Just this once" becomes "just every time"
 - CI time is expensive - catch issues locally

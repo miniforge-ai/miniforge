@@ -151,22 +151,20 @@
 
 (deftest deliver-decision-writes-edn-file-test
   (testing "Decision is written as <decision-id>.edn under decisions-dir/<agent-id>/"
-    (let [adapter (sut/create-adapter)
+    (let [base (make-temp-dir)
+          adapter (sut/create-adapter {:decisions-dir (.getAbsolutePath base)})
           aid (random-uuid)
           did (random-uuid)
           rec (agent-record :agent/id aid)
           resolution {:decision/id did
                       :decision/resolution "approved"
                       :decision/comment    "looks good"}
-          ret (proto/deliver-decision adapter rec resolution)]
+          ret (proto/deliver-decision adapter rec resolution)
+          expected (io/file base (str aid) (str did ".edn"))]
       (is (true? (:delivered? ret)))
-      ;; File was written under the configured decisions-dir
-      (let [expected (io/file sut/decisions-dir (str aid) (str did ".edn"))]
-        (is (.exists expected))
-        (let [round-trip (read-string (slurp expected))]
-          (is (= resolution round-trip)))
-        ;; Cleanup so the temp file doesn't accumulate.
-        (.delete expected)))))
+      (is (.exists expected))
+      (let [round-trip (read-string (slurp expected))]
+        (is (= resolution round-trip))))))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; send-command

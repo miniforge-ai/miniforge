@@ -59,6 +59,7 @@
      :inherit / :disable / :enable / :tune"
   (:require
    [ai.miniforge.anomaly.interface                    :as anomaly]
+   [ai.miniforge.progress-detector.detectors.repair-loop :as repair-loop]
    [ai.miniforge.progress-detector.event-envelope     :as envelope]
    [ai.miniforge.progress-detector.protocol           :as proto]
    [ai.miniforge.progress-detector.schema             :as schema]
@@ -313,6 +314,14 @@
   [state]
   (anomalies-by-severity state :fatal))
 
+(def review-fingerprint
+  "Stable fingerprint of the actionable content of a review artifact."
+  repair-loop/review-fingerprint)
+
+(def stagnated?
+  "True when the current review fingerprint has made no actionable progress."
+  repair-loop/stagnated?)
+
 ;------------------------------------------------------------------------------ Rich Comment
 
 (comment
@@ -321,7 +330,6 @@
         cfg  (resolve-config [{:config/params {:window-size 5}}
                               {:config/directive :tune
                                :config/params {:window-size 10}}])
-        st0  (init det (effective-config-params cfg))
         obs1 (make-observation :tool/Read 1 (java.time.Instant/now)
                                {:tool/duration-ms 120})
         stf  (reduce-observations det (effective-config-params cfg) [obs1])]
