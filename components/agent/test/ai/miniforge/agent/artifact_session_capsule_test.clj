@@ -23,17 +23,27 @@
    [clojure.test :refer [deftest testing is]]
    [clojure.string :as str]
    [ai.miniforge.agent.artifact-session :as session]
-   [ai.miniforge.dag-executor.executor :as executor]))
+   [ai.miniforge.dag-executor.executor :as executor]
+   [ai.miniforge.dag-executor.result :as result]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Mock executor infrastructure
+
+(def ^:private capsule-workdir
+  "/workspace")
+
+(def ^:private capsule-session-dir
+  (str capsule-workdir "/.miniforge-session"))
+
+(def ^:private capsule-cleanup-command
+  (str "rm -rf " capsule-session-dir))
 
 (defn- mock-execute!
   "Mock executor that records commands and returns success."
   [log]
   (fn [_executor _env-id command & [_opts]]
     (swap! log conj command)
-    {:ok? true :data {:stdout "" :stderr "" :exit-code 0}}))
+    (result/ok {:stdout "" :stderr "" :exit-code 0})))
 
 (defn- mock-execute-with-artifact!
   "Mock executor that records commands and returns artifact EDN for cat commands."
@@ -42,15 +52,17 @@
     (swap! log conj command)
     (cond
       (and (string? command) (str/starts-with? command "cat ") (str/includes? command "artifact.edn"))
-      {:ok? true :data {:stdout "{:code/id \"a1b2c3d4-e5f6-7890-abcd-ef1234567890\" :code/description \"test\"}"
-                        :stderr "" :exit-code 0}}
+      (result/ok {:stdout "{:code/id \"a1b2c3d4-e5f6-7890-abcd-ef1234567890\" :code/description \"test\"}"
+                  :stderr ""
+                  :exit-code 0})
 
       (and (string? command) (str/starts-with? command "cat ") (str/includes? command "implement.edn"))
-      {:ok? true :data {:stdout "{:status :already-implemented :summary \"already there\"}"
-                        :stderr "" :exit-code 0}}
+      (result/ok {:stdout "{:status :already-implemented :summary \"already there\"}"
+                  :stderr ""
+                  :exit-code 0})
 
       :else
-      {:ok? true :data {:stdout "" :stderr "" :exit-code 0}})))
+      (result/ok {:stdout "" :stderr "" :exit-code 0}))))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; with-session dispatch tests
@@ -83,11 +95,11 @@
         (let [context {:execution/mode :governed
                        :execution/executor :mock-executor
                        :execution/environment-id "env-123"
-                       :execution/worktree-path "/workspace"}
+                       :execution/worktree-path capsule-workdir}
               result (session/with-session context
                        (fn [session]
                          (is (true? (:capsule? session)))
-                         (is (= "/workspace/.miniforge-session" (:dir session)))
+                         (is (= capsule-session-dir (:dir session)))
                          (is (= :mock-executor (:executor session)))
                          :capsule-response))]
           (is (= :capsule-response (:llm-result result)))
@@ -104,7 +116,7 @@
         (let [context {:execution/mode :governed
                        :execution/executor :mock
                        :execution/environment-id "env-456"
-                       :execution/worktree-path "/workspace"}
+                       :execution/worktree-path capsule-workdir}
               result (session/with-session context
                        (fn [_session] :done))]
           (is (some? (:artifact result)))
@@ -116,14 +128,13 @@
           context {:execution/mode :governed
                    :execution/executor :mock
                    :execution/environment-id "env-789"
-                   :execution/worktree-path "/workspace"}]
+                   :execution/worktree-path capsule-workdir}]
       (with-redefs [executor/execute! (mock-execute! log)]
         (is (thrown? Exception
               (session/with-session context
                 (fn [_session]
-                  (throw (ex-info "test error" {})))))))
-      ;; Cleanup rm -rf should have been called
-      (is (some #(.contains (str %) "rm -rf") @log)))))
+                  (throw (ex-info "test error" {}))))))
+        (is (some #(= capsule-cleanup-command %) @log))))))
 
 ;------------------------------------------------------------------------------ Layer 2
 ;; Context cache dispatch tests
@@ -145,7 +156,7 @@
              :exec! (mock-execute! log)
              :executor :mock
              :environment-id "env-test"
-             :workdir "/workspace"}]
+             :workdir capsule-workdir}]
       (session/write-context-cache-for-session! s {"src/foo.clj" "(ns foo)"})
       (is (some #(.contains (str %) "context-cache.edn") @log)))))
 
@@ -160,7 +171,7 @@
              :exec! (mock-execute-with-artifact! log)
              :executor :mock
              :environment-id "env-uuid"
-             :workdir "/workspace"}
+             :workdir capsule-workdir}
           artifact (session/read-capsule-artifact s)]
       (is (some? artifact))
       (is (uuid? (:code/id artifact))))))
@@ -172,7 +183,7 @@
              :exec! (mock-execute-with-artifact! log)
              :executor :mock
              :environment-id "env-role"
-             :workdir "/workspace"}
+             :workdir capsule-workdir}
           artifact (session/read-capsule-worktree-artifact s :implement)]
       (is (= :already-implemented (:status artifact)))
       (is (= "already there" (:summary artifact))))))
