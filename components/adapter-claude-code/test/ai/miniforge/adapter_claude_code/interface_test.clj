@@ -74,9 +74,9 @@
 ;; create-adapter / adapter-id
 
 (deftest create-adapter-returns-record-test
-  (testing "create-adapter returns a ClaudeCodeAdapter record"
+  (testing "create-adapter returns a control-plane adapter"
     (let [a (sut/create-adapter)]
-      (is (instance? ai.miniforge.adapter_claude_code.interface.ClaudeCodeAdapter a))
+      (is (satisfies? proto/ControlPlaneAdapter a))
       (is (= :claude-code (proto/adapter-id a))))))
 
 (deftest create-adapter-stores-config-test
