@@ -17,10 +17,11 @@
 ;; limitations under the License.
 
 (ns ai.miniforge.pr-lifecycle.conflict-resolution-test
-  "Stage 3 slices 3a + 3b: tests for the pure-data classifiers, the
-   conflict-input builder, and the git-plumbing probes
-   (extract-conflict-paths, push-resolution!). Slice 3c adds tests
-   for the orchestrator entry point."
+  "Stage 3 slices 3a + 3b + 3c: tests for the pure-data classifiers,
+   the conflict-input builder, the git-plumbing probes, and the
+   resolve-pr-conflicts! orchestrator entry point. Slice 3d wires
+   the orchestrator into the attempt-merge path with separate
+   integration tests there."
   (:require
    [ai.miniforge.dag-executor.interface :as dag]
    [ai.miniforge.pr-lifecycle.conflict-resolution :as sut]
@@ -215,6 +216,97 @@
         (let [r (sut/push-resolution! repo "feat/x")]
           (is (dag/err? r))
           (is (= :command-failed (:code (:error r)))))
+        (finally (fs/delete-tree repo))))))
+
+;------------------------------------------------------------------------------ resolve-pr-conflicts! (orchestrator)
+
+(deftest resolve-pr-conflicts-happy-path-test
+  (testing "End-to-end on a real conflicted worktree with an injected
+            resolve-fn that simulates the merge-resolution sub-
+            workflow's success contract: writes a clean file, commits,
+            returns dag/ok with :commit-sha. resolve-pr-conflicts!
+            then push-resolution!s the result. We mock push by
+            redef'ing push-resolution! — the real `git push` would
+            fail without a configured remote."
+    (let [repo (temp-conflict-repo!)
+          mock-resolve (fn [{:keys [worktree-path]}]
+                         (spit (str worktree-path "/conflict.txt")
+                               "from a\nfrom main\n")
+                         (run-git! worktree-path "add" "conflict.txt")
+                         (run-git! worktree-path "commit"
+                                   "--no-gpg-sign" "--no-verify"
+                                   "-m" "resolution")
+                         (let [head (:out (shell/sh "git" "-C" worktree-path
+                                                    "rev-parse" "HEAD"))]
+                           (dag/ok {:commit-sha (str/trim head)
+                                    :iterations 1
+                                    :resolved?  true})))]
+      (with-redefs [sut/push-resolution!
+                    (fn [_ pr-branch]
+                      (dag/ok {:pushed?    true
+                               :pushed-sha "fake-sha"
+                               :pr-branch  pr-branch}))]
+        (try
+          (let [r (sut/resolve-pr-conflicts!
+                   {:worktree-path repo
+                    :pr            sample-pr
+                    :resolve-fn    mock-resolve
+                    :context       {}})]
+            (is (dag/ok? r))
+            (is (true? (:resolved? (:data r))))
+            (is (= 1 (:iterations (:data r))))
+            (is (= "feat/widget" (:pr-branch (:data r)))))
+          (finally (fs/delete-tree repo)))))))
+
+(deftest resolve-pr-conflicts-no-conflicts-detected-test
+  (testing "If extract-conflict-paths comes back empty (caller
+            staged the wrong worktree, or git already cleaned the
+            markers), resolve-pr-conflicts! short-circuits with a
+            clear dag/err rather than handing an empty conflict-
+            input to the resolver — that would fail downstream
+            with a less helpful message."
+    (let [repo (str (fs/create-temp-dir {:prefix "pr-empty-test-"}))]
+      (try
+        (run-git! repo "init" "-b" "main")
+        (run-git! repo "config" "user.email" "t@t")
+        (run-git! repo "config" "user.name" "t")
+        (run-git! repo "config" "commit.gpgsign" "false")
+        (spit (str repo "/x.txt") "x\n")
+        (run-git! repo "add" "x.txt")
+        (run-git! repo "commit" "-m" "x")
+        (let [resolve-called? (atom false)
+              r (sut/resolve-pr-conflicts!
+                 {:worktree-path repo
+                  :pr            sample-pr
+                  :resolve-fn    (fn [_]
+                                   (reset! resolve-called? true)
+                                   (dag/ok {}))
+                  :context       {}})]
+          (is (dag/err? r))
+          (is (= :no-conflicts-detected (:code (:error r))))
+          (is (false? @resolve-called?)
+              "the injected resolver was not called — short-circuit
+               happened before the dead-end invocation"))
+        (finally (fs/delete-tree repo))))))
+
+(deftest resolve-pr-conflicts-passes-unresolvable-anomaly-through-test
+  (testing "When the injected resolver returns the
+            :dag-multi-parent-unresolvable terminal anomaly,
+            resolve-pr-conflicts! passes it through unchanged so
+            the caller can surface it to the human review path the
+            same way it would for a comment-loop failure."
+    (let [repo (temp-conflict-repo!)
+          terminal {:anomaly/category :anomalies/dag-multi-parent-unresolvable
+                    :anomaly/message  "Merge conflict could not be auto-resolved"
+                    :resolution/reason :budget-exhausted}
+          r (sut/resolve-pr-conflicts!
+             {:worktree-path repo
+              :pr            sample-pr
+              :resolve-fn    (fn [_] terminal)
+              :context       {}})]
+      (try
+        (is (= terminal r)
+            "no wrapping/munging — caller sees the original anomaly")
         (finally (fs/delete-tree repo))))))
 
 ;------------------------------------------------------------------------------ Rich Comment

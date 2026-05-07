@@ -38,6 +38,8 @@
    lifecycle automatically engages on a CONFLICTING state."
   (:require
    [ai.miniforge.dag-executor.interface :as dag]
+   [ai.miniforge.logging.interface :as log]
+   [ai.miniforge.pr-lifecycle.messages :as messages]
    [babashka.process :as process]
    [clojure.string :as str]))
 
@@ -179,6 +181,72 @@
    :merge/input-key  (str "pr-" id "-" head-sha "-" base-sha)
    :merge/conflicts  (mapv (fn [p] {:path p :stages ["1" "2" "3"]})
                            conflict-paths)})
+
+;------------------------------------------------------------------------------ Layer 2
+;; Public entry — orchestrate the §6.4 hook (Stage 3c)
+
+(defn resolve-pr-conflicts!
+  "Spec §6.4 entry point. Run the merge-resolution sub-workflow on
+   a PR that's CONFLICTING with its base, then push the resolution
+   commit to the PR branch.
+
+   Inputs (one map for clarity at the call site):
+   - `:worktree-path` — local worktree where the PR branch is
+     checked out and the attempted merge with base has produced
+     conflict markers. Caller is responsible for staging that
+     state — keeping it outside this fn lets it be exercised
+     independently in tests.
+   - `:pr` — `{:pr/id :pr/branch :pr/base :pr/head-sha :pr/base-sha}`.
+   - `:resolve-fn` — injected
+     `(fn [{:keys [conflict-input host-repo worktree-path task-id]}])`.
+     Compatible with workflow.merge-resolution/resolve-conflict!.
+     Caller supplies it to avoid the workflow → pr-lifecycle dep
+     cycle.
+   - `:context` — optional, carries `:logger`. Forwarded to
+     resolve-fn via its own opts where useful.
+
+   Returns:
+   - dag/ok `{:resolved? true :pushed-sha <sha> :iterations N}` on
+     success.
+   - The terminal `:dag-multi-parent-unresolvable` anomaly from
+     the resolver on resolution failure (caller surfaces to the
+     human review path).
+   - dag/err on infrastructure failures (extract-conflict-paths or
+     push-resolution!)."
+  [{:keys [worktree-path pr resolve-fn context]}]
+  (let [logger (:logger context)
+        paths-r (extract-conflict-paths worktree-path)]
+    (when logger
+      (log/info logger :pr-lifecycle :conflict-resolution/starting
+                {:message (messages/t :conflict-resolution/starting)
+                 :data    {:pr/id (:pr/id pr)
+                           :pr/branch (:pr/branch pr)}}))
+    (cond
+      (dag/err? paths-r)
+      paths-r
+
+      (empty? (:data paths-r))
+      (dag/err :no-conflicts-detected
+               (messages/t :conflict-resolution/no-conflicts)
+               {:pr/id (:pr/id pr)})
+
+      :else
+      (let [conflict-input (build-pr-conflict-input pr (:data paths-r))
+            outcome (resolve-fn {:conflict-input conflict-input
+                                 :host-repo      worktree-path
+                                 :worktree-path  worktree-path
+                                 :task/id        (:task/id conflict-input)})]
+        (if (dag/ok? outcome)
+          (let [push-r (push-resolution! worktree-path (:pr/branch pr))]
+            (if (dag/ok? push-r)
+              (dag/ok (merge (:data push-r)
+                             {:resolved?  true
+                              :iterations (:iterations (:data outcome))}))
+              push-r))
+          ;; outcome is the terminal :dag-multi-parent-unresolvable
+          ;; anomaly — pass it through unchanged so the caller can
+          ;; surface to the human review path.
+          outcome)))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
