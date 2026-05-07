@@ -75,6 +75,20 @@
     (is (nil? (:workflow-run/spec run))
         "no spec identity is set when the event carries none")))
 
+(deftest workflow-started-omits-blank-spec-fields
+  ;; Blank or whitespace-only title / description must not produce
+  ;; `{:spec/title ""}`, which would violate the `[:string {:min 1}]`
+  ;; schema and is not useful identity anyway.
+  (let [wf-id (random-uuid)
+        table (acc/apply-event schema/empty-table
+                               (ev :workflow/started
+                                   {:workflow/id   wf-id
+                                    :workflow/spec {:spec/title       "   "
+                                                    :spec/description ""}}))
+        run   (get-in table [:workflows wf-id])]
+    (is (nil? (:workflow-run/spec run))
+        "blank string fields are dropped, leaving no spec identity to emit")))
+
 (deftest workflow-started-normalizes-bare-title-and-description
   ;; Producers that build :workflow/spec from raw input may emit `:title` /
   ;; `:description` rather than the parsed `:spec/*` keys. Keep that path

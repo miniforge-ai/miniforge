@@ -155,8 +155,12 @@
    shape some emitters use when building a spec from raw input."
   [event]
   (let [spec        (:workflow/spec event)
-        title       (or (:spec/title spec) (:title spec))
-        description (or (:spec/description spec) (:description spec))
+        ;; Trim + not-empty so blank strings ("", "   ") are dropped rather
+        ;; than emitted as `{:spec/title ""}` — that shape would violate the
+        ;; `[:string {:min 1}]` schema constraint and is not useful identity.
+        clean       (fn [v] (when (string? v) (not-empty (str/trim v))))
+        title       (or (clean (:spec/title spec))       (clean (:title spec)))
+        description (or (clean (:spec/description spec)) (clean (:description spec)))
         intent      (:spec/intent spec)
         m (cond-> {}
             title       (assoc :spec/title title)
