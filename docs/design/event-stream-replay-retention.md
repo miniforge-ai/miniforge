@@ -1,7 +1,8 @@
 # Event-stream replay, retention, and quiesce (BD-2)
 
-Status: **draft v3**, opened 2026-05-07, revised twice 2026-05-07 after
-design review. Author: Christopher Lester (`miniforge-control` BD-2).
+Status: **draft v4**, opened 2026-05-07, revised three times 2026-05-07
+after design review. Author: Christopher Lester (`miniforge-control`
+BD-2).
 
 This RFC scopes three coupled producer-side problems that surface as
 consumer pain in `miniforge-control`:
@@ -17,6 +18,37 @@ The control-plane consumer can mitigate cold start with a history window
 (`UX-K`), but cannot fix the producer-side race or the unbounded log. This
 RFC proposes the upstream changes that make the consumer's job tractable
 and tracks them as a sequenced burndown across two repos.
+
+## v4 changes vs v3
+
+Open questions resolved into commitments. Two material guardrails
+added:
+
+- **Crashed workflows whose snapshot synthesis fails or times out are
+  now archived in a *degraded* state**, not "archived without snapshot."
+  Manifest carries `archive_status` + `snapshot_status` and the slow
+  path protects the raw event tail from ordinary retention deletion
+  while `snapshot_status` is `pending` or `failed`. Without this rule,
+  a crashed workflow could become neither hydratable nor replayable —
+  the v3 wording opened that hole.
+- **`MINIFORGE_BEST_EFFORT_SHUTDOWN`** kept as an explicit local/dev
+  opt-out, default off, but reframed as a noisy degradation: drain
+  failures still log structured warnings, the run result still carries
+  `event_durability` metadata, and CI correctness paths must not enable
+  it.
+
+Other v4 changes:
+
+- Active checkpoint cadence formalized as **OR semantics** (events OR
+  time, dirty-only, coalesced, terminal forces final) with explicit
+  config knobs and measurement hooks.
+- Summary index field list pinned: cheap navigation metadata only,
+  counts deferred to lazy snapshot load.
+- Cleanup work explicitly **budgeted per pass** with knobs to prevent
+  retention from becoming a startup/shutdown latency bug.
+- Future-index language softened: avoid frequently rewritten
+  `index.json`; prefer append-only or sparse if measurement justifies
+  it. Add measurement hooks now so the decision is data-driven.
 
 ## v3 changes vs v2
 
@@ -236,6 +268,16 @@ if any publish lands during drain, the result is downgraded to `:ok? false
    fsync(parent dir)` where supported. Verify by killing the process
    mid-write and checking that no half-written event file is read on
    startup.
+9. **Best-effort shutdown — timeout.** Set
+   `MINIFORGE_BEST_EFFORT_SHUTDOWN=1`, slow sink hits timeout, workflow
+   succeeded. Assert exit zero, run result carries
+   `event_durability: "best_effort_timeout"` and `undrained_event_count`.
+10. **Best-effort shutdown — sink failure.** Same flag, sink write
+    fails. Assert structured `failed_sinks` populated; exit zero only
+    if workflow itself succeeded (failure cases still exit non-zero).
+11. **Best-effort never silent.** Run with the flag set; assert at
+    least one structured warning is logged on every drain
+    timeout / sink failure.
 
 ---
 
@@ -250,6 +292,9 @@ Every workflow directory carries a `manifest.json`:
   "workflow_id": "f47ac10b-58cc-4372-a567-0e02b2c3d479",
   "schema_version": "1.0.0",
   "status": "active",
+  "archive_status": "live",
+  "snapshot_status": "none",
+  "snapshot_failure_reason": null,
   "created_at": "2026-05-07T03:00:00Z",
   "completed_at": null,
   "archived_at": null,
@@ -257,6 +302,7 @@ Every workflow directory carries a `manifest.json`:
     "workflow_sequence_number": 0,
     "last_event_id": null
   },
+  "raw_events_retained": true,
   "raw_events_retained_until": null,
   "owner": {
     "pid": 12345,
@@ -266,6 +312,23 @@ Every workflow directory carries a `manifest.json`:
   }
 }
 ```
+
+Field semantics:
+
+- `status` — workflow lifecycle (active / completed / failed /
+  cancelled / crashed).
+- `archive_status` — storage lifecycle (live / archiving / archived /
+  tombstoned).
+- `snapshot_status` — snapshot availability (none / available /
+  pending / failed). `pending` means synthesis was attempted and
+  timed out; `failed` means it errored.
+- `snapshot_failure_reason` — populated when `snapshot_status` is
+  `pending` or `failed` (e.g. `"timeout"`, `"corrupted-tail"`).
+- `raw_events_retained` — when true, the slow path **must not** delete
+  this workflow's raw event tail under ordinary retention rules. Set
+  true on crashed workflows whose snapshot is `pending`/`failed` so
+  the only reconstructable state is preserved. A separate explicit
+  knob (default off) controls lossy crashed-workflow retention.
 
 The state machine:
 
@@ -291,9 +354,12 @@ misclassifies legitimately quiet active workflows.
 | Tier | Default | Knob |
 |---|---|---|
 | Raw archived event tail | 30 d | `MINIFORGE_EVENTS_ARCHIVED_TAIL_RETENTION_DAYS` |
-| Workflow summary / snapshot | forever | `MINIFORGE_EVENTS_SUMMARY_RETENTION_DAYS` (set to integer to bound) |
+| Workflow summary / snapshot | forever | `MINIFORGE_EVENTS_SUMMARY_RETENTION_DAYS` (integer to bound) |
 | Cleanup cadence | 60 min | `MINIFORGE_EVENTS_CLEANUP_INTERVAL_MINUTES` |
 | Crashed-workflow detection threshold | lease TTL × 2 | `MINIFORGE_EVENTS_CRASHED_THRESHOLD_SECONDS` |
+| Crashed snapshot synthesis timeout | 10 s | `MINIFORGE_EVENTS_CRASH_SNAPSHOT_TIMEOUT_SECONDS` |
+| Cleanup workflows per pass | 10 | `MINIFORGE_EVENTS_CLEANUP_MAX_WORKFLOWS_PER_PASS` |
+| Cleanup wall-time per pass | 30 s | `MINIFORGE_EVENTS_CLEANUP_MAX_SECONDS_PER_PASS` |
 
 When raw event tail expires, raw events are deleted but the snapshot
 and summary stay. The workflow transitions `archived → tombstoned`.
@@ -359,17 +425,64 @@ Three triggers, all writing the same on-disk shape:
    :cancelled` followed by `quiesce!`, the supervisory-state component
    serializes its slice of the entity table for that workflow to
    `live/{wid}/snapshot.json`, then BD-2b's atomic archive moves it.
-2. **Active checkpoint.** Every N events or M minutes (whichever
-   comes first; defaults `N=500`, `M=2`), the component writes
+2. **Active checkpoint.** The component writes
    `live/{wid}/checkpoint.json` carrying the current entity-table
-   slice plus watermark. Atomic via temp + rename.
+   slice plus watermark. Atomic via temp + rename. Cadence:
+
+   ```text
+   write checkpoint when:
+     workflow is dirty
+     AND (
+       events_since_last_checkpoint >= CHECKPOINT_EVERY_EVENTS
+       OR seconds_since_last_checkpoint >= CHECKPOINT_EVERY_SECONDS
+     )
+   ```
+
+   Defaults: `CHECKPOINT_EVERY_EVENTS=500`,
+   `CHECKPOINT_EVERY_SECONDS=120`. OR semantics — either threshold
+   is sufficient, idle workflows produce no writes.
+
+   Coalescing: **at most one checkpoint write per workflow in flight**.
+   If another checkpoint is requested while one is running, the
+   request is coalesced into a single follow-up write, not queued.
+
+   Terminal events (`:workflow/completed | :failed | :cancelled`)
+   force a final checkpoint regardless of cadence, as does clean
+   shutdown when active state is dirty.
+
+   Knobs:
+
+   - `MINIFORGE_EVENTS_CHECKPOINT_EVERY_EVENTS` (default `500`)
+   - `MINIFORGE_EVENTS_CHECKPOINT_EVERY_SECONDS` (default `120`)
 3. **Crashed slow-path synthesis.** When BD-2b classifies a workflow
-   as crashed and it has no live snapshot, the cleanup process replays
-   the workflow's retained events in a fresh accumulator, writes
-   `snapshot.json`, then archives. If replay fails (corrupted events),
-   the archive completes without a snapshot and the manifest carries
-   `snapshot_watermark.last_event_id: null`. Consumer hydrates raw
-   events only.
+   as crashed and it has no live snapshot, the cleanup process attempts
+   to replay the workflow's retained events in a fresh accumulator and
+   write `snapshot.json` before archiving. The attempt is bounded by
+   `MINIFORGE_EVENTS_CRASH_SNAPSHOT_TIMEOUT_SECONDS` (default 10 s).
+
+   Three outcomes, all of which **still archive** the workflow:
+
+   | Outcome | `snapshot_status` | Raw events kept? |
+   |---|---|---|
+   | Replay succeeds within timeout | `available` | per normal retention |
+   | Replay times out | `pending` | yes — protected from tail deletion |
+   | Replay errors (corrupted events, schema mismatch) | `failed` | yes — protected from tail deletion |
+
+   When `snapshot_status` is `pending` or `failed`, the manifest's
+   `raw_events_retained: true` overrides the ordinary tail-deletion
+   rule. A later cleanup pass may retry synthesis; on success it
+   promotes `pending → available` and the raw tail returns to normal
+   retention.
+
+   This guardrail closes a v3 hole where a crashed workflow could
+   become neither hydratable (no snapshot) nor replayable (raw tail
+   deleted at 30 d).
+
+   Headless shutdown does **not** synthesize crashed-workflow
+   snapshots inline — only quiesce/drain and active-workflow
+   checkpoint writes run there. Crashed synthesis happens in the
+   scheduled cleanup pass, bounded by per-pass workflow and wall-time
+   budgets so it can't turn into a startup latency bug.
 
 ### Snapshot schema
 
@@ -444,6 +557,10 @@ Cold start in `miniforge-control`:
 4. Tombstoned workflows: hydrate from snapshot only; raw events gone.
 5. Older archived workflows (outside UX-K window): omit from startup,
    hydrate on explicit open.
+6. Workflows with `snapshot_status: "pending" | "failed"`: surface as
+   "incomplete history" in the runs list and, on dossier open, replay
+   the retained raw event tail to reconstruct state on the fly. The
+   raw_events_retained guard guarantees the tail is still present.
 ```
 
 The eager-load avoidance is what fixes the cold-start cost. With
@@ -459,22 +576,42 @@ its workflow list from.
 2. **Cross-language fixture parity.** A canonical snapshot fixture is
    checked in to both `miniforge` and `miniforge-control`. Both
    languages decode it; entity-by-entity assertions match.
-3. **Active checkpoint cadence.** Publish 1500 events; verify three
-   checkpoints written at sequences ~500/1000/1500, each watermark
-   correct.
-4. **Crashed-workflow synthesis.** Kill mid-pipeline; restart cleanup;
+3. **Active checkpoint cadence — events.** Publish 1500 events
+   quickly; verify three checkpoints at ~500/1000/1500.
+4. **Active checkpoint cadence — time.** Publish a single event,
+   wait `CHECKPOINT_EVERY_SECONDS + ε`; verify a second checkpoint
+   was written at the time threshold even though the event count was
+   well under 500.
+5. **Active checkpoint — idle clean produces nothing.** Workflow
+   exists but emits no new events; assert no checkpoint writes.
+6. **Active checkpoint coalescing.** Force two cadence triggers to
+   fire while a previous checkpoint write is in flight; assert
+   exactly one follow-up write happens, not two.
+7. **Active checkpoint — terminal forces final.** Publish 100 events
+   (under `CHECKPOINT_EVERY_EVENTS`), then `:workflow/completed`;
+   assert a final checkpoint is written before archive.
+8. **Crashed-workflow synthesis.** Kill mid-pipeline; restart cleanup;
    verify slow-path replays retained events into a snapshot, manifest
-   transitions `crashed → archived`.
-5. **Crashed with corrupted tail.** Inject a malformed event file;
-   verify cleanup completes archive *without* a snapshot, manifest
-   carries `snapshot_watermark.last_event_id: null`, consumer falls
-   back to raw-event replay (and surfaces "incomplete history" in the
-   dossier).
-6. **Unknown snapshot version rejected.** Bump `:snapshot/version` to
-   `2.0.0`; verify reader logs and skips, falls back to event replay.
-7. **Forward-compatible entities.** Add a junk key under
-   `:snapshot/entities`; verify reader hydrates known keys and ignores
-   the unknown one.
+   transitions `crashed → archived` with
+   `snapshot_status: "available"`.
+9. **Crashed synthesis timeout.** Force replay to exceed the
+   crash-snapshot timeout; verify archive completes,
+   `snapshot_status: "pending"`, `raw_events_retained: true`, and
+   that ordinary tail-retention cleanup leaves the raw events alone.
+10. **Crashed synthesis retry promotes pending.** Run a second
+    cleanup pass with the timeout raised; verify the workflow's
+    `snapshot_status` transitions `pending → available` and
+    `raw_events_retained` returns to false.
+11. **Crashed with corrupted tail.** Inject a malformed event file;
+    verify cleanup archives with `snapshot_status: "failed"`,
+    `snapshot_failure_reason: "corrupted-tail"`, raw events preserved,
+    consumer falls back to raw-event replay (and surfaces "incomplete
+    history" in the dossier).
+12. **Unknown snapshot version rejected.** Bump `:snapshot/version` to
+    `2.0.0`; verify reader logs and skips, falls back to event replay.
+13. **Forward-compatible entities.** Add a junk key under
+    `:snapshot/entities`; verify reader hydrates known keys and
+    ignores the unknown one.
 
 ---
 
@@ -503,6 +640,41 @@ This is the actual cross-repo interface. Both `miniforge` and
   summaries/
     index.json                   # top-level workflow list, cheap to read
 ```
+
+### Summary index entry shape
+
+The runs-list accelerator. **Cheap navigation metadata only**; counts
+and aggregates are deliberately out of scope for v1 and come from the
+lazily-loaded snapshot.
+
+```json
+{
+  "workflow_id": "f47ac10b-...",
+  "status": "active|completed|failed|crashed|cancelled|archived",
+  "spec_id": "...",
+  "spec_title": "...",
+  "created_at": "2026-05-07T03:00:00Z",
+  "completed_at": null,
+  "archived_at": null,
+  "snapshot_path": "archived/f47ac10b-.../snapshot.transit.json",
+  "snapshot_status": "available|pending|failed|none",
+  "snapshot_version": "1.0.0",
+  "last_event_id": "018f3a9c8e4b12d0",
+  "workflow_sequence_number": 12345
+}
+```
+
+Out of scope for v1 (intentional):
+
+- PR / decision / task / attention / agent counts.
+- Token / cost totals.
+- Phase timing aggregates.
+
+These belong in the lazily-loaded workflow snapshot. The runs list
+shows a cheap row immediately and enriches on focus / open. One
+exception worth flagging: if the runs list later needs a single
+"attention required" boolean at startup, that one denormalized field
+might be worth carrying. Hold off until the UI demonstrably needs it.
 
 ### Sortable event IDs and filename grammar
 
@@ -579,20 +751,43 @@ parsing payloads**. They do **not** by themselves make directory
 enumeration cheaper — that remains `O(files-in-dir)`.
 
 For workflows with O(10⁴) events the no-parse win is already a >10×
-cold-start improvement, which is the actual pain point. True
-`O(events-in-window)` requires one of:
+cold-start improvement, which is the actual pain point.
 
-- bucketed subdirectories keyed off the event-id timestamp prefix
-  (`events/018f3a/{event-id}__{seq}.transit.json`),
-- a per-workflow index file (`index.sqlite` or `index.json`
-  mapping event-id → filename / offset),
-- an append-only per-workflow log with a separate index.
+True `O(events-in-window)` is deferred to follow-on work. Possible
+shapes, in rough order of preference:
 
-None are in this RFC's scope. If post-implementation measurement shows
-directory enumeration is the new bottleneck, the smallest compatible
-follow-on is bucketed directories — the bucket can be derived from the
-filename without changing the on-disk contract for any individual
-file.
+- **Bucketed subdirectories** keyed off the event-id timestamp prefix
+  (`events/018f3a/{event-id}__{seq}.transit.json`). Smallest contract
+  change — bucket derives from filename without per-file metadata.
+- **Sparse per-workflow index** — every K events, write a record
+  `{seq, event_id, filename}` to an append-only `index.ndjson`. Reader
+  scans forward from the nearest indexed point. Avoids
+  write-amplification of a per-event index.
+- **Append-only per-workflow log + index** — restructure to one log
+  file per workflow with byte offsets. Bigger storage-shape change.
+- **SQLite per workflow** — strongest range semantics, biggest
+  decision.
+
+A frequently rewritten `index.json` mapping every event is **not**
+recommended — write amplification and corruption hotspot.
+
+### Measurement hooks (in BD-2 scope)
+
+So the index decision is data-driven, the reader emits these counters
+in BD-2 itself:
+
+- `directory_entries_listed`
+- `files_opened`
+- `payloads_parsed`
+- `skipped_by_filename_watermark`
+- `replay_wall_time_ms`
+- `snapshot_write_ms` / `snapshot_size_bytes` (per active checkpoint)
+- `suffix_replay_ms` / `suffix_replay_events` (per workflow on cold
+  start)
+
+Logged at debug, summarized at info on cold-start completion. A
+follow-on RFC that proposes any of the index shapes above must cite
+these numbers from production telemetry, not vibe.
 
 ### Manifest schema (cross-repo source of truth)
 
@@ -649,29 +844,78 @@ BD-2a (quiesce + drain)
 - **BD-3** becomes implementable once snapshots and summaries index
   exist.
 
-## Open questions
+## Decisions (resolved from v3 open questions)
 
-1. **Active checkpoint cadence.** Defaults `N=500` events / `M=2 min`.
-   Pending real-workload measurement; may need to be lower for chatty
-   workflows.
-2. **Snapshot summary scope.** Does the summaries index carry just
-   workflow status + spec title (cheap, what BD-1 enables), or also
-   counts (PRs, decisions, tasks)? Counts make the runs list richer at
-   startup but enlarge the index. Recommend status + spec only;
-   counts come from the (lazily-loaded) snapshot.
-3. **Crashed-workflow snapshot synthesis cost.** Replaying retained
-   events at archival time pays the O(events) cost once, not on every
-   cold start, but it can still spike during cleanup. Should slow-path
-   archival be batched / rate-limited, or run inline? Recommend inline
-   with a per-workflow timeout that, on miss, archives without
-   snapshot.
-4. **`MINIFORGE_BEST_EFFORT_SHUTDOWN`.** Provided for CI / dev loops
-   that don't care about durability. Default off. Keep, or push back?
-5. **Index file vs current layout.** This RFC does not propose an
-   index file. If post-implementation measurement shows directory
-   enumeration is the new bottleneck, follow-on work adds
-   `live/{wid}/events/index.json` mapping seq → filename. Pre-deciding
-   would over-build.
+### Active checkpoint cadence
+
+Active workflows checkpoint when **dirty** and either 500 events or
+2 minutes have elapsed since the previous checkpoint (OR semantics, not
+AND). Idle clean workflows produce no writes. Terminal events force a
+final checkpoint before archival regardless of cadence. Coalesced so
+at most one checkpoint write per workflow is in flight; an overlapping
+request becomes a single follow-up write, not a queue. Defaults are
+configurable
+(`MINIFORGE_EVENTS_CHECKPOINT_EVERY_EVENTS`,
+`MINIFORGE_EVENTS_CHECKPOINT_EVERY_SECONDS`) and will be revisited
+after measurement of real event volume, snapshot size, and startup
+suffix-replay time.
+
+### Summary index scope
+
+The startup summaries index contains only cheap navigation metadata:
+workflow id, status, spec id/title, timestamps, snapshot pointer,
+snapshot status, version, and watermarks (see schema in the on-disk
+contract section). Entity counts are intentionally excluded from v1
+and come from the lazily-loaded workflow snapshot. The single
+attention-required boolean is the one denormalization candidate to
+revisit if the UI needs it.
+
+### Crashed-workflow snapshot synthesis
+
+Slow-path archival attempts to synthesize a crashed-workflow snapshot
+inline by replaying that workflow's retained event tail. Bounded by
+per-workflow timeout (default 10 s) and per-cleanup-pass workflow /
+wall-time budgets. **All three outcomes archive the workflow** with
+explicit `snapshot_status` (`available` / `pending` / `failed`); the
+`pending` and `failed` states protect the raw event tail from ordinary
+deletion via `raw_events_retained: true`, so the workflow remains
+reconstructable. A later cleanup pass may retry synthesis and promote
+`pending → available`. Headless shutdown does not synthesize crashed
+snapshots inline.
+
+### Best-effort shutdown
+
+`MINIFORGE_BEST_EFFORT_SHUTDOWN` is supported as an explicit opt-out
+for local/dev loops. **Off by default.** Normal headless mode exits
+non-zero on drain timeout or required sink failure; that is the BD-2a
+correctness contract and CI must not weaken it. Best-effort mode
+still attempts quiesce + drain, still logs structured warnings, and
+still reports degradation in the machine-readable run result:
+
+```json
+{
+  "workflow_status": "completed",
+  "event_durability": "best_effort_timeout",
+  "undrained_event_count": 17,
+  "failed_sinks": ["file"]
+}
+```
+
+It exits zero only when (a) `MINIFORGE_BEST_EFFORT_SHUTDOWN=1` is set
+and (b) the workflow result itself was successful. Sink failure is
+never silent.
+
+### Index file
+
+BD-2 does not introduce an index file. Sortable event IDs in
+filenames let the reader skip payload parsing for events below the
+snapshot watermark, but directory enumeration remains proportional to
+files in the workflow directory. Measurement hooks are in BD-2 scope
+so a follow-on RFC can justify any index shape from data, not vibe.
+The deferred shape preference order is bucketed dirs → sparse
+append-only index → restructured log/SQLite. A frequently-rewritten
+per-event `index.json` is explicitly **not** recommended — write
+amplification and corruption hotspot.
 
 ## Tracking
 
