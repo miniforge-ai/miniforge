@@ -1,0 +1,368 @@
+;; =============================================================================
+;; Spec: Progress detector stage 3 — agent.invoke runtime wiring + per-category
+;;       :on-anomaly policy + tool-event surfacing
+;; =============================================================================
+;;
+;; Stage 1 (PR #784) shipped the substrate.
+;; Stage 2 (PR #788) shipped the detectors, supervisor, runtime helper, and
+;;   ported PR #762's review-fingerprint logic into :detector/repair-loop.
+;;   But the runtime sits unconnected: agent.invoke does not yet observe
+;;   live tool events, so :detector/tool-loop never fires on a real run.
+;;
+;; The 2026-05-05 stage-2 dogfood failed at :release before producing any
+;; tool-event observations. Even after merge the wiring caveat persists —
+;; Stage 2 substrate is in main but the only detector that actually fires
+;; today is :detector/repair-loop, via the legacy phase-software-factory
+;; call path that bypasses the runtime helper.
+;;
+;; Stage 3 closes the gap. After Stage 3 ships:
+;;
+;;   - Every agent run constructs a per-call detector runtime via
+;;     pd/make-runtime + pd/make-normalizer.
+;;   - The Claude CLI stream surfaces full tool-use events
+;;     (:tool-name, :tool-input, :tool-output, :tool-error?,
+;;     :tool-call-id) — not just tool-name flags.
+;;   - The agent.invoke layer feeds each tool event through
+;;     pd/observe! and consults the supervisor.
+;;   - On supervisor :terminate, the in-flight LLM stream is
+;;     cancelled and the controlling anomaly is recorded as the
+;;     run's terminating event.
+;;   - Per-category :on-anomaly overrides layer on top of the
+;;     Stage 2 class-default policy, configured per-agent via
+;;     prompt EDN.
+;;
+;; Stage 4 still owns: phase contracts + status taxonomy +
+;; workflow-runner enforcement, :prompt/liveness-watchdog rename
+;; + bb migrate-prompts, composite-rules for promoting heuristics
+;; → mechanical, :detector/no-information-gain (depends on
+;; progress ledger), structured :failure/fingerprint per tool
+;; class (Stage 2 ships a stub that hashes :tool/output text),
+;; :detector/text-similarity, :detector/event-motif-loop,
+;; :detector/repeated-failure.
+
+{:spec/title "Progress detector stage 3 — agent.invoke runtime wiring + per-category :on-anomaly policy"
+
+ :spec/description
+ "Wire the Stage 2 substrate into the agent.invoke LLM-stream
+  boundary so detectors observe live tool events and the supervisor
+  can terminate runs on mechanical anomalies. Layer per-category
+  :on-anomaly overrides onto the Stage 2 class-default policy so
+  individual anomaly categories can opt out of termination without
+  silencing the whole class.
+
+  Layer cake — Stage 3 contributions in **bold**:
+
+    Layer 1 — Budget + liveness     (cost, tokens, turns, OS-wedge)
+                                    [unchanged from Stage 1; rename
+                                     to :prompt/liveness-watchdog
+                                     deferred to Stage 4]
+    Layer 2 — Event normalization   (envelope, tool profile,
+                                     fingerprints) — Stage 2
+                                     **+ tool-input/output/error?
+                                       surfaced from the CLI stream**
+    Layer 3 — Progress / anomaly    (reducer detectors, anomaly facts)
+                                    [unchanged; both Stage 2 detectors
+                                     fire end-to-end now]
+    Layer 4 — **Supervisor policy**     class-default from Stage 2
+                                        + **per-category :on-anomaly
+                                          overrides + prompt-EDN
+                                          configuration**
+    Layer 5 — Phase contracts           [Stage 4]
+
+  ## Why this scope
+
+  The 2026-05-04 dogfood + #779/#781/#782/#783 series chased
+  wallclock thresholds because the only supervision signal the
+  agent layer had was 'how long since stdout produced a chunk?'
+  Stage 2 built the detection mechanism — the within-turn loop
+  detector + the across-turn repair-loop detector. Stage 3 makes
+  them actually observe and act on real runs.
+
+  Per-category :on-anomaly is the smallest policy surface that
+  gives operators a way to tune behavior without touching code.
+  Composite-rules and phase contracts (the rest of the policy
+  surface from the Stage 1 spec) are deferred to Stage 4 because
+  they require infrastructure (composite reducers, phase contract
+  schema, workflow-runner enforcement) that doesn't need to ship
+  alongside the basic wiring.
+
+  ## Component layout (Stage 3 additions)
+
+    components/llm/src/ai/miniforge/llm/
+      protocols/impl/llm_client.clj
+        - parse-cc-stream-line: extend tool_use case to capture
+          :tool-input from the assistant's tool_use block
+        - tool_result handler: emit :tool-output + :tool-error?
+          + :tool-call-id chunk so tool_use and its result can
+          be paired by the agent layer
+        - parse-codex-stream-line: same shape for the codex backend
+
+    components/agent/src/ai/miniforge/agent/
+      detector_wiring.clj      ;; new — owns the per-invoke runtime
+                               ;;   lifecycle: build runtime, build
+                               ;;   normalizer, build per-agent
+                               ;;   detector list from prompt EDN,
+                               ;;   thread tool events through.
+      core.clj                 ;; agent.invoke wraps :on-chunk to
+                               ;;   intercept :tool-use chunks,
+                               ;;   builds observations, feeds them
+                               ;;   to the runtime, calls (pd/check
+                               ;;   runtime), honors :terminate by
+                               ;;   throwing :anomalies.agent/terminated.
+      planner.clj
+      implementer.clj
+      reviewer.clj
+      tester.clj               ;; per-agent detector overlays read
+                               ;;   from prompt EDN. The wiring is
+                               ;;   shared across all four roles —
+                               ;;   no per-role copies of the
+                               ;;   detector pipeline code.
+
+    components/agent/resources/prompts/
+      planner.edn
+      implementer.edn
+      reviewer.edn
+      tester.edn
+      curator.edn
+      releaser.edn             ;; each prompt EDN gains a
+                               ;;   :prompt/detectors block:
+                               ;;     {:detectors/defaults [:tool-loop :repair-loop]
+                               ;;      :on-anomaly         { … category-overrides … }}
+
+    components/progress-detector/src/ai/miniforge/progress_detector/
+      supervisor.clj           ;; handle gains a 3-arity
+                               ;;   (handle policy on-anomaly anomalies)
+                               ;;   that consults the per-category
+                               ;;   :on-anomaly map first, then falls
+                               ;;   back to the class-default policy.
+
+  ## LLM stream extension — tool-input + tool-output
+
+  Today's parse-cc-stream-line for assistant blocks already detects
+  `tool_use` content blocks but only extracts the tool name.
+  Stage 3 extends the chunk shape to also carry:
+
+    :tool-call-id  - unique id from the CLI's tool_use block
+    :tool-input    - the args map the LLM produced
+    :tool-name     - already present
+    :tool-use      - already present (true)
+
+  And for `tool_result` content blocks (currently treated as plain
+  text accumulation), Stage 3 emits a separate chunk:
+
+    {:delta         \"\"
+     :done?         false
+     :tool-result   true
+     :tool-call-id  <matches the prior :tool-use chunk>
+     :tool-output   <result content from the CLI>
+     :tool-error?   <bool; true when the tool reported an error>}
+
+  The agent layer pairs each :tool-result with its earlier :tool-use
+  by :tool-call-id, builds a single Observation carrying both
+  :tool/input and :tool/output (event-envelope redacts both), and
+  feeds it through the runtime.
+
+  This is additive — chunks without :tool-use / :tool-result keys
+  parse identically and existing :on-chunk consumers see no shape
+  change.
+
+  ## agent.invoke wiring
+
+  agent.detector-wiring exposes:
+
+    (with-detector-runtime [runtime ctx prompt-data] body...)
+      Build a per-call runtime + normalizer from prompt-data's
+      :prompt/detectors block, install a wrapper around
+      (:on-chunk ctx) that intercepts tool-use/tool-result chunks
+      and feeds them through the runtime, run body, and on
+      supervisor :terminate, cancel the LLM stream and throw
+      :anomalies.agent/terminated.
+
+  Each role-specific agent (planner, implementer, reviewer,
+  tester, curator, releaser) wraps its existing LLM call path
+  in with-detector-runtime. The wrapping is one form per agent
+  with no per-role logic — the wiring is data-driven from
+  prompt EDN.
+
+  Default behavior when prompt EDN omits :prompt/detectors:
+  use the framework defaults [:tool-loop :repair-loop] with
+  Stage 2's class-default policy and the framework's default
+  config. No prompt change is required for an agent to gain
+  detectors — every agent gets them automatically.
+
+  ## Per-category :on-anomaly policy map
+
+  Stage 2's supervisor.clj handle takes [policy anomalies] where
+  policy is a class → action map. Stage 3 adds a 3-arity
+  (handle policy on-anomaly anomalies) where on-anomaly is a
+  category → action map consulted first:
+
+    {:anomalies.agent/tool-loop      :terminate
+     :anomalies.review/stagnation    :terminate
+     :anomalies.agent/text-loop      :warn}      ;; per-category
+
+  Resolution order:
+    1. Look up the controlling anomaly's category in on-anomaly
+    2. If present, that action wins
+    3. Otherwise fall back to (policy class)
+    4. Otherwise fall back to :continue
+
+  Per-agent prompt EDN can override:
+
+    :prompt/detectors
+    {:detectors/defaults [:tool-loop :repair-loop]
+     :on-anomaly {:anomalies.agent/tool-loop :terminate
+                  :anomalies.review/stagnation :warn}}
+    ;; ^^ reviewer might want to warn-not-terminate on its own
+    ;;    repair-loop signal so the workflow's higher-level
+    ;;    repair budget gets the final call.
+
+  Stage 2's 2-arity (handle policy anomalies) stays for back-compat;
+  it is equivalent to (handle policy {} anomalies).
+
+  ## Termination semantics
+
+  When the supervisor returns :terminate:
+    1. agent.detector-wiring cancels the in-flight LLM stream by
+       closing the underlying process (the LLM client already
+       supports cancellation via the chunk-callback returning
+       a :stop signal — Stage 3 wires that path).
+    2. The controlling anomaly is recorded in the run's event
+       log via :raw-log-ref.
+    3. agent.invoke throws :anomalies.agent/terminated with
+       :anomaly/data carrying the controlling anomaly. The
+       workflow runner catches this and records the run as
+       a detector-terminated failure.
+
+  ## What Stage 3 explicitly does NOT land
+
+  Deferred to Stage 4:
+    - :prompt/progress-monitor → :prompt/liveness-watchdog rename
+      and bb miniforge migrate-prompts (semantic clarification +
+      sweeping migration; lands alongside the policy surface that
+      gates it)
+    - Phase contracts (:phase/contract block per phase)
+    - Phase status taxonomy (:succeeded / :failed-contract /
+      :failed-anomaly / :failed-budget / :failed-liveness /
+      :failed-tool / :cancelled / :requires-human)
+    - Workflow runner enforcement of contracts at phase boundaries
+    - Composite-rules for promoting combined heuristics to
+      mechanical anomalies
+    - :detector/no-information-gain (depends on progress ledger)
+    - Progress ledger reducer + :progress/advanced events
+    - :detector/repeated-failure (depends on structured
+      :failure/fingerprint extraction per tool class)
+    - :detector/text-similarity, :detector/event-motif-loop
+    - Replacing the Stage 2 stub failure-fingerprint with a
+      structured parser per tool class"
+
+ :spec/intent
+ {:type  :feature
+  :scope ["components/llm/src/ai/miniforge/llm/protocols/impl/llm_client.clj"
+          "components/llm/test/ai/miniforge/llm/protocols/impl/llm_client_test.clj"
+          "components/agent/src/ai/miniforge/agent/detector_wiring.clj"
+          "components/agent/test/ai/miniforge/agent/detector_wiring_test.clj"
+          "components/agent/src/ai/miniforge/agent/core.clj"
+          "components/agent/src/ai/miniforge/agent/planner.clj"
+          "components/agent/src/ai/miniforge/agent/implementer.clj"
+          "components/agent/src/ai/miniforge/agent/reviewer.clj"
+          "components/agent/src/ai/miniforge/agent/tester.clj"
+          "components/agent/src/ai/miniforge/agent/curator.clj"
+          "components/agent/src/ai/miniforge/agent/releaser.clj"
+          "components/agent/resources/prompts/planner.edn"
+          "components/agent/resources/prompts/implementer.edn"
+          "components/agent/resources/prompts/reviewer.edn"
+          "components/agent/resources/prompts/tester.edn"
+          "components/agent/resources/prompts/curator.edn"
+          "components/agent/resources/prompts/releaser.edn"
+          "components/progress-detector/src/ai/miniforge/progress_detector/supervisor.clj"
+          "components/progress-detector/test/ai/miniforge/progress_detector/supervisor_test.clj"
+          "components/progress-detector/src/ai/miniforge/progress_detector/runtime.clj"
+          "components/progress-detector/test/ai/miniforge/progress_detector/runtime_test.clj"
+          "components/progress-detector/src/ai/miniforge/progress_detector/interface.clj"]}
+
+ :spec/constraints
+ ["LLM stream extension is additive — chunks without :tool-use / :tool-result keys parse identically; existing :on-chunk consumers see no shape change. Verified by a fixture-replay test that runs the existing chat-stream consumer against a recorded event sequence and asserts the produced text/usage/stop-reason are unchanged"
+  "Detectors stay pure reducers — observe takes (state, observation) and returns a state map with new anomalies appended; no detector reads from the event log, the LLM client, or any external state during observe (Stage 1 contract, preserved)"
+  "Per-event detector overhead in the criterium benchmark stays under 5ms total across the framework's default detector set ([:tool-loop :repair-loop]) on a recorded event-fixture from the event-log-tool-visibility dogfood"
+  "Anomaly evidence remains bounded per Stage 1 — no raw tool args, raw assistant text, or raw file content in evidence payloads. The Stage 2 always-hash redaction in event-envelope is preserved"
+  "Detector wiring is agent-agnostic — the same agent.detector-wiring code path serves planner / implementer / reviewer / tester / curator / releaser. Per-agent overlays come from prompt EDN, not from N copies of the wiring"
+  "Default behavior when prompt EDN omits :prompt/detectors: framework defaults [:tool-loop :repair-loop] with Stage 2 class-default policy. No prompt change required for an agent to gain detector coverage"
+  "Per-category :on-anomaly resolution order: 1) controlling-anomaly category looked up in on-anomaly map; 2) fall back to (policy class); 3) fall back to :continue. Stage 2's 2-arity (handle policy anomalies) stays for back-compat — equivalent to (handle policy {} anomalies)"
+  "Termination cancels the in-flight LLM stream via the existing chunk-callback :stop path. The controlling anomaly is recorded in the run's event log; agent.invoke throws :anomalies.agent/terminated carrying the controlling anomaly under :anomaly/data"
+  "Removing all detectors via prompt EDN ({:detectors/defaults []}) leaves the agent functional and bounded by Layer 1 caps only — Stage 2's runtime null-detector fallback path covers this"
+  "Tool-call-id from the CLI's tool_use block is the pairing key between :tool-use and :tool-result chunks. The agent layer keeps an open-tool-calls map keyed by id; events with no matching id are dropped (CLI gave us a result without a use, or vice versa)"]
+
+ :spec/acceptance-criteria
+ [;; LLM stream extension
+  "parse-cc-stream-line emits :tool-call-id and :tool-input on tool_use content blocks — verified by fixture-replay test against a recorded Claude CLI stream"
+  "parse-cc-stream-line emits a separate :tool-result chunk carrying :tool-call-id, :tool-output, :tool-error? on tool_result content blocks — verified by fixture-replay"
+  "parse-codex-stream-line surfaces the same shape for the codex backend — fixture-replay over a recorded codex session"
+  "Existing :on-chunk consumers (text/usage/stop-reason) see no shape change — fixture-replay test that runs the existing consumer against a recorded session and asserts produced state is byte-identical to a Stage 2 baseline"
+
+  ;; agent.invoke wiring
+  "agent.detector-wiring/with-detector-runtime builds a per-call runtime + normalizer, wraps :on-chunk to intercept tool-use/tool-result chunks, feeds Observations through the runtime, and on :terminate cancels the LLM stream — verified by integration test"
+  "Each of planner, implementer, reviewer, tester, curator, releaser wraps its LLM call path in with-detector-runtime — verified by a structural test that grep-asserts every role-specific :invoke-fn calls with-detector-runtime"
+  "agent.invoke wiring is shared — a code-search asserts a single agent.detector-wiring code path, not per-agent copies of detector + supervisor calls"
+
+  ;; tool-loop fires on a real run
+  "An agent that calls Read on the same path 6 times against the same :resource/version-hash terminates with :anomalies.agent/tool-loop (class :mechanical, severity :error) — integration test against a fake LLM client that produces the looping tool-use stream"
+  "An agent that varies tool calls completes normally — integration test"
+
+  ;; Per-agent overlays
+  "A planner with prompt :prompt/detectors {:disable [:tool-loop]} does not fire that detector — integration test"
+  "A reviewer with prompt :prompt/detectors {:on-anomaly {:anomalies.review/stagnation :warn}} produces a warn anomaly instead of terminating on stagnation — integration test"
+  "A tester with :prompt/detectors {:tune {:tool-loop {:threshold-n 8}}} uses the bumped threshold — integration test"
+
+  ;; Per-category :on-anomaly
+  "supervisor/handle's 3-arity (handle policy on-anomaly anomalies) consults on-anomaly first; missing keys fall through to policy; missing class falls through to :continue — exhaustive truth-table test"
+  "Stage 2's 2-arity (handle policy anomalies) is preserved and equivalent to (handle policy {} anomalies) — equivalence test against a recorded fixture of Stage 2 supervisor decisions"
+
+  ;; Termination
+  "On supervisor :terminate, the in-flight LLM stream is cancelled (the chunk-callback returns :stop) — integration test that asserts the stream consumer stops reading further chunks after termination"
+  "On supervisor :terminate, agent.invoke throws an exception of type :anomalies.agent/terminated whose ex-data :anomaly carries the controlling anomaly — integration test"
+  "All anomalies (controlling and not) emitted during a run are recorded in the run's event log — integration test that captures all emitted events and asserts both controlling and non-controlling anomalies are present"
+
+  ;; Removing all detectors
+  "An agent with prompt :prompt/detectors {:disable :all} (or {:detectors/defaults []}) runs to completion bounded only by Layer 1 caps — integration test"
+
+  ;; Performance
+  "Per-event detector overhead in the criterium benchmark stays under 5ms total across [:tool-loop :repair-loop] on the event-log-tool-visibility dogfood event-fixture (Stage 2 budget, preserved)"
+
+  ;; Evidence bounding
+  "Stage 2's fuzzer test (synthetic 'secret-shaped' content in agent inputs → no leakage in anomaly evidence) extends to cover :tool/output content surfaced through the new tool-result chunk path — verified by extending the fuzzer fixture"
+
+  ;; Dogfood viability
+  "A dogfood run on event-log-tool-visibility EITHER (a) completes through the full SDLC with no detector anomalies, OR (b) terminates with a detector-emitted anomaly that names which detector fired and includes reproducible evidence — verified by recording the run's event log and asserting it contains a :anomalies.agent/terminated event when termination occurred"]
+
+ :spec/deferred
+ [{:stage :stage-4
+   :scope [":prompt/progress-monitor → :prompt/liveness-watchdog rename
+            (semantic clarification — these are OS-wedge timers, not
+            progress checks)"
+           "bb miniforge migrate-prompts command that rewrites old
+            :prompt/progress-monitor blocks to the new shape"
+           "phase contracts (:phase/contract block per phase)"
+           "phase status taxonomy (:succeeded / :failed-contract /
+            :failed-anomaly / :failed-budget / :failed-liveness /
+            :failed-tool / :cancelled / :requires-human)"
+           "workflow runner enforcement of contracts at phase boundaries"
+           "composite-rules for promoting combined heuristics
+            to mechanical anomalies"
+           ":detector/no-information-gain (depends on progress ledger)"
+           "progress ledger reducer + :progress/advanced events"
+           ":detector/repeated-failure (depends on structured
+            :failure/fingerprint extraction per tool class — replaces
+            the Stage 2 stub that hashes :tool/output text)"
+           ":detector/text-similarity"
+           ":detector/event-motif-loop"]}]
+
+ :spec/priority
+ {:tier        :critical
+  :axes        #{:agent-quality :dogfood-enabler :supervision}
+  :theme       :semantic-supervision
+  :rationale   "Stages 1+2 shipped substrate + detectors but the runtime sits unconnected — :detector/tool-loop never fires on a real run. Stage 3 wires it up. After Stage 3 ships, every agent run goes through the detector pipeline and the supervisor can terminate on mechanical anomalies. The threshold-bump cycle (#779/#781/#782/#783) finally retires for the within-turn case. Stage 4 (phase contracts, full policy surface, more detectors) layers on top of a working detection pipeline; building it without Stage 3 would mean designing policy for a system that does not yet emit the events policy reacts to."
+  :blocks      ["agent-stream-watchdog-and-resume.spec.edn"]
+  :blocked-by  ["progress-detector-stage-2.spec.edn"]}
+
+ :spec/workflow-type :canonical-sdlc}
