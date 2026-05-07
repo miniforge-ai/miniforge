@@ -21,8 +21,15 @@
 
    Layer 0: File format detection
    Layer 1: Format-specific parsers (EDN, JSON, Markdown)
-   Layer 2: Spec normalization — canonical :spec/* only"
+   Layer 2: Spec normalization — canonical :spec/* only
+
+   Failure model: layer 0/1/2 fns return canonical anomaly maps
+   (`ai.miniforge.anomaly.interface/anomaly`) on caller-supplied input
+   problems. The single boundary fn `parse-spec-file` escalates anomalies
+   to `ex-info` so existing slingshot callers (CLI `run` command,
+   task-executor pre-flight) keep their exception-shaped contract."
   (:require
+   [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.knowledge.interface :as knowledge]
    [ai.miniforge.spec-parser.schema :as schema]
    [babashka.fs :as fs]
@@ -34,7 +41,10 @@
 ;; File format detection
 
 (defn detect-format
-  "Detect file format from extension."
+  "Detect file format from extension.
+
+   Returns the format keyword on success, or an `:invalid-input` anomaly
+   when the extension is not in the supported set."
   [path]
   (let [ext (fs/extension path)]
     (case ext
@@ -43,36 +53,52 @@
       "edn"  :edn
       "json" :json
       "md"   :markdown
-      (throw (ex-info (str "Unsupported file format: " ext)
-                      {:path path :extension ext})))))
+      (anomaly/anomaly :invalid-input
+                       (str "Unsupported file format: " ext)
+                       {:path path
+                        :extension ext
+                        :supported #{"yaml" "yml" "edn" "json" "md"}}))))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Format-specific parsers
 
 (defn parse-yaml
-  "Parse YAML file content."
+  "Parse YAML file content.
+
+   Returns an `:unsupported` anomaly — YAML support is not yet
+   implemented; callers should convert their spec to EDN, JSON, or
+   Markdown."
   [_content]
-  (throw (ex-info "YAML support coming soon - use EDN or JSON for now"
-                  {:format :yaml
-                   :workaround "Convert your YAML to EDN or JSON"})))
+  (anomaly/anomaly :unsupported
+                   "YAML support coming soon - use EDN or JSON for now"
+                   {:format :yaml
+                    :workaround "Convert your YAML to EDN or JSON"}))
 
 (defn parse-edn
-  "Parse EDN file content."
+  "Parse EDN file content.
+
+   Returns the parsed value on success, or an `:invalid-input` anomaly
+   when the content is malformed."
   [content]
   (try
     (edn/read-string content)
     (catch Exception e
-      (throw (ex-info "Failed to parse EDN file"
-                      {:error (ex-message e)} e)))))
+      (anomaly/anomaly :invalid-input
+                       "Failed to parse EDN file"
+                       {:error (ex-message e)}))))
 
 (defn parse-json
-  "Parse JSON file content."
+  "Parse JSON file content.
+
+   Returns the parsed value on success, or an `:invalid-input` anomaly
+   when the content is malformed."
   [content]
   (try
     (json/parse-string content true)
     (catch Exception e
-      (throw (ex-info "Failed to parse JSON file"
-                      {:error (ex-message e)} e)))))
+      (anomaly/anomaly :invalid-input
+                       "Failed to parse JSON file"
+                       {:error (ex-message e)}))))
 
 (def ^:private spec-key->ns
   "Map plain YAML keys to their :spec/* or :workflow/* namespace.
@@ -163,57 +189,102 @@
    :markdown parse-markdown})
 
 (defn parse-content
-  "Parse file content using the appropriate format parser."
+  "Parse file content using the appropriate format parser.
+
+   Returns the parser's result (which may itself be an anomaly when the
+   content is malformed), or a `:fault` anomaly when no parser is
+   registered for the requested format. The fault case is exhaustive —
+   `detect-format` only emits formats that have parsers — so reaching it
+   indicates a programmer error in the registry."
   [format content]
   (if-let [parser (get format-parsers format)]
     (parser content)
-    (throw (ex-info (str "No parser registered for format: " format)
-                    {:format format
-                     :available (keys format-parsers)}))))
+    (anomaly/anomaly :fault
+                     (str "No parser registered for format: " format)
+                     {:format format
+                      :available (keys format-parsers)})))
 
 ;------------------------------------------------------------------------------ Layer 2
 ;; Spec normalization — canonical :spec/* only
 
+(defn- spec-shape-anomaly
+  "Return an `:invalid-input` anomaly when `spec` violates the minimum
+   shape required by `normalize-spec`, otherwise nil."
+  [spec]
+  (cond
+    (not (map? spec))
+    (anomaly/anomaly :invalid-input
+                     "Workflow spec must be a map"
+                     {:spec spec})
+
+    (not (:spec/title spec))
+    (anomaly/anomaly :invalid-input
+                     "Workflow spec must have :spec/title"
+                     {:spec spec})
+
+    (not (:spec/description spec))
+    (anomaly/anomaly :invalid-input
+                     "Workflow spec must have :spec/description"
+                     {:spec spec})))
+
+(defn- assemble-normalized-spec
+  "Build the normalized :spec/* payload. Caller is responsible for running
+   [[spec-shape-anomaly]] first; reaching this fn with a malformed spec is
+   a programmer error."
+  [spec]
+  (let [{:spec/keys [title description intent constraints tags
+                     acceptance-criteria code-artifact
+                     repo-url branch llm-backend sandbox plan-tasks]
+         :workflow/keys [type version]} spec]
+    (cond-> {:spec/title            title
+             :spec/description      description
+             :spec/intent           (or intent {:type :general})
+             :spec/constraints      (or constraints [])
+             :spec/tags             (or tags [])
+             :spec/workflow-type    (or (some-> type keyword) :canonical-sdlc)
+             :spec/workflow-version (or version "latest")
+             :spec/raw-data         spec}
+      acceptance-criteria (assoc :spec/acceptance-criteria acceptance-criteria)
+      code-artifact       (assoc :spec/code-artifact code-artifact)
+      repo-url            (assoc :spec/repo-url repo-url)
+      branch              (assoc :spec/branch branch)
+      llm-backend         (assoc :spec/llm-backend llm-backend)
+      (some? sandbox)     (assoc :spec/sandbox sandbox)
+      plan-tasks          (assoc :spec/plan-tasks plan-tasks))))
+
 (defn normalize-spec
   "Normalize parsed spec to canonical :spec/* workflow format.
 
-   Accepts canonical :spec/* input and applies defaults for missing optional fields.
-   Uses destructuring for clean extraction.
+   Accepts canonical :spec/* input and applies defaults for missing
+   optional fields. Returns the normalized payload on success, or an
+   `:invalid-input` anomaly when the input is not a map or is missing
+   :spec/title or :spec/description."
+  [spec]
+  (or (spec-shape-anomaly spec)
+      (assemble-normalized-spec spec)))
 
-   Output: normalized map with :spec/* namespace ready for workflow engine."
-  [{:spec/keys [title description intent constraints tags
-                acceptance-criteria code-artifact
-                repo-url branch llm-backend sandbox plan-tasks]
-    :workflow/keys [type version]
-    :as spec}]
-  (when-not (map? spec)
-    (throw (ex-info "Workflow spec must be a map"
-                    {:spec spec})))
+;------------------------------------------------------------------------------ Layer 3
+;; File loading + boundary escalation
 
-  (when-not title
-    (throw (ex-info "Workflow spec must have :spec/title"
-                    {:spec spec})))
+(defn- escalate!
+  "Boundary helper — translate a canonical anomaly into the legacy
+   ex-info shape so existing slingshot callers (CLI `run`, task-executor
+   pre-flight) keep their exception contract.
 
-  (when-not description
-    (throw (ex-info "Workflow spec must have :spec/description"
-                    {:spec spec})))
+   `parse-spec-file` is the single escalation point in this component;
+   layer 0/1/2 fns return anomalies."
+  [anom]
+  (throw (ex-info (:anomaly/message anom)
+                  (assoc (:anomaly/data anom)
+                         :anomaly/type (:anomaly/type anom)))))
 
-  ;; Build normalized payload with defaults
-  (cond-> {:spec/title            title
-           :spec/description      description
-           :spec/intent           (or intent {:type :general})
-           :spec/constraints      (or constraints [])
-           :spec/tags             (or tags [])
-           :spec/workflow-type    (or (some-> type keyword) :canonical-sdlc)
-           :spec/workflow-version (or version "latest")
-           :spec/raw-data         spec}
-    acceptance-criteria (assoc :spec/acceptance-criteria acceptance-criteria)
-    code-artifact       (assoc :spec/code-artifact code-artifact)
-    repo-url            (assoc :spec/repo-url repo-url)
-    branch              (assoc :spec/branch branch)
-    llm-backend         (assoc :spec/llm-backend llm-backend)
-    (some? sandbox)     (assoc :spec/sandbox sandbox)
-    plan-tasks          (assoc :spec/plan-tasks plan-tasks)))
+(defn- file-not-found-anomaly
+  "Return a `:not-found` anomaly when `path` does not resolve, otherwise nil."
+  [path]
+  (when-not (fs/exists? path)
+    (anomaly/anomaly :not-found
+                     (str "Spec file not found: " path)
+                     {:path path})))
 
 (defn parse-spec-file
   "Parse a workflow specification file and normalize to canonical format.
@@ -227,20 +298,28 @@
    Returns normalized spec map ready for workflow engine, decorated with:
    - :spec/provenance - Source file metadata
 
+   Boundary semantics: this is the public escalation point for the
+   component. Anomalies surfaced by `detect-format`, `parse-content`,
+   or `normalize-spec` are rethrown as ex-info so existing slingshot
+   callers (CLI `run`, task-executor pre-flight) keep their existing
+   exception-shaped contract.
+
    Throws ex-info on:
    - File not found
    - Unsupported format
    - Parse errors
    - Invalid spec schema"
   [path]
-  (when-not (fs/exists? path)
-    (throw (ex-info (str "Spec file not found: " path)
-                    {:path path})))
+  (when-let [anom (file-not-found-anomaly path)]
+    (escalate! anom))
 
-  (let [format     (detect-format path)
+  (let [format (detect-format path)
+        _      (when (anomaly/anomaly? format) (escalate! format))
         content    (slurp path)
         parsed     (parse-content format content)
-        normalized (normalize-spec parsed)]
+        _          (when (anomaly/anomaly? parsed) (escalate! parsed))
+        normalized (normalize-spec parsed)
+        _          (when (anomaly/anomaly? normalized) (escalate! normalized))]
 
     ;; Add provenance decoration
     (assoc normalized
