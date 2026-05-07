@@ -17,7 +17,8 @@
 ;; limitations under the License.
 
 (ns ai.miniforge.progress-detector.supervisor-test
-  "Tests for the Stage 2 minimal supervisor."
+  "Tests for the supervisor — covers Stage 2 class-default policy and
+   Stage 3 per-category on-anomaly overrides."
   (:require
    [clojure.test :refer [deftest is testing]]
    [ai.miniforge.progress-detector.supervisor :as sut]))
@@ -27,18 +28,21 @@
 
 (defn- mk-anomaly
   "Construct a minimal anomaly map under :anomaly/data — the supervisor
-   only reads :anomaly/class, :anomaly/severity, and the
+   only reads :anomaly/class, :anomaly/category, :anomaly/severity, and the
    :anomaly/evidence :event-ids vector for tie-breaking."
   ([anomaly-class severity]
-   (mk-anomaly anomaly-class severity nil))
+   (mk-anomaly anomaly-class severity nil nil))
   ([anomaly-class severity event-seq]
+   (mk-anomaly anomaly-class severity event-seq nil))
+  ([anomaly-class severity event-seq category]
    {:anomaly/type :fault
     :anomaly/data
-    {:detector/kind    :detector/test
-     :anomaly/class    anomaly-class
-     :anomaly/severity severity
-     :anomaly/evidence {:summary    (str (name anomaly-class) " " (name severity))
-                        :event-ids  (cond-> [] event-seq (conj event-seq))}}}))
+    (cond-> {:detector/kind    :detector/test
+             :anomaly/class    anomaly-class
+             :anomaly/severity severity
+             :anomaly/evidence {:summary    (str (name anomaly-class) " " (name severity))
+                                :event-ids  (cond-> [] event-seq (conj event-seq))}}
+      category (assoc :anomaly/category category))}))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Empty + class-default policy
@@ -137,3 +141,99 @@
       (is (contains? terminate-decision :reason))
       (is (not (contains? warn-decision :reason)))
       (is (not (contains? continue-decision :reason))))))
+
+;------------------------------------------------------------------------------ Layer 3
+;; 3-arity handle — on-anomaly category overrides
+
+(deftest on-anomaly-category-overrides-class-default-test
+  (testing "category lookup in on-anomaly takes precedence over class-default policy"
+    (let [category :anomalies.agent/tool-loop
+          ;; mechanical error would normally :terminate per default-policy
+          a        (mk-anomaly :mechanical :error 1 category)
+          ;; but on-anomaly says :continue for this category
+          decision (sut/handle sut/default-policy
+                               {category :continue}
+                               [a])]
+      (is (= :continue (:action decision))
+          "on-anomaly category override suppresses class-default :terminate"))))
+
+(deftest on-anomaly-terminate-overrides-class-warn-test
+  (testing "category lookup can escalate action beyond class-default"
+    (let [category :anomalies.review/stagnation
+          ;; heuristic warn would normally :warn per default-policy
+          a        (mk-anomaly :heuristic :warn 1 category)
+          ;; on-anomaly escalates this category to :terminate
+          decision (sut/handle sut/default-policy
+                               {category :terminate}
+                               [a])]
+      (is (= :terminate (:action decision))
+          "on-anomaly can escalate a heuristic to :terminate")
+      (is (string? (:reason decision))
+          ":reason present when action is :terminate"))))
+
+(deftest on-anomaly-empty-falls-back-to-policy-test
+  (testing "empty on-anomaly map falls back to class-default policy"
+    (let [a        (mk-anomaly :mechanical :error 1 :anomalies.agent/tool-loop)
+          decision (sut/handle sut/default-policy {} [a])]
+      (is (= :terminate (:action decision))
+          "empty on-anomaly map ⇒ class-default :terminate"))))
+
+(deftest on-anomaly-missing-category-falls-back-to-policy-test
+  (testing "category not in on-anomaly falls back to class-default policy"
+    (let [a        (mk-anomaly :mechanical :error 1 :anomalies.agent/tool-loop)
+          ;; on-anomaly only covers a different category
+          decision (sut/handle sut/default-policy
+                               {:anomalies.review/stagnation :continue}
+                               [a])]
+      (is (= :terminate (:action decision))
+          "unmatched category falls through to class-default policy"))))
+
+(deftest on-anomaly-nil-category-falls-back-to-policy-test
+  (testing "anomaly with no category key falls back to class-default policy"
+    (let [;; mk-anomaly with nil category omits :anomaly/category from data
+          a        (mk-anomaly :mechanical :error 1)
+          decision (sut/handle sut/default-policy
+                               {:anomalies.agent/tool-loop :continue}
+                               [a])]
+      (is (= :terminate (:action decision))
+          "nil category does not match any on-anomaly key; policy used"))))
+
+(deftest on-anomaly-resolution-order-category-first-test
+  (testing "full resolution chain: category → policy → :continue"
+    (let [category :anomalies.agent/tool-loop
+          ;; anomaly whose class is not in policy at all (:exotic)
+          ;; but category IS in on-anomaly
+          a        {:anomaly/type :fault
+                    :anomaly/data {:anomaly/class    :exotic
+                                   :anomaly/category category
+                                   :anomaly/severity :error
+                                   :anomaly/evidence {:summary "test" :event-ids [1]}}}]
+      ;; Step 1: category found → :terminate
+      (is (= :terminate
+             (:action (sut/handle {} {category :terminate} [a])))
+          "category hit → returned directly")
+      ;; Step 2: category miss, class found → :warn
+      (is (= :warn
+             (:action (sut/handle {:exotic :warn} {} [a])))
+          "class-default hit when category misses")
+      ;; Step 3: both miss → :continue
+      (is (= :continue
+             (:action (sut/handle {} {} [a])))
+          "nothing matches → :continue"))))
+
+(deftest two-arity-delegates-to-three-arity-test
+  (testing "2-arity (handle policy anomalies) is back-compat delegate to 3-arity"
+    ;; The 2-arity and 3-arity with empty on-anomaly must produce identical decisions.
+    (let [a        (mk-anomaly :mechanical :error 1 :anomalies.agent/tool-loop)
+          via-two  (sut/handle sut/default-policy [a])
+          via-three (sut/handle sut/default-policy {} [a])]
+      (is (= (:action via-two) (:action via-three)))
+      (is (= (:anomaly via-two) (:anomaly via-three))))))
+
+(deftest three-arity-empty-input-continues-test
+  (testing "3-arity handle with empty anomalies always returns :continue"
+    (let [decision (sut/handle sut/default-policy
+                               {:anomalies.agent/tool-loop :terminate}
+                               [])]
+      (is (= :continue (:action decision)))
+      (is (= [] (:anomalies decision))))))
