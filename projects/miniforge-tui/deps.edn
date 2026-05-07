@@ -68,10 +68,13 @@
         ai.miniforge/dag-primitives {:local/root "../../components/dag-primitives"}
         ai.miniforge/decision {:local/root "../../components/decision"}
         ai.miniforge/diagnosis {:local/root "../../components/diagnosis"}
+        ai.miniforge/failure-classifier {:local/root "../../components/failure-classifier"}
         ai.miniforge/improvement {:local/root "../../components/improvement"}
+        ai.miniforge/progress-detector {:local/root "../../components/progress-detector"}
         ai.miniforge/reliability {:local/root "../../components/reliability"}
         ai.miniforge/repo-index {:local/root "../../components/repo-index"}
         ai.miniforge/semantic-analyzer {:local/root "../../components/semantic-analyzer"}
+        ai.miniforge/workflow-resume {:local/root "../../components/workflow-resume"}
         ai.miniforge/lsp-mcp-bridge {:local/root "../../bases/lsp-mcp-bridge"}
         ai.miniforge/mcp-context-server {:local/root "../../bases/mcp-context-server"}}
 

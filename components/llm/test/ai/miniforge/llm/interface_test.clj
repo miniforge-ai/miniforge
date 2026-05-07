@@ -451,7 +451,8 @@
           handler (impl/stream-with-parser
                    #'impl/parse-claude-stream-line
                    (fn [chunk] (swap! chunks conj chunk))
-                   monitor content usage cost tools session-id stop-reason turns)]
+                   monitor
+                   content usage cost tools session-id stop-reason turns)]
       (handler (json/generate-string
                 {:type "result"
                  :result "{\"ok\":true}"

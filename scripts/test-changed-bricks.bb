@@ -25,6 +25,16 @@
    index, causing empty or wrong-tree commits."
   (dissoc (into {} (System/getenv)) "GIT_INDEX_FILE"))
 
+(def ^:private test-env
+  "Environment for the test JVM with git worktree vars stripped.
+   Test namespaces shell out to git against temp repos and worktrees, so the
+   caller's worktree-specific git vars must not leak into child JVMs."
+  (dissoc (into {} (System/getenv))
+          "GIT_INDEX_FILE"
+          "GIT_DIR"
+          "GIT_WORK_TREE"
+          "GIT_COMMON_DIR"))
+
 (defn poly-changed-names
   "Query poly for changed brick names since main. Returns a vector of strings."
   [key]
@@ -53,25 +63,50 @@
 
 ;; --------------------------------------------------------------------------- Brick-parallel test execution
 
+(def ^:private isolated-bricks-env-var
+  "Environment variable that overrides the isolated brick set.
+   Value should be a comma-separated list such as:
+   MINIFORGE_TEST_ISOLATED_BRICKS=pipeline-pack-store,artifact"
+  "MINIFORGE_TEST_ISOLATED_BRICKS")
+
+(def ^:private default-isolated-bricks
+  "Bricks that should run in their own test JVM.
+   Some native-backed stores are reliable in isolation but can fail inside the
+   large aggregate JVM used for changed-brick testing."
+  #{"pipeline-pack-store"})
+
+(defn configured-isolated-bricks
+  "Return the configured isolated brick set.
+   A comma-separated MINIFORGE_TEST_ISOLATED_BRICKS overrides the defaults."
+  []
+  (if-let [raw (some-> (System/getenv isolated-bricks-env-var) str/trim seq)]
+    (->> (str/split raw #",")
+         (map str/trim)
+         (remove str/blank?)
+         set)
+    default-isolated-bricks))
+
 (defn build-test-expr
-  "Build a Clojure expression that runs bricks in parallel, but namespaces
-   within each brick sequentially.
+  "Build a Clojure expression that runs brick groups in a single test JVM.
+   Namespaces within a brick always run sequentially.
 
    with-redefs (used heavily in phase/agent tests) mutates global var roots,
    so namespaces sharing the same with-redefs targets must not run concurrently.
    Brick boundaries are the natural isolation unit — different bricks don't
    share mocked vars."
-  [brick-groups]
+  [brick-groups parallel?]
   (let [quote-ns (fn [n] (str "'" n))
         all-nses (mapcat val brick-groups)
         require-expr (str/join " " (map quote-ns all-nses))
-        ;; Build a vector of vectors: [[ns1 ns2] [ns3] ...]
         groups-expr (str "["
                          (str/join " "
-                           (map (fn [[_brick nses]]
-                                  (str "[" (str/join " " (map quote-ns nses)) "]"))
-                                brick-groups))
-                         "]")]
+                                   (map (fn [[_brick nses]]
+                                          (str "[" (str/join " " (map quote-ns nses)) "]"))
+                                        brick-groups))
+                         "]")
+        results-expr (if parallel?
+                       "(doall (pmap run-group groups))"
+                       "(mapv run-group groups)")]
     (str "(require 'clojure.test " require-expr ") "
          "(let [groups " groups-expr
          "      run-group (fn [nses] "
@@ -80,7 +115,7 @@
          "                              (select-keys (clojure.test/run-tests ns) "
          "                                           [:test :pass :fail :error]))) "
          "                          {:test 0 :pass 0 :fail 0 :error 0} nses))"
-         "      results (doall (pmap run-group groups))"
+         "      results " results-expr
          "      summary (reduce (fn [acc r] (merge-with + acc r)) "
          "                      {:test 0 :pass 0 :fail 0 :error 0} results)]"
          "  (println) "
@@ -120,6 +155,26 @@
       brick-groups
       affinity-groups)))
 
+(defn partition-isolated-bricks
+  "Split brick-groups into {:isolated ... :parallel ...} by brick name."
+  [brick-groups]
+  (let [isolated-bricks (configured-isolated-bricks)]
+    (reduce-kv
+     (fn [acc brick nses]
+       (update acc (if (isolated-bricks brick) :isolated :parallel) assoc brick nses))
+     {:isolated {} :parallel {}}
+     brick-groups)))
+
+(defn run-test-jvm!
+  "Run the given brick groups in a dedicated Clojure test JVM.
+   Returns the process exit code."
+  [brick-groups parallel?]
+  (let [expr (build-test-expr brick-groups parallel?)
+        {:keys [exit]} (deref (p/process {:out :inherit :err :inherit
+                                          :env test-env}
+                                         "clojure" "-M:dev:test" "-e" expr))]
+    exit))
+
 
 ;; --------------------------------------------------------------------------- Main
 
@@ -130,42 +185,38 @@
         ;; Group namespaces by brick so we can parallelize across bricks
         ;; but run sequentially within each brick
         brick-groups (-> (into {}
-                           (concat
-                             (for [c components
-                                   :let [nses (find-test-nses "components" c)]
-                                   :when (seq nses)]
-                               [c nses])
-                             (for [b bases
-                                   :let [nses (find-test-nses "bases" b)]
-                                   :when (seq nses)]
-                               [b nses])))
+                              (concat
+                               (for [c components
+                                     :let [nses (find-test-nses "components" c)]
+                                     :when (seq nses)]
+                                 [c nses])
+                               (for [b bases
+                                     :let [nses (find-test-nses "bases" b)]
+                                     :when (seq nses)]
+                                 [b nses])))
                          coalesce-by-affinity)
+        {:keys [isolated parallel]} (partition-isolated-bricks brick-groups)
         total-nses (reduce + 0 (map count (vals brick-groups)))]
     (if (empty? brick-groups)
       (println "✓ No changed bricks — nothing to test")
       (do
         (println (str "  Changed bricks: " (str/join ", " (keys brick-groups))))
+        (when (seq isolated)
+          (println (str "  Isolated bricks: " (str/join ", " (keys isolated)))))
         (println (str "  Test namespaces (" total-nses " across " (count brick-groups) " bricks):"))
         (doseq [[brick nses] brick-groups]
           (println (str "    " brick " (" (count nses) " namespaces)"))
           (doseq [ns nses] (println (str "      " ns))))
-        (let [expr (build-test-expr brick-groups)
-              ;; Strip git worktree vars from the test JVM's environment.
-              ;; Changed-brick detection may need the caller's GIT_DIR /
-              ;; GIT_WORK_TREE, but test namespaces shell out to git against
-              ;; temp repos and worktrees. If those vars leak into the test
-              ;; JVM, git commands inside tests resolve against the committing
-              ;; repo instead of the test fixture repo, causing false failures.
-              test-env (dissoc (into {} (System/getenv))
-                               "GIT_INDEX_FILE"
-                               "GIT_DIR"
-                               "GIT_WORK_TREE"
-                               "GIT_COMMON_DIR")
-              {:keys [exit]} (deref (p/process {:out :inherit :err :inherit
-                                                :env test-env}
-                                               "clojure" "-M:dev:test" "-e" expr))]
-          (when-not (zero? exit)
-            (println "❌ Tests failed with exit code:" exit)
-            (System/exit exit)))))))
+        (doseq [[brick nses] isolated]
+          (println (str "▶ Running isolated brick: " brick))
+          (let [exit (run-test-jvm! {brick nses} false)]
+            (when-not (zero? exit)
+              (println "❌ Tests failed with exit code:" exit)
+              (System/exit exit))))
+        (when (seq parallel)
+          (let [exit (run-test-jvm! parallel true)]
+            (when-not (zero? exit)
+              (println "❌ Tests failed with exit code:" exit)
+              (System/exit exit))))))))
 
 (-main)

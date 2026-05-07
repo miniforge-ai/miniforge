@@ -20,7 +20,7 @@
   "Adapter for Cloverage-backed JVM coverage tasks."
   (:require
    [ai.miniforge.bb-dev-tools.adapter-registry :as registry]
-   [ai.miniforge.bb-test-runner.core :as bb-test-runner]
+   [ai.miniforge.bb-test-runner.interface :as bb-test-runner]
    [babashka.fs :as fs]))
 
 (defn- repo-cwd

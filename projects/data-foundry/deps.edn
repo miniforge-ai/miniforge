@@ -26,12 +26,16 @@
         ai.miniforge/connector-jira            {:local/root "../../components/connector-jira"}
         ai.miniforge/connector-pipeline-output {:local/root "../../components/connector-pipeline-output"}
         ai.miniforge/connector-sarif           {:local/root "../../components/connector-sarif"}
+        ai.miniforge/anomaly                   {:local/root "../../components/anomaly"}
+        ai.miniforge/coerce                    {:local/root "../../components/coerce"}
         ai.miniforge/config                    {:local/root "../../components/config"}
         ai.miniforge/dag-executor              {:local/root "../../components/dag-executor"}
         ai.miniforge/dag-primitives            {:local/root "../../components/dag-primitives"}
         ai.miniforge/data-quality              {:local/root "../../components/data-quality"}
+        ai.miniforge/event-stream              {:local/root "../../components/event-stream"}
         ai.miniforge/logging                   {:local/root "../../components/logging"}
         ai.miniforge/messages                  {:local/root "../../components/messages"}
+        ai.miniforge/phase                     {:local/root "../../components/phase"}
         ai.miniforge/response                  {:local/root "../../components/response"}
         ai.miniforge/schema                    {:local/root "../../components/schema"}}
 

@@ -25,10 +25,10 @@
    was returned. The `Chain` is the accumulating envelope.
 
    Schemas are exposed so consumers can validate at their own
-   boundaries. The component itself only validates input where doing so
-   prevents corruption of the chain invariant."
+  boundaries. The component itself only validates input where doing so
+  prevents corruption of the chain invariant."
   (:require
-   [ai.miniforge.anomaly.contract :as anomaly-contract]
+   [ai.miniforge.anomaly.interface :as anomaly]
    [malli.core :as m]
    [malli.error :as me]))
 
@@ -55,7 +55,7 @@
   [:map {:closed true}
    [:operation  :keyword]
    [:succeeded? :boolean]
-   [:anomaly    [:maybe anomaly-contract/Anomaly]]
+   [:anomaly    [:maybe anomaly/Anomaly]]
    [:response   :any]
    [:request    {:optional true} :any]])
 
