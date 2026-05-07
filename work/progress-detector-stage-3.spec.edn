@@ -90,7 +90,7 @@
 
     components/llm/src/ai/miniforge/llm/
       protocols/impl/llm_client.clj
-        - parse-cc-stream-line: extend tool_use case to capture
+        - parse-claude-stream-line: extend tool_use case to capture
           :tool-input from the assistant's tool_use block
         - tool_result handler: emit :tool-output + :tool-error?
           + :tool-call-id chunk so tool_use and its result can
@@ -112,9 +112,13 @@
       planner.clj
       implementer.clj
       reviewer.clj
-      tester.clj               ;; per-agent detector overlays read
+      tester.clj
+      curator.clj
+      releaser.clj             ;; per-agent detector overlays read
                                ;;   from prompt EDN. The wiring is
-                               ;;   shared across all four roles —
+                               ;;   shared across all six roles
+                               ;;   (planner / implementer / reviewer /
+                               ;;    tester / curator / releaser) —
                                ;;   no per-role copies of the
                                ;;   detector pipeline code.
 
@@ -138,7 +142,7 @@
 
   ## LLM stream extension — tool-input + tool-output
 
-  Today's parse-cc-stream-line for assistant blocks already detects
+  Today's parse-claude-stream-line for assistant blocks already detects
   `tool_use` content blocks but only extracts the tool name.
   Stage 3 extends the chunk shape to also carry:
 
@@ -229,10 +233,21 @@
        a :stop signal — Stage 3 wires that path).
     2. The controlling anomaly is recorded in the run's event
        log via :raw-log-ref.
-    3. agent.invoke throws :anomalies.agent/terminated with
-       :anomaly/data carrying the controlling anomaly. The
-       workflow runner catches this and records the run as
-       a detector-terminated failure.
+    3. agent.invoke throws an ex-info whose ex-data classifies as
+       :anomaly :anomalies.agent/terminated (matching the
+       project-wide exception → anomaly category convention used by
+       components/response — see ex-data shapes in
+       response/interface) and carries the controlling anomaly map
+       under a separate :controlling-anomaly key. Concretely:
+
+         (throw (ex-info \"agent run terminated by detector\"
+                         {:anomaly             :anomalies.agent/terminated
+                          :controlling-anomaly <controlling-anomaly-map>
+                          :run-id              <agent-run-id>}))
+
+       The workflow runner catches this, reads :anomaly to classify
+       the failure category, and reads :controlling-anomaly for the
+       full evidence/category/severity payload.
 
   ## What Stage 3 explicitly does NOT land
 
@@ -289,14 +304,14 @@
   "Detector wiring is agent-agnostic — the same agent.detector-wiring code path serves planner / implementer / reviewer / tester / curator / releaser. Per-agent overlays come from prompt EDN, not from N copies of the wiring"
   "Default behavior when prompt EDN omits :prompt/detectors: framework defaults [:tool-loop :repair-loop] with Stage 2 class-default policy. No prompt change required for an agent to gain detector coverage"
   "Per-category :on-anomaly resolution order: 1) controlling-anomaly category looked up in on-anomaly map; 2) fall back to (policy class); 3) fall back to :continue. Stage 2's 2-arity (handle policy anomalies) stays for back-compat — equivalent to (handle policy {} anomalies)"
-  "Termination cancels the in-flight LLM stream via the existing chunk-callback :stop path. The controlling anomaly is recorded in the run's event log; agent.invoke throws :anomalies.agent/terminated carrying the controlling anomaly under :anomaly/data"
+  "Termination cancels the in-flight LLM stream via the existing chunk-callback :stop path. The controlling anomaly is recorded in the run's event log; agent.invoke throws an ex-info whose ex-data has :anomaly :anomalies.agent/terminated (the project-wide ex-data → anomaly category convention used by components/response) plus :controlling-anomaly <anomaly-map> carrying the full evidence payload. :anomaly/data is NOT used here — that key is the data slot on canonical anomaly maps, not on classification ex-info"
   "Removing all detectors via prompt EDN ({:detectors/defaults []}) leaves the agent functional and bounded by Layer 1 caps only — Stage 2's runtime null-detector fallback path covers this"
   "Tool-call-id from the CLI's tool_use block is the pairing key between :tool-use and :tool-result chunks. The agent layer keeps an open-tool-calls map keyed by id; events with no matching id are dropped (CLI gave us a result without a use, or vice versa)"]
 
  :spec/acceptance-criteria
  [;; LLM stream extension
-  "parse-cc-stream-line emits :tool-call-id and :tool-input on tool_use content blocks — verified by fixture-replay test against a recorded Claude CLI stream"
-  "parse-cc-stream-line emits a separate :tool-result chunk carrying :tool-call-id, :tool-output, :tool-error? on tool_result content blocks — verified by fixture-replay"
+  "parse-claude-stream-line emits :tool-call-id and :tool-input on tool_use content blocks — verified by fixture-replay test against a recorded Claude CLI stream"
+  "parse-claude-stream-line emits a separate :tool-result chunk carrying :tool-call-id, :tool-output, :tool-error? on tool_result content blocks — verified by fixture-replay"
   "parse-codex-stream-line surfaces the same shape for the codex backend — fixture-replay over a recorded codex session"
   "Existing :on-chunk consumers (text/usage/stop-reason) see no shape change — fixture-replay test that runs the existing consumer against a recorded session and asserts produced state is byte-identical to a Stage 2 baseline"
 
@@ -320,7 +335,7 @@
 
   ;; Termination
   "On supervisor :terminate, the in-flight LLM stream is cancelled (the chunk-callback returns :stop) — integration test that asserts the stream consumer stops reading further chunks after termination"
-  "On supervisor :terminate, agent.invoke throws an exception of type :anomalies.agent/terminated whose ex-data :anomaly carries the controlling anomaly — integration test"
+  "On supervisor :terminate, agent.invoke throws an ex-info whose ex-data has :anomaly :anomalies.agent/terminated (the project-wide ex-data → anomaly classification convention used by components/response) plus :controlling-anomaly <anomaly-map> carrying the full controlling-anomaly payload — integration test asserts both keys are present and the controlling-anomaly map satisfies the canonical Anomaly schema"
   "All anomalies (controlling and not) emitted during a run are recorded in the run's event log — integration test that captures all emitted events and asserts both controlling and non-controlling anomalies are present"
 
   ;; Removing all detectors
