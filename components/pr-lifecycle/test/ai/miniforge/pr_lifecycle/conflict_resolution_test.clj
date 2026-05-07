@@ -17,11 +17,15 @@
 ;; limitations under the License.
 
 (ns ai.miniforge.pr-lifecycle.conflict-resolution-test
-  "Stage 3 slice 3a: tests for the pure-data classifiers and the
-   conflict-input builder. Slices 3b and 3c add tests for git-
-   plumbing and the orchestrator entry point respectively."
+  "Stage 3 slices 3a + 3b: tests for the pure-data classifiers, the
+   conflict-input builder, and the git-plumbing probes
+   (extract-conflict-paths, push-resolution!). Slice 3c adds tests
+   for the orchestrator entry point."
   (:require
+   [ai.miniforge.dag-executor.interface :as dag]
    [ai.miniforge.pr-lifecycle.conflict-resolution :as sut]
+   [babashka.fs :as fs]
+   [clojure.java.shell :as shell]
    [clojure.string :as str]
    [clojure.test :refer [deftest is testing]]))
 
@@ -104,6 +108,114 @@
             invocation; the builder itself is total."
     (let [input (sut/build-pr-conflict-input sample-pr [])]
       (is (= [] (:merge/conflicts input))))))
+
+;------------------------------------------------------------------------------ extract-conflict-paths (real git fixture)
+
+(defn- run-git! [cwd & args]
+  (let [r (apply shell/sh "git" "-C" cwd args)]
+    (when-not (zero? (:exit r))
+      (throw (ex-info (str "git " (str/join " " args) " failed: "
+                           (:err r))
+                      {:cwd cwd :result r})))
+    r))
+
+(defn- temp-conflict-repo!
+  "Set up a real repo with an induced conflict between two branches.
+   Returns the repo path; caller deletes when done."
+  []
+  (let [repo (str (fs/create-temp-dir {:prefix "pr-conflict-test-"}))]
+    (run-git! repo "init" "-b" "main")
+    (run-git! repo "config" "user.email" "test@miniforge.ai")
+    (run-git! repo "config" "user.name" "miniforge-test")
+    (run-git! repo "config" "commit.gpgsign" "false")
+    (run-git! repo "config" "tag.gpgsign" "false")
+    (spit (str repo "/README.md") "init\n")
+    (run-git! repo "add" "README.md")
+    (run-git! repo "commit" "-m" "init")
+    (run-git! repo "checkout" "-b" "branch-a" "main")
+    (spit (str repo "/conflict.txt") "from a\n")
+    (run-git! repo "add" "conflict.txt")
+    (run-git! repo "commit" "-m" "a")
+    (run-git! repo "checkout" "main")
+    (spit (str repo "/conflict.txt") "from main\n")
+    (run-git! repo "add" "conflict.txt")
+    (run-git! repo "commit" "-m" "main")
+    ;; merge attempt produces the conflict markers + unmerged index
+    (let [m (shell/sh "git" "-C" repo "merge" "--no-edit"
+                      "--no-gpg-sign" "--no-verify" "branch-a")]
+      (assert (not (zero? (:exit m)))
+              "fixture expected merge to conflict"))
+    repo))
+
+(deftest extract-conflict-paths-returns-unmerged-paths-test
+  (testing "extract-conflict-paths reads `git diff --name-only
+            --diff-filter=U` so an unmerged index surfaces as a
+            vector of relative paths. Real-git fixture rather than
+            a mock — the filter behaviour is git's, not ours, so a
+            mock would just re-encode our own assumption."
+    (let [repo (temp-conflict-repo!)]
+      (try
+        (let [r (sut/extract-conflict-paths repo)]
+          (is (dag/ok? r))
+          (is (= ["conflict.txt"] (:data r))))
+        (finally (fs/delete-tree repo))))))
+
+(deftest extract-conflict-paths-empty-when-no-conflicts-test
+  (testing "Clean worktree → empty vector, not nil. Caller branches
+            on (empty? paths) and would mis-handle nil."
+    (let [repo (str (fs/create-temp-dir {:prefix "pr-clean-test-"}))]
+      (try
+        (run-git! repo "init" "-b" "main")
+        (run-git! repo "config" "user.email" "t@t")
+        (run-git! repo "config" "user.name" "t")
+        (run-git! repo "config" "commit.gpgsign" "false")
+        (spit (str repo "/x.txt") "x\n")
+        (run-git! repo "add" "x.txt")
+        (run-git! repo "commit" "-m" "x")
+        (let [r (sut/extract-conflict-paths repo)]
+          (is (dag/ok? r))
+          (is (= [] (:data r))))
+        (finally (fs/delete-tree repo))))))
+
+;------------------------------------------------------------------------------ rev-parse + push-resolution! (push mocked — no remote)
+
+(deftest rev-parse-resolves-head-test
+  (testing "rev-parse against HEAD on a fresh init+commit returns
+            the 40-char commit SHA via dag/ok."
+    (let [repo (str (fs/create-temp-dir {:prefix "pr-rev-test-"}))]
+      (try
+        (run-git! repo "init" "-b" "main")
+        (run-git! repo "config" "user.email" "t@t")
+        (run-git! repo "config" "user.name" "t")
+        (run-git! repo "config" "commit.gpgsign" "false")
+        (spit (str repo "/x.txt") "x\n")
+        (run-git! repo "add" "x.txt")
+        (run-git! repo "commit" "-m" "x")
+        (let [r (sut/rev-parse repo "HEAD")]
+          (is (dag/ok? r))
+          (is (= 40 (count (:sha (:data r))))
+              "rev-parse returns full SHA"))
+        (finally (fs/delete-tree repo))))))
+
+(deftest push-resolution-surfaces-failure-when-no-remote-test
+  (testing "push-resolution! against a repo with no `origin` remote
+            surfaces git's failure as a dag/err with :command-failed.
+            Without this, an unconfigured remote would silently
+            succeed-look (no exception thrown) and the orchestrator
+            would think the resolution landed."
+    (let [repo (str (fs/create-temp-dir {:prefix "pr-push-test-"}))]
+      (try
+        (run-git! repo "init" "-b" "main")
+        (run-git! repo "config" "user.email" "t@t")
+        (run-git! repo "config" "user.name" "t")
+        (run-git! repo "config" "commit.gpgsign" "false")
+        (spit (str repo "/x.txt") "x\n")
+        (run-git! repo "add" "x.txt")
+        (run-git! repo "commit" "-m" "x")
+        (let [r (sut/push-resolution! repo "feat/x")]
+          (is (dag/err? r))
+          (is (= :command-failed (:code (:error r)))))
+        (finally (fs/delete-tree repo))))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

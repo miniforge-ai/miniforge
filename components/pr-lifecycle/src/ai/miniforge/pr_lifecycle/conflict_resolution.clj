@@ -37,6 +37,8 @@
    3d wires the orchestrator into the attempt-merge path so the
    lifecycle automatically engages on a CONFLICTING state."
   (:require
+   [ai.miniforge.dag-executor.interface :as dag]
+   [babashka.process :as process]
    [clojure.string :as str]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -71,6 +73,79 @@
     (re-find conflict-marker-re gh-output) :conflicting
     (re-find #"(?i)\"mergeable\"\s*:\s*\"MERGEABLE\"" gh-output) :mergeable
     :else :unknown))
+
+;------------------------------------------------------------------------------ Layer 0
+;; Worktree probes (Stage 3b)
+
+(defn- run-cmd
+  [cwd args]
+  (try
+    (let [r (apply process/shell
+                   {:dir cwd :out :string :err :string :continue true}
+                   args)]
+      (if (zero? (:exit r))
+        (dag/ok {:output (str/trim (:out r ""))})
+        (dag/err :command-failed (str/trim (:err r ""))
+                 {:exit-code (:exit r) :args args})))
+    (catch Exception e
+      (dag/err :command-exception (.getMessage e) {:args args}))))
+
+(defn extract-conflict-paths
+  "Run `git diff --name-only --diff-filter=U` in `worktree-path` to
+   list paths the index has marked unmerged. Returns a vector of
+   relative path strings (possibly empty), or a dag/err if git
+   itself failed.
+
+   Spec §6.1 conflict-input requires this list — the resolution
+   agent reads each path's content (via build-resolution-task in
+   workflow.merge-resolution) so the LLM can see what to fix."
+  [worktree-path]
+  (let [r (run-cmd worktree-path
+                   ["git" "diff" "--name-only" "--diff-filter=U"])]
+    (if (dag/ok? r)
+      (let [out (:output (:data r))]
+        (dag/ok (if (str/blank? out)
+                  []
+                  (vec (str/split-lines out)))))
+      r)))
+
+(defn rev-parse
+  "Resolve a ref to a full SHA in `worktree-path`. Wraps `git
+   rev-parse <ref>` and returns the trimmed SHA via dag/ok or a
+   dag/err on failure."
+  [worktree-path ref]
+  (let [r (run-cmd worktree-path ["git" "rev-parse" ref])]
+    (if (dag/ok? r)
+      (dag/ok {:sha (:output (:data r))})
+      r)))
+
+(defn push-resolution!
+  "Push the worktree's current HEAD to origin/<pr-branch> via plain
+   `git push`. The resolution commit is a merge commit on top of
+   the PR branch's existing HEAD (parents = [PR-HEAD base-HEAD]),
+   so the push is a fast-forward update of the PR branch — no
+   force-push needed.
+
+   Plain push rejects non-fast-forwards by default, which is the
+   right safety: if upstream moved out from under us between merge
+   attempt and push, the conflict-input we resolved against is
+   stale and we'd want to re-evaluate rather than overwrite the
+   new state.
+
+   Returns dag/ok `{:pushed-sha <sha>}` on success, or the dag/err
+   from the underlying git push on failure."
+  [worktree-path pr-branch]
+  (let [push-r (run-cmd worktree-path
+                        ["git" "push" "origin"
+                         (str "HEAD:" pr-branch)])]
+    (if (dag/ok? push-r)
+      (let [sha-r (rev-parse worktree-path "HEAD")]
+        (if (dag/ok? sha-r)
+          (dag/ok {:pushed?    true
+                   :pushed-sha (:sha (:data sha-r))
+                   :pr-branch  pr-branch})
+          sha-r))
+      push-r)))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; conflict-input shape
