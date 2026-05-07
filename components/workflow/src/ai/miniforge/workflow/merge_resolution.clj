@@ -116,6 +116,137 @@
   [_worktree-path]
   (response/success {:verify/skipped? true} nil))
 
+;; Resolution prompt builders (Stage 2C, spec §6.1.3) ------------------
+;; Pure-data assembly of the task input that the implementer agent
+;; will receive when Stage 2C's `agent-driven-edit-fn` lands in a
+;; follow-up slice. Splitting the prompt-building helpers from the
+;; agent-invocation closure keeps each slice independently reviewable
+;; and lets a policy pack swap catalog templates without touching the
+;; invocation wiring.
+;;
+;; Spec §6.1.3 — policy-overridable prompts. The default prompt
+;; templates live in the workflow message catalog under
+;; :dag.merge.resolution.prompt/*. A loaded policy pack can substitute
+;; its own templates through the same plumbing the policy interface
+;; already uses for other agent prompts — that override happens at the
+;; messages/t lookup layer, not here.
+
+(defn- format-parent-line
+  [parent]
+  (messages/t :dag.merge.resolution.prompt/parent-line
+              {:task-id    (:task/id parent)
+               :commit-sha (:commit-sha parent)}))
+
+(defn- format-conflict-line
+  [conflict]
+  (messages/t :dag.merge.resolution.prompt/conflict-line
+              {:path   (:path conflict)
+               :stages (str/join "/" (:stages conflict))}))
+
+(defn- build-resolution-prompt
+  "Build the resolution-task description from the conflict-input.
+   Iteration count and max-iterations let the prompt give the agent
+   awareness of its budget. Returns a string suitable for
+   `:task/description` on the implementer's task input."
+  [conflict-input iteration max-iterations]
+  (let [parents (:merge/parents conflict-input)
+        conflicts (:merge/conflicts conflict-input)
+        strategy (:merge/strategy conflict-input)]
+    (str/join "\n\n"
+              [(messages/t :dag.merge.resolution.prompt/header
+                           {:parent-count (count parents)})
+               (messages/t :dag.merge.resolution.prompt/iteration
+                           {:iteration (inc iteration)
+                            :max-iterations max-iterations})
+               (messages/t :dag.merge.resolution.prompt/strategy-line
+                           {:strategy strategy})
+               (str (messages/t :dag.merge.resolution.prompt/parents-header)
+                    "\n"
+                    (str/join "\n" (map format-parent-line parents)))
+               (str (messages/t :dag.merge.resolution.prompt/conflicts-header)
+                    "\n"
+                    (str/join "\n" (map format-conflict-line conflicts)))
+               (messages/t :dag.merge.resolution.prompt/instructions)])))
+
+(defn- read-conflict-file
+  "Slurp one conflicted file from `worktree-path`. Returns the
+   `{:path :content :truncated?}` map the implementer's
+   `format-existing-files` expects, or nil if the file is missing or
+   unreadable (skip rather than fail — the agent can still try to
+   resolve markers in the files we did manage to read; the curator's
+   marker scan on the next iteration is the authoritative gate)."
+  [worktree-path conflict]
+  (let [rel-path (:path conflict)
+        f (io/file worktree-path rel-path)]
+    (when (and (.exists f) (.canRead f))
+      (try {:path rel-path
+            :content (slurp f)
+            :truncated? false}
+           (catch Exception _ nil)))))
+
+(defn- build-resolution-task
+  "Build the task map agent.implementer expects.
+
+   `:task/existing-files` is a vector of `{:path :content :truncated?}`
+   maps — the shape the implementer's `format-existing-files` and
+   context-cache writer expect. Path-strings would yield nil paths and
+   nil contents in the prompt and poison the session context-cache.
+   Files that can't be read are skipped (logged would be better but
+   the resolution loop owns logging; here we just emit what the agent
+   can see)."
+  [conflict-input worktree-path iteration max-iterations]
+  {:task/description       (build-resolution-prompt conflict-input
+                                                    iteration max-iterations)
+   :task/type              :merge-resolution
+   :task/existing-files    (->> (:merge/conflicts conflict-input)
+                                (keep (partial read-conflict-file
+                                                worktree-path))
+                                vec)
+   :task/worktree-path     worktree-path})
+
+;; Resolution agent invocation (Stage 2C) ------------------------------
+;; The agent-driven edit-fn invokes the existing implementer agent
+;; (agent/create-implementer + agent/invoke) on the synthetic task
+;; built above. The implementer's tool-call plumbing (Edit/Write) does
+;; the actual file edits in the worktree; the agent-edit-fn just
+;; builds the task input and reports the invocation result up to the
+;; resolution loop, which checks markers cleared on the next pass.
+
+(defn agent-driven-edit-fn
+  "Construct an `agent-edit-fn` that delegates to the existing
+   implementer agent for actual conflict resolution. Spec §6.1.
+
+   `agent-context` is a map carrying at least `:llm-backend` (resolved
+   LLM client) and optionally `:logger`. The closure captures a single
+   implementer agent at construction so multiple iterations share its
+   config; the agent's `agent/invoke` is called per iteration with
+   the per-iteration task built from the conflict info.
+
+   Returns the agent's response on success (the implementer wrote
+   files via Edit/Write tool calls; the curator's marker scan picks
+   up the worktree state on the next iteration). Returns
+   response/error on agent invocation failure — the loop counts that
+   as a no-progress iteration and lets the budget catch it.
+
+   The max-iterations argument feeds the prompt so the agent knows
+   its budget; falls back to the default-budget if absent."
+  [{:keys [llm-backend logger max-iterations]}]
+  (let [max-iters (or max-iterations (:max-iterations (default-budget)))
+        impl     (agent/create-implementer (cond-> {}
+                                             logger (assoc :logger logger)))]
+    (fn agent-edit-step [worktree-path conflict-input iteration]
+      (let [task (build-resolution-task conflict-input worktree-path
+                                        iteration max-iters)
+            invoke-ctx (cond-> {:execution/worktree-path worktree-path}
+                         llm-backend (assoc :llm-backend llm-backend))]
+        (try (agent/invoke impl task invoke-ctx)
+             (catch Exception e
+               (response/error
+                (messages/t :dag.merge.resolution.prompt/agent-error
+                            {:error (str e)})
+                {:data {:exception/class (.getName (class e))
+                        :iteration iteration}})))))))
+
 ;; Anomaly + result factories ------------------------------------------
 
 (defn- unresolvable-anomaly

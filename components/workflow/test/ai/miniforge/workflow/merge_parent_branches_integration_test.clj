@@ -28,7 +28,9 @@
    [clojure.java.shell :as shell]
    [clojure.string :as str]
    [clojure.test :refer [deftest is testing use-fixtures]]
+   [ai.miniforge.agent.interface :as agent]
    [ai.miniforge.dag-executor.interface :as dag]
+   [ai.miniforge.response.interface :as response]
    [ai.miniforge.workflow.dag-orchestrator :as dag-orch]
    [ai.miniforge.workflow.messages :as messages]))
 
@@ -276,6 +278,51 @@
            conflict-free merge")
       (is (string? (:commit-sha data))
           "the resolution commit's SHA is the new merge base"))))
+
+(deftest auto-default-llm-backend-routes-through-agent-driven-edit-fn-test
+  (testing "Stage 2C wiring: when context has :llm-backend and no
+            explicit :dag/resolution-overrides, the orchestrator's
+            derive-resolution-overrides helper auto-builds an
+            agent-driven-edit-fn that delegates to the implementer
+            agent. We mock agent/create-implementer + agent/invoke
+            here so the test doesn't need a real LLM backend; the
+            mock invoke writes the resolution as the real implementer
+            would (via tool calls). End-to-end success proves the
+            wiring fans out correctly: context :llm-backend ⇒
+            agent-driven-edit-fn ⇒ agent/invoke ⇒ resolution commit."
+    (run-git! *repo* "checkout" "-b" "task-a" "main")
+    (commit-file! *repo* "src/conflict.txt" "from a\n" "a edit")
+    (run-git! *repo* "checkout" "-b" "task-b" "main")
+    (commit-file! *repo* "src/conflict.txt" "from b\n" "b edit")
+    (run-git! *repo* "checkout" "main")
+    (let [task-def {:task/id "task-c" :task/deps [:a :b]}
+          invoked? (atom false)
+          mock-invoke (fn [_agent task ctx]
+                        (when-not @invoked?
+                          (reset! invoked? true)
+                          (let [wt (:execution/worktree-path ctx)]
+                            (spit (str wt "/src/conflict.txt")
+                                  "from a\nfrom b\n")
+                            ;; run-git! throws on non-zero exit; using
+                            ;; shell/sh would silently swallow setup
+                            ;; failures and surface as an opaque
+                            ;; "agent didn't resolve" downstream.
+                            (run-git! wt "add" "src/conflict.txt")))
+                        (response/success {:edits/applied 1
+                                           :task/type (:task/type task)}
+                                          nil))]
+      (with-redefs [agent/create-implementer (fn [& _] ::mock-impl)
+                    agent/invoke mock-invoke]
+        (let [ctx (-> (ctx-with-registry {:a {:branch "task-a"}
+                                          :b {:branch "task-b"}})
+                      (assoc :llm-backend ::mock-backend))
+              result (dag-orch/merge-parent-branches! ctx task-def)]
+          (is (dag/ok? result)
+              "auto-default agent-driven-edit-fn resolved the conflict")
+          (is (true? @invoked?)
+              "agent/invoke was called via the auto-default closure")
+          (is (true? (:resolved? (:data result))))
+          (is (pos-int? (:resolution-iterations (:data result)))))))))
 
 ;------------------------------------------------------------------------------ Tests: branch unresolvable
 
