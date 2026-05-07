@@ -52,6 +52,43 @@
     (is (string? (:workflow-run/workflow-key run))
         "synthesized key is a string when event carries no spec")))
 
+(deftest workflow-started-captures-spec-identity-when-present
+  (let [wf-id (random-uuid)
+        spec  {:spec/title       "Implement Feature"
+               :spec/description "wire the new feature"
+               :spec/intent      {:type :implement :scope ["app/core.clj"]}}
+        table (acc/apply-event schema/empty-table
+                               (ev :workflow/started
+                                   {:workflow/id   wf-id
+                                    :workflow/spec spec}))
+        run   (get-in table [:workflows wf-id])]
+    (is (= "Implement Feature" (get-in run [:workflow-run/spec :spec/title])))
+    (is (= "wire the new feature" (get-in run [:workflow-run/spec :spec/description])))
+    (is (= {:type :implement :scope ["app/core.clj"]}
+           (get-in run [:workflow-run/spec :spec/intent])))))
+
+(deftest workflow-started-omits-spec-when-event-has-none
+  (let [wf-id (random-uuid)
+        table (acc/apply-event schema/empty-table
+                               (ev :workflow/started {:workflow/id wf-id}))
+        run   (get-in table [:workflows wf-id])]
+    (is (nil? (:workflow-run/spec run))
+        "no spec identity is set when the event carries none")))
+
+(deftest workflow-started-normalizes-bare-title-and-description
+  ;; Producers that build :workflow/spec from raw input may emit `:title` /
+  ;; `:description` rather than the parsed `:spec/*` keys. Keep that path
+  ;; working so old emitters do not silently drop spec identity.
+  (let [wf-id (random-uuid)
+        table (acc/apply-event schema/empty-table
+                               (ev :workflow/started
+                                   {:workflow/id   wf-id
+                                    :workflow/spec {:title       "Bare Title"
+                                                    :description "raw"}}))
+        run   (get-in table [:workflows wf-id])]
+    (is (= "Bare Title" (get-in run [:workflow-run/spec :spec/title])))
+    (is (= "raw" (get-in run [:workflow-run/spec :spec/description])))))
+
 (deftest workflow-phase-started-updates-phase
   (let [wf-id (random-uuid)
         table (-> schema/empty-table
