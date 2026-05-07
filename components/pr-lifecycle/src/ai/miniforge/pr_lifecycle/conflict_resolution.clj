@@ -232,10 +232,23 @@
 
       :else
       (let [conflict-input (build-pr-conflict-input pr (:data paths-r))
+            ;; Key is :task-id (unnamespaced) to match the
+            ;; workflow.merge-resolution/resolve-conflict! contract,
+            ;; which destructures `[{:keys [... task-id ...]}]`. The
+            ;; conflict-input itself stores the namespaced :task/id
+            ;; (matching the conflict-anomaly shape from the
+            ;; orchestrator) — the unwrap-then-rewrap is intentional.
+            ;;
+            ;; :host-repo and :worktree-path are the same path here.
+            ;; For PR-lifecycle the agent edits the cloned repo
+            ;; directly (no separate bare/worktree split), so the
+            ;; resolver's host-repo concept collapses to the
+            ;; worktree. Slice 3d may revisit if the lifecycle moves
+            ;; to a worktree-off-bare layout.
             outcome (resolve-fn {:conflict-input conflict-input
                                  :host-repo      worktree-path
                                  :worktree-path  worktree-path
-                                 :task/id        (:task/id conflict-input)})]
+                                 :task-id        (:task/id conflict-input)})]
         (if (dag/ok? outcome)
           (let [push-r (push-resolution! worktree-path (:pr/branch pr))]
             (if (dag/ok? push-r)

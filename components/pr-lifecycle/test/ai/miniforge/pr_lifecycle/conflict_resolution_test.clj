@@ -258,6 +258,47 @@
             (is (= "feat/widget" (:pr-branch (:data r)))))
           (finally (fs/delete-tree repo)))))))
 
+(deftest resolve-pr-conflicts-forwards-resolver-keys-test
+  (testing "resolve-pr-conflicts! must hand the resolver exactly the
+            keys workflow.merge-resolution/resolve-conflict!
+            destructures: :conflict-input, :host-repo,
+            :worktree-path, :task-id (UNNAMESPACED). The earlier
+            slice mistakenly passed :task/id (namespaced), which
+            would silently bind task-id to nil in the resolver and
+            land nil in the commit/anomaly metadata — pin the
+            contract so a future regression fires here instead."
+    (let [repo (temp-conflict-repo!)
+          captured (atom nil)
+          mock-resolve (fn [opts]
+                         (reset! captured opts)
+                         (dag/ok {:commit-sha "fake" :iterations 1
+                                  :resolved? true}))]
+      (with-redefs [sut/push-resolution!
+                    (fn [_ pr-branch]
+                      (dag/ok {:pushed? true :pushed-sha "x"
+                               :pr-branch pr-branch}))]
+        (try
+          (sut/resolve-pr-conflicts!
+           {:worktree-path repo
+            :pr            sample-pr
+            :resolve-fn    mock-resolve
+            :context       {}})
+          (let [opts @captured]
+            (is (contains? opts :task-id)
+                ":task-id (unnamespaced) — what merge-resolution
+                 destructures")
+            (is (not (contains? opts :task/id))
+                "no namespaced :task/id leaked through; that would
+                 silently bind task-id to nil in the resolver")
+            (is (= "pr-123" (:task-id opts))
+                "value carried from conflict-input's :task/id")
+            (is (= repo (:worktree-path opts)))
+            (is (= repo (:host-repo opts))
+                "host-repo collapses to worktree for the lifecycle
+                 path — slice 3d may revisit if the layout changes")
+            (is (some? (:conflict-input opts))))
+          (finally (fs/delete-tree repo)))))))
+
 (deftest resolve-pr-conflicts-no-conflicts-detected-test
   (testing "If extract-conflict-paths comes back empty (caller
             staged the wrong worktree, or git already cleaned the
