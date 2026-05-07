@@ -168,16 +168,40 @@
                     (str/join "\n" (map format-conflict-line conflicts)))
                (messages/t :dag.merge.resolution.prompt/instructions)])))
 
+(defn- read-conflict-file
+  "Slurp one conflicted file from `worktree-path`. Returns the
+   `{:path :content :truncated?}` map the implementer's
+   `format-existing-files` expects, or nil if the file is missing or
+   unreadable (skip rather than fail — the agent can still try to
+   resolve markers in the files we did manage to read; the curator's
+   marker scan on the next iteration is the authoritative gate)."
+  [worktree-path conflict]
+  (let [rel-path (:path conflict)
+        f (io/file worktree-path rel-path)]
+    (when (and (.exists f) (.canRead f))
+      (try {:path rel-path
+            :content (slurp f)
+            :truncated? false}
+           (catch Exception _ nil)))))
+
 (defn- build-resolution-task
-  "Build the task map agent.implementer expects. The conflicted file
-   paths go in `:task/existing-files` so the implementer's prompt
-   builder includes them in the LLM's context. The description carries
-   the prompt built from the catalog templates."
+  "Build the task map agent.implementer expects.
+
+   `:task/existing-files` is a vector of `{:path :content :truncated?}`
+   maps — the shape the implementer's `format-existing-files` and
+   context-cache writer expect. Path-strings would yield nil paths and
+   nil contents in the prompt and poison the session context-cache.
+   Files that can't be read are skipped (logged would be better but
+   the resolution loop owns logging; here we just emit what the agent
+   can see)."
   [conflict-input worktree-path iteration max-iterations]
   {:task/description       (build-resolution-prompt conflict-input
                                                     iteration max-iterations)
    :task/type              :merge-resolution
-   :task/existing-files    (mapv :path (:merge/conflicts conflict-input))
+   :task/existing-files    (->> (:merge/conflicts conflict-input)
+                                (keep (partial read-conflict-file
+                                                worktree-path))
+                                vec)
    :task/worktree-path     worktree-path})
 
 ;; Resolution agent invocation (Stage 2C) ------------------------------

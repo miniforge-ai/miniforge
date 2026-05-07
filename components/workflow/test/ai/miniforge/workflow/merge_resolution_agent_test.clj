@@ -28,6 +28,7 @@
    [ai.miniforge.agent.interface :as agent]
    [ai.miniforge.response.interface :as response]
    [ai.miniforge.workflow.merge-resolution :as sut]
+   [babashka.fs :as fs]
    [clojure.string :as str]
    [clojure.test :refer [deftest is testing]]))
 
@@ -95,18 +96,61 @@
 
 ;------------------------------------------------------------------------------ Pure-data: task builder
 
+(defn- write-file! [worktree rel-path content]
+  (let [f (java.io.File. ^String worktree ^String rel-path)]
+    (.mkdirs (.getParentFile f))
+    (spit f content)))
+
 (deftest build-resolution-task-shape-test
   (testing "Task map carries the description, type :merge-resolution,
-            existing-files for the conflicted paths, and the worktree
-            path. Existing-files lets the implementer's prompt builder
-            slurp the conflicted files into the LLM's context."
-    (let [task (build-resolution-task sample-conflict-input
-                                      "/tmp/wt" 0 5)]
-      (is (string? (:task/description task)))
-      (is (= :merge-resolution (:task/type task)))
-      (is (= ["src/conflict.txt" "src/other.clj"] (:task/existing-files task))
-          "existing-files mirrors the conflict paths in declaration order")
-      (is (= "/tmp/wt" (:task/worktree-path task))))))
+            existing-files (as `{:path :content :truncated?}` maps —
+            the shape the implementer's format-existing-files and
+            context-cache writer expect), and the worktree path.
+            Path-strings here would yield nil paths/contents in the
+            implementer prompt and poison the context-cache."
+    (let [worktree (str (fs/create-temp-dir {:prefix "mr-task-test-"}))]
+      (try
+        (write-file! worktree "src/conflict.txt"
+                     "<<<<<<< a\nfrom a\n=======\nfrom b\n>>>>>>> b\n")
+        (write-file! worktree "src/other.clj"
+                     ";; another conflict\n")
+        (let [task (build-resolution-task sample-conflict-input
+                                          worktree 0 5)
+              files (:task/existing-files task)]
+          (is (string? (:task/description task)))
+          (is (= :merge-resolution (:task/type task)))
+          (is (= worktree (:task/worktree-path task)))
+          (is (= 2 (count files))
+              "both conflicted files were slurped")
+          (is (= ["src/conflict.txt" "src/other.clj"]
+                 (mapv :path files))
+              "paths preserved in declaration order")
+          (is (every? #(false? (:truncated? %)) files)
+              ":truncated? false on every entry — implementer relies
+               on this key being present")
+          (is (str/includes? (:content (first files)) "<<<<<<< a")
+              "slurped content is the on-disk worktree state")
+          (is (= ";; another conflict\n" (:content (second files)))
+              "second file's content is independently slurped"))
+        (finally (fs/delete-tree worktree))))))
+
+(deftest build-resolution-task-skips-unreadable-files-test
+  (testing "If a conflicted file can't be read (gone or unreadable),
+            it's skipped rather than producing a {:path X :content nil}
+            entry that would feed nil into the context-cache. The
+            curator's marker scan on the next iteration is the
+            authoritative gate for missing files."
+    (let [worktree (str (fs/create-temp-dir {:prefix "mr-skip-test-"}))]
+      (try
+        (write-file! worktree "src/conflict.txt" "real content\n")
+        ;; src/other.clj intentionally absent
+        (let [task (build-resolution-task sample-conflict-input
+                                          worktree 0 5)
+              files (:task/existing-files task)]
+          (is (= 1 (count files)))
+          (is (= "src/conflict.txt" (:path (first files)))
+              "missing file dropped, present file kept"))
+        (finally (fs/delete-tree worktree))))))
 
 ;------------------------------------------------------------------------------ agent-driven-edit-fn — happy path
 

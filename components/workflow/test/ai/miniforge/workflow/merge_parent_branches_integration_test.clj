@@ -303,8 +303,11 @@
                           (let [wt (:execution/worktree-path ctx)]
                             (spit (str wt "/src/conflict.txt")
                                   "from a\nfrom b\n")
-                            (shell/sh "git" "-C" wt "add"
-                                      "src/conflict.txt")))
+                            ;; run-git! throws on non-zero exit; using
+                            ;; shell/sh would silently swallow setup
+                            ;; failures and surface as an opaque
+                            ;; "agent didn't resolve" downstream.
+                            (run-git! wt "add" "src/conflict.txt")))
                         (response/success {:edits/applied 1
                                            :task/type (:task/type task)}
                                           nil))]
