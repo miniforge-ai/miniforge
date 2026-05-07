@@ -439,7 +439,8 @@
 
 (deftest stream-parser-recovers-result-only-content-test
   (testing "result-only content is recovered when no assistant delta arrived"
-    (let [content (atom "")
+    (let [monitor (pm/create-progress-monitor {:min-activity-interval-ms 1})
+          content (atom "")
           usage (atom nil)
           cost (atom nil)
           chunks (atom [])
@@ -450,7 +451,7 @@
           handler (impl/stream-with-parser
                    #'impl/parse-claude-stream-line
                    (fn [chunk] (swap! chunks conj chunk))
-                   content usage cost tools session-id stop-reason turns)]
+                   monitor content usage cost tools session-id stop-reason turns)]
       (handler (json/generate-string
                 {:type "result"
                  :result "{\"ok\":true}"

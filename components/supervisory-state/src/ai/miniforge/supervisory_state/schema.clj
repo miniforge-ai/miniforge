@@ -200,6 +200,15 @@
    [:workflow-run/correlation-id :id/uuid]
    [:workflow-run/artifact-ids {:optional true} [:vector :id/uuid]]
    [:workflow-run/evidence-bundle-id {:optional true} [:maybe :id/uuid]]
+   ;; BD-1: canonical run-owned spec identity. Lifted from `:workflow/spec`
+   ;; on the lifecycle event so consumers do not have to recover it from
+   ;; correlated agent metadata. Open: producers may add further `:spec/*`
+   ;; keys without a contract bump.
+   [:workflow-run/spec {:optional true}
+    [:map
+     [:spec/title       {:optional true} [:string {:min 1}]]
+     [:spec/description {:optional true} [:string {:min 1}]]
+     [:spec/intent      {:optional true} map?]]]
    [:workflow-run/prs {:optional true}
     [:vector
      [:map
