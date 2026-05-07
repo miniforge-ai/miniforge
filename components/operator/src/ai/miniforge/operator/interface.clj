@@ -77,8 +77,18 @@
 ;; Bounded supervisory interventions
 
 (def create-intervention
-  "Create a bounded InterventionRequest map."
+  "Create a bounded InterventionRequest map.
+
+   Canonical, anomaly-returning entry point: returns the constructed
+   intervention on success, or an `:invalid-input` anomaly when any
+   step of the validation cascade rejects the request."
   intervention/create-intervention)
+
+(def create-intervention!
+  "Boundary variant of [[create-intervention]] that throws `ex-info`
+   on validation failure. Prefer [[create-intervention]] in non-boundary
+   code."
+  intervention/create-intervention!)
 
 (def approval-required?
   "Check whether an intervention type defaults to a pending-human step."
