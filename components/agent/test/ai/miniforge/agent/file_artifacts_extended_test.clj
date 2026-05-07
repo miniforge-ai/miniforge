@@ -21,6 +21,7 @@
    status codes, changed-paths filtering, empty snapshots, and manifest handling."
   (:require
    [ai.miniforge.agent.file-artifacts :as sut]
+   [ai.miniforge.anomaly.interface :as anomaly]
    [clojure.java.io :as io]
    [clojure.java.shell]
    [clojure.string]
@@ -146,12 +147,20 @@
       (let [snap (sut/snapshot-working-dir "/tmp")]
         (is (= (sut/empty-snapshot) snap))))))
 
-(deftest snapshot-git-failure-throws-test
-  (testing "non-zero exit throws ex-info"
+(deftest snapshot-git-failure-returns-anomaly-test
+  (testing "non-zero exit returns a :fault anomaly (not a throw)"
+    ;; Migrated from thrown-test under the exceptions-as-data cleanup:
+    ;; snapshot-working-dir is now anomaly-returning so the surrounding
+    ;; review-phase pipeline never has to wrap it in try/catch.
     (with-redefs [clojure.java.shell/sh
                   (fn [& _] {:exit 128 :out "" :err "not a git repo"})]
-      (is (thrown? clojure.lang.ExceptionInfo
-                   (sut/snapshot-working-dir "/tmp"))))))
+      (let [result (sut/snapshot-working-dir "/tmp")]
+        (is (anomaly/anomaly? result))
+        (is (= :fault (:anomaly/type result)))
+        (let [data (:anomaly/data result)]
+          (is (= "/tmp" (:working-dir data)))
+          (is (= 128 (:exit data)))
+          (is (= "not a git repo" (:stderr data))))))))
 
 ;------------------------------------------------------------------------------ Layer 2
 ;; changed-paths filtering

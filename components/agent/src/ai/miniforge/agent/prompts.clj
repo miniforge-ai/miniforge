@@ -31,6 +31,13 @@
 (defn load-prompt
   "Load an agent prompt from the resources directory.
 
+   This is the fail-fast startup boundary: prompt resources are
+   compiled into the deploy artifact, so a missing or malformed
+   resource is a build/packaging fault — not a runtime not-found
+   condition. The boundary throw uses `:anomalies/fault` so callers
+   that try+ on fault categories observe it consistently with the
+   rest of the platform.
+
    Arguments:
    - agent-type: Keyword identifying the agent (e.g., :implementer, :planner)
 
@@ -38,19 +45,21 @@
    - The system prompt string
 
    Throws:
-   - ExceptionInfo if prompt cannot be loaded"
+   - slingshot anomaly with `:anomaly/category :anomalies/fault`
+     when the prompt resource is missing or missing the
+     `:prompt/system` key."
   [agent-type]
   (let [resource-path (str "prompts/" (name agent-type) ".edn")]
     (if-let [resource (io/resource resource-path)]
       (let [prompt-data (with-open [rdr (io/reader resource)]
                           (edn/read (java.io.PushbackReader. rdr)))]
         (or (:prompt/system prompt-data)
-            (response/throw-anomaly! :anomalies/not-found
+            (response/throw-anomaly! :anomalies/fault
                                     "Prompt data missing :prompt/system key"
                                     {:agent-type agent-type
                                      :resource-path resource-path
                                      :keys (keys prompt-data)})))
-      (response/throw-anomaly! :anomalies/not-found
+      (response/throw-anomaly! :anomalies/fault
                                 "Could not find prompt resource"
                                 {:agent-type agent-type
                                  :resource-path resource-path}))))
@@ -58,17 +67,25 @@
 (defn load-prompt-data
   "Load full prompt data map from resources.
 
+   Boundary semantics match `load-prompt`: a missing resource is
+   a build-time fault, not a runtime not-found. See `load-prompt`
+   for the rationale on the `:anomalies/fault` category.
+
    Arguments:
    - agent-type: Keyword identifying the agent
 
    Returns:
-   - The full prompt data map including :prompt/id, :prompt/version, etc."
+   - The full prompt data map including :prompt/id, :prompt/version, etc.
+
+   Throws:
+   - slingshot anomaly with `:anomaly/category :anomalies/fault`
+     when the prompt resource is missing on the classpath."
   [agent-type]
   (let [resource-path (str "prompts/" (name agent-type) ".edn")]
     (if-let [resource (io/resource resource-path)]
       (with-open [rdr (io/reader resource)]
         (edn/read (java.io.PushbackReader. rdr)))
-      (response/throw-anomaly! :anomalies/not-found
+      (response/throw-anomaly! :anomalies/fault
                                 "Could not find prompt resource"
                                 {:agent-type agent-type
                                  :resource-path resource-path}))))

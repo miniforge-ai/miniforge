@@ -26,6 +26,7 @@
    [ai.miniforge.agent.prompts :as prompts]
    [ai.miniforge.agent.role-config :as role-config]
    [ai.miniforge.agent.specialized :as specialized]
+   [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.schema.interface :as schema]
    [ai.miniforge.logging.interface :as log]
    [ai.miniforge.llm.interface :as llm]
@@ -525,6 +526,45 @@
      :submitted-plan submitted-plan
      :parsed-plan    parsed-plan}))
 
+(defn parsed-plan-or-anomaly
+  "Return the first non-nil plan from `submitted` then `parsed`, else
+   a `:fault` anomaly describing the EDN parse miss.
+
+   This is the canonical, anomaly-returning entry point for the
+   plan-extraction step. The boundary site inside `create-planner`
+   inlines `response/throw-anomaly!` with `:anomalies.agent/invoke-failed`
+   when an anomaly is observed, preserving the legacy slingshot
+   contract for callers that try+ on the agent taxonomy."
+  [submitted parsed llm-response]
+  (or submitted
+      parsed
+      (let [content     (planner-response-content llm-response)
+            stop-reason (:stop-reason llm-response)
+            num-turns   (:num-turns llm-response)]
+        (anomaly/anomaly :fault
+                         "Plan generation failed: EDN parse did not succeed"
+                         (cond-> {:phase :plan
+                                  :parse-result nil
+                                  :llm-content-length (count content)
+                                  :llm-content-preview (subs content 0 (min 500 (count content)))}
+                           stop-reason (assoc :stop-reason stop-reason)
+                           num-turns   (assoc :num-turns num-turns))))))
+
+(defn require-llm-client-or-anomaly
+  "Return `llm-client` when truthy, else an `:invalid-input` anomaly
+   describing the missing planner backend.
+
+   Anomaly-returning sibling of the legacy boundary throw at the
+   `:invoke-fn` no-LLM-backend branch. The boundary inlines a
+   slingshot throw at `:anomalies.agent/llm-error` so external try+
+   callers continue to observe the agent-error category they depend
+   on."
+  [llm-client]
+  (or llm-client
+      (anomaly/anomaly :invalid-input
+                       "No LLM backend provided for planner agent"
+                       {:phase :plan})))
+
 (defn create-planner
   "Create a Planner agent with optional configuration overrides.
 
@@ -551,15 +591,26 @@
 
       :invoke-fn
       (fn [context input]
-        (let [llm-client (model/resolve-llm-client-for-role
-                          :planner (get opts :llm-backend (:llm-backend context)))
+        (let [resolved-client (model/resolve-llm-client-for-role
+                               :planner (get opts :llm-backend (:llm-backend context)))
+              client-or-anom  (require-llm-client-or-anomaly resolved-client)
+              ;; Boundary site: escalate the missing-backend anomaly
+              ;; to a slingshot throw under the agent taxonomy so
+              ;; external try+ callers see the same shape they did
+              ;; before the data-first migration.
+              llm-client      (if (anomaly/anomaly? client-or-anom)
+                                (response/throw-anomaly! :anomalies.agent/llm-error
+                                                        (:anomaly/message client-or-anom)
+                                                        (:anomaly/data client-or-anom))
+                                client-or-anom)
               on-chunk (:on-chunk context)
               spec-text (spec->text input)
               existing-files (:task/existing-files input)
               user-prompt    (build-user-prompt spec-text existing-files)]
-          (if llm-client
-            ;; Use the real LLM with artifact session for MCP tool support
-            (let [{:keys [llm-result artifact worktree-artifacts context-misses]}
+          ;; Past this point `llm-client` is non-nil — the
+          ;; require-llm-client-or-anomaly boundary above already
+          ;; escalated when the backend was missing.
+          (let [{:keys [llm-result artifact worktree-artifacts context-misses]}
                   (artifact-session/with-session context
                     #(invoke-planner-session % llm-client user-prompt config context
                                              on-chunk existing-files))
@@ -604,19 +655,20 @@
               (if (or final-submitted-plan
                       final-parsed-plan
                       (llm/success? final-llm-response))
-                (let [content (planner-response-content final-llm-response)
-                      stop-reason (:stop-reason final-llm-response)
+                (let [stop-reason (:stop-reason final-llm-response)
                       num-turns   (:num-turns final-llm-response)
-                      plan (or final-submitted-plan
-                               final-parsed-plan
-                               (response/throw-anomaly! :anomalies.agent/invoke-failed
-                                                       "Plan generation failed: EDN parse did not succeed"
-                                                       (cond-> {:phase :plan
-                                                                :parse-result nil
-                                                                :llm-content-length (count content)
-                                                                :llm-content-preview (subs content 0 (min 500 (count content)))}
-                                                         stop-reason (assoc :stop-reason stop-reason)
-                                                         num-turns   (assoc :num-turns num-turns))))
+                      plan-or-anom (parsed-plan-or-anomaly final-submitted-plan
+                                                           final-parsed-plan
+                                                           final-llm-response)
+                      ;; Boundary site: escalate the parse-miss anomaly
+                      ;; to a slingshot throw under the agent taxonomy
+                      ;; so external try+ callers see the same shape
+                      ;; they did before the data-first migration.
+                      plan (if (anomaly/anomaly? plan-or-anom)
+                             (response/throw-anomaly! :anomalies.agent/invoke-failed
+                                                     (:anomaly/message plan-or-anom)
+                                                     (:anomaly/data plan-or-anom))
+                             plan-or-anom)
                       plan-final (finalize-plan plan)]
                   ;; Check for already-satisfied response
                   (if (= :already-satisfied (:plan/status plan-final))
@@ -658,11 +710,7 @@
                   (response/error error-msg
                                   {:data (cond-> (or llm-err {})
                                            stop-reason (assoc :stop-reason stop-reason)
-                                           num-turns   (assoc :num-turns num-turns))}))))
-               ;; No LLM client — hard failure
-            (response/throw-anomaly! :anomalies.agent/llm-error
-                                    "No LLM backend provided for planner agent"
-                                    {:phase :plan}))))
+                                           num-turns   (assoc :num-turns num-turns))}))))))
 
       :validate-fn validate-plan
 
