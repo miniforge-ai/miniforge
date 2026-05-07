@@ -202,6 +202,60 @@
                                :content (str/trim content)}))
                vec))))))
 
+(defn- code-block-test-artifact
+  "Derive a test artifact from markdown code blocks when structured EDN is absent."
+  [content]
+  (when-let [files (extract-test-code-blocks content)]
+    {:test/id (random-uuid)
+     :test/files files
+     :test/type :unit
+     :test/summary "Tests from code blocks"
+     :test/created-at (java.util.Date.)}))
+
+(defn- count-test-file-assertions
+  "Count assertions across all files in a test artifact."
+  [test-files]
+  (->> test-files
+       (map :content)
+       (map count-assertions)
+       (reduce + 0)))
+
+(defn- count-test-file-cases
+  "Count cases across all files in a test artifact."
+  [test-files]
+  (->> test-files
+       (map :content)
+       (map count-test-cases)
+       (reduce + 0)))
+
+(defn- enrich-test-artifact
+  "Attach normalized metadata to a parsed test artifact."
+  [tests context]
+  (let [test-files (:test/files tests)]
+    (-> tests
+        (update :test/id #(or % (random-uuid)))
+        (assoc :test/framework (extract-test-framework test-files context))
+        (assoc :test/assertions-count
+               (if (contains? tests :test/assertions-count)
+                 (:test/assertions-count tests)
+                 (count-test-file-assertions test-files)))
+        (assoc :test/cases-count
+               (if (contains? tests :test/cases-count)
+                 (:test/cases-count tests)
+                 (count-test-file-cases test-files)))
+        (assoc :test/created-at (or (:test/created-at tests)
+                                    (java.util.Date.))))))
+
+(defn- test-artifact-metrics
+  "Build the success metrics payload for a normalized test artifact."
+  [tests tokens cost-usd]
+  {:test-files (count (:test/files tests))
+   :test-type (:test/type tests)
+   :assertions (:test/assertions-count tests)
+   :cases (:test/cases-count tests)
+   :tokens tokens
+   :cost-usd cost-usd})
+
 ;; make-fallback-tests removed — silent fallback masks real failures,
 ;; prevents retry/repair from working, and short-circuits checkpoint resume.
 
@@ -345,13 +399,7 @@
                                :worktree-artifacts worktree-artifacts
                                :artifact artifact
                                :parse-response parse-test-response
-                               :derive-artifact (fn [content]
-                                                  (when-let [files (extract-test-code-blocks content)]
-                                                    {:test/id (random-uuid)
-                                                     :test/files files
-                                                     :test/type :unit
-                                                     :test/summary "Tests from code blocks"
-                                                     :test/created-at (java.util.Date.)}))})]
+                               :derive-artifact code-block-test-artifact})]
               (when (seq context-misses)
                 (log/info logger :tester :tester/context-cache-misses
                           {:data {:miss-count (count context-misses)
@@ -362,30 +410,12 @@
                                 :streaming? (boolean on-chunk)}})
               (if (result-boundary/usable-content? normalized)
                 (if-let [tests (result-boundary/authoritative-payload normalized)]
-                  (let [tests-with-meta (-> tests
-                                            (update :test/id #(or % (random-uuid)))
-                                            (assoc :test/framework (extract-test-framework (:test/files tests) context))
-                                            (assoc :test/assertions-count
-                                                   (or (:test/assertions-count tests)
-                                                       (->> (:test/files tests)
-                                                            (map :content)
-                                                            (map count-assertions)
-                                                            (reduce +))))
-                                            (assoc :test/cases-count
-                                                   (or (:test/cases-count tests)
-                                                       (->> (:test/files tests)
-                                                            (map :content)
-                                                            (map count-test-cases)
-                                                            (reduce +))))
-                                            (assoc :test/created-at (java.util.Date.)))]
+                  (let [tests-with-meta (enrich-test-artifact tests context)]
                     (response/success tests-with-meta
                                       {:tokens (:tokens normalized)
-                                       :metrics {:test-files (count (:test/files tests-with-meta))
-                                                 :test-type (:test/type tests-with-meta)
-                                                 :assertions (:test/assertions-count tests-with-meta)
-                                                 :cases (:test/cases-count tests-with-meta)
-                                                 :tokens (:tokens normalized)
-                                                 :cost-usd (:cost-usd normalized)}}))
+                                       :metrics (test-artifact-metrics tests-with-meta
+                                                                       (:tokens normalized)
+                                                                       (:cost-usd normalized))}))
                   (response/error "LLM response could not be parsed as test artifact"
                                   {:tokens (:tokens normalized)}))
                 (result-boundary/error-response normalized "LLM call failed")))
