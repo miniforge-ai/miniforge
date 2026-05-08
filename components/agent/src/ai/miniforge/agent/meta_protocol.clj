@@ -28,7 +28,8 @@
    - Each meta-agent has focused domain expertise
    - Decisions are observable and logged
    - Lightweight coordinator routes information, doesn't control"
-  (:require [ai.miniforge.response.interface :as response]))
+  (:require [ai.miniforge.anomaly.interface :as anomaly]
+            [ai.miniforge.response.interface :as response]))
 
 (defprotocol MetaAgent
   "Protocol for meta-agents that monitor workflow execution.
@@ -116,30 +117,40 @@
 (defn create-meta-config
   "Create a meta-agent configuration.
 
+   This is the canonical, anomaly-returning constructor. Returns an
+   `:invalid-input` anomaly when required fields are missing instead
+   of throwing — callers branch on `anomaly/anomaly?` and decide
+   whether to short-circuit or escalate.
+
    Options:
    - :id (required) - Keyword identifier
    - :name (required) - Human-readable name
    - :can-halt? (default: true) - Can halt workflow
    - :check-interval-ms (default: 30000) - Check frequency
    - :priority (default: :medium) - :high, :medium, :low
-   - :enabled? (default: true) - Is active"
+   - :enabled? (default: true) - Is active
+
+   Returns:
+   - a `MetaAgentConfig` record on success
+   - an `:invalid-input` anomaly carrying `:provided` (the original
+     opts map) when `:id` or `:name` is missing"
   [{:keys [id name can-halt? check-interval-ms priority enabled?]
     :or {can-halt? true
          check-interval-ms 30000
          priority :medium
          enabled? true}
     :as opts}]
-  (when-not (and id name)
-    (response/throw-anomaly! :anomalies/incorrect
-                            "Meta-agent config requires :id and :name"
-                            {:provided opts}))
-  (map->MetaAgentConfig
-   {:id id
-    :name name
-    :can-halt? can-halt?
-    :check-interval-ms check-interval-ms
-    :priority priority
-    :enabled? enabled?}))
+  (if-not (and id name)
+    (anomaly/anomaly :invalid-input
+                     "Meta-agent config requires :id and :name"
+                     {:provided opts})
+    (map->MetaAgentConfig
+     {:id id
+      :name name
+      :can-halt? can-halt?
+      :check-interval-ms check-interval-ms
+      :priority priority
+      :enabled? enabled?})))
 
 (comment
   ;; Example meta-agent implementation

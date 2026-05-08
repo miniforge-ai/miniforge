@@ -19,7 +19,7 @@
 (ns ai.miniforge.agent.file-artifacts
   "Fallback artifact collection from files written in the working tree."
   (:require
-   [ai.miniforge.response.interface :as response]
+   [ai.miniforge.anomaly.interface :as anomaly]
    [clojure.edn :as edn]
    [clojure.java.io :as io]
    [clojure.java.shell :as shell]
@@ -149,9 +149,20 @@
 (defn snapshot-working-dir
   "Capture the current git dirty state for a working directory.
 
-   Returns sets of paths relative to working-dir. Paths already staged as new
-   files are tracked in :added so they can still be treated as :create during
-   fallback artifact synthesis."
+   Returns sets of paths relative to working-dir. Paths already staged
+   as new files are tracked in :added so they can still be treated as
+   :create during fallback artifact synthesis.
+
+   Returns:
+   - a snapshot map `{:untracked :modified :deleted :added}` on
+     success
+   - a `:fault` anomaly when `git status` returns a non-zero exit
+     code (carrying `:working-dir`, `:exit`, `:stderr`)
+
+   This is the canonical, anomaly-returning entry point. The single
+   internal caller (`collect-written-files`) branches on
+   `anomaly/anomaly?` and falls through to `nil` so a missing or
+   broken git repo never aborts the surrounding review phase."
   [working-dir]
   (let [{:keys [exit out err]} (shell/sh "git" "-C" working-dir
                                          "status" "--porcelain=v1"
@@ -161,11 +172,11 @@
       (reduce add-entry
               (empty-snapshot)
               (keep porcelain-entry (str/split-lines out)))
-      (response/throw-anomaly! :anomalies/fault
-                              "Failed to snapshot working directory"
-                              {:working-dir working-dir
-                               :exit exit
-                               :stderr err}))))
+      (anomaly/anomaly :fault
+                       "Failed to snapshot working directory"
+                       {:working-dir working-dir
+                        :exit exit
+                        :stderr err}))))
 
 (defn snapshot-via-executor
   "Capture git dirty state inside a capsule via the executor.
@@ -186,13 +197,21 @@
   "Collect files written during the agent session into a synthetic code artifact.
 
    Uses the pre-session snapshot to exclude files that were already dirty before
-   the session started."
+   the session started.
+
+   `snapshot-working-dir` is anomaly-returning; we treat any anomaly
+   the same way we treat a thrown exception — return nil so a broken
+   working tree never aborts the review phase. The `try/catch` covers
+   non-anomaly throws from downstream IO (e.g. `synthetic-artifact`
+   reading file content)."
   [pre-snapshot working-dir]
   (when pre-snapshot
     (try
-      (->> (snapshot-working-dir working-dir)
-           (changed-paths pre-snapshot)
-           (synthetic-artifact working-dir))
+      (let [snap (snapshot-working-dir working-dir)]
+        (when-not (anomaly/anomaly? snap)
+          (->> snap
+               (changed-paths pre-snapshot)
+               (synthetic-artifact working-dir))))
       (catch Exception _
         nil))))
 
