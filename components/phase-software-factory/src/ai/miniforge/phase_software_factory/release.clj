@@ -152,45 +152,86 @@
            vec))
     (catch Exception _ [])))
 
+(defn- rehydrate-committed-files
+  "Read content for the `:code/file-paths` recorded by the implement
+   phase. Used when implement's boundary commit has cleaned the
+   worktree — `git-dirty-files` then returns empty even though the
+   files exist as committed content on the task branch.
+
+   Modeled after review.clj/rehydrate-from-paths but with two
+   differences:
+   - Returns a `:code/files` vector directly (review wraps it back
+     into the outer artifact); release wants the vector to feed
+     into `code-artifacts` below.
+   - Applies the same `agent/substantive-file?` filter that
+     `git-dirty-files` uses, so a record consisting only of
+     `.miniforge/session-id` does not count as releasable work
+     (matches the iter-23 empty-diff PR guard).
+
+   Host-mode only: `agent/rehydrate-files` reads the host
+   filesystem. In governed (capsule) mode the worktree lives
+   inside a Docker/K8s container and the host cannot reach it
+   directly. A capsule-aware variant is a follow-up; today the
+   capsule path falls through to `git-dirty-files-capsule`, which
+   matches the pre-fix behavior in that mode."
+  [implement-artifact worktree-path]
+  (when-let [paths (and implement-artifact
+                        worktree-path
+                        (seq (:code/file-paths implement-artifact)))]
+    (let [files (try
+                  (agent/rehydrate-files worktree-path paths
+                                         (:code/file-actions implement-artifact))
+                  (catch Exception _ nil))]
+      (->> (or files [])
+           (filter agent/substantive-file?)
+           vec))))
+
 (defn build-workflow-state
   "Build workflow state from phase context for the release executor.
 
    In the new environment model, code changes live in the execution
    environment's git working tree (:execution/worktree-path) rather than
-   being serialized into phase results. This function reads the current
-   git diff from the worktree to discover which files need to be released.
+   being serialized into phase results.
 
-   The environment is the authoritative source — release proceeds when the
-   worktree has dirty paths, regardless of what the implement phase's
-   result map said. This matches verify and review, which both read the
-   environment directly. The previous behavior (gating on
-   `[:execution/phase-results :implement :result :status]`) disagreed with
-   verify/review and dropped real work whenever the curator marked
-   implement :failed despite persist capturing files on disk.
+   File-discovery resolution order:
 
-   Throws :release/zero-files when no changed files are found in the
-   worktree — that's the only legitimate \"nothing to release\" condition
-   in the env model."
+     1. `:code/file-paths` recorded on the implement phase artifact
+        (`lightweight-curated-artifact`). After implement's boundary
+        commit lands on the task branch the worktree is clean at HEAD,
+        so `git-dirty-files` returns empty even though the files exist
+        as committed content. Reading the recorded paths off disk is
+        the same pattern review.clj/rehydrate-from-paths uses.
+     2. `git-dirty-files` (or its capsule-aware twin) for files the
+        agent wrote to the worktree but the boundary did not commit
+        (legacy / partial-write path).
+     3. Throw :release/zero-files when both paths come back empty —
+        the only legitimate \"nothing to release\" condition.
+
+   Stage-3 dogfood (2026-05-07) tripped on the missing #1 path:
+   plan/implement/verify/review all green, files committed on the
+   task branch, but release threw zero-files because git-dirty-files
+   saw a clean worktree. This commit closes that gap."
   [ctx]
   (let [impl-result   (get-in ctx [:execution/phase-results :implement :result])
+        impl-artifact (get-in ctx [:execution/phase-results :implement :artifact])
         impl-status   (:status impl-result)]
     (log-already-implemented! ctx impl-status)
-    ;; Discover files via the environment's git working tree.
-    ;; Code provenance is environment-based: the agent writes to the worktree
-    ;; and the PR diff is the authoritative record of what changed.
-    ;; In governed mode with a non-local executor, use capsule-aware git (N11 §9.3).
-    (let [worktree-path (ctx-worktree-path ctx)
-          governed?     (= :governed (get ctx :execution/mode))
-          execute-fn    (get ctx :execution/execute-fn)
-          executor      (get ctx :execution/executor)
-          env-id        (get ctx :execution/environment-id)
-          files         (or (not-empty (if (and governed? execute-fn executor env-id)
-                                         (git-dirty-files-capsule execute-fn executor env-id worktree-path)
-                                         (git-dirty-files worktree-path)))
-                            (throw (ex-info (messages/t :release/zero-files)
-                                            {:phase          :release
-                                             :environment-id (:environment-id impl-result)
-                                             :worktree-path  worktree-path})))
+    (let [worktree-path  (ctx-worktree-path ctx)
+          governed?      (= :governed (get ctx :execution/mode))
+          execute-fn     (get ctx :execution/execute-fn)
+          executor       (get ctx :execution/executor)
+          env-id         (get ctx :execution/environment-id)
+          committed      (rehydrate-committed-files impl-artifact worktree-path)
+          dirty          (when (empty? committed)
+                           (if (and governed? execute-fn executor env-id)
+                             (git-dirty-files-capsule execute-fn executor env-id worktree-path)
+                             (git-dirty-files worktree-path)))
+          files          (or (not-empty committed)
+                             (not-empty dirty)
+                             (throw (ex-info (messages/t :release/zero-files)
+                                             {:phase          :release
+                                              :environment-id (:environment-id impl-result)
+                                              :worktree-path  worktree-path})))
           code-artifacts [{:artifact/type    :code
                            :artifact/content {:code/id        (random-uuid)
                                               :code/language  "mixed"
