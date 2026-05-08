@@ -20,15 +20,25 @@
   "Unit tests for bb-proc. Exercises only on commands guaranteed to
    exist on any POSIX host (`true`, `false`, `echo`). No network, no
    filesystem writes, no sleeps beyond the tight `destroy!` deadline."
-  (:require [clojure.test :refer [deftest testing is]]
+  (:require [babashka.fs :as fs]
+            [clojure.test :refer [deftest testing is]]
             [clojure.string :as str]
             [ai.miniforge.bb-proc.core :as sut]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Factories
 
-(def ^:private ok-cmd   "true")
-(def ^:private fail-cmd "false")
+(defn- required-command
+  "Resolve a required POSIX command to an absolute path for deterministic tests."
+  [cmd]
+  (or (some-> (fs/which cmd) str)
+      cmd))
+
+(def ^:private ok-cmd
+  (required-command "true"))
+
+(def ^:private fail-cmd
+  (required-command "false"))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Unit tests

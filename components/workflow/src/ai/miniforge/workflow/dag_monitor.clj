@@ -30,7 +30,8 @@
   (:require
    [ai.miniforge.pr-lifecycle.interface :as pr-lifecycle]
    [ai.miniforge.pr-train.interface :as pr-train]
-   [ai.miniforge.logging.interface :as log]))
+   [ai.miniforge.logging.interface :as log]
+   [ai.miniforge.workflow.merge-resolution :as merge-resolution]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Result constructors & predicates
@@ -72,7 +73,32 @@
   (let [dag-id (or (:dag-id context) (random-uuid))
         run-id (or (:run-id context) (random-uuid))
         event-bus (or (:event-bus context)
-                      (pr-lifecycle/create-event-bus))]
+                      (pr-lifecycle/create-event-bus))
+        ;; Spec §6.4 hook: when the PR-lifecycle merge step finds a
+        ;; CONFLICTING branch, dispatch into merge-resolution/
+        ;; resolve-conflict! with an LLM-driven agent-edit-fn.
+        ;;
+        ;; Only construct/inject :resolve-fn when context carries
+        ;; :llm-backend. Without a backend, merge-resolution would
+        ;; fall back to its no-op stub agent and deterministically
+        ;; return an unresolvable anomaly — the lifecycle would
+        ;; then attempt resolution every cycle for no benefit.
+        ;; Skipping injection lets the conflict-resolution dispatch
+        ;; decline cleanly and the existing rebase / not-ready path
+        ;; handles the PR. Callers that DO have a backend
+        ;; (workflow's dag-orchestrator path) get the auto-engage
+        ;; behaviour; callers that don't (e.g. phase-software-
+        ;; factory's pr_monitor) keep the existing semantics.
+        llm-backend (:llm-backend context)
+        logger      (:logger context)
+        resolve-fn  (when llm-backend
+                      (let [agent-edit-fn
+                            (merge-resolution/agent-driven-edit-fn
+                             (cond-> {:llm-backend llm-backend}
+                               logger (assoc :logger logger)))]
+                        (fn [opts]
+                          (merge-resolution/resolve-conflict!
+                           (assoc opts :agent-edit-fn agent-edit-fn)))))]
     (->> pr-infos
          (map (fn [{:keys [pr-number task-id]}]
                 [pr-number
@@ -85,6 +111,7 @@
                    :logger (:logger context)
                    :generate-fn (:generate-fn context)
                    :merge-policy (:merge-policy context)
+                   :resolve-fn resolve-fn
                    :max-fix-iterations (get context :max-fix-iterations 5))]))
          (into {}))))
 

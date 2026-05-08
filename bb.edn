@@ -78,6 +78,16 @@
            (when-not (zero? exit)
              (System/exit exit)))}
 
+  poly:check
+  {:doc  "Run Polylith workspace structure checks"
+   :task (do
+           (println "🏗️  Running Polylith workspace check...")
+           (println "Command: clojure -M:poly check")
+           (let [exit (run-clojure-stream! "-M:poly" "check")]
+             (when-not (zero? exit)
+               (println "❌ Polylith workspace check failed with exit code:" exit)
+               (System/exit exit))))}
+
   test:poly
   {:doc  "Run unit (brick) tests via Polylith (full, serial)"
    :task (do
@@ -121,8 +131,8 @@
   ;; ──────────────────────────────────────────────────────────────────────────
 
   pre-commit
-  {:doc     "Run all pre-commit checks (commit budget first, then lint, format, test, graalvm)"
-   :depends [commit-budget lint:clj fmt:md test test:graalvm]
+  {:doc     "Run all pre-commit checks (commit budget, structure, lint, format, test, graalvm)"
+   :depends [commit-budget poly:check lint:clj fmt:md test test:graalvm]
    :task    (println "\n✅ ALL PRE-COMMIT CHECKS PASSED\n")}
 
   ;; ──────────────────────────────────────────────────────────────────────────

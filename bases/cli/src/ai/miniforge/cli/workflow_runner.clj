@@ -802,6 +802,45 @@
           (when-not (:quiet opts)
             (println (display/colorize :yellow (messages/t :workflow-runner/sandbox-released)))))))))
 
+(defn- best-effort-shutdown?
+  "Honor `MINIFORGE_BEST_EFFORT_SHUTDOWN` as the documented escape hatch
+   for local/dev loops that don't care about event durability. Default
+   off — normal headless mode treats drain failures as errors."
+  []
+  (let [v (System/getenv "MINIFORGE_BEST_EFFORT_SHUTDOWN")]
+    (boolean (and v (contains? #{"1" "true" "yes" "on"} (str/lower-case v))))))
+
+(defn- event-stream-shutdown!
+  "Run the BD-2a shutdown sequence on `es`: quiesce publishers for
+   `workflow-id`, then drain sinks. Returns the structured drain result
+   for inclusion in the run result map, or `nil` when no event stream
+   exists (dashboard-url runs).
+
+   On a non-OK drain in normal mode (best-effort off), throws an
+   ex-info carrying the drain result so the caller's catch path renders
+   the failure and the CLI exits non-zero. Best-effort mode logs the
+   degradation to stderr and returns the result without throwing."
+  [es workflow-id {:keys [quiet]}]
+  (when es
+    (es/quiesce! es {:workflow-id workflow-id :timeout-ms 5000})
+    (let [drain-result (es/drain! es {:timeout-ms 5000})]
+      (when-not (:ok? drain-result)
+        (let [best-effort? (best-effort-shutdown?)
+              msg (str "Event-stream drain incomplete on shutdown: "
+                       (name (:reason drain-result :unknown))
+                       (when-let [pending (:pending-count drain-result)]
+                         (str " (pending=" pending ")"))
+                       (when-let [failed (:failed-sinks drain-result)]
+                         (str " (failed-sinks=" (count failed) ")")))]
+          (binding [*out* *err*]
+            (println (cond-> msg
+                       (not quiet) (->> (display/colorize :yellow))
+                       best-effort? (str " [MINIFORGE_BEST_EFFORT_SHUTDOWN=1, continuing]"))))
+          (when-not best-effort?
+            (throw (ex-info msg {:reason :event-stream-drain-failed
+                                 :drain-result drain-result})))))
+      drain-result)))
+
 (defn run-workflow! [workflow-id {:keys [version output quiet event-stream dashboard-url]
                                     :or {version "latest" output :pretty quiet false}
                                     :as opts}]
@@ -828,8 +867,17 @@
         (try
           (let [result (execute-workflow-pipeline run-pipeline workflow workflow-input callbacks-with-url artifact-store es)]
             (close-artifact-store artifact-store)
-            (display/print-result result opts)
-            result)
+            ;; BD-2a shutdown ordering: fence late publishers for this
+            ;; workflow, then drain sinks before returning. quiesce!
+            ;; rejects any post-terminal `publish!` for this workflow
+            ;; (heartbeat / cleanup background threads); drain! waits
+            ;; for in-flight publishes to settle and asks each sink to
+            ;; flush. Without this, headless exits could land before the
+            ;; producer-side completion event was durable.
+            (let [shutdown (event-stream-shutdown! es workflow-id opts)]
+              (display/print-result result opts)
+              (cond-> result
+                (some? shutdown) (assoc :event-durability shutdown))))
           (finally
             (progress-cleanup)))))
     (catch Exception e

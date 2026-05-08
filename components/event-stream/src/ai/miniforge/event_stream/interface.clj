@@ -48,6 +48,10 @@
 (def get-events stream/get-events)
 (def get-latest-status stream/get-latest-status)
 
+;; BD-2a shutdown-ordering primitives.
+(def quiesce! stream/quiesce!)
+(def drain! stream/drain!)
+
 ;------------------------------------------------------------------------------ Layer 1
 ;; Event constructors
 

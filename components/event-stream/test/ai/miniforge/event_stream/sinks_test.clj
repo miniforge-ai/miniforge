@@ -62,27 +62,23 @@
 ;; event-file-path
 
 (deftest event-file-path-test
-  (testing "returns a File path ending in .json"
-    (let [wf-id (random-uuid)
-          path (sinks/event-file-path wf-id)]
-      (is (instance? java.io.File path))
-      (is (str/ends-with? (.getName path) ".json"))
-      (is (str/includes? (.getPath path) (str wf-id)))))
-
-  (testing "creates the workflow subdirectory"
-    (let [wf-id (random-uuid)
-          path (sinks/event-file-path wf-id)
-          parent (.getParentFile path)]
-      (is (.isDirectory parent))
-      (is (str/ends-with? (.getName parent) (str wf-id)))))
-
-  (testing "accepts an explicit base-dir"
+  (testing "returns a File path ending in .json under an explicit base-dir"
     (with-temp-dir
       (fn [dir]
         (let [wf-id (random-uuid)
               path (sinks/event-file-path dir wf-id)]
+          (is (instance? java.io.File path))
           (is (str/includes? (.getPath path) (.getPath dir)))
-          (is (str/ends-with? (.getName path) ".json")))))))
+          (is (str/ends-with? (.getName path) ".json"))))))
+
+  (testing "creates the workflow subdirectory under an explicit base-dir"
+    (with-temp-dir
+      (fn [dir]
+        (let [wf-id (random-uuid)
+              path (sinks/event-file-path dir wf-id)
+              parent (.getParentFile path)]
+          (is (.isDirectory parent))
+          (is (str/ends-with? (.getName parent) (str wf-id))))))))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; file-sink

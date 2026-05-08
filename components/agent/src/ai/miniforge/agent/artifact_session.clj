@@ -29,6 +29,7 @@
    Layer 3: High-level session macro"
   (:require
    [ai.miniforge.agent.file-artifacts :as file-artifacts]
+   [ai.miniforge.anomaly.interface :as anomaly]
    [cheshire.core :as json]
    [clojure.edn :as edn]
    [clojure.java.io :as io]
@@ -207,10 +208,19 @@
      :source-root source-root
      :mcp-config-path config-path
      :artifact-path artifact-path
-     :pre-session-snapshot (try
-                             (file-artifacts/snapshot-working-dir working-dir)
-                             (catch Exception _
-                               (file-artifacts/empty-snapshot)))})))
+     ;; `snapshot-working-dir` is anomaly-returning post-W7.2 cleanup —
+     ;; a git failure now yields an `:anomaly/category :anomalies/fault`
+     ;; map rather than throwing. The legacy try/catch only handled
+     ;; thrown exceptions (e.g. `Process` invocation faults that escape
+     ;; the wrapper); add an explicit anomaly check so a return-as-data
+     ;; fault doesn't flow into `:pre-session-snapshot` and break
+     ;; downstream diffing / changed-paths logic.
+     :pre-session-snapshot (let [snap (try
+                                        (file-artifacts/snapshot-working-dir working-dir)
+                                        (catch Exception _ nil))]
+                             (if (or (nil? snap) (anomaly/anomaly? snap))
+                               (file-artifacts/empty-snapshot)
+                               snap))})))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; MCP server command
