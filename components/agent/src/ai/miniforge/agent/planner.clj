@@ -704,7 +704,7 @@
                 ;; post-mortem. Iters 11-12 lost this context and
                 ;; produced undiagnosable \"Unknown error\" / bare
                 ;; \"Process timed out\" phase errors.
-                (result-boundary/error-response final-normalized "LLM call failed")))
+                (result-boundary/error-response final-normalized "LLM call failed")))))
 
       :validate-fn validate-plan
 
