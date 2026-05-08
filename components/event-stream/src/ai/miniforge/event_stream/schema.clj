@@ -19,7 +19,18 @@
 (ns ai.miniforge.event-stream.schema
   "N3-compliant event schemas for workflow observability.
 
-   See specs/normative/N3-event-stream.md for the full specification.")
+   See specs/normative/N3-event-stream.md for the full specification.
+
+   Identity propagation (added for miniforge-fleet's Phase E.1
+   planning prerequisite #10, Decision 14): every event schema
+   carries an optional `:org/id` / `:workspace/id` / `:repo/id` /
+   `:auth/context` quartet so subscribers can scope authorization
+   without retrofitting the event log later. All four are optional
+   for backward compatibility — single-org single-workspace
+   deployments populate them with stable singleton values; multi-
+   tenant deployments populate per-request. The `core/create-envelope`
+   constructor accepts them as optional kwargs and stamps them onto
+   the envelope when present.")
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Shared payload schemas
@@ -46,6 +57,10 @@
    [:agent/id {:optional true} keyword?]           ; OPTIONAL: agent that emitted event
    [:agent/instance-id {:optional true} uuid?]     ; OPTIONAL: specific agent instance
    [:event/parent-id {:optional true} uuid?]       ; OPTIONAL: parent event ID (for causality)
+   [:org/id       {:optional true} uuid?]
+   [:workspace/id {:optional true} uuid?]
+   [:repo/id      {:optional true} string?]
+   [:auth/context {:optional true} map?]
    [:message string?]])                ; REQUIRED: human-readable message
 
 ;------------------------------------------------------------------------------ Layer 1
@@ -62,6 +77,10 @@
    [:workflow/id uuid?]
    [:workflow/spec {:optional true} map?]
    [:workflow/intent {:optional true} map?]
+   [:org/id       {:optional true} uuid?]
+   [:workspace/id {:optional true} uuid?]
+   [:repo/id      {:optional true} string?]
+   [:auth/context {:optional true} map?]
    [:message string?]])
 
 (def PhaseStarted
@@ -76,6 +95,10 @@
    [:workflow/phase keyword?]
    [:phase/expected-agent {:optional true} keyword?]
    [:phase/context {:optional true} map?]
+   [:org/id       {:optional true} uuid?]
+   [:workspace/id {:optional true} uuid?]
+   [:repo/id      {:optional true} string?]
+   [:auth/context {:optional true} map?]
    [:message string?]])
 
 (def PhaseCompleted
@@ -96,6 +119,10 @@
    [:phase/error {:optional true} map?]
    [:phase/tokens {:optional true} int?]
    [:phase/cost-usd {:optional true} number?]
+   [:org/id       {:optional true} uuid?]
+   [:workspace/id {:optional true} uuid?]
+   [:repo/id      {:optional true} string?]
+   [:auth/context {:optional true} map?]
    [:message string?]])
 
 (def WorkspacePersisted
@@ -117,6 +144,10 @@
    [:workspace/commit-sha {:optional true} string?]
    [:workspace/bundle-path {:optional true} string?]
    [:workspace/tier {:optional true} [:enum :worktree :remote]]
+   [:org/id       {:optional true} uuid?]
+   [:workspace/id {:optional true} uuid?]
+   [:repo/id      {:optional true} string?]
+   [:auth/context {:optional true} map?]
    [:message string?]])
 
 (def WorkflowCompleted
@@ -133,6 +164,10 @@
    [:workflow/evidence-bundle-id {:optional true} uuid?]
    [:workflow/tokens {:optional true} int?]
    [:workflow/cost-usd {:optional true} number?]
+   [:org/id       {:optional true} uuid?]
+   [:workspace/id {:optional true} uuid?]
+   [:repo/id      {:optional true} string?]
+   [:auth/context {:optional true} map?]
    [:message string?]])
 
 (def WorkflowFailed
@@ -147,6 +182,10 @@
    [:workflow/failure-phase {:optional true} keyword?]
    [:workflow/failure-reason {:optional true} string?]
    [:workflow/error-details {:optional true} map?]
+   [:org/id       {:optional true} uuid?]
+   [:workspace/id {:optional true} uuid?]
+   [:repo/id      {:optional true} string?]
+   [:auth/context {:optional true} map?]
    [:message string?]])
 
 ;------------------------------------------------------------------------------ Layer 1.5
@@ -172,6 +211,10 @@
    [:pr/title {:optional true} string?]
    [:pr/author {:optional true} string?]
    [:pr/merge-order {:optional true} int?]
+   [:org/id       {:optional true} uuid?]
+   [:workspace/id {:optional true} uuid?]
+   [:repo/id      {:optional true} string?]
+   [:auth/context {:optional true} map?]
    [:message string?]])
 
 ;------------------------------------------------------------------------------ Layer 2
@@ -190,6 +233,10 @@
    [:agent/id keyword?]
    [:agent/instance-id {:optional true} uuid?]
    [:agent/context {:optional true} map?]
+   [:org/id       {:optional true} uuid?]
+   [:workspace/id {:optional true} uuid?]
+   [:repo/id      {:optional true} string?]
+   [:auth/context {:optional true} map?]
    [:message string?]])
 
 (def AgentCompleted
@@ -207,6 +254,10 @@
    [:agent/outcome {:optional true} [:enum :success :failure]]
    [:agent/output {:optional true} map?]
    [:agent/artifacts {:optional true} [:vector uuid?]]
+   [:org/id       {:optional true} uuid?]
+   [:workspace/id {:optional true} uuid?]
+   [:repo/id      {:optional true} string?]
+   [:auth/context {:optional true} map?]
    [:message string?]])
 
 (def AgentChunk
@@ -221,6 +272,10 @@
    [:agent/id keyword?]
    [:chunk/delta string?]              ; The chunk of text
    [:chunk/done? {:optional true} boolean?]
+   [:org/id       {:optional true} uuid?]
+   [:workspace/id {:optional true} uuid?]
+   [:repo/id      {:optional true} string?]
+   [:auth/context {:optional true} map?]
    [:message string?]])
 
 (def AgentStatus
@@ -238,6 +293,10 @@
    [:status/type [:enum :reading :thinking :generating :validating :repairing :running :waiting :communicating]]
    [:status/detail {:optional true} string?]
    [:status/progress-percent {:optional true} int?]
+   [:org/id       {:optional true} uuid?]
+   [:workspace/id {:optional true} uuid?]
+   [:repo/id      {:optional true} string?]
+   [:auth/context {:optional true} map?]
    [:message string?]])
 
 ;------------------------------------------------------------------------------ Layer 3
@@ -255,6 +314,10 @@
    [:workaround-id {:optional true} keyword?]
    [:pattern-id keyword?]
    [:success? boolean?]
+   [:org/id       {:optional true} uuid?]
+   [:workspace/id {:optional true} uuid?]
+   [:repo/id      {:optional true} string?]
+   [:auth/context {:optional true} map?]
    [:message string?]])
 
 (def BackendSwitched
@@ -270,6 +333,10 @@
    [:to keyword?]
    [:reason string?]
    [:cooldown-until inst?]
+   [:org/id       {:optional true} uuid?]
+   [:workspace/id {:optional true} uuid?]
+   [:repo/id      {:optional true} string?]
+   [:auth/context {:optional true} map?]
    [:message string?]])
 
 ;------------------------------------------------------------------------------ Layer 4
@@ -289,6 +356,10 @@
    [:llm/model string?]
    [:llm/prompt-tokens {:optional true} int?]
    [:llm/request-id uuid?]
+   [:org/id       {:optional true} uuid?]
+   [:workspace/id {:optional true} uuid?]
+   [:repo/id      {:optional true} string?]
+   [:auth/context {:optional true} map?]
    [:message string?]])
 
 (def LLMResponse
@@ -308,6 +379,10 @@
    [:llm/total-tokens {:optional true} int?]
    [:llm/duration-ms {:optional true} int?]
    [:llm/cost-usd {:optional true} number?]
+   [:org/id       {:optional true} uuid?]
+   [:workspace/id {:optional true} uuid?]
+   [:repo/id      {:optional true} string?]
+   [:auth/context {:optional true} map?]
    [:message string?]])
 
 ;------------------------------------------------------------------------------ Layer 4.5
@@ -336,6 +411,10 @@
    [:dependency/previous-status {:optional true} keyword?]
    [:dependency/last-observed-at {:optional true} inst?]
    [:dependency/last-recovered-at {:optional true} inst?]
+   [:org/id       {:optional true} uuid?]
+   [:workspace/id {:optional true} uuid?]
+   [:repo/id      {:optional true} string?]
+   [:auth/context {:optional true} map?]
    [:message string?]])
 
 (def DependencyRecovered
@@ -361,6 +440,10 @@
    [:dependency/previous-status {:optional true} keyword?]
    [:dependency/last-observed-at {:optional true} inst?]
    [:dependency/last-recovered-at {:optional true} inst?]
+   [:org/id       {:optional true} uuid?]
+   [:workspace/id {:optional true} uuid?]
+   [:repo/id      {:optional true} string?]
+   [:auth/context {:optional true} map?]
    [:message string?]])
 
 ;------------------------------------------------------------------------------ Layer 5
@@ -456,6 +539,10 @@
    [:supervision/meta-eval? {:optional true} boolean?]
    [:supervision/confidence {:optional true} number?]
    [:workflow/phase {:optional true} keyword?]
+   [:org/id       {:optional true} uuid?]
+   [:workspace/id {:optional true} uuid?]
+   [:repo/id      {:optional true} string?]
+   [:auth/context {:optional true} map?]
    [:message string?]])
 
 (def InterventionRequested
@@ -479,6 +566,10 @@
    [:intervention/approval-required? {:optional true} boolean?]
    [:intervention/requested-at inst?]
    [:intervention/updated-at inst?]
+   [:org/id       {:optional true} uuid?]
+   [:workspace/id {:optional true} uuid?]
+   [:repo/id      {:optional true} string?]
+   [:auth/context {:optional true} map?]
    [:message string?]])
 
 (def InterventionStateChanged
@@ -505,6 +596,10 @@
    [:intervention/approval-required? {:optional true} boolean?]
    [:intervention/requested-at {:optional true} inst?]
    [:intervention/updated-at {:optional true} inst?]
+   [:org/id       {:optional true} uuid?]
+   [:workspace/id {:optional true} uuid?]
+   [:repo/id      {:optional true} string?]
+   [:auth/context {:optional true} map?]
    [:message string?]])
 
 ;; OCI container event schemas
@@ -521,6 +616,10 @@
    [:oci/container-id string?]
    [:oci/image-digest {:optional true} string?]
    [:oci/trust-level {:optional true} [:enum :untrusted :trusted :privileged]]
+   [:org/id       {:optional true} uuid?]
+   [:workspace/id {:optional true} uuid?]
+   [:repo/id      {:optional true} string?]
+   [:auth/context {:optional true} map?]
    [:message string?]])
 
 (def ContainerCompleted
@@ -535,6 +634,10 @@
    [:oci/container-id string?]
    [:oci/exit-code int?]
    [:oci/duration-ms {:optional true} int?]
+   [:org/id       {:optional true} uuid?]
+   [:workspace/id {:optional true} uuid?]
+   [:repo/id      {:optional true} string?]
+   [:auth/context {:optional true} map?]
    [:message string?]])
 
 ;------------------------------------------------------------------------------ Rich Comment

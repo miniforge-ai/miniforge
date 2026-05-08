@@ -62,20 +62,46 @@
    most-significant 64 bits encode (epoch-ms timestamp, worker id,
    per-ms sequence) per the RFC, so events sort lexically by creation
    order. Streams without a generator fall back to a random UUID;
-   `:event/id` stays a `uuid?` either way for downstream compatibility."
-  [stream event-type workflow-id message]
-  (let [seq-num (get-in @stream [:sequence-numbers workflow-id] 0)
-        generator (:snowflake-generator @stream)]
-    (swap! stream assoc-in [:sequence-numbers workflow-id] (inc seq-num))
-    {:event/type event-type
-     :event/id (if generator
-                 (snowflake/next-id! generator)
-                 (random-uuid))
-     :event/timestamp (java.util.Date.)
-     :event/version event-version
-     :event/sequence-number seq-num
-     :workflow/id workflow-id
-     :message message}))
+   `:event/id` stays a `uuid?` either way for downstream compatibility.
+
+   Identity propagation (Decision 14 of miniforge-fleet's Phase E
+   plan): every envelope can carry org / workspace / repo / auth
+   context so subscribers can scope authorization without
+   retrofitting the event log later. Fields default off; pass any
+   subset via the options map. The OPTIONS arity is the
+   recommended call shape; the legacy 4-arg arity stays for
+   in-tree callers that don't have identity context yet.
+
+   Options:
+     :org/id        — UUID. Org tenancy boundary.
+     :workspace/id  — UUID. Workspace tenancy boundary.
+     :repo/id       — string. Slug-style repo id when applicable.
+     :auth/context  — map. Caller-shaped auth context.
+     :event/parent-id — UUID. Parent event id for causality.
+     :agent/id        — keyword. Agent that emitted the event.
+     :agent/instance-id — UUID. Specific agent instance."
+  ([stream event-type workflow-id message]
+   (create-envelope stream event-type workflow-id message {}))
+  ([stream event-type workflow-id message opts]
+   (let [seq-num   (get-in @stream [:sequence-numbers workflow-id] 0)
+         generator (:snowflake-generator @stream)]
+     (swap! stream assoc-in [:sequence-numbers workflow-id] (inc seq-num))
+     (cond-> {:event/type event-type
+              :event/id (if generator
+                          (snowflake/next-id! generator)
+                          (random-uuid))
+              :event/timestamp (java.util.Date.)
+              :event/version event-version
+              :event/sequence-number seq-num
+              :workflow/id workflow-id
+              :message message}
+       (:org/id opts)            (assoc :org/id (:org/id opts))
+       (:workspace/id opts)      (assoc :workspace/id (:workspace/id opts))
+       (:repo/id opts)           (assoc :repo/id (:repo/id opts))
+       (:auth/context opts)      (assoc :auth/context (:auth/context opts))
+       (:event/parent-id opts)   (assoc :event/parent-id (:event/parent-id opts))
+       (:agent/id opts)          (assoc :agent/id (:agent/id opts))
+       (:agent/instance-id opts) (assoc :agent/instance-id (:agent/instance-id opts))))))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Event bus operations
