@@ -1,10 +1,16 @@
 {:paths ["src" "resources"]
- :deps {ai.miniforge/config {:local/root "../config"}
-        ai.miniforge/algorithms {:local/root "../algorithms"}
-        ai.miniforge/schema {:local/root "../schema"}
-        ai.miniforge/logging {:local/root "../logging"}
-        ai.miniforge/messages {:local/root "../messages"}
-        metosin/malli {:mvn/version "0.16.4"}
-        clj-commons/clj-yaml {:mvn/version "1.0.29"}}
+ :deps {ai.miniforge/config       {:local/root "../config"}
+        ai.miniforge/algorithms   {:local/root "../algorithms"}
+        ai.miniforge/schema       {:local/root "../schema"}
+        ai.miniforge/logging      {:local/root "../logging"}
+        ai.miniforge/messages     {:local/root "../messages"}
+        ;; Used by `zettel/compute-digest` to derive `:zettel/digest`
+        ;; (SHA-256 over canonical EDN of the content-bearing subset)
+        ;; per miniforge-fleet's Phase E Decision 6. Same canonical-EDN
+        ;; primitive other content-addressed surfaces in the codebase
+        ;; lean on, so digests stay comparable across components.
+        ai.miniforge/content-hash {:local/root "../content-hash"}
+        metosin/malli             {:mvn/version "0.16.4"}
+        clj-commons/clj-yaml      {:mvn/version "1.0.29"}}
  :aliases {:test {:extra-paths ["test"]
                   :extra-deps {}}}}

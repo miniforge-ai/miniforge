@@ -22,12 +22,79 @@
    Layer 1: Link management
    Layer 2: Serialization (Markdown with YAML frontmatter)"
   (:require
+   [ai.miniforge.content-hash.interface :as content-hash]
    [ai.miniforge.knowledge.schema :as schema]
    [clojure.string :as str]
    [clj-yaml.core :as yaml]
-   [malli.core :as m]))
+   [malli.core :as m])
+  (:import
+   [java.util UUID]))
 
 ;------------------------------------------------------------------------------ Layer 0
+;; Content-bearing subset + revision-id derivation.
+;;
+;; miniforge-fleet's Phase E Decision 6: trust attaches to the IMMUTABLE
+;; revision of a zettel, not to its mutable logical id. To make that
+;; mechanical we (a) define the closed set of fields that are "the
+;; content" — anything that affects WHAT the zettel says — and (b)
+;; derive `:zettel/revision-id` deterministically from the digest so two
+;; agents producing the same content land on the same revision id.
+
+(def ^:private content-bearing-fields
+  "Fields whose value affects the zettel's revision identity. Operational
+   metadata (`:zettel/id`, `:zettel/created`, `:zettel/modified`,
+   `:zettel/author`, `:zettel/backlinks`, `:fleet/*`, `:privacy/*`,
+   `:fleet/oss-version`) is intentionally excluded — they describe
+   surrounding policy, not knowledge content."
+  [:zettel/uid
+   :zettel/title
+   :zettel/content
+   :zettel/type
+   :zettel/dewey
+   :zettel/tags
+   :zettel/links
+   :zettel/source])
+
+(defn- content-projection
+  "Pure: project `zettel` down to the content-bearing subset that feeds
+   the digest. Stable across additions of operational metadata."
+  [zettel]
+  (select-keys zettel content-bearing-fields))
+
+(defn compute-digest
+  "Pure: SHA-256 hex digest of the zettel's canonical-EDN
+   content-projection. Stable across map-key reorderings and across
+   non-content metadata changes; rotates whenever a content-bearing
+   field changes. Used to seed `:zettel/digest` and (deterministically)
+   `:zettel/revision-id`."
+  [zettel]
+  (content-hash/content-hash (content-projection zettel)))
+
+(defn revision-id-from-digest
+  "Pure: derive a stable UUID from a digest hex string. Two zettels with
+   identical content land on the same `:zettel/revision-id` — the
+   property miniforge-fleet's E.1 idempotent-retry path needs."
+  ^UUID [^String digest]
+  (UUID/nameUUIDFromBytes (.getBytes digest "UTF-8")))
+
+(defn- stamp-revision
+  "Pure: stamp a zettel with `:zettel/digest` + `:zettel/revision-id`
+   derived from its current content projection. Idempotent for an
+   already-stamped zettel whose content has not changed."
+  [zettel]
+  (let [d (compute-digest zettel)]
+    (assoc zettel
+           :zettel/digest d
+           :zettel/revision-id (revision-id-from-digest d))))
+
+(def ^:private derived-fields
+  "Fields the constructor / updater own — callers cannot override them
+   directly. They're recomputed from `content-projection` so the
+   relationship between content and revision identity stays
+   tamper-evident."
+  #{:zettel/digest :zettel/revision-id})
+
+;------------------------------------------------------------------------------ Layer 1
 ;; Zettel creation and manipulation
 
 (defn create-zettel
@@ -39,39 +106,83 @@
    - content - Markdown content body
    - type    - Zettel type keyword
 
-   Options:
-   - :dewey  - Dewey classification code (e.g., '210')
+   Options (local Zettelkasten):
+   - :dewey  - Dewey classification code (e.g., \"210\")
    - :tags   - Vector of keyword tags
    - :links  - Vector of Link maps
    - :source - Source/provenance map
    - :author - Author string (default: 'user')
 
+   Options (miniforge-fleet share intent):
+   - :fleet/shareable        — boolean. Producer's intent to share
+                               via the Fleet event log.
+   - :fleet/share-scope      — `:org` / `:team` / `:repo` / `:workflow`.
+   - :privacy/classification — `:public-org` / `:internal` /
+                               `:restricted` / `:secret`.
+   - :fleet/oss-version      — version string the zettel was captured
+                               against. Stamped onto every event the
+                               agent runtime emits; quarantine + migration
+                               registry key off this on the Fleet side.
+
+   The constructor stamps `:zettel/digest` + `:zettel/revision-id`
+   automatically (per Decision 6 of miniforge-fleet's Phase E plan).
+
    Example:
-     (create-zettel 'protocol-naming' 'Protocol Naming Convention'
-                    '# Protocol Naming...' :rule
-                    {:dewey '210' :tags [:clojure :protocol]})"
-  [uid title content type & {:keys [dewey tags links source author]
-                              :or {author "user"}}]
-  (let [now (java.util.Date.)
-        zettel {:zettel/id (random-uuid)
-                :zettel/uid uid
-                :zettel/title title
-                :zettel/content content
-                :zettel/type type
-                :zettel/created now
-                :zettel/author author}]
-    (cond-> zettel
-      dewey (assoc :zettel/dewey dewey)
-      (seq tags) (assoc :zettel/tags (vec tags))
-      (seq links) (assoc :zettel/links (vec links))
-      source (assoc :zettel/source source))))
+     (create-zettel \"protocol-naming\" \"Protocol Naming Convention\"
+                    \"# Protocol Naming...\" :rule
+                    :dewey \"210\" :tags [:clojure :protocol])"
+  [uid title content type
+   & {:keys [dewey tags links source author
+             fleet/shareable fleet/share-scope privacy/classification
+             fleet/oss-version]
+      :or   {author "user"}}]
+  (let [now    (java.util.Date.)
+        zettel (cond-> {:zettel/id      (random-uuid)
+                        :zettel/uid     uid
+                        :zettel/title   title
+                        :zettel/content content
+                        :zettel/type    type
+                        :zettel/created now
+                        :zettel/author  author}
+                 dewey      (assoc :zettel/dewey dewey)
+                 (seq tags) (assoc :zettel/tags (vec tags))
+                 (seq links) (assoc :zettel/links (vec links))
+                 source     (assoc :zettel/source source)
+                 (some? shareable)      (assoc :fleet/shareable shareable)
+                 share-scope            (assoc :fleet/share-scope share-scope)
+                 classification         (assoc :privacy/classification classification)
+                 oss-version            (assoc :fleet/oss-version oss-version))]
+    (stamp-revision zettel)))
 
 (defn update-zettel
-  "Update a zettel with new values, setting modified timestamp."
+  "Update a zettel with new values, setting modified timestamp.
+
+   `:zettel/digest` and `:zettel/revision-id` are DERIVED — any value
+   the caller supplies for either is dropped before the merge.
+   `update-zettel` always re-stamps the result via `stamp-revision`,
+   which is idempotent on unchanged content (same content → same
+   digest → same revision-id) and rotates the revision when a
+   content-bearing field changes (`:zettel/uid` / `:zettel/title` /
+   `:zettel/content` / `:zettel/type` / `:zettel/dewey` /
+   `:zettel/tags` / `:zettel/links` / `:zettel/source`). Two
+   consequences worth pinning:
+
+     - Operational-metadata-only changes (privacy classification,
+       share scope, oss-version, etc.) leave the revision identity
+       intact. Decision 6 attaches trust to the immutable revision,
+       so changing operational policy must NOT silently migrate
+       trust onto a new revision.
+
+     - A legacy zettel without `:zettel/digest` / `:zettel/revision-id`
+       receives the stamped fields on its first update — the system
+       converges on a fully-stamped state without an explicit
+       backfill pass."
   [zettel changes]
-  (-> zettel
-      (merge changes)
-      (assoc :zettel/modified (java.util.Date.))))
+  (let [sanitised (apply dissoc changes derived-fields)
+        merged    (-> zettel
+                      (merge sanitised)
+                      (assoc :zettel/modified (java.util.Date.)))]
+    (stamp-revision merged)))
 
 (defn zettel-summary
   "Extract a lightweight summary from a zettel."
