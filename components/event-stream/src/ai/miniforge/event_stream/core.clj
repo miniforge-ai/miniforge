@@ -20,6 +20,7 @@
   "Event bus and event constructors for workflow observability."
   (:require
    [ai.miniforge.event-stream.messages :as messages]
+   [ai.miniforge.event-stream.snowflake :as snowflake]
    [ai.miniforge.phase.interface :as phase]
    [ai.miniforge.logging.interface :as log]
    [ai.miniforge.response.interface :as response]
@@ -54,12 +55,22 @@
 ;; Event envelope constructor
 
 (defn create-envelope
-  "Create an event envelope with sequence numbering."
+  "Create an event envelope with sequence numbering.
+
+   When the stream carries a `:snowflake-generator` (BD-2b), the
+   envelope's `:event/id` is a snowflake-encoded UUID — the
+   most-significant 64 bits encode (epoch-ms timestamp, worker id,
+   per-ms sequence) per the RFC, so events sort lexically by creation
+   order. Streams without a generator fall back to a random UUID;
+   `:event/id` stays a `uuid?` either way for downstream compatibility."
   [stream event-type workflow-id message]
-  (let [seq-num (get-in @stream [:sequence-numbers workflow-id] 0)]
+  (let [seq-num (get-in @stream [:sequence-numbers workflow-id] 0)
+        generator (:snowflake-generator @stream)]
     (swap! stream assoc-in [:sequence-numbers workflow-id] (inc seq-num))
     {:event/type event-type
-     :event/id (random-uuid)
+     :event/id (if generator
+                 (snowflake/next-id! generator)
+                 (random-uuid))
      :event/timestamp (java.util.Date.)
      :event/version event-version
      :event/sequence-number seq-num
@@ -87,7 +98,10 @@
      (create-event-stream {:sinks [(sinks/file-sink) (sinks/stdout-sink)]})
 
      ;; From config
-     (create-event-stream {:config user-config})"
+     (create-event-stream {:config user-config})
+
+     ;; With a Snowflake event-id generator (BD-2b)
+     (create-event-stream {:snowflake-generator (snowflake/create-generator)})"
   [& [opts]]
   (let [;; Create sinks from config or use provided sinks or default
         event-sinks (cond
@@ -108,7 +122,11 @@
            ;; reaching zero before draining sinks. `publish!` increments
            ;; on entry (after the quiesce check) and decrements in a
            ;; finally so a sink exception still releases the slot.
-           :in-flight 0})))
+           :in-flight 0
+           ;; BD-2b: optional Snowflake event-id generator. When present,
+           ;; `create-envelope` calls it for `:event/id` so events sort
+           ;; lexically by creation order. nil = random-uuid fallback.
+           :snowflake-generator (:snowflake-generator opts)})))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; publish! helpers — small, single-purpose pieces composed by publish!

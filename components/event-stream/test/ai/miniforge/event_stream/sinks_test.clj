@@ -66,7 +66,8 @@
     (with-temp-dir
       (fn [dir]
         (let [wf-id (random-uuid)
-              path (sinks/event-file-path dir wf-id)]
+              event (sample-event {:workflow/id wf-id})
+              path (sinks/event-file-path dir wf-id event)]
           (is (instance? java.io.File path))
           (is (str/includes? (.getPath path) (.getPath dir)))
           (is (str/ends-with? (.getName path) ".json"))))))
@@ -75,10 +76,37 @@
     (with-temp-dir
       (fn [dir]
         (let [wf-id (random-uuid)
-              path (sinks/event-file-path dir wf-id)
+              event (sample-event {:workflow/id wf-id})
+              path (sinks/event-file-path dir wf-id event)
               parent (.getParentFile path)]
           (is (.isDirectory parent))
-          (is (str/ends-with? (.getName parent) (str wf-id))))))))
+          (is (str/ends-with? (.getName parent) (str wf-id)))))))
+
+  (testing "snowflake-encoded :event/id produces the new filename grammar"
+    (with-temp-dir
+      (fn [dir]
+        ;; A snowflake-encoded UUID has zero least-significant bits.
+        (let [wf-id (random-uuid)
+              snowflake-uuid (java.util.UUID. 0x018f3a9c8e4b12d0 0)
+              event (sample-event {:workflow/id wf-id
+                                   :event/id snowflake-uuid
+                                   :event/sequence-number 12345})
+              path (sinks/event-file-path dir wf-id event)
+              filename (.getName path)]
+          (is (str/ends-with? filename ".transit.json"))
+          (is (str/starts-with? filename "018f3a9c8e4b12d0__"))
+          (is (str/includes? filename "__000000012345.transit.json"))))))
+
+  (testing "random :event/id falls back to legacy timestamp-leading filename"
+    (with-temp-dir
+      (fn [dir]
+        (let [wf-id (random-uuid)
+              event (sample-event {:workflow/id wf-id})
+              path (sinks/event-file-path dir wf-id event)
+              filename (.getName path)]
+          ;; Legacy pattern: 20YYMMDDTHHMMSSsss-{uuid}.json
+          (is (re-matches #"\d{8}T\d{9}Z-[0-9a-f-]+\.json" filename)
+              (str "expected legacy timestamp-leading filename, got: " filename)))))))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; file-sink
@@ -160,7 +188,7 @@
         (let [sink (sinks/file-sink {:base-dir dir})
               wf-id (random-uuid)
               event (sample-event {:workflow/id wf-id})]
-          (with-redefs [sinks/event-file-path (fn [_ _]
+          (with-redefs [sinks/event-file-path (fn [_ _ _]
                                                 (io/file dir "nested" "workflow" "event.json"))]
             (sink event))
           (let [event-file (io/file dir "nested" "workflow" "event.json")]

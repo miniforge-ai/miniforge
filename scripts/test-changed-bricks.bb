@@ -71,9 +71,22 @@
 
 (def ^:private default-isolated-bricks
   "Bricks that should run in their own test JVM.
-   Some native-backed stores are reliable in isolation but can fail inside the
-   large aggregate JVM used for changed-brick testing."
-  #{"pipeline-pack-store"})
+
+   - `pipeline-pack-store`: native-backed store; reliable in isolation
+     but can fail inside the large aggregate JVM.
+   - `pr-sync` and `agent`: tests `with-redefs` `clojure.java.shell/sh`
+     to local mocks (e.g. `make-sh-router` returning
+     `{:err \"no route matched\"}` for unmatched calls; or
+     `{:err \"fatal: not a git repo\"}` in agent's
+     snapshot-working-dir tests). `with-redefs` mutates the var
+     globally for the duration of the body, and parallel bricks share
+     a single JVM, so the mocked `sh` bleeds into other bricks' real
+     git/gh subprocess calls (notably `workflow/merge-resolution-test`
+     which legitimately needs to run `git init`). Isolating these
+     bricks contains the mock to its own JVM so the redef can't leak.
+     The deeper fix is to mock through private wrappers instead of
+     vendor namespaces; isolation is a workaround until that lands."
+  #{"pipeline-pack-store" "pr-sync" "agent"})
 
 (defn configured-isolated-bricks
   "Return the configured isolated brick set.
