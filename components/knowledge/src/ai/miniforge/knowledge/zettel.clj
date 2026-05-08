@@ -106,7 +106,7 @@
    - type    - Zettel type keyword
 
    Options (local Zettelkasten):
-   - :dewey  - Dewey classification code (e.g., '210')
+   - :dewey  - Dewey classification code (e.g., \"210\")
    - :tags   - Vector of keyword tags
    - :links  - Vector of Link maps
    - :source - Source/provenance map
