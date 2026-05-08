@@ -24,6 +24,7 @@
   (:require
    [clojure.test :refer [deftest testing is are]]
    [ai.miniforge.dag-executor.interface :as dag]
+   [ai.miniforge.pr-lifecycle.conflict-resolution :as conflict-resolution]
    [ai.miniforge.pr-lifecycle.merge :as merge]))
 
 ;------------------------------------------------------------------------------ Merge Methods
@@ -179,3 +180,96 @@
                      :task-id (random-uuid) :pr-id 123}
             result (merge/attempt-merge "/tmp" 123 policy context)]
         (is (dag/err? result))))))
+
+;------------------------------------------------------------------------------ Stage 3d: conflict-resolution dispatch
+
+(def ^:private conflicting-readiness
+  "Readiness map shaped like evaluate-merge-readiness output where
+   the branch check failed via CONFLICTING (DIRTY mergeStateStatus)."
+  {:ready? false
+   :checks {:branch (dag/ok {:up-to-date? false
+                             :raw "{\"mergeable\":\"CONFLICTING\",\"mergeStateStatus\":\"DIRTY\"}"})}
+   :blocking [:branch-not-up-to-date]})
+
+(deftest attempt-merge-conflicting-engages-resolver-test
+  (testing "When branch-check raw classifies as :conflicting AND
+            policy enables auto-resolve AND context carries
+            :resolve-fn, attempt-merge dispatches to
+            conflict-resolution/resolve-pr-conflicts! and returns
+            its outcome directly. The lifecycle's outer loop
+            re-evaluates merge readiness on the next cycle once
+            GitHub re-classifies the PR after the resolution
+            commit lands."
+    (let [resolver-called? (atom false)
+          fake-success (dag/ok {:resolved? true :iterations 1
+                                :pushed-sha "fake-sha"
+                                :pr-branch "feat/x"})]
+      (with-redefs [merge/evaluate-merge-readiness
+                    (fn [_ _ _] conflicting-readiness)
+                    conflict-resolution/resolve-pr-conflicts!
+                    (fn [_]
+                      (reset! resolver-called? true)
+                      fake-success)
+                    merge/run-gh-command
+                    (fn [_ _]
+                      (dag/ok {:output (str "{\"number\":123,"
+                                            "\"headRefName\":\"feat/x\","
+                                            "\"baseRefName\":\"main\","
+                                            "\"headRefOid\":\"abc1234\","
+                                            "\"baseRefOid\":\"def5678\"}")}))]
+        (let [context {:dag-id (random-uuid) :run-id (random-uuid)
+                       :task-id (random-uuid) :pr-id 123
+                       :resolve-fn (fn [_] (dag/ok {}))}
+              result (merge/attempt-merge "/tmp" 123
+                                          merge/default-merge-policy
+                                          context)]
+          (is (true? @resolver-called?)
+              "resolver was invoked for the :conflicting branch state")
+          (is (= fake-success result)
+              "attempt-merge returns the resolution outcome directly
+               — no rebase fallback when conflict-resolution engaged"))))))
+
+(deftest attempt-merge-conflicting-without-resolver-falls-through-test
+  (testing "When the branch is :conflicting but context has no
+            :resolve-fn (workflow side didn't inject one), the
+            conflict-resolution dispatch declines (returns nil)
+            and attempt-merge falls through to the existing
+            rebase / not-ready logic. With auto-rebase off, ends
+            up as :not-ready."
+    (with-redefs [merge/evaluate-merge-readiness
+                  (fn [_ _ _] conflicting-readiness)]
+      (let [policy (assoc merge/default-merge-policy
+                          :auto-rebase-on-stale? false)
+            context {:dag-id (random-uuid) :run-id (random-uuid)
+                     :task-id (random-uuid) :pr-id 123}
+            ;; no :resolve-fn on context
+            result (merge/attempt-merge "/tmp" 123 policy context)]
+        (is (dag/err? result))
+        (is (= :not-ready (:code (:error result)))
+            "fell through to the not-ready path")))))
+
+(deftest attempt-merge-conflicting-with-policy-disabled-falls-through-test
+  (testing "Even with a :resolve-fn on context, if policy's
+            :auto-resolve-conflicts? is false, the dispatch
+            declines and we fall through to rebase/not-ready.
+            Lets operators turn off auto-resolution per-PR
+            (e.g. for a PR known to need human attention) without
+            removing the wiring globally."
+    (let [resolver-called? (atom false)]
+      (with-redefs [merge/evaluate-merge-readiness
+                    (fn [_ _ _] conflicting-readiness)
+                    conflict-resolution/resolve-pr-conflicts!
+                    (fn [_]
+                      (reset! resolver-called? true)
+                      (dag/ok {}))]
+        (let [policy (assoc merge/default-merge-policy
+                            :auto-resolve-conflicts? false
+                            :auto-rebase-on-stale? false)
+              context {:dag-id (random-uuid) :run-id (random-uuid)
+                       :task-id (random-uuid) :pr-id 123
+                       :resolve-fn (fn [_] (dag/ok {}))}
+              result (merge/attempt-merge "/tmp" 123 policy context)]
+          (is (false? @resolver-called?)
+              "policy disabled — resolver never called")
+          (is (dag/err? result))
+          (is (= :not-ready (:code (:error result)))))))))

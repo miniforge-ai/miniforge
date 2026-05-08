@@ -23,6 +23,7 @@
    a PR is ready to merge and executing the merge."
   (:require
    [ai.miniforge.dag-executor.interface :as dag]
+   [ai.miniforge.pr-lifecycle.conflict-resolution :as conflict-resolution]
    [ai.miniforge.pr-lifecycle.events :as events]
    [ai.miniforge.logging.interface :as log]
    [babashka.process :as process]
@@ -46,7 +47,13 @@
    :require-no-unresolved-threads? true
    :require-branch-up-to-date? true
    :delete-branch-after-merge? true
-   :auto-rebase-on-stale? true})
+   :auto-rebase-on-stale? true
+   ;; Spec §6.4 hook: when GitHub reports the PR as CONFLICTING with
+   ;; its base, run the multi-parent merge resolution sub-workflow
+   ;; via conflict-resolution/resolve-pr-conflicts!. Engages only if
+   ;; the caller also supplied :resolve-fn on context (workflow side
+   ;; injects workflow.merge-resolution/resolve-conflict! there).
+   :auto-resolve-conflicts? true})
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; GitHub CLI helpers
@@ -256,6 +263,66 @@
               (dag/err :push-failed (:error push-result))))
           (dag/err :rebase-failed (:error rebase-result)))))))
 
+;------------------------------------------------------------------------------ Layer 1
+;; Conflict-resolution dispatch (Stage 3d, spec §6.4)
+
+(defn- pr-info-from-gh
+  "Fetch the fields conflict-resolution/resolve-pr-conflicts! needs
+   from `gh pr view`: PR number, branch (headRefName), base
+   (baseRefName), head SHA (headRefOid), base SHA (baseRefOid).
+   Returns dag/ok with the `{:pr/* ...}` shape on success or the
+   underlying gh failure as dag/err."
+  [worktree-path pr-number]
+  (let [r (run-gh-command
+           ["gh" "pr" "view" (str pr-number) "--json"
+            "number,headRefName,baseRefName,headRefOid,baseRefOid"]
+           worktree-path)]
+    (if (dag/err? r)
+      r
+      (let [out (:output (:data r))
+            field (fn [k]
+                    (second (re-find (re-pattern
+                                      (str "\"" k "\"\\s*:\\s*\"([^\"]+)\""))
+                                     out)))
+            head-branch (field "headRefName")
+            base-branch (field "baseRefName")
+            head-sha (field "headRefOid")
+            base-sha (field "baseRefOid")]
+        (if (and head-branch base-branch head-sha base-sha)
+          (dag/ok {:pr/id        pr-number
+                   :pr/branch    head-branch
+                   :pr/base      base-branch
+                   :pr/head-sha  head-sha
+                   :pr/base-sha  base-sha})
+          (dag/err :pr-info-incomplete
+                   "Could not parse PR head/base from gh output"
+                   {:gh-output out}))))))
+
+(defn- attempt-conflict-resolution!
+  "Spec §6.4 dispatch: when `branch-check` raw output classifies as
+   :conflicting AND policy enables auto-resolve AND context carries
+   `:resolve-fn`, run conflict-resolution/resolve-pr-conflicts! and
+   return its outcome. Otherwise return nil so the caller falls
+   back to the existing rebase/not-ready path.
+
+   The resolve-fn comes from context (workflow side injects
+   workflow.merge-resolution/resolve-conflict! at lifecycle ctor
+   time) so pr-lifecycle stays free of a workflow dependency."
+  [worktree-path pr-number policy context branch-raw]
+  (let [resolve-fn (:resolve-fn context)
+        state      (conflict-resolution/classify-merge-state branch-raw)]
+    (when (and (= :conflicting state)
+               (:auto-resolve-conflicts? policy)
+               resolve-fn)
+      (let [pr-r (pr-info-from-gh worktree-path pr-number)]
+        (if (dag/err? pr-r)
+          pr-r
+          (conflict-resolution/resolve-pr-conflicts!
+           {:worktree-path worktree-path
+            :pr            (:data pr-r)
+            :resolve-fn    resolve-fn
+            :context       context}))))))
+
 ;------------------------------------------------------------------------------ Layer 2
 ;; Merge orchestration
 
@@ -308,8 +375,27 @@
                      "Merge command failed"
                      {:gh-error (:error merge-result)})))
 
-        ;; Not ready - check if we should auto-rebase
-        (if (and (contains? (set (:blocking readiness)) :branch-not-up-to-date)
+        ;; Not ready — branch-not-up-to-date may mean either
+        ;; CONFLICTING (Stage 3 §6.4 hook engages) or BEHIND (auto-
+        ;; rebase). Attempt conflict-resolution first; only if it
+        ;; declines (state isn't :conflicting, or policy/resolver
+        ;; absent) fall through to the rebase path.
+        (let [branch-raw (get-in (:branch (:checks readiness))
+                                 [:data :raw])
+              cr-result  (when (contains? (set (:blocking readiness))
+                                          :branch-not-up-to-date)
+                           (attempt-conflict-resolution!
+                            worktree-path pr-number policy context
+                            branch-raw))]
+          (cond
+            ;; conflict-resolution engaged — return its outcome
+            ;; (success, dag/err, or terminal anomaly) directly. The
+            ;; lifecycle's outer loop re-evaluates merge readiness
+            ;; on the next cycle once GitHub re-classifies the PR.
+            (some? cr-result)
+            cr-result
+
+            (and (contains? (set (:blocking readiness)) :branch-not-up-to-date)
                  (:auto-rebase-on-stale? policy))
           ;; Try to rebase
           (do
@@ -339,10 +425,11 @@
                     rebase-result))
                 (dag/err :branch-not-found "Could not determine PR branch"))))
 
-          ;; Can't merge and won't auto-rebase
-          (dag/err :not-ready
-                   "PR is not ready to merge"
-                   {:blocking (:blocking readiness)}))))))
+            :else
+            ;; Can't merge and won't auto-rebase
+            (dag/err :not-ready
+                     "PR is not ready to merge"
+                     {:blocking (:blocking readiness)})))))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
