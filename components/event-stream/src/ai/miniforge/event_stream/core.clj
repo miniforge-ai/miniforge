@@ -110,66 +110,137 @@
            ;; finally so a sink exception still releases the slot.
            :in-flight 0})))
 
-(defn publish! [stream event]
-  (let [workflow-id (:workflow/id event)
-        ;; BD-2a: snapshot the quiesced set once and check before incrementing
-        ;; in-flight, so a quiesced workflow's publish never enters the body
-        ;; and a concurrent `quiesce!` waiter sees a true at-rest in-flight.
-        quiesced? (and workflow-id
-                       (contains? (:quiesced-workflows @stream) workflow-id))]
-    (if quiesced?
-      (let [{:keys [logger]} @stream]
+;------------------------------------------------------------------------------ Layer 0
+;; publish! helpers — small, single-purpose pieces composed by publish!
+;; itself. Each helper is testable in isolation; tests live in
+;; `publish_helpers_test.clj`.
+
+(defn- workflow-quiesced?
+  "True when `event`'s workflow id has been fenced via `quiesce!`."
+  [stream event]
+  (when-let [wid (:workflow/id event)]
+    (contains? (:quiesced-workflows @stream) wid)))
+
+(defn- rejection-result
+  "Build the structured rejection map returned to a publisher whose
+   workflow has been quiesced. Stable shape so callers can pattern-match."
+  [event reason]
+  {:rejected?   true
+   :reason      reason
+   :workflow-id (:workflow/id event)
+   :event-type  (:event/type event)})
+
+(defn- log-rejection!
+  "Surface a quiesce rejection at warn level if a logger is configured."
+  [logger event]
+  (when logger
+    (log/warn logger :event-stream :event/rejected-after-quiesce
+              {:message "publish! rejected: workflow quiesced"
+               :data    {:event-type  (:event/type event)
+                         :workflow-id (:workflow/id event)}})))
+
+(defn- rejection-if-quiesced
+  "Return the structured rejection map when `event`'s workflow is fenced,
+   else nil. Logs the rejection as a side effect so callers don't have
+   to do it twice."
+  [stream event]
+  (when (workflow-quiesced? stream event)
+    (log-rejection! (:logger @stream) event)
+    (rejection-result event :workflow-quiesced)))
+
+(defn- with-in-flight
+  "Run `body-fn` while incrementing the stream's in-flight publish
+   counter, decrementing in a finally so an exception still releases the
+   slot. Returns body-fn's result. Cross-cutting concern that lets
+   `quiesce!` / `drain!` observe an at-rest stream when no publishes
+   are mid-flight."
+  [stream body-fn]
+  (swap! stream update :in-flight inc)
+  (try
+    (body-fn)
+    (finally
+      (swap! stream update :in-flight dec))))
+
+(defn- record-event!
+  "Append `event` to the in-memory event log."
+  [stream event]
+  (swap! stream update :events conj event))
+
+(defn- deliver-to-sink!
+  "Invoke `sink` with `event`, swallowing exceptions and logging them.
+   A failing sink must not break others or the publish path."
+  [sink event logger]
+  (try
+    (sink event)
+    (catch Exception e
+      (when logger
+        (log/warn logger :event-stream :sink-error
+                  {:message "Event sink failed"
+                   :data    {:event-type (:event/type event)
+                             :anomaly    (response/from-exception e)}})))))
+
+(defn- deliver-to-sinks!
+  "Fan `event` out to every configured sink. Each sink runs in
+   isolation via `deliver-to-sink!`."
+  [sinks event logger]
+  (doseq [sink sinks]
+    (deliver-to-sink! sink event logger)))
+
+(defn- deliver-to-subscriber!
+  "Invoke `callback` for `event` when `filter-fn` accepts it,
+   swallowing exceptions and logging them."
+  [sub-id callback filter-fn event logger]
+  (when (filter-fn event)
+    (try
+      (callback event)
+      (catch Exception e
         (when logger
-          (log/warn logger :event-stream :event/rejected-after-quiesce
-                    {:message "publish! rejected: workflow quiesced"
-                     :data {:event-type (:event/type event)
-                            :workflow-id workflow-id}}))
-        {:rejected? true
-         :reason :workflow-quiesced
-         :workflow-id workflow-id
-         :event-type (:event/type event)})
-      (do
-        (swap! stream update :in-flight inc)
-        (try
-          (let [{:keys [subscribers filters logger sinks]} @stream]
-            ;; Persist event to configured sinks
-            (doseq [sink sinks]
-              (try
-                (sink event)
-                (catch Exception e
-                  (when logger
-                    (let [anomaly (response/from-exception e)]
-                      (log/warn logger :event-stream :sink-error
-                                {:message "Event sink failed"
-                                 :data {:event-type (:event/type event)
-                                        :anomaly anomaly}}))))))
+          (log/error logger :event-stream :event/callback-error
+                     {:message "Event callback failed"
+                      :data    {:subscriber-id sub-id
+                                :event-type    (:event/type event)
+                                :anomaly       (response/from-exception e)}}))))))
 
-            ;; In-memory event log
-            (swap! stream update :events conj event)
+(defn- deliver-to-subscribers!
+  "Fan `event` out to every subscriber that accepts it via its filter."
+  [subscribers filters event logger]
+  (doseq [[sub-id callback] subscribers]
+    (let [filter-fn (get filters sub-id (constantly true))]
+      (deliver-to-subscriber! sub-id callback filter-fn event logger))))
 
-            ;; Notify subscribers
-            (doseq [[sub-id callback] subscribers]
-              (let [filter-fn (get filters sub-id (constantly true))]
-                (when (filter-fn event)
-                  (try
-                    (callback event)
-                    (catch Exception e
-                      (when logger
-                        (let [anomaly (response/from-exception e)]
-                          (log/error logger :event-stream :event/callback-error
-                                     {:message "Event callback failed"
-                                      :data {:subscriber-id sub-id
-                                             :event-type (:event/type event)
-                                             :anomaly anomaly}}))))))))
-            (when logger
-              (log/debug logger :event-stream :event/published
-                         {:message "Event published"
-                          :data {:event-type (:event/type event)
-                                 :workflow-id workflow-id
-                                 :sequence (:event/sequence-number event)}}))
-            event)
-          (finally
-            (swap! stream update :in-flight dec)))))))
+(defn- log-published!
+  "Debug-log that `event` reached the subscribers."
+  [logger event]
+  (when logger
+    (log/debug logger :event-stream :event/published
+               {:message "Event published"
+                :data    {:event-type  (:event/type event)
+                          :workflow-id (:workflow/id event)
+                          :sequence    (:event/sequence-number event)}})))
+
+;------------------------------------------------------------------------------ Layer 1
+;; publish! orchestrates the helpers above as a small pipeline.
+
+(defn publish!
+  "Publish `event` to the stream.
+
+   When the event's workflow has been quiesced (BD-2a), short-circuits
+   with a structured `{:rejected? true ...}` map and runs no sinks or
+   subscribers. Otherwise: fan out to sinks, append to the in-memory
+   log, fan out to subscribers, log, and return `event`.
+
+   In-flight publishes are tracked so `quiesce!` / `drain!` can wait
+   for the stream to settle before reporting at-rest."
+  [stream event]
+  (or (rejection-if-quiesced stream event)
+      (with-in-flight stream
+        (fn []
+          (let [{:keys [sinks subscribers filters logger]} @stream]
+            (deliver-to-sinks! sinks event logger)
+            (record-event! stream event)
+            (deliver-to-subscribers! subscribers filters event logger)
+            (log-published! logger event)
+            event)))))
 
 (defn subscribe!
   ([stream subscriber-id callback]
