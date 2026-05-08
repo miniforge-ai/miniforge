@@ -99,47 +99,77 @@
            :filters {}
            :sequence-numbers {}
            :logger (:logger opts)
-           :sinks event-sinks})))
+           :sinks event-sinks
+           ;; BD-2a: workflow-scoped publisher fence. Once a workflow id
+           ;; is in this set, `publish!` rejects further events for that
+           ;; workflow rather than running sinks/subscribers.
+           :quiesced-workflows #{}
+           ;; BD-2a: in-flight publish counter. `drain!` waits on this
+           ;; reaching zero before draining sinks. `publish!` increments
+           ;; on entry (after the quiesce check) and decrements in a
+           ;; finally so a sink exception still releases the slot.
+           :in-flight 0})))
 
 (defn publish! [stream event]
-  (let [{:keys [subscribers filters logger sinks]} @stream
-        workflow-id (:workflow/id event)]
-    ;; Persist event to configured sinks
-    (doseq [sink sinks]
-      (try
-        (sink event)
-        (catch Exception e
-          (when logger
-            (let [anomaly (response/from-exception e)]
-              (log/warn logger :event-stream :sink-error
-                       {:message "Event sink failed"
-                        :data {:event-type (:event/type event)
-                               :anomaly anomaly}}))))))
+  (let [workflow-id (:workflow/id event)
+        ;; BD-2a: snapshot the quiesced set once and check before incrementing
+        ;; in-flight, so a quiesced workflow's publish never enters the body
+        ;; and a concurrent `quiesce!` waiter sees a true at-rest in-flight.
+        quiesced? (and workflow-id
+                       (contains? (:quiesced-workflows @stream) workflow-id))]
+    (if quiesced?
+      (let [{:keys [logger]} @stream]
+        (when logger
+          (log/warn logger :event-stream :event/rejected-after-quiesce
+                    {:message "publish! rejected: workflow quiesced"
+                     :data {:event-type (:event/type event)
+                            :workflow-id workflow-id}}))
+        {:rejected? true
+         :reason :workflow-quiesced
+         :workflow-id workflow-id
+         :event-type (:event/type event)})
+      (do
+        (swap! stream update :in-flight inc)
+        (try
+          (let [{:keys [subscribers filters logger sinks]} @stream]
+            ;; Persist event to configured sinks
+            (doseq [sink sinks]
+              (try
+                (sink event)
+                (catch Exception e
+                  (when logger
+                    (let [anomaly (response/from-exception e)]
+                      (log/warn logger :event-stream :sink-error
+                                {:message "Event sink failed"
+                                 :data {:event-type (:event/type event)
+                                        :anomaly anomaly}}))))))
 
-    ;; In-memory event log
-    (swap! stream update :events conj event)
+            ;; In-memory event log
+            (swap! stream update :events conj event)
 
-    ;; Notify subscribers
-    (doseq [[sub-id callback] subscribers]
-      (let [filter-fn (get filters sub-id (constantly true))]
-        (when (filter-fn event)
-          (try
-            (callback event)
-            (catch Exception e
-              (when logger
-                (let [anomaly (response/from-exception e)]
-                  (log/error logger :event-stream :event/callback-error
-                             {:message "Event callback failed"
-                              :data {:subscriber-id sub-id
-                                     :event-type (:event/type event)
-                                     :anomaly anomaly}}))))))))
-    (when logger
-      (log/debug logger :event-stream :event/published
-                 {:message "Event published"
-                  :data {:event-type (:event/type event)
-                         :workflow-id workflow-id
-                         :sequence (:event/sequence-number event)}}))
-    event))
+            ;; Notify subscribers
+            (doseq [[sub-id callback] subscribers]
+              (let [filter-fn (get filters sub-id (constantly true))]
+                (when (filter-fn event)
+                  (try
+                    (callback event)
+                    (catch Exception e
+                      (when logger
+                        (let [anomaly (response/from-exception e)]
+                          (log/error logger :event-stream :event/callback-error
+                                     {:message "Event callback failed"
+                                      :data {:subscriber-id sub-id
+                                             :event-type (:event/type event)
+                                             :anomaly anomaly}}))))))))
+            (when logger
+              (log/debug logger :event-stream :event/published
+                         {:message "Event published"
+                          :data {:event-type (:event/type event)
+                                 :workflow-id workflow-id
+                                 :sequence (:event/sequence-number event)}}))
+            event)
+          (finally
+            (swap! stream update :in-flight dec)))))))
 
 (defn subscribe!
   ([stream subscriber-id callback]
@@ -159,6 +189,113 @@
                (update :subscribers dissoc subscriber-id)
                (update :filters dissoc subscriber-id))))
   nil)
+
+;------------------------------------------------------------------------------ Layer 1
+;; BD-2a: workflow-scoped publisher quiesce + sink drain barrier.
+;;
+;; `quiesce!` fences future publishes for a workflow so the terminal event
+;; for that workflow is genuinely the last. `drain!` waits for in-flight
+;; publishes to complete and then asks each sink that exposes a drain hook
+;; (under the sink's metadata) to flush. Together they replace the
+;; pre-BD-2a race where headless exits could land before background
+;; producers finished publishing or sinks finished writing.
+
+(defn- wait-for-condition
+  "Spin-wait until `pred` returns truthy or the deadline passes. Returns
+   the final pred value (truthy = condition met before deadline)."
+  [pred deadline-ms]
+  (loop []
+    (let [v (pred)]
+      (cond
+        v v
+        (>= (System/currentTimeMillis) deadline-ms) nil
+        :else (do (Thread/sleep 10) (recur))))))
+
+(defn quiesce!
+  "Fence publishers for `workflow-id` and wait for any in-flight publishes
+   to settle. After return, `publish!` for that workflow returns
+   `{:rejected? true :reason :workflow-quiesced ...}` instead of running
+   sinks or subscribers.
+
+   Without `:workflow-id`, no fence is added — the call only waits for
+   currently in-flight publishes across all workflows to complete. Useful
+   as a barrier before `drain!` when the caller does not care to fence a
+   specific workflow.
+
+   Options:
+     :workflow-id  fence target. Optional.
+     :timeout-ms   wait budget for in-flight publishes (default 5000).
+
+   Returns:
+     {:ok? true  :pending-publishers 0}
+     {:ok? false :pending-publishers N :reason :timeout}"
+  ([stream] (quiesce! stream {}))
+  ([stream {:keys [workflow-id timeout-ms]
+            :or   {timeout-ms 5000}}]
+   (when workflow-id
+     (swap! stream update :quiesced-workflows conj workflow-id))
+   (let [deadline (+ (System/currentTimeMillis) timeout-ms)
+         settled? (wait-for-condition #(zero? (:in-flight @stream)) deadline)
+         pending  (:in-flight @stream)]
+     (if settled?
+       {:ok? true :pending-publishers 0}
+       {:ok? false :reason :timeout :pending-publishers pending}))))
+
+(defn drain!
+  "Wait until every event accepted by `publish!` before this call has
+   reached all configured sinks, including any sink-specific flush hook.
+
+   Sinks may declare a drain hook by carrying it under metadata:
+
+     (with-meta sink-fn {:drain (fn [opts] {:ok? true})})
+
+   Sinks without a drain hook are assumed already-drained on `publish!`
+   return — the file/stdout/stderr sinks are synchronous, so this is the
+   common case. The fleet sink with its internal batching is the
+   motivating exception.
+
+   `drain!` first waits for in-flight publishes to settle (so the
+   sink-list snapshot it operates on covers the full pre-call set), then
+   invokes each sink's drain hook with a shared timeout.
+
+   Options:
+     :timeout-ms  total wait budget across in-flight settle + sink drain
+                  (default 5000).
+
+   Returns one of:
+     {:ok? true  :drained-count N}
+     {:ok? false :reason :timeout       :pending-count N}
+     {:ok? false :reason :sink-error    :failed-sinks [{...}]}
+
+   The result is structured so the caller (e.g. `run-workflow!`) can map
+   it to a non-zero exit unless `MINIFORGE_BEST_EFFORT_SHUTDOWN` is set,
+   per the BD-2a contract."
+  ([stream] (drain! stream {}))
+  ([stream {:keys [timeout-ms] :or {timeout-ms 5000}}]
+   (let [deadline (+ (System/currentTimeMillis) timeout-ms)
+         settled? (wait-for-condition #(zero? (:in-flight @stream)) deadline)]
+     (if-not settled?
+       {:ok? false :reason :timeout :pending-count (:in-flight @stream)}
+       (let [{:keys [sinks]} @stream
+             results (mapv
+                      (fn [sink]
+                        (if-let [drain-fn (:drain (meta sink))]
+                          (let [remaining (max 100 (- deadline (System/currentTimeMillis)))]
+                            (try
+                              {:sink sink :result (drain-fn {:timeout-ms remaining})}
+                              (catch Exception e
+                                {:sink sink :result {:ok? false
+                                                     :reason :sink-error
+                                                     :error (ex-message e)}})))
+                          ;; No drain hook: sink is assumed synchronous.
+                          {:sink sink :result {:ok? true}}))
+                      sinks)
+             failed (filterv (comp not :ok? :result) results)]
+         (if (seq failed)
+           {:ok? false
+            :reason :sink-error
+            :failed-sinks (mapv :result failed)}
+           {:ok? true :drained-count (count results)}))))))
 
 ;------------------------------------------------------------------------------ Layer 2
 ;; Query API
