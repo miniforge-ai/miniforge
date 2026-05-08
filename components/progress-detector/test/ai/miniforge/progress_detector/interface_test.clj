@@ -30,6 +30,14 @@
   (anomaly/anomaly :fault "test failure" (apply detector-anomaly-data
                                                 (mapcat identity opts))))
 
+(defn- review-issue
+  "Build a reviewer issue entry."
+  [description]
+  {:severity :blocking
+   :file "src/example/core.clj"
+   :line 42
+   :description description})
+
 ;------------------------------------------------------------------------------ Layer 1
 ;; Detector lifecycle (init / observe / reduce-observations)
 
@@ -202,3 +210,11 @@
       (is (= 1 (count (pd/anomalies-by-severity state :fatal))))
       (is (= [{:anomaly/data {:anomaly/severity :fatal :x 4}}]
              (pd/fatal-anomalies state))))))
+
+(deftest repair-loop-reexports-test
+  (testing "review-fingerprint and stagnated? are available through the public interface"
+    (let [review {:review/issues [(review-issue "add guard clause")]}
+          fingerprint (pd/review-fingerprint review)]
+      (is (seq fingerprint))
+      (is (true? (pd/stagnated? fingerprint fingerprint)))
+      (is (false? (pd/stagnated? nil fingerprint))))))
