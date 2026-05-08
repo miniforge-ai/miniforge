@@ -27,7 +27,7 @@ canonical registration moments.
 ## Schema
 
 ```clojure
-{:registry/version "1.0.0"
+{:registry/version "0.1.0"
 
  ;; Listener entry — keyed by PR URL.
  :listener/entry
@@ -114,10 +114,15 @@ The registry is a Miniforge artifact (per N6) stored at:
 Schema:
 
 ```clojure
-{:registry/version "1.0.0"
+{:registry/version "0.1.0"
  :registry/listeners {<pr-url-string> [<listener-entry> ...]}
  :registry/last-updated #inst "..."}
 ```
+
+The `:registry/version` field tracks the on-disk artifact format and
+moves on the same cadence as this spec document; both currently sit at
+`0.1.0` (`-draft` in this document's footer denotes status, not a
+distinct version).
 
 Updates MUST be transactional (write-rename) to avoid partial reads.
 

@@ -67,6 +67,17 @@
     (is (= :error
            (:violation/severity
             (comments/violation->payload non-fixable-violation base-pack-info)))))
+  (testing "non-fixable + non-critical → :warning (not :error)"
+    (let [v (assoc auto-fixable-violation :auto-fixable? false)]
+      (is (= :warning
+             (:violation/severity
+              (comments/violation->payload v base-pack-info))))))
+  (testing "auto-fixable + critical category → :error (critical wins)"
+    (let [v (assoc auto-fixable-violation
+                   :rule/category "security")]
+      (is (= :error
+             (:violation/severity
+              (comments/violation->payload v base-pack-info))))))
   (testing ":severity-override wins"
     (is (= :info
            (:violation/severity

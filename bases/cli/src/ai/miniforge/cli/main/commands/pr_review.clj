@@ -29,10 +29,10 @@
    `pr review <url>` CLI entry point in `commands.pr` delegates to."
   (:require
    [babashka.fs :as fs]
+   [cheshire.core :as json]
    [clojure.edn :as edn]
    [clojure.java.io :as io]
    [clojure.pprint :as pprint]
-   [clojure.string :as str]
    [ai.miniforge.cli.main.display :as display]
    [ai.miniforge.compliance-scanner.interface :as scanner]))
 
@@ -106,33 +106,11 @@
   (pprint/pprint comments))
 
 (defn- emit-json
-  "Print the comments vector as JSON. Inline serializer to avoid pulling
-   cheshire into this surface; comment payloads are simple maps."
+  "Print the comments vector as RFC 8259-compliant JSON via cheshire.
+   Keywords are stringified; the internal `(str)` call in the key-fn
+   handles the leading colon for deterministic output."
   [comments]
-  (letfn [(esc [s]
-            (-> (str s)
-                (str/replace "\\" "\\\\")
-                (str/replace "\"" "\\\"")
-                (str/replace "\n" "\\n")))
-          (json-val [v]
-            (cond
-              (nil? v)            "null"
-              (boolean? v)        (str v)
-              (number? v)         (str v)
-              (keyword? v)        (str "\"" (esc (subs (str v) 1)) "\"")
-              (string? v)         (str "\"" (esc v) "\"")
-              (map? v)            (str "{"
-                                       (str/join ","
-                                                 (for [[k vv] v]
-                                                   (str "\""
-                                                        (esc (cond
-                                                               (keyword? k) (subs (str k) 1)
-                                                               :else        (str k)))
-                                                        "\":" (json-val vv))))
-                                       "}")
-              (sequential? v)     (str "[" (str/join "," (mapv json-val v)) "]")
-              :else               (str "\"" (esc (pr-str v)) "\"")))]
-    (println (json-val comments))))
+  (println (json/generate-string comments {:key-fn name})))
 
 (defn run-pr-review!
   "Run a PR-scoped standards review against an existing repo checkout.
@@ -185,7 +163,12 @@
    For when the operator already has a checkout — useful in dogfood and
    from janitors that operate on existing worktrees.
 
-   Required: --base <git-ref>. Optional: positional repo path."
+   Flags: required `--base <git-ref>`; optional `--repo <path>`
+   (defaults to `(fs/cwd)`), `--standards <path>`, `--pack <name|path>`,
+   `--rules <selector>`, `--out edn|json|table`. The CLI surface in
+   `commands.pr` registers `[:url]` as the only positional via
+   `:args->opts`, so the repo path comes from the `--repo` flag, not
+   from a positional argument."
   [opts]
   (let [repo-path (get opts :repo (str (fs/cwd)))
         base-ref  (get opts :base)]

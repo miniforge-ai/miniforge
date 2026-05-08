@@ -27,7 +27,8 @@
    Layer 0: payload helpers
    Layer 1: comment-record builders
    Layer 2: bulk renderer + severity inference"
-  (:require [clojure.string :as str]))
+  (:require [clojure.edn :as edn]
+            [clojure.string :as str]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Severity inference
@@ -35,21 +36,18 @@
 (defn- infer-severity
   "Map a classified Violation to a :violation/severity keyword.
 
-   Heuristic: auto-fixable? true → :warning; false with security/safety
-   category → :error; otherwise :warning. Callers may override by
-   providing :severity-override on the violation map."
+   Heuristic: violations whose `:rule/category` matches
+   security/safety/critical → :error. Everything else → :warning,
+   regardless of auto-fixability. Callers may override by providing
+   `:severity-override` on the violation map."
   [violation]
   (or (:severity-override violation)
-      (let [auto-fix? (:auto-fixable? violation)
-            category  (some-> (:rule/category violation) str/lower-case)
+      (let [category      (some-> (:rule/category violation) str/lower-case)
             critical-cat? (and category
                                (or (str/includes? category "security")
                                    (str/includes? category "safety")
                                    (str/includes? category "critical")))]
-        (cond
-          critical-cat?      :error
-          (false? auto-fix?) :error
-          :else              :warning))))
+        (if critical-cat? :error :warning))))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Payload construction
@@ -178,8 +176,11 @@
     (let [block-re #"(?s)```edn\s*:comment/payload\s*(\{.*?\})\s*```"]
       (when-let [[_ edn-str] (re-find block-re body)]
         (try
-          (binding [*read-eval* false]
-            (read-string edn-str))
+          ;; clojure.edn/read-string is strictly EDN — no reader macros,
+          ;; no #=, no eval. Comment bodies are untrusted input once
+          ;; posted/retrieved from a PR. {:default identity} swallows
+          ;; unknown tagged literals safely.
+          (edn/read-string {:default (fn [_tag value] value)} edn-str)
           (catch Exception _ nil))))))
 
 ;------------------------------------------------------------------------------ Rich Comment
