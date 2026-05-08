@@ -49,10 +49,19 @@
 
 ;------------------------------------------------------------------------------ File-not-found anomaly + boundary escalation
 
+(defn- nonexistent-path
+  "Generate a path under the system temp dir that is guaranteed not to
+   exist. Avoids `/tmp/...` hardcodes that can be flaky if the file
+   happens to be present on the test machine."
+  [suffix]
+  (str (fs/path (fs/temp-dir)
+                (str "spec-parser-anomaly-" (random-uuid) "-" suffix))))
+
 (deftest parse-spec-file-not-found-escalates
   (testing "missing path surfaces as :not-found ex-info"
-    (let [thrown (try
-                   (core/parse-spec-file "/tmp/does-not-exist-spec-parser-test.edn")
+    (let [path   (nonexistent-path "missing.edn")
+          thrown (try
+                   (core/parse-spec-file path)
                    nil
                    (catch clojure.lang.ExceptionInfo e e))]
       (is (some? thrown))
@@ -61,9 +70,10 @@
 
 (deftest parse-spec-file-ex-data-carries-anomaly-type
   (testing "every escalated anomaly tags ex-data with :anomaly/type"
-    (let [thrown (try
-                   (core/parse-spec-file "/tmp/missing-1.edn")
+    (let [path   (nonexistent-path "ex-data.edn")
+          thrown (try
+                   (core/parse-spec-file path)
                    nil
                    (catch clojure.lang.ExceptionInfo e e))]
       (is (= :not-found (:anomaly/type (ex-data thrown))))
-      (is (= "/tmp/missing-1.edn" (:path (ex-data thrown)))))))
+      (is (= path (:path (ex-data thrown)))))))

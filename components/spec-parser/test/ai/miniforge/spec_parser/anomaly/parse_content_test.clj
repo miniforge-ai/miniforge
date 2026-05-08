@@ -26,7 +26,8 @@
    registry), not `:invalid-input`. `parse-yaml` is a separate
    `:unsupported` anomaly because YAML is reachable through the normal
    detect-format path until YAML support lands."
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [babashka.fs :as fs]
+            [clojure.test :refer [deftest is testing]]
             [ai.miniforge.anomaly.interface :as anomaly]
             [ai.miniforge.spec-parser.core :as core]))
 
@@ -66,9 +67,9 @@
 
 (deftest parse-spec-file-escalates-yaml-unsupported
   (testing "yaml content surfaces as ex-info from parse-spec-file"
-    (let [tmp (babashka.fs/create-temp-file {:suffix ".yaml"})]
+    (let [tmp (fs/create-temp-file {:suffix ".yaml"})]
       (try
-        (spit (babashka.fs/file tmp) "title: T\n")
+        (spit (fs/file tmp) "title: T\n")
         (let [thrown (try
                        (core/parse-spec-file (str tmp))
                        nil
@@ -76,4 +77,4 @@
           (is (some? thrown))
           (is (= :unsupported (:anomaly/type (ex-data thrown)))))
         (finally
-          (babashka.fs/delete-if-exists tmp))))))
+          (fs/delete-if-exists tmp))))))

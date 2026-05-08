@@ -51,7 +51,7 @@ Refactor / per-component cleanup tier.
 | 74 | `parse-json` (malformed) | `:invalid-input` | caller-supplied content |
 | 190 | `normalize-spec` (non-map) | `:invalid-input` | caller-supplied shape |
 | 194 | `normalize-spec` (no `:spec/title`) | `:invalid-input` | caller-supplied shape |
-| 198 | `normalize-spec` (no `:spec/desc`) | `:invalid-input` | caller-supplied shape |
+| 198 | `normalize-spec` (no `:spec/description`) | `:invalid-input` | caller-supplied shape |
 | 237 | `parse-spec-file` (file-not-found) | `:not-found` | caller-supplied path |
 | 55 | `parse-yaml` (placeholder) | `:unsupported` | minimal cleanup |
 | 170 | `parse-content` (unknown format) | `:fault` | registry programmer error, exhaustive |
