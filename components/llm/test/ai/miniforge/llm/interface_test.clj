@@ -959,6 +959,84 @@
       (is (= {:stdin "the-prompt"} @seen-opts)
           "opts must reach a 2-arity-capable fn unchanged"))))
 
+;------------------------------------------------------------------------------ Layer 5
+;; Keepalive — decouples stagnation from the CLI's emission cadence
+;;
+;; Stage-3 dogfood (2026-05-07) failed at the planner with
+;; "Stagnation timeout: no progress for 180047ms". Diagnosis: claude
+;; CLI in `--input-format text` mode does not emit rate_limit_event
+;; during the model's think phase, so the stream-heartbeat-based
+;; stagnation guard has no signal during legitimate thinking.
+;;
+;; Fix: pm/start-keepalive! daemon thread that pings the monitor while
+;; the JVM-side reader is alive. These tests lock both halves of the
+;; contract — the bug pattern (silence => stagnation) and the fix
+;; (keepalive masks silence).
+
+(deftest stagnation-fires-on-silence-without-keepalive-test
+  (testing "without keepalive, a silent monitor stagnates after the threshold"
+    ;; Bug demonstration: this is the dogfood failure mode in unit form.
+    ;; record-activity! once at start, then silence — the timer expires.
+    (let [monitor (pm/create-progress-monitor
+                   {:stagnation-threshold-ms 80
+                    :max-total-ms            5000
+                    :min-activity-interval-ms 1})]
+      (pm/record-activity! monitor :stream-init)
+      (Thread/sleep 200)
+      (let [timeout (pm/check-timeout monitor)]
+        (is (= :stagnation (:type timeout))
+            "silence beyond stagnation-threshold-ms ⇒ stagnation fires")))))
+
+(deftest keepalive-prevents-stagnation-during-silence-test
+  (testing "keepalive thread refreshes the monitor across silent periods"
+    (let [monitor (pm/create-progress-monitor
+                   {:stagnation-threshold-ms 80
+                    :max-total-ms            5000
+                    :min-activity-interval-ms 1})
+          stop! (pm/start-keepalive! monitor 20)]
+      (try
+        (pm/record-activity! monitor :stream-init)
+        (Thread/sleep 200)
+        (is (nil? (pm/check-timeout monitor))
+            "keepalive refreshes ⇒ stagnation timer never expires")
+        (finally
+          (stop!))))))
+
+(deftest keepalive-stop-fn-halts-the-thread-test
+  (testing "stop! returned by start-keepalive! halts further refreshes"
+    (let [monitor (pm/create-progress-monitor
+                   {:stagnation-threshold-ms 80
+                    :max-total-ms            5000
+                    :min-activity-interval-ms 1})
+          stop! (pm/start-keepalive! monitor 20)]
+      (pm/record-activity! monitor :stream-init)
+      (Thread/sleep 50)
+      (stop!)
+      ;; Allow any in-flight tick to settle, then sleep past the threshold.
+      (Thread/sleep 200)
+      (is (= :stagnation (:type (pm/check-timeout monitor)))
+          "after stop!, silence stagnates as expected"))))
+
+(deftest keepalive-does-not-mask-hard-limit-test
+  (testing "keepalive only refreshes stagnation; max-total-ms still fires"
+    ;; Wedge backstop: the keepalive is a per-tick refresh of
+    ;; last-activity-at, but :max-total-ms tracks elapsed-since-start
+    ;; independently. A run that legitimately exceeds max-total-ms
+    ;; must still time out — the keepalive cannot mask it.
+    (let [monitor (pm/create-progress-monitor
+                   {:stagnation-threshold-ms 50000
+                    :max-total-ms            120
+                    :min-activity-interval-ms 1})
+          stop! (pm/start-keepalive! monitor 20)]
+      (try
+        (pm/record-activity! monitor :stream-init)
+        (Thread/sleep 200)
+        (let [timeout (pm/check-timeout monitor)]
+          (is (= :hard-limit (:type timeout))
+              "max-total-ms fires even with keepalive active"))
+        (finally
+          (stop!))))))
+
 (deftest stream-exec-fn-pipes-stdin-test
   (testing ":stdin opt is written to subprocess stdin in streaming path"
     (let [seen (atom [])

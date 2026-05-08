@@ -838,6 +838,18 @@
     (ByteArrayInputStream. (.getBytes ^String stdin-str "UTF-8"))
     (ByteArrayInputStream. (byte-array 0))))
 
+(defn- keepalive-interval-ms
+  "Refresh interval for the stream-side keepalive thread.
+
+   Tied to the configured stagnation threshold so the keepalive fires
+   well within the window — at one-third of the threshold we get three
+   refreshes per stagnation-window, so a brief reader stall never
+   races the timer."
+  [monitor]
+  (let [stagnation (get @monitor :stagnation-threshold-ms
+                        (default-stagnation-threshold-ms))]
+    (max 1000 (long (/ stagnation 3)))))
+
 (defn stream-exec-fn
   ([cmd on-line]
    (stream-exec-fn cmd on-line {}))
@@ -849,7 +861,22 @@
                                           workdir     (assoc :dir workdir)) cmd)
          out-reader (java.io.BufferedReader.
                      (java.io.InputStreamReader. (:out process)))
-         {:keys [lines timeout]} (process-stream-lines out-reader monitor on-line)
+         ;; Decouple stagnation from the CLI's emission cadence.
+         ;; claude in --input-format text mode does not emit
+         ;; rate_limit_event during the model's think phase, so the
+         ;; stream-heartbeat-based stagnation guard has no signal
+         ;; during legitimate thinking on heavy prompts (2026-05-07
+         ;; stage-3 dogfood: stagnation timeout at 180s with 6
+         ;; init-time chunks then nothing for the model's full
+         ;; think). Keepalive refreshes the monitor while the JVM-side
+         ;; reader is alive; max-total-ms remains the wedge backstop.
+         stop-keepalive! (pm/start-keepalive! monitor
+                                              (keepalive-interval-ms monitor))
+         {:keys [lines timeout]}
+         (try
+           (process-stream-lines out-reader monitor on-line)
+           (finally
+             (stop-keepalive!)))
          ;; Stream ended with a timeout reason (stream-idle,
          ;; stagnation, or total-max) — the subprocess is hung or
          ;; silent. Kill it so `deref` returns immediately instead of

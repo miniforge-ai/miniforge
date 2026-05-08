@@ -156,6 +156,51 @@
       ;; Still making progress
       :else nil)))
 
+;------------------------------------------------------------------------------ Layer 1
+;; Keepalive — decouples stagnation from CLI emission cadence
+
+(defn start-keepalive!
+  "Spawn a daemon thread that calls record-activity! on `monitor` every
+   `interval-ms` until the returned 0-arity stop-fn is invoked.
+
+   ## Why
+
+   Stage-2 dogfood (2026-05-07) failed at the planner with
+   'Stagnation timeout: no progress for 180047ms'. Diagnosis: the
+   claude CLI in `--input-format text` mode does not emit
+   `rate_limit_event` during the model's think phase. Without
+   those heartbeats our stream-heartbeat-based stagnation guard has
+   no signal during legitimate model thinking on heavy prompts.
+
+   Keepalive decouples the per-run liveness check from the CLI's
+   own emission cadence — as long as the LLM-client's reader thread
+   is alive (i.e., this JVM is alive and the subprocess hasn't
+   wedged the JVM), the monitor's stagnation timer keeps refreshing.
+   `max-total-ms` remains the OS-wedge backstop.
+
+   This is the pragmatic stopgap until the Stage 3 progress-detector
+   wiring (semantic loop detection) replaces the wallclock approach
+   wholesale.
+
+   ## Arguments
+     monitor     - a progress monitor atom (from create-progress-monitor)
+     interval-ms - how often to refresh; should be < stagnation-threshold-ms
+
+   ## Returns
+     0-arity stop-fn that stops the keepalive thread."
+  [monitor interval-ms]
+  (let [running? (atom true)
+        thread (Thread.
+                 (fn []
+                   (while @running?
+                     (Thread/sleep ^long interval-ms)
+                     (when @running?
+                       (record-activity! monitor :keepalive))))
+                 "llm-progress-monitor-keepalive")]
+    (.setDaemon thread true)
+    (.start thread)
+    (fn stop! [] (reset! running? false))))
+
 (defn get-stats
   "Get current statistics from the monitor."
   [monitor]
