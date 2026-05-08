@@ -34,9 +34,33 @@
    [clojure.java.io :as io]
    [clojure.pprint :as pprint]
    [ai.miniforge.cli.main.display :as display]
+   [ai.miniforge.cli.messages :as messages]
    [ai.miniforge.compliance-scanner.interface :as scanner]))
 
 (def ^:private default-standards-path ".standards")
+
+;; ── Table layout for emit-table ──────────────────────────────────────
+;; Column widths (chars). Tuned for 100-col terminals: file paths get
+;; the bulk, line is 6 (covers up to a million-line file), severity is
+;; 12 (longest keyword name like ":warning" plus padding), rule trails
+;; with no fixed width.
+(def ^:private file-col-width      60)
+(def ^:private line-col-width      6)
+(def ^:private severity-col-width  12)
+
+(def ^:private table-header-fmt
+  (str "%-" file-col-width "s %-" line-col-width "s %-" severity-col-width "s %s%n"))
+
+(def ^:private table-row-fmt
+  (str "%-" file-col-width "s %-" line-col-width "d %-" severity-col-width "s %s%n"))
+
+(defn- separator-row
+  "Build the dashed underline row used between header and body."
+  []
+  (let [dashes (fn [n] (apply str (repeat n "-")))]
+    (str (dashes file-col-width) " "
+         (dashes line-col-width) " "
+         (dashes severity-col-width) " ----")))
 
 (defn- resolve-pack
   "Resolve a pack by name or path; returns the loaded pack map or nil."
@@ -75,26 +99,22 @@
   "Print a one-line summary of the review."
   [{:pr-review/keys [summary]}]
   (display/print-info
-   (format "policy-review: %d violations (%d auto-fixable, %d need review) across %d files / %d rules"
-           (:total summary)
-           (:auto-fixable summary)
-           (:needs-review summary)
-           (:files-affected summary)
-           (:rules-violated summary))))
+   (messages/t :pr/review-summary
+               {:total        (:total summary)
+                :auto-fixable (:auto-fixable summary)
+                :needs-review (:needs-review summary)
+                :files        (:files-affected summary)
+                :rules        (:rules-violated summary)})))
 
 (defn- emit-table
   "Print a human-readable table of comments."
   [comments]
   (when (seq comments)
     (println)
-    (printf "%-60s %-6s %-12s %s%n" "FILE" "LINE" "SEVERITY" "RULE")
-    (printf "%s %s %s %s%n"
-            (apply str (repeat 60 "-"))
-            (apply str (repeat 6 "-"))
-            (apply str (repeat 12 "-"))
-            "----")
+    (printf table-header-fmt "FILE" "LINE" "SEVERITY" "RULE")
+    (println (separator-row))
     (doseq [c comments]
-      (printf "%-60s %-6d %-12s %s%n"
+      (printf table-row-fmt
               (:comment/path c)
               (:comment/line c)
               (name (or (get-in c [:comment/payload :violation/severity]) :info))
@@ -154,7 +174,7 @@
       :json  (emit-json (:pr-review/comments result))
       :table (emit-table (:pr-review/comments result))
       (display/print-error
-       (format "pr-review: unknown --out format: %s" (name out))))
+       (messages/t :pr/review-unknown-out {:fmt (name out)})))
     result))
 
 (defn run-pr-review-by-path-cmd
@@ -175,11 +195,11 @@
     (cond
       (not (fs/exists? repo-path))
       (display/print-error
-       (format "pr-review: repo path not found: %s" repo-path))
+       (messages/t :pr/review-repo-not-found {:path repo-path}))
 
       (or (nil? base-ref) (= "" base-ref))
       (display/print-error
-       "pr-review: --base <git-ref> is required (e.g., --base origin/main)")
+       (messages/t :pr/review-base-required))
 
       :else
       (try
@@ -191,4 +211,4 @@
                           (:out opts)       (assoc :out (keyword (:out opts)))))
         (catch Exception e
           (display/print-error
-           (format "pr-review failed: %s" (ex-message e))))))))
+           (messages/t :pr/review-failed {:message (ex-message e)})))))))

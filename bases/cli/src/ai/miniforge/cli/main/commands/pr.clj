@@ -134,7 +134,7 @@
 
                 (not base-ref)
                 (display/print-error
-                 "pr review: failed to resolve base ref via gh")
+                 (messages/t :pr/review-base-ref-failed))
 
                 :else
                 (let [cwd (System/getProperty "user.dir")]

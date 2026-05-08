@@ -490,6 +490,14 @@
   :pr/merging "Merging: {url}"
   :pr/merge-todo "TODO: Use gh pr merge"
 
+  ;; PR Review (N13 §2.2 Standards Reviewer)
+  :pr/review-base-ref-failed "pr review: failed to resolve base ref via gh"
+  :pr/review-repo-not-found "pr-review: repo path not found: {path}"
+  :pr/review-base-required "pr-review: --base <git-ref> is required (e.g., --base origin/main)"
+  :pr/review-unknown-out "pr-review: unknown --out format: {fmt}"
+  :pr/review-failed "pr-review failed: {message}"
+  :pr/review-summary "policy-review: {total} violations ({auto-fixable} auto-fixable, {needs-review} need review) across {files} files / {rules} rules"
+
   ;; PR Monitor
   :pr/monitor-starting "Starting PR monitor for author: {author}"
   :pr/monitor-polling "Polling every {seconds}s in {dir}"
