@@ -28,7 +28,9 @@
    The runtime owns:
      - a single MultiDetector composing the configured detector set
      - the running detector state (one map; pure-reducer threading)
-     - the supervisor policy
+     - the supervisor policy (class-default decisions)
+     - the on-anomaly map (per-category action overrides, consulted
+       before the class-default policy)
      - bookkeeping for which anomalies have already been seen by
        the supervisor (so we don't re-fire termination on the same
        anomaly across observe! calls)
@@ -50,14 +52,17 @@
    Keys:
      :detector       - the composed (Multi)Detector
      :detector-state - the threaded reducer state
-     :policy         - supervisor policy map
+     :policy         - supervisor class-default policy map
+     :on-anomaly     - per-category action override map; consulted
+                       before :policy in the 3-arity supervisor/handle
      :seen-count     - number of anomalies the supervisor has been
                        shown so far; new-anomalies = drop seen-count
                        from current-anomalies"
-  [detector detector-state policy]
+  [detector detector-state policy on-anomaly]
   {:detector       detector
    :detector-state detector-state
    :policy         policy
+   :on-anomaly     on-anomaly
    :seen-count     0})
 
 ;------------------------------------------------------------------------------ Layer 1
@@ -78,24 +83,29 @@
 
    Arguments:
      opts - map with:
-       :detectors - seq of Detector implementations. May be empty —
-                    an empty list is replaced with a single
-                    null-detector so the runtime stays usable when
-                    detectors are disabled (Stage 2 spec acceptance:
-                    'removing all detectors leaves the agent runtime
-                    functional and bounded by Layer 1 caps').
-       :config    - (optional) detector config map passed to init
-                    on each detector
-       :policy    - (optional) supervisor policy map
-                    (defaults to sup/default-policy)
+       :detectors  - seq of Detector implementations. May be empty —
+                     an empty list is replaced with a single
+                     null-detector so the runtime stays usable when
+                     detectors are disabled (Stage 2 spec acceptance:
+                     'removing all detectors leaves the agent runtime
+                     functional and bounded by Layer 1 caps').
+       :config     - (optional) detector config map passed to init
+                     on each detector
+       :policy     - (optional) supervisor class-default policy map
+                     (defaults to sup/default-policy)
+       :on-anomaly - (optional) per-category action override map.
+                     Consulted before :policy in supervisor/handle.
+                     Example: {:anomalies.agent/tool-loop :terminate
+                               :anomalies.review/stagnation :continue}
+                     Defaults to {} (no category overrides).
 
    Returns: atom holding runtime state. Pass to observe! / check
    to drive it."
-  [{:keys [detectors config policy]
-    :or   {config {} policy sup/default-policy}}]
+  [{:keys [detectors config policy on-anomaly]
+    :or   {config {} policy sup/default-policy on-anomaly {}}}]
   (let [composed (proto/multi-detector (effective-detectors detectors))
         d-state  (proto/init composed config)]
-    (atom (initial-state composed d-state policy))))
+    (atom (initial-state composed d-state policy on-anomaly))))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Observation
@@ -138,15 +148,20 @@
   "Run the supervisor over anomalies emitted since the last check
    and return its decision map (see supervisor/handle).
 
+   Threads both :policy (class-default) and :on-anomaly (per-category
+   overrides) from the runtime config through to supervisor/handle
+   3-arity, so category-specific actions take precedence over the
+   class-default.
+
    Side effect: marks those anomalies as seen so the next check
    only considers anomalies that arrived after this one. This
    guards against repeatedly returning :terminate for the same
    already-acted-on anomaly while the runtime is still draining."
   [runtime]
-  (let [{:keys [detector-state policy seen-count]} @runtime
+  (let [{:keys [detector-state policy on-anomaly seen-count]} @runtime
         all       (get detector-state :anomalies [])
         unseen    (subvec all (min seen-count (count all)))
-        decision  (sup/handle policy unseen)]
+        decision  (sup/handle policy on-anomaly unseen)]
     (swap! runtime assoc :seen-count (count all))
     decision))
 
@@ -155,10 +170,10 @@
    the unseen-anomaly window. Use `check` when you want to mark
    anomalies as acted-on."
   [runtime]
-  (let [{:keys [detector-state policy seen-count]} @runtime
+  (let [{:keys [detector-state policy on-anomaly seen-count]} @runtime
         all    (get detector-state :anomalies [])
         unseen (subvec all (min seen-count (count all)))]
-    (sup/terminate? (sup/handle policy unseen))))
+    (sup/terminate? (sup/handle policy on-anomaly unseen))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 
@@ -174,10 +189,19 @@
                  :determinism :stable-with-resource-version
                  :anomaly/categories #{:anomalies.agent/tool-loop}})
 
+  ;; Default runtime — mechanical anomaly terminates
   (def rt (make-runtime
             {:detectors [(tl/make-tool-loop-detector reg)
                          (rl/make-repair-loop-detector)]
              :config    {:config/params {:threshold-n 3}}}))
+
+  ;; Runtime with on-anomaly: tool-loop → :continue (suppressed)
+  ;; but stagnation → :terminate (default policy)
+  (def rt2 (make-runtime
+             {:detectors [(tl/make-tool-loop-detector reg)
+                          (rl/make-repair-loop-detector)]
+              :config    {:config/params {:threshold-n 3}}
+              :on-anomaly {:anomalies.agent/tool-loop :continue}}))
 
   ;; Hammer Read with the same args 3× — should fire mechanical
   (let [obs {:tool/id   :tool/Read

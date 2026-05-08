@@ -17,7 +17,7 @@
 ;; limitations under the License.
 
 (ns ai.miniforge.progress-detector.runtime-test
-  "Tests for the agent-run detector runtime."
+  "Tests for the agent-run detector runtime — includes on-anomaly threading."
   (:require
    [clojure.test :refer [deftest is testing]]
    [ai.miniforge.progress-detector.detectors.repair-loop :as repair]
@@ -84,6 +84,20 @@
       (is (= [] (sut/current-anomalies rt)))
       (is (= [] (sut/new-anomalies rt)))
       (is (false? (sut/terminate? rt))))))
+
+(deftest make-runtime-on-anomaly-stored-in-state-test
+  (testing "make-runtime stores :on-anomaly in the runtime atom"
+    (let [on-anomaly {:anomalies.agent/tool-loop :continue}
+          rt         (sut/make-runtime {:detectors  []
+                                        :on-anomaly on-anomaly})]
+      (is (= on-anomaly (:on-anomaly @rt))
+          ":on-anomaly is persisted in the runtime state"))))
+
+(deftest make-runtime-default-on-anomaly-is-empty-test
+  (testing "make-runtime defaults :on-anomaly to {} when not supplied"
+    (let [rt (sut/make-runtime {:detectors []})]
+      (is (= {} (:on-anomaly @rt))
+          "no :on-anomaly key ⇒ defaults to empty map"))))
 
 ;------------------------------------------------------------------------------ Layer 2
 ;; Tool-loop end-to-end
@@ -210,3 +224,105 @@
         (sut/observe! rt (read-event i)))
       (is (= :warn (:action (sut/check rt)))
           "custom policy treats mechanical as :warn"))))
+
+;------------------------------------------------------------------------------ Layer 3
+;; on-anomaly threading through check and terminate?
+
+(deftest on-anomaly-suppresses-tool-loop-termination-test
+  (testing "on-anomaly :continue for tool-loop category prevents :terminate"
+    (let [reg (registry-with-read-stable)
+          rt  (sut/make-runtime
+               {:detectors  [(tloop/make-tool-loop-detector reg)]
+                :config     {:config/params {:threshold-n 5}}
+                ;; tool-loop anomalies are :mechanical → default :terminate,
+                ;; but on-anomaly overrides the category to :continue
+                :on-anomaly {:anomalies.agent/tool-loop :continue}})]
+      (doseq [i (range 1 7)]
+        (sut/observe! rt (read-event i)))
+      (let [decision (sut/check rt)]
+        (is (= :continue (:action decision))
+            "on-anomaly suppresses the tool-loop termination")
+        (is (some? (:anomaly decision))
+            "controlling anomaly still surfaced even when action is :continue")))))
+
+(deftest on-anomaly-escalates-stagnation-when-policy-would-warn-test
+  (testing "PR #803 review fix: on-anomaly :terminate must actually
+            ESCALATE beyond what policy would do — the previous
+            version of this test left the default policy in place,
+            and repair-loop emits :mechanical :error which already
+            terminates via the default policy. The assertion
+            therefore passed even when on-anomaly was ignored.
+
+            Override policy so mechanical → :warn so the only path
+            to :terminate is via on-anomaly. Sanity-check that the
+            policy override alone (without on-anomaly) yields :warn,
+            then confirm on-anomaly flips it to :terminate."
+    (let [warn-policy {:mechanical :warn :heuristic :warn}
+          ;; Without on-anomaly: policy says :warn → expect :warn.
+          baseline-rt (sut/make-runtime
+                       {:detectors [(repair/make-repair-loop-detector)]
+                        :policy    warn-policy})
+          ;; With on-anomaly :terminate: must escalate to :terminate.
+          escalating-rt (sut/make-runtime
+                         {:detectors  [(repair/make-repair-loop-detector)]
+                          :policy     warn-policy
+                          :on-anomaly {:anomalies.review/stagnation :terminate}})]
+      (sut/observe! baseline-rt (review-event 1 [blocking-issue]))
+      (sut/observe! baseline-rt (review-event 2 [blocking-issue]))
+      (sut/observe! escalating-rt (review-event 1 [blocking-issue]))
+      (sut/observe! escalating-rt (review-event 2 [blocking-issue]))
+      (is (= :warn (:action (sut/check baseline-rt)))
+          "policy override sanity check — without on-anomaly, action is :warn")
+      (let [decision (sut/check escalating-rt)]
+        (is (= :terminate (:action decision))
+            "on-anomaly genuinely escalates stagnation beyond policy :warn")
+        (is (string? (:reason decision)))))))
+
+(deftest on-anomaly-does-not-affect-other-categories-test
+  (testing "PR #803 review fix: scope isolation must demonstrate
+            that the un-suppressed anomaly drives the decision —
+            the previous version asserted only that ‘some anomaly
+            fires’, which was true even when the suppressed-to-
+            :continue anomaly remained controlling. With the
+            action-aware controlling-anomaly selection (PR #803 fix
+            #1), the un-suppressed stagnation must be the
+            controlling anomaly AND :action must be :terminate.
+
+            Setup: tool-loop fires (mechanical → would terminate)
+            but on-anomaly suppresses it to :continue. Stagnation
+            fires (mechanical, default :terminate) and is NOT
+            suppressed. The decision must terminate, with
+            stagnation as controlling."
+    (let [reg (registry-with-read-stable)
+          rt  (sut/make-runtime
+               {:detectors  [(tloop/make-tool-loop-detector reg)
+                             (repair/make-repair-loop-detector)]
+                :config     {:config/params {:threshold-n 5}}
+                :on-anomaly {:anomalies.agent/tool-loop :continue}})]
+      ;; Trigger tool-loop (suppressed by on-anomaly)
+      (doseq [i (range 1 7)]
+        (sut/observe! rt (read-event i)))
+      ;; Trigger repair-loop stagnation (not suppressed)
+      (sut/observe! rt (review-event 100 [blocking-issue]))
+      (sut/observe! rt (review-event 101 [blocking-issue]))
+      (let [decision (sut/check rt)
+            controlling-cat (get-in decision
+                                    [:anomaly :anomaly/data :anomaly/category])]
+        (is (= :terminate (:action decision))
+            "un-suppressed stagnation drives the decision to :terminate
+             — proves the suppressed tool-loop did NOT mask termination")
+        (is (= :anomalies.review/stagnation controlling-cat)
+            "controlling anomaly is the stagnation, not the suppressed
+             tool-loop — action-aware selection works as advertised")))))
+
+(deftest terminate?-respects-on-anomaly-test
+  (testing "terminate? peek also honours on-anomaly override"
+    (let [reg (registry-with-read-stable)
+          rt  (sut/make-runtime
+               {:detectors  [(tloop/make-tool-loop-detector reg)]
+                :config     {:config/params {:threshold-n 5}}
+                :on-anomaly {:anomalies.agent/tool-loop :continue}})]
+      (doseq [i (range 1 7)]
+        (sut/observe! rt (read-event i)))
+      (is (false? (sut/terminate? rt))
+          "terminate? returns false when on-anomaly suppresses the category"))))
