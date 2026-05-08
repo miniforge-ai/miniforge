@@ -377,6 +377,80 @@
             (is (= :success (get-in result [:phase :result :status]))
                 "Release should succeed when verification passes"))))))))
 
+;------------------------------------------------------------------------------ Layer N: Boundary-commit rehydration regression
+;;
+;; Stage-3 dogfood (2026-05-07): plan/implement/verify/review all green,
+;; files committed on the task branch by the implement-phase boundary,
+;; but release threw `:release/zero-files` because `git-dirty-files`
+;; saw a clean worktree. The fix mirrors review.clj/rehydrate-from-paths
+;; — read content for the `:code/file-paths` recorded on the implement
+;; artifact instead of relying on the worktree's dirty status.
+
+(defn- write-and-commit-mock-files!
+  "Write the mock files into the worktree AND commit them.
+   Simulates the post-implement-boundary state where the agent's
+   files have landed on the task branch and the worktree is clean."
+  [worktree]
+  (write-mock-files-to-worktree! worktree)
+  (shell/sh "git" "config" "user.email" "test@example.com" :dir worktree)
+  (shell/sh "git" "config" "user.name" "Test" :dir worktree)
+  (shell/sh "git" "add" "." :dir worktree)
+  (shell/sh "git" "commit" "-m" "implement-phase-boundary commit"
+            :dir worktree))
+
+(defn- create-clean-context-with-recorded-paths
+  "Test context that mirrors the dogfood-failure shape:
+   - worktree clean at HEAD (implement boundary already committed)
+   - implement phase artifact carries :code/file-paths so release can
+     rehydrate the content even though git-dirty-files returns empty."
+  [worktree]
+  (write-and-commit-mock-files! worktree)
+  (let [paths   (mapv :path (:code/files mock-code-artifact))
+        actions (mapv :action (:code/files mock-code-artifact))]
+    {:execution/id (random-uuid)
+     :execution/input {:description "Test release after boundary commit"
+                       :title "Add feature"
+                       :intent "testing"}
+     :execution/metrics {:tokens 0 :duration-ms 0}
+     :execution/phase-results
+     {:implement {:result   mock-implement-result
+                  :artifact {:code/file-paths   paths
+                             :code/file-actions actions
+                             :code/file-count   (count paths)}}}
+     :worktree-path worktree}))
+
+(deftest release-rehydrates-from-implement-artifact-paths-test
+  (testing "release reads files via :code/file-paths when worktree is clean post-boundary-commit"
+    ;; Stage-3 dogfood-2026-05-07 regression guard: the dogfood failed
+    ;; here because git-dirty-files returns empty after the implement
+    ;; boundary commits, even though the files are present on HEAD.
+    (with-test-worktree
+      (fn [worktree]
+        (with-redefs [release-executor/execute-release-phase
+                      (fn [workflow-state _exec-context _opts]
+                        ;; Capture the code-artifact content to assert
+                        ;; the rehydrated files reached the executor.
+                        (let [files (->> (:workflow/artifacts workflow-state)
+                                         (mapcat (comp :code/files :artifact/content)))]
+                          {:success?  true
+                           :captured-files files
+                           :artifacts [{:artifact/id (random-uuid)
+                                        :artifact/type :release
+                                        :artifact/content {:files-written-count (count files)
+                                                           :files-written-paths (mapv :path files)}}]
+                           :metrics {:files-written (count files)
+                                     :duration-ms 50}}))]
+          (let [ctx (create-clean-context-with-recorded-paths worktree)
+                ctx-with-config (assoc ctx :phase-config {:phase :release})
+                interceptor (phase/get-phase-interceptor {:phase :release})
+                result-ctx ((:enter interceptor) ctx-with-config)]
+            (is (not= :failed (get-in result-ctx [:phase :status]))
+                "release must succeed when paths are recorded — clean-worktree fallback was the bug")
+            (let [executor-files (get-in result-ctx
+                                         [:phase :result :status])]
+              (is (= :success executor-files)
+                  "phase result reports success"))))))))
+
 (deftest release-handles-zero-files-artifact-test
   (testing "release phase fails fast when no files changed in the environment"
     (with-test-worktree
