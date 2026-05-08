@@ -20,11 +20,16 @@
   "Configurable event sinks for different deployment scenarios.
 
    Supported sinks:
-   - :file   - Write to ~/.miniforge/events/<workflow-id>/<eventid>__<seq>.transit.json
-               (local dev). When the event's :event/id is a Snowflake-encoded UUID,
-               the leading hex of the filename sorts by creation order. Legacy
-               files written before BD-2b retain the {timestamp}-{uuid}.json
-               name and are still readable.
+   - :file   - Write to ~/.miniforge/events/<workflow-id>/<filename>
+               (local dev). The filename grammar is conditional on the
+               envelope's :event/id:
+                 * Snowflake-encoded UUID (low 64 bits zero, BD-2b) →
+                   {event-id-hex16}__{workflow-seq-dec12}.transit.json,
+                   sortable lex by creation order across workflows;
+                 * any other UUID (no snowflake generator wired into the
+                   stream, or legacy files on disk) →
+                   {timestamp}-{uuid}.json, sortable by the ts prefix.
+               Both shapes coexist; the reader accepts either.
    - :stdout - Print to stdout (container/Docker/K8s)
    - :stderr - Print to stderr (error-only events)
    - :fleet  - Send to fleet command (org-level ops)

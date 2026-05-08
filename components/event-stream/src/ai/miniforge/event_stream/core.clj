@@ -84,9 +84,16 @@
   "Create an event stream with configurable sinks.
 
    Options:
-     :logger - Optional logger instance
-     :sinks - Vector of sink functions (default: file sink)
-     :config - Config map to create sinks from
+     :logger              - Optional logger instance
+     :sinks               - Vector of sink functions (default: file sink)
+     :config              - Config map to create sinks from
+     :snowflake-generator - Optional snowflake event-id generator
+                            (BD-2b). When supplied, `create-envelope`
+                            uses it for `:event/id` so events sort
+                            lexically by creation order. Without it,
+                            `:event/id` falls back to `random-uuid`
+                            and the file sink uses the legacy
+                            `{timestamp}-{uuid}.json` filename.
 
    Returns: Event stream atom
 

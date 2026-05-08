@@ -59,14 +59,13 @@
    [clojure.string :as str]
    [ai.miniforge.logging.interface :as log]))
 
-;; NOTE: Class references for the worker-id lease path
-;; (java.io.RandomAccessFile, java.nio.ByteBuffer, java.nio.channels.FileChannel,
-;; java.nio.channels.FileLock, java.lang.management.ManagementFactory,
-;; java.net.InetAddress, java.io.File) are used via fully-qualified names inside
-;; fn bodies rather than imported at the top, so the namespace loads in
-;; Babashka (which doesn't ship java.nio.channels.FileLock). Functions that
-;; touch those classes only run on the JVM; the BB-runtime test loads the
-;; namespace but never calls them, which keeps event-stream BB-compatible.
+;; NOTE: The worker-id lease path constructs java.io.RandomAccessFile,
+;; calls .getChannel (FileChannel), .tryLock (returning FileLock), and
+;; wraps bytes via java.nio.ByteBuffer. Those references appear FQN
+;; inside fn bodies rather than imported at the top, so the namespace
+;; loads in Babashka (which doesn't ship java.nio.channels.FileLock).
+;; Worker-id leasing is JVM-only — the BB-runtime test loads the
+;; namespace but never calls it, keeping event-stream BB-compatible.
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Constants
@@ -173,12 +172,28 @@
 (defn- try-acquire-slot
   "Try to acquire an exclusive FileLock on `{workers-dir}/{id}.lease`.
    Returns a map `{:channel ... :lock ... :worker-id id}` on success,
-   `nil` if the slot is held. Does not retry."
+   `nil` if the slot is held by another holder. Does not retry.
+
+   Treats only lock-contention as a slot-held signal:
+     - `.tryLock` returning nil → another process / JVM holds it.
+     - `OverlappingFileLockException` → this JVM already holds an
+       overlapping lock on the same file (e.g. a sibling generator
+       in the same process).
+
+   IO/permission failures (failed to create the lease file, no write
+   permission on the workers dir) are real problems and propagate
+   with workers-dir/id context attached, rather than silently moving
+   to the next slot — which would otherwise misleadingly throw
+   `:workers-exhausted` even when no slots are actually contended."
   [workers-dir ^long id]
   (.mkdirs workers-dir)
   (let [lease-path (io/file workers-dir (str id ".lease"))
         raf       (java.io.RandomAccessFile. lease-path "rw")
         channel   (.getChannel raf)]
+    ;; Resolve OverlappingFileLockException lazily via Class/forName so
+    ;; this namespace stays loadable in Babashka (which doesn't ship
+    ;; java.nio.channels). A typed `(catch java.nio.channels...)` would
+    ;; force compile-time class resolution and break BB load.
     (try
       (let [lock (.tryLock channel)]
         (if lock
@@ -186,9 +201,20 @@
             (write-lease-metadata! channel id)
             {:channel channel :lock lock :worker-id id :raf raf})
           (do (.close raf) nil)))
-      (catch Exception _
-        (.close raf)
-        nil))))
+      (catch Exception e
+        (try (.close raf) (catch Exception _))
+        (if (instance? (Class/forName "java.nio.channels.OverlappingFileLockException") e)
+          ;; This JVM already holds an overlapping lock on the same
+          ;; file. Treat as "slot held" and let the caller advance.
+          nil
+          ;; Real IO/permission failure. Wrap with context and propagate
+          ;; rather than silently masking as :workers-exhausted later.
+          (throw (ex-info "Snowflake worker-lease acquire failed"
+                          {:reason :lease-io-failure
+                           :worker-id id
+                           :lease-path (.getAbsolutePath lease-path)
+                           :workers-dir (.getAbsolutePath workers-dir)}
+                          e)))))))
 
 (defn acquire-worker-lease!
   "Walk slots 0..1023 and acquire the first whose lease file is
