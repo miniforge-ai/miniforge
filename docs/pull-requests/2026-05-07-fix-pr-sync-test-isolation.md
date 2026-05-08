@@ -3,14 +3,22 @@
   Author: Christopher Lester (christopher@miniforge.ai)
   Copyright 2025-2026 Christopher Lester. Licensed under Apache 2.0.
 -->
-# fix(test-runner): isolate pr-sync brick to prevent shell/sh redef pollution
+# fix(test-runner): document pr-sync + agent isolation rationale
 
 ## Overview
 
-Add `pr-sync` to the `default-isolated-bricks` set in
-`scripts/test-changed-bricks.bb`. Eliminates a class of intermittent
-test failures across `workflow`, `agent`, and `cli` bricks when their
-tests run in parallel with `pr-sync`'s test JVM.
+Expand the docstring on `default-isolated-bricks` in
+`scripts/test-changed-bricks.bb` to document the precise failure
+mechanism that motivated isolating `pr-sync` and `agent`.
+
+A separate change landed `pr-sync` and `agent` into
+`default-isolated-bricks` while this PR was in review. The
+behavioural fix is therefore already on `main`. This PR's
+contribution is the deeper docstring (explicit `make-sh-router` /
+`{:err \"fatal: not a git repo\"}` examples, the
+`scan-conflicted-paths` cond-branch + `or` short-circuit walkthrough)
+plus this standalone PR doc, so the next person who wonders *why*
+those bricks must be isolated has a complete account in-tree.
 
 ## Root cause
 
