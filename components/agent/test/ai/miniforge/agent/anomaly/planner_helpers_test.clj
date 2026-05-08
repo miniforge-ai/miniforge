@@ -32,7 +32,7 @@
   (testing "submitted plan wins over parsed and anomaly"
     (let [submitted {:plan/id (random-uuid) :plan/name "submitted"}
           parsed    {:plan/id (random-uuid) :plan/name "parsed"}
-          result    (planner/parsed-plan-or-anomaly submitted parsed
+          result    (@#'planner/parsed-plan-or-anomaly submitted parsed
                                                     {:content "irrelevant"})]
       (is (= submitted result))
       (is (not (anomaly/anomaly? result))))))
@@ -40,7 +40,7 @@
 (deftest parsed-plan-or-anomaly-falls-back-to-parsed
   (testing "parsed plan returned when submitted is nil"
     (let [parsed {:plan/id (random-uuid) :plan/name "parsed"}
-          result (planner/parsed-plan-or-anomaly nil parsed
+          result (@#'planner/parsed-plan-or-anomaly nil parsed
                                                  {:content "irrelevant"})]
       (is (= parsed result))
       (is (not (anomaly/anomaly? result))))))
@@ -50,7 +50,7 @@
     (let [llm-response {:content "this content describes a plan but cannot be parsed as EDN"
                         :stop-reason :max-turns
                         :num-turns 12}
-          result (planner/parsed-plan-or-anomaly nil nil llm-response)]
+          result (@#'planner/parsed-plan-or-anomaly nil nil llm-response)]
       (is (anomaly/anomaly? result))
       (is (= :fault (:anomaly/type result)))
       (is (= "Plan generation failed: EDN parse did not succeed"
@@ -66,7 +66,7 @@
 (deftest parsed-plan-or-anomaly-truncates-long-previews-to-500
   (testing "preview is bounded by 500 chars"
     (let [content (apply str (repeat 1000 \x))
-          result  (planner/parsed-plan-or-anomaly nil nil {:content content})]
+          result  (@#'planner/parsed-plan-or-anomaly nil nil {:content content})]
       (is (anomaly/anomaly? result))
       (is (= 500 (count (:llm-content-preview (:anomaly/data result))))))))
 
@@ -75,13 +75,13 @@
 (deftest require-llm-client-or-anomaly-returns-client-when-present
   (testing "non-nil client passes through"
     (let [client {:llm/backend :anthropic}
-          result (planner/require-llm-client-or-anomaly client)]
+          result (@#'planner/require-llm-client-or-anomaly client)]
       (is (= client result))
       (is (not (anomaly/anomaly? result))))))
 
 (deftest require-llm-client-or-anomaly-returns-invalid-input-when-nil
   (testing "nil client → :invalid-input anomaly carrying :phase :plan"
-    (let [result (planner/require-llm-client-or-anomaly nil)]
+    (let [result (@#'planner/require-llm-client-or-anomaly nil)]
       (is (anomaly/anomaly? result))
       (is (= :invalid-input (:anomaly/type result)))
       (is (= "No LLM backend provided for planner agent"
@@ -90,6 +90,6 @@
 
 (deftest require-llm-client-or-anomaly-treats-false-as-missing
   (testing "false (returned by some client resolvers) → anomaly"
-    (let [result (planner/require-llm-client-or-anomaly false)]
+    (let [result (@#'planner/require-llm-client-or-anomaly false)]
       (is (anomaly/anomaly? result))
       (is (= :invalid-input (:anomaly/type result))))))

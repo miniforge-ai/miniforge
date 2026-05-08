@@ -26,7 +26,11 @@ Refactor / per-component cleanup tier.
 
 `components/agent/src/.../file_artifacts.clj`:
 
-- `snapshot-working-dir` git failure now returns a `:fault` anomaly. The single in-component caller (`collect-written-files`) branches on `anomaly?` and returns nil — no boundary escalation needed.
+- `snapshot-working-dir` git failure now returns a `:fault` anomaly. Two in-component callers handle the new return shape:
+  - `collect-written-files` branches on `anomaly?` and returns nil.
+  - `artifact-session/create-session!` (the `:pre-session-snapshot` site) wraps the call in a let, checks for `nil` (legacy thrown-exception path) or anomaly, and coerces to `empty-snapshot` so a fault never flows downstream into diffing / changed-paths logic.
+
+  No external boundary escalation needed — both callers degrade gracefully.
 
 `components/agent/src/.../meta_protocol.clj`:
 
@@ -34,7 +38,7 @@ Refactor / per-component cleanup tier.
 
 `components/agent/src/.../planner.clj`:
 
-- Two new anomaly-returning private helpers — `parsed-plan-or-anomaly` and `require-llm-client-or-anomaly`. Boundary throws live at the call sites where `planner_test.clj` (and external slingshot callers) assert the legacy `:anomalies.agent/invoke-failed` and `:anomalies.agent/llm-error` taxonomy.
+- Two new anomaly-returning private helpers — `parsed-plan-or-anomaly` and `require-llm-client-or-anomaly` (both `defn-`; tests reach via `#'planner/...`). Boundary throws live at the call sites where `planner_test.clj` (and external slingshot callers) assert the legacy `:anomalies.agent/invoke-failed` and `:anomalies.agent/llm-error` taxonomy.
 - The previously redundant `(if llm-client …)` wrapper was removed — `require-llm-client-or-anomaly` already escalates above it, so the else-branch was unreachable.
 
 `components/agent/src/.../prompts.clj` (3 sites):

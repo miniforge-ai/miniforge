@@ -526,15 +526,17 @@
      :submitted-plan submitted-plan
      :parsed-plan    parsed-plan}))
 
-(defn parsed-plan-or-anomaly
+(defn- parsed-plan-or-anomaly
   "Return the first non-nil plan from `submitted` then `parsed`, else
    a `:fault` anomaly describing the EDN parse miss.
 
    This is the canonical, anomaly-returning entry point for the
-   plan-extraction step. The boundary site inside `create-planner`
-   inlines `response/throw-anomaly!` with `:anomalies.agent/invoke-failed`
-   when an anomaly is observed, preserving the legacy slingshot
-   contract for callers that try+ on the agent taxonomy."
+   plan-extraction step. Private — tests reach it via
+   `#'planner/parsed-plan-or-anomaly`. The boundary site inside
+   `create-planner` inlines `response/throw-anomaly!` with
+   `:anomalies.agent/invoke-failed` when an anomaly is observed,
+   preserving the legacy slingshot contract for callers that try+ on
+   the agent taxonomy."
   [submitted parsed llm-response]
   (or submitted
       parsed
@@ -550,12 +552,13 @@
                            stop-reason (assoc :stop-reason stop-reason)
                            num-turns   (assoc :num-turns num-turns))))))
 
-(defn require-llm-client-or-anomaly
+(defn- require-llm-client-or-anomaly
   "Return `llm-client` when truthy, else an `:invalid-input` anomaly
    describing the missing planner backend.
 
    Anomaly-returning sibling of the legacy boundary throw at the
-   `:invoke-fn` no-LLM-backend branch. The boundary inlines a
+   `:invoke-fn` no-LLM-backend branch. Private — tests reach it via
+   `#'planner/require-llm-client-or-anomaly`. The boundary inlines a
    slingshot throw at `:anomalies.agent/llm-error` so external try+
    callers continue to observe the agent-error category they depend
    on."
