@@ -1017,6 +1017,42 @@
       (is (= :stagnation (:type (pm/check-timeout monitor)))
           "after stop!, silence stagnates as expected"))))
 
+(deftest keepalive-rejects-non-positive-interval-test
+  (testing "start-keepalive! refuses non-positive interval-ms"
+    ;; Without validation Thread/sleep would throw IllegalArgumentException
+    ;; deep in the worker thread; assert + AssertionError fails fast at the
+    ;; call site (PR #806 Copilot review).
+    (let [monitor (pm/create-progress-monitor {:stagnation-threshold-ms 1000})]
+      (is (thrown? AssertionError (pm/start-keepalive! monitor 0))
+          "0 interval rejected")
+      (is (thrown? AssertionError (pm/start-keepalive! monitor -10))
+          "negative interval rejected")
+      (is (thrown? AssertionError (pm/start-keepalive! monitor 1.5))
+          "non-integer interval rejected"))))
+
+(deftest keepalive-stop-is-definitive-test
+  (testing "after stop!, no further activity ticks land"
+    ;; Race-window guard: stop! interrupts the thread + joins so the
+    ;; worker has exited (or is about to exit on the running? check)
+    ;; before stop! returns. PR #806 Copilot review.
+    (let [monitor (pm/create-progress-monitor
+                   {:stagnation-threshold-ms 5000
+                    :max-total-ms            60000
+                    :min-activity-interval-ms 1})
+          stop! (pm/start-keepalive! monitor 5)]
+      ;; Let several ticks land
+      (Thread/sleep 50)
+      (let [chunks-before-stop (:chunk-count @monitor)]
+        (stop!)
+        ;; Sleep long enough that further ticks WOULD land if the
+        ;; worker were still running (~10× the interval).
+        (Thread/sleep 100)
+        (let [chunks-after-stop (:chunk-count @monitor)
+              extra-ticks       (- chunks-after-stop chunks-before-stop)]
+          (is (<= extra-ticks 1)
+              (str "at most one in-flight tick may land after stop!, got "
+                   extra-ticks)))))))
+
 (deftest keepalive-does-not-mask-hard-limit-test
   (testing "keepalive only refreshes stagnation; max-total-ms still fires"
     ;; Wedge backstop: the keepalive is a per-tick refresh of

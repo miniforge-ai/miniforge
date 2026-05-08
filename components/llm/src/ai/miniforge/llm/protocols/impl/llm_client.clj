@@ -838,17 +838,34 @@
     (ByteArrayInputStream. (.getBytes ^String stdin-str "UTF-8"))
     (ByteArrayInputStream. (byte-array 0))))
 
+(def ^:private keepalive-min-interval-ms
+  "Floor on the keepalive interval so the worker doesn't burn cycles
+   pinging the monitor in a tight loop on production-sized thresholds.
+   1s is plenty fine-grained for a 180+ second stagnation window."
+  1000)
+
 (defn- keepalive-interval-ms
   "Refresh interval for the stream-side keepalive thread.
 
    Tied to the configured stagnation threshold so the keepalive fires
-   well within the window — at one-third of the threshold we get three
-   refreshes per stagnation-window, so a brief reader stall never
-   races the timer."
+   well within the window — at one-third of the threshold we get
+   three refreshes per stagnation-window, so a brief reader stall
+   never races the timer.
+
+   Two clamps:
+   - lower: `keepalive-min-interval-ms` to avoid a hot-loop on
+     production stagnation values.
+   - upper: strictly less than the stagnation threshold so the
+     keepalive always fires before stagnation can. The min wins
+     when the configured threshold is small (e.g. tests using
+     80ms) so the lower-bound floor doesn't push the interval
+     past the threshold."
   [monitor]
   (let [stagnation (get @monitor :stagnation-threshold-ms
-                        (default-stagnation-threshold-ms))]
-    (max 1000 (long (/ stagnation 3)))))
+                        (default-stagnation-threshold-ms))
+        target     (long (/ stagnation 3))
+        ceiling    (max 1 (dec stagnation))]
+    (min ceiling (max keepalive-min-interval-ms target))))
 
 (defn stream-exec-fn
   ([cmd on-line]
