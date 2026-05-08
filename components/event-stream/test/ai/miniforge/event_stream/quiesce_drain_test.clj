@@ -154,6 +154,30 @@
     (is (= :sink-error (:reason result))
         "sink-reported timeout surfaces as a sink-error in the aggregate result")))
 
+(deftest drain-budget-short-circuits-remaining-sinks-when-deadline-passes
+  ;; If an earlier sink consumes the entire drain budget, subsequent
+  ;; sinks must not be granted "extra" wall time (which would happen
+  ;; under a `(max 100 remaining)` floor). They are marked as timed out
+  ;; without their drain hook being called.
+  (let [budget-burner (with-meta
+                        (fn [_event] nil)
+                        {:drain (fn [{:keys [timeout-ms]}]
+                                  (Thread/sleep timeout-ms)
+                                  {:ok? false :reason :timeout})})
+        called? (atom false)
+        later-sink (with-meta
+                     (fn [_event] nil)
+                     {:drain (fn [_opts]
+                               (reset! called? true)
+                               {:ok? true})})
+        stream (core/create-event-stream {:sinks [budget-burner later-sink]})
+        result (core/drain! stream {:timeout-ms 100})]
+    (is (false? (:ok? result)))
+    (is (false? @called?)
+        "later sink's drain hook must not be invoked once budget is exhausted")
+    (is (= 2 (count (:failed-sinks result)))
+        "both sinks contribute failure entries — the burner timed out, the later one was short-circuited")))
+
 (deftest drain-catches-sink-drain-exceptions
   (let [throwing-sink (with-meta
                         (fn [_event] nil)

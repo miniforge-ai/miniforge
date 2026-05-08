@@ -236,9 +236,17 @@
      (swap! stream update :quiesced-workflows conj workflow-id))
    (let [deadline (+ (System/currentTimeMillis) timeout-ms)
          settled? (wait-for-condition #(zero? (:in-flight @stream)) deadline)
-         pending  (:in-flight @stream)]
+         ;; Read in-flight once at return time and report it honestly in
+         ;; both branches. In no-workflow-id mode there is no fence, so a
+         ;; concurrent publisher can land between the wait observing zero
+         ;; and us reading. With a fence in place that workflow's future
+         ;; publishes are rejected (no in-flight increment), but other
+         ;; workflows can still increment. The observational contract is:
+         ;; "ok=true means in-flight reached zero at some point during
+         ;; the wait; pending is the value at return."
+         pending (:in-flight @stream)]
      (if settled?
-       {:ok? true :pending-publishers 0}
+       {:ok? true :pending-publishers pending}
        {:ok? false :reason :timeout :pending-publishers pending}))))
 
 (defn drain!
@@ -277,18 +285,32 @@
      (if-not settled?
        {:ok? false :reason :timeout :pending-count (:in-flight @stream)}
        (let [{:keys [sinks]} @stream
-             results (mapv
-                      (fn [sink]
-                        (if-let [drain-fn (:drain (meta sink))]
-                          (let [remaining (max 100 (- deadline (System/currentTimeMillis)))]
-                            (try
-                              {:sink sink :result (drain-fn {:timeout-ms remaining})}
-                              (catch Exception e
-                                {:sink sink :result {:ok? false
-                                                     :reason :sink-error
-                                                     :error (ex-message e)}})))
-                          ;; No drain hook: sink is assumed synchronous.
-                          {:sink sink :result {:ok? true}}))
+             ;; Process sinks in order, honoring the total budget. If the
+             ;; deadline is already past, mark the remaining sinks as
+             ;; timed out without calling them — this prevents a slow
+             ;; first sink from granting later sinks "extra" wall time
+             ;; just because of a per-sink minimum, which would violate
+             ;; the docstring's total-budget contract.
+             results (reduce
+                      (fn [acc sink]
+                        (let [remaining (- deadline (System/currentTimeMillis))]
+                          (conj acc
+                                (cond
+                                  (<= remaining 0)
+                                  {:sink sink :result {:ok? false :reason :timeout}}
+
+                                  (some? (:drain (meta sink)))
+                                  (try
+                                    {:sink sink
+                                     :result ((:drain (meta sink)) {:timeout-ms remaining})}
+                                    (catch Exception e
+                                      {:sink sink :result {:ok? false
+                                                           :reason :sink-error
+                                                           :error (ex-message e)}}))
+
+                                  ;; No drain hook: sink is assumed synchronous.
+                                  :else {:sink sink :result {:ok? true}}))))
+                      []
                       sinks)
              failed (filterv (comp not :ok? :result) results)]
          (if (seq failed)
