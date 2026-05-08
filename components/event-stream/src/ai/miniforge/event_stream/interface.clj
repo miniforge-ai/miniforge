@@ -115,6 +115,9 @@
 (def pr-created events/pr-created)
 (def pr-scored events/pr-scored)
 
+;; Zettelkasten lifecycle (miniforge-fleet Phase E.3)
+(def zettel-promoted events/zettel-promoted)
+
 ;------------------------------------------------------------------------------ Layer 2
 ;; Listener, control, approval, and callback APIs
 

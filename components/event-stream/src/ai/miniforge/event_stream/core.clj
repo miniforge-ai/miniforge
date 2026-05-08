@@ -969,6 +969,71 @@
           (assoc :intervention/approval-required?
                  (:intervention/approval-required? opts))))))
 
+;------------------------------------------------------------------------------ Layer 5.5
+;; Zettelkasten lifecycle events (added for miniforge-fleet's Phase
+;; E.3 outbox path — Fleet's ingest consumes these to grow the
+;; cross-instance event log).
+
+(defn zettel-promoted
+  "Emit when a zettel revision transitions to `:trusted` state and
+   becomes eligible to ride the Fleet event log.
+
+   Schema in `schema/ZettelPromoted`. Required positional args
+   carry the Decision-6 revision-keyed identity + the content the
+   Fleet ingest path validates against the privacy gates; optional
+   share-intent kwargs (`:fleet/shareable`, `:fleet/share-scope`,
+   `:privacy/classification`) populate when the producer wants the
+   zettel to actually ride the Fleet event log.
+
+   Args:
+     stream            — event-stream atom
+     workflow-id       — owning workflow run UUID
+     zettel            — the trusted zettel map (must carry
+                          `:zettel/id`, `:zettel/revision-id`,
+                          `:zettel/digest`, `:zettel/uid`,
+                          `:zettel/title`, `:zettel/content`,
+                          `:zettel/type`)
+     oss-version       — OSS version pin (Decision 13).
+
+   Optional opts (all may be omitted):
+     :fleet/shareable
+     :fleet/share-scope
+     :privacy/classification
+     :org/id, :workspace/id, :repo/id, :auth/context (envelope)"
+  [stream workflow-id zettel oss-version & [opts]]
+  (let [opts (or opts {})
+        base (create-envelope stream :zettel/promoted workflow-id
+                              (str "Zettel " (:zettel/uid zettel)
+                                   " promoted to trusted"))]
+    (cond-> (assoc base
+                   :zettel/id          (:zettel/id zettel)
+                   :zettel/revision-id (:zettel/revision-id zettel)
+                   :zettel/digest      (:zettel/digest zettel)
+                   :zettel/uid         (:zettel/uid zettel)
+                   :zettel/title       (:zettel/title zettel)
+                   :zettel/content     (:zettel/content zettel)
+                   :zettel/type        (:zettel/type zettel)
+                   :fleet/oss-version  oss-version)
+      ;; Fleet-share intent (Decision 8) rides through from the zettel
+      ;; when present. Absence means local-only promotion.
+      (some? (:fleet/shareable zettel))
+      (assoc :fleet/shareable (:fleet/shareable zettel))
+
+      (:fleet/share-scope zettel)
+      (assoc :fleet/share-scope (:fleet/share-scope zettel))
+
+      (:privacy/classification zettel)
+      (assoc :privacy/classification (:privacy/classification zettel))
+
+      ;; Identity propagation (Decision 14) rides through from the
+      ;; opts map. Once the envelope-side identity-propagation PR
+      ;; (the matching prerequisite #10 PR) lands, callers will pass
+      ;; these via `create-envelope`'s opts arity instead.
+      (:org/id opts)       (assoc :org/id (:org/id opts))
+      (:workspace/id opts) (assoc :workspace/id (:workspace/id opts))
+      (:repo/id opts)      (assoc :repo/id (:repo/id opts))
+      (:auth/context opts) (assoc :auth/context (:auth/context opts)))))
+
 ;------------------------------------------------------------------------------ Layer 6
 ;; PR scoring events (N5-delta-2 §4.1)
 

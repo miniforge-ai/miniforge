@@ -331,6 +331,12 @@
    {:constructor "dependency-recovered"
     :event-type  :dependency/recovered
     :json-string "dependency/recovered"
+    :browser?    false}
+
+   ;; Zettelkasten lifecycle (miniforge-fleet Phase E.3 outbox path)
+   {:constructor "zettel-promoted"
+    :event-type  :zettel/promoted
+    :json-string "zettel/promoted"
     :browser?    false}])
 
 ;------------------------------------------------------------------------------ Layer 0
