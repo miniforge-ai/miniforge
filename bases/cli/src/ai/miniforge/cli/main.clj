@@ -591,7 +591,14 @@
 
    ;; PR subcommands
    {:cmds ["pr" "list"]    :fn pr-list-cmd    :spec {:repo {:alias :r}}}
-   {:cmds ["pr" "review"]  :fn pr-review-cmd  :args->opts [:url]}
+   {:cmds ["pr" "review"]  :fn pr-review-cmd  :args->opts [:url]
+    :spec {:url       {:alias :u}
+           :repo      {}
+           :base      {:alias :b}
+           :standards {:default ".standards"}
+           :pack      {:alias :p}
+           :rules     {:alias :r}
+           :out       {:default "table"}}}
    {:cmds ["pr" "respond"] :fn pr-respond-cmd :args->opts [:url]}
    {:cmds ["pr" "merge"]   :fn pr-merge-cmd   :args->opts [:url]}
    {:cmds ["pr" "monitor"] :fn pr-monitor-cmd :spec {:author {:alias :a}
