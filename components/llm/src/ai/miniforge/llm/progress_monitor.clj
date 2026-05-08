@@ -156,6 +156,73 @@
       ;; Still making progress
       :else nil)))
 
+;------------------------------------------------------------------------------ Layer 1
+;; Keepalive — decouples stagnation from CLI emission cadence
+
+(def ^:private keepalive-stop-join-ms
+  "How long stop! waits for the keepalive thread to exit after
+   interrupting it. 100ms is generous — the worker only needs to
+   wake from Thread/sleep, see the running? flag, and exit."
+  100)
+
+(defn start-keepalive!
+  "Spawn a daemon thread that calls record-activity! on `monitor` every
+   `interval-ms` until the returned 0-arity stop-fn is invoked.
+
+   ## Why
+
+   Stage-3 dogfood (2026-05-07) failed at the planner with
+   'Stagnation timeout: no progress for 180047ms'. Diagnosis: the
+   claude CLI in `--input-format text` mode does not emit
+   `rate_limit_event` during the model's think phase. Without
+   those heartbeats our stream-heartbeat-based stagnation guard has
+   no signal during legitimate model thinking on heavy prompts.
+
+   Keepalive decouples the per-run liveness check from the CLI's
+   own emission cadence — as long as the LLM-client's reader thread
+   is alive (i.e., this JVM is alive and the subprocess hasn't
+   wedged the JVM), the monitor's stagnation timer keeps refreshing.
+   `max-total-ms` remains the OS-wedge backstop.
+
+   This is the pragmatic stopgap until the Stage 3 progress-detector
+   wiring (semantic loop detection) replaces the wallclock approach
+   wholesale.
+
+   ## Arguments
+     monitor     - a progress monitor atom (from create-progress-monitor)
+     interval-ms - positive integer; how often to refresh. Must be
+                   strictly less than stagnation-threshold-ms or the
+                   keepalive will fire too late to prevent stagnation.
+
+   ## Returns
+     0-arity stop-fn. Calling it interrupts the worker thread and
+     waits up to `keepalive-stop-join-ms` for it to exit, so callers
+     can rely on no further `record-activity!` calls landing once
+     stop! has returned (modulo a single in-flight tick that already
+     started before the interrupt — kept harmless by the running?
+     check guarding record-activity!)."
+  [monitor interval-ms]
+  (assert (and (integer? interval-ms) (pos? interval-ms))
+          "keepalive interval-ms must be a positive integer")
+  (let [running? (atom true)
+        thread   (Thread.
+                   (fn []
+                     (try
+                       (while @running?
+                         (Thread/sleep ^long interval-ms)
+                         (when @running?
+                           (record-activity! monitor :keepalive)))
+                       (catch InterruptedException _
+                         ;; stop! interrupted us mid-sleep; exit cleanly.
+                         nil)))
+                   "llm-progress-monitor-keepalive")]
+    (.setDaemon thread true)
+    (.start thread)
+    (fn stop! []
+      (reset! running? false)
+      (.interrupt thread)
+      (.join thread keepalive-stop-join-ms))))
+
 (defn get-stats
   "Get current statistics from the monitor."
   [monitor]
