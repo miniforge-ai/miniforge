@@ -62,6 +62,16 @@
   [deps-config opts]
   (core/coverage-args deps-config opts))
 
+(defn load-deps-config
+  "Load the repo deps.edn config needed for coverage planning."
+  [repo-root]
+  (core/load-deps-config repo-root))
+
+(defn coverage-install-args
+  "Pure helper: build the argv needed to prefetch the coverage tool."
+  []
+  (core/coverage-install-args))
+
 (defn install-coverage-tool
   "Prefetch the Cloverage dependency into the repo's local Clojure cache.
    Accepts `{:repo-root \".\"}` and returns the process exit code."

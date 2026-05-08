@@ -31,14 +31,18 @@
 ;; leave-review status tests
 ;; ============================================================================
 
+(def ^:private default-review-issues
+  [{:severity :blocking
+    :description "Missing require"}])
+
 (defn simulate-leave-review
   "Simulate the leave-review logic for a given decision and iteration state.
    Returns the phase map after leave-review processing."
-  [decision iterations max-iterations]
-  (let [result {:output {:review/decision decision
-                         :review/issues [{:severity :blocking
-                                          :description "Missing require"}]}
-                :metrics {:tokens 100 :duration-ms 5000}}
+  ([decision iterations max-iterations]
+   (simulate-leave-review decision iterations max-iterations {:review/issues default-review-issues}))
+  ([decision iterations max-iterations review-output]
+   (let [result {:output (merge {:review/decision decision} review-output)
+                 :metrics {:tokens 100 :duration-ms 5000}}
         ctx {:phase {:started-at (- (System/currentTimeMillis) 1000)
                      :iterations iterations
                      :budget {:iterations max-iterations}
@@ -51,7 +55,7 @@
         interceptor (phase/get-phase-interceptor {:phase :review})
         leave-fn (:leave interceptor)
         result-ctx (leave-fn ctx)]
-    (:phase result-ctx)))
+    (:phase result-ctx))))
 
 ;; ============================================================================
 ;; Core behavior tests
@@ -86,7 +90,7 @@
     (let [phase (simulate-leave-review :changes-requested 1 4)]
       (is (some? (:review-feedback phase))
           "Review feedback should be stored for implement to consume")
-      (is (= [{:severity :blocking :description "Missing require"}]
+      (is (= default-review-issues
              (:review-feedback phase))
           "Should contain the review issues"))))
 
@@ -103,6 +107,14 @@
     (let [phase (simulate-leave-review :rejected 4 4)]
       (is (phase/failed? phase))
       (is (not (phase/redirect-requested? phase))))))
+
+(deftest rejected-without-actionable-feedback-fails-closed
+  (testing "operational reviewer rejection with no repair feedback does not redirect"
+    (let [phase (simulate-leave-review :rejected 1 4 {})]
+      (is (phase/failed? phase))
+      (is (not (phase/redirect-requested? phase))
+          "No redirect when reviewer produced no actionable feedback for implement")
+      (is (nil? (:review-feedback phase))))))
 
 (deftest approved-sets-completed-status
   (testing "approved review sets :completed status"

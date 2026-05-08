@@ -127,12 +127,16 @@ the file list from your Write/Edit tool calls.
 ## Already-Implemented Response
 
 If the task is already fully implemented in the existing files provided to you,
-do NOT generate new code. Instead, call `submit` with:
+do NOT generate new code. Prefer writing this EDN to
+`.miniforge/implement.edn` with `Write`:
 
 ```clojure
 {:status :already-implemented
  :summary \"Brief explanation: what exists, why no changes are needed\"}
 ```
+
+If `Write` is unavailable, the same EDN map in your final message is an
+acceptable fallback. The runtime normalizes both paths.
 
 Only use this when ALL acceptance criteria are already met by existing code.
 If even partial changes are needed, proceed with normal Write/Edit delivery.

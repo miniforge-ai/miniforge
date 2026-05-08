@@ -61,5 +61,8 @@
    (->CLIClient (cond-> {:backend backend}
                   model (assoc :model model))
                 logger
-                (or exec-fn impl/default-exec-fn)
+                ;; Normalize so 1-arity user-supplied exec-fns keep
+                ;; working when the impl invokes 2-arity (the
+                ;; :prompt-via :stdin path on the claude backend).
+                (impl/normalize-exec-fn (or exec-fn impl/default-exec-fn))
                 stream-exec-fn)))

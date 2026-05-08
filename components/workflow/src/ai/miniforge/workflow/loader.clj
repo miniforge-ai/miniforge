@@ -23,6 +23,7 @@
    [clojure.java.io :as io]
    [clojure.edn :as edn]
    [clojure.string :as str]
+   [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.response.interface :as response]
    [ai.miniforge.workflow.validator :as validator]
    [ai.miniforge.heuristic.interface :as heuristic])
@@ -115,7 +116,16 @@
    - workflow-id: Workflow identifier (keyword)
    - version: Version string (e.g., \"2.0.0\" or \"latest\")
 
-   Returns workflow config map or nil if not found."
+   Returns:
+   - workflow config map on success
+   - nil when no matching resource exists on the classpath
+   - a `:fault` anomaly when a candidate resource was found but EDN
+     parsing failed (carrying `:workflow-id`, `:resource-path`, `:error`)
+
+   This is the canonical, anomaly-returning entry point. The boundary
+   site `load-workflow` inlines a `response/throw-anomaly!` when an
+   anomaly is observed, preserving the legacy thrown-exception contract
+   for external callers that depend on it."
   [workflow-id version]
   (let [;; Try versioned filename first: workflows/standard-sdlc-v2.0.0.edn
         versioned-path (str "workflows/" (name workflow-id) "-v" version ".edn")
@@ -133,11 +143,11 @@
         (with-open [rdr (io/reader resource)]
           (edn/read (java.io.PushbackReader. rdr)))
         (catch Exception e
-          (response/throw-anomaly! :anomalies/fault
-                                  "Failed to load workflow from resource"
-                                  {:workflow-id workflow-id
-                                   :resource-path resource-path
-                                   :error (.getMessage e)}))))))
+          (anomaly/anomaly :fault
+                           "Failed to load workflow from resource"
+                           {:workflow-id workflow-id
+                            :resource-path resource-path
+                            :error (.getMessage e)}))))))
 
 ;------------------------------------------------------------------------------ Layer 2
 ;; Heuristic store loading
@@ -174,33 +184,62 @@
 (defn try-load-from-sources
   "Try loading workflow from resource or store.
 
-   Returns workflow or nil if not found."
+   Returns:
+   - `{:workflow w :source :resource}` when found via `load-from-resource`
+   - `{:workflow w :source :store}` when found via `load-from-store`
+   - nil if no matching resource or store entry was found
+   - a `:fault` anomaly when a resource was found but failed to parse
+     (propagates the anomaly from `load-from-resource`)
+
+   The result includes `:source` so the caller can thread it through
+   `validate-and-cache-workflow` without re-reading the resource."
   [workflow-id version opts]
-  (or (load-from-resource workflow-id version)
-      (load-from-store workflow-id version opts)))
+  (let [from-resource (load-from-resource workflow-id version)]
+    (cond
+      (anomaly/anomaly? from-resource) from-resource
+      (some? from-resource)            {:workflow from-resource :source :resource}
+      :else                            (when-let [w (load-from-store workflow-id version opts)]
+                                         {:workflow w :source :store}))))
 
 (defn validate-and-cache-workflow
   "Validate workflow and add to cache.
 
-   Throws ex-info if validation fails.
-   Returns result map with workflow, source, and validation."
-  [workflow workflow-id version skip-validation?]
+   Arguments:
+   - workflow         — the workflow config map
+   - workflow-id      — keyword id
+   - version          — version string
+   - source           — `:resource` | `:store` (where the workflow was
+                        loaded from). Threaded by callers that already
+                        know — e.g. `try-load-from-sources` returns it
+                        in its result map. Avoids a second
+                        `load-from-resource` round-trip just to compute
+                        `:source`.
+   - skip-validation? — bypass the validator (still caches)
+
+   Returns:
+   - on success: `{:workflow :source :validation}`
+   - on validation failure: an `:invalid-input` anomaly carrying
+     `:workflow-id`, `:version`, `:errors`
+
+   This is the canonical, anomaly-returning entry point. The boundary
+   site `load-workflow` inlines a `response/throw-anomaly!` when an
+   anomaly is observed."
+  [workflow workflow-id version source skip-validation?]
   (let [validation (if skip-validation?
                     {:valid? true :errors []}
                     (validator/validate-workflow workflow))]
-    (when-not (:valid? validation)
-      (response/throw-anomaly! :anomalies.workflow/invalid-config
-                              "Workflow validation failed"
-                              {:workflow-id workflow-id
-                               :version version
-                               :errors (:errors validation)}))
-
-    ;; Cache the validated workflow
-    (swap! workflow-cache assoc [workflow-id version] workflow)
-
-    {:workflow workflow
-     :source (if (load-from-resource workflow-id version) :resource :store)
-     :validation validation}))
+    (if-not (:valid? validation)
+      (anomaly/anomaly :invalid-input
+                       "Workflow validation failed"
+                       {:workflow-id workflow-id
+                        :version version
+                        :errors (:errors validation)})
+      (do
+        ;; Cache the validated workflow
+        (swap! workflow-cache assoc [workflow-id version] workflow)
+        {:workflow workflow
+         :source source
+         :validation validation}))))
 
 (defn load-workflow
   "Load workflow config with caching.
@@ -219,7 +258,18 @@
     :source :resource | :store | :cache
     :validation validation-result}
 
-   Throws ex-info if workflow not found or validation fails."
+   This is the external-boundary entry point. It inlines
+   `response/throw-anomaly!` on:
+   - parse failures from `load-from-resource` (anomaly category
+     `:anomalies/fault`)
+   - validation failures from `validate-and-cache-workflow`
+     (anomaly category `:anomalies.workflow/invalid-config`)
+   - missing workflow on every source (anomaly category
+     `:anomalies/not-found`)
+
+   For anomaly-returning equivalents that callers can branch on as
+   data, use `load-from-resource` and `validate-and-cache-workflow`
+   directly."
   [workflow-id version opts]
   (let [cache-key [workflow-id version]
         skip-cache? (:skip-cache? opts false)
@@ -232,14 +282,34 @@
        :validation {:valid? true :errors []}}
 
       ;; Try loading from sources
-      (if-let [workflow (try-load-from-sources workflow-id version opts)]
-        (validate-and-cache-workflow workflow workflow-id version skip-validation?)
+      (let [from-sources (try-load-from-sources workflow-id version opts)]
+        (cond
+          ;; Source-level fault — escalate at this single boundary site.
+          (anomaly/anomaly? from-sources)
+          (response/throw-anomaly! :anomalies/fault
+                                   (:anomaly/message from-sources)
+                                   (:anomaly/data from-sources))
 
-        ;; Not found anywhere
-        (response/throw-anomaly! :anomalies/not-found
-                                "Workflow not found"
-                                {:workflow-id workflow-id
-                                 :version version})))))
+          ;; Found — validate-and-cache may itself return an anomaly.
+          ;; `from-sources` is `{:workflow :source}` per
+          ;; `try-load-from-sources`; pass `:source` through directly so
+          ;; we don't re-read the resource.
+          (some? from-sources)
+          (let [{:keys [workflow source]} from-sources
+                result (validate-and-cache-workflow workflow workflow-id version
+                                                    source skip-validation?)]
+            (if (anomaly/anomaly? result)
+              (response/throw-anomaly! :anomalies.workflow/invalid-config
+                                       (:anomaly/message result)
+                                       (:anomaly/data result))
+              result))
+
+          ;; Not found anywhere
+          :else
+          (response/throw-anomaly! :anomalies/not-found
+                                   "Workflow not found"
+                                   {:workflow-id workflow-id
+                                    :version version}))))))
 
 ;------------------------------------------------------------------------------ Layer 4
 ;; Workflow discovery

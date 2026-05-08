@@ -375,6 +375,30 @@
                (get-in final-result [:phase :error :message])))
         (is (empty? (get-in final-result [:execution :phases-completed] [])))))))
 
+(deftest leave-implement-preserves-verified-already-implemented-noop-test
+  (testing "already-implemented survives curator no-files when the task is already satisfied"
+    (with-redefs [agent/create-implementer (fn [_] {:type :mock-implementer})
+                  agent/invoke (fn [_ _ _]
+                                 {:status :already-implemented
+                                  :output {:code/id (random-uuid)
+                                           :code/files []
+                                           :code/summary "Behavioral harness already exists"}
+                                  :summary "Behavioral harness already exists"
+                                  :metrics {:tokens 25 :duration-ms 250}})
+                  agent/curate-implement-output mock-curator-error]
+      (let [ctx (create-base-context)
+            ctx-with-config (assoc ctx :phase-config {:phase :implement})
+            interceptor (phase/get-phase-interceptor {:phase :implement})
+            enter-result ((:enter interceptor) ctx-with-config)
+            final-result ((:leave interceptor) enter-result)]
+        (is (= :already-implemented (get-in enter-result [:phase :result :status])))
+        (is (= :already-implemented (get-in final-result [:phase :status])))
+        (is (= :already-implemented (get-in final-result [:phase :skipped-reason])))
+        (is (= "Behavioral harness already exists"
+               (get-in final-result [:phase :result :summary])))
+        (is (nil? (get-in final-result [:phase :error])))
+        (is (= [:implement] (get-in final-result [:execution :phases-completed])))))))
+
 ;------------------------------------------------------------------------------ Layer 3: Capsule File Loading
 
 (deftest load-files-from-capsule-reads-via-execute-fn-test

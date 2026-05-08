@@ -29,7 +29,8 @@
             [ai.miniforge.phase-software-factory.knowledge-helpers :as kb-helpers]
             [ai.miniforge.agent.interface :as agent]
             [ai.miniforge.knowledge.interface :as knowledge]
-            [ai.miniforge.response.interface :as response]))
+            [ai.miniforge.response.interface :as response]
+            [clojure.string :as str]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Defaults
@@ -233,12 +234,12 @@
 
 (defn- compute-decision
   "Pick the post-review action: :stagnated | :repair | :exhausted | :complete."
-  [{:keys [reviewer-blocked? stagnated? within-budget? phase-status]}]
+  [{:keys [reviewer-blocked? stagnated? within-budget? phase-status actionable-feedback?]}]
   (cond
-    stagnated?                              :stagnated
-    (and reviewer-blocked? within-budget?)  :repair
-    (= :failed phase-status)                :exhausted
-    :else                                   :complete))
+    stagnated?                                               :stagnated
+    (and reviewer-blocked? within-budget? actionable-feedback?) :repair
+    (= :failed phase-status)                                 :exhausted
+    :else                                                    :complete))
 
 (defn- apply-decision
   "Apply the chosen post-review action to the updated context."
@@ -269,6 +270,14 @@
   [result]
   (or (get-in result [:output :review/feedback])
       (get-in result [:output :review/issues])))
+
+(defn- actionable-feedback?
+  "True when review feedback gives implement something concrete to repair."
+  [feedback]
+  (cond
+    (string? feedback)     (not (str/blank? feedback))
+    (sequential? feedback) (seq feedback)
+    :else                  (some? feedback)))
 
 (defn leave-review
   "Post-processing for review phase.
@@ -302,11 +311,12 @@
         stagnated?        (compute-stagnated? reviewer-blocked? prior-history current-fp)
         phase-status      (compute-phase-status reviewer-blocked? gate-failed?)
         within-budget?    (< iterations max-iterations)
-        decision          (compute-decision {:reviewer-blocked? reviewer-blocked?
-                                             :stagnated?        stagnated?
-                                             :within-budget?    within-budget?
-                                             :phase-status      phase-status})
         feedback          (review-feedback result)
+        decision          (compute-decision {:reviewer-blocked?    reviewer-blocked?
+                                             :stagnated?           stagnated?
+                                             :within-budget?       within-budget?
+                                             :phase-status         phase-status
+                                             :actionable-feedback? (actionable-feedback? feedback)})
         updated-ctx       (accumulate-base-ctx ctx end-time duration-ms phase-status
                                                metrics iterations current-fp)
         next-ctx          (apply-decision decision updated-ctx feedback

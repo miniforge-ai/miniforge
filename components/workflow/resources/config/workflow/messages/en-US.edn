@@ -107,4 +107,36 @@
   "Resolved conflicts on {parent-count}-parent merge after {iterations} iteration{s}."
 
   :dag.merge.resolution/commit-failed
-  "Could not commit the resolution to the worktree"}}
+  "Could not commit the resolution to the worktree"
+
+  ;; v2 multi-parent merge — resolution agent prompt (Stage 2C, spec §6.1.3)
+  ;; Policy-overridable defaults. The descriptive prompt below is the
+  ;; system default; a loaded policy pack can substitute its own
+  ;; resolution-prompt template through the same plumbing the policy
+  ;; interface already uses for other agent prompts.
+  :dag.merge.resolution.prompt/header
+  "Resolve a git merge conflict between {parent-count} parent branches."
+
+  :dag.merge.resolution.prompt/iteration
+  "Resolution attempt {iteration} of {max-iterations}."
+
+  :dag.merge.resolution.prompt/parents-header
+  "Parents being merged (in declaration order):"
+
+  :dag.merge.resolution.prompt/parent-line
+  "- {task-id} @ {commit-sha}"
+
+  :dag.merge.resolution.prompt/conflicts-header
+  "Files with conflict markers:"
+
+  :dag.merge.resolution.prompt/conflict-line
+  "- {path} (stages: {stages})"
+
+  :dag.merge.resolution.prompt/strategy-line
+  "Merge strategy attempted: {strategy}"
+
+  :dag.merge.resolution.prompt/instructions
+  "Use the Edit and Write tools to resolve the conflict markers (<<<<<<<, =======, >>>>>>>) in each file. Read the surrounding code carefully — do not blindly pick `ours` or `theirs`. Produce a merge that combines both parents' intent: the goal is a working tree that compiles and tests cleanly, not a syntactic resolution. Stage your edits with `git add` for each file you change; the orchestrator commits and verifies."
+
+  :dag.merge.resolution.prompt/agent-error
+  "Agent invocation threw: {error}"}}

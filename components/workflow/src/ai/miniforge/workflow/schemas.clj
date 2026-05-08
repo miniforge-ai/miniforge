@@ -18,7 +18,8 @@
 
 (ns ai.miniforge.workflow.schemas
   "Malli schemas for workflow-related data structures."
-  (:require [malli.core :as m]
+  (:require [ai.miniforge.anomaly.interface :as anomaly]
+            [malli.core :as m]
             [malli.error :as me]))
 
 ;;------------------------------------------------------------------------------ Layer 0
@@ -155,11 +156,36 @@
   (when-let [explanation (m/explain CheckpointData value)]
     (me/humanize explanation)))
 
-(defn validate-checkpoint-data!
-  "Validate loaded or soon-to-be-persisted checkpoint data at the boundary."
+(defn validate-checkpoint-data
+  "Validate loaded or soon-to-be-persisted checkpoint data.
+
+   Returns:
+   - the input value when it satisfies `CheckpointData`
+   - an `:invalid-input` anomaly carrying `:value` and `:errors`
+     (humanized malli explanation) otherwise
+
+   This is the canonical, anomaly-returning entry point. The boundary
+   helper `validate-checkpoint-data!` re-escalates the anomaly via a
+   thrown `ex-info` for callers (e.g. the checkpoint store) that
+   treat schema breakage as a programmer error rather than a runtime
+   condition to be carried forward as data."
   [value]
   (if (valid-checkpoint-data? value)
     value
-    (throw (ex-info "Invalid checkpoint data"
-                    {:value value
-                     :errors (explain-checkpoint-data value)}))))
+    (anomaly/anomaly :invalid-input
+                     "Invalid checkpoint data"
+                     {:value value
+                      :errors (explain-checkpoint-data value)})))
+
+(defn validate-checkpoint-data!
+  "Validate loaded or soon-to-be-persisted checkpoint data at the boundary.
+
+   Returns the input value when valid; throws `ex-info` carrying
+   `:value` and `:errors` when invalid. Use `validate-checkpoint-data`
+   for an anomaly-returning equivalent."
+  [value]
+  (let [result (validate-checkpoint-data value)]
+    (if (anomaly/anomaly? result)
+      (throw (ex-info (:anomaly/message result)
+                      (:anomaly/data result)))
+      result)))

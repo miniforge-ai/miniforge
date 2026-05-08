@@ -1,0 +1,62 @@
+;; Title: Miniforge.ai
+;; Subtitle: An agentic SDLC / fleet-control platform
+;; Author: Christopher Lester
+;; Line: Founder, Miniforge.ai (project)
+;; Copyright 2025-2026 Christopher Lester (christopher@miniforge.ai)
+;;
+;; Licensed under the Apache License, Version 2.0 (the "License");
+;; you may not use this file except in compliance with the License.
+;; You may obtain a copy of the License at
+;;
+;;     http://www.apache.org/licenses/LICENSE-2.0
+;;
+;; Unless required by applicable law or agreed to in writing, software
+;; distributed under the License is distributed on an "AS IS" BASIS,
+;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+;; See the License for the specific language governing permissions and
+;; limitations under the License.
+
+(ns ai.miniforge.spec-parser.anomaly.parse-edn-test
+  "Coverage for `core/parse-edn` (anomaly-returning) and its boundary
+   escalation through `parse-spec-file`.
+
+   Malformed EDN is `:invalid-input` because the content is
+   caller-supplied. The boundary at `parse-spec-file` rethrows as
+   ex-info so existing slingshot callers keep their contract."
+  (:require [clojure.test :refer [deftest is testing]]
+            [babashka.fs :as fs]
+            [ai.miniforge.anomaly.interface :as anomaly]
+            [ai.miniforge.spec-parser.core :as core]))
+
+;------------------------------------------------------------------------------ Anomaly-returning happy path
+
+(deftest parse-edn-valid-content
+  (testing "valid EDN parses to data"
+    (is (= {:spec/title "T" :spec/description "D"}
+           (core/parse-edn "{:spec/title \"T\" :spec/description \"D\"}")))))
+
+;------------------------------------------------------------------------------ Anomaly-returning failure path
+
+(deftest parse-edn-malformed-returns-anomaly
+  (testing "unbalanced braces yield :invalid-input anomaly"
+    (let [result (core/parse-edn "{:a 1")]
+      (is (anomaly/anomaly? result))
+      (is (= :invalid-input (:anomaly/type result)))
+      (is (= "Failed to parse EDN file" (:anomaly/message result)))
+      (is (string? (get-in result [:anomaly/data :error]))))))
+
+;------------------------------------------------------------------------------ Boundary escalation
+
+(deftest parse-spec-file-escalates-malformed-edn
+  (testing "malformed EDN surfaces as ex-info from parse-spec-file"
+    (let [tmp (fs/create-temp-file {:suffix ".edn"})]
+      (try
+        (spit (fs/file tmp) "{:spec/title \"unterminated")
+        (let [thrown (try
+                       (core/parse-spec-file (str tmp))
+                       nil
+                       (catch clojure.lang.ExceptionInfo e e))]
+          (is (some? thrown))
+          (is (= :invalid-input (:anomaly/type (ex-data thrown)))))
+        (finally
+          (fs/delete-if-exists tmp))))))

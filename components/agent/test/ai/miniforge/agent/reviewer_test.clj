@@ -23,6 +23,7 @@
    [ai.miniforge.agent.model :as model]
    [ai.miniforge.agent.reviewer :as reviewer]
    [ai.miniforge.agent.core :as core]
+   [ai.miniforge.logging.interface :as log]
    [ai.miniforge.llm.interface :as llm]
    [ai.miniforge.loop.interface :as loop]
    [ai.miniforge.response.interface :as response]))
@@ -42,6 +43,33 @@
   "Floor for the reviewer main-turn :max-total-ms. Below this, long
    but legitimate reviews are killed mid-turn."
   600000)
+
+(def ^:private unparseable-output-token-count
+  42)
+
+(def ^:private parseable-backend-failure-token-count
+  7)
+
+(def ^:private timeout-review-token-count
+  9)
+
+(def ^:private timeout-success-wrapper-token-count
+  11)
+
+(def ^:private backend-timeout-elapsed-ms
+  120183)
+
+(def ^:private wrapped-timeout-elapsed-ms
+  120228)
+
+(def ^:private backend-timeout-stop-reason
+  "timeout")
+
+(def ^:private backend-timeout-num-turns
+  4)
+
+(def ^:private backend-timeout-type
+  "adaptive_timeout")
 
 ;------------------------------------------------------------------------------ Test fixtures
 
@@ -75,6 +103,53 @@
    :artifact/content {:code/files [{:path "src/example.clj"
                                     :content "(ns example)\n(defn hello [] \"world\")"
                                     :action :create}]}})
+
+(defn- review-gate-feedback
+  ([] (review-gate-feedback :unknown 0))
+  ([gate-id duration-ms]
+   {:gate-id gate-id
+    :gate-type :unknown
+    :passed? true
+    :errors []
+    :warnings []
+    :duration-ms duration-ms}))
+
+(defn- adaptive-timeout-message
+  [elapsed-ms]
+  (str "Adaptive timeout: Stagnation timeout: no progress for "
+       elapsed-ms
+       "ms"))
+
+(defn- wrapped-timeout-message
+  [elapsed-ms]
+  (str (adaptive-timeout-message elapsed-ms)
+       " (type: stagnation, elapsed: "
+       elapsed-ms
+       "ms)"))
+
+(defn- timeout-only-review-content
+  ([blocking-message]
+   (timeout-only-review-content blocking-message [(review-gate-feedback)]))
+  ([blocking-message gate-results]
+   (pr-str {:review/decision :rejected
+            :review/gate-results gate-results
+            :review/blocking-issues [blocking-message]
+            :review/recommendations []})))
+
+(defn- mock-llm-response
+  [content & {:as extra}]
+  (merge {:success? true
+          :content content
+          :tokens 1}
+         extra))
+
+(defn- backend-timeout-error
+  ([message]
+   (backend-timeout-error message nil))
+  ([message data]
+   (cond-> {:type backend-timeout-type
+            :message message}
+     data (assoc :data data))))
 
 ;------------------------------------------------------------------------------ Core functionality tests
 
@@ -201,9 +276,9 @@
   (testing "successful LLM calls that cannot be parsed fail closed"
     (with-redefs [model/resolve-llm-client-for-role (fn [_role client] client)
                   llm/chat (fn [_client _prompt _opts]
-                             {:success? true
-                              :content "not valid edn"
-                              :tokens 42})
+                             (mock-llm-response
+                              "not valid edn"
+                              :tokens unparseable-output-token-count))
                   llm/success? :success?
                   llm/get-content :content]
       (let [reviewer (reviewer/create-reviewer {:llm-backend ::mock-backend
@@ -213,16 +288,18 @@
         (is (= :rejected (:review/decision review)))
         (is (= ["Reviewer LLM output could not be parsed into a review artifact"]
                (:review/blocking-issues review)))
-        (is (= 42 (get-in result [:metrics :tokens])))))))
+        (is (= unparseable-output-token-count
+               (get-in result [:metrics :tokens])))))))
 
 (deftest test-reviewer-uses-parseable-content-even-when-backend-flags-failure
   (testing "parseable review content still drives the decision when backend success? is false"
     (with-redefs [model/resolve-llm-client-for-role (fn [_role client] client)
                   llm/chat (fn [_client _prompt _opts]
-                             {:success? false
-                              :content "```clojure\n{:review/decision :changes-requested\n :review/issues [{:severity :blocking :description \"Needs changes\"}]}\n```"
-                              :tokens 7
-                              :error {:message "artifact file not found"}})
+                             (mock-llm-response
+                              "```clojure\n{:review/decision :changes-requested\n :review/issues [{:severity :blocking :description \"Needs changes\"}]}\n```"
+                              :success? false
+                              :tokens parseable-backend-failure-token-count
+                              :error {:message "artifact file not found"}))
                   llm/success? :success?
                   llm/get-content :content
                   llm/get-error :error]
@@ -232,7 +309,143 @@
             review (:artifact result)]
         (is (= :changes-requested (:review/decision review)))
         (is (some #{"Needs changes"} (:review/blocking-issues review)))
-        (is (= 7 (get-in result [:metrics :tokens])))))))
+        (is (= parseable-backend-failure-token-count
+               (get-in result [:metrics :tokens])))))))
+
+(deftest test-reviewer-timeout-only-parseable-failure-is-agent-error
+  (testing "timeout-only parsed review failures do not become rejected code-review artifacts"
+    (with-redefs [model/resolve-llm-client-for-role (fn [_role client] client)
+                  llm/chat (fn [_client _prompt _opts]
+                             (mock-llm-response
+                              (timeout-only-review-content
+                               (adaptive-timeout-message backend-timeout-elapsed-ms))
+                              :success? false
+                              :tokens timeout-review-token-count
+                              :error {:message (adaptive-timeout-message backend-timeout-elapsed-ms)}))
+                  llm/success? :success?
+                  llm/get-content :content
+                  llm/get-error :error]
+      (let [reviewer (reviewer/create-reviewer {:llm-backend ::mock-backend
+                                                :gates []})
+            result (core/invoke reviewer {} sample-artifact)]
+        (is (= :error (:status result)))
+        (is (= (adaptive-timeout-message backend-timeout-elapsed-ms)
+               (get-in result [:error :message])))
+        (is (= :reviewer/backend-timeout
+               (get-in result [:error :data :code])))
+        (is (= timeout-review-token-count
+               (get-in result [:metrics :tokens])))))))
+
+(deftest test-reviewer-timeout-only-parseable-success-wrapper-is-agent-error
+  (testing "timeout-only parsed review failures are treated as backend errors even when the wrapper reports success"
+    (with-redefs [model/resolve-llm-client-for-role (fn [_role client] client)
+                  llm/chat (fn [_client _prompt _opts]
+                             (mock-llm-response
+                              (timeout-only-review-content
+                               (wrapped-timeout-message wrapped-timeout-elapsed-ms)
+                               [(review-gate-feedback)
+                                (review-gate-feedback)])
+                              :success? true
+                              :tokens timeout-success-wrapper-token-count))
+                  llm/success? :success?
+                  llm/get-content :content
+                  llm/get-error (constantly nil)]
+      (let [reviewer (reviewer/create-reviewer {:llm-backend ::mock-backend
+                                                :gates []})
+            result (core/invoke reviewer {} sample-artifact)]
+        (is (= :error (:status result)))
+        (is (= (wrapped-timeout-message wrapped-timeout-elapsed-ms)
+               (get-in result [:error :message])))
+        (is (= :reviewer/backend-timeout
+               (get-in result [:error :data :code])))
+        (is (= timeout-success-wrapper-token-count
+               (get-in result [:metrics :tokens])))))))
+
+(deftest test-reviewer-timeout-only-shape-does-not-hide-real-gate-failures
+  (testing "timeout-only classification requires the deterministic gates to approve"
+    (with-redefs [model/resolve-llm-client-for-role (fn [_role client] client)
+                  llm/chat (fn [_client _prompt _opts]
+                             (mock-llm-response
+                              (timeout-only-review-content
+                               (adaptive-timeout-message backend-timeout-elapsed-ms)
+                               [])
+                              :success? false
+                              :tokens timeout-review-token-count
+                              :error (backend-timeout-error
+                                      (adaptive-timeout-message backend-timeout-elapsed-ms))))
+                  llm/success? :success?
+                  llm/get-content :content
+                  llm/get-error :error]
+      (let [reviewer (reviewer/create-reviewer {:llm-backend ::mock-backend
+                                                :gates [(failing-gate :gate1 "Gate failure")]})
+            result (core/invoke reviewer {} sample-artifact)]
+        (is (= :success (:status result)))
+        (is (not= :reviewer/backend-timeout
+                  (get-in result [:error :data :code])))
+        (is (= :rejected (get-in result [:artifact :review/decision])))))))
+
+(deftest test-reviewer-timeout-only-error-emits-phase-completed
+  (testing "timeout-only backend errors still emit review phase completion telemetry"
+    (let [events (atom [])]
+      (with-redefs [model/resolve-llm-client-for-role (fn [_role client] client)
+                    llm/chat (fn [_client _prompt _opts]
+                               (mock-llm-response
+                                (timeout-only-review-content
+                                 (adaptive-timeout-message backend-timeout-elapsed-ms))
+                                :success? false
+                                :tokens timeout-review-token-count
+                                :error (backend-timeout-error
+                                        (adaptive-timeout-message backend-timeout-elapsed-ms)
+                                        {:elapsed-ms backend-timeout-elapsed-ms})))
+                    llm/success? :success?
+                    llm/get-content :content
+                    llm/get-error :error
+                    log/info (fn [_logger category event payload]
+                               (swap! events conj {:category category
+                                                   :event event
+                                                   :payload payload}))]
+        (let [reviewer (reviewer/create-reviewer {:llm-backend ::mock-backend
+                                                  :gates []})
+              result (core/invoke reviewer {} sample-artifact)
+              completed-event (some #(when (= :reviewer/phase-completed (:event %)) %) @events)]
+          (is (= :error (:status result)))
+          (is completed-event)
+          (is (= :reviewer/backend-timeout
+                 (get-in completed-event [:payload :data :error-code])))
+          (is (= :error
+                 (get-in completed-event [:payload :data :status]))))))))
+
+(deftest test-reviewer-timeout-only-error-preserves-backend-metadata
+  (testing "timeout-only backend errors preserve normalized backend metadata for post-mortem"
+    (with-redefs [model/resolve-llm-client-for-role (fn [_role client] client)
+                  llm/chat (fn [_client _prompt _opts]
+                             (mock-llm-response
+                              (timeout-only-review-content
+                               (adaptive-timeout-message backend-timeout-elapsed-ms))
+                              :success? false
+                              :tokens timeout-review-token-count
+                              :stop-reason backend-timeout-stop-reason
+                              :num-turns backend-timeout-num-turns
+                              :error (backend-timeout-error
+                                      (adaptive-timeout-message backend-timeout-elapsed-ms)
+                                      {:elapsed-ms backend-timeout-elapsed-ms})))
+                  llm/success? :success?
+                  llm/get-content :content
+                  llm/get-error :error]
+      (let [reviewer (reviewer/create-reviewer {:llm-backend ::mock-backend
+                                                :gates []})
+            result (core/invoke reviewer {} sample-artifact)]
+        (is (= :error (:status result)))
+        (is (= :reviewer/backend-timeout
+               (get-in result [:error :data :code])))
+        (is (= backend-timeout-type
+               (get-in result [:error :data :type])))
+        (is (= backend-timeout-elapsed-ms
+               (get-in result [:error :data :elapsed-ms])))
+        (is (= backend-timeout-stop-reason
+               (get-in result [:error :data :stop-reason])))
+        (is (= backend-timeout-num-turns
+               (get-in result [:error :data :num-turns])))))))
 
 (deftest test-reviewer-rejects-degraded-implement-handoff
   (testing "default reviewer rejects curated artifacts marked as degraded handoffs"
@@ -420,117 +633,13 @@
           "Should report 0 tokens"))))
 
 ;------------------------------------------------------------------------------ Repair-loop progress detection
-
-(def ^:private blocking-issue-a
-  {:severity :blocking :file "src/foo.clj" :line 12 :description "Null pointer access"})
-
-(def ^:private blocking-issue-b
-  {:severity :blocking :file "src/bar.clj" :line 7  :description "Bad arity"})
-
-(def ^:private warning-issue
-  {:severity :warning :file "src/foo.clj" :line 90 :description "Inefficient loop"})
-
-(def ^:private nit-issue
-  {:severity :nit :file "src/foo.clj" :line 4 :description "Stale comment"})
-
-(deftest review-fingerprint-includes-blocking-and-warning-test
-  (testing "fingerprint covers actionable severities (:blocking + :warning)"
-    (let [fp (reviewer/review-fingerprint
-              {:review/issues [blocking-issue-a warning-issue]})]
-      (is (= 2 (count fp)) ":blocking and :warning both flow through")
-      (is (every? vector? fp) "each entry is a tuple"))))
-
-(deftest review-fingerprint-excludes-nits-test
-  (testing ":nit issues are intentionally excluded — long-tail polish, not stagnation"
-    (let [fp (reviewer/review-fingerprint
-              {:review/issues [blocking-issue-a nit-issue]})]
-      (is (= 1 (count fp)) "only the blocking issue counted")
-      (is (= :blocking (-> fp first first))))))
-
-(deftest review-fingerprint-is-order-independent-test
-  (testing "issue order does not affect the fingerprint"
-    (let [fp1 (reviewer/review-fingerprint
-               {:review/issues [blocking-issue-a blocking-issue-b]})
-          fp2 (reviewer/review-fingerprint
-               {:review/issues [blocking-issue-b blocking-issue-a]})]
-      (is (= fp1 fp2)
-          "fingerprint is sorted before comparison"))))
-
-(deftest review-fingerprint-empty-when-no-actionable-issues-test
-  (testing "approved review with only nits has empty fingerprint"
-    (is (= [] (reviewer/review-fingerprint
-               {:review/issues [nit-issue]})))
-    (is (= [] (reviewer/review-fingerprint
-               {:review/issues []})))))
-
-(deftest review-fingerprint-discriminates-on-description-change-test
-  (testing "fingerprint changes when an issue description changes"
-    (let [original (reviewer/review-fingerprint
-                    {:review/issues [blocking-issue-a]})
-          edited   (reviewer/review-fingerprint
-                    {:review/issues [(assoc blocking-issue-a
-                                            :description "Different bug")]})]
-      (is (not= original edited)
-          "different description ⇒ different fingerprint"))))
-
-(deftest review-fingerprint-survives-whitespace-reformatting-test
-  (testing "trivial whitespace differences in the description don't read as progress"
-    (let [base    (reviewer/review-fingerprint
-                   {:review/issues [(assoc blocking-issue-a
-                                           :description "Null pointer access")]})
-          reflowed (reviewer/review-fingerprint
-                    {:review/issues [(assoc blocking-issue-a
-                                            :description "  Null   pointer\n access  ")]})]
-      (is (= base reflowed)
-          "whitespace normalization keeps the fingerprint stable across reformats"))))
-
-(deftest review-fingerprint-includes-failed-gates-test
-  (testing "gate-only mode: failed gate-results contribute to the fingerprint"
-    ;; Critical for gate-only mode: the reviewer populates :review/gate-results
-    ;; without filling :review/issues, so an :issues-only fingerprint would
-    ;; be empty and the stagnation guard would never fire on a looping
-    ;; gate failure. Failed gates must surface as virtual issues.
-    (let [fp (reviewer/review-fingerprint
-              {:review/gate-results [{:gate-id :syntax
-                                      :passed? false
-                                      :errors [{:message "Unbalanced paren at line 8"}]}
-                                     {:gate-id :lint
-                                      :passed? true
-                                      :errors []}]})]
-      (is (= 1 (count fp)) "only the failed gate contributes")
-      (is (= :blocking (-> fp first first))
-          "failed gates fingerprint as :blocking severity")
-      (is (= ":gate/syntax" (-> fp first second))
-          "gate id is the file slot for sortable identification"))))
-
-(deftest stagnated?-true-on-identical-fingerprints-test
-  (testing "two consecutive identical fingerprints with non-empty issues ⇒ stagnated"
-    (let [fp (reviewer/review-fingerprint
-              {:review/issues [blocking-issue-a]})]
-      (is (true? (reviewer/stagnated? fp fp))))))
-
-(deftest stagnated?-false-on-first-iteration-test
-  (testing "no prior fingerprint ⇒ not stagnated (first review never short-circuits)"
-    (let [fp (reviewer/review-fingerprint
-              {:review/issues [blocking-issue-a]})]
-      (is (false? (boolean (reviewer/stagnated? nil fp)))))))
-
-(deftest stagnated?-false-on-empty-fingerprint-test
-  (testing "no actionable issues ⇒ not stagnated regardless of prior — :approved is progress"
-    (is (false? (boolean (reviewer/stagnated? [] []))))
-    (is (false? (boolean (reviewer/stagnated?
-                          (reviewer/review-fingerprint
-                           {:review/issues [blocking-issue-a]})
-                          []))))))
-
-(deftest stagnated?-false-on-progress-test
-  (testing "fingerprint changed between iterations ⇒ progress, not stagnated"
-    (let [fp1 (reviewer/review-fingerprint
-               {:review/issues [blocking-issue-a blocking-issue-b]})
-          fp2 (reviewer/review-fingerprint
-               {:review/issues [blocking-issue-b]})]
-      (is (false? (boolean (reviewer/stagnated? fp1 fp2)))
-          "one issue resolved between iterations is real progress"))))
+;;
+;; Pure-fingerprint cases (review-fingerprint, stagnated?, gate-only-mode,
+;; whitespace-normalization, etc.) moved to the
+;; :detector/repair-loop port at
+;; components/progress-detector/test/ai/miniforge/progress_detector/detectors/repair_loop_test.clj
+;; per Stage 2 spec. The agent.reviewer namespace no longer hosts the
+;; fingerprint logic, so the tests live with the detector.
 
 (deftest reviewer-progress-monitor-thresholds-loaded-test
   ;; Guards the 2026-05-04 reviewer stagnation-threshold fix at the

@@ -21,6 +21,7 @@
   (:require
    [clojure.test :refer [deftest testing is]]
    [clojure.string :as str]
+   [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.spec-parser.interface :as spec-parser]
    [ai.miniforge.spec-parser.schema :as schema]
    [malli.core :as m]
@@ -174,17 +175,23 @@
 ;------------------------------------------------------------------------------ Layer 3: Validation Error Tests
 
 (deftest validation-errors-test
-  (testing "spec must be a map"
-    (is (thrown-with-msg? Exception #"must be a map"
-          (spec-parser/normalize-spec "not a map"))))
+  (testing "spec must be a map — returns :invalid-input anomaly"
+    (let [result (spec-parser/normalize-spec "not a map")]
+      (is (anomaly/anomaly? result))
+      (is (= :invalid-input (:anomaly/type result)))
+      (is (str/includes? (:anomaly/message result) "must be a map"))))
 
-  (testing "spec must have :spec/title"
-    (is (thrown-with-msg? Exception #"must have :spec/title"
-          (spec-parser/normalize-spec {:spec/description "No title"}))))
+  (testing "spec must have :spec/title — returns :invalid-input anomaly"
+    (let [result (spec-parser/normalize-spec {:spec/description "No title"})]
+      (is (anomaly/anomaly? result))
+      (is (= :invalid-input (:anomaly/type result)))
+      (is (str/includes? (:anomaly/message result) ":spec/title"))))
 
-  (testing "spec must have :spec/description"
-    (is (thrown-with-msg? Exception #"must have :spec/description"
-          (spec-parser/normalize-spec {:spec/title "No desc"})))))
+  (testing "spec must have :spec/description — returns :invalid-input anomaly"
+    (let [result (spec-parser/normalize-spec {:spec/title "No desc"})]
+      (is (anomaly/anomaly? result))
+      (is (= :invalid-input (:anomaly/type result)))
+      (is (str/includes? (:anomaly/message result) ":spec/description")))))
 
 (deftest validate-spec-with-malli-test
   (testing "valid normalized spec passes Malli validation"

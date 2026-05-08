@@ -1,0 +1,63 @@
+;; Title: Miniforge.ai
+;; Subtitle: An agentic SDLC / fleet-control platform
+;; Author: Christopher Lester
+;; Line: Founder, Miniforge.ai (project)
+;; Copyright 2025-2026 Christopher Lester (christopher@miniforge.ai)
+;;
+;; Licensed under the Apache License, Version 2.0 (the "License");
+;; you may not use this file except in compliance with the License.
+;; You may obtain a copy of the License at
+;;
+;;     http://www.apache.org/licenses/LICENSE-2.0
+;;
+;; Unless required by applicable law or agreed to in writing, software
+;; distributed under the License is distributed on an "AS IS" BASIS,
+;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+;; See the License for the specific language governing permissions and
+;; limitations under the License.
+;;
+;; Tool profiles for the eight Claude CLI native tools. Loaded by
+;; ai.miniforge.adapter-claude-code.tool-profiles at namespace load
+;; and contributed to the progress-detector default tool registry.
+;;
+;; :determinism choices, per the Stage 1 spec's tool capability
+;; registry:
+;;
+;;   :stable-with-resource-version - mechanical when the resource
+;;     hash matches across calls (Read of an unchanged file, or
+;;     Edit/Write that produces a hash-equal post-state — i.e. a
+;;     no-op patch — counts as a loop).
+;;   :stable-ish - mostly-deterministic, mechanical with bounded
+;;     false-positives (same Grep pattern, same Glob input).
+;;   :environment-dependent - mechanical only when the parsed
+;;     failure fingerprint matches across calls (Bash with the
+;;     same command failing the same way is a loop; Bash with
+;;     different exit codes or different parsed errors is not).
+;;   :unstable - heuristic only (network calls return different
+;;     payloads even for identical inputs).
+
+{:adapter-claude-code/tool-profiles
+ [{:tool/id            :tool/Read
+   :determinism        :stable-with-resource-version
+   :anomaly/categories #{:anomalies.agent/tool-loop}}
+  {:tool/id            :tool/Bash
+   :determinism        :environment-dependent
+   :anomaly/categories #{:anomalies.agent/tool-loop}}
+  {:tool/id            :tool/Grep
+   :determinism        :stable-ish
+   :anomaly/categories #{:anomalies.agent/tool-loop}}
+  {:tool/id            :tool/Glob
+   :determinism        :stable-ish
+   :anomaly/categories #{:anomalies.agent/tool-loop}}
+  {:tool/id            :tool/Edit
+   :determinism        :stable-with-resource-version
+   :anomaly/categories #{:anomalies.agent/tool-loop}}
+  {:tool/id            :tool/Write
+   :determinism        :stable-with-resource-version
+   :anomaly/categories #{:anomalies.agent/tool-loop}}
+  {:tool/id            :tool/WebSearch
+   :determinism        :unstable
+   :anomaly/categories #{:anomalies.agent/tool-loop}}
+  {:tool/id            :tool/WebFetch
+   :determinism        :unstable
+   :anomaly/categories #{:anomalies.agent/tool-loop}}]}

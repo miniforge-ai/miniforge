@@ -22,7 +22,9 @@
    Layer 1: Task store operations (CRUD)
    Layer 2: Orchestration (queries, decomposition, state transitions)"
   (:require
+   [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.fsm.interface :as fsm]
+   [ai.miniforge.response.interface :as response]
    [ai.miniforge.task.lifecycle-config :as lifecycle-config]
    [ai.miniforge.task.messages :as messages]
    [ai.miniforge.schema.interface :as schema]
@@ -127,14 +129,44 @@
   [from-state to-state]
   (contains? (get valid-transitions from-state #{}) to-state))
 
-(defn validate-transition
-  "Validate a state transition, throwing if invalid."
+(defn transition-result
+  "Anomaly-returning FSM transition check.
+
+   Returns `to-state` when the transition is allowed by the FSM, or an
+   `:invalid-input` anomaly when the transition is rejected. The
+   anomaly's `:anomaly/data` carries `:from`, `:to`, and
+   `:valid-targets` (the set of states reachable from `from-state`).
+
+   This is the canonical, anomaly-returning entry point. The boundary
+   site `validate-transition` inlines a `response/throw-anomaly!` when
+   an anomaly is observed, preserving the legacy thrown-exception
+   contract for in-component callers (`transition-task!`) and external
+   consumers that branch on the throw."
   [from-state to-state]
-  (let [transition-event (get transition-events [from-state to-state])]
-    (when-not transition-event
-      (throw (ex-info invalid-transition-message
-                      (invalid-transition-data from-state to-state)))))
-  to-state)
+  (if (contains? transition-events [from-state to-state])
+    to-state
+    (anomaly/anomaly :invalid-input
+                     invalid-transition-message
+                     (invalid-transition-data from-state to-state))))
+
+(defn validate-transition
+  "Validate a state transition.
+
+   Returns `to-state` on success. On FSM rejection, escalates the
+   anomaly returned by `transition-result` to a slingshot throw with
+   category `:anomalies/conflict` — task transition rejection is a
+   programmer-error / state-mismatch boundary condition, not a runtime
+   anomaly to be carried as data.
+
+   For an anomaly-returning equivalent that callers can branch on as
+   data, use `transition-result` directly."
+  [from-state to-state]
+  (let [result (transition-result from-state to-state)]
+    (if (anomaly/anomaly? result)
+      (response/throw-anomaly! :anomalies/conflict
+                               (:anomaly/message result)
+                               (:anomaly/data result))
+      result)))
 
 (defn make-task
   "Create a new task map with required fields.
@@ -198,38 +230,71 @@
   [task-id]
   (get @task-store task-id))
 
+(defn lookup-task
+  "Anomaly-returning task lookup.
+
+   Returns the task map when present, or a `:not-found` anomaly when
+   no task exists for `task-id`. The anomaly's `:anomaly/data` carries
+   `:task-id`.
+
+   This is the canonical, anomaly-returning entry point. The boundary
+   sites `update-task!`, `delete-task!`, `transition-task!`, and
+   `decompose-task!` inline a `response/throw-anomaly!` when an anomaly
+   is observed, preserving the legacy thrown-exception contract for
+   external consumers that branch on the throw."
+  ([task-id] (lookup-task task-id task-not-found-message))
+  ([task-id message]
+   (if-let [task (get-task task-id)]
+     task
+     (anomaly/anomaly :not-found message {:task-id task-id}))))
+
+(defn- lookup-task!
+  "Boundary helper. Calls `lookup-task`; on anomaly result raises a
+   slingshot `:anomalies/not-found` throw. Used by mutating CRUD and
+   transition functions where missing-task is a caller error rather
+   than a runtime anomaly to be carried as data."
+  ([task-id] (lookup-task! task-id task-not-found-message))
+  ([task-id message]
+   (let [result (lookup-task task-id message)]
+     (if (anomaly/anomaly? result)
+       (response/throw-anomaly! :anomalies/not-found
+                                (:anomaly/message result)
+                                (:anomaly/data result))
+       result))))
+
 (defn update-task!
   "Update a task with new data.
    Validates the resulting task against the schema.
-   Returns the updated task or throws if task not found."
+   Returns the updated task. Raises a slingshot `:anomalies/not-found`
+   throw when no task exists for `task-id` — see `lookup-task` for the
+   anomaly-returning equivalent."
   ([task-id changes] (update-task! task-id changes nil))
   ([task-id changes logger]
-   (if-let [existing (get-task task-id)]
-     (let [updated (merge existing changes)
-           validated (schema/validate schema/Task updated)]
-       (swap! task-store assoc task-id validated)
-       (when logger
-         (log/debug logger :agent :task/updated
-                    {:message (messages/t :task/updated)
-                     :data {:task-id task-id
-                            :changes (keys changes)}}))
-       validated)
-     (throw (ex-info task-not-found-message {:task-id task-id})))))
+   (let [existing (lookup-task! task-id)
+         updated (merge existing changes)
+         validated (schema/validate schema/Task updated)]
+     (swap! task-store assoc task-id validated)
+     (when logger
+       (log/debug logger :agent :task/updated
+                  {:message (messages/t :task/updated)
+                   :data {:task-id task-id
+                          :changes (keys changes)}}))
+     validated)))
 
 (defn delete-task!
   "Delete a task by ID.
-   Returns the deleted task or throws if not found."
+   Returns the deleted task. Raises a slingshot `:anomalies/not-found`
+   throw when no task exists for `task-id` — see `lookup-task` for the
+   anomaly-returning equivalent."
   ([task-id] (delete-task! task-id nil))
   ([task-id logger]
-   (if-let [task (get-task task-id)]
-     (do
-       (swap! task-store dissoc task-id)
-       (when logger
-         (log/info logger :agent :task/deleted
-                   {:message (messages/t :task/deleted)
-                    :data {:task-id task-id}}))
-       task)
-     (throw (ex-info task-not-found-message {:task-id task-id})))))
+   (let [task (lookup-task! task-id)]
+     (swap! task-store dissoc task-id)
+     (when logger
+       (log/info logger :agent :task/deleted
+                 {:message (messages/t :task/deleted)
+                  :data {:task-id task-id}}))
+     task)))
 
 ;------------------------------------------------------------------------------ Layer 2
 ;; Orchestration (state transitions, queries, decomposition)
@@ -237,11 +302,14 @@
 ;; State transitions
 
 (defn transition-task!
-  "Internal helper to perform a state transition with logging."
+  "Internal helper to perform a state transition with logging.
+
+   Raises a slingshot `:anomalies/not-found` throw when no task exists
+   for `task-id`, or `:anomalies/conflict` when the FSM rejects the
+   transition. See `lookup-task` and `transition-result` for the
+   anomaly-returning equivalents."
   [task-id to-state additional-changes logger event-key message]
-  (let [task (get-task task-id)]
-    (when-not task
-      (throw (ex-info task-not-found-message {:task-id task-id})))
+  (let [task (lookup-task! task-id)]
     (validate-transition (:task/status task) to-state)
     (let [changes (merge {:task/status to-state} additional-changes)
           updated (update-task! task-id changes)]
@@ -345,27 +413,27 @@
    4. Updates parent with child references (side effects)"
   ([parent-task-id sub-tasks] (decompose-task! parent-task-id sub-tasks nil))
   ([parent-task-id sub-tasks logger]
-   (let [parent (get-task parent-task-id)]
-     (when-not parent
-       (throw (ex-info parent-task-not-found-message
-                       {:task-id parent-task-id})))
-     ;; Compute child task specs with parent references (pure)
-     (let [child-specs (compute-child-tasks parent-task-id sub-tasks)
-           ;; Create all child tasks (side effects)
-           child-ids (mapv (fn [child-spec]
-                             (:task/id (create-task! child-spec logger)))
-                           child-specs)
-           ;; Update parent with child references (side effect)
-           updated-parent (update-task! parent-task-id
-                                        {:task/children child-ids}
-                                        logger)]
-       (when logger
-         (log/info logger :agent :task/decomposed
-                   {:message (messages/t :task/decomposed)
-                    :data {:parent-id parent-task-id
-                           :child-count (count child-ids)
-                           :child-ids child-ids}}))
-       updated-parent))))
+   ;; Validate parent exists before any side effects. Raises
+   ;; :anomalies/not-found when missing — see `lookup-task` for the
+   ;; anomaly-returning equivalent.
+   (lookup-task! parent-task-id parent-task-not-found-message)
+   ;; Compute child task specs with parent references (pure)
+   (let [child-specs (compute-child-tasks parent-task-id sub-tasks)
+         ;; Create all child tasks (side effects)
+         child-ids (mapv (fn [child-spec]
+                           (:task/id (create-task! child-spec logger)))
+                         child-specs)
+         ;; Update parent with child references (side effect)
+         updated-parent (update-task! parent-task-id
+                                      {:task/children child-ids}
+                                      logger)]
+     (when logger
+       (log/info logger :agent :task/decomposed
+                 {:message (messages/t :task/decomposed)
+                  :data {:parent-id parent-task-id
+                         :child-count (count child-ids)
+                         :child-ids child-ids}}))
+     updated-parent)))
 
 (defn get-children
   "Get all child tasks of the specified task."

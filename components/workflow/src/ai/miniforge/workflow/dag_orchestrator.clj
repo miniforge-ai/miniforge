@@ -883,6 +883,30 @@
                               extras))
       (ref-write-failed-anomaly task-id ref-name commit-sha upd))))
 
+(defn- derive-resolution-overrides
+  "Build the resolution-overrides map handed to `resolve-conflict!`.
+   Combines:
+   - explicit overrides on `context` under `:dag/resolution-overrides`
+     (tests inject mocks here);
+   - an auto-default `agent-edit-fn` built from `agent-driven-edit-fn`
+     when `:llm-backend` is on context and the explicit overrides
+     don't already specify one.
+
+   Explicit overrides win — production paths get the real LLM agent,
+   tests stay free to inject deterministic mocks. With neither
+   override nor backend present, the resolution loop falls back to
+   the namespace-default no-op stub (preserves Stage 2B behaviour for
+   non-LLM contexts)."
+  [context]
+  (let [explicit (get context :dag/resolution-overrides)
+        llm-backend (:llm-backend context)
+        auto (when (and llm-backend (not (:agent-edit-fn explicit)))
+               {:agent-edit-fn
+                (merge-resolution/agent-driven-edit-fn
+                 (cond-> {:llm-backend llm-backend}
+                   (:logger context) (assoc :logger (:logger context))))})]
+    (merge auto explicit)))
+
 (defn- attempt-resolution!
   "Spec §6.1 conflict path. The merge produced a conflict; spawn the
    resolution sub-workflow to try to resolve it. On success we land a
@@ -1030,14 +1054,16 @@
           (attempt-merge-with-cache! host-repo run-id task-id strategy
                                      (:effective-parents prep)
                                      (:collapsed prep)
-                                     ;; Optional context override — tests
-                                     ;; inject mock agent-edit-fn / verify-fn
-                                     ;; here. Production paths leave this nil
-                                     ;; and the resolution loop uses its
-                                     ;; defaults (no-op stub agent until
-                                     ;; Stage 2C wires the real LLM agent).
+                                     ;; Resolution overrides combine the
+                                     ;; auto-default agent-edit-fn (built
+                                     ;; from `:llm-backend` when present)
+                                     ;; with any explicit overrides on
+                                     ;; context. Tests inject mocks via
+                                     ;; `:dag/resolution-overrides`;
+                                     ;; production paths get the real LLM
+                                     ;; agent through the auto-default.
                                      {:resolution-overrides
-                                      (get context :dag/resolution-overrides)}))))))
+                                      (derive-resolution-overrides context)}))))))
 
 (defn task-sub-opts
   "Build execution opts for a DAG task's sub-workflow.

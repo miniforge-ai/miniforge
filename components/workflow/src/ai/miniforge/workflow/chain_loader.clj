@@ -24,6 +24,7 @@
    [clojure.java.io :as io]
    [clojure.edn :as edn]
    [clojure.string :as str]
+   [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.response.interface :as response])
   (:import
    [java.util.jar JarFile]))
@@ -104,14 +105,22 @@
 ;------------------------------------------------------------------------------ Layer 2
 ;; Public API
 
-(defn load-chain
-  "Load a chain definition from classpath resources.
+(defn try-load-chain
+  "Anomaly-returning chain loader.
 
    Arguments:
    - chain-id: Chain identifier (keyword, e.g. :reporting-chain)
    - version: Version string (e.g. \"1.0.0\" or \"latest\")
 
-   Returns chain definition map or throws if not found."
+   Returns:
+   - on success: `{:chain chain-def :source :resource :path resource-path}`
+   - on miss:    a `:not-found` anomaly carrying `:chain-id`, `:version`,
+                 `:looked-for` (vector of paths attempted)
+
+   This is the canonical, anomaly-returning entry point. The boundary
+   site `load-chain` inlines a `response/throw-anomaly!` when an
+   anomaly is observed, preserving the legacy thrown-exception
+   contract for external callers that depend on it."
   [chain-id version]
   (let [versioned-path (str "chains/" (name chain-id) "-v" version ".edn")
         base-path (str "chains/" (name chain-id) ".edn")
@@ -123,10 +132,33 @@
         chain-def (when resource-path (load-chain-resource resource-path))]
     (if chain-def
       {:chain chain-def :source :resource :path resource-path}
+      (anomaly/anomaly :not-found
+                       (str "Chain '" (name chain-id) "' not found. "
+                            "Looked for: " versioned-path ", " base-path)
+                       {:chain-id chain-id
+                        :version version
+                        :looked-for [versioned-path base-path]}))))
+
+(defn load-chain
+  "Load a chain definition from classpath resources.
+
+   Arguments:
+   - chain-id: Chain identifier (keyword, e.g. :reporting-chain)
+   - version: Version string (e.g. \"1.0.0\" or \"latest\")
+
+   Returns the chain definition result map on success.
+   Throws via `response/throw-anomaly!` with category
+   `:anomalies/not-found` when no matching chain resource exists.
+
+   For an anomaly-returning equivalent that callers can branch on as
+   data, use `try-load-chain` directly."
+  [chain-id version]
+  (let [result (try-load-chain chain-id version)]
+    (if (anomaly/anomaly? result)
       (response/throw-anomaly! :anomalies/not-found
-                              (str "Chain '" (name chain-id) "' not found. "
-                                   "Looked for: " versioned-path ", " base-path)
-                              {:chain-id chain-id :version version}))))
+                               (:anomaly/message result)
+                               (:anomaly/data result))
+      result)))
 
 (defn list-chains
   "List all available chain definitions from classpath."

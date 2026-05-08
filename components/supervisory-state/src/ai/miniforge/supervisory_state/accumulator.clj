@@ -143,6 +143,31 @@
     :unreachable :unreachable
     :executing))
 
+(defn- extract-spec-identity
+  "Pull a canonical run-owned spec identity from a workflow event. Returns
+   nil when the event carries no identity-bearing fields, so callers can
+   omit `:workflow-run/spec` rather than emit an empty map.
+
+   Lifts the same identity the agent supervisory-bridge already carries
+   under `:workflow-spec` agent metadata (see N5-delta-1 §3.1 +
+   miniforge-control burndown BD-1) onto the run entity directly. Accepts
+   both parsed `:spec/*` keys and the bare `:title` / `:description`
+   shape some emitters use when building a spec from raw input."
+  [event]
+  (let [spec        (:workflow/spec event)
+        ;; Trim + not-empty so blank strings ("", "   ") are dropped rather
+        ;; than emitted as `{:spec/title ""}` — that shape would violate the
+        ;; `[:string {:min 1}]` schema constraint and is not useful identity.
+        clean       (fn [v] (when (string? v) (not-empty (str/trim v))))
+        title       (or (clean (:spec/title spec))       (clean (:title spec)))
+        description (or (clean (:spec/description spec)) (clean (:description spec)))
+        intent      (:spec/intent spec)
+        m (cond-> {}
+            title       (assoc :spec/title title)
+            description (assoc :spec/description description)
+            intent      (assoc :spec/intent intent))]
+    (when (seq m) m)))
+
 ;------------------------------------------------------------------------------ Layer 1
 ;; WorkflowRun handlers
 
@@ -157,20 +182,27 @@
         wf-key   (or (:workflow/key spec)
                      (some-> spec :workflow/spec name)
                      (workflow-key-fallback id))
-        run      (merge {:workflow-run/id              id
-                         :workflow-run/workflow-key    wf-key
-                         :workflow-run/intent          intent
-                         :workflow-run/status          :running
-                         :workflow-run/current-phase   :unknown
-                         :workflow-run/started-at      ts
-                         :workflow-run/updated-at      ts
-                         :workflow-run/trigger-source  :cli
-                         :workflow-run/correlation-id  id}
-                        ;; Preserve fields from a prior phase-* event that
-                        ;; arrived before workflow/started.
-                        (select-keys existing
-                                     [:workflow-run/current-phase
-                                      :workflow-run/workflow-key]))]
+        spec-identity (extract-spec-identity event)
+        run      (cond-> (merge {:workflow-run/id              id
+                                 :workflow-run/workflow-key    wf-key
+                                 :workflow-run/intent          intent
+                                 :workflow-run/status          :running
+                                 :workflow-run/current-phase   :unknown
+                                 :workflow-run/started-at      ts
+                                 :workflow-run/updated-at      ts
+                                 :workflow-run/trigger-source  :cli
+                                 :workflow-run/correlation-id  id}
+                                ;; Preserve fields from a prior phase-* event that
+                                ;; arrived before workflow/started. `:workflow-run/spec`
+                                ;; is preserved here too so a placeholder set by an
+                                ;; earlier spec-bearing event survives if this event
+                                ;; has none; an event-derived identity overrides it
+                                ;; below.
+                                (select-keys existing
+                                             [:workflow-run/current-phase
+                                              :workflow-run/workflow-key
+                                              :workflow-run/spec]))
+                   spec-identity (assoc :workflow-run/spec spec-identity))]
     (assoc-in table [:workflows id] run)))
 
 (defn- ensure-workflow

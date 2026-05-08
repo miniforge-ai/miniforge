@@ -8,6 +8,7 @@
         ai.miniforge/diagnosis {:local/root "../diagnosis"}
         ai.miniforge/improvement {:local/root "../improvement"}
         ai.miniforge/llm {:local/root "../llm"}
+        ai.miniforge/progress-detector {:local/root "../progress-detector"}
         slingshot/slingshot {:mvn/version "0.12.2"}}
  :aliases
  {:test {:extra-paths ["test"]

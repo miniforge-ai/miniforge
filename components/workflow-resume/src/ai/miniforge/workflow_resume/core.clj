@@ -38,7 +38,8 @@
    [ai.miniforge.event-stream.interface :as es]
    [ai.miniforge.response.interface :as response]
    [ai.miniforge.workflow.interface :as workflow]
-   [ai.miniforge.workflow-resume.schema :as schema]))
+   [ai.miniforge.workflow-resume.schema :as schema]
+   [clojure.string :as str]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Pure extractors over an event sequence
@@ -263,6 +264,13 @@
 ;------------------------------------------------------------------------------ Layer 1
 ;; Identity resolution
 
+(defn- synthetic-dag-task-workflow-id?
+  "True when the recorded workflow id is an internal DAG task workflow key,
+   not a loadable top-level workflow type from the registry."
+  [workflow-id]
+  (and (keyword? workflow-id)
+       (str/starts-with? (name workflow-id) "dag-task-")))
+
 (defn resolve-workflow-identity
   "Resolve `{:workflow-type :workflow-version}` for a resume run.
 
@@ -279,11 +287,14 @@
                     {:message "Invalid resolve-workflow-identity input"})
   (let [workflow-spec (:workflow-spec reconstructed)
         machine-snapshot (:machine-snapshot reconstructed)
-        workflow-type (or (:execution/workflow-id machine-snapshot)
-                          (some-> workflow-spec :name keyword)
+        workflow-id-from-snapshot (:execution/workflow-id machine-snapshot)
+        workflow-type (or (some-> workflow-spec :name keyword)
+                          (when-not (synthetic-dag-task-workflow-id? workflow-id-from-snapshot)
+                            workflow-id-from-snapshot)
                           (fallback-fn))
-        workflow-version (or (:execution/workflow-version machine-snapshot)
-                             (get workflow-spec :version "latest"))]
+        workflow-version (or (get workflow-spec :version)
+                             (:execution/workflow-version machine-snapshot)
+                             "latest")]
     (when-not workflow-type
       (response/throw-anomaly! :anomalies/not-found
                               "Could not resolve a workflow type for resume"

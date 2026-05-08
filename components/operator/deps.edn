@@ -3,6 +3,7 @@
         ai.miniforge/schema {:local/root "../schema"}
         ai.miniforge/logging {:local/root "../logging"}
         ai.miniforge/knowledge {:local/root "../knowledge"}
-        ai.miniforge/workflow {:local/root "../workflow"}}
+        ai.miniforge/workflow {:local/root "../workflow"}
+        ai.miniforge/anomaly {:local/root "../anomaly"}}
  :aliases {:test {:extra-paths ["test"]
                   :extra-deps {}}}}

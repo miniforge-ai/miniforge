@@ -25,6 +25,7 @@
    [ai.miniforge.agent.file-artifacts :as file-artifacts]
    [ai.miniforge.agent.model :as model]
    [ai.miniforge.agent.prompts :as prompts]
+   [ai.miniforge.agent.result-boundary :as result-boundary]
    [ai.miniforge.agent.role-config :as role-config]
    [ai.miniforge.agent.specialized :as specialized]
    [ai.miniforge.patterns.interface :as patterns]
@@ -422,6 +423,12 @@
                                  :tokens tokens
                                  :cost-usd cost-usd}})))
 
+(defn- code-artifact?
+  "True when the structured artifact is a code artifact payload."
+  [artifact]
+  (and (map? artifact)
+       (contains? artifact :code/files)))
+
 (defn- code-from-blocks
   "Build a code artifact map from extracted markdown code blocks."
   [content]
@@ -433,19 +440,21 @@
      :code/created-at (java.util.Date.)}))
 
 (defn- process-llm-response
-  "Process a successful LLM response, returning the appropriate result."
-  [response artifact artifact-source context logger tokens cost-usd input]
-  (let [content (llm/get-content response)
-        parsed (or artifact (parse-code-response content))]
-    (let [tools (get response :tools-called [])]
+  "Normalize structured implementer outputs from any submission channel:
+   worktree metadata, MCP artifact, file fallback, or parseable stdout."
+  [{:keys [content structured-artifact parsed-content derived-artifact
+           artifact-source tokens cost-usd tools-called]}
+   context logger input]
+  (let [parsed (or structured-artifact parsed-content)]
+    (let [tools tools-called]
       (when (nil? artifact-source)
         (log/warn logger :implementer :implementer/mcp-tool-not-called
                   {:data {:content-length (count (or content ""))
                           :tools-called tools
                           :has-code-blocks? (boolean (re-find #"```" (or content "")))}})))
     (cond
-      artifact
-      (build-code-response artifact context tokens cost-usd)
+      (code-artifact? structured-artifact)
+      (build-code-response structured-artifact context tokens cost-usd)
 
       (= :already-implemented (:status parsed))
       (if (repair-attempt? input)
@@ -453,7 +462,7 @@
         (build-already-implemented-response parsed tokens cost-usd))
 
       :else
-      (if-let [code (or parsed (code-from-blocks content))]
+      (if-let [code (or parsed derived-artifact)]
         (build-code-response code context tokens cost-usd)
         (response/error (messages/t :error/parse-failed) {:tokens tokens})))))
 
@@ -512,7 +521,8 @@
    existing-files input]
   (let [working-dir (or (:execution/worktree-path context)
                         (System/getProperty "user.dir"))
-        {:keys [llm-result artifact context-misses pre-session-snapshot session-mode]}
+        {:keys [llm-result artifact worktree-artifacts context-misses
+                pre-session-snapshot session-mode]}
         (artifact-session/with-session context
           #(invoke-implementer-session % llm-client user-prompt effective-system-prompt
                                        config context on-chunk existing-files working-dir))
@@ -527,13 +537,14 @@
                            working-dir)
                           (file-artifacts/collect-written-files pre-session-snapshot
                                                                 working-dir)))
-        artifact-source (cond
-                          artifact :mcp
-                          file-artifact :file-fallback
-                          :else nil)
-        effective-artifact (or artifact file-artifact)
-        tokens (get response :tokens 0)
-        cost-usd (get response :cost-usd)]
+        normalized (result-boundary/normalize-llm-result
+                    {:role :implement
+                     :response response
+                     :worktree-artifacts worktree-artifacts
+                     :artifact artifact
+                     :fallback-artifact file-artifact
+                     :parse-response parse-code-response
+                     :derive-artifact code-from-blocks})]
     (when (seq context-misses)
       (log/info logger :implementer :implementer/context-cache-misses
                 {:data {:miss-count (count context-misses)
@@ -544,10 +555,10 @@
                         :tools-called (get response :tools-called [])}}))
     (log/info logger :implementer :implementer/llm-called
               {:data (cond-> {:success (llm/success? response)
-                              :tokens tokens
+                              :tokens (:tokens normalized)
                               :streaming? (boolean on-chunk)
-                              :artifact-source (or artifact-source :none)
-                              :tools-called (get response :tools-called [])}
+                              :artifact-source (or (:artifact-source normalized) :none)
+                              :tools-called (:tools-called normalized)}
                        (:stop-reason response)
                        (assoc :stop-reason (:stop-reason response))
                        (:num-turns response)
@@ -560,24 +571,16 @@
     ;; successful stream of edits; the old path discarded a real
     ;; artifact because the LLM response was classified as failure.
     ;; Mirrors the planner fix in `(or worktree-plan (llm/success? …))`.
-    (if (or effective-artifact (llm/success? response))
-      (process-llm-response response effective-artifact artifact-source
-                            context logger tokens cost-usd input)
+    (if (result-boundary/usable-content? normalized)
+      (process-llm-response normalized context logger input)
       ;; LLM call failed, no artifact — preserve the full llm-error
       ;; shape into :data so the phase-completed event carries
       ;; :type (e.g. "cli_error" / "adaptive_timeout"), :stderr /
       ;; :stdout / :timeout / :exit-code for post-mortem. Iters
       ;; 11-12 of planner-convergence lost this context and produced
       ;; undiagnosable "Unknown error" phase errors; same trap here.
-      (let [llm-err (llm/get-error response)
-            error-msg (or (:message llm-err)
-                          (messages/t :error/llm-failed))
-            stop-reason (:stop-reason response)
-            num-turns   (:num-turns response)]
-        (response/error error-msg
-                        {:data (cond-> (or llm-err {})
-                                 stop-reason (assoc :stop-reason stop-reason)
-                                 num-turns   (assoc :num-turns num-turns))})))))
+      (result-boundary/error-response normalized
+                                      (messages/t :error/llm-failed)))))
 
 ;------------------------------------------------------------------------------ Layer 2
 ;; Public API

@@ -87,6 +87,7 @@
         ai.miniforge/dag-primitives {:local/root "../../components/dag-primitives"}
         ;; Decision component (control plane decisions)
         ai.miniforge/decision {:local/root "../../components/decision"}
+        ai.miniforge/progress-detector {:local/root "../../components/progress-detector"}
         ;; Semantic analysis for code understanding
         ai.miniforge/semantic-analyzer {:local/root "../../components/semantic-analyzer"}
         ;; Context packing for agent prompts

@@ -31,3 +31,8 @@
 (def unsubscribe! core/unsubscribe!)
 (def get-events core/get-events)
 (def get-latest-status core/get-latest-status)
+
+;; BD-2a: shutdown ordering primitives. See `core/quiesce!` and
+;; `core/drain!` for the contract.
+(def quiesce! core/quiesce!)
+(def drain! core/drain!)

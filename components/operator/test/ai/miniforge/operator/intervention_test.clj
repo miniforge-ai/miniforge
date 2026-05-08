@@ -89,9 +89,9 @@
       (is (= (messages/t :intervention/terminal-state {:state :rejected})
              (:message result)))))
 
-  (testing "given an unknown intervention type → creation throws"
+  (testing "given an unknown intervention type → boundary variant throws"
     (is (thrown-with-msg? clojure.lang.ExceptionInfo
                           (re-pattern (java.util.regex.Pattern/quote
                                        (messages/t :intervention/unknown-type)))
-                          (op/create-intervention
+                          (op/create-intervention!
                            (intervention-request :unknown-action (random-uuid)))))))

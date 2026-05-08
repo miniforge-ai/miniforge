@@ -3,7 +3,8 @@
         ai.miniforge/logging {:local/root "../logging"}
         ai.miniforge/response {:local/root "../response"}
         ai.miniforge/control-plane {:local/root "../control-plane"}
-        ai.miniforge/control-plane-adapter {:local/root "../control-plane-adapter"}}
+        ai.miniforge/control-plane-adapter {:local/root "../control-plane-adapter"}
+        ai.miniforge/progress-detector {:local/root "../progress-detector"}}
  :aliases {:test {:extra-paths ["test"]
                   :extra-deps {io.github.cognitect-labs/test-runner
                                {:git/tag "v0.5.1" :git/sha "dfb30dd"}}}}}

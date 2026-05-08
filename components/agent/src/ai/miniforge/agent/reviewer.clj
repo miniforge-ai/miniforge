@@ -23,6 +23,7 @@
   (:require
    [ai.miniforge.agent.model :as model]
    [ai.miniforge.agent.prompts :as prompts]
+   [ai.miniforge.agent.result-boundary :as result-boundary]
    [ai.miniforge.agent.role-config :as role-config]
    [ai.miniforge.agent.specialized :as specialized]
    [ai.miniforge.schema.interface :as schema]
@@ -374,6 +375,38 @@
       (string? (:message llm-error)) (:message llm-error)
       :else "Reviewer LLM invocation failed before producing a review artifact")))
 
+(defn- backend-failure-message
+  "Derive the backend failure message when the reviewer LLM response parsed,
+   but the underlying invocation still failed."
+  [response llm-review]
+  (if-let [message (:message (llm/get-error response))]
+    message
+    (or (first (:review/blocking-issues llm-review))
+        "Reviewer LLM invocation failed after producing a review artifact")))
+
+(defn- backend-timeout-issue?
+  [message]
+  (boolean
+   (and (string? message)
+        (re-find #"(?i)(adaptive timeout|stagnation timeout|timed out|stream-idle|timeout)"
+                 message))))
+
+(defn- timeout-only-review?
+  "True when a parsed review artifact is just reflecting the reviewer backend's
+   own timeout rather than providing actionable code-review findings."
+  [llm-review gate-result]
+  (let [blocking-issues (vec (:review/blocking-issues llm-review))
+        recommendations (vec (:review/recommendations llm-review))
+        issues (vec (:review/issues llm-review))
+        negative-decision? (contains? #{:rejected :changes-requested}
+                                      (:review/decision llm-review))]
+    (and negative-decision?
+         (= :approved (:decision gate-result))
+         (seq blocking-issues)
+         (empty? recommendations)
+         (empty? issues)
+         (every? backend-timeout-issue? blocking-issues))))
+
 (defn llm-issues->recommendations
   "Extract suggestions from LLM issues as recommendations."
   [issues]
@@ -538,6 +571,41 @@
   [logger data]
   (log/info logger :reviewer :reviewer/phase-completed {:data data}))
 
+(defn- timeout-only-error-result
+  "Normalize the reviewer exit path when the LLM only reports its own timeout.
+
+   This preserves backend timeout metadata, emits the standard phase-completed
+   telemetry, and reports the deterministic gate outcome instead of converting
+   the backend failure into a bogus code-review rejection."
+  [logger normalized llm-review gate-result counts duration tokens cost-usd timeout-failure-message]
+  (log/warn logger :reviewer :reviewer/backend-timeout-only
+            {:data {:llm-decision (:review/decision llm-review)
+                    :gate-decision (:decision gate-result)
+                    :blocking-issues (:review/blocking-issues llm-review)
+                    :duration-ms duration}})
+  (leave-review logger {:review/decision (:decision gate-result)
+                        :duration-ms duration
+                        :gates-passed (:passed counts)
+                        :gates-failed (:failed counts)
+                        :llm? true
+                        :status :error
+                        :error-code :reviewer/backend-timeout})
+  (assoc
+   (result-boundary/error-response
+    normalized
+    timeout-failure-message
+    {:data (merge (or (some-> normalized :llm-error :data) {})
+                  {:code :reviewer/backend-timeout
+                   :blocking-issues (:review/blocking-issues llm-review)})})
+   :metrics
+   (cond-> {:decision (:decision gate-result)
+            :gates-passed (:passed counts)
+            :gates-failed (:failed counts)
+            :gates-total (:total counts)
+            :duration-ms duration
+            :tokens tokens}
+     cost-usd (assoc :cost-usd cost-usd))))
+
 ;------------------------------------------------------------------------------ Layer 5
 ;; Agent creation
 
@@ -612,9 +680,12 @@
                              (llm/chat-stream llm-client user-prompt on-chunk
                                               base-opts)
                              (llm/chat llm-client user-prompt base-opts))
-                  content (or (llm/get-content response) "")
-                  tokens (get response :tokens 0)
-                  cost-usd (get response :cost-usd)]
+                  normalized (result-boundary/normalize-llm-result
+                              {:response response
+                               :parse-response parse-review-response})
+                  content (:content normalized)
+                  tokens (:tokens normalized)
+                  cost-usd (:cost-usd normalized)]
 
               (log/info logger :reviewer :reviewer/llm-called
                         {:data {:success (llm/success? response)
@@ -622,21 +693,22 @@
                                 :streaming? (boolean on-chunk)}})
 
               (let [;; Parse LLM review
-                    llm-review (when-not (str/blank? content)
-                                 (parse-review-response content))
-                    failure-message (review-failure-message response content)
+                    llm-review (:parsed-content normalized)
+                    parse-failure-message (review-failure-message response content)
                     parse-failed? (nil? llm-review)
+                    ;; Run deterministic gates
+                    gate-feedbacks (run-gates-on-artifact gates artifact context logger)
+                    gate-result (make-review-decision gate-feedbacks config)
+                    counts (calculate-gate-counts gate-feedbacks)
+                    timeout-failure-message (backend-failure-message response llm-review)
+                    timeout-only-review? (timeout-only-review? llm-review gate-result)
                     llm-decision (cond
+                                   timeout-only-review? nil
                                    parse-failed? :rejected
                                    llm-review (normalize-llm-decision (:review/decision llm-review)))
                     llm-issues (get llm-review :review/issues [])
                     llm-strengths (get llm-review :review/strengths [])
                     llm-summary (:review/summary llm-review)
-
-                    ;; Run deterministic gates
-                    gate-feedbacks (run-gates-on-artifact gates artifact context logger)
-                    gate-result (make-review-decision gate-feedbacks config)
-                    counts (calculate-gate-counts gate-feedbacks)
 
                     ;; Merge decisions: gates can override LLM
                     final-decision (if llm-decision
@@ -647,7 +719,9 @@
                     all-blocking (cond-> (into (vec (:blocking-issues gate-result))
                                                (llm-issues->blocking-strings llm-issues))
                                    parse-failed?
-                                   (conj failure-message))
+                                   (conj parse-failure-message)
+                                   timeout-only-review?
+                                   (conj timeout-failure-message))
                     all-warnings (into (vec (:warnings gate-result))
                                        (llm-issues->warning-strings llm-issues))
 
@@ -669,23 +743,29 @@
 
                     duration (- (System/currentTimeMillis) start-time)]
 
-                (log/info logger :reviewer :reviewer/review-complete
-                          {:data {:decision final-decision
-                                  :llm-decision llm-decision
-                                  :llm-parse-failed? parse-failed?
-                                  :gates-passed (:passed counts)
-                                  :gates-failed (:failed counts)
-                                  :llm-issues (count llm-issues)
-                                  :duration-ms duration}})
-
-                ;; Phase lifecycle: mark review exit with decision
-                (leave-review logger {:review/decision final-decision
-                                      :duration-ms duration
+                (if timeout-only-review?
+                  (timeout-only-error-result
+                   logger normalized llm-review gate-result counts duration tokens cost-usd
+                   timeout-failure-message)
+                  (do
+                    (log/info logger :reviewer :reviewer/review-complete
+                              {:data {:decision final-decision
+                                      :llm-decision llm-decision
+                                      :llm-parse-failed? parse-failed?
+                                      :timeout-only-review? timeout-only-review?
                                       :gates-passed (:passed counts)
                                       :gates-failed (:failed counts)
-                                      :llm? true})
+                                      :llm-issues (count llm-issues)
+                                      :duration-ms duration}})
 
-                (build-review-result review counts duration tokens :cost-usd cost-usd)))
+                    ;; Phase lifecycle: mark review exit with decision
+                    (leave-review logger {:review/decision final-decision
+                                          :duration-ms duration
+                                          :gates-passed (:passed counts)
+                                          :gates-failed (:failed counts)
+                                          :llm? true})
+
+                    (build-review-result review counts duration tokens :cost-usd cost-usd)))))
 
             ;; No LLM — gate-only fallback
             (let [gate-feedbacks (run-gates-on-artifact gates artifact context logger)
@@ -770,95 +850,6 @@
   "Extract strengths noted by the LLM from review artifact."
   [artifact]
   (:review/strengths artifact []))
-
-;------------------------------------------------------------------------------ Layer 6
-;; Repair-loop progress detection
-;;
-;; A pure fingerprint of a review's actionable issues, used by the
-;; phase runner to detect "useless loops" — the agent has burned
-;; another implement+verify+review cycle but the reviewer's blocking
-;; complaints didn't budge. Cheaper signal than budget caps and
-;; localizes the burn rather than masking it.
-
-(def ^:private actionable-severities
-  "Severities that count as 'something the implementer should fix.'
-   Nits are excluded — a stable nit list is not stagnation, it's the
-   normal long tail of style polish."
-  #{:blocking :warning})
-
-(defn- normalize-text
-  "Trim and collapse internal whitespace. Used so trivial reformatting
-   of an issue's description (added space, line wrap) doesn't read as
-   progress between repair iterations."
-  [s]
-  (-> (or s "")
-      str/trim
-      (str/replace #"\s+" " ")))
-
-(defn- issue-fingerprint
-  "Stable per-issue tuple [severity file line description].
-   Stores the whitespace-normalized description in full — earlier
-   versions used `hash` to keep the tuple compact, but Clojure's
-   `hash` (and the underlying String hashCode) is not collision-free
-   and a hash collision would surface as a false-positive stagnation."
-  [{:keys [severity file line description]}]
-  [severity
-   (or file "")
-   (or line 0)
-   (normalize-text description)])
-
-(defn- failed-gate-fingerprint
-  "Convert a failed gate-feedback entry into a virtual issue tuple so
-   stagnation also catches gate-only-mode loops. In gate-only mode
-   the reviewer populates :review/gate-results without :review/issues,
-   so a fingerprint that only consulted :review/issues would be empty
-   and the stagnation guard would never fire."
-  [{:keys [gate-id errors]}]
-  [:blocking
-   (str ":gate/" (name (or gate-id :unknown)))
-   0
-   (normalize-text (str/join " | " (map :message errors)))])
-
-(defn review-fingerprint
-  "Reduce a review artifact to a stable, comparable fingerprint of its
-   actionable items. Returns a sorted vector of `[severity file line
-   description]` tuples — order-independent because the inputs are
-   sorted before comparison.
-
-   Two sources contribute:
-   - LLM-surfaced :review/issues at severity :blocking or :warning
-     (:nit is intentionally excluded — long-tail polish, not
-     progress signal).
-   - Failed entries in :review/gate-results — covers gate-only mode
-     where :review/issues is empty but the review is still blocked.
-
-   A review with neither actionable LLM issues nor failed gates
-   returns the empty vector."
-  [review]
-  (let [llm-issues   (->> (get review :review/issues [])
-                          (filter (comp actionable-severities :severity))
-                          (map issue-fingerprint))
-        failed-gates (->> (get review :review/gate-results [])
-                          (remove :passed?)
-                          (map failed-gate-fingerprint))]
-    (->> (concat llm-issues failed-gates)
-         sort
-         vec)))
-
-(defn stagnated?
-  "True when a review's fingerprint matches the prior review's
-   fingerprint exactly. v1 uses strict equality — if the implementer
-   produced any actionable change between iterations the fingerprint
-   should differ at minimum on file or description-hash. Loosening to
-   set-overlap with a threshold belongs in a follow-up once we have
-   data on real-world false-positive rates.
-
-   `prior` may be nil (first iteration); returns false in that case so
-   the first review never short-circuits."
-  [prior current]
-  (and (some? prior)
-       (seq current)
-       (= prior current)))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

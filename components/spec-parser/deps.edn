@@ -1,5 +1,7 @@
 {:paths ["src" "resources"]
- :deps {metosin/malli {:mvn/version "0.16.4"}
+ :deps {ai.miniforge/anomaly {:local/root "../anomaly"}    ; Canonical anomaly maps for exceptions-as-data
+        ai.miniforge/knowledge {:local/root "../knowledge"} ; YAML frontmatter parsing
+        metosin/malli {:mvn/version "0.16.4"}
         babashka/fs   {:mvn/version "0.5.22"}
         cheshire/cheshire {:mvn/version "5.13.0"}}
  :aliases {:test {:extra-paths ["test"]

@@ -58,11 +58,13 @@
    **Config layers** compose via overlay resolution:
      :inherit / :disable / :enable / :tune"
   (:require
-   [ai.miniforge.anomaly.interface             :as anomaly]
-   [ai.miniforge.progress-detector.protocol    :as proto]
-   [ai.miniforge.progress-detector.schema      :as schema]
-   [ai.miniforge.progress-detector.tool-profile :as tp]
-   [ai.miniforge.progress-detector.config      :as cfg]))
+   [ai.miniforge.anomaly.interface                    :as anomaly]
+   [ai.miniforge.progress-detector.detectors.repair-loop :as repair-loop]
+   [ai.miniforge.progress-detector.event-envelope     :as envelope]
+   [ai.miniforge.progress-detector.protocol           :as proto]
+   [ai.miniforge.progress-detector.schema             :as schema]
+   [ai.miniforge.progress-detector.tool-profile       :as tp]
+   [ai.miniforge.progress-detector.config             :as cfg]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Detector protocol (re-exported)
@@ -122,6 +124,28 @@
 (def DetectorConfig      schema/DetectorConfig)
 (def ToolProfile         schema/ToolProfile)
 (def DetectorAnomalyData schema/DetectorAnomalyData)
+
+;------------------------------------------------------------------------------ Layer 1
+;; Event-envelope normalizer
+
+(def make-normalizer
+  "Return a per-agent-run event normalizer fn whose :seq counter
+   starts at 0. Each call to make-normalizer produces an isolated
+   counter so concurrent runs don't interleave seq numbers.
+
+   Returned arities:
+     (normalize event)
+     (normalize event tool-profile)
+
+   Strings, structured values, and numbers in :tool/input /
+   :tool/output are replaced with a non-reversible 'hash:<hex>:len<n>'
+   token — raw content never reaches detector evidence. nil is
+   preserved (absence is meaningful).
+
+   :resource/version-hash is attached only when tool-profile declares
+   :determinism :stable-with-resource-version AND the event carries
+   the field."
+  envelope/make-normalizer)
 
 (def valid-observation?            schema/valid-observation?)
 (def explain-observation           schema/explain-observation)
@@ -290,6 +314,14 @@
   [state]
   (anomalies-by-severity state :fatal))
 
+(def review-fingerprint
+  "Stable fingerprint of the actionable content of a review artifact."
+  repair-loop/review-fingerprint)
+
+(def stagnated?
+  "True when the current review fingerprint has made no actionable progress."
+  repair-loop/stagnated?)
+
 ;------------------------------------------------------------------------------ Rich Comment
 
 (comment
@@ -298,7 +330,6 @@
         cfg  (resolve-config [{:config/params {:window-size 5}}
                               {:config/directive :tune
                                :config/params {:window-size 10}}])
-        st0  (init det (effective-config-params cfg))
         obs1 (make-observation :tool/Read 1 (java.time.Instant/now)
                                {:tool/duration-ms 120})
         stf  (reduce-observations det (effective-config-params cfg) [obs1])]

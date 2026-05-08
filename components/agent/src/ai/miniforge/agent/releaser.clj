@@ -25,6 +25,7 @@
    [ai.miniforge.agent.budget :as budget]
    [ai.miniforge.agent.model :as model]
    [ai.miniforge.agent.prompts :as prompts]
+   [ai.miniforge.agent.result-boundary :as result-boundary]
    [ai.miniforge.agent.role-config :as role-config]
    [ai.miniforge.agent.specialized :as specialized]
    [ai.miniforge.schema.interface :as schema]
@@ -241,30 +242,31 @@
               user-prompt (input->text input context)]
           (if llm-client
             ;; Use the real LLM with artifact session for MCP tool support
-            (let [{:keys [llm-result artifact]}
+            (let [{:keys [llm-result artifact worktree-artifacts]}
                   (artifact-session/with-session context
                     #(invoke-releaser-session % llm-client user-prompt config context on-chunk))
                   llm-response llm-result
-                  tokens (get llm-response :tokens 0)]
+                  normalized (result-boundary/normalize-llm-result
+                              {:role :release
+                               :response llm-response
+                               :worktree-artifacts worktree-artifacts
+                               :artifact artifact
+                               :parse-response parse-release-response})]
               (log/info logger :releaser :releaser/llm-called
                         {:data {:success (llm/success? llm-response)
-                                :tokens tokens
+                                :tokens (:tokens normalized)
                                 :streaming? (boolean on-chunk)}})
-              (if (llm/success? llm-response)
-                (let [content (llm/get-content llm-response)
-                      parsed (or artifact (parse-release-response content))]
+              (if (result-boundary/usable-content? normalized)
+                (let [parsed (result-boundary/authoritative-payload normalized)]
                   (if parsed
                     (let [release-with-meta (-> parsed
                                                 (update :release/id #(or % (random-uuid)))
                                                 (assoc :release/created-at (java.util.Date.)))]
-                      (response/success release-with-meta {:tokens tokens}))
+                      (response/success release-with-meta {:tokens (:tokens normalized)}))
                     ;; LLM returned content but no parseable release artifact — fail explicitly
                     (response/error "LLM response could not be parsed as release artifact"
-                                    {:tokens tokens})))
-                ;; LLM call failed — propagate error, no fallback
-                (let [error-msg (or (:message (llm/get-error llm-response))
-                                    "LLM call failed")]
-                  (response/error error-msg))))
+                                    {:tokens (:tokens normalized)})))
+                (result-boundary/error-response normalized "LLM call failed")))
             ;; No LLM client — fail explicitly
             (response/error "No LLM backend provided"))))
 
