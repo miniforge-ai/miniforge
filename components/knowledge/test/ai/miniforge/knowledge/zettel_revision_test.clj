@@ -101,6 +101,86 @@
       (is (= (:zettel/digest z1) (:zettel/digest z4))
           "digest unchanged across operational-metadata updates"))))
 
+(deftest test-update-ignores-caller-supplied-derived-fields
+  (testing "callers cannot spoof :zettel/digest or :zettel/revision-id via update-zettel"
+    ;; A producer trying to stamp a forged digest/revision-id (e.g. to
+    ;; ride existing trust onto new content) gets neither — the updater
+    ;; drops both fields from `changes` and re-stamps from the
+    ;; content projection.
+    (let [z1     (new-z)
+          forged-digest "0000000000000000000000000000000000000000000000000000000000000000"
+          forged-rev    (java.util.UUID/randomUUID)
+          z2     (zettel/update-zettel z1 {:zettel/digest      forged-digest
+                                           :zettel/revision-id forged-rev})]
+      (is (not= forged-digest (:zettel/digest z2))
+          "forged :zettel/digest dropped, recomputed from content")
+      (is (not= forged-rev (:zettel/revision-id z2))
+          "forged :zettel/revision-id dropped, recomputed from content")
+      (is (= (:zettel/digest z1) (:zettel/digest z2))
+          "digest stays equal to z1's because content didn't change")
+      (is (= (:zettel/revision-id z1) (:zettel/revision-id z2)))))
+
+  (testing "spoof attempt combined with a real content change still rotates correctly"
+    (let [z1 (new-z)
+          z2 (zettel/update-zettel z1 {:zettel/content      "# Updated content"
+                                       :zettel/digest       "deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
+                                       :zettel/revision-id  (java.util.UUID/randomUUID)})]
+      (is (not= (:zettel/digest z1) (:zettel/digest z2))
+          "content change rotated digest")
+      (is (not= "deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
+                (:zettel/digest z2))
+          "rotated digest comes from content, not from the spoof attempt"))))
+
+(deftest test-update-backfills-derived-fields-on-legacy-zettel
+  (testing "a legacy zettel without :zettel/digest / :zettel/revision-id gets them stamped on first update"
+    ;; Decision 6 wants the system to converge on a fully-stamped state
+    ;; without an explicit migration. update-zettel handles that
+    ;; convergence implicitly by always re-stamping after merge.
+    (let [legacy {:zettel/id      (java.util.UUID/randomUUID)
+                  :zettel/uid     "legacy-z"
+                  :zettel/title   "Legacy Zettel"
+                  :zettel/content "Body."
+                  :zettel/type    :rule
+                  :zettel/created (java.util.Date.)
+                  :zettel/author  "user"}
+          updated (zettel/update-zettel legacy {:fleet/oss-version "1.0.0"})]
+      (is (string? (:zettel/digest updated))
+          ":zettel/digest backfilled by update")
+      (is (= 64 (count (:zettel/digest updated))))
+      (is (instance? java.util.UUID (:zettel/revision-id updated))
+          ":zettel/revision-id backfilled by update")
+      (is (= "1.0.0" (:fleet/oss-version updated))
+          "the operational change still landed"))))
+
+;------------------------------------------------------------------------------ Layer 2.5
+;; Schema digest validation — accepts canonical lowercase hex; rejects
+;; uppercase / non-hex / wrong-length.
+
+(deftest test-digest-schema-accepts-canonical-hex
+  (testing "the digest the constructor stamps is lowercase SHA-256 hex and validates"
+    (let [z (new-z)]
+      (is (m/validate schema/Zettel z))
+      (is (re-matches #"^[0-9a-f]{64}$" (:zettel/digest z))))))
+
+(deftest test-digest-schema-rejects-uppercase-hex
+  (testing "uppercase hex fails — content-hash always returns lowercase, so uppercase = forged or corrupted"
+    (let [z (assoc (new-z) :zettel/digest
+                   "DEADBEEFDEADBEEFDEADBEEFDEADBEEFDEADBEEFDEADBEEFDEADBEEFDEADBEEF")]
+      (is (false? (m/validate schema/Zettel z))))))
+
+(deftest test-digest-schema-rejects-non-hex
+  (testing "64-char string with non-hex characters fails"
+    (let [z (assoc (new-z) :zettel/digest
+                   (apply str (repeat 64 \z)))]
+      (is (false? (m/validate schema/Zettel z))))))
+
+(deftest test-digest-schema-rejects-wrong-length
+  (testing "wrong-length hex fails"
+    (let [too-short (apply str (repeat 63 \a))
+          too-long  (apply str (repeat 65 \a))]
+      (is (false? (m/validate schema/Zettel (assoc (new-z) :zettel/digest too-short))))
+      (is (false? (m/validate schema/Zettel (assoc (new-z) :zettel/digest too-long)))))))
+
 ;------------------------------------------------------------------------------ Layer 3
 ;; Fleet-share schema fields accept their documented values.
 

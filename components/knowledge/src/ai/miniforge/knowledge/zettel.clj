@@ -87,11 +87,12 @@
            :zettel/digest d
            :zettel/revision-id (revision-id-from-digest d))))
 
-(defn- content-changed?
-  "Pure: true when `changes` touches any content-bearing field. Used by
-   `update-zettel` to decide whether to rotate the revision."
-  [changes]
-  (some #(contains? changes %) content-bearing-fields))
+(def ^:private derived-fields
+  "Fields the constructor / updater own — callers cannot override them
+   directly. They're recomputed from `content-projection` so the
+   relationship between content and revision identity stays
+   tamper-evident."
+  #{:zettel/digest :zettel/revision-id})
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Zettel creation and manipulation
@@ -156,22 +157,32 @@
 (defn update-zettel
   "Update a zettel with new values, setting modified timestamp.
 
-   When `changes` touches any content-bearing field
-   (`:zettel/uid` / `:zettel/title` / `:zettel/content` / `:zettel/type`
-   / `:zettel/dewey` / `:zettel/tags` / `:zettel/links` /
-   `:zettel/source`), the constructor recomputes `:zettel/digest` and
-   rotates `:zettel/revision-id`. Operational-metadata-only changes
-   (privacy classification, share scope, oss-version, etc.) leave the
-   revision identity intact — Decision 6 attaches trust to the
-   immutable revision, so changing an operational policy must NOT
-   silently migrate trust onto a new revision."
+   `:zettel/digest` and `:zettel/revision-id` are DERIVED — any value
+   the caller supplies for either is dropped before the merge.
+   `update-zettel` always re-stamps the result via `stamp-revision`,
+   which is idempotent on unchanged content (same content → same
+   digest → same revision-id) and rotates the revision when a
+   content-bearing field changes (`:zettel/uid` / `:zettel/title` /
+   `:zettel/content` / `:zettel/type` / `:zettel/dewey` /
+   `:zettel/tags` / `:zettel/links` / `:zettel/source`). Two
+   consequences worth pinning:
+
+     - Operational-metadata-only changes (privacy classification,
+       share scope, oss-version, etc.) leave the revision identity
+       intact. Decision 6 attaches trust to the immutable revision,
+       so changing operational policy must NOT silently migrate
+       trust onto a new revision.
+
+     - A legacy zettel without `:zettel/digest` / `:zettel/revision-id`
+       receives the stamped fields on its first update — the system
+       converges on a fully-stamped state without an explicit
+       backfill pass."
   [zettel changes]
-  (let [merged (-> zettel
-                   (merge changes)
-                   (assoc :zettel/modified (java.util.Date.)))]
-    (if (content-changed? changes)
-      (stamp-revision merged)
-      merged)))
+  (let [sanitised (apply dissoc changes derived-fields)
+        merged    (-> zettel
+                      (merge sanitised)
+                      (assoc :zettel/modified (java.util.Date.)))]
+    (stamp-revision merged)))
 
 (defn zettel-summary
   "Extract a lightweight summary from a zettel."

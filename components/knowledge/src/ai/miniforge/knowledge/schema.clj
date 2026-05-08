@@ -140,8 +140,12 @@
    ;; Revision-keyed identity (miniforge-fleet Decision 6). Optional in
    ;; the schema so legacy zettels round-trip; new zettels stamp these
    ;; via `zettel/create-zettel` and rotate via `zettel/update-zettel`.
+   ;; `:zettel/digest` is constrained to lowercase 64-char SHA-256 hex
+   ;; — the exact shape `zettel/compute-digest` produces — so a
+   ;; uppercase-hex / non-hex / wrong-length value gets rejected at
+   ;; the schema boundary rather than silently propagating.
    [:zettel/revision-id {:optional true} uuid?]
-   [:zettel/digest      {:optional true} [:string {:min 64 :max 64}]]  ; SHA-256 hex
+   [:zettel/digest      {:optional true} [:re #"^[0-9a-f]{64}$"]]
 
    ;; Fleet share intent (Decision 8). Producers that intend to share
    ;; a zettel set these explicitly; absence means "local-only".
