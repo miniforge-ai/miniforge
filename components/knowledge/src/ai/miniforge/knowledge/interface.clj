@@ -53,6 +53,11 @@
 (def KnowledgeQuery schema/KnowledgeQuery)
 (def AgentManifest schema/AgentManifest)
 (def LearningCapture schema/LearningCapture)
+;; Fleet-share enums (added in #807). Surfaced through the interface
+;; so downstream components reference them without reaching into
+;; `knowledge.schema` directly (Polylith dependency rule).
+(def ShareScope     schema/ShareScope)
+(def Classification schema/Classification)
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Store creation

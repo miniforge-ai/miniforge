@@ -1,0 +1,8 @@
+{:paths ["src" "resources"]
+ :deps  {ai.miniforge/knowledge    {:local/root "../knowledge"}
+         ;; SHA-256 over canonical EDN — same primitive zettel/digest
+         ;; uses, so pack digests are comparable across components.
+         ai.miniforge/content-hash {:local/root "../content-hash"}
+         metosin/malli             {:mvn/version "0.16.4"}}
+ :aliases {:test {:extra-paths ["test"]
+                  :extra-deps {}}}}
