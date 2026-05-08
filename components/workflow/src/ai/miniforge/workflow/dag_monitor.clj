@@ -30,7 +30,8 @@
   (:require
    [ai.miniforge.pr-lifecycle.interface :as pr-lifecycle]
    [ai.miniforge.pr-train.interface :as pr-train]
-   [ai.miniforge.logging.interface :as log]))
+   [ai.miniforge.logging.interface :as log]
+   [ai.miniforge.workflow.merge-resolution :as merge-resolution]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Result constructors & predicates
@@ -72,7 +73,24 @@
   (let [dag-id (or (:dag-id context) (random-uuid))
         run-id (or (:run-id context) (random-uuid))
         event-bus (or (:event-bus context)
-                      (pr-lifecycle/create-event-bus))]
+                      (pr-lifecycle/create-event-bus))
+        ;; Spec §6.4 hook: when the PR-lifecycle merge step finds a
+        ;; CONFLICTING branch, dispatch into merge-resolution/
+        ;; resolve-conflict!. The auto-default agent-edit-fn uses the
+        ;; context's :llm-backend (matching dag_orchestrator's
+        ;; derive-resolution-overrides plumbing for the multi-parent
+        ;; merge case) so the same LLM-driven implementer resolves
+        ;; conflicts on both surfaces.
+        llm-backend (:llm-backend context)
+        logger      (:logger context)
+        agent-edit-fn (when llm-backend
+                        (merge-resolution/agent-driven-edit-fn
+                         (cond-> {:llm-backend llm-backend}
+                           logger (assoc :logger logger))))
+        resolve-fn (fn [opts]
+                     (merge-resolution/resolve-conflict!
+                      (cond-> opts
+                        agent-edit-fn (assoc :agent-edit-fn agent-edit-fn))))]
     (->> pr-infos
          (map (fn [{:keys [pr-number task-id]}]
                 [pr-number
@@ -85,6 +103,7 @@
                    :logger (:logger context)
                    :generate-fn (:generate-fn context)
                    :merge-policy (:merge-policy context)
+                   :resolve-fn resolve-fn
                    :max-fix-iterations (get context :max-fix-iterations 5))]))
          (into {}))))
 
