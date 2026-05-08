@@ -158,9 +158,22 @@
    worktree — `git-dirty-files` then returns empty even though the
    files exist as committed content on the task branch.
 
-   Mirrors review.clj/rehydrate-from-paths exactly. Substantive
-   filter is the same as `git-dirty-files` so a record of only
-   `.miniforge/session-id` does not count as releasable work."
+   Modeled after review.clj/rehydrate-from-paths but with two
+   differences:
+   - Returns a `:code/files` vector directly (review wraps it back
+     into the outer artifact); release wants the vector to feed
+     into `code-artifacts` below.
+   - Applies the same `agent/substantive-file?` filter that
+     `git-dirty-files` uses, so a record consisting only of
+     `.miniforge/session-id` does not count as releasable work
+     (matches the iter-23 empty-diff PR guard).
+
+   Host-mode only: `agent/rehydrate-files` reads the host
+   filesystem. In governed (capsule) mode the worktree lives
+   inside a Docker/K8s container and the host cannot reach it
+   directly. A capsule-aware variant is a follow-up; today the
+   capsule path falls through to `git-dirty-files-capsule`, which
+   matches the pre-fix behavior in that mode."
   [implement-artifact worktree-path]
   (when-let [paths (and implement-artifact
                         worktree-path

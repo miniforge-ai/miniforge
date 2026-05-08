@@ -386,17 +386,39 @@
 ;; — read content for the `:code/file-paths` recorded on the implement
 ;; artifact instead of relying on the worktree's dirty status.
 
+(defn- sh-must-succeed!
+  "Run `git` with `args`; throw if exit != 0. Test-helper guard so
+   we don't silently fall back through git-dirty-files when the
+   boundary-commit simulation actually didn't commit."
+  [worktree args]
+  (let [result (apply shell/sh (concat args [:dir worktree]))]
+    (when-not (zero? (:exit result))
+      (throw (ex-info "git command failed inside test fixture"
+                      {:args args
+                       :exit (:exit result)
+                       :err  (:err result)
+                       :out  (:out result)})))
+    result))
+
 (defn- write-and-commit-mock-files!
-  "Write the mock files into the worktree AND commit them.
+  "Write the mock files into the worktree, commit them on a real
+   git history, and assert the worktree is clean afterwards.
+
    Simulates the post-implement-boundary state where the agent's
-   files have landed on the task branch and the worktree is clean."
+   files have landed on the task branch and `git status --porcelain`
+   reports nothing. Asserting cleanliness here means the regression
+   test cannot accidentally pass via the legacy `git-dirty-files`
+   path — it forces the rehydrate-from-paths code under test."
   [worktree]
   (write-mock-files-to-worktree! worktree)
-  (shell/sh "git" "config" "user.email" "test@example.com" :dir worktree)
-  (shell/sh "git" "config" "user.name" "Test" :dir worktree)
-  (shell/sh "git" "add" "." :dir worktree)
-  (shell/sh "git" "commit" "-m" "implement-phase-boundary commit"
-            :dir worktree))
+  (sh-must-succeed! worktree ["git" "config" "user.email" "test@example.com"])
+  (sh-must-succeed! worktree ["git" "config" "user.name" "Test"])
+  (sh-must-succeed! worktree ["git" "add" "."])
+  (sh-must-succeed! worktree ["git" "commit" "-m" "implement-phase-boundary commit"])
+  (let [{:keys [out]} (sh-must-succeed! worktree ["git" "status" "--porcelain"])]
+    (when-not (clojure.string/blank? out)
+      (throw (ex-info "fixture left worktree dirty after commit"
+                      {:porcelain out})))))
 
 (defn- create-clean-context-with-recorded-paths
   "Test context that mirrors the dogfood-failure shape:
@@ -426,30 +448,38 @@
     ;; boundary commits, even though the files are present on HEAD.
     (with-test-worktree
       (fn [worktree]
-        (with-redefs [release-executor/execute-release-phase
-                      (fn [workflow-state _exec-context _opts]
-                        ;; Capture the code-artifact content to assert
-                        ;; the rehydrated files reached the executor.
-                        (let [files (->> (:workflow/artifacts workflow-state)
-                                         (mapcat (comp :code/files :artifact/content)))]
-                          {:success?  true
-                           :captured-files files
-                           :artifacts [{:artifact/id (random-uuid)
-                                        :artifact/type :release
-                                        :artifact/content {:files-written-count (count files)
-                                                           :files-written-paths (mapv :path files)}}]
-                           :metrics {:files-written (count files)
-                                     :duration-ms 50}}))]
-          (let [ctx (create-clean-context-with-recorded-paths worktree)
-                ctx-with-config (assoc ctx :phase-config {:phase :release})
-                interceptor (phase/get-phase-interceptor {:phase :release})
-                result-ctx ((:enter interceptor) ctx-with-config)]
-            (is (not= :failed (get-in result-ctx [:phase :status]))
-                "release must succeed when paths are recorded — clean-worktree fallback was the bug")
-            (let [executor-files (get-in result-ctx
-                                         [:phase :result :status])]
-              (is (= :success executor-files)
-                  "phase result reports success"))))))))
+        (let [;; Capture the workflow state the executor stub sees so
+              ;; we can assert the rehydrated content actually reached
+              ;; it — checking just :phase :result :status would also
+              ;; pass on a (broken) dirty-file fallback.
+              captured-files (atom nil)]
+          (with-redefs [release-executor/execute-release-phase
+                        (fn [workflow-state _exec-context _opts]
+                          (let [files (->> (:workflow/artifacts workflow-state)
+                                           (mapcat (comp :code/files :artifact/content))
+                                           vec)]
+                            (reset! captured-files files)
+                            {:success? true
+                             :artifacts [{:artifact/id (random-uuid)
+                                          :artifact/type :release
+                                          :artifact/content {:files-written-count (count files)
+                                                             :files-written-paths (mapv :path files)}}]
+                             :metrics {:files-written (count files)
+                                       :duration-ms 50}}))]
+            (let [ctx (create-clean-context-with-recorded-paths worktree)
+                  ctx-with-config (assoc ctx :phase-config {:phase :release})
+                  interceptor (phase/get-phase-interceptor {:phase :release})
+                  result-ctx ((:enter interceptor) ctx-with-config)
+                  expected-paths (set (mapv :path (:code/files mock-code-artifact)))
+                  observed-paths (some-> @captured-files (->> (mapv :path) set))]
+              (is (not= :failed (get-in result-ctx [:phase :status]))
+                  "release must succeed when paths are recorded — clean-worktree fallback was the bug")
+              (is (some? @captured-files)
+                  "executor stub must have been called — release got past zero-files")
+              (is (= expected-paths observed-paths)
+                  "rehydrated files must match the recorded :code/file-paths exactly")
+              (is (every? #(seq (:content %)) @captured-files)
+                  "every rehydrated file must carry content read from disk"))))))))
 
 (deftest release-handles-zero-files-artifact-test
   (testing "release phase fails fast when no files changed in the environment"
