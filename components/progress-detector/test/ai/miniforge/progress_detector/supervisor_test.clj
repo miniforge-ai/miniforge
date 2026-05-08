@@ -237,3 +237,57 @@
                                [])]
       (is (= :continue (:action decision)))
       (is (= [] (:anomalies decision))))))
+
+;------------------------------------------------------------------------------ PR #803 fix: action-aware controlling-anomaly selection
+
+(deftest suppressed-strong-does-not-mask-terminating-weak-test
+  (testing "PR #803 Copilot fix — controlling-anomaly selection
+            must consider the EFFECTIVE action (after on-anomaly +
+            policy), not just severity/class. Otherwise an
+            on-anomaly :continue suppression on a severity-strong
+            anomaly silently masks a sibling that policy /
+            on-anomaly would terminate.
+
+            Setup: tool-loop is mechanical :error (severity-
+            strongest under default-policy → would terminate).
+            on-anomaly suppresses it to :continue. A second anomaly,
+            heuristic :warn, has on-anomaly :terminate. Without
+            action-aware selection, tool-loop wins controlling →
+            :continue → bug. With the fix, the heuristic anomaly
+            is selected as controlling because its effective action
+            (:terminate) outranks tool-loop's :continue."
+    (let [tool-loop (mk-anomaly :mechanical :error 1
+                                :anomalies.agent/tool-loop)
+          stagnation (mk-anomaly :heuristic :warn 2
+                                 :anomalies.review/stagnation)
+          on-anomaly {:anomalies.agent/tool-loop :continue
+                      :anomalies.review/stagnation :terminate}
+          decision (sut/handle sut/default-policy on-anomaly
+                               [tool-loop stagnation])]
+      (is (= :terminate (:action decision))
+          "the un-suppressed stagnation anomaly drives the
+           decision — termination is not silently masked by the
+           suppressed tool-loop")
+      (is (= :anomalies.review/stagnation
+             (get-in decision [:anomaly :anomaly/data :anomaly/category]))
+          "the controlling anomaly is the one whose effective action
+           is strongest, not the one whose severity/class is strongest")
+      (is (string? (:reason decision))
+          ":reason populated when terminating, even though the
+           severity-strongest anomaly was suppressed"))))
+
+(deftest action-rank-tiebreak-uses-severity-test
+  (testing "When two anomalies have the SAME effective action, the
+            existing severity / class / seq tie-break still applies.
+            Two mechanicals both at default :terminate → controlling
+            is the one with stronger severity, mirroring Stage 1
+            behaviour."
+    (let [error-a (mk-anomaly :mechanical :error 1
+                              :anomalies.agent/tool-loop)
+          fatal-a (mk-anomaly :mechanical :fatal 2
+                              :anomalies.agent/runaway)
+          decision (sut/handle [error-a fatal-a])]
+      (is (= :terminate (:action decision)))
+      (is (= :anomalies.agent/runaway
+             (get-in decision [:anomaly :anomaly/data :anomaly/category]))
+          "fatal beats error within the same :terminate action tier"))))

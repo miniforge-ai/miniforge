@@ -28,16 +28,30 @@
    Stage 3 adds a per-category on-anomaly map for finer-grained control.
    Resolution order in the 3-arity handle:
 
-     1. category lookup in on-anomaly  (e.g. {:tool-loop :terminate})
-     2. class-default from policy       (e.g. {:mechanical :terminate})
-     3. :continue                       (catch-all safe default)
+     1. category lookup in on-anomaly
+        (e.g. {:anomalies.agent/tool-loop :terminate})
+     2. class-default from policy
+        (e.g. {:mechanical :terminate})
+     3. :continue
+        (catch-all safe default)
 
    Controlling-anomaly selection (when multiple anomalies fire in
    the same observe step):
 
-     :fatal > :error > :warn > :info        (severity rank)
-     ties broken: :mechanical > :heuristic  (class rank)
-     further ties: earliest :event/seq      (deterministic)
+     1. compute the effective action per anomaly under
+        on-anomaly + policy
+     2. pick by strongest effective action:
+        :terminate > :warn > :continue   (action rank)
+     3. tie-break by severity rank:
+        :fatal > :error > :warn > :info
+     4. then class rank:
+        :mechanical > :heuristic
+     5. then earliest :event/seq         (deterministic)
+
+   Action-first ordering matters: a controlling anomaly chosen by
+   severity/class alone would let an on-anomaly :continue
+   suppression on the strongest-by-severity anomaly mask a weaker
+   anomaly that the policy / on-anomaly would otherwise terminate.
 
    All anomalies (controlling and not) are surfaced to the caller;
    the supervisor names which one drives the decision."
@@ -55,6 +69,13 @@
 (def ^:private class-rank
   "Mechanical > heuristic when severities tie."
   {:mechanical 2 :heuristic 1})
+
+(def ^:private action-rank
+  "Strongest action wins when controlling-anomaly selection happens
+   AFTER applying on-anomaly + policy. Used in handle's selection
+   tuple so that a suppressed-to-:continue anomaly never masks a
+   sibling that policy / on-anomaly would otherwise terminate."
+  {:terminate 3 :warn 2 :continue 1})
 
 (def default-policy
   "Stage 2 class-default policy. Stage 3 layers a per-category map
@@ -91,17 +112,44 @@
 ;; Public API
 
 (defn select-controlling
-  "Choose one controlling anomaly from a non-empty seq.
+  "Choose one controlling anomaly from a non-empty seq using the
+   severity/class/seq rank only — does NOT consider effective action.
 
-   Selection rule (Stage 1 spec, lifted verbatim):
-     :fatal > :error > :warn > :info,
-     ties broken :mechanical > :heuristic,
-     further ties broken by earliest :event/seq.
+   Kept for Stage 1 callers that don't have policy/on-anomaly
+   context. Stage 3's `handle` uses an action-aware variant
+   internally (see select-controlling-by-action) so on-anomaly
+   suppressions don't mask sibling anomalies that should terminate.
 
    Returns nil for an empty input."
   [anomalies]
   (when (seq anomalies)
     (first (sort-by ranking-tuple anomalies))))
+
+(defn- effective-action
+  "Compute the effective action for ONE anomaly under on-anomaly
+   then policy then catch-all :continue."
+  [policy on-anomaly anomaly]
+  (or (get on-anomaly (anomaly-category anomaly))
+      (get policy     (anomaly-class    anomaly))
+      :continue))
+
+(defn- action-aware-tuple
+  "Selection tuple that orders by effective action first, then
+   severity / class / seq. Strongest action wins so that an
+   on-anomaly :continue on a severity-strongest anomaly cannot
+   mask a sibling that policy / on-anomaly would terminate."
+  [policy on-anomaly anomaly]
+  [(- (get action-rank (effective-action policy on-anomaly anomaly) 0))
+   (- (get severity-rank (anomaly-severity anomaly) 0))
+   (- (get class-rank    (anomaly-class    anomaly) 0))
+   (anomaly-event-seq anomaly)])
+
+(defn- select-controlling-by-action
+  "Action-aware controlling-anomaly selection used by `handle`.
+   Returns nil for an empty input."
+  [policy on-anomaly anomalies]
+  (when (seq anomalies)
+    (first (sort-by #(action-aware-tuple policy on-anomaly %) anomalies))))
 
 (defn handle
   "Decide what to do given a vector of anomalies.
@@ -144,11 +192,9 @@
    (if (empty? anomalies)
      {:action    :continue
       :anomalies anomalies}
-     (let [controlling (select-controlling anomalies)
-           category    (anomaly-category controlling)
-           action      (or (get on-anomaly category)
-                           (get policy (anomaly-class controlling))
-                           :continue)
+     (let [controlling (select-controlling-by-action
+                        policy on-anomaly anomalies)
+           action      (effective-action policy on-anomaly controlling)
            summary     (get-in controlling
                                [:anomaly/data :anomaly/evidence :summary]
                                (msg/t :supervisor/no-summary))
