@@ -239,9 +239,12 @@
 
    This is the canonical, anomaly-returning entry point. The boundary
    sites `update-task!`, `delete-task!`, `transition-task!`, and
-   `decompose-task!` inline a `response/throw-anomaly!` when an anomaly
-   is observed, preserving the legacy thrown-exception contract for
-   external consumers that branch on the throw."
+   `decompose-task!` route through the private helper `lookup-task!`,
+   which observes an anomaly here and rethrows via
+   `response/throw-anomaly!` with the `:anomalies/not-found` slingshot
+   category. That preserves the legacy thrown-exception contract for
+   external consumers that branch on the throw without putting the
+   throw at every individual call site."
   ([task-id] (lookup-task task-id task-not-found-message))
   ([task-id message]
    (if-let [task (get-task task-id)]

@@ -30,7 +30,7 @@ Refactor / per-component cleanup tier.
 `components/task/src/.../core.clj`:
 
 - New canonical anomaly-returning fns:
-  - `transition-result` — `nil | :invalid-input anomaly` for FSM rejections (replacing `validate-transition`'s throw)
+  - `transition-result` — `to-state keyword | :invalid-input anomaly` (returns the destination state on success, anomaly on FSM rejection; replacing `validate-transition`'s throw)
   - `lookup-task` — `task | :not-found anomaly` (replacing the four lookup-then-throw call sites in `update-task!`, `delete-task!`, `transition-task!`, `decompose-task!`)
 - New private boundary helper:
   - `lookup-task!` — calls `lookup-task`; on anomaly raises via `response/throw-anomaly!` with `:anomalies/not-found` slingshot category for legacy callers above the component
