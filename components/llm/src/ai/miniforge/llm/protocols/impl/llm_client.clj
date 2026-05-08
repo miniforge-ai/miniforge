@@ -169,10 +169,12 @@
                                     (when (= "text" (:type block))
                                       (:text block)))
                                   content-blocks)
-                tool-names (keep (fn [block]
-                                   (when (= "tool_use" (:type block))
-                                     (:name block)))
-                                 content-blocks)
+                ;; Collect full tool_use block maps so we can extract :id
+                ;; and :input alongside :name. One pass for all three fields.
+                tool-blocks (keep (fn [block]
+                                    (when (= "tool_use" (:type block)) block))
+                                  content-blocks)
+                tool-names (map :name tool-blocks)
                 text (str/join text-blocks)
                 ;; Claude surfaces stop_reason on each assistant message.
                 ;; Values: "end_turn" | "max_tokens" | "stop_sequence" |
@@ -182,9 +184,16 @@
                 stop-reason (get-in data [:message :stop_reason])]
             (cond
               (seq tool-names)
-              (cond-> {:delta (or text "") :done? false
-                       :tool-use true :tool-names tool-names}
-                stop-reason (assoc :stop-reason stop-reason))
+              (let [first-tool (first tool-blocks)]
+                (cond-> {:delta (or text "") :done? false
+                         :tool-use true :tool-names tool-names}
+                  stop-reason               (assoc :stop-reason stop-reason)
+                  ;; Additive: :tool-call-id and :tool-input from the first
+                  ;; tool_use block. Present only when the fields are
+                  ;; non-nil so existing consumers that check for key
+                  ;; presence see no change on stripped blocks.
+                  (:id first-tool)          (assoc :tool-call-id (:id first-tool))
+                  (some? (:input first-tool)) (assoc :tool-input (:input first-tool))))
 
               (not (str/blank? text))
               (cond-> {:delta text :done? false}
@@ -213,6 +222,35 @@
               ;; final result event too — prefer it over the per-message
               ;; stop_reason when both are present.
               (:stop_reason data) (assoc :stop-reason (:stop_reason data))))
+
+          ;; User messages contain tool_result content blocks — emitted by
+          ;; the CLI when tool output is fed back to the model. Surface a
+          ;; :tool-result chunk so downstream subscribers can observe both
+          ;; the invocation (:tool-use) and the outcome (:tool-result).
+          "user"
+          (let [content-blocks (get-in data [:message :content])
+                tool-result-blocks (when (sequential? content-blocks)
+                                     (filter (fn [b] (= "tool_result" (:type b)))
+                                             content-blocks))]
+            (when (seq tool-result-blocks)
+              (let [block       (first tool-result-blocks)
+                    raw-content (:content block)
+                    tool-output (cond
+                                  (string? raw-content)     raw-content
+                                  ;; Array of content blocks — join text parts
+                                  (sequential? raw-content) (->> raw-content
+                                                                 (keep (fn [b]
+                                                                         (when (= "text" (:type b))
+                                                                           (:text b))))
+                                                                 (str/join "\n"))
+                                  (nil? raw-content)        ""
+                                  :else                     (str raw-content))]
+                {:delta        ""
+                 :done?        false
+                 :tool-result  true
+                 :tool-call-id (:tool_use_id block)
+                 :tool-output  tool-output
+                 :tool-error?  (boolean (:is_error block))})))
 
           ;; Tool use events — capture tool name for diagnostics
           "tool_use"
@@ -303,6 +341,27 @@
               {:delta "" :done? false :tool-use true
                :tool-name (or (:name item) (:tool_name item))
                :tool-call-id (:id item)}
+
+              ;; MCP tool result — emitted when MCP tool output is returned
+              ;; to the model. Analogous to Claude's tool_result blocks:
+              ;; surface :tool-result so downstream code can pair each
+              ;; invocation with its outcome.
+              "mcp_tool_result"
+              {:delta        ""
+               :done?        false
+               :tool-result  true
+               :tool-call-id (or (:tool_call_id item) (:id item))
+               :tool-output  (:output item)
+               :tool-error?  (boolean (:is_error item))}
+
+              ;; Native tool result (pre-MCP) — same shape as mcp_tool_result.
+              "tool_result"
+              {:delta        ""
+               :done?        false
+               :tool-result  true
+               :tool-call-id (or (:tool_call_id item) (:id item))
+               :tool-output  (:output item)
+               :tool-error?  (boolean (:is_error item))}
 
               ;; reasoning — ignored for content but could be surfaced
               ;; later as :agent/reasoning events if useful
@@ -1046,6 +1105,12 @@
               (some->> (:tool-names parsed) seq sort (str/join ","))
               "unknown")))
 
+    ;; Tool-result events are liveness signals — record activity keyed on
+    ;; the call-id so the stagnation timer stays alive during tool round-trips.
+    (:tool-result parsed)
+    (pm/record-activity! progress-monitor
+                         (str "tool-result:" (or (:tool-call-id parsed) "unknown")))
+
     (:heartbeat parsed)
     (pm/record-activity! progress-monitor :stream-heartbeat)
 
@@ -1082,8 +1147,9 @@
       ;; emitting an absolute count — bump the accumulator on each one.
       (when (:increment-turns parsed)
         (swap! accumulated-turns (fnil inc 0)))
-      (if (or (:tool-use parsed) (:heartbeat parsed))
-        ;; Tool-use and heartbeat events: track tool names and fire on-chunk
+      (if (or (:tool-use parsed) (:tool-result parsed) (:heartbeat parsed))
+        ;; Tool-use, tool-result, and heartbeat events: track tool names and
+        ;; fire on-chunk without appending anything to accumulated-content.
         (do
           (when-let [tool-name (:tool-name parsed)]
             (swap! accumulated-tools conj tool-name))
