@@ -145,6 +145,12 @@
    - :ci-poll-interval-ms - CI poll interval (default 30000)
    - :review-poll-interval-ms - Review poll interval (default 30000)
    - :auto-resolve-comments - Auto-resolve conversation threads after fixes (default true)
+   - :resolve-fn - Spec §6.4 resolution callback. When set, attempt-merge!
+     forwards it to merge/attempt-merge via context, where the
+     conflict-resolution dispatch picks it up on a CONFLICTING branch
+     state. Workflow-side caller passes
+     workflow.merge-resolution/resolve-conflict! here so pr-lifecycle
+     stays free of a workflow dependency.
 
    Returns controller state atom."
   [dag-id run-id task-id task
@@ -170,6 +176,7 @@
            :event-bus (:event-bus non-nil-opts)
            :logger (:logger non-nil-opts)
            :generate-fn (:generate-fn non-nil-opts)
+           :resolve-fn (:resolve-fn non-nil-opts)
 
            ;; State
            :status controller-fsm/initial-status
@@ -440,7 +447,7 @@
   "Attempt to merge the PR."
   [controller]
   (let [{dag-id :dag/id run-id :run/id task-id :task/id
-         :keys [pr config event-bus logger]} @controller
+         :keys [pr config event-bus logger resolve-fn]} @controller
         {:keys [worktree-path merge-policy]} config]
 
     (update-status! controller :ready-to-merge)
@@ -453,12 +460,18 @@
 
     (let [merge-result (merge/attempt-merge
                         worktree-path (:pr/id pr) merge-policy
-                        {:dag-id dag-id
-                         :run-id run-id
-                         :task-id task-id
-                         :pr-id (:pr/id pr)
-                         :event-bus event-bus
-                         :logger logger})]
+                        ;; Spec §6.4: when caller injected
+                        ;; :resolve-fn at create-controller time,
+                        ;; thread it into the merge context so
+                        ;; merge.clj's conflict-resolution dispatch
+                        ;; picks it up on a CONFLICTING branch state.
+                        (cond-> {:dag-id dag-id
+                                 :run-id run-id
+                                 :task-id task-id
+                                 :pr-id (:pr/id pr)
+                                 :event-bus event-bus
+                                 :logger logger}
+                          resolve-fn (assoc :resolve-fn resolve-fn)))]
       (if (and (dag/ok? merge-result) (:merged? (:data merge-result)))
         (do
           (update-status! controller :merged)
