@@ -105,15 +105,24 @@ This revision incorporates external design review. Material changes:
 Today's event-stream contract:
 
 - **Storage** — one Transit-JSON file per event under
-  `~/.miniforge/events/{workflow-id}/{ts}-{uuid}.json`
-  (`components/event-stream/src/.../sinks.clj:60-71`).
+  `~/.miniforge/events/{workflow-id}/{ts}-{uuid}.json`. The path
+  layout is built by `event-file-path` /
+  `new-event-file-path` in `components/event-stream/src/.../sinks.clj`
+  (around line 88+).
 - **Envelope** — every event carries `:event/sequence-number` per
-  workflow (`event_stream/core.clj:56-67`), but readers do not surface it.
+  workflow (`event_stream/core.clj`, in `create-envelope`). The reader
+  parses the payload and surfaces the field on the returned event
+  maps; what is missing is a *range query keyed off it* (e.g.
+  `read-since(workflow-id, seq-N)`).
 - **Reader** — full directory read, sort by filename, no range queries
-  (`event_stream/reader.clj:81-103`).
-- **Producer publish** — `publish!` notifies subscribers async and
-  returns immediately; no drain primitive
-  (`event_stream/core.clj:104-142`).
+  (`event_stream/reader.clj`, in `read-workflow-events`).
+- **Producer publish** — `publish!` runs sinks and notifies subscribers
+  *synchronously* in-process before returning; there is no drain
+  primitive, no fence against late publishers, and no fsync on file
+  sink writes (`event_stream/core.clj`, `publish!`). The race the RFC
+  closes is therefore primarily on the *publisher* side: heartbeat /
+  cleanup background threads can call `publish!` after `run-workflow!`
+  has returned but before the process exits.
 - **Retention** — `cleanup-stale-events!` deletes files older than 7 d
   (configurable), invoked once on sink creation in a fire-and-forget
   future (`sinks.clj:115-159`). Concurrent workflow-heavy loads can
@@ -368,19 +377,22 @@ Tombstoned workflows still hydrate from snapshot on consumer cold start.
 ### Atomic archive operation
 
 ```text
-1. Inside live/{wid}: write snapshot to snapshot.json.tmp.
-2. fsync(snapshot.json.tmp).
-3. Update manifest.json status="archiving", snapshot_watermark_sequence=N.
+1. Inside live/{wid}: write snapshot to snapshot.transit.json.tmp.
+2. fsync(snapshot.transit.json.tmp).
+3. Update manifest.json:
+     archive_status = "archiving"
+     snapshot_watermark.workflow_sequence_number = N
+     snapshot_watermark.last_event_id = <hex>
 4. fsync(manifest.json) and parent dir.
-5. mv snapshot.json.tmp → snapshot.json.
+5. mv snapshot.transit.json.tmp → snapshot.transit.json.
 6. mv live/{wid} → archived/{wid} (atomic rename on same FS).
 7. Touch archived/{wid}/archived.marker.
 8. fsync(archived/) and archived/{wid}/.
 ```
 
-Crash recovery: any `live/{wid}` whose `manifest.status == "archiving"`
-or that is missing `archived.marker` after the rename is recovered by
-re-running steps 5–8. Idempotent.
+Crash recovery: any `live/{wid}` whose `manifest.archive_status ==
+"archiving"` or that is missing `archived.marker` after the rename is
+recovered by re-running steps 5–8. Idempotent.
 
 The cross-FS case (e.g. archived to a different volume) loses atomic
 rename; we keep archive on the same FS to preserve atomicity. Operators
@@ -424,7 +436,8 @@ Three triggers, all writing the same on-disk shape:
 1. **Terminal archive snapshot.** On `:workflow/completed | :failed |
    :cancelled` followed by `quiesce!`, the supervisory-state component
    serializes its slice of the entity table for that workflow to
-   `live/{wid}/snapshot.json`, then BD-2b's atomic archive moves it.
+   `live/{wid}/snapshot.transit.json`, then BD-2b's atomic archive
+   moves it.
 2. **Active checkpoint.** The component writes
    `live/{wid}/checkpoint.json` carrying the current entity-table
    slice plus watermark. Atomic via temp + rename. Cadence:
@@ -457,7 +470,8 @@ Three triggers, all writing the same on-disk shape:
 3. **Crashed slow-path synthesis.** When BD-2b classifies a workflow
    as crashed and it has no live snapshot, the cleanup process attempts
    to replay the workflow's retained events in a fresh accumulator and
-   write `snapshot.json` before archiving. The attempt is bounded by
+   write `snapshot.transit.json` before archiving. The attempt is
+   bounded by
    `MINIFORGE_EVENTS_CRASH_SNAPSHOT_TIMEOUT_SECONDS` (default 10 s).
 
    Three outcomes, all of which **still archive** the workflow:
@@ -551,7 +565,7 @@ Cold start in `miniforge-control`:
      a. Load live/{wid}/checkpoint.json if present, else hydrate empty.
      b. Read live/{wid}/events with sequence > checkpoint watermark.
 3. For archived workflows within UX-K history window:
-     a. Lazily hydrate from archived/{wid}/snapshot.json on demand
+     a. Lazily hydrate from archived/{wid}/snapshot.transit.json on demand
         (when the user opens the run in the dossier).
      b. Eagerly load only lightweight summary fields for the runs list.
 4. Tombstoned workflows: hydrate from snapshot only; raw events gone.
@@ -564,7 +578,7 @@ Cold start in `miniforge-control`:
 ```
 
 The eager-load avoidance is what fixes the cold-start cost. With
-thousands of completed workflows, hydrating each `snapshot.json`
+thousands of completed workflows, hydrating each `snapshot.transit.json`
 synchronously reproduces the cold-start problem at a different layer.
 The summaries index is the cheap top-level structure the TUI rebuilds
 its workflow list from.
@@ -627,16 +641,16 @@ This is the actual cross-repo interface. Both `miniforge` and
   live/
     {workflow-id}/
       manifest.json
-      checkpoint.json            # may be absent before first checkpoint
+      checkpoint.transit.json    # may be absent before first checkpoint
       events/
-        {seq:020d}__{ts}__{uuid}.json
+        {event-id-hex16}__{workflow-seq-dec12}.transit.json
   archived/
     {workflow-id}/
-      manifest.json              # status: archived | tombstoned
-      snapshot.json              # may be null on crashed/no-snapshot
+      manifest.json              # archive_status: archived | tombstoned
+      snapshot.transit.json      # may be absent on crashed/no-snapshot
       archived.marker
       events/                    # absent after tombstone
-        {seq:020d}__{ts}__{uuid}.json
+        {event-id-hex16}__{workflow-seq-dec12}.transit.json
   summaries/
     index.json                   # top-level workflow list, cheap to read
 ```
@@ -650,7 +664,8 @@ lazily-loaded snapshot.
 ```json
 {
   "workflow_id": "f47ac10b-...",
-  "status": "active|completed|failed|crashed|cancelled|archived",
+  "status": "active|completed|failed|crashed|cancelled",
+  "archive_status": "live|archiving|archived|tombstoned",
   "spec_id": "...",
   "spec_title": "...",
   "created_at": "2026-05-07T03:00:00Z",
@@ -663,6 +678,15 @@ lazily-loaded snapshot.
   "workflow_sequence_number": 12345
 }
 ```
+
+The two lifecycle fields mirror the manifest schema. `status` carries
+workflow lifecycle (terminal state of the run); `archive_status`
+carries storage lifecycle (where the events / snapshot live on disk).
+Mixing them (e.g. a single field containing `archived` alongside
+`completed`) loses information consumers need — a workflow can be
+`completed` + `live` (just finished, not yet archived), `completed` +
+`archived` (event tail moved, snapshot present), or `completed` +
+`tombstoned` (raw events reaped, snapshot still present).
 
 Out of scope for v1 (intentional):
 
