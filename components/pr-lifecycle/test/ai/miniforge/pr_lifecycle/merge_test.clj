@@ -248,6 +248,80 @@
         (is (= :not-ready (:code (:error result)))
             "fell through to the not-ready path")))))
 
+(deftest attempt-merge-conflicting-unresolvable-anomaly-becomes-dag-err-test
+  (testing "PR #805 review fix: conflict-resolution can return a
+            terminal `:dag-multi-parent-unresolvable` anomaly map.
+            Letting that bubble out of attempt-merge breaks the
+            implicit dag/ok-or-dag/err contract — callers branching
+            on dag/err? would treat the anomaly as a generic blocked
+            merge and could retry indefinitely. attempt-merge must
+            normalize the anomaly into a dag/err with the distinct
+            :code :conflict-unresolvable so the controller / train
+            monitor transitions the PR to :failed instead of looping.
+            The original anomaly is preserved under :data :anomaly
+            for diagnostic surfacing."
+    (let [terminal-anomaly {:anomaly/category :anomalies/dag-multi-parent-unresolvable
+                            :anomaly/message  "Merge conflict could not be auto-resolved"
+                            :resolution/reason :budget-exhausted}]
+      (with-redefs [merge/evaluate-merge-readiness
+                    (fn [_ _ _] conflicting-readiness)
+                    conflict-resolution/resolve-pr-conflicts!
+                    (fn [_] terminal-anomaly)
+                    merge/run-gh-command
+                    (fn [_ _]
+                      (dag/ok {:output (str "{\"number\":123,"
+                                            "\"headRefName\":\"feat/x\","
+                                            "\"baseRefName\":\"main\","
+                                            "\"headRefOid\":\"abc1234\","
+                                            "\"baseRefOid\":\"def5678\"}")}))]
+        (let [context {:dag-id (random-uuid) :run-id (random-uuid)
+                       :task-id (random-uuid) :pr-id 123
+                       :resolve-fn (fn [_] (dag/ok {}))}
+              result (merge/attempt-merge "/tmp" 123
+                                          merge/default-merge-policy
+                                          context)]
+          (is (dag/err? result)
+              "anomaly normalized into dag/err so callers' dag/err?
+               check fires correctly")
+          (is (= :conflict-unresolvable (:code (:error result)))
+              "distinct code lets controller/monitor transition to
+               :failed instead of treating as a generic retry")
+          (is (= terminal-anomaly (get-in result [:error :data :anomaly]))
+              "original anomaly preserved for diagnostic surfacing"))))))
+
+(deftest pr-info-from-gh-rejects-malformed-json-test
+  (testing "PR #805 review fix: pr-info-from-gh now parses gh's
+            JSON output via Cheshire (the same parser
+            github.clj / pr_poller.clj already use). When gh's
+            output isn't valid JSON, return a structured
+            :pr-info-invalid-json dag/err instead of silently
+            returning nils. The previous regex parser would have
+            quietly succeeded on partial matches and broken
+            downstream — Cheshire fails loud."
+    (with-redefs [merge/run-gh-command
+                  (fn [_ _]
+                    (dag/ok {:output "not actually json {{{"}))]
+      (let [r (#'merge/pr-info-from-gh "/tmp" 123)]
+        (is (dag/err? r))
+        (is (= :pr-info-invalid-json (:code (:error r))))))))
+
+(deftest pr-info-from-gh-parses-valid-json-test
+  (testing "Happy path: well-formed gh JSON output parses into
+            the {:pr/* ...} shape via Cheshire."
+    (with-redefs [merge/run-gh-command
+                  (fn [_ _]
+                    (dag/ok {:output (str "{\"number\":42,"
+                                          "\"headRefName\":\"feat/y\","
+                                          "\"baseRefName\":\"develop\","
+                                          "\"headRefOid\":\"sha-head\","
+                                          "\"baseRefOid\":\"sha-base\"}")}))]
+      (let [r (#'merge/pr-info-from-gh "/tmp" 42)]
+        (is (dag/ok? r))
+        (is (= "feat/y" (:pr/branch (:data r))))
+        (is (= "develop" (:pr/base (:data r))))
+        (is (= "sha-head" (:pr/head-sha (:data r))))
+        (is (= "sha-base" (:pr/base-sha (:data r))))))))
+
 (deftest attempt-merge-conflicting-with-policy-disabled-falls-through-test
   (testing "Even with a :resolve-fn on context, if policy's
             :auto-resolve-conflicts? is false, the dispatch

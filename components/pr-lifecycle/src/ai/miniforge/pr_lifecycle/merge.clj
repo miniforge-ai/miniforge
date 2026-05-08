@@ -27,6 +27,7 @@
    [ai.miniforge.pr-lifecycle.events :as events]
    [ai.miniforge.logging.interface :as log]
    [babashka.process :as process]
+   [cheshire.core :as json]
    [clojure.string :as str]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -266,6 +267,16 @@
 ;------------------------------------------------------------------------------ Layer 1
 ;; Conflict-resolution dispatch (Stage 3d, spec §6.4)
 
+(defn- parse-gh-json
+  "Parse `gh --json` output as JSON via Cheshire. Returns the parsed
+   map (keywordized keys) on success or nil if the body isn't valid
+   JSON. Cheshire matches what github.clj / pr_poller.clj already
+   use; the prior regex-based parse here was brittle to formatting
+   and escaping changes in gh's output."
+  [body]
+  (try (json/parse-string body true)
+       (catch Exception _ nil)))
+
 (defn- pr-info-from-gh
   "Fetch the fields conflict-resolution/resolve-pr-conflicts! needs
    from `gh pr view`: PR number, branch (headRefName), base
@@ -280,30 +291,67 @@
     (if (dag/err? r)
       r
       (let [out (:output (:data r))
-            field (fn [k]
-                    (second (re-find (re-pattern
-                                      (str "\"" k "\"\\s*:\\s*\"([^\"]+)\""))
-                                     out)))
-            head-branch (field "headRefName")
-            base-branch (field "baseRefName")
-            head-sha (field "headRefOid")
-            base-sha (field "baseRefOid")]
-        (if (and head-branch base-branch head-sha base-sha)
+            parsed (parse-gh-json out)
+            head-branch (:headRefName parsed)
+            base-branch (:baseRefName parsed)
+            head-sha (:headRefOid parsed)
+            base-sha (:baseRefOid parsed)]
+        (cond
+          (nil? parsed)
+          (dag/err :pr-info-invalid-json
+                   "Could not parse gh JSON output"
+                   {:gh-output out})
+
+          (and head-branch base-branch head-sha base-sha)
           (dag/ok {:pr/id        pr-number
                    :pr/branch    head-branch
                    :pr/base      base-branch
                    :pr/head-sha  head-sha
                    :pr/base-sha  base-sha})
+
+          :else
           (dag/err :pr-info-incomplete
-                   "Could not parse PR head/base from gh output"
-                   {:gh-output out}))))))
+                   "gh JSON missing one or more PR head/base fields"
+                   {:gh-output out
+                    :missing (cond-> []
+                               (not head-branch) (conj :headRefName)
+                               (not base-branch) (conj :baseRefName)
+                               (not head-sha)    (conj :headRefOid)
+                               (not base-sha)    (conj :baseRefOid))}))))))
+
+(defn- normalize-resolution-outcome
+  "conflict-resolution/resolve-pr-conflicts! can return:
+   - dag/ok on success;
+   - dag/err on infrastructure failure; or
+   - the bare `:dag-multi-parent-unresolvable` anomaly map (a
+     terminal failure of the resolution sub-workflow itself).
+
+   Bare anomaly maps break attempt-merge's implicit
+   dag/ok-or-dag/err contract — callers that branch on
+   dag/err?/dag/ok? would treat the anomaly as a generic blocked
+   merge and could retry indefinitely. Wrap the anomaly into a
+   dag/err with the distinct :code :conflict-unresolvable so the
+   controller / train monitor can transition the PR to :failed
+   instead of looping. The original anomaly is preserved under
+   :data :anomaly for diagnostic surfacing."
+  [outcome]
+  (if (and (map? outcome)
+           (contains? outcome :anomaly/category)
+           (not (dag/ok? outcome))
+           (not (dag/err? outcome)))
+    (dag/err :conflict-unresolvable
+             (or (:anomaly/message outcome)
+                 "Conflict resolution sub-workflow declared the merge unresolvable")
+             {:anomaly outcome})
+    outcome))
 
 (defn- attempt-conflict-resolution!
   "Spec §6.4 dispatch: when `branch-check` raw output classifies as
    :conflicting AND policy enables auto-resolve AND context carries
    `:resolve-fn`, run conflict-resolution/resolve-pr-conflicts! and
-   return its outcome. Otherwise return nil so the caller falls
-   back to the existing rebase/not-ready path.
+   return its outcome (normalized into dag/ok or dag/err — see
+   normalize-resolution-outcome). Otherwise return nil so the
+   caller falls back to the existing rebase/not-ready path.
 
    The resolve-fn comes from context (workflow side injects
    workflow.merge-resolution/resolve-conflict! at lifecycle ctor
@@ -317,11 +365,12 @@
       (let [pr-r (pr-info-from-gh worktree-path pr-number)]
         (if (dag/err? pr-r)
           pr-r
-          (conflict-resolution/resolve-pr-conflicts!
-           {:worktree-path worktree-path
-            :pr            (:data pr-r)
-            :resolve-fn    resolve-fn
-            :context       context}))))))
+          (normalize-resolution-outcome
+           (conflict-resolution/resolve-pr-conflicts!
+            {:worktree-path worktree-path
+             :pr            (:data pr-r)
+             :resolve-fn    resolve-fn
+             :context       context})))))))
 
 ;------------------------------------------------------------------------------ Layer 2
 ;; Merge orchestration

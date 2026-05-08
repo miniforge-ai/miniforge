@@ -76,21 +76,29 @@
                       (pr-lifecycle/create-event-bus))
         ;; Spec §6.4 hook: when the PR-lifecycle merge step finds a
         ;; CONFLICTING branch, dispatch into merge-resolution/
-        ;; resolve-conflict!. The auto-default agent-edit-fn uses the
-        ;; context's :llm-backend (matching dag_orchestrator's
-        ;; derive-resolution-overrides plumbing for the multi-parent
-        ;; merge case) so the same LLM-driven implementer resolves
-        ;; conflicts on both surfaces.
+        ;; resolve-conflict! with an LLM-driven agent-edit-fn.
+        ;;
+        ;; Only construct/inject :resolve-fn when context carries
+        ;; :llm-backend. Without a backend, merge-resolution would
+        ;; fall back to its no-op stub agent and deterministically
+        ;; return an unresolvable anomaly — the lifecycle would
+        ;; then attempt resolution every cycle for no benefit.
+        ;; Skipping injection lets the conflict-resolution dispatch
+        ;; decline cleanly and the existing rebase / not-ready path
+        ;; handles the PR. Callers that DO have a backend
+        ;; (workflow's dag-orchestrator path) get the auto-engage
+        ;; behaviour; callers that don't (e.g. phase-software-
+        ;; factory's pr_monitor) keep the existing semantics.
         llm-backend (:llm-backend context)
         logger      (:logger context)
-        agent-edit-fn (when llm-backend
-                        (merge-resolution/agent-driven-edit-fn
-                         (cond-> {:llm-backend llm-backend}
-                           logger (assoc :logger logger))))
-        resolve-fn (fn [opts]
-                     (merge-resolution/resolve-conflict!
-                      (cond-> opts
-                        agent-edit-fn (assoc :agent-edit-fn agent-edit-fn))))]
+        resolve-fn  (when llm-backend
+                      (let [agent-edit-fn
+                            (merge-resolution/agent-driven-edit-fn
+                             (cond-> {:llm-backend llm-backend}
+                               logger (assoc :logger logger)))]
+                        (fn [opts]
+                          (merge-resolution/resolve-conflict!
+                           (assoc opts :agent-edit-fn agent-edit-fn)))))]
     (->> pr-infos
          (map (fn [{:keys [pr-number task-id]}]
                 [pr-number
