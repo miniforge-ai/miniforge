@@ -24,6 +24,7 @@
    [clojure.string :as str]
    [ai.miniforge.cli.app-config :as app-config]
    [ai.miniforge.cli.main.display :as display]
+   [ai.miniforge.cli.main.commands.pr-review :as pr-review]
    [ai.miniforge.cli.messages :as messages]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -85,14 +86,72 @@
                     (display/print-error (messages/t :pr/list-failed {:error (:err result2)}))))))
             (display/print-error (messages/t :pr/query-failed {:error (:err result)}))))))))
 
+(defn- gh-pr-base-ref
+  "Resolve the base-branch ref for `pr-number` via the GitHub CLI.
+   Returns a remote-prefixed ref like \"origin/main\", or nil on failure."
+  [pr-number]
+  (let [r (sh! "gh" "pr" "view" (str pr-number)
+               "--json" "baseRefName" "--jq" ".baseRefName")]
+    (when (zero? (:exit r))
+      (let [base-name (str/trim (:out r))]
+        (when (seq base-name)
+          (str "origin/" base-name))))))
+
 (defn pr-review-cmd
+  "N13 §2.2 Standards Reviewer entry point.
+
+   Checks out the given PR URL, derives the base ref, and runs the
+   compliance-scanner in PR-scoped read-only mode. Prints rendered
+   review comments per N13 §2.3 to stdout. Does NOT post comments and
+   does NOT apply fixes.
+
+   Pass --repo <path> + --base <ref> to operate on an existing checkout
+   without using `gh` to fetch metadata; `--url <pr-url>` is the default
+   user-facing flow."
   [opts]
-  (let [{:keys [url]} opts]
-    (if-not url
-      (display/print-error (messages/t :pr/review-usage {:command (app-config/command-string "pr review <pr-url>")}))
-      (do
-        (display/print-info (messages/t :pr/reviewing {:url url}))
-        (println (messages/t :pr/review-todo))))))
+  (let [{:keys [url repo base]} opts]
+    (cond
+      ;; --repo + --base path: operate on existing checkout
+      (and repo base)
+      (pr-review/run-pr-review-by-path-cmd opts)
+
+      ;; URL path: parse, checkout, derive base, delegate
+      url
+      (let [parse-url (requiring-resolve 'ai.miniforge.pr-lifecycle.interface/parse-pr-url)
+            {:keys [number]} (parse-url url)]
+        (cond
+          (not number)
+          (display/print-error (messages/t :pr/respond-bad-url))
+
+          :else
+          (do
+            (display/print-info (messages/t :pr/reviewing {:url url}))
+            (let [base-ref (gh-pr-base-ref number)
+                  branch   (checkout-pr! number)]
+              (cond
+                (not branch)
+                (display/print-error (messages/t :pr/respond-checkout-failed))
+
+                (not base-ref)
+                (display/print-error
+                 (messages/t :pr/review-base-ref-failed))
+
+                :else
+                (let [cwd (System/getProperty "user.dir")]
+                  (display/print-info
+                   (messages/t :pr/respond-on-branch {:branch branch}))
+                  (pr-review/run-pr-review!
+                   cwd
+                   (cond-> {:base-ref base-ref}
+                     (:standards opts) (assoc :standards (:standards opts))
+                     (:pack opts)      (assoc :pack (:pack opts))
+                     (:rules opts)     (assoc :rules (:rules opts))
+                     (:out opts)       (assoc :out (keyword (:out opts)))))))))))
+
+      :else
+      (display/print-error
+       (messages/t :pr/review-usage
+                   {:command (app-config/command-string "pr review <pr-url>")})))))
 
 (defn pr-respond-cmd
   [opts]

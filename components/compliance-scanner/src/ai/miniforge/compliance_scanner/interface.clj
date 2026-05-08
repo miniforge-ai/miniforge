@@ -31,6 +31,7 @@
             [ai.miniforge.compliance-scanner.plan               :as plan]
             [ai.miniforge.compliance-scanner.report             :as report]
             [ai.miniforge.compliance-scanner.execute            :as execute]
+            [ai.miniforge.compliance-scanner.comments           :as comments]
             [ai.miniforge.compliance-scanner.exceptions-as-data :as exc-data]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -153,6 +154,87 @@
    Returns map with :prs (vector of per-rule results), :violations-fixed, :files-changed."
   [plan repo-path]
   (execute/execute! plan repo-path))
+
+;------------------------------------------------------------------------------ Layer 1
+;; PR-scoped review entry point (N13 §2.2)
+
+(def violation->comment
+  "Render a single classified Violation to a PR review comment per
+   N13 §2.3."
+  comments/violation->comment)
+
+(def violations->comments
+  "Render a vector of classified Violations to a vector of PR review
+   comment records per N13 §2.3."
+  comments/violations->comments)
+
+(def extract-comment-payload
+  "Recover the embedded `:comment/payload` map from a comment body.
+   Used by the Comment Response Agent to parse posted policy
+   violations."
+  comments/extract-payload)
+
+(defn pr-review
+  "PR-scoped read-only standards review per N13 §2.2.
+
+   Runs scan with `:since base-ref` (incremental + diff-analysis modes),
+   classifies the resulting violations, and renders them to the comment
+   record shape defined in N13 §2.3 — without applying any fixes.
+
+   Arguments:
+   - repo-path      - string path to repo root (a checkout of the PR's
+                      head SHA)
+   - standards-path - string path to .standards dir
+   - opts           - map with:
+       :base-ref     - REQUIRED. Git ref of the PR's base branch (e.g.,
+                       \"origin/main\"). Passed through to scan as :since.
+       :rules        - rule selector, default :all
+       :pack-info    - {:pack/id <string> :pack/version <string>}.
+                       Embedded in every rendered comment payload.
+                       Defaults to {:pack/id \"unknown\" :pack/version \"0.0.0\"}
+                       if not supplied — callers SHOULD provide real values.
+       :pack         - pre-compiled PackManifest (optional)
+
+   Returns:
+
+     {:pr-review/scan-result <ScanResult>
+      :pr-review/classified  <vector of classified Violations>
+      :pr-review/comments    <vector of comment records, ready to post>
+      :pr-review/summary     {:total <int>
+                              :auto-fixable <int>
+                              :needs-review <int>
+                              :files-affected <int>
+                              :rules-violated <int>}}
+
+   This function does NOT post comments and does NOT apply fixes. The
+   caller (a step workflow / CLI / janitor) consumes the
+   :pr-review/comments vector and posts via `connector-github` (or the
+   appropriate provider connector).
+
+   See N13 §2.2 — Standards Reviewer (reuse compliance-scanner)."
+  [repo-path standards-path
+   {:keys [base-ref rules pack pack-info]
+    :or   {rules :all}
+    :as   _opts}]
+  (when-not (and (string? base-ref) (seq base-ref))
+    (throw (ex-info "pr-review requires :base-ref (e.g., \"origin/main\")"
+                    {:opts _opts :anomaly :pr-review/missing-base-ref})))
+  (let [scan-opts    (cond-> {:rules rules :since base-ref}
+                       pack (assoc :pack pack))
+        scan-result  (scan repo-path standards-path scan-opts)
+        classified   (classify (:violations scan-result))
+        pi           (or pack-info {:pack/id "unknown" :pack/version "0.0.0"})
+        comment-recs (violations->comments classified pi)
+        total        (count classified)
+        auto-fix     (count (filter :auto-fixable? classified))]
+    {:pr-review/scan-result scan-result
+     :pr-review/classified  classified
+     :pr-review/comments    comment-recs
+     :pr-review/summary     {:total          total
+                             :auto-fixable   auto-fix
+                             :needs-review   (- total auto-fix)
+                             :files-affected (count (distinct (mapv :file classified)))
+                             :rules-violated (count (distinct (mapv :rule/id classified)))}}))
 
 ;------------------------------------------------------------------------------ Layer 2
 ;; Convenience orchestrator

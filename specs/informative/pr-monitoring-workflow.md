@@ -148,12 +148,18 @@ Handles comments on PRs from bots and humans.
 
 ### Bot Comment Handling
 
-| Bot        | Comment Pattern          | Action                           |
-| ---------- | ------------------------ | -------------------------------- |
-| Dependabot | Version update available | Evaluate and update if safe      |
-| CodeQL     | Security finding         | Assess severity, fix if critical |
-| Codecov    | Coverage decreased       | Add tests or justify             |
-| Renovate   | Dependency update        | Same as Dependabot               |
+| Bot                              | Comment Pattern                       | Action                                                                                                                 |
+| -------------------------------- | ------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| Dependabot                       | Version update available              | Evaluate and update if safe                                                                                            |
+| CodeQL                           | Security finding                      | Assess severity, fix if critical                                                                                       |
+| Codecov                          | Coverage decreased                    | Add tests or justify                                                                                                   |
+| Renovate                         | Dependency update                     | Same as Dependabot                                                                                                     |
+| `miniforge-policy-evaluator[bot]` | Embedded `:comment/payload` EDN block | Apply `:violation/suggested-fix` if present; else dispatch a fix sub-task scoped to the rule-id and file. Per N13 §2.5. |
+
+When the embedded `:comment/payload` block reports
+`:violation/auto-fixable? false`, the agent MUST escalate to an N11
+attention item rather than attempt a fix. See N13 §2.6 for convergence
+and oscillation termination rules.
 
 ### Human Comment Handling
 
@@ -199,6 +205,85 @@ The workflow has a budget for CI fix attempts:
 ```
 
 If budget exhausted → signal for human intervention.
+
+---
+
+## Component: Plan-Driven Context Cache (per N13 §2.4)
+
+Each janitor agent invoked by this workflow (Comment Response, Conflict
+Resolution, CI Failure Handler) receives its working context through the
+Miniforge planner→cache pattern, not from a snapshot of the authoring
+agent's session.
+
+### Flow
+
+```text
+janitor task arrives
+        │
+        ▼
+  reviewer-planner   (variant of planner.edn for the janitor's task scope)
+        │           emits :task/exclusive-files via the standard plan shape
+        ▼
+  cache loader       (writes context-cache.edn to the run's artifact dir)
+        │
+        ▼
+  janitor agent      (queries via mcp-context-server: context_read / _grep / _glob)
+```
+
+### Reuse contract
+
+- Reviewer-planner runs MUST emit a Plan (existing
+  `components/agent/planner` shape) with `:task/exclusive-files` populated.
+- The cache loader uses the existing
+  `bases/mcp-context-server/.../context-cache.clj` `load-cache!` path —
+  no new loader code.
+- The cache MUST be reused across janitor invocations within a single PR
+  HEAD SHA; cache rebuild MUST occur when the SHA advances.
+
+### Elision
+
+When the PR diff is below a configurable size threshold (default: 200
+lines changed), the reviewer-planner step MAY be elided and the cache
+loaded directly from the diff's file set.
+
+---
+
+## Component: Resume Signal Dispatcher (per N13 §2.7)
+
+Closes the loop on the operator side: agents waiting for a PR to merge
+receive a structured resume primer instead of operator-typed
+`merged` confirmations.
+
+### Listener registry
+
+Mapping `PR-URL → [{:agent/id, :session/id, :runtime, :resume-channel}]`.
+Listener registration occurs when an agent declares dependency on a PR's
+merge — typically at PR creation by the authoring agent or at operator
+binding time via the N11 Native Control Console.
+
+See `specs/informative/n13-listener-registry.md` for the canonical schema
+and lifecycle.
+
+### Trigger and dispatch
+
+On `pull_request.closed.merged` for a PR with registered listeners:
+
+1. Emit `:pipeline/pr-merged` event (per N13 §5).
+2. For each listener, prepare a resume primer:
+
+   ```clojure
+   {:resume/pr-url      "https://..."
+    :resume/merge-sha   "abc1234"
+    :resume/merged-at   #inst "..."
+    :resume/diff-summary "<short summary of what merged>"
+    :resume/listener    {:agent/id ... :session/id ...}}
+   ```
+
+3. Dispatch via the listener's declared `:resume-channel`:
+   - `:pty` — inject as structured input into the Drive console PTY.
+   - `:miniforge-ipc` — emit as an event the agent's runtime subscribes
+     to.
+   - `:webhook` — POST to a registered URL (for external runtimes).
 
 ---
 
