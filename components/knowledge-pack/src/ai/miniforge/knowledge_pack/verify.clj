@@ -49,7 +49,17 @@
    [ai.miniforge.knowledge-pack.pack :as pack]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Per-ref verification.
+;; Discrepancy factory + per-ref verification.
+
+(defn- discrepancy
+  "Pure factory: build a discrepancy map. `extras` is an optional
+   map merged onto the `{:reason :detail}` base; per-ref callers
+   pass `{:ref ref :stored-digest ...}` and manifest-level callers
+   pass the stamped-vs-computed values an operator needs to triage."
+  ([reason detail]
+   {:reason reason :detail detail})
+  ([reason detail extras]
+   (merge {:reason reason :detail detail} extras)))
 
 (defn- verify-ref
   "Pure: compare a single `:pack/zettels` entry against what the
@@ -59,25 +69,24 @@
   (let [stored (lookup-fn id revision-id)]
     (cond
       (nil? stored)
-      {:ref ref
-       :reason :zettel-not-found
-       :detail "lookup returned nil for (zettel-id, revision-id)"}
+      (discrepancy :zettel-not-found
+                   "lookup returned nil for (zettel-id, revision-id)"
+                   {:ref ref})
 
       (not= digest (:zettel/digest stored))
-      {:ref ref
-       :reason :digest-mismatch
-       :detail "stored zettel's :zettel/digest differs — content was rewritten without rotating the revision-id"
-       :stored-digest (:zettel/digest stored)}
+      (discrepancy :digest-mismatch
+                   "stored zettel's :zettel/digest differs — content was rewritten without rotating the revision-id"
+                   {:ref ref :stored-digest (:zettel/digest stored)})
 
       (not= id (:zettel/id stored))
-      {:ref ref
-       :reason :id-mismatch
-       :detail "lookup returned a zettel with a different :zettel/id (lookup-fn invariant violation)"}
+      (discrepancy :id-mismatch
+                   "lookup returned a zettel with a different :zettel/id (lookup-fn invariant violation)"
+                   {:ref ref})
 
       (not= revision-id (:zettel/revision-id stored))
-      {:ref ref
-       :reason :revision-id-mismatch
-       :detail "lookup returned a zettel with a different :zettel/revision-id (lookup-fn invariant violation)"})))
+      (discrepancy :revision-id-mismatch
+                   "lookup returned a zettel with a different :zettel/revision-id (lookup-fn invariant violation)"
+                   {:ref ref}))))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Manifest-level verification.
@@ -103,24 +112,24 @@
                          (pack/revision-id-from-digest recomputed))]
     (cond
       (nil? stamped-digest)
-      {:reason :pack/digest-missing
-       :detail "pack manifest carries no :pack/digest — was it built via knowledge-pack/build-pack?"}
+      (discrepancy :pack/digest-missing
+                   "pack manifest carries no :pack/digest — was it built via knowledge-pack/build-pack?")
 
       (not= stamped-digest recomputed)
-      {:reason :pack/digest-mismatch
-       :detail "manifest body was edited without going through update-pack"
-       :stamped-digest stamped-digest
-       :recomputed-digest recomputed}
+      (discrepancy :pack/digest-mismatch
+                   "manifest body was edited without going through update-pack"
+                   {:stamped-digest    stamped-digest
+                    :recomputed-digest recomputed})
 
       (nil? stamped-rev)
-      {:reason :pack/revision-id-missing
-       :detail "pack manifest carries :pack/digest but no :pack/revision-id — partial stamping should never happen via the constructors"}
+      (discrepancy :pack/revision-id-missing
+                   "pack manifest carries :pack/digest but no :pack/revision-id — partial stamping should never happen via the constructors")
 
       (not= stamped-rev derived-rev)
-      {:reason :pack/revision-id-mismatch
-       :detail "manifest's :pack/revision-id does not match the UUID derived from :pack/digest — someone forged one without the other"
-       :stamped-revision-id stamped-rev
-       :derived-revision-id derived-rev})))
+      (discrepancy :pack/revision-id-mismatch
+                   "manifest's :pack/revision-id does not match the UUID derived from :pack/digest — someone forged one without the other"
+                   {:stamped-revision-id stamped-rev
+                    :derived-revision-id derived-rev}))))
 
 (defn verify-pack
   "Verify a pack against a zettel store.
