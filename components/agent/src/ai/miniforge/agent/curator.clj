@@ -198,11 +198,21 @@
          :code/files)))
 
 (defn- files-via-local-snapshot
-  "Collect files via local git status (non-capsule fallback)."
+  "Collect files via local git status (non-capsule fallback).
+
+   When `pre-session-snapshot` is missing (the implementer threw before
+   propagating it — e.g. supervisor termination in the middle of a stream),
+   fall back to an empty snapshot. Task worktrees start clean, so 'every
+   dirty file is implementer work' is the right interpretation. Without
+   this fallback, the curator emits :curator/no-files-written even when
+   the implementer wrote substantive files before the throw — observed
+   in the 2026-05-08 dogfood (Run 7 produced 285 LOC that the curator
+   rejected because the snapshot path short-circuited)."
   [{:keys [pre-session-snapshot worktree-path]}]
-  (when (and pre-session-snapshot worktree-path)
+  (when worktree-path
     (get (file-artifacts/collect-written-files
-          pre-session-snapshot worktree-path)
+          (or pre-session-snapshot (file-artifacts/empty-snapshot))
+          worktree-path)
          :code/files)))
 
 (def non-substantive-paths
