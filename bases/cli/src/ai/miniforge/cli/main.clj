@@ -598,7 +598,9 @@
            :standards {:default ".standards"}
            :pack      {:alias :p}
            :rules     {:alias :r}
-           :out       {:default "table"}}}
+           :out       {:default "table"}
+           :post      {:coerce :boolean}
+           :pr-number {:coerce :long}}}
    {:cmds ["pr" "respond"] :fn pr-respond-cmd :args->opts [:url]}
    {:cmds ["pr" "merge"]   :fn pr-merge-cmd   :args->opts [:url]}
    {:cmds ["pr" "monitor"] :fn pr-monitor-cmd :spec {:author {:alias :a}

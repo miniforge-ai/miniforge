@@ -146,7 +146,8 @@
                      (:standards opts) (assoc :standards (:standards opts))
                      (:pack opts)      (assoc :pack (:pack opts))
                      (:rules opts)     (assoc :rules (:rules opts))
-                     (:out opts)       (assoc :out (keyword (:out opts)))))))))))
+                     (:out opts)       (assoc :out (keyword (:out opts)))
+                     (:post opts)      (assoc :post? true :pr-number number)))))))))
 
       :else
       (display/print-error

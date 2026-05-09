@@ -497,6 +497,10 @@
   :pr/review-unknown-out "pr-review: unknown --out format: {fmt}"
   :pr/review-failed "pr-review failed: {message}"
   :pr/review-summary "policy-review: {total} violations ({auto-fixable} auto-fixable, {needs-review} need review) across {files} files / {rules} rules"
+  :pr/review-posted "Posted review with {count} inline comment(s): {url}"
+  :pr/review-post-failed "pr-review post failed: [{code}] {message}"
+  :pr/review-post-skipped-empty "No violations to post — skipping review post."
+  :pr/review-post-pr-required "pr-review --post requires a PR number (use the URL flow or pass --pr-number)."
 
   ;; PR Monitor
   :pr/monitor-starting "Starting PR monitor for author: {author}"

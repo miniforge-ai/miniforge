@@ -221,6 +221,89 @@
                    {:thread-id thread-id :thread thread})))
       result)))
 
+;------------------------------------------------------------------------------ Layer 1.5
+;; Batched review posting (N13 §2.2 Standards Reviewer)
+
+(defn- run-gh-with-stdin
+  "Run a `gh` command piping `stdin-body` over stdin. Returns the
+   same DAG-shaped result as `run-gh-command`. Used for `gh api ...
+   --input -` invocations where the JSON body is too large or too
+   nested to fit `-f`/`-F` field-pair encoding."
+  [args worktree-path stdin-body]
+  (try
+    (let [result (apply process/shell
+                        {:dir (str worktree-path)
+                         :in stdin-body
+                         :out :string
+                         :err :string
+                         :continue true}
+                        args)]
+      (if (zero? (:exit result))
+        (dag/ok {:output (str/trim (:out result ""))})
+        (dag/err :gh-command-failed
+                 (str/trim (:err result ""))
+                 {:exit-code (:exit result)
+                  :command args})))
+    (catch Exception e
+      (dag/err :gh-exception (.getMessage e)))))
+
+(defn- review-comment->github-comment
+  "Translate one comment record from `compliance-scanner.comments`
+   (`{:comment/path :comment/line :comment/body ...}`) to the inline-
+   comment shape GitHub's create-review API expects."
+  [c]
+  (let [path (or (:comment/path c) (:path c))
+        line (or (:comment/line c) (:line c))
+        body (or (:comment/body c) (:body c))]
+    {:path path
+     :line line
+     :side "RIGHT"
+     :body body}))
+
+(defn post-review!
+  "Post a single PR review batching multiple inline comments.
+
+   Uses the create-a-review REST endpoint
+   (`POST /repos/{owner}/{repo}/pulls/{pull_number}/reviews`) so all
+   violations land as one expandable review on the PR rather than as
+   N separate top-level comments. The review is posted with
+   `event: \"COMMENT\"` — non-blocking, no approval/changes-requested
+   semantics. The `{owner}/{repo}` template is resolved by `gh` from
+   the worktree's git remote.
+
+   Arguments:
+   - worktree-path: path to a checkout of the PR's repo (gh resolves
+                    `{owner}/{repo}` from this worktree's remote)
+   - pr-number:     pull request number
+   - body:          review summary string (markdown)
+   - comments:      vector of comment records. Either the renderer
+                    shape (`:comment/path`/`:comment/line`/`:comment/body`)
+                    or a flatter `{:path :line :body}` shape; both
+                    accepted.
+
+   Returns DAG result with `{:review-id :url :state}` on success or
+   typed error on failure."
+  [worktree-path pr-number body comments]
+  (let [payload   {:body     body
+                   :event    "COMMENT"
+                   :comments (mapv review-comment->github-comment comments)}
+        json-body (json/generate-string payload)
+        endpoint  (str "repos/{owner}/{repo}/pulls/" pr-number "/reviews")
+        result    (run-gh-with-stdin
+                   ["gh" "api" endpoint "-X" "POST" "--input" "-"]
+                   worktree-path
+                   json-body)]
+    (if (dag/ok? result)
+      (try
+        (let [parsed (json/parse-string (:output (:data result)) true)]
+          (dag/ok {:review-id (:id parsed)
+                   :url       (:html_url parsed)
+                   :state     (:state parsed)
+                   :comment-count (count (:comments payload))}))
+        (catch Exception e
+          (dag/err :json-parse-error (.getMessage e))))
+      result)))
+
 ;------------------------------------------------------------------------------ Layer 2
 ;; High-level conversation operations
 

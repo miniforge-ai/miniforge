@@ -35,7 +35,9 @@
    [clojure.pprint :as pprint]
    [ai.miniforge.cli.main.display :as display]
    [ai.miniforge.cli.messages :as messages]
-   [ai.miniforge.compliance-scanner.interface :as scanner]))
+   [ai.miniforge.compliance-scanner.interface :as scanner]
+   [ai.miniforge.dag-executor.interface :as dag]
+   [ai.miniforge.pr-lifecycle.interface :as pr-lifecycle]))
 
 (def ^:private default-standards-path ".standards")
 
@@ -132,6 +134,44 @@
   [comments]
   (println (json/generate-string comments {:key-fn name})))
 
+(defn- review-summary-body
+  "Build the markdown body for the posted PR review from the
+   pr-review result's summary."
+  [{:pr-review/keys [summary]}]
+  (messages/t :pr/review-summary
+              {:total        (:total summary)
+               :auto-fixable (:auto-fixable summary)
+               :needs-review (:needs-review summary)
+               :files        (:files-affected summary)
+               :rules        (:rules-violated summary)}))
+
+(defn- maybe-post-review!
+  "When the operator opted in via `--post`, batch-post the rendered
+   comments to the PR via `pr-lifecycle.interface/post-review!`. Skips
+   silently when there are zero comments to post."
+  [repo-path pr-number result]
+  (let [comments (:pr-review/comments result)]
+    (cond
+      (not (pos? (count comments)))
+      (display/print-info (messages/t :pr/review-post-skipped-empty))
+
+      (not (pos-int? pr-number))
+      (display/print-error
+       (messages/t :pr/review-post-pr-required))
+
+      :else
+      (let [body (review-summary-body result)
+            r    (pr-lifecycle/post-review! repo-path pr-number body comments)]
+        (if (dag/ok? r)
+          (display/print-info
+           (messages/t :pr/review-posted
+                       {:count (:comment-count (:data r))
+                        :url   (:url (:data r))}))
+          (display/print-error
+           (messages/t :pr/review-post-failed
+                       {:code    (str (get-in r [:error :code]))
+                        :message (get-in r [:error :message])})))))))
+
 (defn run-pr-review!
   "Run a PR-scoped standards review against an existing repo checkout.
 
@@ -146,13 +186,19 @@
        :pack       - pack name or path (optional)
        :rules      - rule selector string or keyword (default :all)
        :out        - :table | :edn | :json (default :table)
+       :post?      - when truthy, batch-post the rendered comments to
+                     the PR as a single review (event=COMMENT). Requires
+                     :pr-number.
+       :pr-number  - integer PR number, required when :post? is truthy.
 
    Side effects:
    - Prints summary + comments to stdout in the requested format.
+   - When :post? is set: posts a single review batching all comments
+     via `pr-lifecycle.interface/post-review!`.
 
    Returns the pr-review result map (per scanner/pr-review)."
   [repo-path
-   {:keys [base-ref standards pack rules out]
+   {:keys [base-ref standards pack rules out post? pr-number]
     :or   {standards default-standards-path
            rules     :all
            out       :table}}]
@@ -175,6 +221,8 @@
       :table (emit-table (:pr-review/comments result))
       (display/print-error
        (messages/t :pr/review-unknown-out {:fmt (name out)})))
+    (when post?
+      (maybe-post-review! repo-path pr-number result))
     result))
 
 (defn run-pr-review-by-path-cmd
@@ -208,7 +256,13 @@
                           (:standards opts) (assoc :standards (:standards opts))
                           (:pack opts)      (assoc :pack (:pack opts))
                           (:rules opts)     (assoc :rules (:rules opts))
-                          (:out opts)       (assoc :out (keyword (:out opts)))))
+                          (:out opts)       (assoc :out (keyword (:out opts)))
+                          (:post opts)      (assoc :post? true)
+                          (:pr-number opts) (assoc :pr-number
+                                                   (cond
+                                                     (integer? (:pr-number opts)) (:pr-number opts)
+                                                     :else (try (Long/parseLong (str (:pr-number opts)))
+                                                                (catch Exception _ nil))))))
         (catch Exception e
           (display/print-error
            (messages/t :pr/review-failed {:message (ex-message e)})))))))
