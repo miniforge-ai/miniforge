@@ -77,7 +77,12 @@
     (keyword? binding) (get chain-input binding)))
 
 (defn resolve-bindings
-  "Resolve all input bindings for a step."
+  "Resolve all input bindings for a step.
+
+   Bindings that resolve to nil are omitted from the returned map
+   instead of being materialized as present-with-nil keys. This
+   preserves the semantic difference between an absent optional input
+   and an explicit nil value."
   [input-bindings prev-output chain-input]
   (reduce-kv
     (fn [acc k binding]
