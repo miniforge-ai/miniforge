@@ -501,6 +501,7 @@
   :pr/review-post-failed "pr-review post failed: [{code}] {message}"
   :pr/review-post-skipped-empty "No violations to post — skipping review post."
   :pr/review-post-pr-required "pr-review --post requires a PR number (use the URL flow or pass --pr-number)."
+  :pr/review-post-commit-id-required "pr-review --post requires a PR head SHA. The URL flow derives it from the worktree HEAD after `gh pr checkout` — pass --commit-id explicitly if calling the by-path flow on a worktree that isn't at the PR head."
 
   ;; PR Monitor
   :pr/monitor-starting "Starting PR monitor for author: {author}"

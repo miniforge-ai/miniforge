@@ -40,6 +40,8 @@
    {:id 999001 :html_url "https://github.com/o/r/pull/42#pullrequestreview-999001"
     :state "COMMENTED"}))
 
+(def ^:private fixture-sha "deadbeefcafef00ddeadbeefcafef00ddeadbeef")
+
 (def ^:private comment-renderer-shape
   [{:comment/author "miniforge-policy-evaluator[bot]"
     :comment/path   "components/agent/src/foo.clj"
@@ -61,7 +63,7 @@
           stub  (capture-shell calls
                                {:exit 0 :out fake-review-success :err ""})]
       (with-redefs [process/shell stub]
-        (let [_ (github/post-review! "/some/repo" 42 "summary" comment-renderer-shape)
+        (let [_ (github/post-review! "/some/repo" 42 fixture-sha "summary" comment-renderer-shape)
               call (first @calls)]
           (is (= 1 (count @calls)))
           (is (= ["gh" "api"
@@ -75,16 +77,18 @@
               "exit codes returned, not thrown"))))))
 
 (deftest post-review-translates-renderer-shape-to-github-comments
-  (testing "stdin JSON has comments[] with path/line/side/body keys per render record"
+  (testing "stdin JSON has comments[] with path/line/side/body keys per render record + commit_id"
     (let [calls (atom [])
           stub  (capture-shell calls
                                {:exit 0 :out fake-review-success :err ""})]
       (with-redefs [process/shell stub]
-        (github/post-review! "/some/repo" 42 "summary" comment-renderer-shape))
+        (github/post-review! "/some/repo" 42 fixture-sha "summary" comment-renderer-shape))
       (let [stdin (get-in (first @calls) [:opts :in])
             payload (json/parse-string stdin true)]
         (is (= "summary" (:body payload)))
         (is (= "COMMENT" (:event payload)))
+        (is (= fixture-sha (:commit_id payload))
+            "commit_id (PR head SHA) MUST be present — GitHub 422s without it on inline comments[]")
         (is (= 2 (count (:comments payload))))
         (is (= {:path "components/agent/src/foo.clj"
                 :line 42
@@ -92,13 +96,26 @@
                 :body (-> comment-renderer-shape first :comment/body)}
                (first (:comments payload))))))))
 
+(deftest post-review-rejects-missing-commit-id
+  (testing "missing/blank commit-id short-circuits with :missing-commit-id, never shells out"
+    (let [calls (atom [])
+          stub  (capture-shell calls {:exit 0 :out "" :err ""})]
+      (doseq [bad [nil "" "   "]]
+        (with-redefs [process/shell stub]
+          (let [r (github/post-review! "/some/repo" 42 bad "summary" comment-renderer-shape)]
+            (is (not (dag/ok? r)))
+            (is (= :missing-commit-id (get-in r [:error :code]))
+                (str "input was " (pr-str bad))))))
+      (is (zero? (count @calls))
+          "no shell invocation when commit-id missing — fail fast"))))
+
 (deftest post-review-accepts-flat-shape-too
   (testing "{:path :line :body} also flows through unchanged"
     (let [calls (atom [])
           stub  (capture-shell calls
                                {:exit 0 :out fake-review-success :err ""})]
       (with-redefs [process/shell stub]
-        (github/post-review! "/some/repo" 42 "summary" flat-shape))
+        (github/post-review! "/some/repo" 42 fixture-sha "summary" flat-shape))
       (let [stdin (get-in (first @calls) [:opts :in])
             payload (json/parse-string stdin true)]
         (is (= 1 (count (:comments payload))))
@@ -111,7 +128,7 @@
           stub  (capture-shell calls
                                {:exit 0 :out fake-review-success :err ""})]
       (with-redefs [process/shell stub]
-        (let [r (github/post-review! "/some/repo" 42 "summary" comment-renderer-shape)]
+        (let [r (github/post-review! "/some/repo" 42 fixture-sha "summary" comment-renderer-shape)]
           (is (dag/ok? r))
           (is (= 999001 (-> r :data :review-id)))
           (is (= "COMMENTED" (-> r :data :state)))
@@ -124,7 +141,7 @@
           stub  (capture-shell calls
                                {:exit 1 :out "" :err "HTTP 422: Unprocessable Entity"})]
       (with-redefs [process/shell stub]
-        (let [r (github/post-review! "/some/repo" 42 "summary" comment-renderer-shape)]
+        (let [r (github/post-review! "/some/repo" 42 fixture-sha "summary" comment-renderer-shape)]
           (is (not (dag/ok? r)))
           (is (= :gh-command-failed (get-in r [:error :code])))
           (is (re-find #"422" (get-in r [:error :message])))
@@ -134,6 +151,6 @@
   (testing "process/shell throwing yields :gh-exception"
     (let [stub (fn [& _] (throw (ex-info "boom" {})))]
       (with-redefs [process/shell stub]
-        (let [r (github/post-review! "/some/repo" 42 "summary" comment-renderer-shape)]
+        (let [r (github/post-review! "/some/repo" 42 fixture-sha "summary" comment-renderer-shape)]
           (is (not (dag/ok? r)))
           (is (= :gh-exception (get-in r [:error :code]))))))))

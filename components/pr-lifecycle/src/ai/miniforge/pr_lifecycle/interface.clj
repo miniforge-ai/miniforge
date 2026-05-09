@@ -314,6 +314,12 @@
      ; => {:success true :data {:reply-posted true :resolved true :thread-id \"PRRT_...\"}}"
   github/link-fix-pr-to-comment)
 
+(def git-head-sha
+  "Return the full HEAD SHA of `worktree-path`, or nil. Convenience
+   helper for callers of `post-review!` that need a `commit-id` after
+   a `gh pr checkout`."
+  github/git-head-sha)
+
 (def post-review!
   "Post a single PR review batching multiple inline comments
    (N13 §2.2 Standards Reviewer end-cap).
@@ -327,6 +333,10 @@
    Arguments:
    - worktree-path: path to a checkout of the PR's repo
    - pr-number:     pull request number
+   - commit-id:     full SHA of the PR's head commit. REQUIRED — the
+                    create-review API returns 422 on inline
+                    `comments[]` payloads without it. Use
+                    `git-head-sha` after a `gh pr checkout`.
    - body:          review summary string (markdown)
    - comments:      vector of comment records — accepts either the
                     `compliance-scanner.comments` shape
@@ -337,11 +347,12 @@
    on success or typed error on failure.
 
    Example:
-     (post-review! \"/path/to/repo\" 808 \"Standards review (3 findings)\"
-                   [{:comment/path \"src/foo.clj\"
-                     :comment/line 42
-                     :comment/body \"...payload edn block...\"}])
-     ; => {:success true :data {:review-id ... :url \"https://...\" ...}}"
+     (let [sha (git-head-sha \"/path/to/repo\")]
+       (post-review! \"/path/to/repo\" 808 sha \"Standards review (3 findings)\"
+                     [{:comment/path \"src/foo.clj\"
+                       :comment/line 42
+                       :comment/body \"...payload edn block...\"}]))
+     ; => {:ok? true :data {:review-id ... :url \"https://...\" ...}}"
   github/post-review!)
 
 ;------------------------------------------------------------------------------ Layer 3

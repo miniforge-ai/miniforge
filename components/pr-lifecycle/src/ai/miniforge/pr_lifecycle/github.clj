@@ -260,6 +260,22 @@
      :side "RIGHT"
      :body body}))
 
+(defn git-head-sha
+  "Return the full HEAD SHA of `worktree-path`, or nil if `git
+   rev-parse` fails. Used to populate `commit_id` for the create-review
+   API, which 422s on inline `comments[]` payloads without it."
+  [worktree-path]
+  (try
+    (let [r (process/shell {:dir (str worktree-path)
+                            :out :string
+                            :err :string
+                            :continue true}
+                           "git" "rev-parse" "HEAD")]
+      (when (zero? (:exit r))
+        (let [sha (str/trim (:out r ""))]
+          (when (seq sha) sha))))
+    (catch Throwable _ nil)))
+
 (defn post-review!
   "Post a single PR review batching multiple inline comments.
 
@@ -275,34 +291,44 @@
    - worktree-path: path to a checkout of the PR's repo (gh resolves
                     `{owner}/{repo}` from this worktree's remote)
    - pr-number:     pull request number
+   - commit-id:     full SHA of the PR's head commit. REQUIRED — the
+                    create-review API returns 422 on inline
+                    `comments[]` payloads without it. Callers can use
+                    `(git-head-sha worktree-path)` after a
+                    `gh pr checkout` to derive this.
    - body:          review summary string (markdown)
    - comments:      vector of comment records. Either the renderer
                     shape (`:comment/path`/`:comment/line`/`:comment/body`)
                     or a flatter `{:path :line :body}` shape; both
                     accepted.
 
-   Returns DAG result with `{:review-id :url :state}` on success or
-   typed error on failure."
-  [worktree-path pr-number body comments]
-  (let [payload   {:body     body
-                   :event    "COMMENT"
-                   :comments (mapv review-comment->github-comment comments)}
-        json-body (json/generate-string payload)
-        endpoint  (str "repos/{owner}/{repo}/pulls/" pr-number "/reviews")
-        result    (run-gh-with-stdin
-                   ["gh" "api" endpoint "-X" "POST" "--input" "-"]
-                   worktree-path
-                   json-body)]
-    (if (dag/ok? result)
-      (try
-        (let [parsed (json/parse-string (:output (:data result)) true)]
-          (dag/ok {:review-id (:id parsed)
-                   :url       (:html_url parsed)
-                   :state     (:state parsed)
-                   :comment-count (count (:comments payload))}))
-        (catch Exception e
-          (dag/err :json-parse-error (.getMessage e))))
-      result)))
+   Returns DAG result with `{:review-id :url :state :comment-count}`
+   on success or typed error on failure."
+  [worktree-path pr-number commit-id body comments]
+  (if (or (nil? commit-id) (and (string? commit-id) (str/blank? commit-id)))
+    (dag/err :missing-commit-id
+             "post-review! requires a non-blank commit-id (PR head SHA)"
+             {:pr-number pr-number})
+    (let [payload   {:body      body
+                     :event     "COMMENT"
+                     :commit_id commit-id
+                     :comments  (mapv review-comment->github-comment comments)}
+          json-body (json/generate-string payload)
+          endpoint  (str "repos/{owner}/{repo}/pulls/" pr-number "/reviews")
+          result    (run-gh-with-stdin
+                     ["gh" "api" endpoint "-X" "POST" "--input" "-"]
+                     worktree-path
+                     json-body)]
+      (if (dag/ok? result)
+        (try
+          (let [parsed (json/parse-string (:output (:data result)) true)]
+            (dag/ok {:review-id (:id parsed)
+                     :url       (:html_url parsed)
+                     :state     (:state parsed)
+                     :comment-count (count (:comments payload))}))
+          (catch Exception e
+            (dag/err :json-parse-error (.getMessage e))))
+        result))))
 
 ;------------------------------------------------------------------------------ Layer 2
 ;; High-level conversation operations
