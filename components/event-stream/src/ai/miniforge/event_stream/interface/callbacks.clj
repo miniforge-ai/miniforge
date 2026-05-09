@@ -47,6 +47,12 @@
      :tool-call-id — provider-supplied id when available
      :tool-args-preview — bounded args digest when the parser can safely
                           expose it
+     :tool-result — boolean, true when the LLM streamed a tool-result
+                    block (outcome of a prior tool-use). Treated as a
+                    pure liveness signal here — supervisors/detectors
+                    consume it via the stream accumulator, not via this
+                    streaming callback. Suppressed so it doesn't publish
+                    an empty :agent/chunk.
      :heartbeat   — keepalive, ignored for diagnostic emission
 
    For tool-use events emits BOTH:
@@ -58,7 +64,7 @@
                           migration."
   [stream-atom workflow-id agent-id & [opts]]
   (let [{:keys [print? quiet?]} opts]
-    (fn [{:keys [delta done? tool-use heartbeat
+    (fn [{:keys [delta done? tool-use tool-result heartbeat
                  tool-name tool-names tool-call-id tool-args-preview]}]
       (cond
         tool-use
@@ -81,6 +87,12 @@
               (events/agent-status stream-atom workflow-id agent-id
                                    :tool-calling
                                    (messages/t :stream/agent-calling-tool)))))
+
+        ;; Tool-result chunks are liveness signals (no delta payload).
+        ;; Suppressed here — without this branch the :else clause would
+        ;; publish an empty :agent/chunk for every tool round-trip.
+        tool-result
+        nil
 
         heartbeat
         nil

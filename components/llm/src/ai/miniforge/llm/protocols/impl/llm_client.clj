@@ -174,7 +174,10 @@
                 tool-blocks (keep (fn [block]
                                     (when (= "tool_use" (:type block)) block))
                                   content-blocks)
-                tool-names (map :name tool-blocks)
+                ;; `keep :name` (not `map :name`) drops blocks without a
+                ;; :name field so `(seq tool-names)` only goes truthy when
+                ;; the assistant turn actually has named tool calls.
+                tool-names (keep :name tool-blocks)
                 text (str/join text-blocks)
                 ;; Claude surfaces stop_reason on each assistant message.
                 ;; Values: "end_turn" | "max_tokens" | "stop_sequence" |
@@ -227,12 +230,15 @@
           ;; the CLI when tool output is fed back to the model. Surface a
           ;; :tool-result chunk so downstream subscribers can observe both
           ;; the invocation (:tool-use) and the outcome (:tool-result).
+          ;; "user" frames without tool_result (e.g. plain echo) fall
+          ;; through to a heartbeat — same shape the case-default would
+          ;; have produced before "user" was a recognised type.
           "user"
           (let [content-blocks (get-in data [:message :content])
                 tool-result-blocks (when (sequential? content-blocks)
                                      (filter (fn [b] (= "tool_result" (:type b)))
                                              content-blocks))]
-            (when (seq tool-result-blocks)
+            (if (seq tool-result-blocks)
               (let [block       (first tool-result-blocks)
                     raw-content (:content block)
                     tool-output (cond
@@ -250,7 +256,8 @@
                  :tool-result  true
                  :tool-call-id (:tool_use_id block)
                  :tool-output  tool-output
-                 :tool-error?  (boolean (:is_error block))})))
+                 :tool-error?  (boolean (:is_error block))})
+              {:delta "" :done? false :heartbeat true}))
 
           ;; Tool use events — capture tool name for diagnostics
           "tool_use"
@@ -1105,11 +1112,11 @@
               (some->> (:tool-names parsed) seq sort (str/join ","))
               "unknown")))
 
-    ;; Tool-result events are liveness signals — record activity keyed on
-    ;; the call-id so the stagnation timer stays alive during tool round-trips.
+    ;; Tool-result events are liveness signals — use a stable activity
+    ;; key (not the call-id) so :unique-chunks stays bounded across long
+    ;; tool-heavy runs.
     (:tool-result parsed)
-    (pm/record-activity! progress-monitor
-                         (str "tool-result:" (or (:tool-call-id parsed) "unknown")))
+    (pm/record-activity! progress-monitor :tool-result)
 
     (:heartbeat parsed)
     (pm/record-activity! progress-monitor :stream-heartbeat)
