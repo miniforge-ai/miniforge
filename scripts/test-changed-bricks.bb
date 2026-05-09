@@ -74,18 +74,30 @@
 
    - `pipeline-pack-store`: native-backed store; reliable in isolation
      but can fail inside the large aggregate JVM.
+
    - `pr-sync` and `agent`: tests `with-redefs` `clojure.java.shell/sh`
-     to local mocks (e.g. `make-sh-router` returning
-     `{:err \"no route matched\"}` for unmatched calls; or
-     `{:err \"fatal: not a git repo\"}` in agent's
-     snapshot-working-dir tests). `with-redefs` mutates the var
-     globally for the duration of the body, and parallel bricks share
-     a single JVM, so the mocked `sh` bleeds into other bricks' real
-     git/gh subprocess calls (notably `workflow/merge-resolution-test`
-     which legitimately needs to run `git init`). Isolating these
-     bricks contains the mock to its own JVM so the redef can't leak.
-     The deeper fix is to mock through private wrappers instead of
-     vendor namespaces; isolation is a workaround until that lands."
+     to local mocks. `pr-sync`'s `make-sh-router` returns
+     `{:exit 1 :err \"no route matched\"}` for unmatched calls;
+     `agent`'s `snapshot-working-dir` tests inject
+     `{:err \"fatal: not a git repo\"}`. `with-redefs` mutates the
+     var root globally for the duration of the body, and parallel
+     bricks share a single JVM, so the mocked `sh` bleeds into other
+     bricks' real git/gh subprocess calls.
+
+     Effects observed when these bricks ran in pmap'd groups
+     alongside others: `workflow/merge-resolution-test` errored with
+     `git init -b main failed: no route matched`;
+     `agent/curator-merge-resolution-test` failed because
+     `scan-conflicted-paths`'s `(shell/sh \"git\" ... \"grep\" ...)`
+     hit the mock and the `(and r (= 1 (:exit r)))` cond branch
+     returned `#{}`, short-circuiting `or` past the file-walk
+     fallback so the curator reported `:resolution/markers-cleared?
+     true` even though the test wrote conflict markers.
+
+     Isolating these bricks contains the mock to its own JVM so the
+     redef can't leak. The deeper fix is to mock through private
+     wrappers instead of vendor namespaces; isolation is a
+     workaround until that lands."
   #{"pipeline-pack-store" "pr-sync" "agent"})
 
 (defn configured-isolated-bricks
