@@ -22,13 +22,34 @@
    live in runner-integration-test under project tests."
   (:require
    [clojure.java.io :as io]
-   [clojure.test :refer [deftest is testing]]
+   [clojure.test :refer [deftest is testing use-fixtures]]
    [ai.miniforge.event-stream.interface :as es]
+   [ai.miniforge.phase.interface :as phase]
+   [ai.miniforge.phase.loader :as loader]
    [ai.miniforge.supervisory-state.interface :as supervisory]
    [ai.miniforge.workflow.checkpoint-store :as checkpoint-store]
-   [ai.miniforge.workflow.runner :as runner]
    [ai.miniforge.workflow.context :as ctx]
-   [ai.miniforge.phase.interface]))
+   [ai.miniforge.workflow.phase-test-support :as phase-test-support]
+   [ai.miniforge.workflow.runner :as runner]))
+
+(def phase-test-config-resource
+  "config/phase/test-support-namespaces.edn")
+
+(use-fixtures :each
+  (fn [f]
+    (phase/reset-phase-loader!)
+    (with-redefs [loader/phase-loader-config-resource phase-test-config-resource]
+      (f))
+    (phase/reset-phase-loader!)))
+
+(def ^:private runner-test-plan
+  phase-test-support/runner-test-plan)
+
+(def ^:private runner-test-implement
+  phase-test-support/runner-test-implement)
+
+(def ^:private runner-test-done
+  phase-test-support/runner-test-done)
 
 (defn- with-temp-checkpoint-root
   [f]
@@ -76,9 +97,9 @@
 (deftest build-pipeline-simple-test
   (testing "build-pipeline creates interceptors from config"
     (let [workflow {:workflow/pipeline
-                    [{:phase :plan}
-                     {:phase :implement}
-                     {:phase :done}]}
+                    [{:phase runner-test-plan}
+                     {:phase runner-test-implement}
+                     {:phase runner-test-done}]}
           pipeline (runner/build-pipeline workflow)]
       (is (vector? pipeline))
       (is (= 3 (count pipeline)))
@@ -93,9 +114,9 @@
 (deftest build-pipeline-legacy-format-test
   (testing "build-pipeline handles legacy phase format"
     (let [workflow {:workflow/phases
-                    [{:phase/id :plan}
-                     {:phase/id :implement}
-                     {:phase/id :done}]}
+                    [{:phase/id runner-test-plan}
+                     {:phase/id runner-test-implement}
+                     {:phase/id runner-test-done}]}
           pipeline (runner/build-pipeline workflow)]
       (is (= 3 (count pipeline))))))
 
@@ -106,8 +127,8 @@
 (deftest validate-pipeline-valid-test
   (testing "validate-pipeline accepts valid workflow"
     (let [workflow {:workflow/pipeline
-                    [{:phase :plan}
-                     {:phase :done}]}
+                    [{:phase runner-test-plan}
+                     {:phase runner-test-done}]}
           result (runner/validate-pipeline workflow)]
       (is (:valid? result)))))
 
@@ -132,7 +153,7 @@
   (testing "run-pipeline completes with just :done phase"
     (let [workflow {:workflow/id :test
                     :workflow/version "1.0.0"
-                    :workflow/pipeline [{:phase :done}]}
+                    :workflow/pipeline [{:phase runner-test-done}]}
           result (runner/run-pipeline workflow {:task "Test"} {})]
       (is (= :completed (:execution/status result)))
       (is (number? (:execution/ended-at result))))))
@@ -141,7 +162,7 @@
   (testing "run-pipeline auto-attaches supervisory-state for event-stream callers"
     (let [workflow {:workflow/id :test
                     :workflow/version "1.0.0"
-                    :workflow/pipeline [{:phase :done}]}
+                    :workflow/pipeline [{:phase runner-test-done}]}
           stream (es/create-event-stream {:sinks []})]
       (is (false? (supervisory/attached? stream)))
       (let [result (runner/run-pipeline workflow {:task "Test"} {:event-stream stream})
@@ -155,7 +176,7 @@
     (fn [checkpoint-root]
       (let [workflow {:workflow/id :test
                       :workflow/version "1.0.0"
-                      :workflow/pipeline [{:phase :done}]}
+                      :workflow/pipeline [{:phase runner-test-done}]}
             result (runner/run-pipeline workflow {:task "Test"}
                                         {:checkpoint/root checkpoint-root})
             checkpoint-data (checkpoint-store/load-checkpoint-data
@@ -164,14 +185,14 @@
         (is (= :completed (:execution/status result)))
         (is (= (:execution/id result)
                (get-in checkpoint-data [:machine-snapshot :execution/id])))
-        (is (= [:done]
+        (is (= [runner-test-done]
                (get-in checkpoint-data [:manifest :workflow/phases-completed])))))))
 
 (deftest run-pipeline-callbacks-test
   (testing "run-pipeline invokes callbacks"
     (let [workflow {:workflow/id :test
                     :workflow/version "1.0.0"
-                    :workflow/pipeline [{:phase :done}]}
+                    :workflow/pipeline [{:phase runner-test-done}]}
           started (atom [])
           completed (atom [])
           result (runner/run-pipeline workflow {:task "Test"}
@@ -184,15 +205,15 @@
                                           (swap! completed conj
                                                  (get-in ic [:config :phase])))})]
       (is (= :completed (:execution/status result)))
-      (is (= [:done] @started))
-      (is (= [:done] @completed)))))
+      (is (= [runner-test-done] @started))
+      (is (= [runner-test-done] @completed)))))
 
 (deftest run-pipeline-max-phases-test
   (testing "run-pipeline completes a simple workflow within max-phases limit"
     ;; Use :done phase only since other phases require LLM infrastructure
     (let [workflow {:workflow/id :test
                     :workflow/version "1.0.0"
-                    :workflow/pipeline [{:phase :done}]}
+                    :workflow/pipeline [{:phase runner-test-done}]}
           result (runner/run-pipeline workflow {:task "Test"} {:max-phases 50})]
       (is (= :completed (:execution/status result))))))
 
@@ -200,7 +221,7 @@
   (testing "resume-machine-snapshot preserves the original execution id"
     (let [workflow {:workflow/id :test
                     :workflow/version "1.0.0"
-                    :workflow/pipeline [{:phase :done}]}
+                    :workflow/pipeline [{:phase runner-test-done}]}
           resume-ctx (ctx/create-context workflow {:task "Test"} {})
           result (runner/run-pipeline workflow
                                       {:task "Ignored"}
@@ -218,9 +239,9 @@
   (testing "phase results are recorded in execution context"
     (let [workflow {:workflow/id :test
                     :workflow/version "1.0.0"
-                    :workflow/pipeline [{:phase :done}]}
+                    :workflow/pipeline [{:phase runner-test-done}]}
           result (runner/run-pipeline workflow {:task "Test"} {})]
-      (is (contains? (:execution/phase-results result) :done)))))
+      (is (contains? (:execution/phase-results result) runner-test-done)))))
 
 ;; ============================================================================
 ;; Metrics accumulation tests
@@ -230,7 +251,7 @@
   (testing "metrics are accumulated across phases"
     (let [workflow {:workflow/id :test
                     :workflow/version "1.0.0"
-                    :workflow/pipeline [{:phase :done}]}
+                    :workflow/pipeline [{:phase runner-test-done}]}
           result (runner/run-pipeline workflow {:task "Test"} {})]
       (is (map? (:execution/metrics result)))
       (is (contains? (:execution/metrics result) :tokens)))))
@@ -264,7 +285,7 @@
   (testing "FSM state transitions on completion"
     (let [workflow {:workflow/id :test
                     :workflow/version "1.0.0"
-                    :workflow/pipeline [{:phase :done}]}
+                    :workflow/pipeline [{:phase runner-test-done}]}
           result (runner/run-pipeline workflow {:task "Test"} {})]
       (is (= :completed (:execution/status result)))
       (is (= :completed (:_state (:execution/fsm-state result))))))
@@ -284,8 +305,8 @@
     (let [;; Build a minimal context that looks like a completed pipeline
           fake-ctx {:execution/artifacts [{:type :file :path "out.txt"}]
                     :execution/phase-results {:plan {:phase/status :succeeded}
-                                              :done {:phase/status :succeeded}}
-                    :execution/current-phase :done
+                                              runner-test-done {:phase/status :succeeded}}
+                    :execution/current-phase runner-test-done
                     :execution/status :completed}
           ;; Call extract-output via its var (private fn)
           result (ai.miniforge.workflow.runner/extract-output fake-ctx)
@@ -293,7 +314,7 @@
       (is (some? output) ":execution/output should be present")
       (is (= [{:type :file :path "out.txt"}] (:artifacts output)))
       (is (= {:plan {:phase/status :succeeded}
-              :done {:phase/status :succeeded}}
+              runner-test-done {:phase/status :succeeded}}
              (:phase-results output)))
       (is (= {:phase/status :succeeded} (:last-phase-result output)))
       (is (= :completed (:status output))))))
@@ -302,7 +323,7 @@
   (testing "run-pipeline returns context with :execution/output populated"
     (let [workflow {:workflow/id :test
                     :workflow/version "1.0.0"
-                    :workflow/pipeline [{:phase :done}]}
+                    :workflow/pipeline [{:phase runner-test-done}]}
           result (runner/run-pipeline workflow {:task "Test"} {})]
       (is (= :completed (:execution/status result)))
       (is (some? (:execution/output result))
@@ -311,7 +332,7 @@
         (is (= :completed (:status output)))
         (is (vector? (:artifacts output)))
         (is (map? (:phase-results output)))
-        (is (contains? (:phase-results output) :done))
+        (is (contains? (:phase-results output) runner-test-done))
         (is (some? (:last-phase-result output)))))))
 
 (deftest context-initializes-output-nil-test
@@ -331,7 +352,7 @@
     (let [env-id (random-uuid)
           workflow {:workflow/id :test
                     :workflow/version "1.0.0"
-                    :workflow/pipeline [{:phase :done}]}
+                    :workflow/pipeline [{:phase runner-test-done}]}
           result (runner/run-pipeline workflow {:task "Test"}
                                        {:executor       ::stub-executor
                                         :environment-id env-id
@@ -350,7 +371,7 @@
         (fn []
           (let [workflow {:workflow/id :test
                           :workflow/version "1.0.0"
-                          :workflow/pipeline [{:phase :done}]}
+                          :workflow/pipeline [{:phase runner-test-done}]}
                 result (runner/run-pipeline workflow {:task "Test"} {})]
             (is (= :completed (:execution/status result)))
             (is (nil? (:execution/environment-id result)))

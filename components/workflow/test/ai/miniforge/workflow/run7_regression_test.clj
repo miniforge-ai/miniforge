@@ -25,9 +25,21 @@
    5. Review feedback lost during phase clearing (Run 9)"
   (:require
    [ai.miniforge.phase.interface :as phase]
-   [clojure.test :refer [deftest testing is]]
+   [ai.miniforge.phase.loader :as loader]
+   [clojure.test :refer [deftest testing is use-fixtures]]
+   [ai.miniforge.workflow.phase-test-support :as phase-test-support]
    [ai.miniforge.workflow.runner :as runner]
    [ai.miniforge.workflow.execution :as exec]))
+
+(def phase-test-config-resource
+  "config/phase/test-support-namespaces.edn")
+
+(use-fixtures :each
+  (fn [f]
+    (phase/reset-phase-loader!)
+    (with-redefs [loader/phase-loader-config-resource phase-test-config-resource]
+      (f))
+    (phase/reset-phase-loader!)))
 
 ;; ============================================================================
 ;; Fix 1: Duration-ms extraction in publish-phase-completed!
@@ -156,7 +168,8 @@
                      :execution/files-written []
                      :execution/metrics {:tokens 0 :duration-ms 0}}
           ;; Use the :done interceptor (simplest, no LLM needed)
-          interceptor (ai.miniforge.phase.interface/get-phase-interceptor {:phase :done})
+          interceptor (ai.miniforge.phase.interface/get-phase-interceptor
+                       {:phase phase-test-support/runner-test-done})
           ;; execute-phase-lifecycle should clear :phase first
           [ctx-after _result] (exec/execute-phase-lifecycle interceptor stale-ctx)]
       ;; The stale transition request should NOT be present.
