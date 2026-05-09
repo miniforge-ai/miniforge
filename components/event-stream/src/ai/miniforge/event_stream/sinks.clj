@@ -20,13 +20,23 @@
   "Configurable event sinks for different deployment scenarios.
 
    Supported sinks:
-   - :file   - Write to ~/.miniforge/events/<workflow-id>/<timestamp>-<uuid>.json (local dev)
+   - :file   - Write to ~/.miniforge/events/<workflow-id>/<filename>
+               (local dev). The filename grammar is conditional on the
+               envelope's :event/id:
+                 * Snowflake-encoded UUID (low 64 bits zero, BD-2b) →
+                   {event-id-hex16}__{workflow-seq-dec12}.transit.json,
+                   sortable lex by creation order across workflows;
+                 * any other UUID (no snowflake generator wired into the
+                   stream, or legacy files on disk) →
+                   {timestamp}-{uuid}.json, sortable by the ts prefix.
+               Both shapes coexist; the reader accepts either.
    - :stdout - Print to stdout (container/Docker/K8s)
    - :stderr - Print to stderr (error-only events)
    - :fleet  - Send to fleet command (org-level ops)
    - :multi  - Combine multiple sinks"
   (:require
    [ai.miniforge.config.interface :as config]
+   [ai.miniforge.event-stream.snowflake :as snowflake]
    [clojure.java.io :as io]
    [clojure.string :as str]
    [clojure.pprint :as pprint]
@@ -70,14 +80,41 @@
     (transit/write writer event)
     (.toString out "UTF-8")))
 
+(defn- snowflake-uuid?
+  "True when `id` is a UUID whose low 64 bits are zero — the shape that
+   `snowflake/long->uuid` produces. Random UUIDs collide on this with
+   probability ~1 in 2^64, which is negligible."
+  [id]
+  (and (uuid? id)
+       (zero? (.getLeastSignificantBits ^java.util.UUID id))))
+
+(defn- event-filename
+  "Pick a filename for `event`.
+
+   New (BD-2b): when `:event/id` is a snowflake UUID,
+     `{event-id-hex16}__{workflow-seq-dec12}.transit.json`
+   sorts lex-by-creation across all workflows on this host.
+
+   Legacy: `{timestamp}-{uuid}.json` for streams without a snowflake
+   generator. Sort-by-creation still works via the timestamp prefix."
+  [event]
+  (let [id (:event/id event)
+        seq-num (long (or (:event/sequence-number event) 0))]
+    (if (snowflake-uuid? id)
+      (str (snowflake/uuid->hex id)
+           "__"
+           (format "%012d" seq-num)
+           ".transit.json")
+      (str (now-sortable-str) "-" (or id (random-uuid)) ".json"))))
+
 (defn- new-event-file-path
-  "Return a java.io.File for a new event file in `parent-dir`.
-   The filename is {timestamp}-{uuid}.json, sortable by creation time.
-   Creates `parent-dir` if it does not already exist."
-  [parent-dir]
+  "Return a java.io.File for `event` inside `parent-dir`. Creates the
+   directory if needed. The filename is derived from the event itself
+   (BD-2b filename grammar — see `event-filename`)."
+  [parent-dir event]
   (let [dir (io/file parent-dir)]
     (.mkdirs dir)
-    (io/file dir (str (now-sortable-str) "-" (random-uuid) ".json"))))
+    (io/file dir (event-filename event))))
 
 (defn- ensure-parent-dir!
   [file-path]
@@ -87,30 +124,35 @@
 
 (defn event-file-path
   "Return a java.io.File for a new event file in the per-workflow subdirectory.
-   Creates the subdirectory if needed.
+   Creates the subdirectory if needed. Filename derives from `event`'s
+   `:event/id` and `:event/sequence-number` (BD-2b filename grammar).
 
-   File layout: {base-dir}/{workflow-id}/{timestamp}-{uuid}.json
+   File layout: {base-dir}/{workflow-id}/{event-id-hex16}__{seq:012d}.transit.json
+                (or legacy {timestamp}-{uuid}.json for non-snowflake streams).
 
    Arguments:
+     base-dir    - Base directory (default: ~/.miniforge/events)
      workflow-id - UUID or string workflow identifier
-     base-dir    - Optional base directory (default: ~/.miniforge/events)"
-  ([workflow-id]
-   (event-file-path (default-events-dir) workflow-id))
-  ([base-dir workflow-id]
-   (new-event-file-path (io/file base-dir (str workflow-id)))))
+     event       - The event whose envelope provides the filename fields"
+  ([workflow-id event]
+   (event-file-path (default-events-dir) workflow-id event))
+  ([base-dir workflow-id event]
+   (new-event-file-path (io/file base-dir (str workflow-id)) event)))
 
 (defn operator-event-file-path
   "Return a java.io.File for a new event file in the operator subdirectory.
    Used by meta-loop, reliability, and degradation events (no :workflow/id).
 
-   File layout: {base-dir}/operator/{timestamp}-{uuid}.json
+   File layout: {base-dir}/operator/{event-id-hex16}__{seq:012d}.transit.json
+                (or legacy {timestamp}-{uuid}.json for non-snowflake streams).
 
    Arguments:
-     base-dir - Optional base directory (default: ~/.miniforge/events)"
-  ([]
-   (operator-event-file-path (default-events-dir)))
-  ([base-dir]
-   (new-event-file-path (io/file base-dir "operator"))))
+     base-dir - Base directory (default: ~/.miniforge/events)
+     event    - The event whose envelope provides the filename fields"
+  ([event]
+   (operator-event-file-path (default-events-dir) event))
+  ([base-dir event]
+   (new-event-file-path (io/file base-dir "operator") event)))
 
 (defn cleanup-stale-events!
   "Delete event files older than TTL from the events directory.
@@ -140,11 +182,16 @@
   "Create a file sink that writes each event as a Transit-JSON file.
 
    File layout:
-     per-workflow:  {base-dir}/{workflow-id}/{timestamp}-{uuid}.json
-     cross-workflow: {base-dir}/operator/{timestamp}-{uuid}.json
+     per-workflow:   {base-dir}/{workflow-id}/{event-id-hex16}__{seq:012d}.transit.json
+     cross-workflow: {base-dir}/operator/{event-id-hex16}__{seq:012d}.transit.json
 
-   Each event gets its own file (no append). Files are sortable by creation
-   time via the timestamp prefix.
+   The leading hex sorts by creation order when the event's :event/id is a
+   snowflake-encoded UUID (BD-2b). For events whose :event/id is a random
+   UUID (e.g. streams without a snowflake generator), the filename falls
+   back to the legacy {timestamp}-{uuid}.json shape so sort-by-creation
+   still works via the timestamp prefix.
+
+   Each event gets its own file (no append).
 
    Performs lazy cleanup of stale event files (older than 7 days) on creation.
 
@@ -161,8 +208,8 @@
     (try
       (let [base-dir (or (:base-dir opts) (default-events-dir))
             file-path (if-let [workflow-id (:workflow/id event)]
-                        (event-file-path base-dir workflow-id)
-                        (operator-event-file-path base-dir))]
+                        (event-file-path base-dir workflow-id event)
+                        (operator-event-file-path base-dir event))]
         (ensure-parent-dir! file-path)
         (spit file-path (write-transit-json event)))
       (catch Exception e
