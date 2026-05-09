@@ -4,7 +4,7 @@
   Copyright 2025-2026 Christopher Lester. Licensed under Apache 2.0.
 -->
 
-# Fix chain bindings omit nil values
+# Fix chain bindings to omit nil values
 
 ## Summary
 
