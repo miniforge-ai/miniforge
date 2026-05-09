@@ -20,9 +20,13 @@
   "Tests for DAG execution pausing on rate limits and plan->dag-tasks dependency handling."
   (:require
    [clojure.test :refer [deftest testing is]]
+   [ai.miniforge.clock.interface :as clock]
    [ai.miniforge.workflow.dag-orchestrator :as dag-orch]
+   [ai.miniforge.workflow.dag-resilience :as resilience]
    [ai.miniforge.dag-executor.interface :as dag]
-   [ai.miniforge.logging.interface :as log]))
+   [ai.miniforge.logging.interface :as log])
+  (:import
+   [java.time Instant]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Test fixtures
@@ -41,7 +45,8 @@
 
 (deftest test-dag-execution-pauses-on-rate-limit
   (testing "DAG execution returns paused result when all tasks hit rate limits"
-    (let [[logger _] (log/collecting-logger)
+    (let [fixed-now (Instant/parse "2026-05-09T17:00:00Z")
+          [logger _] (log/collecting-logger)
           ;; Use real UUIDs as task IDs since plan->dag-tasks expects them
           task-a (random-uuid)
           task-b (random-uuid)
@@ -54,20 +59,21 @@
                              {:task/id task-b
                               :task/description "Task B"
                               :task/type :implement
-                              :task/dependencies []}]}
-          ;; Mock execute-single-task to return rate limit errors
-          _original-fn @(resolve 'ai.miniforge.workflow.dag-orchestrator/execute-single-task)]
-      (with-redefs [ai.miniforge.workflow.dag-orchestrator/execute-single-task
+                              :task/dependencies []}]}]
+      (with-redefs [clock/now-ms (fn [] (.toEpochMilli fixed-now))
+                    ai.miniforge.workflow.dag-orchestrator/execute-single-task
                     (fn [_task-def _context]
                       (dag/err :task-execution-failed
-                               "You've hit your limit · resets 2pm"
+                               "You've hit your limit · resets 2pm (America/Los_Angeles)"
                                {}))]
-        (let [result (ai.miniforge.workflow.dag-orchestrator/execute-plan-as-dag
-                      plan {:logger logger})]
-          (is (not (:success? result)))
-          (is (true? (:paused? result)))
-          (is (string? (:pause-reason result)))
-          (is (= [] (:completed-task-ids result))))))))
+        (binding [resilience/*sleep!* (fn [_]
+                                        (throw (ex-info "unexpected short sleep in pause test" {})))]
+          (let [result (ai.miniforge.workflow.dag-orchestrator/execute-plan-as-dag
+                        plan {:logger logger})]
+            (is (not (:success? result)))
+            (is (true? (:paused? result)))
+            (is (string? (:pause-reason result)))
+            (is (= [] (:completed-task-ids result)))))))))
 
 (deftest test-dag-execution-partial-rate-limit
   (testing "DAG pauses when some tasks succeed and others hit rate limits"

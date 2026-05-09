@@ -21,6 +21,7 @@
   (:require
    [clojure.test :refer [deftest testing is]]
    [clojure.string :as str]
+   [ai.miniforge.clock.interface :as clock]
    [ai.miniforge.workflow.dag-resilience :as resilience]
    [ai.miniforge.workflow.dag-orchestrator :as dag-orch]
    [ai.miniforge.dag-executor.interface :as dag]
@@ -78,31 +79,42 @@
 ;; parse-reset-instant tests
 
 (deftest test-parse-reset-instant-absolute-time
-  (testing "parses 'resets 2pm' as an instant"
-    (let [text "You've hit your limit · resets 2pm"
-          result (resilience/parse-reset-instant text)]
-      (is (instance? Instant result))
-      (is (.isAfter result (Instant/now)))))
+  (let [fixed-now (Instant/parse "2026-05-09T20:00:00Z")]
+    (with-redefs [clock/now-ms (fn [] (.toEpochMilli fixed-now))]
+      (testing "parses 'resets 2pm' using the system timezone"
+        (let [text "You've hit your limit · resets 2pm"
+              result (resilience/parse-reset-instant text)
+              expected (-> (java.time.ZonedDateTime/ofInstant
+                            fixed-now
+                            (java.time.ZoneId/systemDefault))
+                           (.withHour 14)
+                           (.withMinute 0)
+                           (.withSecond 0)
+                           (.withNano 0)
+                           (#(if (.isBefore % (java.time.ZonedDateTime/ofInstant
+                                               fixed-now
+                                               (java.time.ZoneId/systemDefault)))
+                               (.plusDays % 1)
+                               %))
+                           (.toInstant))]
+          (is (= expected result))))
 
-  (testing "parses 'resets 2pm (America/Los_Angeles)' with timezone"
-    (let [text "You've hit your limit · resets 2pm (America/Los_Angeles)"
-          result (resilience/parse-reset-instant text)]
-      (is (instance? Instant result))))
+      (testing "parses 'resets 2pm (America/Los_Angeles)' with explicit timezone"
+        (let [text "You've hit your limit · resets 2pm (America/Los_Angeles)"
+              result (resilience/parse-reset-instant text)]
+          (is (= (Instant/parse "2026-05-09T21:00:00Z") result))))
 
-  (testing "parses 'resets 2:30pm' with minutes"
-    (let [text "resets 2:30pm"
-          result (resilience/parse-reset-instant text)]
-      (is (instance? Instant result)))))
+      (testing "parses 'resets 2:30pm' with minutes"
+        (let [text "resets 2:30pm (America/Los_Angeles)"
+              result (resilience/parse-reset-instant text)]
+          (is (= (Instant/parse "2026-05-09T21:30:00Z") result)))))))
 
 (deftest test-parse-reset-instant-relative-time
-  (testing "parses 'resets in 30 minutes' as relative duration"
-    (let [before (Instant/now)
-          result (resilience/parse-reset-instant "resets in 30 minutes")
-          after (Instant/now)]
-      (is (instance? Instant result))
-      ;; Should be approximately 30 minutes from now
-      (is (> (.toEpochMilli result) (+ (.toEpochMilli before) 1790000)))
-      (is (< (.toEpochMilli result) (+ (.toEpochMilli after) 1810000))))))
+  (testing "parses 'resets in 30 minutes' against the injected clock"
+    (let [fixed-now (Instant/parse "2026-05-09T20:00:00Z")]
+      (with-redefs [clock/now-ms (fn [] (.toEpochMilli fixed-now))]
+        (is (= (Instant/parse "2026-05-09T20:30:00Z")
+               (resilience/parse-reset-instant "resets in 30 minutes")))))))
 
 (deftest test-parse-reset-instant-no-match
   (testing "returns nil for non-reset text"
@@ -114,14 +126,22 @@
 
 (deftest test-handle-rate-limited-batch-waits-for-reset
   (testing "waits for reset when reset time is imminent (relative)"
-    (let [[logger _] (log/collecting-logger)
+    (let [fake-now (atom (.toEpochMilli (Instant/parse "2026-05-09T20:00:00Z")))
+          [logger _] (log/collecting-logger)
           rate-limit-msg "You've hit your limit · resets in 1 seconds"
           results {:b (dag/err :task-execution-failed rate-limit-msg {:task-id :b})}
-          decision (resilience/handle-rate-limited-batch
-                    {} #{:b} #{:a} logger results)]
-      ;; Should have waited and returned :continue
-      (is (= :continue (:action decision)))
-      (is (number? (:waited-ms decision))))))
+          sleep-calls (atom [])]
+      (with-redefs [clock/now-ms (fn [] @fake-now)]
+        (binding [resilience/*sleep!* (fn [wait-ms]
+                                        (swap! sleep-calls conj wait-ms)
+                                        (swap! fake-now + wait-ms))]
+          (let [decision (resilience/handle-rate-limited-batch
+                          {} #{:b} #{:a} logger results)]
+            (is (= :continue (:action decision)))
+            (is (= 1000 (:waited-ms decision)))
+            (is (= [1000] @sleep-calls))
+            (is (= (.toEpochMilli (Instant/parse "2026-05-09T20:00:01Z"))
+                   @fake-now))))))))
 
 (deftest test-handle-rate-limited-batch-pauses-without-results
   (testing "pauses when no results provided (backward compat)"

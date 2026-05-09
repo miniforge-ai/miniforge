@@ -1,5 +1,6 @@
 {:paths ["src" "resources"]
  :deps {ai.miniforge/config {:local/root "../config"}
+        ai.miniforge/clock {:local/root "../clock"}
         ai.miniforge/schema {:local/root "../schema"}
         ai.miniforge/logging {:local/root "../logging"}
         ai.miniforge/messages {:local/root "../messages"}
