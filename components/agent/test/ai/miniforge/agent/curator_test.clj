@@ -23,6 +23,9 @@
   (:require
    [ai.miniforge.agent.curator :as sut]
    [ai.miniforge.response.interface :as response]
+   [babashka.fs :as fs]
+   [clojure.java.shell :as shell]
+   [clojure.string :as str]
    [clojure.test :refer [deftest is testing]]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -234,6 +237,75 @@
                    :worktree-path "/tmp/ignored"
                    :llm-client nil})]
       (is (= :deterministic (get-in result [:output :code/curator-source]))))))
+
+;------------------------------------------------------------------------------ Layer 5
+;; Local-snapshot fallback — recovers implementer work when impl-result
+;; never propagated :code/files (e.g. supervisor-terminated agent throw).
+
+(defn- git!
+  "Run git in `cwd`; throw on non-zero exit."
+  [cwd & args]
+  (let [r (apply shell/sh "git" "-C" (str cwd) args)]
+    (when-not (zero? (:exit r))
+      (throw (ex-info (str "git " (str/join " " args) " failed: " (:err r))
+                      {:cwd cwd :args args :result r})))
+    r))
+
+(defn- init-clean-worktree!
+  "Create a fresh git worktree with one committed file (clean HEAD)."
+  [worktree]
+  (git! worktree "init" "-b" "main")
+  (git! worktree "config" "user.email" "test@miniforge.ai")
+  (git! worktree "config" "user.name" "miniforge-test")
+  (git! worktree "config" "commit.gpgsign" "false")
+  (spit (fs/file worktree "README.md") "initial\n")
+  (git! worktree "add" "README.md")
+  (git! worktree "commit" "-m" "init"))
+
+(deftest curate-falls-back-to-worktree-snapshot-when-impl-result-missing-files
+  (testing "Run-7 dogfood regression: impl-result with no :code/files but a
+            dirty worktree must still surface implementer work via the local
+            snapshot fallback. Reproduces the case where the agent threw
+            mid-stream (e.g. supervisor termination) so invoke-with-llm
+            never reached collect-written-files, yet the writes are sitting
+            on disk waiting to be picked up."
+    (let [worktree (str (fs/create-temp-dir {:prefix "curator-fallback-"}))]
+      (try
+        (init-clean-worktree! worktree)
+        ;; Implementer-style writes that landed on disk before the throw.
+        (fs/create-dirs (fs/file worktree "src"))
+        (spit (fs/file worktree "src/added.clj") "(ns added)\n")
+        (spit (fs/file worktree "README.md") "modified\n")
+        (let [;; impl-result shape that response/failure produces — no :output map.
+              failure-result {:status :failed :success false
+                              :error {:message "agent terminated mid-stream"}}
+              result (sut/curate-implement-output
+                      {:implementer-result failure-result
+                       :worktree-path      worktree})]
+          (is (response/success? result)
+              "curator should fall back to the worktree snapshot and find the dirty files")
+          (let [files (get-in result [:output :code/files])
+                paths (set (map :path files))]
+            (is (contains? paths "src/added.clj"))
+            (is (contains? paths "README.md")
+                "modified-but-tracked file must also be picked up")))
+        (finally
+          (try (fs/delete-tree worktree) (catch Throwable _ nil)))))))
+
+(deftest curate-snapshot-fallback-still-fails-when-worktree-clean
+  (testing "fallback must NOT mask a genuinely empty diff — clean worktree
+            with no impl-result files still terminates with no-files-written"
+    (let [worktree (str (fs/create-temp-dir {:prefix "curator-clean-"}))]
+      (try
+        (init-clean-worktree! worktree)
+        (let [result (sut/curate-implement-output
+                      {:implementer-result {:status :failed :success false}
+                       :worktree-path      worktree})]
+          (is (= :curator/no-files-written
+                 (get-in result [:error :data :code])))
+          (is (= worktree (get-in result [:error :data :worktree-path]))))
+        (finally
+          (try (fs/delete-tree worktree) (catch Throwable _ nil)))))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
