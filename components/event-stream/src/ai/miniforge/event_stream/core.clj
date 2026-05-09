@@ -980,10 +980,14 @@
 
    Schema in `schema/ZettelPromoted`. Required positional args
    carry the Decision-6 revision-keyed identity + the content the
-   Fleet ingest path validates against the privacy gates; optional
-   share-intent kwargs (`:fleet/shareable`, `:fleet/share-scope`,
-   `:privacy/classification`) populate when the producer wants the
-   zettel to actually ride the Fleet event log.
+   Fleet ingest path validates against the privacy gates.
+
+   Fleet-share intent (`:fleet/shareable`, `:fleet/share-scope`,
+   `:privacy/classification`) is read FROM THE ZETTEL itself —
+   producers attach those fields to the zettel (via the
+   `knowledge/create-zettel` kwargs) and they ride through to the
+   event automatically when present. Absence on the zettel means
+   the promotion is local-only.
 
    Args:
      stream            — event-stream atom
@@ -992,14 +996,12 @@
                           `:zettel/id`, `:zettel/revision-id`,
                           `:zettel/digest`, `:zettel/uid`,
                           `:zettel/title`, `:zettel/content`,
-                          `:zettel/type`)
+                          `:zettel/type`; optional Fleet-share
+                          intent fields ride through if present)
      oss-version       — OSS version pin (Decision 13).
 
-   Optional opts (all may be omitted):
-     :fleet/shareable
-     :fleet/share-scope
-     :privacy/classification
-     :org/id, :workspace/id, :repo/id, :auth/context (envelope)"
+   Optional opts (envelope identity, all may be omitted):
+     :org/id, :workspace/id, :repo/id, :auth/context"
   [stream workflow-id zettel oss-version & [opts]]
   (let [opts (or opts {})
         base (create-envelope stream :zettel/promoted workflow-id

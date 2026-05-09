@@ -153,6 +153,28 @@
                     "DEADBEEFDEADBEEFDEADBEEFDEADBEEFDEADBEEFDEADBEEFDEADBEEFDEADBEEF")]
       (is (false? (m/validate schema/ZettelPromoted ev))))))
 
+(deftest test-schema-rejects-unknown-zettel-type
+  (testing ":zettel/type is constrained to the closed enum mirroring knowledge.schema/ZettelType"
+    ;; Catches typos / drift between the OSS knowledge enum and this
+    ;; mirrored copy. A new type added to knowledge.schema/ZettelType
+    ;; must be mirrored here before it can ride the outbox stream.
+    (let [base (core/zettel-promoted (fresh-stream) (UUID/randomUUID)
+                                     (trusted-zettel) "1.0.0")]
+      (doseq [bad-type [:not-a-real-type :pattern :hypothesis]]
+        (is (false? (m/validate schema/ZettelPromoted (assoc base :zettel/type bad-type)))
+            (str ":zettel/type " bad-type " should be rejected"))))))
+
+(deftest test-schema-accepts-every-knowledge-zettel-type
+  (testing "every value the OSS knowledge schema enumerates is accepted here"
+    ;; Pin the sync requirement: if knowledge.schema/ZettelType
+    ;; gains a value, this test surfaces the gap in the mirrored
+    ;; enum the next time the suite runs.
+    (let [base (core/zettel-promoted (fresh-stream) (UUID/randomUUID)
+                                     (trusted-zettel) "1.0.0")]
+      (doseq [t [:rule :concept :learning :example :hub :question :decision]]
+        (is (m/validate schema/ZettelPromoted (assoc base :zettel/type t))
+            (str ":zettel/type " t " should be accepted"))))))
+
 ;------------------------------------------------------------------------------ Layer 5
 ;; Registry + privacy classification.
 

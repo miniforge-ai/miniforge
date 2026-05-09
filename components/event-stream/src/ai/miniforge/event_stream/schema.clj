@@ -154,6 +154,17 @@
 ;; Phase E.3 outbox path — Fleet's ingest consumes these to grow the
 ;; cross-instance event log).
 
+(def ^:private zettel-type-enum
+  "Closed enum of zettel types accepted in the outbox event stream.
+
+   MUST stay in sync with `ai.miniforge.knowledge.schema/ZettelType`
+   — duplicated inline rather than required from `knowledge` to keep
+   event-stream's dep boundary tight (the only consumer of this
+   enum here is the cross-instance event shape Fleet ingests; the
+   shared values are stable). When `knowledge.schema` adds a new
+   type, mirror the addition here."
+  [:enum :rule :concept :learning :example :hub :question :decision])
+
 (def ZettelPromoted
   "Schema for zettel/promoted event.
 
@@ -176,7 +187,10 @@
      :zettel/uid         human-readable id
      :zettel/title       short display name
      :zettel/content     markdown body
-     :zettel/type        zettel type keyword
+     :zettel/type        closed enum mirroring knowledge.schema/ZettelType
+                          (`:rule` / `:concept` / `:learning` /
+                           `:example` / `:hub` / `:question` /
+                           `:decision`)
      :fleet/oss-version  version pin (per Decision 13)
 
    Optional Fleet-share intent (populated when the producer wants
@@ -205,7 +219,7 @@
    [:zettel/uid     [:string {:min 1}]]
    [:zettel/title   [:string {:min 1 :max 200}]]
    [:zettel/content [:string {:min 1}]]
-   [:zettel/type    keyword?]
+   [:zettel/type    zettel-type-enum]
 
    ;; Version provenance (Decision 13).
    [:fleet/oss-version [:string {:min 1}]]
