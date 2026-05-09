@@ -1005,8 +1005,8 @@
   [stream workflow-id zettel oss-version & [opts]]
   (let [opts (or opts {})
         base (create-envelope stream :zettel/promoted workflow-id
-                              (str "Zettel " (:zettel/uid zettel)
-                                   " promoted to trusted"))]
+                              (messages/t :zettel/promoted
+                                          {:uid (:zettel/uid zettel)}))]
     (cond-> (assoc base
                    :zettel/id          (:zettel/id zettel)
                    :zettel/revision-id (:zettel/revision-id zettel)
