@@ -50,11 +50,37 @@
         (swap! counter inc)
         v))))
 
+;; ─── Test fixture constants ─────────────────────────────────────────
+;; The generator state initialises `last-ts` and `last-seq` to a sentinel
+;; meaning "no id has been emitted yet". `next-state` interprets this as
+;; "any wall ms ≥ epoch advances state and resets seq to 0", so the
+;; first emission goes through the third (forward-time) branch. The
+;; sentinel must be < any valid (ms, seq) pair the generator could
+;; observe; -1 is the conventional Java/Clojure sentinel for unset.
+(def ^:private ^:const ^long unset-timestamp-sentinel -1)
+(def ^:private ^:const ^long unset-sequence-sentinel  -1)
+
+;; Bypass the FileLock-based worker-id lease in unit tests by pinning a
+;; deterministic worker id and providing a fake lease handle. `0` is
+;; chosen for readability; any 0..max-workers-1 value works.
+(def ^:private ^:const ^long test-worker-id 0)
+
+(def ^:private fresh-test-state
+  "A fresh-but-quiesced generator state — what the production
+   `initial-state` factory would produce for the test worker-id, but
+   defined locally so tests don't reach into a private fn."
+  {:last-ts   unset-timestamp-sentinel
+   :last-seq  unset-sequence-sentinel
+   :worker-id test-worker-id})
+
+(def ^:private fake-test-lease
+  "Sentinel lease handle for tests that bypass the file-lock path."
+  {:worker-id test-worker-id})
+
 (defn- generator-with-fixed-clock [times]
-  ;; No real lease — pass a fake lease handle to bypass file-locking.
-  {:state     (atom {:last-ts -1 :last-seq -1 :worker-id 0})
-   :worker-id 0
-   :lease     {:worker-id 0}
+  {:state     (atom fresh-test-state)
+   :worker-id test-worker-id
+   :lease     fake-test-lease
    :now-fn    (fixed-clock times)})
 
 ;------------------------------------------------------------------------------ Pure id-composition
@@ -123,7 +149,9 @@
         gen (generator-with-fixed-clock (concat (repeat 10 base-ts)
                                                 (repeat 10 (inc base-ts))))]
     ;; Pre-seed state so seq is at max.
-    (reset! (:state gen) {:last-ts base-ts :last-seq sf/max-seq :worker-id 0})
+    (reset! (:state gen) {:last-ts   base-ts
+                          :last-seq  sf/max-seq
+                          :worker-id test-worker-id})
     (let [id (sf/next-id-long! gen)]
       ;; The id should be at base-ts + 1, seq = 0.
       (is (= (- (inc base-ts) sf/miniforge-epoch-ms)

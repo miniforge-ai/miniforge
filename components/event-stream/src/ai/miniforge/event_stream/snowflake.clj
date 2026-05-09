@@ -55,6 +55,7 @@
    millisecond + same sequence slot, which is narrow."
   (:require
    [ai.miniforge.config.interface :as config]
+   [ai.miniforge.event-stream.messages :as messages]
    [clojure.java.io :as io]
    [clojure.string :as str]
    [ai.miniforge.logging.interface :as log]))
@@ -209,7 +210,14 @@
           nil
           ;; Real IO/permission failure. Wrap with context and propagate
           ;; rather than silently masking as :workers-exhausted later.
-          (throw (ex-info "Snowflake worker-lease acquire failed"
+          ;; Localized via messages/t. acquire-worker-lease! and its
+          ;; sole caller (create-generator at process startup) are at
+          ;; the edge — an exception is the right shape vs a data
+          ;; anomaly that callers would have to convert back to a
+          ;; failure signal.
+          (throw (ex-info (messages/t :snowflake/lease-io-failure
+                                      {:worker-id id
+                                       :lease-path (.getAbsolutePath lease-path)})
                           {:reason :lease-io-failure
                            :worker-id id
                            :lease-path (.getAbsolutePath lease-path)
@@ -218,16 +226,35 @@
 
 (defn acquire-worker-lease!
   "Walk slots 0..1023 and acquire the first whose lease file is
-   unlocked. The OS releases the lock on JVM exit, so stale leases
-   from dead processes are reclaimed automatically.
+   unlocked.
 
-   Throws ex-info when all slots are held — typical only when 1024+
-   miniforge processes coexist on the same host."
+   Why FileLock vs Clojure refs / STM
+   ----------------------------------
+   The lease has to coordinate across *operating-system processes*,
+   not just threads inside one JVM. Multiple miniforge CLI invocations
+   on the same host run as independent processes — they share the
+   `~/.miniforge/events/.workers/` directory but no JVM-level state.
+   Refs (`dosync`, `alter`, `commute`) are STM coordinated only within
+   a single JVM, so two concurrent processes both running
+   `(dosync (alter ref ...))` would hand each one the same worker id
+   and produce colliding event-id streams downstream. OS-level file
+   locks (`FileChannel/tryLock`) are the only primitive that gives
+   cross-process exclusion on a vanilla single-machine setup. As a
+   bonus the OS releases the lock automatically on JVM exit (graceful
+   or crash), so stale leases reclaim themselves without explicit
+   teardown.
+
+   Throws ex-info (localized) when all slots are held — typical only
+   when 1024+ miniforge processes coexist on the same host. This is
+   an edge condition raised at generator construction; an exception
+   is the right shape vs a data anomaly per the project's
+   exceptions-as-data conventions."
   [workers-dir]
   (loop [id 0]
     (cond
       (>= id max-workers)
-      (throw (ex-info "All snowflake worker-id slots taken on this host"
+      (throw (ex-info (messages/t :snowflake/workers-exhausted
+                                  {:max max-workers})
                       {:reason :workers-exhausted
                        :max    max-workers
                        :workers-dir (.getAbsolutePath workers-dir)}))
@@ -289,41 +316,86 @@
               {:message "Snowflake generator detected clock rollback; stalling"
                :data    details})))
 
+(def ^:private ^:const ^long park-budget-nanos
+  "Park budget for the wait loop on clock-rollback / sequence-exhausted.
+   100µs is short enough to wake well before the next ms tick (so the
+   loop spins ~10× per ms in the worst case) but long enough to avoid
+   a CPU-burning busy-spin. `parkNanos` may wake earlier on signal —
+   that's fine, the outer loop simply re-checks the wall clock."
+  100000)
+
+(def ^:private park-nanos-method
+  "Lazily-resolved `java.util.concurrent.locks.LockSupport/parkNanos`
+   via `Class/forName` + reflection. The id-generation path only
+   executes on the JVM, but this namespace is transitively loaded
+   from Babashka-runtime bricks and BB does not ship
+   `java.util.concurrent.locks`. A static method call would force
+   compile-time class resolution and break BB load; this delay
+   defers it to the first JVM invocation."
+  (delay
+    (.getMethod (Class/forName "java.util.concurrent.locks.LockSupport")
+                "parkNanos"
+                (into-array Class [Long/TYPE]))))
+
+(defn- park-briefly!
+  "Park the calling thread for up to `park-budget-nanos`. Used by the
+   id-generation loop in place of `Thread/sleep` so there's no
+   millisecond-rounded delay and the call surface stays
+   `LockSupport`-style rather than the deprecated sleep idiom. The
+   thread can wake earlier on spurious signal; callers must re-check
+   their condition."
+  []
+  (.invoke @park-nanos-method
+           nil
+           (into-array Object [(Long/valueOf park-budget-nanos)])))
+
+(defn- pre-epoch-error
+  [now-ms worker-id]
+  (ex-info (messages/t :snowflake/pre-epoch-clock
+                       {:now-ms now-ms :epoch-ms miniforge-epoch-ms})
+           {:reason     :pre-epoch-clock
+            :now-ms     now-ms
+            :epoch-ms   miniforge-epoch-ms
+            :worker-id  worker-id}))
+
+(defn- handle-rollback!
+  "Side-effect: warn once on first rollback observation. Park before
+   the outer loop retries. Returns the new `warned?` value."
+  [{:keys [logger ^long worker-id]} now-ms last-ts warned?]
+  (when (not warned?)
+    (log-rollback! logger {:now-ms    now-ms
+                           :last-ts   last-ts
+                           :worker-id worker-id}))
+  (park-briefly!)
+  true)
+
+(defn- emit-id
+  "CAS the new state and return the composed id long. nil on CAS loss
+   (caller retries the outer loop)."
+  [state old new-state ^long worker-id]
+  (when (compare-and-set! state old new-state)
+    (compose-id (- ^long (:last-ts new-state) miniforge-epoch-ms)
+                worker-id
+                ^long (:last-seq new-state))))
+
 (defn next-id-long!
-  "Internal: generate the next snowflake as a primitive long. Spins on
-   clock rollback or sequence exhaustion (1ms sleep per retry).
+  "Internal: generate the next snowflake as a primitive long. Parks on
+   clock rollback or sequence exhaustion (≤100µs per retry via
+   `LockSupport/parkNanos` rather than `Thread/sleep`).
    Public id functions (`next-id!`, `next-id-hex!`) wrap this."
-  ^long [{:keys [state now-fn logger ^long worker-id]}]
+  ^long [{:keys [state now-fn ^long worker-id] :as gen}]
   (loop [warned? false]
     (let [now-ms (long (now-fn))
           old    @state
           r      (next-state old now-ms)]
       (cond
-        (= r ::pre-epoch)
-        (throw (ex-info "Snowflake generator: wall clock is before the miniforge epoch"
-                        {:now-ms     now-ms
-                         :epoch-ms   miniforge-epoch-ms
-                         :worker-id  worker-id}))
-
-        (= r ::clock-rollback)
-        (do (when (not warned?)
-              (log-rollback! logger {:now-ms    now-ms
-                                     :last-ts   (:last-ts old)
-                                     :worker-id worker-id}))
-            (Thread/sleep 1)
-            (recur true))
-
-        (= r ::seq-exhausted)
-        (do (Thread/sleep 1)
-            (recur warned?))
-
-        (compare-and-set! state old r)
-        (compose-id (- (:last-ts r) miniforge-epoch-ms)
-                    worker-id
-                    (:last-seq r))
-
-        :else ;; Lost CAS race; retry with fresh state.
-        (recur warned?)))))
+        (= r ::pre-epoch)        (throw (pre-epoch-error now-ms worker-id))
+        (= r ::clock-rollback)   (recur (handle-rollback! gen now-ms (:last-ts old) warned?))
+        (= r ::seq-exhausted)    (do (park-briefly!) (recur warned?))
+        :else
+        (or (emit-id state old r worker-id)
+            ;; Lost CAS race against another thread — retry with fresh state.
+            (recur warned?))))))
 
 (defn next-id!
   "Generate the next snowflake event id as a `java.util.UUID`. The

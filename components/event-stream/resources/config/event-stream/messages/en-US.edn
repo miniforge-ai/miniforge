@@ -17,4 +17,17 @@
   :stream/tool-use-line       "\n[tool] {names}\n"
 
   ;; Status payload published when the agent calls one or more tools.
-  :stream/agent-calling-tool  "Agent calling tool"}}
+  :stream/agent-calling-tool  "Agent calling tool"
+
+  ;; Snowflake event-id generator (BD-2b). All emitted at process
+  ;; boundaries — generator startup is the only place these can be
+  ;; raised, so an exception is the right shape rather than a data
+  ;; anomaly.
+  :snowflake/workers-exhausted
+  "All snowflake worker-id slots taken on this host (max {max}); refusing to start"
+
+  :snowflake/lease-io-failure
+  "Snowflake worker-lease acquire failed for slot {worker-id} at {lease-path}"
+
+  :snowflake/pre-epoch-clock
+  "Snowflake generator: wall clock {now-ms} is before the miniforge epoch {epoch-ms}"}}
