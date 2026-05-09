@@ -30,4 +30,7 @@
   "Snowflake worker-lease acquire failed for slot {worker-id} at {lease-path}"
 
   :snowflake/pre-epoch-clock
-  "Snowflake generator: wall clock {now-ms} is before the miniforge epoch {epoch-ms}"}}
+  "Snowflake generator: wall clock {now-ms} is before the miniforge epoch {epoch-ms}"
+
+  ;; Zettelkasten lifecycle (miniforge-fleet Phase E.3 outbox path)
+  :zettel/promoted            "Zettel {uid} promoted to trusted"}}

@@ -190,6 +190,96 @@
     [:workflow/error-details {:optional true} map?]
     [:message string?]]))
 
+;------------------------------------------------------------------------------ Layer 1.4
+;; Zettelkasten lifecycle event schemas (added for miniforge-fleet's
+;; Phase E.3 outbox path — Fleet's ingest consumes these to grow the
+;; cross-instance event log).
+
+(def ^:private zettel-type-enum
+  "Closed enum of zettel types accepted in the outbox event stream.
+
+   MUST stay in sync with `ai.miniforge.knowledge.schema/ZettelType`
+   — duplicated inline rather than required from `knowledge` to keep
+   event-stream's dep boundary tight (the only consumer of this
+   enum here is the cross-instance event shape Fleet ingests; the
+   shared values are stable). When `knowledge.schema` adds a new
+   type, mirror the addition here."
+  [:enum :rule :concept :learning :example :hub :question :decision])
+
+(def ZettelPromoted
+  "Schema for zettel/promoted event.
+
+   Emitted when a zettel revision transitions to `:trusted` state and
+   is therefore eligible to ride the Fleet event log per Decision 6
+   (trust on revision) + Decision 8 (privacy gates) of miniforge-
+   fleet's Phase E plan. The event carries the revision-keyed identity
+   triple plus the zettel's content + Fleet-share metadata so the
+   ingest path can run its boundary validation without a separate
+   round-trip into the local Zettelkasten store.
+
+   The producer attaches `:fleet/oss-version` per Decision 13 so
+   Fleet's E.4 quarantine + E.9 migration registry have the version
+   pin they need without a second event-shape change later.
+
+   Required fields beyond the envelope:
+     :zettel/id          UUID
+     :zettel/revision-id UUID
+     :zettel/digest      lowercase 64-char hex
+     :zettel/uid         human-readable id
+     :zettel/title       short display name
+     :zettel/content     markdown body
+     :zettel/type        closed enum mirroring knowledge.schema/ZettelType
+                          (`:rule` / `:concept` / `:learning` /
+                           `:example` / `:hub` / `:question` /
+                           `:decision`)
+     :fleet/oss-version  version pin (per Decision 13)
+
+   Optional Fleet-share intent (populated when the producer wants
+   the zettel to actually ride the Fleet event log; absence means
+   the promotion was local-only):
+     :fleet/shareable        boolean
+     :fleet/share-scope      :org / :team / :repo / :workflow
+     :privacy/classification :public-org / :internal / :restricted /
+                              :secret"
+  [:map
+   [:event/type [:= :zettel/promoted]]
+   [:event/id uuid?]
+   [:event/timestamp inst?]
+   [:event/version string?]
+   [:event/sequence-number int?]
+   [:workflow/id uuid?]
+
+   ;; Revision-keyed zettel identity (Decision 6).
+   [:zettel/id          uuid?]
+   [:zettel/revision-id uuid?]
+   [:zettel/digest      [:re #"^[0-9a-f]{64}$"]]
+
+   ;; Zettel content the Fleet ingest path validates against the
+   ;; privacy gates (Decision 8). Carried alongside the triple so
+   ;; subscribers don't need a round-trip to the producer's store.
+   [:zettel/uid     [:string {:min 1}]]
+   [:zettel/title   [:string {:min 1 :max 200}]]
+   [:zettel/content [:string {:min 1}]]
+   [:zettel/type    zettel-type-enum]
+
+   ;; Version provenance (Decision 13).
+   [:fleet/oss-version [:string {:min 1}]]
+
+   ;; Optional Fleet-share intent (Decision 8).
+   [:fleet/shareable        {:optional true} boolean?]
+   [:fleet/share-scope      {:optional true}
+    [:enum :org :team :repo :workflow]]
+   [:privacy/classification {:optional true}
+    [:enum :public-org :internal :restricted :secret]]
+
+   ;; Identity propagation (Decision 14, added in event-stream side
+   ;; via the matching PR for prerequisite #10).
+   [:org/id       {:optional true} uuid?]
+   [:workspace/id {:optional true} uuid?]
+   [:repo/id      {:optional true} string?]
+   [:auth/context {:optional true} map?]
+   [:message string?]])
+
 ;------------------------------------------------------------------------------ Layer 1.5
 ;; PR lifecycle event schemas
 
@@ -465,7 +555,13 @@
    :chain/failed             :public
    :chain/step-started       :internal
    :chain/step-completed     :internal
-   :chain/step-failed        :internal})
+   :chain/step-failed        :internal
+
+   ;; Zettelkasten lifecycle. Default is `:internal` because the
+   ;; event carries `:zettel/content` directly — Fleet's privacy
+   ;; gates (Decision 8) decide whether the zettel is actually
+   ;; cleared for cross-instance share, not the local default.
+   :zettel/promoted          :internal})
 
 (defn create-privacy-config
   "Create a privacy configuration by merging overrides into defaults.

@@ -92,6 +92,11 @@
 (def pr-created core/pr-created)
 (def pr-scored core/pr-scored)
 
+;; Zettelkasten lifecycle event constructors (miniforge-fleet
+;; Phase E.3 outbox path).
+
+(def zettel-promoted core/zettel-promoted)
+
 ;------------------------------------------------------------------------------ Layer 2
 ;; Reliability metric event constructors (N3 §3.17)
 
