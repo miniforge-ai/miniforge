@@ -37,6 +37,7 @@
                        "components/loop/resources"
                        "components/knowledge/src"
                        "components/knowledge/resources"
+                       "components/knowledge-pack/src"
                        "components/policy/src"
                        "components/heuristic/src"
                        "components/heuristic/resources"
@@ -209,6 +210,7 @@
                       ai.miniforge/decision {:local/root "components/decision"}
                       ai.miniforge/loop {:local/root "components/loop"}
                       ai.miniforge/knowledge {:local/root "components/knowledge"}
+                      ai.miniforge/knowledge-pack {:local/root "components/knowledge-pack"}
                       ai.miniforge/policy {:local/root "components/policy"}
                       ai.miniforge/heuristic {:local/root "components/heuristic"}
                       ai.miniforge/response {:local/root "components/response"}
@@ -326,6 +328,7 @@
                        "components/decision/test"
                        "components/loop/test"
                        "components/knowledge/test"
+                       "components/knowledge-pack/test"
                        "components/policy/test"
                        "components/heuristic/test"
                        "components/phase/test"
@@ -447,6 +450,7 @@
                       ai.miniforge/decision {:local/root "components/decision"}
                       ai.miniforge/loop {:local/root "components/loop"}
                       ai.miniforge/knowledge {:local/root "components/knowledge"}
+                      ai.miniforge/knowledge-pack {:local/root "components/knowledge-pack"}
                       ai.miniforge/policy {:local/root "components/policy"}
                       ai.miniforge/heuristic {:local/root "components/heuristic"}
                       ai.miniforge/response {:local/root "components/response"}
@@ -536,6 +540,8 @@
                               "components/loop/test"
                               "components/knowledge/src"
                               "components/knowledge/test"
+                              "components/knowledge-pack/src"
+                              "components/knowledge-pack/test"
                               "components/policy/src"
                               "components/policy/test"
                               "components/heuristic/src"

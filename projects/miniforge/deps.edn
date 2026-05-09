@@ -29,6 +29,13 @@
         ai.miniforge/loop {:local/root "../../components/loop"}
         ai.miniforge/observer {:local/root "../../components/observer"}
         ai.miniforge/knowledge {:local/root "../../components/knowledge"}
+        ;; Wired so `poly test brick:knowledge-pack` runs in this
+        ;; project's context. miniforge-fleet is the operational
+        ;; consumer (`pack` is the curation layer for the cross-
+        ;; instance event log Decision 6 commits to); this project
+        ;; carries no callers yet, so a Polylith warning 207 is
+        ;; expected until a downstream feature lands here.
+        ai.miniforge/knowledge-pack {:local/root "../../components/knowledge-pack"}
         ai.miniforge/spec-parser {:local/root "../../components/spec-parser"}
         ai.miniforge/policy {:local/root "../../components/policy"}
         ai.miniforge/heuristic {:local/root "../../components/heuristic"}
