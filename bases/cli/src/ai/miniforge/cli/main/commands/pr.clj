@@ -102,8 +102,13 @@
 
    Checks out the given PR URL, derives the base ref, and runs the
    compliance-scanner in PR-scoped read-only mode. Prints rendered
-   review comments per N13 §2.3 to stdout. Does NOT post comments and
-   does NOT apply fixes.
+   review comments per N13 §2.3 to stdout.
+
+   With `--post`, additionally batch-posts the rendered comments as a
+   single PR review (event=COMMENT) via `pr-lifecycle/post-review!`.
+   The PR head SHA needed for the create-review API is derived from
+   the worktree HEAD after `gh pr checkout`. Does NOT apply fixes —
+   that remains the Comment Response Agent's job.
 
    Pass --repo <path> + --base <ref> to operate on an existing checkout
    without using `gh` to fetch metadata; `--url <pr-url>` is the default
@@ -146,7 +151,8 @@
                      (:standards opts) (assoc :standards (:standards opts))
                      (:pack opts)      (assoc :pack (:pack opts))
                      (:rules opts)     (assoc :rules (:rules opts))
-                     (:out opts)       (assoc :out (keyword (:out opts)))))))))))
+                     (:out opts)       (assoc :out (keyword (:out opts)))
+                     (:post opts)      (assoc :post? true :pr-number number)))))))))
 
       :else
       (display/print-error
