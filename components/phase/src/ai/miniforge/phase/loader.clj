@@ -24,7 +24,7 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Configuration
 
-(def phase-loader-config-resource
+(def ^:dynamic phase-loader-config-resource
   "Classpath resource path for phase implementation namespace declarations."
   "config/phase/namespaces.edn")
 

@@ -39,7 +39,7 @@
 
 (deftest configured-phase-namespaces-test
   (testing "phase implementation namespaces are discovered from composed resources"
-    (with-redefs [loader/phase-loader-config-resource loader-test-config-resource]
+    (binding [loader/phase-loader-config-resource loader-test-config-resource]
       (let [phase-namespaces (loader/configured-phase-namespaces)]
         (is (some #{loader-support-namespace} phase-namespaces))
         (is (every? symbol? phase-namespaces))
@@ -48,7 +48,7 @@
 
 (deftest ensure-phase-implementations-loaded-test
   (testing "loading configured phase implementations registers their phase defaults"
-    (with-redefs [loader/phase-loader-config-resource loader-test-config-resource]
+    (binding [loader/phase-loader-config-resource loader-test-config-resource]
       (phase/ensure-phase-implementations-loaded!)
       (let [phases (phase/list-phases)]
         (is (contains? phases loader-support-phase))))))

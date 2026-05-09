@@ -30,7 +30,7 @@
 (clojure.test/use-fixtures :each
   (fn [f]
     (phase/reset-phase-loader!)
-    (with-redefs [loader/phase-loader-config-resource phase-test-config-resource]
+    (binding [loader/phase-loader-config-resource phase-test-config-resource]
       (f))
     (phase/reset-phase-loader!)))
 
