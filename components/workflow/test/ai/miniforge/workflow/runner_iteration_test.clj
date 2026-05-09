@@ -25,8 +25,12 @@
    [clojure.test :refer [deftest testing is]]
    [ai.miniforge.workflow.context :as ctx]
    [ai.miniforge.workflow.monitoring :as monitoring]
+   [ai.miniforge.workflow.phase-test-support :as phase-test-support]
    [ai.miniforge.workflow.runner :as runner]
    [slingshot.slingshot :refer [try+ throw+]]))
+
+(def ^:private runner-test-done
+  phase-test-support/runner-test-done)
 
 ;; Access private fns
 (def ^:private rate-limited? #'runner/rate-limited?)
@@ -154,7 +158,7 @@
   (testing "supervision halt transitions the workflow to failed"
     (let [workflow {:workflow/id :test
                     :workflow/version "1.0.0"
-                    :workflow/pipeline [{:phase :done}]}
+                    :workflow/pipeline [{:phase runner-test-done}]}
           context (ctx/create-context workflow {:task "Test"} {})
           result (with-redefs [monitoring/check-workflow-supervision
                                (fn [_runtime _workflow-state]
