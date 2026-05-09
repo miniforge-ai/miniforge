@@ -157,6 +157,7 @@
               output (:execution/output result)
               step-result {:step/id step-id
                            :step/workflow-id workflow-id
+                           :step/execution-id (:execution/id result)
                            :step/status (:execution/status result)
                            :step/output output
                            :step/chain-id chain-id

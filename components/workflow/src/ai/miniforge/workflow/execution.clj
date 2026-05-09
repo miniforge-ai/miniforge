@@ -89,6 +89,18 @@
                         {:error (ex-message ex)})))))
       ctx)))
 
+(defn- entered-phase-context?
+  "True when the phase enter step established the standard phase context.
+
+   Enter-path exceptions are normalized by the interceptor error handler into
+   `{:phase {:status :failed :error ...}}`, but that path does not populate the
+   normal enter-context keys like `:started-at` or `:result`. In that state the
+   corresponding `:leave` function has no valid phase context to finalize."
+  [phase-result]
+  (and (map? phase-result)
+       (contains? phase-result :started-at)
+       (contains? phase-result :result)))
+
 (defn extract-phase-result
   "Extract phase result from context."
   [ctx]
@@ -226,7 +238,9 @@
         ctx-entered (execute-enter interceptor ctx-clean)
         phase-result (extract-phase-result ctx-entered)
         phase-result-gated (apply-gate-validation interceptor phase-result ctx-entered)
-        ctx-left (execute-leave interceptor (assoc ctx-entered :phase phase-result-gated))]
+        ctx-left (if (entered-phase-context? phase-result-gated)
+                   (execute-leave interceptor (assoc ctx-entered :phase phase-result-gated))
+                   (assoc ctx-entered :phase phase-result-gated))]
     [ctx-left (extract-phase-result ctx-left)]))
 
 (defn process-phase-result

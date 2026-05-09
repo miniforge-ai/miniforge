@@ -163,6 +163,34 @@
       (is (nil? (get-in ctx-after [:phase :phase/transition-request]))
           "Stale phase transition request must not leak"))))
 
+(deftest enter-failure-skips-leave-test
+  (testing "execute-phase-lifecycle does not invoke leave when enter fails before phase context exists"
+    (let [leave-called? (atom false)
+          interceptor {:config {:phase :failing-phase}
+                       :enter (fn [_]
+                                (throw (ex-info "enter failed" {:phase :failing-phase})))
+                       :leave (fn [ctx]
+                                (reset! leave-called? true)
+                                ctx)
+                       :error (fn [ctx ex]
+                                (-> ctx
+                                    (assoc-in [:phase :status] :failed)
+                                    (assoc-in [:phase :error]
+                                              {:message (ex-message ex)
+                                               :data (ex-data ex)})))}
+          ctx {:execution/input {}
+               :execution/phase-results {}
+               :execution/errors []
+               :execution/response-chain {:operation :test :succeeded? true}
+               :execution/artifacts []
+               :execution/files-written []
+               :execution/metrics {:tokens 0 :duration-ms 0}}
+          [ctx-after phase-result] (exec/execute-phase-lifecycle interceptor ctx)]
+      (is (false? @leave-called?)
+          "Leave must not run when enter failed before establishing phase context")
+      (is (= :failed (:status phase-result)))
+      (is (= "enter failed" (get-in ctx-after [:phase :error :message]))))))
+
 ;; ============================================================================
 ;; Fix 5: Review feedback survives :phase clearing (Run 9 bug)
 ;;

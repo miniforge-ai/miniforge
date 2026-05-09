@@ -161,9 +161,10 @@
     (let [args ((private-fn 'codex-args) {:prompt "fix bug"})]
       (is (= "exec" (first args)))
       (is (some #(= "--json" %) args))
-      ;; Explicit sandbox + approval replaces the deprecated --full-auto alias.
+      ;; Explicit sandbox + approval-policy config replaces the deprecated
+      ;; --full-auto alias.
       (is (some #(= "--sandbox=workspace-write" %) args))
-      (is (some #(= "--ask-for-approval=never" %) args))
+      (is (some #(re-matches #"approval_policy=\"?never\"?" %) args))
       (is (some #(= "--skip-git-repo-check" %) args))
       (is (= "fix bug" (last args))))))
 
@@ -173,10 +174,8 @@
       ;; mcp_servers.artifact.required=true makes Codex fail loudly if our
       ;; MCP server doesn't initialize, instead of running without it.
       (is (some #(= "mcp_servers.artifact.required=true" %) args))
-      ;; --ask-for-approval=never sets the policy via the CLI flag, and
-      ;; approval_policy=never sets it via -c so any config.toml default
-      ;; cannot relax it. Two different knobs, both pinned to never.
-      (is (some #(= "--ask-for-approval=never" %) args))
+      ;; approval_policy=never is set via -c so any config.toml default
+      ;; cannot relax it.
       (is (some #(re-matches #"approval_policy=\"?never\"?" %) args)))))
 
 (deftest codex-args-model-test

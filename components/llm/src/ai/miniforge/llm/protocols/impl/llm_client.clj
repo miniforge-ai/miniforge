@@ -482,7 +482,6 @@
   (cond-> ["exec"
            "--json"
            "--sandbox=workspace-write"
-           "--ask-for-approval=never"
            "--skip-git-repo-check"]
     true   (into ["-c" "approval_policy=never"])
     true   (into ["-c" "mcp_servers.artifact.required=true"])

@@ -47,7 +47,8 @@
 (defn mock-pipeline-success
   "Mock run-pipeline that always succeeds."
   [_workflow _input _opts]
-  {:execution/status :completed
+  {:execution/id (random-uuid)
+   :execution/status :completed
    :execution/output {:artifacts []
                       :phase-results {}
                       :last-phase-result {:plan "the-plan"}
@@ -56,7 +57,8 @@
 (defn mock-pipeline-failure
   "Mock run-pipeline that always fails."
   [_workflow _input _opts]
-  {:execution/status :failed
+  {:execution/id (random-uuid)
+   :execution/status :failed
    :execution/output {:artifacts []
                       :phase-results {}
                       :last-phase-result {:success? false}
@@ -104,6 +106,8 @@
             (is (= :step-1 (:step/id step-started)))
             (is (= 0 (:step/index step-started)))
             (is (= :workflow-a (:step/workflow-id step-started))))
+          (let [first-step (first (:chain/step-results result))]
+            (is (uuid? (:step/execution-id first-step))))
           (let [completed (last (:events @stream))]
             (is (= :test-chain (:chain/id completed)))
             (is (= 2 (:chain/step-count completed)))
@@ -138,6 +142,8 @@
             (is (= :step-1 (:step/id step-failed)))
             (is (= 0 (:step/index step-failed)))
             (is (= "LLM timeout" (:chain/error step-failed))))
+          (let [failed-step (first (:chain/step-results result))]
+            (is (uuid? (:step/execution-id failed-step))))
           (let [chain-failed (last (:events @stream))]
             (is (= :step-1 (:chain/failed-step chain-failed)))
             (is (= "LLM timeout" (:chain/error chain-failed)))))))))
