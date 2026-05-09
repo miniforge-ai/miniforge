@@ -21,7 +21,18 @@
   (:require
    [clojure.test :refer [deftest is testing]]
    [ai.miniforge.phase.interface :as phase]
+   [ai.miniforge.phase.loader :as loader]
    [ai.miniforge.phase.registry :as registry]))
+
+(def phase-test-config-resource
+  "config/phase/test-support-namespaces.edn")
+
+(clojure.test/use-fixtures :each
+  (fn [f]
+    (phase/reset-phase-loader!)
+    (with-redefs [loader/phase-loader-config-resource phase-test-config-resource]
+      (f))
+    (phase/reset-phase-loader!)))
 
 (defmethod registry/get-phase-interceptor :test-phase
   [config]
