@@ -1085,6 +1085,218 @@
       (is (= ["line1" "line2"] @seen)
           "subprocess saw stdin content split by line"))))
 
+;------------------------------------------------------------------------------ Layer 6
+;; Rich tool-event chunks — :tool-call-id/:tool-input on tool_use,
+;; :tool-result chunks from tool_result content blocks
+
+(deftest parse-claude-stream-tool-use-enriched-test
+  (testing "tool_use block with id and input yields :tool-call-id and :tool-input"
+    (let [line   (json/generate-string
+                   {:type "assistant"
+                    :message {:content [{:type  "tool_use"
+                                         :id    "toolu_01abc"
+                                         :name  "Read"
+                                         :input {:path "/tmp/foo.txt"}}]
+                              :stop_reason "tool_use"}})
+          parsed (impl/parse-claude-stream-line line)]
+      (is (true? (:tool-use parsed)))
+      (is (= ["Read"] (vec (:tool-names parsed))))
+      (is (= "toolu_01abc" (:tool-call-id parsed)))
+      (is (= {:path "/tmp/foo.txt"} (:tool-input parsed)))
+      (is (= "tool_use" (:stop-reason parsed)))))
+
+  (testing "tool_use block without :id does not add :tool-call-id key"
+    (let [line   (json/generate-string
+                   {:type "assistant"
+                    :message {:content [{:type "tool_use" :name "Read"}]}})
+          parsed (impl/parse-claude-stream-line line)]
+      (is (true? (:tool-use parsed)))
+      (is (nil? (:tool-call-id parsed)))))
+
+  (testing "tool_use block without :input does not add :tool-input key"
+    (let [line   (json/generate-string
+                   {:type "assistant"
+                    :message {:content [{:type "tool_use" :id "toolu_01abc" :name "Read"}]}})
+          parsed (impl/parse-claude-stream-line line)]
+      (is (= "toolu_01abc" (:tool-call-id parsed)))
+      (is (nil? (:tool-input parsed)))))
+
+  (testing "existing :tool-names and :tool-use keys are unchanged"
+    (let [line   (json/generate-string
+                   {:type "assistant"
+                    :message {:content [{:type "tool_use" :id "t1" :name "Grep"
+                                         :input {:pattern "foo"}}
+                                        {:type "tool_use" :id "t2" :name "Read"
+                                         :input {:path "/bar"}}]}})
+          parsed (impl/parse-claude-stream-line line)]
+      (is (true? (:tool-use parsed)))
+      (is (= #{"Grep" "Read"} (set (:tool-names parsed))))
+      ;; New keys come from the FIRST tool_use block only
+      (is (= "t1" (:tool-call-id parsed)))
+      (is (= {:pattern "foo"} (:tool-input parsed))))))
+
+(deftest parse-claude-stream-tool-result-test
+  (testing "user message with tool_result block emits :tool-result chunk"
+    (let [line   (json/generate-string
+                   {:type "user"
+                    :message {:role    "user"
+                              :content [{:type        "tool_result"
+                                         :tool_use_id "toolu_01abc"
+                                         :content     "file contents here"
+                                         :is_error    false}]}})
+          parsed (impl/parse-claude-stream-line line)]
+      (is (true? (:tool-result parsed)))
+      (is (= "" (:delta parsed)))
+      (is (false? (:done? parsed)))
+      (is (= "toolu_01abc" (:tool-call-id parsed)))
+      (is (= "file contents here" (:tool-output parsed)))
+      (is (false? (:tool-error? parsed)))))
+
+  (testing "tool_result with is_error true sets :tool-error? true"
+    (let [line   (json/generate-string
+                   {:type "user"
+                    :message {:content [{:type        "tool_result"
+                                         :tool_use_id "toolu_err"
+                                         :content     "No such file"
+                                         :is_error    true}]}})
+          parsed (impl/parse-claude-stream-line line)]
+      (is (true? (:tool-result parsed)))
+      (is (true? (:tool-error? parsed)))
+      (is (= "toolu_err" (:tool-call-id parsed)))
+      (is (= "No such file" (:tool-output parsed)))))
+
+  (testing "tool_result with vector content joins text blocks"
+    (let [line   (json/generate-string
+                   {:type "user"
+                    :message {:content [{:type    "tool_result"
+                                         :tool_use_id "toolu_vec"
+                                         :content [{:type "text" :text "line one"}
+                                                   {:type "text" :text "line two"}]}]}})
+          parsed (impl/parse-claude-stream-line line)]
+      (is (true? (:tool-result parsed)))
+      (is (= "line one\nline two" (:tool-output parsed)))))
+
+  (testing "user message without tool_result blocks falls through to heartbeat"
+    (let [line   (json/generate-string
+                   {:type "user"
+                    :message {:content [{:type "text" :text "hello"}]}})
+          parsed (impl/parse-claude-stream-line line)]
+      (is (true? (:heartbeat parsed)))
+      (is (nil? (:tool-result parsed)))))
+
+  (testing "user message with empty content falls through to heartbeat"
+    (let [line   (json/generate-string
+                   {:type "user" :message {:content []}})
+          parsed (impl/parse-claude-stream-line line)]
+      (is (true? (:heartbeat parsed)))
+      (is (nil? (:tool-result parsed))))))
+
+(deftest parse-codex-stream-tool-result-test
+  (testing "mcp_tool_result item emits :tool-result chunk"
+    (let [line   (json/generate-string
+                   {:type "item.completed"
+                    :item {:type         "mcp_tool_result"
+                           :tool_call_id "call_abc"
+                           :output       "tool output text"
+                           :is_error     false}})
+          parsed (impl/parse-codex-stream-line line)]
+      (is (true? (:tool-result parsed)))
+      (is (= "" (:delta parsed)))
+      (is (false? (:done? parsed)))
+      (is (= "call_abc" (:tool-call-id parsed)))
+      (is (= "tool output text" (:tool-output parsed)))
+      (is (false? (:tool-error? parsed)))))
+
+  (testing "mcp_tool_result with is_error true sets :tool-error? true"
+    (let [line   (json/generate-string
+                   {:type "item.completed"
+                    :item {:type         "mcp_tool_result"
+                           :tool_call_id "call_err"
+                           :output       "Error: not found"
+                           :is_error     true}})
+          parsed (impl/parse-codex-stream-line line)]
+      (is (true? (:tool-result parsed)))
+      (is (true? (:tool-error? parsed)))))
+
+  (testing "mcp_tool_result falls back to :id when :tool_call_id absent"
+    (let [line   (json/generate-string
+                   {:type "item.completed"
+                    :item {:type   "mcp_tool_result"
+                           :id     "item_xyz"
+                           :output "output text"}})
+          parsed (impl/parse-codex-stream-line line)]
+      (is (true? (:tool-result parsed)))
+      (is (= "item_xyz" (:tool-call-id parsed)))
+      (is (= "output text" (:tool-output parsed)))))
+
+  (testing "native tool_result item emits :tool-result chunk"
+    (let [line   (json/generate-string
+                   {:type "item.completed"
+                    :item {:type   "tool_result"
+                           :id     "native_call"
+                           :output "native output"}})
+          parsed (impl/parse-codex-stream-line line)]
+      (is (true? (:tool-result parsed)))
+      (is (= "native_call" (:tool-call-id parsed)))
+      (is (= "native output" (:tool-output parsed))))))
+
+(deftest stream-with-parser-tool-result-test
+  (testing ":tool-result chunks forwarded via on-chunk without accumulating content"
+    (let [monitor (pm/create-progress-monitor {:min-activity-interval-ms 1})
+          chunks  (atom [])
+          content (atom "")
+          handler (impl/stream-with-parser
+                    #'impl/parse-claude-stream-line
+                    (fn [chunk] (swap! chunks conj chunk))
+                    monitor
+                    content
+                    (atom nil) (atom nil) (atom []) (atom nil) (atom nil) (atom nil))]
+      ;; Text delta so accumulated-content is non-blank
+      (handler (json/generate-string
+                 {:type "assistant"
+                  :message {:content [{:type "text" :text "Analyzing..."}]}}))
+      ;; Tool-result event (user message with tool_result block)
+      (handler (json/generate-string
+                 {:type "user"
+                  :message {:content [{:type        "tool_result"
+                                       :tool_use_id "toolu_01abc"
+                                       :content     "file line 1\nfile line 2"
+                                       :is_error    false}]}}))
+      ;; accumulated-content must not change on tool-result events
+      (is (= "Analyzing..." @content)
+          "accumulated content must not change on :tool-result events")
+      ;; on-chunk must fire for both events
+      (is (= 2 (count @chunks))
+          "two chunks: text delta + tool-result")
+      (let [tr (last @chunks)]
+        (is (true? (:tool-result tr)))
+        (is (= "toolu_01abc" (:tool-call-id tr)))
+        (is (= "file line 1\nfile line 2" (:tool-output tr)))
+        (is (= "Analyzing..." (:content tr))
+            ":content carries accumulated text at the time of the tool-result"))))
+
+  (testing ":tool-result chunk advances progress-monitor activity timestamp"
+    (let [monitor (pm/create-progress-monitor
+                   {:stagnation-threshold-ms  1000
+                    :max-total-ms             1000
+                    :min-activity-interval-ms 1})
+          handler (impl/stream-with-parser
+                    #'impl/parse-claude-stream-line
+                    (fn [_] nil)
+                    monitor
+                    (atom "")
+                    (atom nil) (atom nil) (atom []) (atom nil) (atom nil) (atom nil))
+          before  (:last-activity-at @monitor)]
+      (Thread/sleep 5)
+      (handler (json/generate-string
+                 {:type "user"
+                  :message {:content [{:type        "tool_result"
+                                       :tool_use_id "toolu_ping"
+                                       :content     "pong"
+                                       :is_error    false}]}}))
+      (is (< before (:last-activity-at @monitor))
+          ":tool-result must advance :last-activity-at to keep monitor alive"))))
+
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
   (test/run-tests 'ai.miniforge.llm.interface-test)
