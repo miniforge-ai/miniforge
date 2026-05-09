@@ -26,6 +26,7 @@
    - Layer 2: Batch analysis + rate limit handling
    - Layer 3: Resume — restore DAG progress from machine snapshots"
   (:require
+   [ai.miniforge.clock.interface :as clock]
    [ai.miniforge.dag-executor.interface :as dag]
    [ai.miniforge.logging.interface :as log]
    [ai.miniforge.workflow.checkpoint-store :as checkpoint-store]))
@@ -68,6 +69,22 @@
   "Matches 'resets in 30 minutes', 'resets in 2 hours'"
   #"resets\s+in\s+(\d+)\s*(minutes?|hours?|seconds?)")
 
+(def ^:dynamic *sleep!*
+  "Injected wall-clock wait used by short reset waits.
+   Tests bind this to advance a fake clock instead of sleeping for real."
+  (fn [wait-ms]
+    (Thread/sleep wait-ms)))
+
+(defn- current-instant
+  "Current instant derived from the shared clock seam."
+  []
+  (java.time.Instant/ofEpochMilli (clock/now-ms)))
+
+(defn- current-zoned-datetime
+  "Current zoned time derived from the shared clock seam."
+  [zone]
+  (java.time.ZonedDateTime/ofInstant (current-instant) zone))
+
 (defn parse-reset-instant
   "Parse rate limit reset time from message text.
    Returns java.time.Instant or nil.
@@ -96,7 +113,7 @@
                local-time (java.time.LocalTime/parse
                            (.trim time-str)
                            formatter)
-               now (java.time.ZonedDateTime/now zone)
+               now (current-zoned-datetime zone)
                reset-today (.with now local-time)
                ;; If reset time is in the past, it means tomorrow
                reset (if (.isBefore reset-today now)
@@ -114,7 +131,7 @@
                           (re-find #"second" unit) (java.time.Duration/ofSeconds amount)
                           (re-find #"minute" unit) (java.time.Duration/ofMinutes amount)
                           (re-find #"hour" unit) (java.time.Duration/ofHours amount))]
-           (.plus (java.time.Instant/now) duration))
+           (.plus (current-instant) duration))
          (catch Exception _ nil))))))
 
 (def ^:private short-wait-threshold-ms
@@ -131,7 +148,7 @@
 (defn millis-until-reset
   "Calculate milliseconds until a reset instant. Returns 0 if already past."
   [reset-instant]
-  (max 0 (- (.toEpochMilli reset-instant) (System/currentTimeMillis))))
+  (max 0 (- (.toEpochMilli reset-instant) (clock/now-ms))))
 
 (defn rate-limit-error?
   "Check if a DAG result indicates a rate limit error."
@@ -281,7 +298,7 @@
                     {:data {:reset-at (str reset-instant)
                             :wait-ms wait-ms
                             :wait-minutes wait-minutes}})
-          (Thread/sleep wait-ms)
+          (*sleep!* wait-ms)
           {:waited? true :wait-ms wait-ms})
 
       ;; Medium wait (30min - 2hrs) — checkpoint, schedule auto-resume
