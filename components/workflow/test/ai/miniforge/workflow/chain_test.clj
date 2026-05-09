@@ -78,6 +78,18 @@
       (is (= "static-label" (:label result)))
       (is (= "bonus" (:extra result))))))
 
+(deftest resolve-bindings-omits-missing-values-test
+  (testing "bindings that resolve to nil are omitted instead of materialized as nil-valued keys"
+    (let [bindings {:task :chain/input.task
+                    :notes :chain/input.notes
+                    :plan [:prev/last-phase-result :plan]}
+          prev-output {:last-phase-result {:plan "the plan"}}
+          chain-input {:task "build feature"}
+          result (chain/resolve-bindings bindings prev-output chain-input)]
+      (is (= "build feature" (:task result)))
+      (is (= "the plan" (:plan result)))
+      (is (not (contains? result :notes))))))
+
 ;------------------------------------------------------------------------------ Layer 2
 ;; run-chain tests
 
