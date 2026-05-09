@@ -169,3 +169,29 @@
               :workflow/id (UUID/randomUUID)
               :message "test"}]
       (is (m/validate schema/WorkflowStarted ev)))))
+
+;------------------------------------------------------------------------------ Layer 4
+;; Sequence numbering — atomic increment under concurrency.
+
+(deftest test-sequence-numbers-are-unique-under-concurrency
+  (testing "concurrent create-envelope calls for the same workflow get distinct :event/sequence-number values"
+    ;; Reviewer flagged the original read-then-swap pattern as racey
+    ;; — concurrent producers could observe the same seq number.
+    ;; The fix uses `swap-vals!` for an atomic capture-and-increment.
+    ;; This test fans out N futures hitting the same workflow id and
+    ;; asserts that every emitted event got a distinct seq number.
+    (let [stream      (fresh-stream)
+          workflow-id (UUID/randomUUID)
+          n           500
+          futures     (doall
+                        (for [_ (range n)]
+                          (future
+                            (:event/sequence-number
+                              (core/create-envelope stream
+                                                    :workflow/started
+                                                    workflow-id
+                                                    "concurrency probe")))))
+          seqs        (mapv deref futures)]
+      (is (= n (count (distinct seqs)))
+          (str "expected " n " distinct seq numbers, got "
+               (count (distinct seqs)))))))

@@ -83,9 +83,17 @@
   ([stream event-type workflow-id message]
    (create-envelope stream event-type workflow-id message {}))
   ([stream event-type workflow-id message opts]
-   (let [seq-num   (get-in @stream [:sequence-numbers workflow-id] 0)
-         generator (:snowflake-generator @stream)]
-     (swap! stream assoc-in [:sequence-numbers workflow-id] (inc seq-num))
+   ;; `swap-vals!` returns [old-state new-state] atomically, so we
+   ;; pull the seq value and increment it in a single CAS — no
+   ;; window where two concurrent producers see the same number.
+   ;; The previous read-then-swap pattern WAS racey; reviewers
+   ;; flagged it on PR #814.
+   (let [[old _new] (swap-vals! stream
+                                update-in
+                                [:sequence-numbers workflow-id]
+                                (fnil inc 0))
+         seq-num    (get-in old [:sequence-numbers workflow-id] 0)
+         generator  (:snowflake-generator @stream)]
      (cond-> {:event/type event-type
               :event/id (if generator
                           (snowflake/next-id! generator)
