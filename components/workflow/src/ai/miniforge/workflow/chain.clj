@@ -81,7 +81,10 @@
   [input-bindings prev-output chain-input]
   (reduce-kv
     (fn [acc k binding]
-      (assoc acc k (resolve-binding binding prev-output chain-input)))
+      (let [resolved (resolve-binding binding prev-output chain-input)]
+        (if (nil? resolved)
+          acc
+          (assoc acc k resolved))))
     {}
     input-bindings))
 
