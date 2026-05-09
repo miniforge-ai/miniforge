@@ -383,7 +383,6 @@
            "--sandbox=workspace-write"
            "--skip-git-repo-check"]
     true   (into ["-c" "approval_policy=never"])
-    true   (into ["-c" "mcp_servers.artifact.required=true"])
     model  (into ["-m" model])
     system (into ["-c" (str "system_prompt=" (json/generate-string system))])
     true   (conj prompt)))
@@ -782,14 +781,72 @@
   (when (System/getenv "CLAUDECODE")
     (into {} (remove (fn [[k _]] (= k "CLAUDECODE"))) (System/getenv))))
 
+(def ^:private codex-runtime-home-dirname
+  "miniforge-codex-home")
+
+(def ^:private codex-runtime-seed-files
+  ["auth.json" "config.toml" "installation_id"])
+
+(defn- default-codex-home
+  []
+  (str (io/file (System/getProperty "user.home") ".codex")))
+
+(defn- runtime-codex-home
+  []
+  (str (io/file (System/getProperty "java.io.tmpdir") codex-runtime-home-dirname)))
+
+(defn- ensure-dir!
+  [path]
+  (let [dir (io/file path)]
+    (.mkdirs dir)
+    path))
+
+(defn- copy-file-if-present!
+  [source-path target-path]
+  (let [source-file (io/file source-path)
+        target-file (io/file target-path)]
+    (when (.exists source-file)
+      (some-> (.getParentFile target-file) .mkdirs)
+      (with-open [in (io/input-stream source-file)
+                  out (io/output-stream target-file)]
+        (io/copy in out)))))
+
+(defn- ensure-codex-runtime-home!
+  []
+  (let [source-home (or (System/getenv "CODEX_HOME") (default-codex-home))
+        runtime-home (runtime-codex-home)]
+    (doseq [dirname [runtime-home
+                     (str (io/file runtime-home "sessions"))
+                     (str (io/file runtime-home "log"))
+                     (str (io/file runtime-home "tmp"))]]
+      (ensure-dir! dirname))
+    (doseq [filename codex-runtime-seed-files]
+      (copy-file-if-present! (str (io/file source-home filename))
+                             (str (io/file runtime-home filename))))
+    runtime-home))
+
+(defn- process-env
+  [backend]
+  (let [env (clean-env)]
+    (cond
+      (= backend :codex)
+      (assoc (or env (into {} (System/getenv)))
+             "CODEX_HOME"
+             (ensure-codex-runtime-home!))
+
+      env env
+
+      :else nil)))
+
 (defn stream-exec-fn
   ([cmd on-line]
    (stream-exec-fn cmd on-line {}))
-  ([cmd on-line {:keys [progress-monitor workdir]}]
+  ([cmd on-line {:keys [env progress-monitor workdir]}]
    (let [monitor (or progress-monitor (default-progress-monitor))
          empty-stdin (ByteArrayInputStream. (byte-array 0))
          process (apply p/process (cond-> {:err :string :in empty-stdin}
-                                          (clean-env) (assoc :env (clean-env))
+                                          env         (assoc :env env)
+                                          (and (nil? env) (clean-env)) (assoc :env (clean-env))
                                           workdir     (assoc :dir workdir)) cmd)
          out-reader (java.io.BufferedReader.
                      (java.io.InputStreamReader. (:out process)))
@@ -853,7 +910,10 @@
             request-with-model (cond-> request model (assoc :model model))
             args (args-fn (assoc request-with-model :prompt prompt))
             full-cmd (into [cmd] args)
-            result (exec-fn full-cmd)
+            result (try
+                     (exec-fn full-cmd {:env (process-env backend)})
+                     (catch clojure.lang.ArityException _
+                       (exec-fn full-cmd)))
             response (parse-cli-output (:out result) (:exit result) (:err result))]
         (log-response logger response)
         response))))
@@ -1026,7 +1086,7 @@
       (log/debug logger :system :agent/streaming-prompt-sent
                  {:data {:backend backend
                          :prompt-length (count prompt)}}))
-    (let [result (stream-fn
+        (let [result (stream-fn
                   full-cmd
                   (stream-with-parser stream-parser on-chunk progress-monitor
                                       accumulated-content accumulated-usage
@@ -1034,6 +1094,7 @@
                                       accumulated-session-id
                                       accumulated-stop-reason accumulated-turns)
                   {:progress-monitor progress-monitor
+                   :env (process-env backend)
                    :workdir (:workdir request)})
           exit-code (:exit result)
           timeout-info (:timeout result)
@@ -1121,15 +1182,19 @@
 
 ;------------------------------------------------------------------------------ Layer 3
 
-(defn default-exec-fn [cmd]
+(defn default-exec-fn
+  ([cmd]
+   (default-exec-fn cmd {}))
+  ([cmd {:keys [env]}]
   (let [timeout-ms 600000
         empty-stdin (ByteArrayInputStream. (byte-array 0))
         result (apply p/shell (cond-> {:out :string :err :string :continue true
                                        :in empty-stdin :timeout timeout-ms}
-                                (clean-env) (assoc :env (clean-env))) cmd)]
+                                env         (assoc :env env)
+                                (and (nil? env) (clean-env)) (assoc :env (clean-env))) cmd)]
     {:out (:out result)
      :err (:err result)
-     :exit (:exit result)}))
+     :exit (:exit result)})))
 
 (defn capsule-exec-fn
   "Returns an exec-fn that routes CLI commands through a task capsule executor.

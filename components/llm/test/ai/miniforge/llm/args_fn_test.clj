@@ -21,6 +21,7 @@
    Verifies that extracted defn- functions produce the same args
    as their original inline anonymous counterparts."
   (:require
+   [clojure.java.io :as io]
    [clojure.test :refer [deftest testing is]]
    [clojure.string :as str]
    [ai.miniforge.llm.protocols.impl.llm-client :as impl]))
@@ -168,12 +169,9 @@
       (is (some #(= "--skip-git-repo-check" %) args))
       (is (= "fix bug" (last args))))))
 
-(deftest codex-args-mcp-required-test
-  (testing "config overrides force the artifact MCP server to be required"
+(deftest codex-args-approval-policy-test
+  (testing "config overrides keep approval policy pinned to never"
     (let [args ((private-fn 'codex-args) {:prompt "p"})]
-      ;; mcp_servers.artifact.required=true makes Codex fail loudly if our
-      ;; MCP server doesn't initialize, instead of running without it.
-      (is (some #(= "mcp_servers.artifact.required=true" %) args))
       ;; approval_policy=never is set via -c so any config.toml default
       ;; cannot relax it.
       (is (some #(re-matches #"approval_policy=\"?never\"?" %) args)))))
@@ -188,6 +186,33 @@
   (testing "system prompt adds -c flag with JSON-encoded value"
     (let [args ((private-fn 'codex-args) {:prompt "p" :system "be helpful"})]
       (is (some #(str/starts-with? % "system_prompt=") args)))))
+
+(deftest process-env-codex-runtime-home-test
+  (testing "codex backend seeds a writable runtime CODEX_HOME from user config files"
+    (let [suffix (str "miniforge-codex-home-test-" (System/nanoTime))
+          source-home (io/file (System/getProperty "java.io.tmpdir") (str suffix "-source"))
+          runtime-home (io/file (System/getProperty "java.io.tmpdir") (str suffix "-runtime"))
+          source-auth (io/file source-home "auth.json")
+          source-config (io/file source-home "config.toml")
+          source-installation (io/file source-home "installation_id")]
+      (.mkdirs source-home)
+      (spit source-auth "{\"token\":\"test\"}")
+      (spit source-config "model = \"gpt-5-codex\"\n")
+      (spit source-installation "install-test\n")
+      (try
+        (with-redefs [impl/default-codex-home (fn [] (.getPath source-home))
+                      impl/runtime-codex-home (fn [] (.getPath runtime-home))]
+          (let [env ((private-fn 'process-env) :codex)]
+            (is (= (.getPath runtime-home) (get env "CODEX_HOME")))
+            (is (.exists (io/file runtime-home "sessions")))
+            (is (= (slurp source-auth) (slurp (io/file runtime-home "auth.json"))))
+            (is (= (slurp source-config) (slurp (io/file runtime-home "config.toml"))))
+            (is (= (slurp source-installation)
+                   (slurp (io/file runtime-home "installation_id"))))))
+        (finally
+          (doseq [dir [source-home runtime-home]]
+            (when (.exists dir)
+              (run! #(io/delete-file % true) (reverse (file-seq dir))))))))))
 
 ;; ============================================================================
 ;; cursor-args
