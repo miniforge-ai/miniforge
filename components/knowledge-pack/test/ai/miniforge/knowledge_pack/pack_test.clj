@@ -56,10 +56,15 @@
       (is (instance? UUID (:pack/revision-id p))))))
 
 (deftest test-pack-revision-id-is-deterministic-over-content
-  (testing "two packs with identical content land on the same revision-id and digest"
-    ;; Pin the inner zettel content via fresh constructions so digests
-    ;; align — different create-zettel calls with same content emit
-    ;; identical revision-id + digest.
+  (testing "two packs that reference the same zettel triples land on the same revision-id and digest"
+    ;; The pack's content-projection includes :pack/zettels (the
+    ;; vector of (zettel-id, revision-id, digest) triples), so
+    ;; pack determinism is against the SAME REFERENCED ZETTELS,
+    ;; not against \"two zettels that happen to have identical
+    ;; content\". `create-zettel` mints a fresh `:zettel/id` per
+    ;; call, so two zettels with identical content have different
+    ;; ids and would change the pack triple. The fixture binds
+    ;; `shared` once so both packs reference the same zettel id.
     (let [shared (z)
           p1 (pack-of [shared])
           p2 (pack-of [shared])]

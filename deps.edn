@@ -38,7 +38,6 @@
                        "components/knowledge/src"
                        "components/knowledge/resources"
                        "components/knowledge-pack/src"
-                       "components/knowledge-pack/resources"
                        "components/policy/src"
                        "components/heuristic/src"
                        "components/heuristic/resources"

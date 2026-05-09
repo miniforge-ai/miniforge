@@ -141,3 +141,32 @@
       (is (false? (:valid? result)))
       (is (= :pack/digest-missing
              (-> result :pack/discrepancy :reason))))))
+
+(deftest test-verify-pack-detects-missing-revision-id
+  (testing "a pack with :pack/digest but no :pack/revision-id surfaces :pack/revision-id-missing"
+    ;; Partial stamping should never happen via the constructors
+    ;; (build-pack / update-pack always stamp both), but a forged
+    ;; pack manifest could carry digest-only — pin the boundary.
+    (let [z1   (knowledge/create-zettel "z-1" "Z1" "Body 1." :rule)
+          pack (kp/build-pack "p" "Pack" "1.0.0" [z1])
+          partial (dissoc pack :pack/revision-id)
+          result (kp/verify-pack partial (lookup-from (store-of [z1])))]
+      (is (false? (:valid? result)))
+      (is (= :pack/revision-id-missing
+             (-> result :pack/discrepancy :reason))))))
+
+(deftest test-verify-pack-detects-forged-revision-id
+  (testing ":pack/revision-id forged independent of :pack/digest fails with :pack/revision-id-mismatch"
+    ;; An attacker-rotated `:pack/revision-id` (e.g. attempting to
+    ;; ride existing trust onto new content by stamping a forged
+    ;; revision id) is caught because revision-id is derived from
+    ;; the digest.
+    (let [z1   (knowledge/create-zettel "z-1" "Z1" "Body 1." :rule)
+          pack (kp/build-pack "p" "Pack" "1.0.0" [z1])
+          forged-rev (UUID/randomUUID)
+          tampered (assoc pack :pack/revision-id forged-rev)
+          result (kp/verify-pack tampered (lookup-from (store-of [z1])))]
+      (is (false? (:valid? result)))
+      (is (= :pack/revision-id-mismatch
+             (-> result :pack/discrepancy :reason)))
+      (is (= forged-rev (-> result :pack/discrepancy :stamped-revision-id))))))

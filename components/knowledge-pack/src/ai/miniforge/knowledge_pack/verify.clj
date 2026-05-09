@@ -34,8 +34,11 @@
        same `:zettel/id` AND `:zettel/revision-id` AND
        `:zettel/digest`. Any divergence — missing zettel, wrong
        revision, mutated content — surfaces as a structured per-ref
-       discrepancy and the verification fails fast (no silent
-       'latest in pack' fallback).
+       discrepancy. The verifier ACCUMULATES every per-ref problem
+       it finds rather than short-circuiting, so an operator
+       diagnosing a partial-failure can see the full set in one
+       result map. There is no silent 'latest in pack' fallback —
+       any divergence is reported.
 
    The verifier is pure over its inputs: it takes a pack map and a
    `lookup-fn` that resolves `(zettel-id, revision-id) → zettel
@@ -81,21 +84,43 @@
 
 (defn- verify-manifest-digest
   "Pure: recompute the pack's digest from the current content
-   projection and compare against the stamped value. Returns nil on
-   success or a discrepancy map on failure."
+   projection, compare against the stamped digest, AND verify the
+   stamped `:pack/revision-id` is the UUID derived from that
+   recomputed digest. Returns nil on success or a discrepancy map
+   on failure.
+
+   Both checks matter: an attacker who tampers with manifest body
+   AND re-stamps `:pack/digest` would still trip the revision-id
+   check, because revision-id is `nameUUIDFromBytes(digest)`. A
+   tamper that goes through `update-pack` is not really tampering
+   — the revision rotates by design — but a bypass attempt that
+   forges either field independently is caught here."
   [pack]
-  (let [stamped     (:pack/digest pack)
-        recomputed  (pack/compute-digest pack)]
+  (let [stamped-digest (:pack/digest pack)
+        recomputed     (pack/compute-digest pack)
+        stamped-rev    (:pack/revision-id pack)
+        derived-rev    (when recomputed
+                         (pack/revision-id-from-digest recomputed))]
     (cond
-      (nil? stamped)
+      (nil? stamped-digest)
       {:reason :pack/digest-missing
        :detail "pack manifest carries no :pack/digest — was it built via knowledge-pack/build-pack?"}
 
-      (not= stamped recomputed)
+      (not= stamped-digest recomputed)
       {:reason :pack/digest-mismatch
        :detail "manifest body was edited without going through update-pack"
-       :stamped-digest stamped
-       :recomputed-digest recomputed})))
+       :stamped-digest stamped-digest
+       :recomputed-digest recomputed}
+
+      (nil? stamped-rev)
+      {:reason :pack/revision-id-missing
+       :detail "pack manifest carries :pack/digest but no :pack/revision-id — partial stamping should never happen via the constructors"}
+
+      (not= stamped-rev derived-rev)
+      {:reason :pack/revision-id-mismatch
+       :detail "manifest's :pack/revision-id does not match the UUID derived from :pack/digest — someone forged one without the other"
+       :stamped-revision-id stamped-rev
+       :derived-revision-id derived-rev})))
 
 (defn verify-pack
   "Verify a pack against a zettel store.
