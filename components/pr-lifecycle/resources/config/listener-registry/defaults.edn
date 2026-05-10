@@ -1,0 +1,33 @@
+;; Listener Registry — per-component configuration defaults.
+;;
+;; Loaded once at namespace load via `clojure.edn/read-string` and
+;; folded into the public `def`s exposed from
+;; `ai.miniforge.pr-lifecycle.listener-registry`. Keep code-side
+;; constants out of the source — operators changing tunables
+;; shouldn't need to recompile.
+;;
+;; Per N13 §2.7 + specs/informative/n13-listener-registry.md.
+
+{;; Spec / artifact format version. Tracks the spec document
+ ;; version on the same cadence — bumping the spec bumps this.
+ :registry/version           "0.1.0"
+
+ ;; On-disk artifact path, relative to the worktree root.
+ :default-storage-path       ".miniforge/listener-registry.edn"
+
+ ;; Default `:ttl-seconds` per spec §Lifecycle. 7 days.
+ :default-ttl-seconds        604800
+
+ ;; Enumerated `:runtime` values per spec schema.
+ :valid-runtimes             #{:claude-cli :codex :miniforge :webhook}
+
+ ;; Enumerated `:resume-channel/kind` values per spec §Dispatch.
+ :valid-channel-kinds        #{:pty :miniforge-ipc :webhook}
+
+ ;; Enumerated `:status` values per spec §Lifecycle states.
+ :valid-statuses             #{:active :dispatched :expired :cancelled}
+
+ ;; The three canonical registration moments per spec
+ ;; §Registration moments. Registration with any other
+ ;; `:registered-by` MUST be rejected.
+ :valid-registered-by        #{:authoring-agent :operator :workflow}}

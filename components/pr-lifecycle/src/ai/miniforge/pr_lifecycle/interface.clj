@@ -40,6 +40,7 @@
    [ai.miniforge.pr-lifecycle.review-monitor :as review]
    [ai.miniforge.pr-lifecycle.fix-loop :as fix]
    [ai.miniforge.pr-lifecycle.github :as github]
+   [ai.miniforge.pr-lifecycle.listener-registry :as listener-registry]
    [ai.miniforge.pr-lifecycle.review-scheduler :as review-scheduler]
    [ai.miniforge.pr-lifecycle.triage :as triage]
    [ai.miniforge.pr-lifecycle.merge :as merge]
@@ -393,6 +394,71 @@
 (def fetch-pr-head!
   "Fetch the PR head into `refs/miniforge-review/pr-<n>`. DAG result."
   review-scheduler/fetch-pr-head!)
+
+;------------------------------------------------------------------------------ Layer 2.7
+;; Listener registry (N13 §2.7)
+
+(def listener-registry-default-storage-path
+  "Default on-disk path for the listener registry artifact, relative
+   to the worktree root."
+  listener-registry/default-storage-path)
+
+(def listener-registry-default-ttl-seconds
+  "Default `:ttl-seconds` per spec §Lifecycle (7 days)."
+  listener-registry/default-ttl-seconds)
+
+(def register-listener!
+  "Persist a new listener entry per N13 §2.7. Required `params` keys:
+   `:pr/url :pr/repo-id :pr/number :agent/id :runtime :resume-channel
+   :registered-by`. Returns DAG result `(dag/ok {:listener-id <uuid>
+   :path <storage-path>})` on success.
+
+   Registration is rejected when `:registered-by` isn't one of the
+   three canonical moments (`:authoring-agent` / `:operator` /
+   `:workflow`) per spec §Registration moments."
+  listener-registry/register!)
+
+(def unregister-listener!
+  "Transition `listener-id` (under `pr-url`) to `:cancelled`. Returns
+   `(dag/err :listener-registry/listener-not-found ...)` if no such
+   entry exists."
+  listener-registry/unregister!)
+
+(def mark-listener-dispatched!
+  "Transition `listener-id` to `:dispatched`, recording
+   `:resume/dispatched-at` and `:resume/dispatch-id`. Called by the
+   Resume Signal Dispatcher (separate component) on a successful
+   primer delivery."
+  listener-registry/mark-dispatched!)
+
+(def cancel-listeners-on-pr-close!
+  "Transition every `:active` listener for `pr-url` to `:cancelled`.
+   Called when `pull_request.closed` arrives with `merged: false`."
+  listener-registry/mark-cancelled-on-pr-close!)
+
+(def sweep-expired-listeners!
+  "Transition every `:active` entry whose TTL has elapsed to
+   `:expired`. Idempotent."
+  listener-registry/sweep-expired!)
+
+(def read-listener-registry
+  "Load the registry from `worktree-path`'s `.miniforge/listener-registry.edn`.
+   Returns `(dag/ok <registry>)` (empty registry on missing file) or
+   typed error on parse failure."
+  listener-registry/read-registry)
+
+(def listeners-for-pr
+  "Pure: return all entries (any status) for `pr-url`."
+  listener-registry/entries-for-pr)
+
+(def active-listeners-for-pr
+  "Pure: return entries with `:status :active` for `pr-url`."
+  listener-registry/active-entries-for-pr)
+
+(def listeners-for-agent
+  "Pure: return all entries (any status) bound to `agent-id` across
+   all PRs."
+  listener-registry/entries-for-agent)
 
 ;------------------------------------------------------------------------------ Layer 3
 ;; Fix loop
