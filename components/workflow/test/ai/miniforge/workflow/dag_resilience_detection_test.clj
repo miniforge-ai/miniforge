@@ -127,7 +127,29 @@
       "API rate limit exceeded"
       "429 Too Many Requests"
       "Quota exceeded for this billing period"
-      "resets 3pm (US/Pacific)")))
+      "resets 3pm (US/Pacific)"
+      ;; Anthropic 529 / overloaded_error — the current random-throttling
+      ;; signal. The implementer's phase-local regex caught this already;
+      ;; the centralised resilience layer did not until the
+      ;; :anthropic-overloaded pattern was added.
+      "API Error: 529 {\"error\":{\"type\":\"overloaded_error\",\"message\":\"Overloaded\"}}"
+      "anthropic response: overloaded_error"
+      "HTTP 529 service capacity exceeded"
+      ;; OpenAI/Codex structured error shapes
+      "openai: rate_limit_exceeded — please slow down"
+      "codex error: insufficient_quota for current billing tier"
+      "OpenAI: 30 requests per minute exceeded"
+      "openai response: model is currently overloaded with other requests"
+      "codex: 503 service unavailable, try again later"
+      ;; Free-text / prose-only rate-limit signals — vendors that don't
+      ;; bother with a standard HTTP code or JSON shape
+      "We're throttling your requests, please try again in 60 seconds"
+      "Service is at capacity. Please back off and retry."
+      "API is temporarily overloaded — please wait"
+      "Usage limit reached for this hour"
+      "You've exceeded your quota for the day"
+      "Service too busy — back off"
+      "Please slow down and retry shortly")))
 
 (deftest test-rate-limit-in-text-rejects-normal-text
   (testing "does not flag normal text"
