@@ -40,6 +40,7 @@
    [ai.miniforge.pr-lifecycle.review-monitor :as review]
    [ai.miniforge.pr-lifecycle.fix-loop :as fix]
    [ai.miniforge.pr-lifecycle.github :as github]
+   [ai.miniforge.pr-lifecycle.review-scheduler :as review-scheduler]
    [ai.miniforge.pr-lifecycle.triage :as triage]
    [ai.miniforge.pr-lifecycle.merge :as merge]
    [ai.miniforge.pr-lifecycle.events :as events]
@@ -354,6 +355,44 @@
                        :comment/body \"...payload edn block...\"}]))
      ; => {:ok? true :data {:review-id ... :url \"https://...\" ...}}"
   github/post-review!)
+
+(def review-marker
+  "Invisible HTML comment appended to every review body posted via
+   `post-review!`. Lets `existing-review-shas` recognize prior posts
+   authored by the N13 Standards Reviewer."
+  github/review-marker)
+
+;------------------------------------------------------------------------------ Layer 2.5
+;; Review scheduling (N13 §2.2 auto-trigger)
+
+(def existing-review-shas
+  "Return `(dag/ok #{sha …})` of head SHAs for which we've already
+   posted a marker-bearing standards review on `pr-number`.
+   Pages through `gh api .../reviews --paginate`."
+  review-scheduler/existing-review-shas)
+
+(def pr-needs-review?
+  "Pure predicate: true when `pr` (a `:pr/sha`-bearing map from
+   `pr-poller/poll-open-prs`) has no entry in `existing-shas`."
+  review-scheduler/pr-needs-review?)
+
+(def partition-needs-review
+  "Split a vector of `pr-poller`-shaped PR maps into
+   `{:needs-review [...] :already-reviewed [...]}` against the
+   `existing-shas-by-pr` map (keyed by `:pr/number`)."
+  review-scheduler/partition-needs-review)
+
+(def with-pr-worktree
+  "Bracketing helper: fetch PR head, create an ephemeral detached
+   worktree at `sha` under `/tmp/mf-review-<sha>`, invoke `f` with
+   `{:worktree-path string :sha string}`, then clean up. Returns
+   `(dag/ok {:result <f-return> :sha <sha>})` on success or the
+   failing DAG result on setup failure."
+  review-scheduler/with-pr-worktree)
+
+(def fetch-pr-head!
+  "Fetch the PR head into `refs/miniforge-review/pr-<n>`. DAG result."
+  review-scheduler/fetch-pr-head!)
 
 ;------------------------------------------------------------------------------ Layer 3
 ;; Fix loop

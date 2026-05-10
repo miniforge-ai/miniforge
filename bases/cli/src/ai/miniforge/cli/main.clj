@@ -54,6 +54,7 @@
    [ai.miniforge.cli.main.commands.monitoring :as cmd-monitoring]
    [ai.miniforge.cli.main.commands.fleet :as cmd-fleet]
    [ai.miniforge.cli.main.commands.pr :as cmd-pr]
+   [ai.miniforge.cli.main.commands.pr-review-monitor :as cmd-pr-review-monitor]
    [ai.miniforge.cli.main.commands.control-plane :as cmd-cp]
    [ai.miniforge.cli.main.commands.scan :as cmd-scan]
    [ai.miniforge.cli.main.commands.init :as cmd-init]
@@ -320,6 +321,7 @@
 (defn pr-respond-cmd [m] (cmd-pr/pr-respond-cmd (get-opts m)))
 (defn pr-merge-cmd [m] (cmd-pr/pr-merge-cmd (get-opts m)))
 (defn pr-monitor-cmd [m] (cmd-pr/pr-monitor-cmd (get-opts m)))
+(defn pr-review-monitor-cmd [m] (cmd-pr-review-monitor/pr-review-monitor-cmd (get-opts m)))
 
 ;; Control Plane commands
 (defn cp-status-cmd [m] (cmd-cp/status-cmd (get-opts m)))
@@ -605,6 +607,16 @@
    {:cmds ["pr" "merge"]   :fn pr-merge-cmd   :args->opts [:url]}
    {:cmds ["pr" "monitor"] :fn pr-monitor-cmd :spec {:author {:alias :a}
                                                       :poll-interval {:alias :p}}}
+
+   ;; N13 §2.2 Standards Reviewer auto-trigger (single-pass v0)
+   {:cmds ["pr" "review-monitor"]
+    :fn pr-review-monitor-cmd
+    :spec {:repo      {}
+           :author    {:alias :a}
+           :standards {:default ".standards"}
+           :pack      {:alias :p}
+           :rules     {:alias :r}
+           :once      {:coerce :boolean :default true}}}
 
    ;; Control Plane subcommands
    {:cmds ["control-plane" "status"]    :fn cp-status-cmd}

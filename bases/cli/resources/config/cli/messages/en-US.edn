@@ -503,6 +503,17 @@
   :pr/review-post-pr-required "pr-review --post requires a PR number (use the URL flow or pass --pr-number)."
   :pr/review-post-commit-id-required "pr-review --post requires a PR head SHA. The URL flow derives it from the worktree HEAD after `gh pr checkout` — pass --commit-id explicitly if calling the by-path flow on a worktree that isn't at the PR head."
 
+  ;; PR Review Monitor (N13 §2.2 auto-trigger)
+  :pr/review-monitor-repo-not-found "pr review-monitor: --repo path not found: {path}"
+  :pr/review-monitor-author-required "pr review-monitor: --author <login> is required (e.g. --author chrislester)."
+  :pr/review-monitor-poll-failed "pr review-monitor: failed to list PRs: [{code}] {message}"
+  :pr/review-monitor-poll-summary "pr review-monitor: {count} open PR(s) authored by {author}"
+  :pr/review-monitor-partition "pr review-monitor: {needs} need review, {skip} already reviewed at HEAD"
+  :pr/review-monitor-running "pr review-monitor: reviewing PR #{n} (head {sha}…)"
+  :pr/review-monitor-base-failed "pr review-monitor: PR #{n} — failed to resolve base ref via gh, skipping"
+  :pr/review-monitor-pr-failed "pr review-monitor: PR #{n} ({url}) — [{code}] {message}"
+  :pr/review-monitor-failed "pr review-monitor failed: {message}"
+
   ;; PR Monitor
   :pr/monitor-starting "Starting PR monitor for author: {author}"
   :pr/monitor-polling "Polling every {seconds}s in {dir}"
