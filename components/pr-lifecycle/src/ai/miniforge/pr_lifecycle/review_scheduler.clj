@@ -133,9 +133,18 @@
    `f` is called with `{:worktree-path string :sha string}` and may
    return any value, which is wrapped on success.
 
+   Cleanup invariants:
+   - Pre-flight: any pre-existing leftover at `tmp` is removed
+     before fetch/add — handles the previous-crashed-run case.
+   - On fetch failure: nothing to clean up (no worktree created).
+   - On add failure: best-effort `remove-pr-worktree!` on `tmp`
+     because `git worktree add` can leave a partial directory and/or
+     a registered worktree entry even when it exits non-zero.
+   - On `f` success or `f` exception: `try/finally` always runs
+     `remove-pr-worktree!`.
+
    Returns:
-   - On any setup failure: the failing DAG result (no `f` invocation,
-     no cleanup needed beyond what was created).
+   - On any setup failure: the failing DAG result.
    - On `f` success: `(dag/ok {:result <f-return> :sha <sha>})`.
    - On `f` exception: re-throws after cleanup."
   [base-repo pr-number sha f]
@@ -147,7 +156,12 @@
         fetch-r
         (let [add-r (add-pr-worktree! base-repo sha tmp)]
           (if-not (dag/ok? add-r)
-            add-r
+            ;; Add failed — best-effort sweep of any partial leftover
+            ;; before bubbling the typed error. `remove-pr-worktree!`
+            ;; tolerates a missing worktree (git noop) + missing dir
+            ;; (catch in delete-tree).
+            (do (remove-pr-worktree! base-repo tmp)
+                add-r)
             (try
               (let [r (f {:worktree-path (str tmp) :sha sha})]
                 (dag/ok {:result r :sha sha}))

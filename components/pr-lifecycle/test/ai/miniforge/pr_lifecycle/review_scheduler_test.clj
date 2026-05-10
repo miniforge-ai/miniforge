@@ -22,6 +22,7 @@
    by integration smoke against a real repo, not unit-tested here)."
   (:require [babashka.process :as process]
             [cheshire.core :as json]
+            [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [ai.miniforge.dag-executor.interface :as dag]
             [ai.miniforge.pr-lifecycle.github :as github]
@@ -126,6 +127,97 @@
     (is (false? (sched/pr-needs-review? {:pr/sha nil} #{})))
     (is (false? (sched/pr-needs-review? {} #{})))
     (is (false? (sched/pr-needs-review? {:pr/sha 42} #{})))))
+
+;; ── with-pr-worktree cleanup invariants ──────────────────────────────
+
+(deftest with-pr-worktree-cleans-up-on-add-failure
+  (testing "when add-pr-worktree! fails, remove-pr-worktree! is still invoked"
+    (let [calls (atom [])]
+      (with-redefs [sched/fetch-pr-head!
+                    (fn [_ _] (dag/ok {:output ""}))
+
+                    sched/add-pr-worktree!
+                    (fn [_ _ _]
+                      (swap! calls conj :add)
+                      (dag/err :git-command-failed "fatal: simulated add failure"
+                               {:exit-code 128 :args []}))
+
+                    sched/remove-pr-worktree!
+                    (fn [_ _]
+                      (swap! calls conj :remove)
+                      (dag/ok {:removed "x"}))]
+        (let [r (sched/with-pr-worktree "/some/repo" 42 sha-a (fn [_] :unreached))]
+          (is (not (dag/ok? r))
+              "the failing add result is bubbled up")
+          (is (= :git-command-failed (get-in r [:error :code])))
+          (is (= [:add :remove] @calls)
+              "add tried, then remove invoked even though add failed")
+          (is (not (some #{:unreached} (map identity []))) ; sanity placeholder
+              ":unreached marker would only show up if f ran"))))))
+
+(deftest with-pr-worktree-runs-f-then-cleanup-on-success
+  (testing "happy path: fetch ok, add ok, f runs, cleanup runs in finally"
+    (let [calls (atom [])]
+      (with-redefs [sched/fetch-pr-head!
+                    (fn [_ _] (swap! calls conj :fetch) (dag/ok {:output ""}))
+
+                    sched/add-pr-worktree!
+                    (fn [_ _ _]
+                      (swap! calls conj :add)
+                      (dag/ok {:worktree-path "/tmp/x"}))
+
+                    sched/remove-pr-worktree!
+                    (fn [_ _] (swap! calls conj :remove) (dag/ok {:removed "x"}))]
+        (let [r (sched/with-pr-worktree
+                 "/some/repo" 42 sha-a
+                 (fn [{:keys [worktree-path sha]}]
+                   (swap! calls conj [:f worktree-path sha])
+                   :review-result))]
+          (is (dag/ok? r))
+          (is (= :review-result (get-in r [:data :result])))
+          (is (= sha-a (get-in r [:data :sha])))
+          (is (= [:fetch :add :remove]
+                 (filter keyword? @calls))
+              "fetch → add → remove all called in order")
+          (let [f-call (first (filter vector? @calls))]
+            (is (= 3 (count f-call)))
+            (is (= :f (first f-call)))
+            (is (str/includes? (second f-call) sha-a)
+                "f received a worktree-path that includes the SHA")
+            (is (= sha-a (last f-call)))))))))
+
+(deftest with-pr-worktree-cleans-up-on-f-exception
+  (testing "f exception still triggers cleanup, then rethrows"
+    (let [calls (atom [])]
+      (with-redefs [sched/fetch-pr-head! (fn [_ _] (dag/ok {:output ""}))
+                    sched/add-pr-worktree!
+                    (fn [_ _ _]
+                      (swap! calls conj :add)
+                      (dag/ok {:worktree-path "/tmp/x"}))
+                    sched/remove-pr-worktree!
+                    (fn [_ _] (swap! calls conj :remove) (dag/ok {}))]
+        (is (thrown? RuntimeException
+                     (sched/with-pr-worktree
+                      "/some/repo" 42 sha-a
+                      (fn [_] (throw (RuntimeException. "f boom"))))))
+        (is (= [:add :remove] @calls)
+            "remove ran in the finally even though f threw")))))
+
+(deftest with-pr-worktree-skips-on-fetch-failure
+  (testing "fetch failure short-circuits — no add, no remove (nothing was created)"
+    (let [calls (atom [])]
+      (with-redefs [sched/fetch-pr-head!
+                    (fn [_ _]
+                      (swap! calls conj :fetch)
+                      (dag/err :git-command-failed "no permission" {}))
+                    sched/add-pr-worktree!
+                    (fn [_ _ _] (swap! calls conj :add) (dag/ok {}))
+                    sched/remove-pr-worktree!
+                    (fn [_ _] (swap! calls conj :remove) (dag/ok {}))]
+        (let [r (sched/with-pr-worktree "/some/repo" 42 sha-a (fn [_] :unreached))]
+          (is (not (dag/ok? r)))
+          (is (= [:fetch] @calls)
+              "fetch tried; add+remove not invoked (nothing was created)"))))))
 
 (deftest partition-needs-review-splits-prs
   (testing "splits into :needs-review / :already-reviewed by PR-keyed map"
