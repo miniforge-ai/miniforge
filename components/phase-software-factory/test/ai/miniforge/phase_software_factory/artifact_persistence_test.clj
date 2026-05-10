@@ -68,9 +68,11 @@
 (use-fixtures :each
   (fn [f]
     (phase/reset-phase-loader!)
-    (binding [loader/phase-loader-config-resource phase-test-config-resource]
-      (worktree-fixture f))
-    (phase/reset-phase-loader!)))
+    (try
+      (binding [loader/phase-loader-config-resource phase-test-config-resource]
+        (worktree-fixture f))
+      (finally
+        (phase/reset-phase-loader!)))))
 
 ;------------------------------------------------------------------------------ Test Helpers
 

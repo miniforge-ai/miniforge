@@ -47,9 +47,11 @@
 (use-fixtures :each
   (fn [f]
     (phase/reset-phase-loader!)
-    (binding [loader/phase-loader-config-resource phase-test-config-resource]
-      (f))
-    (phase/reset-phase-loader!)))
+    (try
+      (binding [loader/phase-loader-config-resource phase-test-config-resource]
+        (f))
+      (finally
+        (phase/reset-phase-loader!)))))
 
 (defn create-temp-worktree
   "Create a temporary directory initialized as a real git repository.
