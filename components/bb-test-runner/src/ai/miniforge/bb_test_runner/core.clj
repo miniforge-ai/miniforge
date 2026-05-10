@@ -50,6 +50,9 @@
 (def ^:private default-heartbeat-seconds
   30)
 
+(def ^:private default-expand-start-size
+  1)
+
 (def ^:private git-worktree-env-keys
   ["GIT_INDEX_FILE" "GIT_DIR" "GIT_WORK_TREE" "GIT_COMMON_DIR"])
 
@@ -299,6 +302,89 @@
     (case direction
       :back (vec (reverse ordered))
       ordered)))
+
+(defn- positive-start-size
+  [project-count requested-size]
+  (-> (or requested-size default-expand-start-size)
+      (max default-expand-start-size)
+      (min project-count)))
+
+(defn expand-project-groups
+  "Return additive project groups that double in size until they cover
+   the full ordered project set."
+  [projects start-size]
+  (let [project-vec (vec projects)
+        project-count (count project-vec)]
+    (if (zero? project-count)
+      []
+      (loop [group-size (positive-start-size project-count start-size)
+             groups []]
+        (let [group (subvec project-vec 0 group-size)
+              next-groups (conj groups group)]
+          (if (= group-size project-count)
+            next-groups
+            (recur (min project-count (* 2 group-size))
+                   next-groups)))))))
+
+(defn bisect-project-groups
+  "Return contiguous project groups in breadth-first binary partition
+   order."
+  [projects]
+  (let [root (vec projects)]
+    (loop [queue (cond-> clojure.lang.PersistentQueue/EMPTY
+                   (> (count root) 1) (conj root))
+           groups []]
+      (if (empty? queue)
+        groups
+        (let [group (peek queue)
+              queue-tail (pop queue)
+              mid (quot (count group) 2)
+              left (subvec group 0 mid)
+              right (subvec group mid)
+              next-groups (cond-> groups
+                            (seq left) (conj left)
+                            (seq right) (conj right))
+              next-queue (cond-> queue-tail
+                           (> (count left) 1) (conj left)
+                           (> (count right) 1) (conj right))]
+          (recur next-queue next-groups))))))
+
+(defn diagnostic-test-plan
+  "Return a stable-derived diagnostic plan over an explicit project
+   vector."
+  [{:keys [mode projects start-size direction order seed]}]
+  (let [effective-mode (or mode :subset)
+        ordered-projects (order-projects (vec projects)
+                                         {:direction direction
+                                          :order order
+                                          :seed seed})
+        project-groups (if (empty? ordered-projects)
+                         []
+                         (case effective-mode
+                           :expand (expand-project-groups ordered-projects start-size)
+                           :bisect (bisect-project-groups ordered-projects)
+                           [(vec ordered-projects)]))
+        total-groups (count project-groups)]
+    {:mode effective-mode
+     :summary (str "Running "
+                   (name effective-mode)
+                   " diagnostics across "
+                   (count ordered-projects)
+                   " stable-derived projects.")
+     :projects ordered-projects
+     :steps (mapv (fn [index group]
+                    (let [selector (format-project-selector group)]
+                      {:label (str (name effective-mode)
+                                 " project subset "
+                                 (inc index) "/"
+                                 total-groups
+                                 " ("
+                                 (count group)
+                                 " projects)")
+                       :argv (cond-> ["clojure" "-M:poly" "test"]
+                               selector (conj selector))}))
+                  (range)
+                  project-groups)}))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Coverage command derivation (pure)
