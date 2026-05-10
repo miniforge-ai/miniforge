@@ -236,6 +236,70 @@
           parsed
           default-heartbeat-seconds)))))
 
+(defn- parse-long-arg
+  [arg prefix]
+  (let [raw (subs arg (count prefix))]
+    (try
+      (Long/parseLong raw)
+      (catch NumberFormatException ex
+        (throw (ex-info "Invalid stable-derived diagnostic argument."
+                        {:arg arg
+                         :prefix prefix
+                         :expected-format (str prefix "N")}
+                        ex))))))
+
+(defn parse-diagnostic-args
+  "Parse supported stable-derived diagnostic CLI arguments.
+
+   Supported forms:
+   - `mode:subset|expand|bisect`
+   - `project:proj1:proj2`
+   - `start-size:N`
+   - `direction:front|back`
+   - `order:declared|random`
+   - `seed:N`"
+  [args]
+  (reduce
+   (fn [acc arg]
+     (cond
+       (str/starts-with? arg "mode:")
+       (assoc acc :mode (keyword (subs arg (count "mode:"))))
+
+       (str/starts-with? arg "project:")
+       (assoc acc :projects (parse-project-selector arg))
+
+       (str/starts-with? arg "start-size:")
+       (assoc acc :start-size (parse-long-arg arg "start-size:"))
+
+       (str/starts-with? arg "direction:")
+       (assoc acc :direction (keyword (subs arg (count "direction:"))))
+
+       (str/starts-with? arg "order:")
+       (assoc acc :order (keyword (subs arg (count "order:"))))
+
+       (str/starts-with? arg "seed:")
+       (assoc acc :seed (parse-long-arg arg "seed:"))
+
+       :else acc))
+   {}
+   args))
+
+(defn- shuffle-projects
+  [projects seed]
+  (let [alist (java.util.ArrayList. ^java.util.Collection projects)]
+    (java.util.Collections/shuffle alist (java.util.Random. (long (or seed 0))))
+    (vec alist)))
+
+(defn order-projects
+  "Apply diagnostic ordering controls to a project vector."
+  [projects {:keys [direction order seed]}]
+  (let [ordered (case order
+                  :random (shuffle-projects projects seed)
+                  (vec projects))]
+    (case direction
+      :back (vec (reverse ordered))
+      ordered)))
+
 ;------------------------------------------------------------------------------ Layer 1
 ;; Coverage command derivation (pure)
 
