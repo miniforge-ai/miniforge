@@ -22,6 +22,7 @@
    This controller uses an explicit FSM-backed status model to drive a task
    through PR creation, CI/review monitoring, fix loops, and merge."
   (:require
+   [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.dag-executor.interface :as dag]
    [ai.miniforge.pr-lifecycle.ci-monitor :as ci]
    [ai.miniforge.pr-lifecycle.controller-config :as controller-config]
@@ -32,6 +33,7 @@
    [ai.miniforge.pr-lifecycle.merge :as merge]
    [ai.miniforge.pr-lifecycle.review-monitor :as review]
    [ai.miniforge.release-executor.interface :as release]
+   [ai.miniforge.response.interface :as response]
    [ai.miniforge.schema.interface :as schema]
    [ai.miniforge.logging.interface :as log]
    [clojure.string :as str]))
@@ -44,6 +46,41 @@
 
 (def ^:private lifecycle-failed-status
   :failed)
+
+(defn iter-budget-result
+  "Anomaly-returning iter-budget check.
+
+   Returns `:ok` when `current` < `max-iters`, or a `:conflict`
+   anomaly when the iteration budget is exhausted. The anomaly's
+   `:anomaly/data` carries `:task-id` and `:iterations`.
+
+   This is the canonical, anomaly-returning entry point. The boundary
+   sites `handle-ci-failure!` and `handle-review-feedback!` consume
+   the anomaly and rethrow via `response/throw-anomaly!` with
+   `:anomalies/conflict`."
+  [task-id current max-iters]
+  (if (>= current max-iters)
+    (anomaly/anomaly :conflict
+                     (messages/t :controller/max-fix-iterations-exceeded)
+                     {:task-id task-id :iterations current})
+    :ok))
+
+(defn pr-creation-result
+  "Anomaly-returning PR-creation check.
+
+   Returns `:ok` when `pr-result` is a successful DAG result, or a
+   `:fault` anomaly when the upstream `create-pr!` returns a DAG
+   error. The anomaly's `:anomaly/data` carries `:error`.
+
+   This is the canonical, anomaly-returning entry point. The boundary
+   site `run-lifecycle!` consumes the anomaly and rethrows via
+   `response/throw-anomaly!` with `:anomalies/fault`."
+  [pr-result]
+  (if (dag/err? pr-result)
+    (anomaly/anomaly :fault
+                     (messages/t :controller/pr-creation-failed)
+                     {:error (:error pr-result)})
+    :ok))
 
 (defn- remove-nil-values
   "Drop entries whose values are nil."
@@ -378,15 +415,17 @@
         {:keys [worktree-path max-fix-iterations]} config
         current-iterations (:fix-iterations @controller)]
 
-    (when (>= current-iterations max-fix-iterations)
-      (update-status! controller :failed)
-      (add-history! controller :max-fix-iterations-exceeded {:iterations current-iterations})
-      (when logger
-        (log/warn logger :pr-lifecycle :controller/max-iterations
-                  {:message (messages/t :controller/max-fix-iterations-exceeded)
-                   :data {:task-id task-id :iterations current-iterations}}))
-      (throw (ex-info (messages/t :controller/max-fix-iterations-exceeded)
-                      {:task-id task-id :iterations current-iterations})))
+    (let [budget (iter-budget-result task-id current-iterations max-fix-iterations)]
+      (when (anomaly/anomaly? budget)
+        (update-status! controller :failed)
+        (add-history! controller :max-fix-iterations-exceeded {:iterations current-iterations})
+        (when logger
+          (log/warn logger :pr-lifecycle :controller/max-iterations
+                    {:message (:anomaly/message budget)
+                     :data (:anomaly/data budget)}))
+        (response/throw-anomaly! :anomalies/conflict
+                                 (:anomaly/message budget)
+                                 (:anomaly/data budget))))
 
     (update-status! controller :fixing)
     (swap! controller update :fix-iterations inc)
@@ -414,11 +453,13 @@
         {:keys [worktree-path max-fix-iterations auto-resolve-comments]} config
         current-iterations (:fix-iterations @controller)]
 
-    (when (>= current-iterations max-fix-iterations)
-      (update-status! controller :failed)
-      (add-history! controller :max-fix-iterations-exceeded {:iterations current-iterations})
-      (throw (ex-info (messages/t :controller/max-fix-iterations-exceeded)
-                      {:task-id task-id :iterations current-iterations})))
+    (let [budget (iter-budget-result task-id current-iterations max-fix-iterations)]
+      (when (anomaly/anomaly? budget)
+        (update-status! controller :failed)
+        (add-history! controller :max-fix-iterations-exceeded {:iterations current-iterations})
+        (response/throw-anomaly! :anomalies/conflict
+                                 (:anomaly/message budget)
+                                 (:anomaly/data budget))))
 
     (update-status! controller :fixing)
     (swap! controller update :fix-iterations inc)
@@ -516,10 +557,12 @@
     (try
       ;; Step 1: Create PR if needed
       (when-not skip-pr-creation?
-        (let [pr-result (create-pr! controller code-artifact)]
-          (when (dag/err? pr-result)
-            (throw (ex-info (messages/t :controller/pr-creation-failed)
-                            {:error (:error pr-result)})))))
+        (let [pr-result (create-pr! controller code-artifact)
+              outcome (pr-creation-result pr-result)]
+          (when (anomaly/anomaly? outcome)
+            (response/throw-anomaly! :anomalies/fault
+                                     (:anomaly/message outcome)
+                                     (:anomaly/data outcome)))))
 
       ;; Step 2: CI/Review loop
       (loop []
