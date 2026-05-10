@@ -249,18 +249,69 @@
               exec-metrics
               (select-keys phase-metrics [:tokens :cost-usd :duration-ms])))
 
+(defn- ->epoch-millis
+  "Coerce a :execution/started-at / :execution/ended-at value to a
+   long epoch-millis. Different writers use different
+   representations (context.clj writes Long via
+   System/currentTimeMillis; runner.clj writes java.time.Instant via
+   Instant/now), and the wall-clock stamp needs to subtract them.
+   That inconsistency is its own bug; coercing here keeps the stamp
+   from failing on either shape — specifically:
+
+     - nil started-at / ended-at → nil here, caller skips the stamp;
+     - Instant input → unguarded subtraction would
+       ClassCastException (java.time.Instant is not a Number);
+     - any unrecognised type → nil, caller skips rather than
+       producing nonsense."
+  [t]
+  (cond
+    (number? t)                          (long t)
+    (instance? java.time.Instant t)      (.toEpochMilli ^java.time.Instant t)
+    :else                                nil))
+
+(defn- stamp-wall-clock-duration
+  "Overwrite :execution/metrics :duration-ms with the actual workflow
+   wall-clock (`ended-at` − `started-at`). Tokens and cost still sum
+   correctly across phases — those are independent per-phase resource
+   consumption — but :duration-ms is the user-facing 'how long did
+   this run take' answer, which under DAG parallelism and per-phase
+   summing diverges from the wall-clock the user is watching.
+
+   Pre-fix, the runner banner reported `Duration: 9.7m` for a ~50m
+   wall run because :duration-ms was sum-of-phases — an aggregate
+   that means little when phases run in parallel and even less when
+   sub-workflow duration didn't propagate. Post-fix, banner shows
+   wall-clock; sum-of-phases is recoverable from the per-phase
+   results if a future analysis ever needs it."
+  [ctx]
+  (let [started-at (->epoch-millis (:execution/started-at ctx))
+        ended-at   (->epoch-millis (:execution/ended-at ctx))]
+    (if (and started-at ended-at)
+      (assoc-in ctx [:execution/metrics :duration-ms]
+                (max 0 (- ended-at started-at)))
+      ctx)))
+
 (defn transition-to-completed
-  "Transition workflow to completed state using FSM."
+  "Transition workflow to completed state using FSM. Stamps
+   :execution/ended-at and overwrites :execution/metrics
+   :duration-ms with the wall-clock so the runner banner reflects
+   how long the run actually took (not sum-of-phases under
+   parallelism)."
   [ctx]
   (-> (if (:execution/fsm-machine ctx)
         (transition-execution ctx :complete)
         (assoc ctx :execution/status :completed))
-      (assoc :execution/ended-at (System/currentTimeMillis))))
+      (assoc :execution/ended-at (System/currentTimeMillis))
+      stamp-wall-clock-duration))
 
 (defn transition-to-failed
-  "Transition workflow to failed state using FSM."
+  "Transition workflow to failed state using FSM. Same wall-clock
+   duration semantics as transition-to-completed — duration is
+   reported even on failure so the user can see how long the run
+   ran before failing."
   [ctx]
   (-> (if (:execution/fsm-machine ctx)
         (transition-execution ctx :fail)
         (assoc ctx :execution/status :failed))
-      (assoc :execution/ended-at (System/currentTimeMillis))))
+      (assoc :execution/ended-at (System/currentTimeMillis))
+      stamp-wall-clock-duration))
