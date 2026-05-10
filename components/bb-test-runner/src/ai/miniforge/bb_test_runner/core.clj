@@ -50,6 +50,9 @@
 (def ^:private default-heartbeat-seconds
   30)
 
+(def ^:private default-expand-start-size
+  1)
+
 (def ^:private git-worktree-env-keys
   ["GIT_INDEX_FILE" "GIT_DIR" "GIT_WORK_TREE" "GIT_COMMON_DIR"])
 
@@ -299,6 +302,79 @@
     (case direction
       :back (vec (reverse ordered))
       ordered)))
+
+(defn- positive-start-size
+  [project-count requested-size]
+  (-> (or requested-size default-expand-start-size)
+      (max default-expand-start-size)
+      (min project-count)))
+
+(defn expand-project-groups
+  "Return additive project groups that double in size until they cover
+   the full ordered project set."
+  [projects start-size]
+  (let [project-count (count projects)]
+    (when (pos? project-count)
+      (loop [group-size (positive-start-size project-count start-size)
+             groups []]
+        (let [group (subvec (vec projects) 0 group-size)
+              next-groups (conj groups group)]
+          (if (= group-size project-count)
+            next-groups
+            (recur (min project-count (* 2 group-size))
+                   next-groups)))))))
+
+(defn bisect-project-groups
+  "Return contiguous project groups in breadth-first binary partition
+   order."
+  [projects]
+  (letfn [(split-groups [group]
+            (let [group (vec group)
+                  group-count (count group)]
+              (cond
+                (zero? group-count) []
+                (= 1 group-count) [group]
+                :else (let [mid (quot group-count 2)
+                            left (subvec group 0 mid)
+                            right (subvec group mid)]
+                        (into [left right]
+                              (concat (when (> (count left) 1)
+                                        (split-groups left))
+                                      (when (> (count right) 1)
+                                        (split-groups right))))))))]
+    (split-groups projects)))
+
+(defn diagnostic-test-plan
+  "Return a stable-derived diagnostic plan over an explicit project
+   vector."
+  [{:keys [mode projects start-size direction order seed]}]
+  (let [ordered-projects (order-projects (vec projects)
+                                         {:direction direction
+                                          :order order
+                                          :seed seed})
+        project-groups (case mode
+                         :expand (expand-project-groups ordered-projects start-size)
+                         :bisect (bisect-project-groups ordered-projects)
+                         [(vec ordered-projects)])
+        total-groups (count project-groups)]
+    {:mode mode
+     :summary (str "Running "
+                   (name mode)
+                   " diagnostics across "
+                   (count ordered-projects)
+                   " stable-derived projects.")
+     :projects ordered-projects
+     :steps (mapv (fn [index group]
+                    {:label (str (name mode)
+                                 " project subset "
+                                 (inc index) "/"
+                                 total-groups
+                                 " ("
+                                 (count group)
+                                 " projects)")
+                     :argv ["clojure" "-M:poly" "test" (format-project-selector group)]})
+                  (range)
+                  project-groups)}))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Coverage command derivation (pure)

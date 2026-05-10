@@ -104,6 +104,21 @@
   [projects opts]
   (core/order-projects projects opts))
 
+(defn expand-project-groups
+  "Return additive project groups that double in size until full scope."
+  [projects start-size]
+  (core/expand-project-groups projects start-size))
+
+(defn bisect-project-groups
+  "Return contiguous project groups in breadth-first binary partition order."
+  [projects]
+  (core/bisect-project-groups projects))
+
+(defn diagnostic-test-plan
+  "Return a stable-derived diagnostic plan over an explicit project set."
+  [opts]
+  (core/diagnostic-test-plan opts))
+
 (defn classify-coverage-paths
   "Pure helper: split merged classpath paths into source and test roots
    suitable for Cloverage."

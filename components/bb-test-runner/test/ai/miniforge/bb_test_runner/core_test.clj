@@ -263,6 +263,31 @@
             {:order :random
              :seed 17})))))
 
+(deftest test-expand-project-groups-doubles-prefix-size
+  (testing "additive expansion doubles until the full set is included"
+    (is (= [["a"] ["a" "b"] ["a" "b" "c" "d"] ["a" "b" "c" "d" "e"]]
+           (sut/expand-project-groups ["a" "b" "c" "d" "e"] 1)))))
+
+(deftest test-bisect-project-groups-partitions-breadth-first
+  (testing "bisect produces contiguous binary groups"
+    (is (= [["a" "b"] ["c" "d"] ["a"] ["b"] ["c"] ["d"]]
+           (sut/bisect-project-groups ["a" "b" "c" "d"])))))
+
+(deftest test-diagnostic-test-plan-builds-expand-steps
+  (testing "diagnostic plans render executable Poly test steps"
+    (is (= {:mode :expand
+            :summary "Running expand diagnostics across 3 stable-derived projects."
+            :projects ["a" "b" "c"]
+            :steps [{:label "expand project subset 1/3 (1 projects)"
+                     :argv ["clojure" "-M:poly" "test" "project:a"]}
+                    {:label "expand project subset 2/3 (2 projects)"
+                     :argv ["clojure" "-M:poly" "test" "project:a:b"]}
+                    {:label "expand project subset 3/3 (3 projects)"
+                     :argv ["clojure" "-M:poly" "test" "project:a:b:c"]}]}
+           (sut/diagnostic-test-plan {:mode :expand
+                                      :projects ["a" "b" "c"]
+                                      :start-size 1})))))
+
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
