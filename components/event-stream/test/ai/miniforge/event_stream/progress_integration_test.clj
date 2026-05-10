@@ -21,10 +21,9 @@
 
    Verifies that:
    1. Workflow launch emits required lifecycle events in correct order
-   2. All event types (phase, agent, tool, gate) are handled by display formatters
-   3. Event ordering and visibility in a simulated end-to-end run
-   4. Display start-progress! subscription and cleanup lifecycle
-   5. Chain event lifecycle ordering"
+   2. Event ordering and visibility in a simulated end-to-end run
+   3. Chain event lifecycle ordering
+   4. Event-stream subscribers can filter and observe full workflow runs"
   (:require
    [clojure.test :refer [deftest testing is]]
    [ai.miniforge.event-stream.interface :as es]))
