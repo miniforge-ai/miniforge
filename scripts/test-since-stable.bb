@@ -69,13 +69,12 @@
 
 (defn- changed-projects-since-stable
   []
-  (let [[prefix suffix] (split-at 4 (bb-test-runner/changed-projects-command))]
-    (->> (sh-string (concat prefix ["since:stable"] suffix))
-         bb-test-runner/parse-project-list-output)))
+  (->> (sh-string (bb-test-runner/changed-projects-since-stable-command))
+       bb-test-runner/parse-project-list-output))
 
 (defn- full-suite-step
   []
-  {:label "No stable tag found; running full Poly test suite"
+  {:label "No stable tag found locally; fetch tags or create a stable tag anchor to avoid a full Poly test sweep"
    :argv ["clojure" "-M:poly" "test"]})
 
 (defn- effective-plan

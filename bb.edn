@@ -86,22 +86,25 @@
 
   test:since-stable:subset
   {:doc  "Run one explicit or detected stable-derived project subset"
-   :task (let [exit (apply run-stream! (concat ["bb" "scripts/test-since-stable.bb" "mode:subset"]
-                                               *command-line-args*))]
+   :task (let [exit (apply run-stream! (concat ["bb" "scripts/test-since-stable.bb"]
+                                               *command-line-args*
+                                               ["mode:subset"]))]
            (when-not (zero? exit)
              (System/exit exit)))}
 
   test:since-stable:expand
   {:doc  "Run additive stable-derived diagnostic subsets"
-   :task (let [exit (apply run-stream! (concat ["bb" "scripts/test-since-stable.bb" "mode:expand"]
-                                               *command-line-args*))]
+   :task (let [exit (apply run-stream! (concat ["bb" "scripts/test-since-stable.bb"]
+                                               *command-line-args*
+                                               ["mode:expand"]))]
            (when-not (zero? exit)
              (System/exit exit)))}
 
   test:since-stable:bisect
   {:doc  "Run breadth-first bisect stable-derived diagnostic subsets"
-   :task (let [exit (apply run-stream! (concat ["bb" "scripts/test-since-stable.bb" "mode:bisect"]
-                                               *command-line-args*))]
+   :task (let [exit (apply run-stream! (concat ["bb" "scripts/test-since-stable.bb"]
+                                               *command-line-args*
+                                               ["mode:bisect"]))]
            (when-not (zero? exit)
              (System/exit exit)))}
 

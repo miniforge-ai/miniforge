@@ -77,6 +77,12 @@
   []
   (core/changed-projects-command))
 
+(defn changed-projects-since-stable-command
+  "Return the argv that asks Polylith for changed-or-affected projects
+   relative to the current stable tag anchor."
+  []
+  (core/changed-projects-since-stable-command))
+
 (defn parse-project-list-output
   "Parse a changed-or-affected project list response into project names."
   [output]
