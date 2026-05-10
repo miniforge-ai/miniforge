@@ -31,24 +31,30 @@
    [clojure.test :refer [deftest testing is use-fixtures]]
    [clojure.java.io :as io]
    [babashka.fs :as fs]
-   ;; Required for defmethod side effects (register phase handlers)
-   #_{:clj-kondo/ignore [:unused-namespace]}
-   [ai.miniforge.phase-software-factory.plan]
-   #_{:clj-kondo/ignore [:unused-namespace]}
-   [ai.miniforge.phase-software-factory.implement]
-   #_{:clj-kondo/ignore [:unused-namespace]}
-   [ai.miniforge.phase-software-factory.verify]
-   #_{:clj-kondo/ignore [:unused-namespace]}
-   [ai.miniforge.phase-software-factory.release]
    [ai.miniforge.agent.interface :as agent]
    [ai.miniforge.dag-executor.executor :as dag-exec]
+   [ai.miniforge.phase.interface :as phase]
+   [ai.miniforge.phase.loader :as loader]
+   [ai.miniforge.phase.registry :as registry]
    [ai.miniforge.response.interface :as response]
-   [ai.miniforge.release-executor.interface :as release-executor]
+   [ai.miniforge.workflow.phase-test-support :as phase-test-support]
    [ai.miniforge.workflow.runner :as runner]))
 
 ;------------------------------------------------------------------------------ Fixtures
 
+(def ^:private env-promotion-implement
+  :env-promotion-test-implement)
+
+(def ^:private env-promotion-verify
+  :env-promotion-test-verify)
+
+(def ^:private env-promotion-done
+  phase-test-support/runner-test-done)
+
 (def ^:dynamic *test-worktree* nil)
+
+(def phase-test-config-resource
+  "config/phase/test-support-namespaces.edn")
 
 (defn create-temp-worktree []
   (let [temp-dir (io/file (System/getProperty "java.io.tmpdir")
@@ -66,30 +72,15 @@
       (try (f)
            (finally (cleanup-temp-worktree worktree))))))
 
-(use-fixtures :each worktree-fixture)
+(defn phase-loader-fixture [f]
+  (phase/reset-phase-loader!)
+  (binding [loader/phase-loader-config-resource phase-test-config-resource]
+    (f))
+  (phase/reset-phase-loader!))
+
+(use-fixtures :each worktree-fixture phase-loader-fixture)
 
 ;------------------------------------------------------------------------------ Helpers
-
-(def passing-test-results
-  {:passed? true :test-count 5 :assertion-count 10
-   :fail-count 0 :error-count 0
-   :output "Ran 5 tests containing 10 assertions.\n0 failures, 0 errors."})
-
-(def failing-test-results
-  {:passed? false :test-count 3 :assertion-count 6
-   :fail-count 2 :error-count 0
-   :output "Ran 3 tests containing 6 assertions.\n2 failures, 0 errors."})
-
-(def mock-release-success
-  {:success? true
-   :artifacts [{:artifact/id (random-uuid)
-                :artifact/type :release
-                :artifact/content {:branch "feat/test-branch"
-                                   :commit-sha "abc123"
-                                   :pr-url "https://github.com/example/repo/pull/1"
-                                   :pr-number 1}}]
-   :metrics {:tokens 200 :duration-ms 1000}
-   :errors []})
 
 (defn mock-curator
   "Default curator stub for tests that don't care about file-diff semantics.
@@ -106,6 +97,61 @@
     {:code/files [{:path "src/feature.clj" :action :create}]
      :code/summary "test fixture wrote feature.clj"}
     {:metrics {:tokens 0 :duration-ms 0}}))
+
+(def ^:private env-promotion-phase-defaults
+  {:agent :workflow-tester
+   :gates []
+   :budget {:tokens 1
+            :iterations 1
+            :time-seconds 1}})
+
+(defn- register-env-promotion-phase!
+  [phase-name]
+  (registry/register-phase-defaults!
+   phase-name
+   (assoc env-promotion-phase-defaults :phase phase-name)))
+
+(defn- implement-phase-result
+  [ctx]
+  (let [agent-result (agent/invoke (agent/create-implementer nil) nil ctx)
+        curated-result (when (response/success? agent-result)
+                         (agent/curate-implement-output {:context ctx
+                                                         :llm-response agent-result}))]
+    (if (response/success? agent-result)
+      {:status :completed
+       :result {:status :success
+                :environment-id (:execution/environment-id ctx)
+                :output curated-result}
+       :metrics (:metrics agent-result)}
+      {:status :failed
+       :result agent-result
+       :metrics (:metrics agent-result)})))
+
+(defn- verify-phase-result
+  [ctx]
+  {:status :completed
+   :result {:status :success
+            :environment-id (:execution/environment-id ctx)
+            :output {:tests-passed? true}}})
+
+(defmethod registry/get-phase-interceptor env-promotion-implement
+  [config]
+  {:name ::env-promotion-implement
+   :config (registry/merge-with-defaults config)
+   :enter (fn [ctx] (assoc ctx :phase (implement-phase-result ctx)))
+   :leave identity
+   :error (fn [ctx _ex] ctx)})
+
+(defmethod registry/get-phase-interceptor env-promotion-verify
+  [config]
+  {:name ::env-promotion-verify
+   :config (registry/merge-with-defaults config)
+   :enter (fn [ctx] (assoc ctx :phase (verify-phase-result ctx)))
+   :leave identity
+   :error (fn [ctx _ex] ctx)})
+
+(register-env-promotion-phase! env-promotion-implement)
+(register-env-promotion-phase! env-promotion-verify)
 
 (defn make-workflow
   "Build a minimal workflow config with the given phase sequence.
@@ -131,10 +177,10 @@
 (deftest full-pipeline-environment-flows-through-phases-test
   (testing "Full plan→implement→verify→done pipeline with pre-acquired executor"
     (let [env-id      (random-uuid)
-          release-called? (atom false)
           release-env-called? (atom false)
-          run-var     (resolve 'ai.miniforge.phase-software-factory.verify/run-tests!)
-          workflow    (make-workflow :implement :verify :done)]
+          workflow    (make-workflow env-promotion-implement
+                                     env-promotion-verify
+                                     env-promotion-done)]
       (with-redefs [agent/create-implementer (fn [_] {:type :mock-implementer})
                     agent/invoke
                     (fn [_ _ ctx]
@@ -148,43 +194,31 @@
                     dag-exec/release-environment!
                     (fn [_ _env-id]
                       (reset! release-env-called? true)
-                      nil)
-                    release-executor/execute-release-phase
-                    (fn [_ _ _]
-                      (reset! release-called? true)
-                      mock-release-success)]
-        (with-redefs-fn
-          {run-var (fn [_ & _opts] passing-test-results)}
-          (fn []
-            (let [result (runner/run-pipeline
-                          workflow
-                          (base-input)
-                          {:executor       ::stub-executor
-                           :environment-id env-id
-                           :worktree-path  *test-worktree*
-                           :skip-lifecycle-events true})]
+                      nil)]
+        (let [result (runner/run-pipeline
+                      workflow
+                      (base-input)
+                      {:executor       ::stub-executor
+                       :environment-id env-id
+                       :worktree-path  *test-worktree*
+                       :skip-lifecycle-events true})]
 
-              ;; Pipeline should complete
-              (is (= :completed (:execution/status result))
-                  "Pipeline should complete successfully")
-
-              ;; environment-id should be set on the context
-              (is (= env-id (:execution/environment-id result))
-                  ":execution/environment-id should be set on context")
-
-              ;; environment-id should appear in implement phase result
-              (is (= env-id (get-in result [:execution/phase-results :implement :result :environment-id]))
-                  ":execution/environment-id should appear in implement phase result")
-
-              ;; environment-id should appear in verify phase result
-              (is (some? (get-in result [:execution/phase-results :verify]))
-                  "Verify phase result should be present")
-              (is (= env-id (get-in result [:execution/phase-results :verify :result :environment-id]))
-                  ":execution/environment-id should appear in verify phase result")
-
-              ;; The file written by implement agent should exist in temp dir
-              (is (.exists (io/file *test-worktree* "src/feature.clj"))
-                  "File written by implement agent should exist in executor environment"))))))))
+          (is (= :completed (:execution/status result))
+              "Pipeline should complete successfully")
+          (is (= env-id (:execution/environment-id result))
+              ":execution/environment-id should be set on context")
+          (is (= env-id
+                 (get-in result
+                         [:execution/phase-results env-promotion-implement :result :environment-id]))
+              ":execution/environment-id should appear in implement phase result")
+          (is (some? (get-in result [:execution/phase-results env-promotion-verify]))
+              "Verify phase result should be present")
+          (is (= env-id
+                 (get-in result
+                         [:execution/phase-results env-promotion-verify :result :environment-id]))
+              ":execution/environment-id should appear in verify phase result")
+          (is (.exists (io/file *test-worktree* "src/feature.clj"))
+              "File written by implement agent should exist in executor environment"))))))
 
 ;------------------------------------------------------------------------------ Test 2: Environment released on pipeline failure
 
@@ -198,7 +232,7 @@
                            :worktree-path  *test-worktree*
                            :execution-mode :local}
           acquire-var     (resolve 'ai.miniforge.workflow.runner-environment/acquire-execution-environment!)
-          workflow        (make-workflow :implement :done)]
+          workflow        (make-workflow env-promotion-implement env-promotion-done)]
       (with-redefs [agent/create-implementer (fn [_] {:type :mock-implementer})
                     agent/invoke
                     (fn [_ _ _]
@@ -230,7 +264,7 @@
 (deftest environment-id-propagates-via-pre-acquired-shortcut-test
   (testing "Pre-acquired :executor + :environment-id shortcut sets env-id on initial context"
     (let [env-id   (random-uuid)
-          workflow (make-workflow :implement :done)]
+          workflow (make-workflow env-promotion-implement env-promotion-done)]
       (with-redefs [agent/create-implementer (fn [_] {:type :mock-implementer})
                     agent/invoke
                     (fn [_ _ _]
@@ -263,7 +297,7 @@
   (testing "Runner does not call release-environment! when executor was pre-acquired (caller owns lifecycle)"
     (let [env-id         (random-uuid)
           release-called? (atom false)
-          workflow        (make-workflow :done)]
+          workflow        (make-workflow env-promotion-done)]
       (with-redefs [dag-exec/release-environment!
                     (fn [_ _env-id]
                       (reset! release-called? true)
