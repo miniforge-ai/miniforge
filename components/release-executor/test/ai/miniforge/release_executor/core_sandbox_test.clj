@@ -156,13 +156,13 @@
       (is (= :no-files-to-stage (:type (first (:errors result))))))))
 
 (deftest release-succeeds-when-boundary-commits-already-on-branch-test
-  (testing "Run-7 dogfood regression: implementer writes were committed at the
-            implement-phase boundary, leaving the worktree clean by the time
-            release runs. step-create-branch now branches off HEAD (carrying
-            the boundary commits), step-stage-dirty-files accepts an empty
-            stage when the branch is already ahead of base, and step-commit
-            skips creating a new commit (the existing HEAD becomes the
-            release commit)."
+  (testing "Run-8 dogfood regression (2026-05-10): implementer writes were
+            committed at the implement-phase boundary, leaving the worktree
+            clean by the time release runs. step-create-branch now branches
+            off HEAD (carrying the boundary commits), step-stage-dirty-files
+            accepts an empty stage when the branch is already ahead of base,
+            and step-commit skips creating a new commit (the existing HEAD
+            becomes the release commit)."
     (let [[exec cmds] (create-mock-executor
                        :responses {"gh auth"          {:exit-code 0 :stdout "Logged in" :stderr ""}
                                    "git symbolic-ref" {:exit-code 0 :stdout "refs/remotes/origin/main\n" :stderr ""}
@@ -184,7 +184,41 @@
       (is (some #(clojure.string/includes? % "git rev-list --count origin/main..HEAD") @cmds)
           "release should consult `git rev-list --count origin/main..HEAD` to detect carry-forward commits")
       (is (not-any? #(clojure.string/starts-with? % "git commit") @cmds)
-          "step-commit must NOT issue a new commit when the boundary commits already exist on the branch"))))
+          "step-commit must NOT issue a new commit when the boundary commits already exist on the branch")
+      (is (some #(clojure.string/includes? % "git diff origin/main..HEAD --numstat") @cmds)
+          "step-validate-diff must inspect the range diff (origin/<base>..HEAD), not
+           the empty staged diff — boundary commits otherwise bypass the destructive-
+           diff gate entirely."))))
+
+(deftest release-rejects-destructive-boundary-commits-test
+  (testing "step-validate-diff still rejects a destructive release when the
+            destructive content lives in boundary commits rather than the
+            staged index. Covers the case where the implementer's commits
+            net-delete tests; without range-diff validation the destructive-
+            diff gate would no-op silently."
+    (let [destructive-numstat "0\t40\tcomponents/foo/test/foo_test.clj\n"
+          destructive-diff    "diff --git a/components/foo/test/foo_test.clj b/components/foo/test/foo_test.clj\n-(deftest a)\n-(deftest b)\n-(deftest c)\n"
+          [exec _] (create-mock-executor
+                    :responses {"gh auth"          {:exit-code 0 :stdout "Logged in" :stderr ""}
+                                "git symbolic-ref" {:exit-code 0 :stdout "refs/remotes/origin/main\n" :stderr ""}
+                                "git fetch"        {:exit-code 0 :stdout "" :stderr ""}
+                                "git checkout"     {:exit-code 0 :stdout "" :stderr ""}
+                                "git add"          {:exit-code 0 :stdout "" :stderr ""}
+                                "git diff --cached"  {:exit-code 0 :stdout "" :stderr ""}
+                                "git diff origin/main..HEAD --numstat" {:exit-code 0 :stdout destructive-numstat :stderr ""}
+                                "git diff origin/main..HEAD -U0"       {:exit-code 0 :stdout destructive-diff    :stderr ""}
+                                "git rev-list"     {:exit-code 0 :stdout "1\n" :stderr ""}
+                                "git rev-parse"    {:exit-code 0 :stdout "deadbeef\n" :stderr ""}})
+          result (core/execute-release-phase
+                  (make-workflow-state)
+                  {:executor exec
+                   :environment-id "mock-env"
+                   :worktree-path "/tmp/wt"
+                   :create-pr? false}
+                  {:release-meta test-release-meta})]
+      (is (not (:success? result))
+          "release must fail when range diff shows net-negative tests, even in boundary-commits mode")
+      (is (= :destructive-diff (:type (first (:errors result))))))))
 
 ;; ============================================================================
 ;; gh-exec-opts and governed-mode token injection

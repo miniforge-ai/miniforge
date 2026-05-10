@@ -166,16 +166,27 @@
        (> deletions (* 3 (max 1 additions)))))
 
 (defn step-validate-diff
-  "Validate staged diff is not destructive before committing.
-   Rejects changes that delete more tests than they add or that empty files.
-   Routes through the executor (sandbox) so governed-mode capsules never
-   shell out to the host."
+  "Validate diff is not destructive before committing. Rejects changes
+   that delete more tests than they add or that empty files. Routes
+   through the executor (sandbox) so governed-mode capsules never
+   shell out to the host.
+
+   In the boundary-commits case (`:preexisting-commits true`), the
+   staged index is empty — the work is in commits on the branch, not
+   in the index — so validation reads the range diff
+   `origin/<base>..HEAD` instead. Without this branch the destructive-
+   diff gate would silently no-op on every boundary-commit release."
   [state]
   (if (failed? state)
     state
-    (let [{:keys [executor environment-id logger]} state
-          diff-stats  (sandbox/diff-stats executor environment-id)
-          test-counts (sandbox/count-test-defs executor environment-id)]
+    (let [{:keys [executor environment-id logger base-branch]} state
+          preexisting? (get-in state [:write-metrics :preexisting-commits])
+          diff-stats  (if preexisting?
+                        (sandbox/diff-stats-range executor environment-id base-branch)
+                        (sandbox/diff-stats executor environment-id))
+          test-counts (if preexisting?
+                        (sandbox/count-test-defs-range executor environment-id base-branch)
+                        (sandbox/count-test-defs executor environment-id))]
       (cond
         (net-negative-tests? test-counts)
         (let [data {:added (:added test-counts) :removed (:removed test-counts)}]

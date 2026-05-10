@@ -81,7 +81,7 @@
    the per-phase boundary commits the workflow runtime makes after
    plan/implement/verify/review. If we branched off `origin/<base>`
    instead, those commits would be discarded and a downstream
-   `git add -A` would find nothing to stage. `:base-branch` is still
+   `git add .` would find nothing to stage. `:base-branch` is still
    tracked for the PR-creation step, which uses it as the merge base."
   [executor env-id branch-name base-branch]
   (let [checkout-r (exec! executor env-id
@@ -232,21 +232,32 @@
 ;------------------------------------------------------------------------------ Layer 1.5
 ;; Diff inspection (governed equivalents of git/diff-stats, git/count-test-defs)
 
+(defn- numstat-totals
+  "Parse `git diff <range> --numstat` output into {:additions :deletions :files}."
+  [output]
+  (let [lines (remove str/blank? (str/split-lines (str/trim (or output ""))))
+        parsed (keep (fn [line]
+                       (when-let [[_ adds dels] (re-matches #"(\d+)\t(\d+)\t.*" line)]
+                         {:additions (parse-long adds)
+                          :deletions (parse-long dels)}))
+                     lines)]
+    {:additions (reduce + 0 (map :additions parsed))
+     :deletions (reduce + 0 (map :deletions parsed))
+     :files (count parsed)}))
+
+(defn- count-deftest
+  "Count `(deftest …` lines added vs removed in a unified diff body."
+  [diff-text]
+  {:added   (count (re-seq #"(?m)^\+.*\(deftest " (or diff-text "")))
+   :removed (count (re-seq #"(?m)^-.*\(deftest " (or diff-text "")))})
+
 (defn diff-stats
   "Get staged diff stats via executor. Mirrors git/diff-stats.
    Returns {:additions N :deletions N :files N} or nil."
   [executor env-id]
   (let [r (exec! executor env-id "git diff --cached --numstat")]
     (when (result/succeeded? r)
-      (let [lines (remove str/blank? (str/split-lines (str/trim (:output r ""))))
-            parsed (keep (fn [line]
-                           (when-let [[_ adds dels] (re-matches #"(\d+)\t(\d+)\t.*" line)]
-                             {:additions (parse-long adds)
-                              :deletions (parse-long dels)}))
-                         lines)]
-        {:additions (reduce + 0 (map :additions parsed))
-         :deletions (reduce + 0 (map :deletions parsed))
-         :files (count parsed)}))))
+      (numstat-totals (:output r "")))))
 
 (defn count-test-defs
   "Count deftest forms in staged changes via executor. Mirrors git/count-test-defs.
@@ -254,10 +265,29 @@
   [executor env-id]
   (let [r (exec! executor env-id "git diff --cached -U0")]
     (when (result/succeeded? r)
-      (let [diff-text (:output r "")
-            added   (count (re-seq #"(?m)^\+.*\(deftest " diff-text))
-            removed (count (re-seq #"(?m)^-.*\(deftest " diff-text))]
-        {:added added :removed removed}))))
+      (count-deftest (:output r "")))))
+
+(defn diff-stats-range
+  "Get diff stats for `origin/<base>..HEAD` (the carry-forward range
+   used by the release branch when phase-boundary commits already
+   contain the work). Mirrors `diff-stats` but reads the merge-base
+   range rather than the staged index."
+  [executor env-id base-branch]
+  (let [r (exec! executor env-id
+                 (str "git diff origin/" base-branch "..HEAD --numstat"))]
+    (when (result/succeeded? r)
+      (numstat-totals (:output r "")))))
+
+(defn count-test-defs-range
+  "Count deftest forms added/removed in `origin/<base>..HEAD`. Mirrors
+   `count-test-defs` but reads the merge-base range so the destructive-
+   diff gate keeps inspecting the actual commits being released, not
+   just the staged index (which is empty in the boundary-commits case)."
+  [executor env-id base-branch]
+  (let [r (exec! executor env-id
+                 (str "git diff origin/" base-branch "..HEAD -U0"))]
+    (when (result/succeeded? r)
+      (count-deftest (:output r "")))))
 
 ;------------------------------------------------------------------------------ Layer 2
 ;; File batch operations (mirrors files.clj write-and-stage-files!)
