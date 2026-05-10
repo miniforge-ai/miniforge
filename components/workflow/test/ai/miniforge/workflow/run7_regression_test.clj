@@ -32,7 +32,7 @@
    [ai.miniforge.workflow.execution :as exec]))
 
 (def phase-test-config-resource
-  "config/phase/test-support-namespaces.edn")
+  "config/phase/workflow-test-support-namespaces.edn")
 
 (use-fixtures :each
   (fn [f]
@@ -176,6 +176,26 @@
       ;; The stale transition request should NOT be present.
       (is (nil? (get-in ctx-after [:phase :phase/transition-request]))
           "Stale phase transition request must not leak"))))
+
+(deftest enter-failure-skips-leave-test
+  (testing "execute-phase-lifecycle does not invoke :leave when :enter never established phase context"
+    (let [leave-called? (atom false)
+          interceptor {:name ::failing-enter
+                       :config {}
+                       :enter (fn [_ctx]
+                                (throw (ex-info "enter blew up" {:type :test/enter-failed})))
+                       :leave (fn [ctx]
+                                (reset! leave-called? true)
+                                ctx)
+                       :error (fn [ctx ex]
+                                (assoc ctx :phase {:status :failed
+                                                   :error (ex-message ex)}))}
+          [ctx-after phase-result] (exec/execute-phase-lifecycle interceptor {})]
+      (is (false? @leave-called?))
+      (is (= {:status :failed
+              :error "enter blew up"}
+             phase-result))
+      (is (= phase-result (:phase ctx-after))))))
 
 ;; ============================================================================
 ;; Fix 5: Review feedback survives :phase clearing (Run 9 bug)

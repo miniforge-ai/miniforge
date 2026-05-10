@@ -54,7 +54,7 @@
 (def ^:dynamic *test-worktree* nil)
 
 (def phase-test-config-resource
-  "config/phase/test-support-namespaces.edn")
+  "config/phase/workflow-test-support-namespaces.edn")
 
 (defn create-temp-worktree []
   (let [temp-dir (io/file (System/getProperty "java.io.tmpdir")
@@ -74,9 +74,11 @@
 
 (defn phase-loader-fixture [f]
   (phase/reset-phase-loader!)
-  (binding [loader/phase-loader-config-resource phase-test-config-resource]
-    (f))
-  (phase/reset-phase-loader!))
+  (try
+    (binding [loader/phase-loader-config-resource phase-test-config-resource]
+      (f))
+    (finally
+      (phase/reset-phase-loader!))))
 
 (use-fixtures :each worktree-fixture phase-loader-fixture)
 

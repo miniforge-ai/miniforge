@@ -93,7 +93,8 @@
 
 (deftest load-chain-latest-test
   (testing "loads latest version when version is 'latest'"
-    (with-redefs [chain-loader/list-resource-names (fn [_]
+    (with-redefs [io/resource fake-resource
+                  chain-loader/list-resource-names (fn [_]
                                                      ["spec-to-pr-v1.0.0.edn"
                                                       "spec-to-pr-v1.2.0.edn"])
                   chain-loader/load-chain-resource fake-load-chain-resource]

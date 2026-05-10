@@ -1,0 +1,3 @@
+{:phase/namespaces
+ [ai.miniforge.phase.loader-support
+  ai.miniforge.workflow.phase-test-support]}
