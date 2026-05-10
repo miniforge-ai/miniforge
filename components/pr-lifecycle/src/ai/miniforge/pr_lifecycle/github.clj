@@ -224,6 +224,23 @@
 ;------------------------------------------------------------------------------ Layer 1.5
 ;; Batched review posting (N13 §2.2 Standards Reviewer)
 
+(def review-marker
+  "Invisible HTML comment appended to every review body posted via
+   `post-review!`. Lets `review-scheduler/existing-review-shas`
+   recognize prior posts authored by the N13 Standards Reviewer
+   (GitHub doesn't surface a stable bot identity for reviews posted
+   under a personal access token, so we tag the body instead).
+   Renders as nothing in PR Markdown."
+  "<!-- miniforge:policy-eval -->")
+
+(defn- ensure-marker
+  "Append `review-marker` to `body` if not already present.
+   Idempotent. Used unconditionally by `post-review!`."
+  [body]
+  (if (and (string? body) (str/includes? body review-marker))
+    body
+    (str (or body "") "\n\n" review-marker)))
+
 (defn- run-gh-with-stdin
   "Run a `gh` command piping `stdin-body` over stdin. Returns the
    same DAG-shaped result as `run-gh-command`. Used for `gh api ...
@@ -309,7 +326,7 @@
     (dag/err :missing-commit-id
              "post-review! requires a non-blank commit-id (PR head SHA)"
              {:pr-number pr-number})
-    (let [payload   {:body      body
+    (let [payload   {:body      (ensure-marker body)
                      :event     "COMMENT"
                      :commit_id commit-id
                      :comments  (mapv review-comment->github-comment comments)}

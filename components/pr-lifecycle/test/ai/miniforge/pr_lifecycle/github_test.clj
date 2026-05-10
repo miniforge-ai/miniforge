@@ -20,6 +20,7 @@
   "Tests for the github.clj batched-review posting (N13 §2.2)."
   (:require [babashka.process :as process]
             [cheshire.core :as json]
+            [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [ai.miniforge.dag-executor.interface :as dag]
             [ai.miniforge.pr-lifecycle.github :as github]))
@@ -85,7 +86,9 @@
         (github/post-review! "/some/repo" 42 fixture-sha "summary" comment-renderer-shape))
       (let [stdin (get-in (first @calls) [:opts :in])
             payload (json/parse-string stdin true)]
-        (is (= "summary" (:body payload)))
+        (is (str/includes? (:body payload) "summary"))
+        (is (str/includes? (:body payload) github/review-marker)
+            "every posted review body MUST embed the review-marker so the scheduler can dedup against existing reviews")
         (is (= "COMMENT" (:event payload)))
         (is (= fixture-sha (:commit_id payload))
             "commit_id (PR head SHA) MUST be present — GitHub 422s without it on inline comments[]")
@@ -95,6 +98,20 @@
                 :side "RIGHT"
                 :body (-> comment-renderer-shape first :comment/body)}
                (first (:comments payload))))))))
+
+(deftest post-review-marker-is-idempotent
+  (testing "supplied body that already contains the marker isn't double-tagged"
+    (let [calls (atom [])
+          stub  (capture-shell calls
+                               {:exit 0 :out fake-review-success :err ""})
+          pre   (str "summary\n\n" github/review-marker)]
+      (with-redefs [process/shell stub]
+        (github/post-review! "/some/repo" 42 fixture-sha pre comment-renderer-shape))
+      (let [stdin (get-in (first @calls) [:opts :in])
+            payload (json/parse-string stdin true)
+            body (:body payload)
+            n (count (re-seq (re-pattern (java.util.regex.Pattern/quote github/review-marker)) body))]
+        (is (= 1 n) "marker appears exactly once even when caller pre-marked")))))
 
 (deftest post-review-rejects-missing-commit-id
   (testing "missing/blank commit-id short-circuits with :missing-commit-id, never shells out"
