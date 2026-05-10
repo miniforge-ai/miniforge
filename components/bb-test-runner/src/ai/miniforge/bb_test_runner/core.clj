@@ -196,6 +196,22 @@
   []
   changed-or-affected-projects-argv)
 
+(defn changed-projects-since-stable-command
+  "Return the argv that queries Polylith for changed-or-affected
+   projects since the current stable tag anchor."
+  []
+  (let [argv (vec (changed-projects-command))
+        marker "get:changes:changed-or-affected-projects"
+        marker-index (.indexOf argv marker)]
+    (if (neg? marker-index)
+      (throw (ex-info "Changed-projects command is missing the Polylith change marker."
+                      {:argv argv
+                       :marker marker}))
+      (let [insert-index (inc marker-index)]
+        (vec (concat (subvec argv 0 insert-index)
+                     ["since:stable"]
+                     (subvec argv insert-index)))))))
+
 (defn parse-project-list-output
   "Parse a Polylith `ws get:changes:changed-or-affected-projects`
    response into a vector of project names."

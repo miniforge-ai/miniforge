@@ -191,6 +191,12 @@
             "skip:dev" "color-mode:none"]
            (sut/changed-projects-command)))))
 
+(deftest test-changed-projects-since-stable-command-inserts-after-change-marker
+  (testing "stable-derived diagnostics insert since:stable next to the Polylith change query"
+    (is (= ["clojure" "-M:poly" "ws" "get:changes:changed-or-affected-projects"
+            "since:stable" "skip:dev" "color-mode:none"]
+           (sut/changed-projects-since-stable-command)))))
+
 (deftest test-parse-project-list-output-reads-edn-vectors
   (testing "Polylith ws output parses into project names"
     (is (= ["miniforge" "miniforge-core"]
