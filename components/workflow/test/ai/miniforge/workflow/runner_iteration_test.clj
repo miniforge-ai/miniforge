@@ -156,7 +156,8 @@
                     :workflow/version "1.0.0"
                     :workflow/pipeline [{:phase :done}]}
           context (ctx/create-context workflow {:task "Test"} {})
-          result (with-redefs [monitoring/check-workflow-supervision
+          result (with-redefs [#_{:clj-kondo/ignore [:unresolved-var]}
+                               monitoring/check-workflow-supervision
                                (fn [_runtime _workflow-state]
                                  (halted-supervision-result))]
                    (runner/execute-single-iteration
