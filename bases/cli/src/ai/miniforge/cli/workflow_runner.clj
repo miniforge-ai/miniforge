@@ -810,6 +810,87 @@
   (let [v (System/getenv "MINIFORGE_BEST_EFFORT_SHUTDOWN")]
     (boolean (and v (contains? #{"1" "true" "yes" "on"} (str/lower-case v))))))
 
+;; BD-2b sub-3a: per-workflow manifest lifecycle.
+;;
+;; `ai.miniforge.event-stream.manifest` is jvm-only (FileLock /
+;; ScheduledExecutorService / java.lang.management). This base loads
+;; under Babashka, so we reach manifest fns via `requiring-resolve`
+;; rather than a top-level `:require`. Same pattern as the other
+;; jvm-only deferrals in this file (event-stream.interface lazy
+;; require around line 853, the resume command at line 1024).
+;;
+;; Stratified-design layering: `manifest-fn` is the lone Layer 1
+;; helper; `start-/mark-/finish-workflow-manifest!` sit at Layer 2
+;; and each independently call `manifest-fn` (never each other).
+;; `run-workflow!` (further down) is the Layer 3 orchestrator that
+;; calls all three lifecycle helpers.
+
+;------------------------------------------------------------------------------ Layer 1 — manifest var resolution
+
+(defn manifest-fn [sym]
+  (requiring-resolve (symbol "ai.miniforge.event-stream.manifest" (name sym))))
+
+;------------------------------------------------------------------------------ Layer 2 — lifecycle helpers (compose Layer 1)
+;; Peers; none calls another. `run-workflow!` composes them at Layer 3.
+
+(defn start-workflow-manifest!
+  "Init the manifest at `manifest-dir` and start the heartbeat. Returns
+   `{:dir java.io.File :heartbeat ScheduledExecutorService :marked? atom}`
+   for the matching `finish-workflow-manifest!`. Returns nil when no
+   event stream is configured (dashboard-only run) — no on-disk
+   manifest to maintain in that case."
+  [workflow-id event-stream]
+  (when event-stream
+    (let [dir         (es/workflow-dir workflow-id)
+          init-active (manifest-fn 'init-active)
+          save!       (manifest-fn 'save-manifest!)
+          start-hb!   (manifest-fn 'start-heartbeat!)]
+      (save! dir (init-active workflow-id))
+      {:dir       dir
+       :heartbeat (start-hb! dir)
+       :marked?   (atom false)})))
+
+(defn mark-manifest-terminal!
+  "Stamp the manifest with a terminal `status` (`:completed |
+   :failed | :cancelled`). Idempotent via the `:marked?` atom — the
+   happy path marks `:completed` after drain, the finally block falls
+   back to `:cancelled` only if no prior mark fired.
+
+   Only flips `marked?` after a successful load + save. If the
+   manifest file is absent (e.g. it was deleted or never written by
+   sub-3b's archive flow), this is a no-op that leaves `marked?`
+   false so a subsequent attempt (e.g. the finally's :cancelled
+   fallback) can still try to write."
+  [{:keys [dir marked?]} status]
+  (when (and dir (not @marked?))
+    (let [load!         (manifest-fn 'load-manifest)
+          mark-terminal (manifest-fn 'mark-terminal)
+          save!         (manifest-fn 'save-manifest!)]
+      (when-let [m (load! dir)]
+        (save! dir (mark-terminal m status))
+        (reset! marked? true)))))
+
+(defn finish-workflow-manifest!
+  "Stop the heartbeat. Caller is expected to have already called
+   `mark-manifest-terminal!` for the happy path; this is the
+   shutdown-time cleanup. Swallows exceptions so a manifest IO
+   failure during cleanup doesn't mask the workflow result.
+
+   `stop-heartbeat!` can raise `InterruptedException` via
+   `awaitTermination`. Swallowing it without restoring the interrupt
+   flag breaks cooperative cancellation — outer frames lose the
+   signal that they're being asked to shut down. We re-interrupt the
+   current thread in that case and still return nil so the cleanup
+   stays best-effort."
+  [{:keys [heartbeat]}]
+  (when heartbeat
+    (try
+      ((manifest-fn 'stop-heartbeat!) heartbeat)
+      (catch InterruptedException _
+        (.interrupt (Thread/currentThread))
+        nil)
+      (catch Exception _ nil))))
+
 (defn- event-stream-shutdown!
   "Run the BD-2a shutdown sequence on `es`: quiesce publishers for
    `workflow-id`, then drain sinks. Returns the structured drain result
@@ -863,10 +944,19 @@
             ;; Pass dashboard-url in callbacks if provided
             callbacks-with-url (cond-> callbacks
                                  dashboard-url (assoc :dashboard-url dashboard-url))
-            progress-cleanup (display/start-progress! es quiet)]
+            progress-cleanup (display/start-progress! es quiet)
+            ;; BD-2b sub-3a: per-workflow manifest. Stamps an :active /
+            ;; :live manifest before the pipeline starts and keeps the
+            ;; owner lease renewed via a heartbeat while alive. The
+            ;; happy path below marks :completed/:failed after drain;
+            ;; the finally falls back to :cancelled if neither fired.
+            manifest-handle (start-workflow-manifest! workflow-id es)]
         (try
           (let [result (execute-workflow-pipeline run-pipeline workflow workflow-input callbacks-with-url artifact-store es)]
             (close-artifact-store artifact-store)
+            (mark-manifest-terminal!
+             manifest-handle
+             (if (phase/succeeded? result) :completed :failed))
             ;; BD-2a shutdown ordering: fence late publishers for this
             ;; workflow, then drain sinks before returning. quiesce!
             ;; rejects any post-terminal `publish!` for this workflow
@@ -879,6 +969,12 @@
               (cond-> result
                 (some? shutdown) (assoc :event-durability shutdown))))
           (finally
+            ;; If we got here without marking, the pipeline threw or was
+            ;; otherwise aborted before the success branch ran. Classify
+            ;; as :cancelled to mirror the existing event-stream
+            ;; publish-failure-event! :cancelled branch.
+            (mark-manifest-terminal! manifest-handle :cancelled)
+            (finish-workflow-manifest! manifest-handle)
             (progress-cleanup)))))
     (catch Exception e
       (when-not quiet

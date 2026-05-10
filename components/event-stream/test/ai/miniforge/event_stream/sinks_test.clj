@@ -59,7 +59,39 @@
     (vec (.listFiles dir))))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; event-file-path
+;; workflow-dir / event-file-path normalisation
+
+(deftest workflow-dir-normalizes-keyword-id
+  ;; Keyword workflow ids (e.g. `:canonical-sdlc` from `workflow run`)
+  ;; must NOT round-trip through `(str ...)` because the result
+  ;; (`":canonical-sdlc"`) carries a colon — invalid on Windows and
+  ;; surprising elsewhere. The shared `workflow-id-segment` helper
+  ;; uses `name` for keywords; UUIDs/strings pass through `str`.
+  (with-temp-dir
+    (fn [dir]
+      (let [kw-path     (sinks/workflow-dir dir :canonical-sdlc)
+            uuid-path   (sinks/workflow-dir dir (random-uuid))
+            string-path (sinks/workflow-dir dir "wf-abc")]
+        (is (= "canonical-sdlc" (.getName kw-path))
+            "keyword id strips the colon — uses (name kw)")
+        (is (re-matches #"[0-9a-f-]{36}" (.getName uuid-path))
+            "uuid id stringifies cleanly")
+        (is (= "wf-abc" (.getName string-path))
+            "string id passes through unchanged")))))
+
+(deftest event-file-path-normalizes-keyword-workflow-id
+  ;; Same normalisation must apply to event-file-path so events and
+  ;; the manifest end up under identical workflow directories.
+  (with-temp-dir
+    (fn [dir]
+      (let [wf-kw :auth-flow
+            event (sample-event {:workflow/id wf-kw})
+            path  (sinks/event-file-path dir wf-kw event)
+            parent (.getParentFile path)]
+        (is (= "auth-flow" (.getName parent))
+            "event-file-path's parent dir uses the same keyword
+             normalisation as workflow-dir so events sit beside the
+             manifest")))))
 
 (deftest event-file-path-test
   (testing "returns a File path ending in .json under an explicit base-dir"

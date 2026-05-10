@@ -28,7 +28,8 @@
    [ai.miniforge.event-stream.interface.events :as events]
    [ai.miniforge.event-stream.interface.listeners :as listeners]
    [ai.miniforge.event-stream.interface.stream :as stream]
-   [ai.miniforge.event-stream.reader :as reader]))
+   [ai.miniforge.event-stream.reader :as reader]
+   [ai.miniforge.event-stream.sinks :as sinks]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Stream lifecycle and control state
@@ -47,6 +48,11 @@
 (def unsubscribe! stream/unsubscribe!)
 (def get-events stream/get-events)
 (def get-latest-status stream/get-latest-status)
+
+;; BD-2b: canonical on-disk paths. Exposed so callers outside this
+;; component (cli workflow runner, sub-3 cleanup) agree with the file
+;; sink on where a workflow's events + manifest live.
+(def workflow-dir sinks/workflow-dir)
 
 ;; BD-2a shutdown-ordering primitives.
 (def quiesce! stream/quiesce!)
