@@ -810,7 +810,6 @@
   (let [v (System/getenv "MINIFORGE_BEST_EFFORT_SHUTDOWN")]
     (boolean (and v (contains? #{"1" "true" "yes" "on"} (str/lower-case v))))))
 
-;------------------------------------------------------------------------------ Layer 1
 ;; BD-2b sub-3a: per-workflow manifest lifecycle.
 ;;
 ;; `ai.miniforge.event-stream.manifest` is jvm-only (FileLock /
@@ -819,9 +818,20 @@
 ;; rather than a top-level `:require`. Same pattern as the other
 ;; jvm-only deferrals in this file (event-stream.interface lazy
 ;; require around line 853, the resume command at line 1024).
+;;
+;; Stratified-design layering: `manifest-fn` is the lone Layer 1
+;; helper; `start-/mark-/finish-workflow-manifest!` sit at Layer 2
+;; and each independently call `manifest-fn` (never each other).
+;; `run-workflow!` (further down) is the Layer 3 orchestrator that
+;; calls all three lifecycle helpers.
+
+;------------------------------------------------------------------------------ Layer 1 — manifest var resolution
 
 (defn manifest-fn [sym]
   (requiring-resolve (symbol "ai.miniforge.event-stream.manifest" (name sym))))
+
+;------------------------------------------------------------------------------ Layer 2 — lifecycle helpers (compose Layer 1)
+;; Peers; none calls another. `run-workflow!` composes them at Layer 3.
 
 (defn start-workflow-manifest!
   "Init the manifest at `manifest-dir` and start the heartbeat. Returns

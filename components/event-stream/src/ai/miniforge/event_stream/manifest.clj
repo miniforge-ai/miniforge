@@ -55,13 +55,32 @@
    [java.time Instant]
    [java.util.concurrent Executors ScheduledExecutorService TimeUnit]))
 
-;------------------------------------------------------------------------------ Layer 0
-;; Defaults — enums, filenames, operator knobs all loaded from
-;; `resources/config/event-stream/manifest-defaults.edn`. Pulling them
-;; out keeps the contract values in one place visible to both the
-;; Malli schema below and the cross-repo JSON Schema fixture at
-;; `contracts/event-stream/manifest.schema.json`, and lets operators
-;; tune the runtime knobs (TTL, heartbeat period) without code edits.
+;; STRATIFIED-DESIGN LAYERING
+;;
+;; Layers are a strict DAG: each layer is a vocabulary for the next
+;; one up; a function only calls functions in strictly-lower layers,
+;; never peers in the same layer. Layer comments below mark each
+;; stratum; if you find yourself wanting one function in a layer to
+;; call another, the called one belongs in a lower layer.
+;;
+;; Quick map:
+;;
+;;   Layer 0  defaults, data shapes, atomic Java-interop helpers
+;;            (snowflake-event-id-re, legal-archive-transitions,
+;;             manifest-path, iso-now, pid-string, hostname-string,
+;;             default-heartbeat-error-log!, stop-heartbeat!)
+;;   Layer 1  single-concern primitives built on Layer 0
+;;            (valid?, explain, legal-archive-transition?,
+;;             fresh-owner, renew-lease, lease-fresh?, owner-pid-alive?)
+;;   Layer 2  compose Layer 1 primitives
+;;            (transition-archive, init-active, mark-terminal,
+;;             load-manifest, save-manifest!)
+;;   Layer 3  manifest-bound IO that composes Layer 2 read + write
+;;            (renew-lease!)
+;;   Layer 4  scheduled / orchestration
+;;            (start-heartbeat!)
+
+;------------------------------------------------------------------------------ Layer 0 — atomic helpers, defaults, data
 
 (def defaults
   "Manifest defaults loaded from
@@ -80,10 +99,6 @@
 (def snapshot-statuses    (:snapshot-statuses defaults))
 (def default-lease-ttl-seconds (:default-lease-ttl-seconds defaults))
 (def heartbeat-period-seconds  (:heartbeat-period-seconds defaults))
-
-;------------------------------------------------------------------------------ Layer 0
-;; Malli schema — mirrors the RFC v4 shape and the cross-repo
-;; JSON Schema at `contracts/event-stream/manifest.schema.json`.
 
 (def ^:private snowflake-event-id-re
   "16-char lowercase hex per the BD-2b sub-1 Snowflake filename
@@ -119,19 +134,6 @@
      [:lease_renewed_at :string]
      [:lease_ttl_seconds [:int {:min 1}]]]]])
 
-(defn valid?
-  "True if `m` matches the manifest schema."
-  [m]
-  (m/validate Manifest m))
-
-(defn explain
-  "Return a malli explanation when `m` does not match. nil when valid."
-  [m]
-  (m/explain Manifest m))
-
-;------------------------------------------------------------------------------ Layer 0
-;; State machine
-
 (def ^:private legal-archive-transitions
   "Forward-only edges. Backwards moves (e.g. archived → live) are
    never legal — once events have been moved they don't come back."
@@ -139,28 +141,6 @@
    :archiving  #{:archived :live}        ; rollback to :live on aborted archive
    :archived   #{:tombstoned}
    :tombstoned #{}})
-
-(defn legal-archive-transition?
-  "True iff the manifest may move from `from` to `to`."
-  [from to]
-  (boolean (contains? (get legal-archive-transitions from #{}) to)))
-
-(defn transition-archive
-  "Pure: move the manifest's `archive_status` from its current value
-   to `to`, returning the updated manifest. Throws ex-info on illegal
-   moves so callers can't silently corrupt the state machine."
-  [manifest to]
-  (let [from (:archive_status manifest)]
-    (if (legal-archive-transition? from to)
-      (assoc manifest :archive_status to)
-      (throw (ex-info "Illegal archive_status transition"
-                      {:reason :illegal-archive-transition
-                       :from   from
-                       :to     to
-                       :workflow-id (:workflow_id manifest)})))))
-
-;------------------------------------------------------------------------------ Layer 0
-;; Owner / lease primitives
 
 (defn- ^String iso-now
   "ISO-8601 instant for `lease_renewed_at` / `created_at` etc."
@@ -180,6 +160,56 @@
   []
   (try (.getCanonicalHostName (InetAddress/getLocalHost))
        (catch Exception _ "unknown-host")))
+
+(defn manifest-path
+  "Return the manifest.json path under `workflow-dir`. The caller
+   chooses live/{wid} vs archived/{wid} — manifest is the same shape
+   in both."
+  ^File [workflow-dir]
+  (io/file workflow-dir manifest-filename))
+
+(defn- default-heartbeat-error-log!
+  "Last-resort logging when no `:on-error` callback is supplied. Writes
+   a single-line warning to stderr so persistent IO failures during
+   the heartbeat are observable in the operator's terminal / CI logs
+   rather than silently disappearing. The workflow runner is the
+   normal caller and should prefer to wire its own logger via
+   `:on-error`."
+  [^Throwable t workflow-dir]
+  (binding [*out* *err*]
+    (println (str "WARNING: manifest heartbeat renew failed for "
+                  (.getAbsolutePath ^File (io/file workflow-dir))
+                  ": " (.getMessage t)))))
+
+(defn stop-heartbeat!
+  "Shut a heartbeat executor down. Waits up to `:timeout-ms` (default
+   1000) for the in-flight renew to finish, then forces. Independent
+   of `start-heartbeat!` — placed in Layer 0 because it has no other
+   calls into this namespace."
+  ([^ScheduledExecutorService ex] (stop-heartbeat! ex {}))
+  ([^ScheduledExecutorService ex {:keys [timeout-ms] :or {timeout-ms 1000}}]
+   (when ex
+     (.shutdown ex)
+     (when-not (.awaitTermination ex (long timeout-ms) TimeUnit/MILLISECONDS)
+       (.shutdownNow ex))
+     nil)))
+
+;------------------------------------------------------------------------------ Layer 1 — single-concern primitives over Layer 0
+
+(defn valid?
+  "True if `m` matches the manifest schema."
+  [m]
+  (m/validate Manifest m))
+
+(defn explain
+  "Return a malli explanation when `m` does not match. nil when valid."
+  [m]
+  (m/explain Manifest m))
+
+(defn legal-archive-transition?
+  "True iff the manifest may move from `from` to `to`."
+  [from to]
+  (boolean (contains? (get legal-archive-transitions from #{}) to)))
 
 (defn fresh-owner
   "Build an owner map with the calling process's pid + host, marking
@@ -221,8 +251,21 @@
              (.isPresent (java.lang.ProcessHandle/of pid)))
            (catch Exception _ false)))))
 
-;------------------------------------------------------------------------------ Layer 0
-;; Manifest construction
+;------------------------------------------------------------------------------ Layer 2 — compose Layer 1
+
+(defn transition-archive
+  "Pure: move the manifest's `archive_status` from its current value
+   to `to`, returning the updated manifest. Throws ex-info on illegal
+   moves so callers can't silently corrupt the state machine."
+  [manifest to]
+  (let [from (:archive_status manifest)]
+    (if (legal-archive-transition? from to)
+      (assoc manifest :archive_status to)
+      (throw (ex-info "Illegal archive_status transition"
+                      {:reason :illegal-archive-transition
+                       :from   from
+                       :to     to
+                       :workflow-id (:workflow_id manifest)})))))
 
 (defn init-active
   "Build a fresh `:active` / `:live` manifest for a new workflow.
@@ -255,16 +298,6 @@
   (assoc manifest
          :status       status
          :completed_at (iso-now)))
-
-;------------------------------------------------------------------------------ Layer 0
-;; File IO — atomic write via temp + Files/move(ATOMIC_MOVE)
-
-(defn manifest-path
-  "Return the manifest.json path under `workflow-dir`. The caller
-   chooses live/{wid} vs archived/{wid} — manifest is the same shape
-   in both."
-  ^File [workflow-dir]
-  (io/file workflow-dir manifest-filename))
 
 (defn load-manifest
   "Read and parse a manifest from disk. Returns the parsed map (with
@@ -329,6 +362,8 @@
                              StandardCopyOption/REPLACE_EXISTING]))
     final))
 
+;------------------------------------------------------------------------------ Layer 3 — manifest-bound IO composing Layer 2 read + write
+
 (defn renew-lease!
   "Re-stamp the lease and write the manifest atomically. Returns the
    updated manifest. Idempotent — a missing manifest is a no-op
@@ -340,21 +375,7 @@
       (save-manifest! workflow-dir renewed)
       renewed)))
 
-;------------------------------------------------------------------------------ Layer 1
-;; Heartbeat — periodic lease renewal while the workflow is live.
-
-(defn- default-heartbeat-error-log!
-  "Last-resort logging when no `:on-error` callback is supplied. Writes
-   a single-line warning to stderr so persistent IO failures during
-   the heartbeat are observable in the operator's terminal / CI logs
-   rather than silently disappearing. The workflow runner is the
-   normal caller and should prefer to wire its own logger via
-   `:on-error`."
-  [^Throwable t workflow-dir]
-  (binding [*out* *err*]
-    (println (str "WARNING: manifest heartbeat renew failed for "
-                  (.getAbsolutePath ^File (io/file workflow-dir))
-                  ": " (.getMessage t)))))
+;------------------------------------------------------------------------------ Layer 4 — scheduled orchestration
 
 (defn ^ScheduledExecutorService start-heartbeat!
   "Start a single-threaded scheduled executor that renews the
@@ -393,14 +414,3 @@
                            (long period-seconds)
                            TimeUnit/SECONDS)
      ex)))
-
-(defn stop-heartbeat!
-  "Shut the heartbeat executor down. Waits up to `:timeout-ms`
-   (default 1000) for the in-flight renew to finish, then forces."
-  ([^ScheduledExecutorService ex] (stop-heartbeat! ex {}))
-  ([^ScheduledExecutorService ex {:keys [timeout-ms] :or {timeout-ms 1000}}]
-   (when ex
-     (.shutdown ex)
-     (when-not (.awaitTermination ex (long timeout-ms) TimeUnit/MILLISECONDS)
-       (.shutdownNow ex))
-     nil)))
