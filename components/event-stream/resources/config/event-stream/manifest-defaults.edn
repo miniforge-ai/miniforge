@@ -1,0 +1,47 @@
+;; Per-workflow manifest defaults (BD-2b sub-2). Centralised here so
+;; the contract values (enums, filename, schema version) live in one
+;; place visible from both the Clojure schema and any future tooling
+;; that needs to read them without booting the namespace, and so the
+;; operator-tunable knobs (lease TTL, heartbeat period) can be
+;; overridden without code edits.
+;;
+;; The cross-repo JSON Schema fixture at
+;; `contracts/event-stream/manifest.schema.json` mirrors the contract
+;; values below; if you change one of those, change both — the Clojure
+;; producer and Rust consumer (BD-2c) both validate against the same
+;; shape.
+{;; Wire format. Bumped only on incompatible shape changes — additive
+ ;; keys do not require a bump per the RFC's forward-compatibility
+ ;; rule.
+ :schema-version  "1.0.0"
+
+ ;; Manifest file basename. Cross-repo contract — Rust looks for the
+ ;; same name on disk.
+ :manifest-filename "manifest.json"
+
+ ;; Workflow lifecycle. `:crashed` is a slow-path classification (see
+ ;; BD-2b sub-3) when no terminal event is observed and the owner
+ ;; lease is stale + pid gone.
+ :workflow-statuses [:active :completed :failed :cancelled :crashed]
+
+ ;; Storage lifecycle. State-machine edges (forward-only except an
+ ;; `:archiving → :live` rollback for sub-3's aborted-archive
+ ;; recovery): :live → :archiving → :archived → :tombstoned.
+ :archive-statuses  [:live :archiving :archived :tombstoned]
+
+ ;; Snapshot availability. `:pending` / `:failed` mean BD-2c synthesis
+ ;; timed out or errored; consumers fall back to raw-event replay
+ ;; (preserved by `raw_events_retained: true` in those states).
+ :snapshot-statuses [:none :available :pending :failed]
+
+ ;; Operator knobs — tunable without code edits.
+
+ ;; How long a lease counts as fresh. Sub-3 cleanup classifies a
+ ;; workflow as crashed only if the lease is older than this AND the
+ ;; owner pid is gone.
+ :default-lease-ttl-seconds 60
+
+ ;; How often `start-heartbeat!` renews the lease while the workflow
+ ;; is alive. Half the lease TTL by default so a single missed renew
+ ;; does not falsely flag the workflow as crashed.
+ :heartbeat-period-seconds 30}

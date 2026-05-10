@@ -42,6 +42,7 @@
   {:miniforge/runtime :jvm-only}
   (:require
    [cheshire.core :as json]
+   [clojure.edn :as edn]
    [clojure.java.io :as io]
    [clojure.string :as str]
    [malli.core :as m])
@@ -55,49 +56,30 @@
    [java.util.concurrent Executors ScheduledExecutorService TimeUnit]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Constants — lifecycle / storage / snapshot enums
+;; Defaults — enums, filenames, operator knobs all loaded from
+;; `resources/config/event-stream/manifest-defaults.edn`. Pulling them
+;; out keeps the contract values in one place visible to both the
+;; Malli schema below and the cross-repo JSON Schema fixture at
+;; `contracts/event-stream/manifest.schema.json`, and lets operators
+;; tune the runtime knobs (TTL, heartbeat period) without code edits.
 
-(def ^:const schema-version
-  "Wire-format version of the manifest. Bumped only on incompatible
-   shape changes — additive keys do not require a bump per the RFC's
-   forward-compatibility rule."
-  "1.0.0")
+(def defaults
+  "Manifest defaults loaded from
+   `resources/config/event-stream/manifest-defaults.edn` at namespace
+   load. Keys: `:schema-version`, `:manifest-filename`,
+   `:workflow-statuses`, `:archive-statuses`, `:snapshot-statuses`,
+   `:default-lease-ttl-seconds`, `:heartbeat-period-seconds`."
+  (-> (io/resource "config/event-stream/manifest-defaults.edn")
+      slurp
+      edn/read-string))
 
-(def workflow-statuses
-  "Workflow-lifecycle states. `crashed` is a slow-path classification
-   (see BD-2b sub-3) — the workflow's process exited without writing a
-   terminal event."
-  [:active :completed :failed :cancelled :crashed])
-
-(def archive-statuses
-  "Storage-lifecycle states for the workflow's events on disk:
-     :live       — still in events/live/{workflow-id}/
-     :archiving  — sub-3 atomic archive in flight (recovery target)
-     :archived   — events moved to archived/{workflow-id}/
-     :tombstoned — raw events deleted, snapshot retained"
-  [:live :archiving :archived :tombstoned])
-
-(def snapshot-statuses
-  "Snapshot availability states:
-     :none       — no snapshot has been written
-     :available  — snapshot.transit.json exists and is readable
-     :pending    — sub-3 synthesis timed out; should be retried
-     :failed     — sub-3 synthesis errored; investigate"
-  [:none :available :pending :failed])
-
-(def ^:const default-lease-ttl-seconds
-  "Default lease TTL. Sub-3 cleanup classifies a workflow as crashed
-   only if the lease is older than this AND the owner pid is gone."
-  60)
-
-(def ^:const heartbeat-period-seconds
-  "How often `start-heartbeat!` renews the lease while the workflow is
-   alive. Half the lease TTL by default so a single missed renew does
-   not falsely flag the workflow as crashed."
-  30)
-
-(def ^:const manifest-filename
-  "manifest.json")
+(def schema-version       (:schema-version defaults))
+(def manifest-filename    (:manifest-filename defaults))
+(def workflow-statuses    (:workflow-statuses defaults))
+(def archive-statuses     (:archive-statuses defaults))
+(def snapshot-statuses    (:snapshot-statuses defaults))
+(def default-lease-ttl-seconds (:default-lease-ttl-seconds defaults))
+(def heartbeat-period-seconds  (:heartbeat-period-seconds defaults))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Malli schema — mirrors the RFC v4 shape and the cross-repo
