@@ -71,6 +71,28 @@
     (is (not (manifest/valid? m))
         "unknown :status enum value must fail validation")))
 
+(deftest valid?-rejects-negative-watermark-sequence
+  (let [m (assoc-in (manifest/init-active test-workflow-id)
+                    [:snapshot_watermark :workflow_sequence_number] -1)]
+    (is (not (manifest/valid? m))
+        "watermark sequence must be ≥ 0 to mirror the JSON Schema contract")))
+
+(deftest valid?-rejects-malformed-event-id
+  (let [base (manifest/init-active test-workflow-id)]
+    (is (not (manifest/valid?
+              (assoc-in base [:snapshot_watermark :last_event_id] "not-hex")))
+        "non-hex last_event_id must fail validation")
+    (is (not (manifest/valid?
+              (assoc-in base [:snapshot_watermark :last_event_id] "ABCDEF1234567890")))
+        "uppercase hex must fail (lowercase-only by RFC contract)")
+    (is (not (manifest/valid?
+              (assoc-in base [:snapshot_watermark :last_event_id] "abc")))
+        "wrong-length hex must fail")
+    (is (manifest/valid?
+         (assoc-in base [:snapshot_watermark :last_event_id]
+                   "018f3a9c8e4b12d0"))
+        "16-char lowercase hex passes")))
+
 ;------------------------------------------------------------------------------ State machine
 
 (deftest legal-archive-transitions-table

@@ -103,10 +103,17 @@
 ;; Malli schema — mirrors the RFC v4 shape and the cross-repo
 ;; JSON Schema at `contracts/event-stream/manifest.schema.json`.
 
+(def ^:private snowflake-event-id-re
+  "16-char lowercase hex per the BD-2b sub-1 Snowflake filename
+   grammar. The cross-repo JSON Schema validates the same shape."
+  #"^[0-9a-f]{16}$")
+
 (def Manifest
   "Open Malli schema for the per-workflow manifest map. Open: future
    keys (e.g. additional snapshot-status detail) pass through without
-   a schema bump per the RFC's forward-compatibility rule."
+   a schema bump per the RFC's forward-compatibility rule. Constraints
+   mirror `contracts/event-stream/manifest.schema.json` so the Clojure
+   producer and the eventual Rust consumer can't drift on validation."
   [:map
    [:workflow_id :uuid]
    [:schema_version [:string {:min 1}]]
@@ -119,8 +126,8 @@
    [:archived_at {:optional true} [:maybe :string]]
    [:snapshot_watermark
     [:map
-     [:workflow_sequence_number :int]
-     [:last_event_id {:optional true} [:maybe :string]]]]
+     [:workflow_sequence_number [:int {:min 0}]]
+     [:last_event_id {:optional true} [:maybe [:re snowflake-event-id-re]]]]]
    [:raw_events_retained :boolean]
    [:raw_events_retained_until {:optional true} [:maybe :string]]
    [:owner
@@ -314,8 +321,12 @@
         _           (.mkdirs dir)
         ^File final (manifest-path dir)
         ^File tmp   (io/file dir (str manifest-filename ".tmp"))]
-    ;; Serialize as JSON with stringified UUIDs / kebab-case keywords.
-    ;; cheshire's :keyword-fn names the keys back as kebab-case strings.
+    ;; Cheshire writes keyword keys via `name`, so the snake_case keys
+    ;; in the manifest map (e.g. `:workflow_id`) round-trip as
+    ;; `"workflow_id"` on disk. Keyword *values* (status enums, the
+    ;; UUID workflow id) need explicit conversion before serialization
+    ;; — the `update`s below stringify them; `load-manifest` reverses
+    ;; the conversions on read.
     (with-open [w (io/writer tmp)]
       (json/generate-stream
         (-> manifest
@@ -350,21 +361,42 @@
 ;------------------------------------------------------------------------------ Layer 1
 ;; Heartbeat — periodic lease renewal while the workflow is live.
 
+(defn- default-heartbeat-error-log!
+  "Last-resort logging when no `:on-error` callback is supplied. Writes
+   a single-line warning to stderr so persistent IO failures during
+   the heartbeat are observable in the operator's terminal / CI logs
+   rather than silently disappearing. The workflow runner is the
+   normal caller and should prefer to wire its own logger via
+   `:on-error`."
+  [^Throwable t workflow-dir]
+  (binding [*out* *err*]
+    (println (str "WARNING: manifest heartbeat renew failed for "
+                  (.getAbsolutePath ^File (io/file workflow-dir))
+                  ": " (.getMessage t)))))
+
 (defn ^ScheduledExecutorService start-heartbeat!
   "Start a single-threaded scheduled executor that renews the
    manifest's lease every `:period-seconds` (default
    `heartbeat-period-seconds`). Returns the executor handle for
    `stop-heartbeat!`.
 
-   The renew is best-effort — it logs but does not throw on transient
-   IO errors so a missed beat doesn't crash the workflow runner. The
-   sub-3 cleanup path's `lease-fresh?` check tolerates a single missed
-   renew via the TTL > period default."
+   Renew failures: a transient IO error during a beat must not crash
+   the workflow runner. By default any caught Throwable is reported
+   via `default-heartbeat-error-log!` (a stderr warning) so persistent
+   failures are visible. Callers that have a structured logger
+   should pass `:on-error` instead — that callback fully replaces the
+   default and is the recommended path for production wiring.
+
+   The sub-3 cleanup path's `lease-fresh?` check tolerates a single
+   missed renew via the TTL > period default, so a one-off swallowed
+   error does not falsely flag the workflow as crashed."
   ([workflow-dir]
    (start-heartbeat! workflow-dir {}))
   ([workflow-dir {:keys [period-seconds on-error]
                   :or   {period-seconds heartbeat-period-seconds}}]
-   (let [^ScheduledExecutorService ex
+   (let [report-error (or on-error
+                          #(default-heartbeat-error-log! % workflow-dir))
+         ^ScheduledExecutorService ex
          (Executors/newSingleThreadScheduledExecutor
            (reify java.util.concurrent.ThreadFactory
              (newThread [_ r]
@@ -374,8 +406,7 @@
                            ^Runnable
                            (fn []
                              (try (renew-lease! workflow-dir)
-                                  (catch Throwable t
-                                    (when on-error (on-error t)))))
+                                  (catch Throwable t (report-error t))))
                            (long period-seconds)
                            (long period-seconds)
                            TimeUnit/SECONDS)
