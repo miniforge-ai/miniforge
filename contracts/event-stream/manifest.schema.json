@@ -1,0 +1,113 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://miniforge.ai/schemas/event-stream/manifest.schema.json",
+  "title": "WorkflowManifest",
+  "description": "Per-workflow manifest carrying lifecycle state, archive lifecycle, snapshot availability, snapshot watermark, and owner lease. Cross-repo on-disk contract per the BD-2 RFC (docs/design/event-stream-replay-retention.md). Producer (Clojure event-stream/manifest) and consumer (Rust supervisory-entities WorkflowManifest, BD-2c) both validate against this schema. Open: additional `:spec/*`-style or `snapshot_*` keys may appear in future versions; consumers MUST tolerate unknown top-level fields.",
+  "type": "object",
+  "required": [
+    "workflow_id",
+    "schema_version",
+    "status",
+    "archive_status",
+    "snapshot_status",
+    "created_at",
+    "snapshot_watermark",
+    "raw_events_retained",
+    "owner"
+  ],
+  "properties": {
+    "workflow_id": {
+      "type": "string",
+      "format": "uuid",
+      "description": "UUID of the WorkflowRun this manifest tracks."
+    },
+    "schema_version": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Wire-format version. Bumped only on incompatible shape changes; additive keys do not require a bump."
+    },
+    "status": {
+      "type": "string",
+      "enum": ["active", "completed", "failed", "cancelled", "crashed"],
+      "description": "Workflow lifecycle. `crashed` is a slow-path classification (BD-2b sub-3) when no terminal event is observed and the owner lease is stale + pid gone."
+    },
+    "archive_status": {
+      "type": "string",
+      "enum": ["live", "archiving", "archived", "tombstoned"],
+      "description": "Storage lifecycle. State-machine edges (forward-only except `archiving → live` rollback): live → archiving → archived → tombstoned."
+    },
+    "snapshot_status": {
+      "type": "string",
+      "enum": ["none", "available", "pending", "failed"],
+      "description": "Snapshot availability. `pending`/`failed` mean the BD-2c sub-3 synthesis attempt timed out or errored; consumers fall back to raw-event replay (which is preserved by `raw_events_retained: true` in those states)."
+    },
+    "snapshot_failure_reason": {
+      "type": ["string", "null"],
+      "description": "Populated when `snapshot_status` is `pending` or `failed`. Free-form diagnostic string."
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO-8601 instant when the manifest was first written (workflow start)."
+    },
+    "completed_at": {
+      "type": ["string", "null"],
+      "format": "date-time",
+      "description": "ISO-8601 instant when `status` transitioned to a terminal value. Null until terminal."
+    },
+    "archived_at": {
+      "type": ["string", "null"],
+      "format": "date-time",
+      "description": "ISO-8601 instant when `archive_status` transitioned to `archived`. Null while live or archiving."
+    },
+    "snapshot_watermark": {
+      "type": "object",
+      "description": "Watermark for snapshot replay. `workflow_sequence_number` is the per-workflow logical sequence the snapshot covers up to; `last_event_id` is the Snowflake event id (16-char lowercase hex) of that last event so consumers can skip filenames lex-below the watermark without parsing payloads.",
+      "required": ["workflow_sequence_number"],
+      "properties": {
+        "workflow_sequence_number": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "last_event_id": {
+          "type": ["string", "null"],
+          "pattern": "^[0-9a-f]{16}$"
+        }
+      }
+    },
+    "raw_events_retained": {
+      "type": "boolean",
+      "description": "When true, the slow-path cleanup (BD-2b sub-3) MUST NOT delete this workflow's raw event tail under ordinary tail-deletion. Set true on crashed workflows whose snapshot is pending/failed, so the only reconstructable state is preserved."
+    },
+    "raw_events_retained_until": {
+      "type": ["string", "null"],
+      "format": "date-time",
+      "description": "ISO-8601 instant after which raw events become eligible for deletion. Null while `raw_events_retained` is true."
+    },
+    "owner": {
+      "type": "object",
+      "description": "Process that holds the live lease. Sub-3 cleanup classifies a workflow as `crashed` only if (lease > TTL old) AND (pid not running) AND (host matches).",
+      "required": ["pid", "host", "lease_renewed_at", "lease_ttl_seconds"],
+      "properties": {
+        "pid": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Process id as a string (decimal). String-typed for cross-platform/cross-runtime safety."
+        },
+        "host": {
+          "type": "string",
+          "minLength": 1
+        },
+        "lease_renewed_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "ISO-8601 instant of the most recent renewal. Heartbeat updates this every period; `lease_ttl_seconds` defines how stale it can be before the workflow is treated as crashed."
+        },
+        "lease_ttl_seconds": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    }
+  }
+}
