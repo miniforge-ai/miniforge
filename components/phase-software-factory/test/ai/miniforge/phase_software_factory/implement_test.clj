@@ -21,11 +21,22 @@
   
   Tests artifact creation, validation, and error handling."
   (:require
-   [clojure.test :refer [deftest testing is]]
+   [clojure.test :refer [deftest testing is use-fixtures]]
    [ai.miniforge.phase-software-factory.implement :as implement]
    [ai.miniforge.phase.interface :as phase]
+   [ai.miniforge.phase.loader :as loader]
    [ai.miniforge.agent.interface :as agent]
    [ai.miniforge.response.interface :as response]))
+
+(def phase-test-config-resource
+  "config/phase/test-support-namespaces.edn")
+
+(use-fixtures :each
+  (fn [f]
+    (phase/reset-phase-loader!)
+    (binding [loader/phase-loader-config-resource phase-test-config-resource]
+      (f))
+    (phase/reset-phase-loader!)))
 
 ;------------------------------------------------------------------------------ Test Fixtures
 
