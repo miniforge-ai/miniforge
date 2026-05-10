@@ -194,6 +194,145 @@
              cutoff (+ reg-at (* 1000 ttl))]
          (<= cutoff (.getTime ^java.util.Date now)))))
 
+;; ── Entry construction (Layer 1; consumes only Layer 0/1) ───────────
+
+(defn- new-listener-id [] (random-uuid))
+
+(defn- build-entry
+  "Pure: assemble a fully-shaped `ListenerEntry` from `params`,
+   stamping a fresh `:listener/id`, `:registered-at`, default
+   `:ttl-seconds`, and `:status :active`."
+  [params]
+  {:listener/id     (new-listener-id)
+   :pr/url          (:pr/url params)
+   :pr/repo-id      (:pr/repo-id params)
+   :pr/number       (:pr/number params)
+   :agent/id        (:agent/id params)
+   :session/id      (:session/id params)
+   :runtime         (:runtime params)
+   :resume-channel  (:resume-channel params)
+   :registered-at   (now-inst)
+   :registered-by   (:registered-by params)
+   :ttl-seconds     (or (:ttl-seconds params) default-ttl-seconds)
+   :status          :active
+   :notes           (:notes params)})
+
+;; ── Per-entry status updates (pure functions over one entry) ────────
+
+(defn- mark-cancelled
+  "Pure entry update: any → :cancelled. Caller is responsible for
+   sourcing only `:active` entries via `check-active-entry` /
+   `active-entries-for-pr`."
+  [entry]
+  (assoc entry :status :cancelled))
+
+(defn- mark-dispatched
+  "Pure entry-update factory: returns a fn that stamps `:dispatched`
+   + `:resume/dispatched-at` + `:resume/dispatch-id` on an entry.
+   Closes over `dispatch-id` to avoid an inline anonymous fn at the
+   call site."
+  [dispatch-id]
+  (fn [entry]
+    (assoc entry
+           :status :dispatched
+           :resume/dispatched-at (now-inst)
+           :resume/dispatch-id dispatch-id)))
+
+(defn- mark-expired
+  "Pure entry update: any → :expired."
+  [entry]
+  (assoc entry :status :expired))
+
+;; ── Result + error builders (pure DAG-result construction) ──────────
+
+(defn- not-found-error
+  [pr-url listener-id]
+  (dag/err :listener-registry/listener-not-found
+           (str "no listener entry " listener-id " for " pr-url)
+           {:pr-url pr-url :listener-id listener-id}))
+
+(defn- wrong-status-error
+  [pr-url listener-id current-status]
+  (dag/err :listener-registry/wrong-status
+           (str "listener " listener-id " on " pr-url
+                " is " current-status ", expected :active")
+           {:pr-url          pr-url
+            :listener-id     listener-id
+            :current-status  current-status
+            :expected-status :active}))
+
+(defn- registration-success
+  "Build the success payload returned to the caller of `register!`."
+  [entry write-result]
+  (dag/ok {:listener-id (:listener/id entry)
+           :path        (:path (:data write-result))}))
+
+(defn- invalid-entry-error
+  "Translate a malli-validation `ExceptionInfo` from `validate-entry!`
+   into a typed DAG error. Honors a caller-supplied `:anomaly` key
+   when present."
+  [^Throwable e]
+  (let [data (ex-data e)]
+    (dag/err (or (:anomaly data) :listener-registry/invalid-entry)
+             (.getMessage e)
+             data)))
+
+;; ── Lookup + active-entry assertion (pure registry queries) ─────────
+
+(defn- find-listener
+  "Pure: locate the entry matching `listener-id` within the bucket
+   for `pr-url`. Returns the entry or nil."
+  [registry pr-url listener-id]
+  (first (filter #(= listener-id (:listener/id %))
+                 (entries-for-pr registry pr-url))))
+
+(defn- check-active-entry
+  "Return `(dag/ok entry)` when the listener exists in `registry`
+   under `pr-url` AND is currently `:active`. Otherwise a typed
+   error per the two failure modes."
+  [registry pr-url listener-id]
+  (let [entry (find-listener registry pr-url listener-id)]
+    (cond
+      (nil? entry)                    (not-found-error pr-url listener-id)
+      (not= :active (:status entry))  (wrong-status-error pr-url listener-id (:status entry))
+      :else                           (dag/ok entry))))
+
+;; ── Bulk-operation helpers (pure reducers + transducer steps) ───────
+
+(defn- apply-cancel-to
+  "Reduce step: cancel one `entry` in-place under its known `pr-url`.
+   Closure-free — `pr-url` arrives via the entry's bucket lookup."
+  [pr-url registry entry]
+  (update-entry-status registry pr-url (:listener/id entry) mark-cancelled))
+
+(defn- apply-expire-to
+  "Reduce step: expire one [pr-url entry] pair in `registry`."
+  [registry [pr-url entry]]
+  (update-entry-status registry pr-url (:listener/id entry) mark-expired))
+
+(defn- pair-with-pr-url
+  "Pure: turn one `[pr-url entries]` map-entry into a seq of
+   `[pr-url entry]` pairs."
+  [[pr-url entries]]
+  (map (fn [e] [pr-url e]) entries))
+
+(defn- pair-expirable?
+  "Pure: predicate for [pr-url entry] pairs against a fixed `now`.
+   Returns a function so `filter` doesn't need a closure-bearing
+   anonymous fn at the call site."
+  [now]
+  (fn [[_ entry]] (auto-expirable? entry now)))
+
+(defn- collect-expirable-pairs
+  "Pure: walk `registry`'s listener buckets and return a vector of
+   `[pr-url entry]` pairs whose entries are auto-expirable as of
+   `now`."
+  [registry now]
+  (into []
+        (comp (mapcat pair-with-pr-url)
+              (filter (pair-expirable? now)))
+        (:registry/listeners registry)))
+
 ;------------------------------------------------------------------------------ Layer 2
 ;; Persistence (read + write-rename)
 
@@ -313,34 +452,7 @@
                  {:path path})))))
 
 ;------------------------------------------------------------------------------ Layer 3
-;; Lifecycle entry points
-
-(defn- new-listener-id [] (random-uuid))
-
-(defn- build-entry
-  "Pure: assemble a fully-shaped `ListenerEntry` from `params`,
-   stamping a fresh `:listener/id`, `:registered-at`, default
-   `:ttl-seconds`, and `:status :active`."
-  [params]
-  {:listener/id     (new-listener-id)
-   :pr/url          (:pr/url params)
-   :pr/repo-id      (:pr/repo-id params)
-   :pr/number       (:pr/number params)
-   :agent/id        (:agent/id params)
-   :session/id      (:session/id params)
-   :runtime         (:runtime params)
-   :resume-channel  (:resume-channel params)
-   :registered-at   (now-inst)
-   :registered-by   (:registered-by params)
-   :ttl-seconds     (or (:ttl-seconds params) default-ttl-seconds)
-   :status          :active
-   :notes           (:notes params)})
-
-(defn- registration-success
-  "Build the success payload returned to the caller of `register!`."
-  [entry write-result]
-  (dag/ok {:listener-id (:listener/id entry)
-           :path        (:path (:data write-result))}))
+;; Lifecycle entry points (orchestrate Layer 1/2 ops; do I/O)
 
 (defn- persist-new-entry!
   "Read → add → write. Internal helper for `register!`. Assumes the
@@ -354,16 +466,6 @@
         (if (dag/ok? write-r)
           (registration-success entry write-r)
           write-r)))))
-
-(defn- invalid-entry-error
-  "Translate a malli-validation `ExceptionInfo` from `validate-entry!`
-   into a typed DAG error. Honors a caller-supplied `:anomaly` key
-   when present."
-  [^Throwable e]
-  (let [data (ex-data e)]
-    (dag/err (or (:anomaly data) :listener-registry/invalid-entry)
-             (.getMessage e)
-             data)))
 
 (defn register!
   "Persist a new listener entry for `pr-url` against `agent-id`.
@@ -399,40 +501,6 @@
           (catch clojure.lang.ExceptionInfo e
             (invalid-entry-error e)))))))
 
-(defn- find-listener
-  "Pure: locate the entry matching `listener-id` within the bucket
-   for `pr-url`. Returns the entry or nil."
-  [registry pr-url listener-id]
-  (first (filter #(= listener-id (:listener/id %))
-                 (entries-for-pr registry pr-url))))
-
-(defn- not-found-error
-  [pr-url listener-id]
-  (dag/err :listener-registry/listener-not-found
-           (str "no listener entry " listener-id " for " pr-url)
-           {:pr-url pr-url :listener-id listener-id}))
-
-(defn- wrong-status-error
-  [pr-url listener-id current-status]
-  (dag/err :listener-registry/wrong-status
-           (str "listener " listener-id " on " pr-url
-                " is " current-status ", expected :active")
-           {:pr-url          pr-url
-            :listener-id     listener-id
-            :current-status  current-status
-            :expected-status :active}))
-
-(defn- check-active-entry
-  "Return `(dag/ok entry)` when the listener exists in `registry`
-   under `pr-url` AND is currently `:active`. Otherwise a typed
-   error per the two failure modes."
-  [registry pr-url listener-id]
-  (let [entry (find-listener registry pr-url listener-id)]
-    (cond
-      (nil? entry)                    (not-found-error pr-url listener-id)
-      (not= :active (:status entry))  (wrong-status-error pr-url listener-id (:status entry))
-      :else                           (dag/ok entry))))
-
 (defn- transition-from-active!
   "Internal: load → assert entry is `:active` → update → write.
 
@@ -456,27 +524,6 @@
           check
           (write-registry! worktree-path
                            (update-entry-status registry pr-url listener-id update-fn)))))))
-
-(defn- mark-cancelled
-  "Pure entry update: `:active → :cancelled`."
-  [entry]
-  (assoc entry :status :cancelled))
-
-(defn- mark-dispatched
-  "Pure entry update: `:active → :dispatched` with timestamp +
-   dispatch-id stamped. Closes over `dispatch-id` so the public
-   `mark-dispatched!` doesn't need an inline anonymous fn."
-  [dispatch-id]
-  (fn [entry]
-    (assoc entry
-           :status :dispatched
-           :resume/dispatched-at (now-inst)
-           :resume/dispatch-id dispatch-id)))
-
-(defn- mark-expired
-  "Pure entry update: `:active → :expired`."
-  [entry]
-  (assoc entry :status :expired))
 
 (defn unregister!
   "Transition `listener-id` for `pr-url` from `:active` to `:cancelled`.
@@ -502,12 +549,6 @@
   [worktree-path pr-url listener-id dispatch-id]
   (transition-from-active! worktree-path pr-url listener-id (mark-dispatched dispatch-id)))
 
-(defn- apply-cancel-to
-  "Reduce step: cancel one `entry` in-place under its known `pr-url`.
-   Closure-free — `pr-url` arrives via the entry's bucket lookup."
-  [pr-url registry entry]
-  (update-entry-status registry pr-url (:listener/id entry) mark-cancelled))
-
 (defn mark-cancelled-on-pr-close!
   "Transition every `:active` listener for `pr-url` to `:cancelled`.
    Called when `pull_request.closed` arrives with `merged: false`
@@ -524,34 +565,6 @@
         (if (dag/ok? write-r)
           (dag/ok {:cancelled-count (count actives) :pr-url pr-url})
           write-r)))))
-
-(defn- pair-with-pr-url
-  "Pure: turn one `[pr-url entries]` map-entry into a seq of
-   `[pr-url entry]` pairs. Used by `collect-expirable-pairs`."
-  [[pr-url entries]]
-  (map (fn [e] [pr-url e]) entries))
-
-(defn- pair-expirable?
-  "Pure: predicate for [pr-url entry] pairs against a fixed `now`.
-   Returns a function so `filter` doesn't need a closure-bearing
-   anonymous fn at the call site."
-  [now]
-  (fn [[_ entry]] (auto-expirable? entry now)))
-
-(defn- collect-expirable-pairs
-  "Pure: walk `registry`'s listener buckets and return a vector of
-   `[pr-url entry]` pairs whose entries are auto-expirable as of
-   `now`."
-  [registry now]
-  (into []
-        (comp (mapcat pair-with-pr-url)
-              (filter (pair-expirable? now)))
-        (:registry/listeners registry)))
-
-(defn- apply-expire-to
-  "Reduce step: expire one [pr-url entry] pair in `registry`."
-  [registry [pr-url entry]]
-  (update-entry-status registry pr-url (:listener/id entry) mark-expired))
 
 (defn sweep-expired!
   "Transition every `:active` entry whose TTL has elapsed to
