@@ -73,22 +73,35 @@
         (str/replace #"refs/remotes/origin/" ""))))
 
 (defn try-checkout-branch
-  "Try to checkout a branch, retrying with timestamp suffix if it already exists."
+  "Try to checkout a new branch off the current HEAD, retrying with a
+   timestamp suffix if the desired name already exists.
+
+   Branches off HEAD (not `origin/<base-branch>`) so the new branch
+   inherits whatever commits the task worktree already carries — e.g.
+   the per-phase boundary commits the workflow runtime makes after
+   plan/implement/verify/review. If we branched off `origin/<base>`
+   instead, those commits would be discarded and a downstream
+   `git add -A` would find nothing to stage. `:base-branch` is still
+   tracked for the PR-creation step, which uses it as the merge base."
   [executor env-id branch-name base-branch]
   (let [checkout-r (exec! executor env-id
-                          (str "git checkout -b " branch-name " origin/" base-branch))]
+                          (str "git checkout -b " branch-name))]
     (if (result/succeeded? checkout-r)
       (result/shell-success {:branch branch-name :base-branch base-branch})
       (let [ts-name (str branch-name "-" (System/currentTimeMillis))
             retry-r (exec! executor env-id
-                           (str "git checkout -b " ts-name " origin/" base-branch))]
+                           (str "git checkout -b " ts-name))]
         (if (result/succeeded? retry-r)
           (result/shell-success {:branch ts-name :base-branch base-branch})
           (result/shell-failure (str "Failed to create branch: " (:error retry-r))
                                {:branch nil}))))))
 
 (defn create-branch!
-  "Create a new git branch inside the sandbox container.
+  "Create a new git branch inside the sandbox container, off the current
+   HEAD (so phase-boundary commits already on the task branch carry
+   forward). Fetches `origin/<default-branch>` first so the PR-creation
+   step has a fresh merge base to compare against.
+
    Returns {:success? bool :branch string :base-branch string :error string}"
   [executor env-id branch-name]
   (let [default-branch (detect-default-branch executor env-id)
@@ -96,6 +109,22 @@
     (if-not (result/succeeded? fetch-r)
       (result/shell-failure (str "Failed to fetch: " (:error fetch-r)) {:branch nil})
       (try-checkout-branch executor env-id branch-name default-branch))))
+
+(defn commits-ahead-of-base
+  "Count commits on HEAD that aren't on `origin/<base-branch>`. Returns
+   nil on git failure (caller treats nil as 'unknown', not zero). Used
+   by step-stage-dirty-files to recognise that a clean worktree may
+   still carry unreleased work in the form of boundary commits — when
+   the implementer's writes were committed at the implement-phase
+   boundary, the release branch inherits them and there is nothing
+   left to stage."
+  [executor env-id base-branch]
+  (let [r (exec! executor env-id
+                 (str "git rev-list --count origin/" base-branch "..HEAD"))]
+    (when (result/succeeded? r)
+      (try
+        (Long/parseLong (str/trim (:output r "0")))
+        (catch NumberFormatException _ nil)))))
 
 (defn write-file!
   "Write content to a file inside the sandbox container.

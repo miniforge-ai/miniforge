@@ -117,26 +117,41 @@
   "Stage all dirty files in the executor environment.
 
    In the environment model, files are already in the worktree (written by
-   the implement agent); this step stages them for commit."
+   the implement agent); this step stages them for commit.
+
+   Empty-stage handling: when nothing is dirty, the implementer's writes
+   may already be committed on the branch as phase-boundary commits (the
+   workflow runtime persists each phase boundary as a commit on the task
+   branch since 2026-04-30). In that case `git rev-list --count
+   origin/<base>..HEAD` reports the carry-forward commits and we treat
+   that as success — step-commit will skip cleanly and step-push will
+   ship the existing commits."
   [state]
   (if (failed? state)
     state
-    (let [{:keys [executor environment-id]} state
+    (let [{:keys [executor environment-id base-branch]} state
           stage-r (sandbox/stage-files! executor environment-id :all)
           staged-r (when (result/succeeded? stage-r)
-                     (sandbox/exec! executor environment-id "git diff --cached --name-only"))]
+                     (sandbox/exec! executor environment-id "git diff --cached --name-only"))
+          staged-output (get staged-r :output "")
+          staged-count (count (remove str/blank? (str/split-lines staged-output)))]
       (cond
         (not (result/succeeded? stage-r))
         (fail state :stage-failed (:error stage-r))
 
-        (str/blank? (get staged-r :output ""))
-        (fail state :no-files-to-stage (msg/t :step/no-files-to-stage))
+        (pos? staged-count)
+        (assoc state :write-metrics {:total-operations staged-count
+                                     :files-written staged-count})
+
+        ;; Nothing dirty in the worktree, but the branch may already
+        ;; carry the work as boundary commits — accept that as success.
+        (let [ahead (sandbox/commits-ahead-of-base executor environment-id base-branch)]
+          (and ahead (pos? ahead)))
+        (assoc state :write-metrics {:total-operations 0 :files-written 0
+                                     :preexisting-commits true})
 
         :else
-        (let [staged-count (count (remove str/blank?
-                                          (str/split-lines (:output staged-r ""))))]
-          (assoc state :write-metrics {:total-operations staged-count
-                                       :files-written staged-count}))))))
+        (fail state :no-files-to-stage (msg/t :step/no-files-to-stage))))))
 
 (defn- net-negative-tests?
   "True when the diff removes more test definitions than it adds."
@@ -178,9 +193,27 @@
                          {:data (merge {} diff-stats test-counts)}))
             state)))))
 
-(defn step-commit [state]
-  (if (failed? state)
-    state
+(defn step-commit
+  "Commit the staged changes with the release-meta message.
+
+   Skipped when step-stage-dirty-files found no dirty files and the
+   branch already carries the work as phase-boundary commits — the
+   existing HEAD becomes the release commit and the boundary-commit
+   messages are what end up in the PR. (This matches the worktree-as-
+   artifact handoff model: the work is in the branch already; release
+   is publishing it, not re-recording it.)"
+  [state]
+  (cond
+    (failed? state) state
+
+    (get-in state [:write-metrics :preexisting-commits])
+    (let [sha-r (sandbox/exec! (:executor state) (:environment-id state)
+                               "git rev-parse HEAD")]
+      (cond-> state
+        (result/succeeded? sha-r)
+        (assoc :commit-sha (str/trim (:output sha-r "")))))
+
+    :else
     (let [{:keys [release-meta executor environment-id]} state
           result (sandbox/commit-changes! executor environment-id
                                           (:release/commit-message release-meta))]
