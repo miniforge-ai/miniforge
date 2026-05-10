@@ -313,11 +313,13 @@
   "Return additive project groups that double in size until they cover
    the full ordered project set."
   [projects start-size]
-  (let [project-count (count projects)]
-    (when (pos? project-count)
+  (let [project-vec (vec projects)
+        project-count (count project-vec)]
+    (if (zero? project-count)
+      []
       (loop [group-size (positive-start-size project-count start-size)
              groups []]
-        (let [group (subvec (vec projects) 0 group-size)
+        (let [group (subvec project-vec 0 group-size)
               next-groups (conj groups group)]
           (if (= group-size project-count)
             next-groups
@@ -328,51 +330,59 @@
   "Return contiguous project groups in breadth-first binary partition
    order."
   [projects]
-  (letfn [(split-groups [group]
-            (let [group (vec group)
-                  group-count (count group)]
-              (cond
-                (zero? group-count) []
-                (= 1 group-count) [group]
-                :else (let [mid (quot group-count 2)
-                            left (subvec group 0 mid)
-                            right (subvec group mid)]
-                        (into [left right]
-                              (concat (when (> (count left) 1)
-                                        (split-groups left))
-                                      (when (> (count right) 1)
-                                        (split-groups right))))))))]
-    (split-groups projects)))
+  (let [root (vec projects)]
+    (loop [queue (cond-> clojure.lang.PersistentQueue/EMPTY
+                   (> (count root) 1) (conj root))
+           groups []]
+      (if (empty? queue)
+        groups
+        (let [group (peek queue)
+              queue-tail (pop queue)
+              mid (quot (count group) 2)
+              left (subvec group 0 mid)
+              right (subvec group mid)
+              next-groups (cond-> groups
+                            (seq left) (conj left)
+                            (seq right) (conj right))
+              next-queue (cond-> queue-tail
+                           (> (count left) 1) (conj left)
+                           (> (count right) 1) (conj right))]
+          (recur next-queue next-groups))))))
 
 (defn diagnostic-test-plan
   "Return a stable-derived diagnostic plan over an explicit project
    vector."
   [{:keys [mode projects start-size direction order seed]}]
-  (let [ordered-projects (order-projects (vec projects)
+  (let [effective-mode (or mode :subset)
+        ordered-projects (order-projects (vec projects)
                                          {:direction direction
                                           :order order
                                           :seed seed})
-        project-groups (case mode
-                         :expand (expand-project-groups ordered-projects start-size)
-                         :bisect (bisect-project-groups ordered-projects)
-                         [(vec ordered-projects)])
+        project-groups (if (empty? ordered-projects)
+                         []
+                         (case effective-mode
+                           :expand (expand-project-groups ordered-projects start-size)
+                           :bisect (bisect-project-groups ordered-projects)
+                           [(vec ordered-projects)]))
         total-groups (count project-groups)]
-    {:mode mode
+    {:mode effective-mode
      :summary (str "Running "
-                   (name mode)
+                   (name effective-mode)
                    " diagnostics across "
                    (count ordered-projects)
                    " stable-derived projects.")
      :projects ordered-projects
      :steps (mapv (fn [index group]
-                    {:label (str (name mode)
+                    (let [selector (format-project-selector group)]
+                      {:label (str (name effective-mode)
                                  " project subset "
                                  (inc index) "/"
                                  total-groups
                                  " ("
                                  (count group)
                                  " projects)")
-                     :argv ["clojure" "-M:poly" "test" (format-project-selector group)]})
+                       :argv (cond-> ["clojure" "-M:poly" "test"]
+                               selector (conj selector))}))
                   (range)
                   project-groups)}))
 

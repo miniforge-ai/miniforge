@@ -266,12 +266,31 @@
 (deftest test-expand-project-groups-doubles-prefix-size
   (testing "additive expansion doubles until the full set is included"
     (is (= [["a"] ["a" "b"] ["a" "b" "c" "d"] ["a" "b" "c" "d" "e"]]
-           (sut/expand-project-groups ["a" "b" "c" "d" "e"] 1)))))
+           (sut/expand-project-groups ["a" "b" "c" "d" "e"] 1))))
+  (testing "empty project input yields an empty expansion plan"
+    (is (= []
+           (sut/expand-project-groups [] 1)))))
 
 (deftest test-bisect-project-groups-partitions-breadth-first
   (testing "bisect produces contiguous binary groups"
     (is (= [["a" "b"] ["c" "d"] ["a"] ["b"] ["c"] ["d"]]
-           (sut/bisect-project-groups ["a" "b" "c" "d"])))))
+           (sut/bisect-project-groups ["a" "b" "c" "d"]))))
+  (testing "larger project sets keep a true breadth-first traversal order"
+    (is (= [["a" "b" "c" "d"]
+            ["e" "f" "g" "h"]
+            ["a" "b"]
+            ["c" "d"]
+            ["e" "f"]
+            ["g" "h"]
+            ["a"]
+            ["b"]
+            ["c"]
+            ["d"]
+            ["e"]
+            ["f"]
+            ["g"]
+            ["h"]]
+           (sut/bisect-project-groups ["a" "b" "c" "d" "e" "f" "g" "h"])))))
 
 (deftest test-diagnostic-test-plan-builds-expand-steps
   (testing "diagnostic plans render executable Poly test steps"
@@ -286,6 +305,21 @@
                      :argv ["clojure" "-M:poly" "test" "project:a:b:c"]}]}
            (sut/diagnostic-test-plan {:mode :expand
                                       :projects ["a" "b" "c"]
+                                      :start-size 1}))))
+  (testing "missing mode defaults to subset"
+    (is (= {:mode :subset
+            :summary "Running subset diagnostics across 2 stable-derived projects."
+            :projects ["a" "b"]
+            :steps [{:label "subset project subset 1/1 (2 projects)"
+                     :argv ["clojure" "-M:poly" "test" "project:a:b"]}]}
+           (sut/diagnostic-test-plan {:projects ["a" "b"]}))))
+  (testing "empty project sets yield an empty step plan"
+    (is (= {:mode :expand
+            :summary "Running expand diagnostics across 0 stable-derived projects."
+            :projects []
+            :steps []}
+           (sut/diagnostic-test-plan {:mode :expand
+                                      :projects []
                                       :start-size 1})))))
 
 
