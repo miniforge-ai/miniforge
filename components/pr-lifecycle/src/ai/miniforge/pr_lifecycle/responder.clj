@@ -26,9 +26,11 @@
    Layer 3: Reply and resolution
    Layer 4: Orchestration (respond-to-comments!)"
   (:require
+   [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.dag-executor.interface :as dag]
    [ai.miniforge.pr-lifecycle.github :as github]
    [ai.miniforge.pr-lifecycle.pr-poller :as poller]
+   [ai.miniforge.response.interface :as response]
    [babashka.process :as process]
    [clojure.string :as str]))
 
@@ -43,6 +45,20 @@
     {:owner (nth match 1)
      :repo (nth match 2)
      :number (parse-long (nth match 3))}))
+
+(defn parse-pr-url-result
+  "Anomaly-returning version of `parse-pr-url`. Returns the parsed map
+   when `url` is a recognizable GitHub PR URL, or an `:invalid-input`
+   anomaly carrying `:url` in `:anomaly/data`.
+
+   This is the canonical, anomaly-returning entry point. The boundary
+   site `respond-to-comments!` consumes the anomaly and rethrows via
+   `response/throw-anomaly!` with `:anomalies/incorrect`."
+  [url]
+  (or (parse-pr-url url)
+      (anomaly/anomaly :invalid-input
+                       "Could not parse PR number from URL"
+                       {:url url})))
 
 (def ^:private bot-authors
   "Authors to exclude from comment processing."
@@ -191,19 +207,39 @@
                   (reply-to-fixed-comments worktree-path pr-number comment-ids fix-pr-url) nil)
       (fix-result path comment-ids false nil (get result :error)))))
 
-(defn- fetch-actionable-comments
-  "Fetch and filter PR comments to actionable review comments.
-   Returns {:comments vector :groups vector} or throws on fetch failure."
+(defn fetch-actionable-comments-result
+  "Anomaly-returning fetch + filter. Returns
+   `{:comments vector :groups vector}` on success, or a `:fault`
+   anomaly when the upstream `poller/fetch-pr-comments` errors.
+
+   This is the canonical, anomaly-returning entry point. The boundary
+   helper `fetch-actionable-comments` rethrows via
+   `response/throw-anomaly!` with `:anomalies/fault` for legacy
+   slingshot consumers."
   [worktree-path pr-number]
   (let [result (poller/fetch-pr-comments worktree-path pr-number)]
-    (when (dag/err? result)
-      (throw (ex-info "Failed to fetch PR comments"
-                      {:pr-number pr-number
-                       :error (get-in result [:error :message])})))
-    (let [all (get-in result [:data :comments])
-          actionable (filter-actionable-comments all)]
-      {:comments actionable
-       :groups (group-comments-by-file actionable)})))
+    (if (dag/err? result)
+      (anomaly/anomaly :fault
+                       "Failed to fetch PR comments"
+                       {:pr-number pr-number
+                        :error (get-in result [:error :message])})
+      (let [all (get-in result [:data :comments])
+            actionable (filter-actionable-comments all)]
+        {:comments actionable
+         :groups (group-comments-by-file actionable)}))))
+
+(defn- fetch-actionable-comments
+  "Boundary helper. Calls `fetch-actionable-comments-result`; on
+   anomaly result raises a slingshot `:anomalies/fault` throw.
+
+   Returns `{:comments vector :groups vector}` on success."
+  [worktree-path pr-number]
+  (let [result (fetch-actionable-comments-result worktree-path pr-number)]
+    (if (anomaly/anomaly? result)
+      (response/throw-anomaly! :anomalies/fault
+                               (:anomaly/message result)
+                               (:anomaly/data result))
+      result)))
 
 (defn- respond-result
   "Build the response summary map."
@@ -238,10 +274,13 @@
     :fixes [{:path :succeeded? :comment-ids :replied? :resolved?}]
     :pushed? bool}"
   [pr-url worktree-path run-fix-fn push-fn opts]
-  (let [{:keys [number]} (parse-pr-url pr-url)]
-    (when-not number
-      (throw (ex-info "Could not parse PR number from URL" {:url pr-url})))
-    (let [{:keys [comments groups]} (fetch-actionable-comments worktree-path number)]
+  (let [parsed (parse-pr-url-result pr-url)]
+    (when (anomaly/anomaly? parsed)
+      (response/throw-anomaly! :anomalies/incorrect
+                               (:anomaly/message parsed)
+                               (:anomaly/data parsed)))
+    (let [{:keys [number]} parsed
+          {:keys [comments groups]} (fetch-actionable-comments worktree-path number)]
       (if (empty? groups)
         (respond-result number 0 0 [] false)
         (let [context (gather-context worktree-path number groups)
