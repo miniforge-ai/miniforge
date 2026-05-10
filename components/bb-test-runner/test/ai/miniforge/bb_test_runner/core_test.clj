@@ -166,6 +166,11 @@
   (testing "empty stable-tag list forces full-suite fallback"
     (is (false? (sut/stable-tags-present? [])))))
 
+(deftest test-stable-tags-absent-when-input-has-no-recognized-stable-tags
+  (testing "non-stable and blank tag entries do not enable since-stable scope"
+    (is (false? (sut/stable-tags-present? ["release-2026-05-10" "feature/foo"])))
+    (is (false? (sut/stable-tags-present? ["" "   " nil])))))
+
 (deftest test-parse-project-selector-supports-poly-and-env-shapes
   (testing "project selectors accept poly syntax and env-friendly delimiters"
     (is (= ["miniforge" "miniforge-core"]

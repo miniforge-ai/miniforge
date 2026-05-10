@@ -152,7 +152,13 @@
 (defn stable-tags-present?
   "True when `tags` contains at least one recognized stable tag."
   [tags]
-  (boolean (seq tags)))
+  (boolean
+   (some (fn [tag]
+           (let [normalized (some-> tag str str/trim not-empty)]
+             (and normalized
+                  (or (str/starts-with? normalized "stable-")
+                      (str/starts-with? normalized "stable/")))))
+         tags)))
 
 (defn parse-project-selector
   "Parse a Polylith project selector or env value into a vector of
