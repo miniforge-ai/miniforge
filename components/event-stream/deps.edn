@@ -3,6 +3,7 @@
         ai.miniforge/logging {:local/root "../logging"}
         ai.miniforge/messages {:local/root "../messages"}
         ai.miniforge/schema {:local/root "../schema"}
+        cheshire/cheshire {:mvn/version "5.13.0"}
         com.cognitect/transit-clj {:mvn/version "1.0.333"}}
  :aliases {:test {:extra-paths ["test"]
                   :extra-deps {io.github.cognitect-labs/test-runner
