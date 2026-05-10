@@ -50,15 +50,22 @@
 
 ;--- Layer 0: Result Constructors
 
+(def zero-metrics
+  "Canonical zeroed metrics for DAG / inner-workflow results. Used as
+   the default when no per-task metrics flow through. Single source
+   of truth — configurable.clj aliases this so the workflow stack
+   doesn't drift on what an empty metrics map looks like."
+  {:tokens 0 :cost-usd 0.0 :duration-ms 0})
+
 (defn workflow-success [artifact metrics]
   {:success? true
    :artifact artifact
-   :metrics (or metrics {:tokens 0 :cost-usd 0.0 :duration-ms 0})})
+   :metrics (or metrics zero-metrics)})
 
 (defn workflow-failure [error metrics]
   {:success? false
    :error error
-   :metrics (or metrics {:tokens 0 :cost-usd 0.0 :duration-ms 0})})
+   :metrics (or metrics zero-metrics)})
 
 (defn dag-execution-result [completed failed artifacts metrics-agg & {:keys [unreached] :or {unreached 0}}]
   {:success? (and (zero? failed) (zero? unreached))
@@ -1252,7 +1259,7 @@
            :description description
            :status :implemented
            :artifacts []
-           :metrics {:tokens 0 :cost-usd 0.0}}))
+           :metrics zero-metrics}))
 
 (defn execute-single-task [task-def context]
   (let [task-id (:task/id task-def)
@@ -1347,15 +1354,31 @@
         err-results (->> results (filter #(not (dag/ok? (second %)))) (map first))]
     {:completed ok-results :failed err-results}))
 
+(defn- result-metrics
+  "Extract per-task `:metrics` from a dag/ok OR dag/err result.
+   `dag/ok` puts the data payload under `:data`; `dag/err` puts the
+   caller-supplied data under `:error :data`. The previous rollup
+   only inspected `:data`, which silently dropped every failed
+   task's tokens / cost / duration at the aggregate. With 8 failed
+   tasks in a dogfood run that's a 100% loss of cost telemetry."
+  [result]
+  (if (dag/ok? result)
+    (get-in result [:data :metrics])
+    (get-in result [:error :data :metrics])))
+
 (defn aggregate-results [all-results]
   (let [results (vals all-results)
         artifacts (->> results (mapcat #(get-in % [:data :artifacts] [])))
         pr-infos (->> results (keep #(get-in % [:data :pr-info])) vec)
         worktree-paths (->> results (keep #(get-in % [:data :worktree-path])) vec)
-        total-tokens (->> results (map #(get-in % [:data :metrics :tokens] 0)) (reduce + 0))
-        total-cost (->> results (map #(get-in % [:data :metrics :cost-usd] 0.0)) (reduce + 0.0))
-        total-duration (->> results (map #(get-in % [:data :metrics :duration-ms] 0)) (reduce + 0))]
-    (cond-> {:artifacts artifacts :total-tokens total-tokens :total-cost total-cost :total-duration total-duration}
+        metrics (map result-metrics results)
+        total-tokens   (->> metrics (map #(get % :tokens 0))      (reduce + 0))
+        total-cost     (->> metrics (map #(get % :cost-usd 0.0))  (reduce + 0.0))
+        total-duration (->> metrics (map #(get % :duration-ms 0)) (reduce + 0))]
+    (cond-> {:artifacts artifacts
+             :total-tokens total-tokens
+             :total-cost total-cost
+             :total-duration total-duration}
       (seq pr-infos) (assoc :pr-infos pr-infos)
       (seq worktree-paths) (assoc :worktree-paths worktree-paths))))
 

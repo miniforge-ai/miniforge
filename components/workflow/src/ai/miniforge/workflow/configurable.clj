@@ -36,10 +36,10 @@
 ;; Constants and result helpers
 
 (def zero-metrics
-  "Canonical zeroed metrics for configurable workflow results."
-  {:tokens 0
-   :cost-usd 0.0
-   :duration-ms 0})
+  "Canonical zeroed metrics for configurable workflow results.
+   Aliases dag-orchestrator's zero-metrics so both layers can't
+   drift on what an empty metrics map looks like."
+  dag-orch/zero-metrics)
 
 (defn- phase-error
   [error-type message & [extra]]

@@ -189,7 +189,13 @@
 ;; execute-single-task tests
 
 (deftest test-execute-single-task-placeholder
-  (testing "returns placeholder result without LLM backend"
+  (testing "returns placeholder result without LLM backend.
+            Placeholder :metrics now uses dag-orchestrator/zero-metrics
+            (`{:tokens 0 :cost-usd 0.0 :duration-ms 0}`) so the shape
+            matches every other zero-metrics emission in the workflow
+            stack — the previous {:tokens 0 :cost-usd 0.0} omission
+            of :duration-ms was the inconsistency that motivated
+            consolidating to a single canonical constant."
     (let [task-def {:task/id :test-task
                     :task/description "Test task"}
           result (task-runner/execute-single-task task-def {})]
@@ -199,7 +205,9 @@
         (is (= "Test task" (:description data)))
         (is (= :implemented (:status data)))
         (is (= [] (:artifacts data)))
-        (is (= {:tokens 0 :cost-usd 0.0} (:metrics data)))))))
+        (is (= {:tokens 0 :cost-usd 0.0 :duration-ms 0}
+               (:metrics data))
+            "placeholder metrics shape matches dag-orchestrator/zero-metrics")))))
 
 (deftest test-execute-single-task-default-description
   (testing "uses default description when missing"

@@ -175,6 +175,20 @@
   [loop-state metric-updates]
   (update loop-state :loop/metrics add-metric-values metric-updates))
 
+(defn- sum-repair-result-metrics
+  "repair/attempt-repair returns top-level shapes that hold per-attempt
+   results in `:results`. The metrics fields (`:tokens-used`,
+   `:cost-usd`) are on those entries, not on the outer map. Sum
+   them so the loop's :cost-usd / :tokens accumulators see what
+   each repair iteration actually cost.
+
+   Returns a `{:tokens N :cost-usd N}` map ready to thread into
+   `update-metrics`. Empty / missing :results yields zeros."
+  [repair-result]
+  (let [results (:results repair-result [])]
+    {:tokens   (->> results (map #(or (:tokens-used %) 0))  (reduce + 0))
+     :cost-usd (->> results (map #(or (:cost-usd %) 0.0))   (reduce + 0.0))}))
+
 (defn add-gate-results
   "Add gate results to loop state."
   [loop-state results]
@@ -284,7 +298,14 @@
                                :duration-ms duration}}))
           (-> loop-state
               (set-artifact artifact)
+              ;; :cost-usd carries through the same way :tokens does
+              ;; — generate-fn is expected to return it at top level
+              ;; (default 0.0 when absent) so add-metric-values'
+              ;; merge-with + can sum across iterations. Without this
+              ;; the :loop/metrics map keeps :cost-usd at its initial
+              ;; 0.0 and the workflow runner banner reports $0.0000.
               (update-metrics {:tokens (:tokens result 0)
+                               :cost-usd (:cost-usd result 0.0)
                                :duration-ms duration
                                :generate-calls 1})
               (transition :validating)))
@@ -382,10 +403,19 @@
                      iteration
                      errors
                      result)
+            ;; repair/attempt-repair returns aggregate shapes
+            ;; (make-success-result / make-max-attempts-result /
+            ;; make-exhausted-strategies-result / make-escalation-
+            ;; result) that put per-attempt metrics under :results,
+            ;; not at the top level. Reading (:tokens-used result)
+            ;; would always default to zero and starve the loop's
+            ;; :cost-usd / :tokens accumulation. Sum the per-attempt
+            ;; entries before threading them into update-metrics.
+            repair-totals (sum-repair-result-metrics result)
             loop-state (-> loop-state
                            (add-repair-attempt attempt)
-                           (update-metrics {:tokens (:tokens-used result 0)
-                                            :repair-calls 1}))]
+                           (update-metrics
+                            (assoc repair-totals :repair-calls 1)))]
         (cond
           ;; Repair succeeded
           (repair/succeeded? result)

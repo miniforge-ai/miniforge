@@ -311,6 +311,64 @@
           "the multi-parent detection is logged for plan-quality observability —
            dashboard surfaces fan-in even though it doesn't reject"))))
 
+;------------------------------------------------------------------------------ aggregate-results — metrics rollup across ok + err
+
+;; Cost-USD assertions tolerate IEEE-754 rounding because :cost-usd is
+;; a double in this layer. 0.01 + 0.03 in IEEE doubles ≈
+;; 0.039999999999999994 — direct = comparison flakes per host. A
+;; sub-cent epsilon is well below any rollup precision a caller
+;; relies on.
+(def ^:private cost-usd-epsilon 1.0e-6)
+
+(defn- approx=
+  [expected actual]
+  (< (Math/abs (double (- expected actual))) cost-usd-epsilon))
+
+;; Test fixtures lifted into named data so the assertion shape and
+;; the input shape can be read together. Lets each row's metrics
+;; carry semantic meaning beyond raw integers in deftest body.
+(def ^:private aggregate-rollup-fixture
+  {:ok    {:tokens 1000 :cost-usd 0.01 :duration-ms 5000}
+   :err   {:tokens 2500 :cost-usd 0.03 :duration-ms 12000}
+   :sum   {:tokens 3500 :cost-usd 0.04 :duration-ms 17000}})
+
+(deftest aggregate-results-sums-metrics-from-ok-and-err-test
+  (testing "Both dag/ok and dag/err results contribute to the
+            aggregate :total-tokens / :total-cost / :total-duration.
+            Pre-fix the rollup only inspected `[:data :metrics ...]`
+            which silently dropped every failed task — for a dogfood
+            run with all tasks failing, total-tokens reported zero
+            despite a per-task implementer carrying real token counts.
+            With the fix, dag/err's `[:error :data :metrics ...]`
+            shape is also picked up so failed tasks contribute to the
+            rollup the same way completed ones do."
+    (let [{:keys [ok err sum]} aggregate-rollup-fixture
+          ok-result  (dag/ok  {:metrics ok})
+          err-result (dag/err :task-execution-failed "boom"
+                              {:metrics err})
+          mixed      {:t-ok ok-result :t-err err-result}
+          agg        (dag-orch/aggregate-results mixed)]
+      (is (= (:tokens sum) (:total-tokens agg))
+          "ok + err token contributions both flow into the rollup")
+      (is (approx= (:cost-usd sum) (:total-cost agg))
+          ":cost-usd from both results sums correctly via the ok/err-
+           aware accessor (within IEEE-double rounding)")
+      (is (= (:duration-ms sum) (:total-duration agg))
+          ":duration-ms also rolls up from both shapes"))))
+
+(deftest aggregate-results-handles-missing-metrics-gracefully-test
+  (testing "Tasks with no :metrics key on either ok or err shape
+            contribute zero rather than throwing or producing nil
+            sums. Older callers that build dag/ok without :metrics
+            (placeholder paths) must keep working."
+    (let [no-metrics-ok  (dag/ok  {:status :implemented :artifacts []})
+          no-metrics-err (dag/err :task-execution-failed "boom" {})
+          mixed          {:t1 no-metrics-ok :t2 no-metrics-err}
+          agg            (dag-orch/aggregate-results mixed)]
+      (is (= 0 (:total-tokens agg)))
+      (is (= 0.0 (:total-cost agg)))
+      (is (= 0 (:total-duration agg))))))
+
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
   (clojure.test/run-tests 'ai.miniforge.workflow.dag-orchestrator-test)
