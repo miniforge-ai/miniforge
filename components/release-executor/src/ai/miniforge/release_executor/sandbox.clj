@@ -111,16 +111,19 @@
       (try-checkout-branch executor env-id branch-name default-branch))))
 
 (defn commits-ahead-of-base
-  "Count commits on HEAD that aren't on `origin/<base-branch>`. Returns
-   nil on git failure (caller treats nil as 'unknown', not zero). Used
-   by step-stage-dirty-files to recognise that a clean worktree may
-   still carry unreleased work in the form of boundary commits — when
-   the implementer's writes were committed at the implement-phase
-   boundary, the release branch inherits them and there is nothing
-   left to stage."
+  "Count commits HEAD has added since branching from `origin/<base>`.
+   Counts against the merge-base (`origin/<base>...HEAD`, three-dot
+   form, right-only) so concurrent movement of `origin/<base>` while
+   the workflow was running doesn't artificially shrink the count to
+   zero. Returns nil on git failure (caller treats nil as 'unknown',
+   not zero). Used by step-stage-dirty-files to recognise that a clean
+   worktree may still carry unreleased work in the form of boundary
+   commits — when the implementer's writes were committed at the
+   implement-phase boundary, the release branch inherits them and
+   there is nothing left to stage."
   [executor env-id base-branch]
   (let [r (exec! executor env-id
-                 (str "git rev-list --count origin/" base-branch "..HEAD"))]
+                 (str "git rev-list --count --right-only origin/" base-branch "...HEAD"))]
     (when (result/succeeded? r)
       (try
         (Long/parseLong (str/trim (:output r "0")))
@@ -268,24 +271,30 @@
       (count-deftest (:output r "")))))
 
 (defn diff-stats-range
-  "Get diff stats for `origin/<base>..HEAD` (the carry-forward range
-   used by the release branch when phase-boundary commits already
-   contain the work). Mirrors `diff-stats` but reads the merge-base
-   range rather than the staged index."
+  "Get diff stats for the changes this branch introduced since branching
+   from `origin/<base>` — i.e. `git diff origin/<base>...HEAD` with the
+   three-dot form, which compares HEAD to the merge-base rather than to
+   the current tip of `origin/<base>`. The two-dot form would compare
+   trees directly, so files merged into `origin/<base>` while the
+   workflow was running would surface as spurious deletions on the
+   branch and trip the destructive-diff gate. Mirrors `diff-stats` but
+   reads the merge-base range rather than the staged index. Used in
+   the boundary-commits release path."
   [executor env-id base-branch]
   (let [r (exec! executor env-id
-                 (str "git diff origin/" base-branch "..HEAD --numstat"))]
+                 (str "git diff origin/" base-branch "...HEAD --numstat"))]
     (when (result/succeeded? r)
       (numstat-totals (:output r "")))))
 
 (defn count-test-defs-range
-  "Count deftest forms added/removed in `origin/<base>..HEAD`. Mirrors
-   `count-test-defs` but reads the merge-base range so the destructive-
-   diff gate keeps inspecting the actual commits being released, not
-   just the staged index (which is empty in the boundary-commits case)."
+  "Count deftest forms added/removed in `origin/<base>...HEAD` (three-dot,
+   merge-base diff). Mirrors `count-test-defs` but reads the merge-base
+   range so the destructive-diff gate keeps inspecting the commits this
+   branch introduced — not deltas caused by `origin/<base>` moving
+   forward concurrently."
   [executor env-id base-branch]
   (let [r (exec! executor env-id
-                 (str "git diff origin/" base-branch "..HEAD -U0"))]
+                 (str "git diff origin/" base-branch "...HEAD -U0"))]
     (when (result/succeeded? r)
       (count-deftest (:output r "")))))
 

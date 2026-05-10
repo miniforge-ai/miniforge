@@ -181,14 +181,19 @@
                   {:release-meta test-release-meta})]
       (is (:success? result)
           "release must succeed when boundary commits already carry the work")
-      (is (some #(clojure.string/includes? % "git rev-list --count origin/main..HEAD") @cmds)
-          "release should consult `git rev-list --count origin/main..HEAD` to detect carry-forward commits")
+      (is (some #(clojure.string/includes? % "git rev-list --count --right-only origin/main...HEAD") @cmds)
+          "release should consult the three-dot, right-only count so concurrent
+           movement of origin/<base> doesn't artificially shrink the count")
       (is (not-any? #(clojure.string/starts-with? % "git commit") @cmds)
           "step-commit must NOT issue a new commit when the boundary commits already exist on the branch")
-      (is (some #(clojure.string/includes? % "git diff origin/main..HEAD --numstat") @cmds)
-          "step-validate-diff must inspect the range diff (origin/<base>..HEAD), not
-           the empty staged diff — boundary commits otherwise bypass the destructive-
-           diff gate entirely."))))
+      (is (some #(clojure.string/includes? % "git diff origin/main...HEAD --numstat") @cmds)
+          "step-validate-diff must inspect the merge-base range diff
+           (origin/<base>...HEAD, three-dot), not the empty staged diff —
+           boundary commits otherwise bypass the destructive-diff gate
+           entirely. Three-dot form is critical: two-dot would compare to
+           the *current* origin/<base>, which can have moved while the
+           workflow was running, surfacing concurrent-merge files as
+           spurious deletions."))))
 
 (deftest release-rejects-destructive-boundary-commits-test
   (testing "step-validate-diff still rejects a destructive release when the
@@ -205,8 +210,8 @@
                                 "git checkout"     {:exit-code 0 :stdout "" :stderr ""}
                                 "git add"          {:exit-code 0 :stdout "" :stderr ""}
                                 "git diff --cached"  {:exit-code 0 :stdout "" :stderr ""}
-                                "git diff origin/main..HEAD --numstat" {:exit-code 0 :stdout destructive-numstat :stderr ""}
-                                "git diff origin/main..HEAD -U0"       {:exit-code 0 :stdout destructive-diff    :stderr ""}
+                                "git diff origin/main...HEAD --numstat" {:exit-code 0 :stdout destructive-numstat :stderr ""}
+                                "git diff origin/main...HEAD -U0"       {:exit-code 0 :stdout destructive-diff    :stderr ""}
                                 "git rev-list"     {:exit-code 0 :stdout "1\n" :stderr ""}
                                 "git rev-parse"    {:exit-code 0 :stdout "deadbeef\n" :stderr ""}})
           result (core/execute-release-phase
