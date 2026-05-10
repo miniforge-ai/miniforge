@@ -197,25 +197,41 @@
   [worktree-path]
   (str (fs/path (str worktree-path) default-storage-path)))
 
-(defn- registry-shape?
-  "Cheap structural check: registry MUST be a map with the three
-   required top-level keys. Catches the common corruption mode where
-   `edn/read-string` reads only the first form and silently ignores
-   trailing garbage (e.g. `\"foo bar\"` parses to the symbol `foo` and
-   never throws)."
-  [v]
-  (and (map? v)
-       (contains? v :registry/version)
-       (contains? v :registry/last-updated)
-       (contains? v :registry/listeners)
-       (map? (:registry/listeners v))))
+(defn- read-single-edn-form
+  "Read exactly one EDN form from `raw`, asserting EOF after.
+   Returns the parsed value or throws ex-info on:
+   - parse failure inside `edn/read` (re-thrown)
+   - trailing forms (a valid first form followed by anything but
+     whitespace / EOF)
+
+   Using PushbackReader + double-read with `:eof` sentinel is the
+   only way to detect trailing garbage without parsing the whole
+   string first. `edn/read-string` reads the first form and silently
+   discards the rest, so a corrupted file like `\"{:a 1} extra junk\"`
+   would otherwise round-trip as `{:a 1}`."
+  [raw]
+  (let [eof-sentinel ::eof
+        rdr (java.io.PushbackReader. (java.io.StringReader. ^String raw))
+        first-form (edn/read {:eof eof-sentinel} rdr)
+        next-form  (edn/read {:eof eof-sentinel} rdr)]
+    (when-not (identical? eof-sentinel next-form)
+      (throw (ex-info "trailing forms after first registry value"
+                      {:trailing next-form})))
+    first-form))
 
 (defn read-registry
   "Read the registry from `worktree-path`'s `.miniforge/listener-registry.edn`.
-   Returns the registry map on success; `empty-registry` on missing
-   file. Returns `(dag/err :listener-registry/read-failed ...)` on
-   parse failure or when the parsed value doesn't match the registry
-   shape."
+   Returns `(dag/ok <registry>)` on success; `(dag/ok empty-registry)`
+   on missing or blank file. Returns `(dag/err :listener-registry/read-failed ...)`
+   on:
+   - parse failure (corrupt EDN)
+   - trailing forms after the first value (silent corruption mode)
+   - schema mismatch against the malli `Registry` schema (e.g.
+     `:registry/listeners` value is a list rather than a vector,
+     which would later trip up `update-entry-status`)
+
+   Schema-mismatch errors carry an `:explain` key under `:data` with
+   the malli explanation so callers can surface a structured diagnostic."
   [worktree-path]
   (let [path (storage-path worktree-path)]
     (try
@@ -230,16 +246,28 @@
             (dag/ok empty-registry)
 
             :else
-            (let [parsed (edn/read-string raw)]
-              (if (registry-shape? parsed)
-                (dag/ok parsed)
+            (let [parsed (read-single-edn-form raw)]
+              (cond
+                (not (m/validate Registry parsed))
                 (dag/err :listener-registry/read-failed
-                         (str "registry file " path " did not parse to a registry-shaped map")
-                         {:path path}))))))
+                         (str "registry file " path " failed Registry schema validation")
+                         {:path path
+                          :explain (m/explain Registry parsed)})
+
+                :else
+                (dag/ok parsed))))))
       (catch Throwable e
         (dag/err :listener-registry/read-failed
                  (str "failed to read " path ": " (.getMessage e))
-                 {:path path})))))
+                 (cond-> {:path path}
+                   (ex-data e) (assoc :ex-data (ex-data e))))))))
+
+(defn- best-effort-delete!
+  "Try to delete `path`; swallow any throwable. Used to keep
+   `.miniforge/` clean of leftover `.tmp` files when an atomic
+   move fails (e.g., on filesystems that don't support it)."
+  [path]
+  (try (fs/delete path) (catch Throwable _ nil)))
 
 (defn write-registry!
   "Write `registry` atomically to `worktree-path`'s storage path.
@@ -247,7 +275,10 @@
    the canonical path. Eliminates partial reads from concurrent
    readers — the rename is atomic on POSIX filesystems.
 
-   Creates `.miniforge/` if it doesn't exist."
+   Creates `.miniforge/` if it doesn't exist. On move failure
+   (e.g. atomic move not supported on the underlying filesystem),
+   best-effort-deletes the leftover `.tmp` file so it doesn't
+   accumulate under `.miniforge/`."
   [worktree-path registry]
   (let [path     (storage-path worktree-path)
         tmp-path (str path ".tmp")
@@ -255,9 +286,13 @@
     (try
       (when-not (fs/exists? parent) (fs/create-dirs parent))
       (spit tmp-path (pr-str registry))
-      (fs/move tmp-path path {:replace-existing true :atomic-move true})
-      (dag/ok {:path path :listener-count
-               (reduce + 0 (map count (vals (:registry/listeners registry))))})
+      (try
+        (fs/move tmp-path path {:replace-existing true :atomic-move true})
+        (dag/ok {:path path :listener-count
+                 (reduce + 0 (map count (vals (:registry/listeners registry))))})
+        (catch Throwable move-err
+          (best-effort-delete! tmp-path)
+          (throw move-err)))
       (catch Throwable e
         (dag/err :listener-registry/write-failed
                  (str "failed to write " path ": " (.getMessage e))
@@ -329,43 +364,73 @@
                      (.getMessage e)
                      (ex-data e))))))))
 
-(defn- transition!
-  "Internal: load → update one entry → write. `update-fn` receives
-   the entry and returns its replacement (or itself unchanged)."
-  [worktree-path pr-url listener-id update-fn err-code-on-missing]
+(defn- transition-from-active!
+  "Internal: load → assert entry is `:active` → update → write.
+   Returns:
+   - `:listener-registry/listener-not-found` when no such entry exists.
+   - `:listener-registry/wrong-status` when the entry's current status
+     is anything other than `:active` — guards against overwriting
+     terminal states (`:dispatched`, `:expired`, `:cancelled`) per
+     spec §Lifecycle, which models all transitions as `:active → X`.
+   - `(dag/ok ...)` from `write-registry!` on the happy path.
+
+   `update-fn` receives the entry (guaranteed `:status :active`) and
+   returns its replacement."
+  [worktree-path pr-url listener-id update-fn]
   (let [r (read-registry worktree-path)]
     (if-not (dag/ok? r)
       r
       (let [registry (:data r)
             bucket   (entries-for-pr registry pr-url)
-            present? (some #(= listener-id (:listener/id %)) bucket)]
-        (if-not present?
-          (dag/err err-code-on-missing
+            entry    (first (filter #(= listener-id (:listener/id %)) bucket))]
+        (cond
+          (nil? entry)
+          (dag/err :listener-registry/listener-not-found
                    (str "no listener entry " listener-id " for " pr-url)
                    {:pr-url pr-url :listener-id listener-id})
+
+          (not= :active (:status entry))
+          (dag/err :listener-registry/wrong-status
+                   (str "listener " listener-id " on " pr-url
+                        " is " (:status entry) ", expected :active")
+                   {:pr-url pr-url
+                    :listener-id listener-id
+                    :current-status (:status entry)
+                    :expected-status :active})
+
+          :else
           (let [next-reg (update-entry-status registry pr-url listener-id update-fn)]
             (write-registry! worktree-path next-reg)))))))
 
 (defn unregister!
-  "Transition `listener-id` for `pr-url` to `:cancelled`. No-op (typed
-   error) when no such entry exists."
+  "Transition `listener-id` for `pr-url` from `:active` to `:cancelled`.
+
+   Returns typed error when:
+   - no such entry exists (`:listener-registry/listener-not-found`)
+   - the entry is already in a terminal state
+     (`:listener-registry/wrong-status`) — does NOT overwrite
+     `:dispatched` / `:expired` / `:cancelled` per spec §Lifecycle."
   [worktree-path pr-url listener-id]
-  (transition! worktree-path pr-url listener-id
-               (fn [e] (assoc e :status :cancelled))
-               :listener-registry/listener-not-found))
+  (transition-from-active! worktree-path pr-url listener-id
+                           (fn [e] (assoc e :status :cancelled))))
 
 (defn mark-dispatched!
-  "Transition to `:dispatched`, recording `:resume/dispatched-at` and
+  "Transition `listener-id` for `pr-url` from `:active` to
+   `:dispatched`, recording `:resume/dispatched-at` and
    `:resume/dispatch-id`. Called by the Resume Signal Dispatcher
-   after a successful primer delivery."
+   after a successful primer delivery.
+
+   Returns `:listener-registry/wrong-status` rather than overwriting
+   when the entry is already in a terminal state — prevents
+   double-dispatch and accidental resurrection of cancelled/expired
+   listeners."
   [worktree-path pr-url listener-id dispatch-id]
-  (transition! worktree-path pr-url listener-id
-               (fn [e]
-                 (assoc e
-                        :status :dispatched
-                        :resume/dispatched-at (now-inst)
-                        :resume/dispatch-id dispatch-id))
-               :listener-registry/listener-not-found))
+  (transition-from-active! worktree-path pr-url listener-id
+                           (fn [e]
+                             (assoc e
+                                    :status :dispatched
+                                    :resume/dispatched-at (now-inst)
+                                    :resume/dispatch-id dispatch-id))))
 
 (defn mark-cancelled-on-pr-close!
   "Transition every `:active` listener for `pr-url` to `:cancelled`.

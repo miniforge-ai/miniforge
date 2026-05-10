@@ -187,17 +187,59 @@
     (is (false? (reg/auto-expirable? cancelled-old now))
         "non-active entries don't auto-expire")))
 
+;; Deterministic registry construction: build the snapshot directly
+;; via pure helpers so we can dial `:registered-at` into the past
+;; without touching wall-clock time. Avoids the Thread/sleep
+;; flakiness that bites under CI load.
+
+(defn- write-state!
+  "Build a registry from `entries`, write it through `write-registry!`,
+   and return the entries actually persisted. `entries` are caller-
+   supplied entry maps (must include all required fields)."
+  [entries]
+  (let [reg (reduce reg/add-entry reg/empty-registry entries)
+        r   (reg/write-registry! *worktree* reg)]
+    (assert (dag/ok? r) "test fixture failed to write registry")
+    entries))
+
+(defn- entry
+  "Build a fully-shaped ListenerEntry for tests with the supplied
+   overrides. Required keys default from base-params; `:registered-at`
+   defaults to now."
+  [overrides]
+  (merge {:listener/id     (random-uuid)
+          :pr/url          (:pr/url base-params)
+          :pr/repo-id      (:pr/repo-id base-params)
+          :pr/number       (:pr/number base-params)
+          :agent/id        (:agent/id base-params)
+          :session/id      nil
+          :runtime         (:runtime base-params)
+          :resume-channel  (:resume-channel base-params)
+          :registered-at   (java.util.Date.)
+          :registered-by   (:registered-by base-params)
+          :ttl-seconds     reg/default-ttl-seconds
+          :status          :active
+          :notes           nil}
+         overrides))
+
+(defn- past-inst
+  "Return an inst `seconds-ago` before now."
+  [seconds-ago]
+  (java.util.Date. (- (.getTime (java.util.Date.)) (* 1000 seconds-ago))))
+
 (deftest sweep-expired-transitions-stale-actives
-  (testing "sweep-expired! flips :active entries past TTL to :expired"
-    (let [_  (reg/register! *worktree* (assoc base-params :ttl-seconds 1))
-          r2 (reg/register! *worktree* (assoc base-params :agent/id "agent-B"
-                                              :ttl-seconds reg/default-ttl-seconds))]
-      (is (dag/ok? r2))
-      (Thread/sleep 1100) ; let the agent-A entry's 1s TTL elapse
+  (testing "sweep-expired! flips :active entries past TTL to :expired (deterministic)"
+    (let [stale (entry {:agent/id "agent-A"
+                        :ttl-seconds 60
+                        :registered-at (past-inst (* 60 60))}) ; 1 hour ago, ttl 60s
+          fresh (entry {:agent/id "agent-B"
+                        :ttl-seconds reg/default-ttl-seconds
+                        :registered-at (java.util.Date.)})]
+      (write-state! [stale fresh])
       (let [r (reg/sweep-expired! *worktree*)]
         (is (dag/ok? r))
         (is (= 1 (-> r :data :expired-count))
-            "only the 1-second-TTL entry expires; the default-TTL one survives")
+            "only the stale entry expires; the fresh one survives")
         (let [statuses (->> (reg/entries-for-pr
                              (:data (reg/read-registry *worktree*))
                              (:pr/url base-params))
@@ -206,10 +248,11 @@
           (is (= #{:expired :active} statuses)))))))
 
 (deftest sweep-expired-is-idempotent
-  (testing "running sweep twice yields 0 the second time"
-    (let [_ (reg/register! *worktree* (assoc base-params :ttl-seconds 1))
-          _ (Thread/sleep 1100)
-          r1 (reg/sweep-expired! *worktree*)
+  (testing "running sweep twice yields 0 the second time (deterministic)"
+    (write-state! [(entry {:agent/id "agent-A"
+                           :ttl-seconds 60
+                           :registered-at (past-inst (* 60 60))})])
+    (let [r1 (reg/sweep-expired! *worktree*)
           r2 (reg/sweep-expired! *worktree*)]
       (is (= 1 (-> r1 :data :expired-count)))
       (is (= 0 (-> r2 :data :expired-count))))))
@@ -247,3 +290,96 @@
       (is (fs/exists? mf-dir) ".miniforge dir created")
       (is (fs/exists? (fs/path mf-dir "listener-registry.edn"))
           "registry artifact written"))))
+
+;; ── transition guards (terminal states are sticky) ───────────────────
+
+(deftest unregister-rejects-non-active-entries
+  (testing "unregister! returns :wrong-status on already-cancelled entries (no overwrite)"
+    (let [r1 (reg/register! *worktree* base-params)
+          lid (-> r1 :data :listener-id)
+          _   (reg/unregister! *worktree* (:pr/url base-params) lid) ; first call: ok
+          r2  (reg/unregister! *worktree* (:pr/url base-params) lid)] ; second: guard fires
+      (is (not (dag/ok? r2)))
+      (is (= :listener-registry/wrong-status (get-in r2 [:error :code])))
+      (is (= :cancelled (get-in r2 [:error :data :current-status])))
+      (is (= :active    (get-in r2 [:error :data :expected-status]))))))
+
+(deftest unregister-rejects-dispatched-entries
+  (testing "unregister! does NOT downgrade a :dispatched entry to :cancelled"
+    (let [r1 (reg/register! *worktree* base-params)
+          lid (-> r1 :data :listener-id)
+          _   (reg/mark-dispatched! *worktree* (:pr/url base-params) lid (random-uuid))
+          r2  (reg/unregister! *worktree* (:pr/url base-params) lid)]
+      (is (not (dag/ok? r2)))
+      (is (= :listener-registry/wrong-status (get-in r2 [:error :code])))
+      (let [entries (reg/entries-for-pr (:data (reg/read-registry *worktree*))
+                                        (:pr/url base-params))]
+        (is (= :dispatched (:status (first entries)))
+            "entry remains :dispatched, not silently overwritten")))))
+
+(deftest mark-dispatched-rejects-non-active-entries
+  (testing "mark-dispatched! refuses to dispatch a cancelled listener"
+    (let [r1 (reg/register! *worktree* base-params)
+          lid (-> r1 :data :listener-id)
+          _   (reg/unregister! *worktree* (:pr/url base-params) lid)
+          r2  (reg/mark-dispatched! *worktree* (:pr/url base-params) lid (random-uuid))]
+      (is (not (dag/ok? r2)))
+      (is (= :listener-registry/wrong-status (get-in r2 [:error :code])))
+      (is (= :cancelled (get-in r2 [:error :data :current-status]))))))
+
+(deftest mark-dispatched-is-not-idempotent-by-design
+  (testing "double-dispatch is rejected, not silently re-stamped"
+    (let [r1 (reg/register! *worktree* base-params)
+          lid (-> r1 :data :listener-id)
+          d1  (random-uuid)
+          d2  (random-uuid)
+          _   (reg/mark-dispatched! *worktree* (:pr/url base-params) lid d1)
+          r2  (reg/mark-dispatched! *worktree* (:pr/url base-params) lid d2)]
+      (is (not (dag/ok? r2)))
+      (let [entries (reg/entries-for-pr (:data (reg/read-registry *worktree*))
+                                        (:pr/url base-params))
+            entry (first entries)]
+        (is (= d1 (:resume/dispatch-id entry))
+            "first dispatch-id sticks; second call doesn't overwrite")))))
+
+;; ── read strictness (trailing forms + schema) ────────────────────────
+
+(deftest read-rejects-trailing-forms
+  (testing "valid registry followed by trailing data is rejected as :read-failed"
+    (let [path (str (fs/path *worktree* reg/default-storage-path))]
+      (fs/create-dirs (fs/parent path))
+      (spit path (str (pr-str reg/empty-registry) " {:trailing :junk}")))
+    (let [r (reg/read-registry *worktree*)]
+      (is (not (dag/ok? r)))
+      (is (= :listener-registry/read-failed (get-in r [:error :code]))))))
+
+(deftest read-rejects-schema-mismatch
+  (testing ":registry/listeners as a list (not a vector) fails malli validation on load"
+    (let [path (str (fs/path *worktree* reg/default-storage-path))
+          ;; bypass our normal write so we can craft a bad-but-shaped artifact
+          bad  {:registry/version reg/registry-version
+                :registry/last-updated (java.util.Date.)
+                :registry/listeners {"https://github.com/o/r/pull/1"
+                                     '({:listener/id (random-uuid)})}}]
+      (fs/create-dirs (fs/parent path))
+      (spit path (pr-str bad)))
+    (let [r (reg/read-registry *worktree*)]
+      (is (not (dag/ok? r)))
+      (is (= :listener-registry/read-failed (get-in r [:error :code])))
+      (is (some? (get-in r [:error :data :explain]))
+          "malli explain payload is included so callers can diagnose"))))
+
+;; ── tmp file cleanup on move failure ─────────────────────────────────
+
+(deftest write-cleans-up-tmp-on-move-failure
+  (testing "if fs/move throws, the .tmp file written by spit is best-effort-deleted"
+    (let [path (str (fs/path *worktree* reg/default-storage-path))
+          tmp-path (str path ".tmp")]
+      (with-redefs [babashka.fs/move (fn [& _]
+                                        (throw (java.lang.UnsupportedOperationException.
+                                                "atomic-move not supported on this fs (simulated)")))]
+        (let [r (reg/write-registry! *worktree* reg/empty-registry)]
+          (is (not (dag/ok? r)))
+          (is (= :listener-registry/write-failed (get-in r [:error :code])))
+          (is (not (fs/exists? tmp-path))
+              ".tmp file should be deleted on move failure to avoid accumulating stale artifacts"))))))

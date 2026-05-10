@@ -98,7 +98,7 @@ sweep-expired!           :active → :expired (TTL-driven, bulk)
   - Lookup by PR + by agent
   - Write-rename leaves no `.tmp` files
   - `.miniforge/` auto-created
-- [x] `bb pre-commit`: pending (will run on commit).
+- [x] `bb pre-commit`: ✅ ALL PRE-COMMIT CHECKS PASSED.
 
 ## What's NOT in this PR
 
