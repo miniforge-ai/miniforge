@@ -73,22 +73,35 @@
         (str/replace #"refs/remotes/origin/" ""))))
 
 (defn try-checkout-branch
-  "Try to checkout a branch, retrying with timestamp suffix if it already exists."
+  "Try to checkout a new branch off the current HEAD, retrying with a
+   timestamp suffix if the desired name already exists.
+
+   Branches off HEAD (not `origin/<base-branch>`) so the new branch
+   inherits whatever commits the task worktree already carries — e.g.
+   the per-phase boundary commits the workflow runtime makes after
+   plan/implement/verify/review. If we branched off `origin/<base>`
+   instead, those commits would be discarded and a downstream
+   `git add .` would find nothing to stage. `:base-branch` is still
+   tracked for the PR-creation step, which uses it as the merge base."
   [executor env-id branch-name base-branch]
   (let [checkout-r (exec! executor env-id
-                          (str "git checkout -b " branch-name " origin/" base-branch))]
+                          (str "git checkout -b " branch-name))]
     (if (result/succeeded? checkout-r)
       (result/shell-success {:branch branch-name :base-branch base-branch})
       (let [ts-name (str branch-name "-" (System/currentTimeMillis))
             retry-r (exec! executor env-id
-                           (str "git checkout -b " ts-name " origin/" base-branch))]
+                           (str "git checkout -b " ts-name))]
         (if (result/succeeded? retry-r)
           (result/shell-success {:branch ts-name :base-branch base-branch})
           (result/shell-failure (str "Failed to create branch: " (:error retry-r))
                                {:branch nil}))))))
 
 (defn create-branch!
-  "Create a new git branch inside the sandbox container.
+  "Create a new git branch inside the sandbox container, off the current
+   HEAD (so phase-boundary commits already on the task branch carry
+   forward). Fetches `origin/<default-branch>` first so the PR-creation
+   step has a fresh merge base to compare against.
+
    Returns {:success? bool :branch string :base-branch string :error string}"
   [executor env-id branch-name]
   (let [default-branch (detect-default-branch executor env-id)
@@ -96,6 +109,22 @@
     (if-not (result/succeeded? fetch-r)
       (result/shell-failure (str "Failed to fetch: " (:error fetch-r)) {:branch nil})
       (try-checkout-branch executor env-id branch-name default-branch))))
+
+(defn commits-ahead-of-base
+  "Count commits on HEAD that aren't on `origin/<base-branch>`. Returns
+   nil on git failure (caller treats nil as 'unknown', not zero). Used
+   by step-stage-dirty-files to recognise that a clean worktree may
+   still carry unreleased work in the form of boundary commits — when
+   the implementer's writes were committed at the implement-phase
+   boundary, the release branch inherits them and there is nothing
+   left to stage."
+  [executor env-id base-branch]
+  (let [r (exec! executor env-id
+                 (str "git rev-list --count origin/" base-branch "..HEAD"))]
+    (when (result/succeeded? r)
+      (try
+        (Long/parseLong (str/trim (:output r "0")))
+        (catch NumberFormatException _ nil)))))
 
 (defn write-file!
   "Write content to a file inside the sandbox container.
@@ -203,21 +232,32 @@
 ;------------------------------------------------------------------------------ Layer 1.5
 ;; Diff inspection (governed equivalents of git/diff-stats, git/count-test-defs)
 
+(defn- numstat-totals
+  "Parse `git diff <range> --numstat` output into {:additions :deletions :files}."
+  [output]
+  (let [lines (remove str/blank? (str/split-lines (str/trim (or output ""))))
+        parsed (keep (fn [line]
+                       (when-let [[_ adds dels] (re-matches #"(\d+)\t(\d+)\t.*" line)]
+                         {:additions (parse-long adds)
+                          :deletions (parse-long dels)}))
+                     lines)]
+    {:additions (reduce + 0 (map :additions parsed))
+     :deletions (reduce + 0 (map :deletions parsed))
+     :files (count parsed)}))
+
+(defn- count-deftest
+  "Count `(deftest …` lines added vs removed in a unified diff body."
+  [diff-text]
+  {:added   (count (re-seq #"(?m)^\+.*\(deftest " (or diff-text "")))
+   :removed (count (re-seq #"(?m)^-.*\(deftest " (or diff-text "")))})
+
 (defn diff-stats
   "Get staged diff stats via executor. Mirrors git/diff-stats.
    Returns {:additions N :deletions N :files N} or nil."
   [executor env-id]
   (let [r (exec! executor env-id "git diff --cached --numstat")]
     (when (result/succeeded? r)
-      (let [lines (remove str/blank? (str/split-lines (str/trim (:output r ""))))
-            parsed (keep (fn [line]
-                           (when-let [[_ adds dels] (re-matches #"(\d+)\t(\d+)\t.*" line)]
-                             {:additions (parse-long adds)
-                              :deletions (parse-long dels)}))
-                         lines)]
-        {:additions (reduce + 0 (map :additions parsed))
-         :deletions (reduce + 0 (map :deletions parsed))
-         :files (count parsed)}))))
+      (numstat-totals (:output r "")))))
 
 (defn count-test-defs
   "Count deftest forms in staged changes via executor. Mirrors git/count-test-defs.
@@ -225,10 +265,29 @@
   [executor env-id]
   (let [r (exec! executor env-id "git diff --cached -U0")]
     (when (result/succeeded? r)
-      (let [diff-text (:output r "")
-            added   (count (re-seq #"(?m)^\+.*\(deftest " diff-text))
-            removed (count (re-seq #"(?m)^-.*\(deftest " diff-text))]
-        {:added added :removed removed}))))
+      (count-deftest (:output r "")))))
+
+(defn diff-stats-range
+  "Get diff stats for `origin/<base>..HEAD` (the carry-forward range
+   used by the release branch when phase-boundary commits already
+   contain the work). Mirrors `diff-stats` but reads the merge-base
+   range rather than the staged index."
+  [executor env-id base-branch]
+  (let [r (exec! executor env-id
+                 (str "git diff origin/" base-branch "..HEAD --numstat"))]
+    (when (result/succeeded? r)
+      (numstat-totals (:output r "")))))
+
+(defn count-test-defs-range
+  "Count deftest forms added/removed in `origin/<base>..HEAD`. Mirrors
+   `count-test-defs` but reads the merge-base range so the destructive-
+   diff gate keeps inspecting the actual commits being released, not
+   just the staged index (which is empty in the boundary-commits case)."
+  [executor env-id base-branch]
+  (let [r (exec! executor env-id
+                 (str "git diff origin/" base-branch "..HEAD -U0"))]
+    (when (result/succeeded? r)
+      (count-deftest (:output r "")))))
 
 ;------------------------------------------------------------------------------ Layer 2
 ;; File batch operations (mirrors files.clj write-and-stage-files!)

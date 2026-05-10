@@ -124,6 +124,37 @@
       (is (not (:success? result)))
       (is (clojure.string/includes? (:error result) "fetch")))))
 
+(deftest create-branch-uses-head-not-origin-base-test
+  (testing "create-branch! checks out off HEAD so phase-boundary commits
+            already on the task branch carry forward into the release branch"
+    (let [[exec cmds] (create-mock-executor
+                       :responses {"git symbolic-ref" {:exit-code 0 :stdout "refs/remotes/origin/main\n" :stderr ""}
+                                   "git fetch" {:exit-code 0 :stdout "" :stderr ""}
+                                   "git checkout" {:exit-code 0 :stdout "" :stderr ""}})
+          result (sandbox/create-branch! exec "env-1" "release/x")]
+      (is (:success? result))
+      (is (= "main" (:base-branch result)))
+      (let [checkout (some #(when (clojure.string/includes? % "git checkout -b release/x") %) @cmds)]
+        (is (some? checkout)
+            "checkout command must be issued for the new branch")
+        (is (not (clojure.string/includes? checkout "origin/main"))
+            "checkout must not reset to origin/<base>; HEAD is the source of truth
+             so prior phase-boundary commits stay on the new branch")))))
+
+(deftest commits-ahead-of-base-parses-count-test
+  (testing "commits-ahead-of-base returns the parsed integer count"
+    (let [[exec _] (create-mock-executor
+                    :responses {"git rev-list" {:exit-code 0 :stdout "3\n" :stderr ""}})]
+      (is (= 3 (sandbox/commits-ahead-of-base exec "env-1" "main")))))
+  (testing "commits-ahead-of-base returns nil on git failure"
+    (let [[exec _] (create-mock-executor
+                    :responses {"git rev-list" {:exit-code 128 :stdout "" :stderr "fatal"}})]
+      (is (nil? (sandbox/commits-ahead-of-base exec "env-1" "main")))))
+  (testing "commits-ahead-of-base returns nil on unparseable output (treat as unknown, not zero)"
+    (let [[exec _] (create-mock-executor
+                    :responses {"git rev-list" {:exit-code 0 :stdout "" :stderr ""}})]
+      (is (nil? (sandbox/commits-ahead-of-base exec "env-1" "main"))))))
+
 ;; ============================================================================
 ;; write-file! tests
 ;; ============================================================================
