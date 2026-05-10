@@ -22,11 +22,17 @@
   "Tests for iteration helpers extracted from runner.clj.
    Includes slingshot try+/throw+ bb-compatibility tests."
   (:require
-   [clojure.test :refer [deftest testing is]]
+   [clojure.test :refer [deftest testing is use-fixtures]]
    [ai.miniforge.workflow.context :as ctx]
    [ai.miniforge.workflow.monitoring :as monitoring]
+   [ai.miniforge.workflow.phase-test-support :as phase-test-support]
    [ai.miniforge.workflow.runner :as runner]
    [slingshot.slingshot :refer [try+ throw+]]))
+
+(use-fixtures :each phase-test-support/with-workflow-phase-test-support)
+
+(def ^:private runner-test-done
+  phase-test-support/runner-test-done)
 
 ;; Access private fns
 (def ^:private rate-limited? #'runner/rate-limited?)
@@ -154,7 +160,7 @@
   (testing "supervision halt transitions the workflow to failed"
     (let [workflow {:workflow/id :test
                     :workflow/version "1.0.0"
-                    :workflow/pipeline [{:phase :done}]}
+                    :workflow/pipeline [{:phase runner-test-done}]}
           context (ctx/create-context workflow {:task "Test"} {})
           result (with-redefs [#_{:clj-kondo/ignore [:unresolved-var]}
                                monitoring/check-workflow-supervision

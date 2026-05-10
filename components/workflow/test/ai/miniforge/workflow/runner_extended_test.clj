@@ -21,8 +21,6 @@
    and edge cases not covered by the main runner_test."
   (:require
    [clojure.test :refer [deftest testing is use-fixtures]]
-   [ai.miniforge.phase.interface :as phase]
-   [ai.miniforge.phase.loader :as loader]
    [ai.miniforge.dag-executor.interface :as dag-exec]
    [ai.miniforge.event-stream.interface :as es]
    [ai.miniforge.logging.interface :as log]
@@ -32,15 +30,7 @@
    [ai.miniforge.workflow.messages :as messages]
    [ai.miniforge.workflow.phase-test-support :as phase-test-support]))
 
-(def phase-test-config-resource
-  "config/phase/test-support-namespaces.edn")
-
-(use-fixtures :each
-  (fn [f]
-    (phase/reset-phase-loader!)
-    (binding [loader/phase-loader-config-resource phase-test-config-resource]
-      (f))
-    (phase/reset-phase-loader!)))
+(use-fixtures :each phase-test-support/with-workflow-phase-test-support)
 
 (def ^:private runner-test-plan
   phase-test-support/runner-test-plan)
@@ -72,8 +62,8 @@
 (deftest extract-output-failed-status-test
   (testing "extract-output preserves failed status"
     (let [ctx {:execution/artifacts []
-               :execution/phase-results {:plan {:phase/status :failed}}
-               :execution/current-phase :plan
+               :execution/phase-results {runner-test-plan {:phase/status :failed}}
+               :execution/current-phase runner-test-plan
                :execution/status :failed}
           output (:execution/output (runner/extract-output ctx))]
       (is (= :failed (:status output)))
@@ -86,7 +76,7 @@
                                                        {:phase runner-test-done}]}
                :execution/artifacts []
                :execution/phase-results {runner-test-done {:phase/status :succeeded}
-                                         :plan {:phase/status :succeeded}}
+                                         runner-test-plan {:phase/status :succeeded}}
                :execution/current-phase nil
                :execution/status :completed}
           output (:execution/output (runner/extract-output ctx))]
