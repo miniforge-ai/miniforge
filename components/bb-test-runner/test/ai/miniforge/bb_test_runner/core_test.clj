@@ -152,6 +152,75 @@
               "components/foo/test"]
              (:paths merged))))))
 
+(deftest test-stable-tag-globs-covers-supported-history
+  (testing "stable tag globs cover both historical naming schemes"
+    (is (= ["stable-*" "stable/*"]
+           (sut/stable-tag-globs)))))
+
+(deftest test-stable-tags-present-when-tag-seq-non-empty
+  (testing "any stable tag list enables since-stable scope"
+    (is (true? (sut/stable-tags-present? ["stable-20260506"])))
+    (is (true? (sut/stable-tags-present? ["stable/main-2026-02-27"])))))
+
+(deftest test-stable-tags-absent-when-tag-seq-empty
+  (testing "empty stable-tag list forces full-suite fallback"
+    (is (false? (sut/stable-tags-present? [])))))
+
+(deftest test-stable-tags-absent-when-input-has-no-recognized-stable-tags
+  (testing "non-stable and blank tag entries do not enable since-stable scope"
+    (is (false? (sut/stable-tags-present? ["release-2026-05-10" "feature/foo"])))
+    (is (false? (sut/stable-tags-present? ["" "   " nil])))))
+
+(deftest test-parse-project-selector-supports-poly-and-env-shapes
+  (testing "project selectors accept poly syntax and env-friendly delimiters"
+    (is (= ["miniforge" "miniforge-core"]
+           (sut/parse-project-selector "project:miniforge:miniforge-core")))
+    (is (= ["miniforge" "miniforge-core"]
+           (sut/parse-project-selector "miniforge:miniforge-core")))
+    (is (= ["miniforge" "miniforge-core"]
+           (sut/parse-project-selector "miniforge,miniforge-core")))))
+
+(deftest test-format-project-selector-renders-poly-project-arg
+  (testing "project vectors render as a Polylith project selector"
+    (is (= "project:miniforge:miniforge-core"
+           (sut/format-project-selector ["miniforge" "miniforge-core"])))))
+
+(deftest test-changed-projects-command-matches-polylith-ws-query
+  (testing "stable-derived diagnostics query the native changed project set"
+    (is (= ["clojure" "-M:poly" "ws" "get:changes:changed-or-affected-projects"
+            "skip:dev" "color-mode:none"]
+           (sut/changed-projects-command)))))
+
+(deftest test-parse-project-list-output-reads-edn-vectors
+  (testing "Polylith ws output parses into project names"
+    (is (= ["miniforge" "miniforge-core"]
+           (sut/parse-project-list-output "[\"miniforge\" \"miniforge-core\"]")))))
+
+(deftest test-sanitize-git-worktree-env-strips-worktree-vars
+  (testing "git worktree vars do not leak into child test processes"
+    (is (= {"PATH" "/usr/bin" "FOO" "bar"}
+           (sut/sanitize-git-worktree-env
+            {"PATH" "/usr/bin"
+             "FOO" "bar"
+             "GIT_INDEX_FILE" "/tmp/index"
+             "GIT_DIR" "/tmp/git"
+             "GIT_WORK_TREE" "/tmp/worktree"
+             "GIT_COMMON_DIR" "/tmp/common"})))))
+
+(deftest test-heartbeat-seconds-defaults-on-missing-env
+  (testing "missing env key falls back to the default heartbeat"
+    (is (= 30 (sut/heartbeat-seconds {})))))
+
+(deftest test-heartbeat-seconds-accepts-positive-env-value
+  (testing "positive configured heartbeat is honored"
+    (is (= 45 (sut/heartbeat-seconds {"MINIFORGE_TEST_HEARTBEAT_SECONDS" "45"})))))
+
+(deftest test-heartbeat-seconds-rejects-invalid-env-value
+  (testing "invalid heartbeat values fall back to the default"
+    (is (= 30 (sut/heartbeat-seconds {"MINIFORGE_TEST_HEARTBEAT_SECONDS" "abc"})))
+    (is (= 30 (sut/heartbeat-seconds {"MINIFORGE_TEST_HEARTBEAT_SECONDS" "0"})))
+    (is (= 30 (sut/heartbeat-seconds {"MINIFORGE_TEST_HEARTBEAT_SECONDS" "-5"})))))
+
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
   (clojure.test/run-tests 'ai.miniforge.bb-test-runner.core-test)

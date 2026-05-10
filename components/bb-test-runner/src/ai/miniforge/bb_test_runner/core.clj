@@ -41,6 +41,22 @@
 (def ^:private default-coverage-output
   "target/coverage")
 
+(def ^:private stable-tag-glob-patterns
+  "Supported stable-tag glob patterns.
+   The repo has historical `stable-*` tags and a few older `stable/*`
+   variants, so the wrapper treats both as stable baselines."
+  ["stable-*" "stable/*"])
+
+(def ^:private default-heartbeat-seconds
+  30)
+
+(def ^:private git-worktree-env-keys
+  ["GIT_INDEX_FILE" "GIT_DIR" "GIT_WORK_TREE" "GIT_COMMON_DIR"])
+
+(def ^:private changed-or-affected-projects-argv
+  ["clojure" "-M:poly" "ws" "get:changes:changed-or-affected-projects"
+   "skip:dev" "color-mode:none"])
+
 (defn- path-segments
   [path]
   (str/split path #"/"))
@@ -126,6 +142,99 @@
      :deps (assoc deps
                   'cloverage/cloverage
                   {:mvn/version cloverage-version})}))
+
+(defn stable-tag-globs
+  "Return the stable-tag glob patterns recognized by Miniforge's
+   stable-derived test scope."
+  []
+  stable-tag-glob-patterns)
+
+(defn stable-tags-present?
+  "True when `tags` contains at least one recognized stable tag."
+  [tags]
+  (boolean
+   (some (fn [tag]
+           (let [normalized (some-> tag str str/trim not-empty)]
+             (and normalized
+                  (or (str/starts-with? normalized "stable-")
+                      (str/starts-with? normalized "stable/")))))
+         tags)))
+
+(defn parse-project-selector
+  "Parse a Polylith project selector or env value into a vector of
+   project names.
+
+   Accepted forms:
+   - `project:proj1:proj2`
+   - `proj1:proj2`
+   - `proj1,proj2`"
+  [selector]
+  (let [raw (some-> selector str/trim not-empty)
+        value (cond
+                (nil? raw) nil
+                (str/starts-with? raw "project:")
+                (subs raw (count "project:"))
+                :else raw)]
+    (->> (some-> value (str/split #"[,:]"))
+         (map str/trim)
+         (remove str/blank?)
+         vec)))
+
+(defn format-project-selector
+  "Render an explicit Polylith project selector argument from project
+   names."
+  [projects]
+  (when (seq projects)
+    (str "project:" (str/join ":" projects))))
+
+(defn changed-projects-command
+  "Return the argv that queries Polylith for the current changed-or-
+   affected project set."
+  []
+  changed-or-affected-projects-argv)
+
+(defn parse-project-list-output
+  "Parse a Polylith `ws get:changes:changed-or-affected-projects`
+   response into a vector of project names."
+  [output]
+  (let [trimmed (some-> output str/trim not-empty)]
+    (if-not trimmed
+      []
+      (let [parsed (edn/read-string trimmed)]
+        (cond
+          (sequential? parsed) (mapv str parsed)
+          (set? parsed) (->> parsed (map str) sort vec)
+          :else (throw (ex-info "Expected a sequential or set project list."
+                                {:output output
+                                 :parsed parsed})))))))
+
+(defn sanitize-git-worktree-env
+  "Remove git worktree/index variables that must not leak into child
+   processes.
+
+   `git commit` and related flows can export worktree-specific git vars.
+   If those leak into nested `git` calls inside tests, temp repos and
+   temp worktrees stop behaving like standalone repos. The stable-derived
+   wrapper must strip them before spawning `poly test`."
+  [env]
+  (apply dissoc env git-worktree-env-keys))
+
+(defn heartbeat-seconds
+  "Return the heartbeat interval, defaulting to 30 seconds.
+   Invalid, missing, or non-positive values fall back to the default."
+  [env]
+  (let [raw (some-> (get env "MINIFORGE_TEST_HEARTBEAT_SECONDS")
+                    str/trim
+                    not-empty)]
+    (if-not raw
+      default-heartbeat-seconds
+      (let [parsed (try
+                     (Long/parseLong raw)
+                     (catch NumberFormatException _
+                       nil))]
+        (if (pos-int? parsed)
+          parsed
+          default-heartbeat-seconds)))))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Coverage command derivation (pure)
