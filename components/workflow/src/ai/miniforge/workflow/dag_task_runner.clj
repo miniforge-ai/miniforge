@@ -56,15 +56,24 @@
 (defn- create-generate-fn [impl-agent context]
   (fn [t _ctx]
     (let [result (agent/invoke impl-agent t context)]
+      ;; Forward the full metrics triple from the agent's response so
+      ;; the inner loop can roll cost + tokens up into :loop/metrics.
+      ;; Previously only :tokens was carried, leaving :cost-usd dropped
+      ;; on every DAG task and surfacing as $0.0000 in the runner
+      ;; banner despite real backend costs.
       {:artifact (:artifact result)
-       :tokens (or (get-in result [:metrics :tokens]) 0)})))
+       :tokens   (or (get-in result [:metrics :tokens]) 0)
+       :cost-usd (or (get-in result [:metrics :cost-usd]) 0.0)})))
 
 (defn- create-repair-fn [impl-agent context]
   (fn [old-artifact errors _ctx]
     (let [result (agent/repair impl-agent old-artifact errors context)]
-      {:success? (:success result)
-       :artifact (:repaired result old-artifact)
-       :tokens-used (or (get-in result [:metrics :tokens]) 0)})))
+      ;; Same metrics-forwarding fix — repair iterations were also
+      ;; dropping :cost-usd on every call.
+      {:success?    (:success result)
+       :artifact    (:repaired result old-artifact)
+       :tokens-used (or (get-in result [:metrics :tokens]) 0)
+       :cost-usd    (or (get-in result [:metrics :cost-usd]) 0.0)})))
 
 (defn- run-mini-workflow [task-def context]
   (let [impl-agent (agent/create-implementer {:llm-backend (:llm-backend context)})

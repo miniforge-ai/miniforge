@@ -284,7 +284,14 @@
                                :duration-ms duration}}))
           (-> loop-state
               (set-artifact artifact)
+              ;; :cost-usd carries through the same way :tokens does
+              ;; — generate-fn is expected to return it at top level
+              ;; (default 0.0 when absent) so add-metric-values'
+              ;; merge-with + can sum across iterations. Without this
+              ;; the :loop/metrics map keeps :cost-usd at its initial
+              ;; 0.0 and the workflow runner banner reports $0.0000.
               (update-metrics {:tokens (:tokens result 0)
+                               :cost-usd (:cost-usd result 0.0)
                                :duration-ms duration
                                :generate-calls 1})
               (transition :validating)))
@@ -384,7 +391,12 @@
                      result)
             loop-state (-> loop-state
                            (add-repair-attempt attempt)
+                           ;; Same :cost-usd forwarding as the
+                           ;; generate-step. Repair calls were
+                           ;; previously dropping cost on every
+                           ;; iteration.
                            (update-metrics {:tokens (:tokens-used result 0)
+                                            :cost-usd (:cost-usd result 0.0)
                                             :repair-calls 1}))]
         (cond
           ;; Repair succeeded
