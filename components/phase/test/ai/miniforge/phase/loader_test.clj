@@ -25,30 +25,26 @@
 (def loader-support-namespace
   'ai.miniforge.phase.loader-support)
 
-(def loader-support-phase
-  :loader-test-phase)
-
 (def loader-test-config-resource
   "config/phase/test-support-namespaces.edn")
 
 (use-fixtures :each
   (fn [f]
     (phase/reset-phase-loader!)
-    (f)
+    (binding [loader/phase-loader-config-resource loader-test-config-resource]
+      (f))
     (phase/reset-phase-loader!)))
 
 (deftest configured-phase-namespaces-test
   (testing "phase implementation namespaces are discovered from composed resources"
-    (binding [loader/phase-loader-config-resource loader-test-config-resource]
-      (let [phase-namespaces (loader/configured-phase-namespaces)]
-        (is (some #{loader-support-namespace} phase-namespaces))
-        (is (every? symbol? phase-namespaces))
-        (is (= (count phase-namespaces)
-               (count (distinct phase-namespaces))))))))
+    (let [phase-namespaces (loader/configured-phase-namespaces)]
+      (is (some #{loader-support-namespace} phase-namespaces))
+      (is (every? symbol? phase-namespaces))
+      (is (= (count phase-namespaces)
+             (count (distinct phase-namespaces)))))))
 
 (deftest ensure-phase-implementations-loaded-test
   (testing "loading configured phase implementations registers their phase defaults"
-    (binding [loader/phase-loader-config-resource loader-test-config-resource]
-      (phase/ensure-phase-implementations-loaded!)
-      (let [phases (phase/list-phases)]
-        (is (contains? phases loader-support-phase))))))
+    (phase/ensure-phase-implementations-loaded!)
+    (let [phases (phase/list-phases)]
+      (is (contains? phases :loader-test-phase)))))
