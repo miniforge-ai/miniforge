@@ -20,15 +20,29 @@
   "Extended tests for workflow runner: output extraction, event publishing,
    and edge cases not covered by the main runner_test."
   (:require
-   [clojure.test :refer [deftest testing is]]
-   [ai.miniforge.workflow.runner :as runner]
-   [ai.miniforge.workflow.context :as ctx]
+   [clojure.test :refer [deftest testing is use-fixtures]]
    [ai.miniforge.dag-executor.interface :as dag-exec]
    [ai.miniforge.event-stream.interface :as es]
    [ai.miniforge.logging.interface :as log]
-   [ai.miniforge.workflow.messages :as messages]
+   [ai.miniforge.workflow.runner :as runner]
+   [ai.miniforge.workflow.context :as ctx]
    [ai.miniforge.workflow.execution :as exec]
-   [ai.miniforge.phase.interface]))
+   [ai.miniforge.workflow.messages :as messages]
+   [ai.miniforge.workflow.phase-test-support :as phase-test-support]))
+
+(use-fixtures :each phase-test-support/with-workflow-phase-test-support)
+
+(def ^:private runner-test-plan
+  phase-test-support/runner-test-plan)
+
+(def ^:private runner-test-implement
+  phase-test-support/runner-test-implement)
+
+(def ^:private runner-test-verify
+  phase-test-support/runner-test-verify)
+
+(def ^:private runner-test-done
+  phase-test-support/runner-test-done)
 
 ;; ---------------------------------------------------------------------------- extract-output
 
@@ -48,8 +62,8 @@
 (deftest extract-output-failed-status-test
   (testing "extract-output preserves failed status"
     (let [ctx {:execution/artifacts []
-               :execution/phase-results {:plan {:phase/status :failed}}
-               :execution/current-phase :plan
+               :execution/phase-results {runner-test-plan {:phase/status :failed}}
+               :execution/current-phase runner-test-plan
                :execution/status :failed}
           output (:execution/output (runner/extract-output ctx))]
       (is (= :failed (:status output)))
@@ -57,24 +71,25 @@
 
 (deftest extract-output-falls-back-to-pipeline-phase-order-test
   (testing "extract-output chooses the last recorded phase using workflow pipeline order"
-    (let [ctx {:execution/workflow {:workflow/pipeline [{:phase :plan}
-                                                       {:phase :implement}
-                                                       {:phase :done}]}
+    (let [ctx {:execution/workflow {:workflow/pipeline [{:phase runner-test-plan}
+                                                       {:phase runner-test-implement}
+                                                       {:phase runner-test-done}]}
                :execution/artifacts []
-               :execution/phase-results {:done {:phase/status :succeeded}
-                                         :plan {:phase/status :succeeded}}
+               :execution/phase-results {runner-test-done {:phase/status :succeeded}
+                                         runner-test-plan {:phase/status :succeeded}}
                :execution/current-phase nil
                :execution/status :completed}
           output (:execution/output (runner/extract-output ctx))]
       (is (= {:phase/status :succeeded} (:last-phase-result output)))
       (is (= {:phase/status :succeeded}
-             (get-in output [:phase-results :done]))))))
+             (get-in output [:phase-results runner-test-done]))))))
 
 ;; ---------------------------------------------------------------------------- build-pipeline edge cases
 
 (deftest build-pipeline-nil-pipeline-falls-back-to-legacy-test
   (testing "nil pipeline with phases falls back to legacy format"
-    (let [wf {:workflow/phases [{:phase/id :plan} {:phase/id :done}]}
+    (let [wf {:workflow/phases [{:phase/id runner-test-plan}
+                                {:phase/id runner-test-done}]}
           pipeline (runner/build-pipeline wf)]
       (is (= 2 (count pipeline))))))
 
@@ -89,7 +104,7 @@
   (testing "run-pipeline works with 2-arity (no opts)"
     (let [wf {:workflow/id :test
               :workflow/version "1.0.0"
-              :workflow/pipeline [{:phase :done}]}
+              :workflow/pipeline [{:phase runner-test-done}]}
           result (runner/run-pipeline wf {:task "Test"})]
       (is (= :completed (:execution/status result))))))
 
@@ -97,7 +112,7 @@
   (testing "skip-lifecycle-events suppresses event publishing"
     (let [wf {:workflow/id :test
               :workflow/version "1.0.0"
-              :workflow/pipeline [{:phase :done}]}
+              :workflow/pipeline [{:phase runner-test-done}]}
           result (runner/run-pipeline wf {:task "Test"}
                    {:skip-lifecycle-events true})]
       (is (= :completed (:execution/status result))))))
@@ -106,7 +121,7 @@
   (testing "run-pipeline accepts custom control-state atom"
     (let [wf {:workflow/id :test
               :workflow/version "1.0.0"
-              :workflow/pipeline [{:phase :done}]}
+              :workflow/pipeline [{:phase runner-test-done}]}
           cs (atom {:paused false :stopped false :adjustments {}})
           result (runner/run-pipeline wf {:task "Test"}
                    {:control-state cs})]
@@ -118,7 +133,7 @@
     ;; This tests that the check is in place even if not triggered.
     (let [wf {:workflow/id :test
               :workflow/version "1.0.0"
-              :workflow/pipeline [{:phase :done}]}
+              :workflow/pipeline [{:phase runner-test-done}]}
           result (runner/run-pipeline wf {:task "Test"} {})]
       ;; :done produces a phase result, so it should be :completed (not :completed-with-warnings)
       (is (contains? #{:completed :completed-with-warnings} (:execution/status result))))))
@@ -127,7 +142,7 @@
   (testing "max-phases 1 allows single :done phase to complete"
     (let [wf {:workflow/id :test
               :workflow/version "1.0.0"
-              :workflow/pipeline [{:phase :done}]}
+              :workflow/pipeline [{:phase runner-test-done}]}
           result (runner/run-pipeline wf {:task "Test"} {:max-phases 1})]
       (is (= :completed (:execution/status result))))))
 
@@ -135,29 +150,30 @@
   (testing "DAG fast-path advances with normal success events"
     (let [workflow {:workflow/id :test
                     :workflow/version "1.0.0"
-                    :workflow/pipeline [{:phase :plan}
-                                        {:phase :implement}
-                                        {:phase :verify}
-                                        {:phase :done}]}
+                    :workflow/pipeline [{:phase runner-test-plan}
+                                        {:phase runner-test-implement}
+                                        {:phase runner-test-verify}
+                                        {:phase runner-test-done}]}
           pipeline (runner/build-pipeline workflow)
           context (ctx/create-context workflow {:task "Test"} {})
           dag-result {:artifacts []
                       :worktree-paths []
                       :metrics {:tokens 0 :cost-usd 0.0}}
-          result (exec/apply-dag-success context
+          result #_{:clj-kondo/ignore [:invalid-arity]}
+                 (exec/apply-dag-success context
                                          dag-result
                                          pipeline
                                          ctx/transition-to-completed
                                          ctx/transition-to-failed)]
       (is (= :running (:execution/status result)))
-      (is (= :verify (:execution/current-phase result)))
+      (is (= runner-test-verify (:execution/current-phase result)))
       (is (= 0 (:execution/redirect-count result))))))
 
 (deftest execute-phase-step-uses-machine-state-over-phase-index-test
   (testing "standard execution selects the active phase from the machine snapshot"
     (let [workflow {:workflow/id :test
                     :workflow/version "1.0.0"
-                    :workflow/pipeline [{:phase :done}]}
+                    :workflow/pipeline [{:phase runner-test-done}]}
           pipeline (runner/build-pipeline workflow)
           context (-> (ctx/create-context workflow {:task "Test"} {})
                       (assoc :execution/phase-index 99))
@@ -168,7 +184,7 @@
                                           ctx/transition-to-completed
                                           ctx/transition-to-failed)]
       (is (= :completed (:execution/status result)))
-      (is (contains? (:execution/phase-results result) :done)))))
+      (is (contains? (:execution/phase-results result) runner-test-done)))))
 
 ;; ---------------------------------------------------------------------------- publish-event edge cases
 
@@ -233,7 +249,7 @@
   (testing ":local mode is the default and sets :execution/mode on context"
     (let [wf {:workflow/id :test
               :workflow/version "1.0.0"
-              :workflow/pipeline [{:phase :done}]}
+              :workflow/pipeline [{:phase runner-test-done}]}
           result (runner/run-pipeline wf {:task "Test"})]
       (is (= :local (:execution/mode result))))))
 
@@ -241,7 +257,7 @@
   (testing "explicit :local mode uses worktree"
     (let [wf {:workflow/id :test
               :workflow/version "1.0.0"
-              :workflow/pipeline [{:phase :done}]}
+              :workflow/pipeline [{:phase runner-test-done}]}
           result (runner/run-pipeline wf {:task "Test"} {:execution-mode :local})]
       (is (= :completed (:execution/status result)))
       (is (= :local (:execution/mode result))))))
@@ -254,7 +270,7 @@
     ;; (N11 §7 no-silent-downgrade) — tested separately via mock.
     (let [wf {:workflow/id :test
               :workflow/version "1.0.0"
-              :workflow/pipeline [{:phase :done}]}]
+              :workflow/pipeline [{:phase runner-test-done}]}]
       (try
         (let [result (runner/run-pipeline wf {:task "Test"} {:execution-mode :governed})]
           ;; Docker was available — mode should be :governed on context
@@ -267,7 +283,7 @@
   (testing ":governed mode provides a host-accessible worktree-path (not /workspace)"
     (let [wf {:workflow/id :test
               :workflow/version "1.0.0"
-              :workflow/pipeline [{:phase :done}]}]
+              :workflow/pipeline [{:phase runner-test-done}]}]
       (try
         (let [result (runner/run-pipeline wf {:task "Test"} {:execution-mode :governed})]
           ;; worktree-path should be a host path, not the container-internal /workspace
@@ -289,7 +305,7 @@
     ;; rejects them and throws rather than silently falling back.
     (let [wf {:workflow/id :test
               :workflow/version "1.0.0"
-              :workflow/pipeline [{:phase :done}]}]
+              :workflow/pipeline [{:phase runner-test-done}]}]
       (with-redefs [dag-exec/executor-type (constantly :worktree)]
         (is (thrown-with-msg?
              Exception #"(?i)No capsule executor available"
@@ -398,6 +414,7 @@
                   (fn [_exec _env-id _opts] ok-result)
                   log/info
                   (fn [& _] nil)
+                  #_{:clj-kondo/ignore [:unresolved-var]}
                   es/workspace-persisted
                   (fn [_stream _wf-id data]
                     (reset! event-data data)
