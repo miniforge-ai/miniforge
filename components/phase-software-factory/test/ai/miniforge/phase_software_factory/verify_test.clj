@@ -23,11 +23,24 @@
    no tester agent. Tests here cover: environment-based test execution,
    fail-fast on missing environment-id, and pass/fail result shapes."
   (:require
-   [clojure.test :refer [deftest testing is]]
+   [clojure.test :refer [deftest testing is use-fixtures]]
    [ai.miniforge.phase-software-factory.verify :as verify]
-   [ai.miniforge.phase.interface :as phase]))
+   [ai.miniforge.phase.interface :as phase]
+   [ai.miniforge.phase.loader :as loader]))
 
 ;------------------------------------------------------------------------------ Test fixtures
+
+(def phase-test-config-resource
+  "config/phase/test-support-namespaces.edn")
+
+(use-fixtures :each
+  (fn [f]
+    (phase/reset-phase-loader!)
+    (try
+      (binding [loader/phase-loader-config-resource phase-test-config-resource]
+        (f))
+      (finally
+        (phase/reset-phase-loader!)))))
 
 (defn create-base-context
   "Create base context with executor environment for testing."

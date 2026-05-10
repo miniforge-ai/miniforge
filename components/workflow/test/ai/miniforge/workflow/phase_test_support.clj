@@ -22,7 +22,7 @@
    [ai.miniforge.phase.loader :as loader]))
 
 (def phase-test-config-resource
-  "config/phase/test-support-namespaces.edn")
+  "config/phase/workflow-test-support-namespaces.edn")
 
 (def runner-test-plan
   :runner-test-plan)

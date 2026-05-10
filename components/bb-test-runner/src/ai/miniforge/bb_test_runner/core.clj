@@ -41,6 +41,25 @@
 (def ^:private default-coverage-output
   "target/coverage")
 
+(def ^:private stable-tag-glob-patterns
+  "Supported stable-tag glob patterns.
+   The repo has historical `stable-*` tags and a few older `stable/*`
+   variants, so the wrapper treats both as stable baselines."
+  ["stable-*" "stable/*"])
+
+(def ^:private default-heartbeat-seconds
+  30)
+
+(def ^:private default-expand-start-size
+  1)
+
+(def ^:private git-worktree-env-keys
+  ["GIT_INDEX_FILE" "GIT_DIR" "GIT_WORK_TREE" "GIT_COMMON_DIR"])
+
+(def ^:private changed-or-affected-projects-argv
+  ["clojure" "-M:poly" "ws" "get:changes:changed-or-affected-projects"
+   "skip:dev" "color-mode:none"])
+
 (defn- path-segments
   [path]
   (str/split path #"/"))
@@ -126,6 +145,262 @@
      :deps (assoc deps
                   'cloverage/cloverage
                   {:mvn/version cloverage-version})}))
+
+(defn stable-tag-globs
+  "Return the stable-tag glob patterns recognized by Miniforge's
+   stable-derived test scope."
+  []
+  stable-tag-glob-patterns)
+
+(defn stable-tags-present?
+  "True when `tags` contains at least one recognized stable tag."
+  [tags]
+  (boolean
+   (some (fn [tag]
+           (let [normalized (some-> tag str str/trim not-empty)]
+             (and normalized
+                  (or (str/starts-with? normalized "stable-")
+                      (str/starts-with? normalized "stable/")))))
+         tags)))
+
+(defn parse-project-selector
+  "Parse a Polylith project selector or env value into a vector of
+   project names.
+
+   Accepted forms:
+   - `project:proj1:proj2`
+   - `proj1:proj2`
+   - `proj1,proj2`"
+  [selector]
+  (let [raw (some-> selector str/trim not-empty)
+        value (cond
+                (nil? raw) nil
+                (str/starts-with? raw "project:")
+                (subs raw (count "project:"))
+                :else raw)]
+    (->> (some-> value (str/split #"[,:]"))
+         (map str/trim)
+         (remove str/blank?)
+         vec)))
+
+(defn format-project-selector
+  "Render an explicit Polylith project selector argument from project
+   names."
+  [projects]
+  (when (seq projects)
+    (str "project:" (str/join ":" projects))))
+
+(defn changed-projects-command
+  "Return the argv that queries Polylith for the current changed-or-
+   affected project set."
+  []
+  changed-or-affected-projects-argv)
+
+(defn changed-projects-since-stable-command
+  "Return the argv that queries Polylith for changed-or-affected
+   projects since the current stable tag anchor."
+  []
+  (let [argv (vec (changed-projects-command))
+        marker "get:changes:changed-or-affected-projects"
+        marker-index (.indexOf argv marker)]
+    (if (neg? marker-index)
+      (throw (ex-info "Changed-projects command is missing the Polylith change marker."
+                      {:argv argv
+                       :marker marker}))
+      (let [insert-index (inc marker-index)]
+        (vec (concat (subvec argv 0 insert-index)
+                     ["since:stable"]
+                     (subvec argv insert-index)))))))
+
+(defn parse-project-list-output
+  "Parse a Polylith `ws get:changes:changed-or-affected-projects`
+   response into a vector of project names."
+  [output]
+  (let [trimmed (some-> output str/trim not-empty)]
+    (if-not trimmed
+      []
+      (let [parsed (edn/read-string trimmed)]
+        (cond
+          (sequential? parsed) (mapv str parsed)
+          (set? parsed) (->> parsed (map str) sort vec)
+          :else (throw (ex-info "Expected a sequential or set project list."
+                                {:output output
+                                 :parsed parsed})))))))
+
+(defn sanitize-git-worktree-env
+  "Remove git worktree/index variables that must not leak into child
+   processes.
+
+   `git commit` and related flows can export worktree-specific git vars.
+   If those leak into nested `git` calls inside tests, temp repos and
+   temp worktrees stop behaving like standalone repos. The stable-derived
+   wrapper must strip them before spawning `poly test`."
+  [env]
+  (apply dissoc env git-worktree-env-keys))
+
+(defn heartbeat-seconds
+  "Return the heartbeat interval, defaulting to 30 seconds.
+   Invalid, missing, or non-positive values fall back to the default."
+  [env]
+  (let [raw (some-> (get env "MINIFORGE_TEST_HEARTBEAT_SECONDS")
+                    str/trim
+                    not-empty)]
+    (if-not raw
+      default-heartbeat-seconds
+      (let [parsed (try
+                     (Long/parseLong raw)
+                     (catch NumberFormatException _
+                       nil))]
+        (if (pos-int? parsed)
+          parsed
+          default-heartbeat-seconds)))))
+
+(defn- parse-long-arg
+  [arg prefix]
+  (let [raw (subs arg (count prefix))]
+    (try
+      (Long/parseLong raw)
+      (catch NumberFormatException ex
+        (throw (ex-info "Invalid stable-derived diagnostic argument."
+                        {:arg arg
+                         :prefix prefix
+                         :expected-format (str prefix "N")}
+                        ex))))))
+
+(defn parse-diagnostic-args
+  "Parse supported stable-derived diagnostic CLI arguments.
+
+   Supported forms:
+   - `mode:subset|expand|bisect`
+   - `project:proj1:proj2`
+   - `start-size:N`
+   - `direction:front|back`
+   - `order:declared|random`
+   - `seed:N`"
+  [args]
+  (reduce
+   (fn [acc arg]
+     (cond
+       (str/starts-with? arg "mode:")
+       (assoc acc :mode (keyword (subs arg (count "mode:"))))
+
+       (str/starts-with? arg "project:")
+       (assoc acc :projects (parse-project-selector arg))
+
+       (str/starts-with? arg "start-size:")
+       (assoc acc :start-size (parse-long-arg arg "start-size:"))
+
+       (str/starts-with? arg "direction:")
+       (assoc acc :direction (keyword (subs arg (count "direction:"))))
+
+       (str/starts-with? arg "order:")
+       (assoc acc :order (keyword (subs arg (count "order:"))))
+
+       (str/starts-with? arg "seed:")
+       (assoc acc :seed (parse-long-arg arg "seed:"))
+
+       :else acc))
+   {}
+   args))
+
+(defn- shuffle-projects
+  [projects seed]
+  (let [alist (java.util.ArrayList. ^java.util.Collection projects)]
+    (java.util.Collections/shuffle alist (java.util.Random. (long (or seed 0))))
+    (vec alist)))
+
+(defn order-projects
+  "Apply diagnostic ordering controls to a project vector."
+  [projects {:keys [direction order seed]}]
+  (let [ordered (case order
+                  :random (shuffle-projects projects seed)
+                  (vec projects))]
+    (case direction
+      :back (vec (reverse ordered))
+      ordered)))
+
+(defn- positive-start-size
+  [project-count requested-size]
+  (-> (or requested-size default-expand-start-size)
+      (max default-expand-start-size)
+      (min project-count)))
+
+(defn expand-project-groups
+  "Return additive project groups that double in size until they cover
+   the full ordered project set."
+  [projects start-size]
+  (let [project-vec (vec projects)
+        project-count (count project-vec)]
+    (if (zero? project-count)
+      []
+      (loop [group-size (positive-start-size project-count start-size)
+             groups []]
+        (let [group (subvec project-vec 0 group-size)
+              next-groups (conj groups group)]
+          (if (= group-size project-count)
+            next-groups
+            (recur (min project-count (* 2 group-size))
+                   next-groups)))))))
+
+(defn bisect-project-groups
+  "Return contiguous project groups in breadth-first binary partition
+   order."
+  [projects]
+  (let [root (vec projects)]
+    (loop [queue (cond-> clojure.lang.PersistentQueue/EMPTY
+                   (> (count root) 1) (conj root))
+           groups []]
+      (if (empty? queue)
+        groups
+        (let [group (peek queue)
+              queue-tail (pop queue)
+              mid (quot (count group) 2)
+              left (subvec group 0 mid)
+              right (subvec group mid)
+              next-groups (cond-> groups
+                            (seq left) (conj left)
+                            (seq right) (conj right))
+              next-queue (cond-> queue-tail
+                           (> (count left) 1) (conj left)
+                           (> (count right) 1) (conj right))]
+          (recur next-queue next-groups))))))
+
+(defn diagnostic-test-plan
+  "Return a stable-derived diagnostic plan over an explicit project
+   vector."
+  [{:keys [mode projects start-size direction order seed]}]
+  (let [effective-mode (or mode :subset)
+        ordered-projects (order-projects (vec projects)
+                                         {:direction direction
+                                          :order order
+                                          :seed seed})
+        project-groups (if (empty? ordered-projects)
+                         []
+                         (case effective-mode
+                           :expand (expand-project-groups ordered-projects start-size)
+                           :bisect (bisect-project-groups ordered-projects)
+                           [(vec ordered-projects)]))
+        total-groups (count project-groups)]
+    {:mode effective-mode
+     :summary (str "Running "
+                   (name effective-mode)
+                   " diagnostics across "
+                   (count ordered-projects)
+                   " stable-derived projects.")
+     :projects ordered-projects
+     :steps (mapv (fn [index group]
+                    (let [selector (format-project-selector group)]
+                      {:label (str (name effective-mode)
+                                 " project subset "
+                                 (inc index) "/"
+                                 total-groups
+                                 " ("
+                                 (count group)
+                                 " projects)")
+                       :argv (cond-> ["clojure" "-M:poly" "test"]
+                               selector (conj selector))}))
+                  (range)
+                  project-groups)}))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Coverage command derivation (pure)

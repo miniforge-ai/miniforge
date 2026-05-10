@@ -32,7 +32,7 @@
    [ai.miniforge.workflow.execution :as exec]))
 
 (def phase-test-config-resource
-  "config/phase/test-support-namespaces.edn")
+  "config/phase/workflow-test-support-namespaces.edn")
 
 (use-fixtures :each
   (fn [f]

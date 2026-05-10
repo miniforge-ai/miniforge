@@ -22,10 +22,23 @@
    Validates that when a reviewer returns :changes-requested, the execution
    engine redirects back to :implement (not re-running :review in place)."
   (:require
-   [clojure.test :refer [deftest is testing]]
+   [clojure.test :refer [deftest is testing use-fixtures]]
    [ai.miniforge.phase.interface :as phase]
+   [ai.miniforge.phase.loader :as loader]
    [ai.miniforge.phase-software-factory.review]
    [ai.miniforge.phase-software-factory.implement]))
+
+(def phase-test-config-resource
+  "config/phase/test-support-namespaces.edn")
+
+(use-fixtures :each
+  (fn [f]
+    (phase/reset-phase-loader!)
+    (try
+      (binding [loader/phase-loader-config-resource phase-test-config-resource]
+        (f))
+      (finally
+        (phase/reset-phase-loader!)))))
 
 ;; ============================================================================
 ;; leave-review status tests

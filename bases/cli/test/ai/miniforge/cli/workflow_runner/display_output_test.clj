@@ -29,6 +29,7 @@
    [clojure.test :refer [deftest testing is]]
    [clojure.string :as str]
    [cheshire.core :as json]
+   [ai.miniforge.event-stream.interface :as es]
    [ai.miniforge.cli.workflow-runner.display :as display]))
 
 ;------------------------------------------------------------------------------ Helpers
@@ -308,6 +309,59 @@
       (is (str/includes? line "recovered")))))
 
 ;------------------------------------------------------------------------------ Layer 6
+;; start-progress! integration
+
+(deftest start-progress-subscribes-and-prints-test
+  (testing "start-progress! prints lifecycle events and returns a cleanup fn"
+    (let [stream (es/create-event-stream {:sinks []})
+          wf-id (random-uuid)
+          output (with-out-str
+                   (let [cleanup (display/start-progress! stream false)]
+                     (es/publish! stream (es/workflow-started stream wf-id))
+                     (es/publish! stream (es/phase-started stream wf-id :plan))
+                     (cleanup)))]
+      (is (not (str/blank? output))
+          "Published workflow events should render progress output"))))
+
+(deftest start-progress-cleanup-stops-output-test
+  (testing "cleanup unsubscribes the progress listener"
+    (let [stream (es/create-event-stream {:sinks []})
+          wf-id (random-uuid)]
+      (let [cleanup (display/start-progress! stream false)]
+        (with-out-str (es/publish! stream (es/workflow-started stream wf-id)))
+        (cleanup))
+      (let [output (with-out-str
+                     (es/publish! stream (es/workflow-completed stream wf-id :success 1000)))]
+        (is (str/blank? output)
+            "No output should be produced after cleanup")))))
+
+(deftest start-progress-deduplicates-identical-lines-test
+  (testing "back-to-back identical event lines are deduplicated"
+    (let [stream (es/create-event-stream {:sinks []})
+          wf-id (random-uuid)
+          output (with-out-str
+                   (let [cleanup (display/start-progress! stream false)]
+                     (let [event (es/workflow-started stream wf-id)]
+                       (es/publish! stream event)
+                       (es/publish! stream event))
+                     (cleanup)))]
+      (is (= 1 (count (remove str/blank? (str/split-lines output))))
+          "Duplicate lines should only print once"))))
+
+(deftest start-progress-different-events-not-deduplicated-test
+  (testing "distinct events each produce their own output line"
+    (let [stream (es/create-event-stream {:sinks []})
+          wf-id (random-uuid)
+          output (with-out-str
+                   (let [cleanup (display/start-progress! stream false)]
+                     (es/publish! stream (es/workflow-started stream wf-id))
+                     (es/publish! stream (es/phase-started stream wf-id :plan))
+                     (es/publish! stream (es/agent-started stream wf-id :planner))
+                     (cleanup)))]
+      (is (= 3 (count (remove str/blank? (str/split-lines output))))
+          "Distinct events must each print once"))))
+
+;------------------------------------------------------------------------------ Layer 7
 ;; format-demo-line edge cases
 
 (deftest format-demo-line-nil-phase-test

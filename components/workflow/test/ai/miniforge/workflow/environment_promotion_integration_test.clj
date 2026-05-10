@@ -54,7 +54,7 @@
 (def ^:dynamic *test-worktree* nil)
 
 (def phase-test-config-resource
-  "config/phase/test-support-namespaces.edn")
+  "config/phase/workflow-test-support-namespaces.edn")
 
 (defn create-temp-worktree []
   (let [temp-dir (io/file (System/getProperty "java.io.tmpdir")

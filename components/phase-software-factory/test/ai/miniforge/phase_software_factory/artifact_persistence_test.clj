@@ -38,12 +38,16 @@
    #_{:clj-kondo/ignore [:unused-namespace]}
    [ai.miniforge.phase-software-factory.release]
    [ai.miniforge.phase.interface :as phase]
+   [ai.miniforge.phase.loader :as loader]
    [ai.miniforge.agent.interface :as agent]
    [ai.miniforge.response.interface :as response]))
 
 ;------------------------------------------------------------------------------ Test Fixtures
 
 (def ^:dynamic *test-worktree* nil)
+
+(def phase-test-config-resource
+  "config/phase/test-support-namespaces.edn")
 
 (defn create-temp-worktree []
   (let [temp-dir (io/file (System/getProperty "java.io.tmpdir")
@@ -61,7 +65,14 @@
       (try (f)
            (finally (cleanup-temp-worktree worktree))))))
 
-(use-fixtures :each worktree-fixture)
+(use-fixtures :each
+  (fn [f]
+    (phase/reset-phase-loader!)
+    (try
+      (binding [loader/phase-loader-config-resource phase-test-config-resource]
+        (worktree-fixture f))
+      (finally
+        (phase/reset-phase-loader!)))))
 
 ;------------------------------------------------------------------------------ Test Helpers
 

@@ -27,17 +27,31 @@
   test worktree before invoking the phase, simulating what the implement
   agent would do in production."
   (:require
-   [clojure.test :refer [deftest testing is]]
+   [clojure.test :refer [deftest testing is use-fixtures]]
    [clojure.java.io :as io]
    [clojure.java.shell :as shell]
+   [clojure.string :as str]
    [babashka.fs :as fs]
    [ai.miniforge.event-stream.interface :as es]
    [ai.miniforge.logging.interface :as log]
    [ai.miniforge.phase-software-factory.release :as release]
    [ai.miniforge.phase.interface :as phase]
+   [ai.miniforge.phase.loader :as loader]
    [ai.miniforge.release-executor.interface :as release-executor]))
 
 ;------------------------------------------------------------------------------ Test Fixtures
+
+(def phase-test-config-resource
+  "config/phase/test-support-namespaces.edn")
+
+(use-fixtures :each
+  (fn [f]
+    (phase/reset-phase-loader!)
+    (try
+      (binding [loader/phase-loader-config-resource phase-test-config-resource]
+        (f))
+      (finally
+        (phase/reset-phase-loader!)))))
 
 (defn create-temp-worktree
   "Create a temporary directory initialized as a real git repository.
@@ -416,7 +430,7 @@
   (sh-must-succeed! worktree ["git" "add" "."])
   (sh-must-succeed! worktree ["git" "commit" "-m" "implement-phase-boundary commit"])
   (let [{:keys [out]} (sh-must-succeed! worktree ["git" "status" "--porcelain"])]
-    (when-not (clojure.string/blank? out)
+    (when-not (str/blank? out)
       (throw (ex-info "fixture left worktree dirty after commit"
                       {:porcelain out})))))
 
