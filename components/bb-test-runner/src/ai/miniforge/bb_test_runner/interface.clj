@@ -94,6 +94,16 @@
   [env]
   (core/heartbeat-seconds env))
 
+(defn parse-diagnostic-args
+  "Parse supported stable-derived diagnostic CLI arguments."
+  [args]
+  (core/parse-diagnostic-args args))
+
+(defn order-projects
+  "Apply diagnostic ordering controls to a project vector."
+  [projects opts]
+  (core/order-projects projects opts))
+
 (defn classify-coverage-paths
   "Pure helper: split merged classpath paths into source and test roots
    suitable for Cloverage."

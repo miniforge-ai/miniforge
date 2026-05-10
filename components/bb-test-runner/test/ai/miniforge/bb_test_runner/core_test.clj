@@ -221,6 +221,30 @@
     (is (= 30 (sut/heartbeat-seconds {"MINIFORGE_TEST_HEARTBEAT_SECONDS" "0"})))
     (is (= 30 (sut/heartbeat-seconds {"MINIFORGE_TEST_HEARTBEAT_SECONDS" "-5"})))))
 
+(deftest test-parse-diagnostic-args-reads-supported-options
+  (testing "diagnostic CLI args parse into a stable-derived plan request"
+    (is (= {:mode :expand
+            :projects ["miniforge" "miniforge-core"]
+            :start-size 2
+            :direction :back
+            :order :random
+            :seed 17}
+           (sut/parse-diagnostic-args
+            ["mode:expand"
+             "project:miniforge:miniforge-core"
+             "start-size:2"
+             "direction:back"
+             "order:random"
+             "seed:17"])))))
+
+(deftest test-order-projects-supports-declared-and-backward-order
+  (testing "diagnostic ordering keeps stable sequences controllable"
+    (is (= ["a" "b" "c"]
+           (sut/order-projects ["a" "b" "c"] {:order :declared})))
+    (is (= ["c" "b" "a"]
+           (sut/order-projects ["a" "b" "c"] {:direction :back})))))
+
+
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
   (clojure.test/run-tests 'ai.miniforge.bb-test-runner.core-test)
