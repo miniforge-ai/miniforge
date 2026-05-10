@@ -18,7 +18,11 @@
 
 (ns ai.miniforge.workflow.phase-test-support
   (:require
-   [ai.miniforge.phase.interface :as phase]))
+   [ai.miniforge.phase.interface :as phase]
+   [ai.miniforge.phase.loader :as loader]))
+
+(def phase-test-config-resource
+  "config/phase/test-support-namespaces.edn")
 
 (def runner-test-plan
   :runner-test-plan)
@@ -68,6 +72,13 @@
   (phase/register-phase-defaults!
    phase-name
    (assoc phase-defaults :phase phase-name)))
+
+(defn with-workflow-phase-test-support
+  [f]
+  (phase/reset-phase-loader!)
+  (binding [loader/phase-loader-config-resource phase-test-config-resource]
+    (f))
+  (phase/reset-phase-loader!))
 
 (defmethod phase/get-phase-interceptor-method runner-test-plan
   [config]
