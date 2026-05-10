@@ -854,25 +854,42 @@
   "Stamp the manifest with a terminal `status` (`:completed |
    :failed | :cancelled`). Idempotent via the `:marked?` atom — the
    happy path marks `:completed` after drain, the finally block falls
-   back to `:cancelled` only if no prior mark fired."
+   back to `:cancelled` only if no prior mark fired.
+
+   Only flips `marked?` after a successful load + save. If the
+   manifest file is absent (e.g. it was deleted or never written by
+   sub-3b's archive flow), this is a no-op that leaves `marked?`
+   false so a subsequent attempt (e.g. the finally's :cancelled
+   fallback) can still try to write."
   [{:keys [dir marked?]} status]
   (when (and dir (not @marked?))
     (let [load!         (manifest-fn 'load-manifest)
           mark-terminal (manifest-fn 'mark-terminal)
           save!         (manifest-fn 'save-manifest!)]
       (when-let [m (load! dir)]
-        (save! dir (mark-terminal m status)))
-      (reset! marked? true))))
+        (save! dir (mark-terminal m status))
+        (reset! marked? true)))))
 
 (defn finish-workflow-manifest!
   "Stop the heartbeat. Caller is expected to have already called
    `mark-manifest-terminal!` for the happy path; this is the
    shutdown-time cleanup. Swallows exceptions so a manifest IO
-   failure during cleanup doesn't mask the workflow result."
+   failure during cleanup doesn't mask the workflow result.
+
+   `stop-heartbeat!` can raise `InterruptedException` via
+   `awaitTermination`. Swallowing it without restoring the interrupt
+   flag breaks cooperative cancellation — outer frames lose the
+   signal that they're being asked to shut down. We re-interrupt the
+   current thread in that case and still return nil so the cleanup
+   stays best-effort."
   [{:keys [heartbeat]}]
   (when heartbeat
-    (try ((manifest-fn 'stop-heartbeat!) heartbeat)
-         (catch Throwable _ nil))))
+    (try
+      ((manifest-fn 'stop-heartbeat!) heartbeat)
+      (catch InterruptedException _
+        (.interrupt (Thread/currentThread))
+        nil)
+      (catch Exception _ nil))))
 
 (defn- event-stream-shutdown!
   "Run the BD-2a shutdown sequence on `es`: quiesce publishers for

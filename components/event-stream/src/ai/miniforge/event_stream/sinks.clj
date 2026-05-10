@@ -122,6 +122,19 @@
 
 ;;------------------------------------------------------------------------------ Layer 0: File Sink paths
 
+(defn- workflow-id-segment
+  "Normalize a workflow-id into a path segment safe for the OS
+   filesystem. Keywords become their plain name (`:canonical-sdlc` →
+   `canonical-sdlc`) — `(str ...)` would otherwise include the colon
+   prefix, which is invalid on Windows and creates surprising layouts
+   elsewhere. UUIDs / strings pass through `str` unchanged. Reused by
+   `workflow-dir` and `event-file-path` so on-disk path normalisation
+   is consistent across all callers."
+  ^String [workflow-id]
+  (if (keyword? workflow-id)
+    (name workflow-id)
+    (str workflow-id)))
+
 (defn workflow-dir
   "Return the per-workflow directory under `base-dir` (default
    `~/.miniforge/events`). Canonical path for `{base-dir}/{workflow-id}/`
@@ -132,7 +145,7 @@
   (^java.io.File [workflow-id]
    (workflow-dir (default-events-dir) workflow-id))
   (^java.io.File [base-dir workflow-id]
-   (io/file base-dir (str workflow-id))))
+   (io/file base-dir (workflow-id-segment workflow-id))))
 
 (defn event-file-path
   "Return a java.io.File for a new event file in the per-workflow subdirectory.
@@ -149,7 +162,7 @@
   ([workflow-id event]
    (event-file-path (default-events-dir) workflow-id event))
   ([base-dir workflow-id event]
-   (new-event-file-path (io/file base-dir (str workflow-id)) event)))
+   (new-event-file-path (io/file base-dir (workflow-id-segment workflow-id)) event)))
 
 (defn operator-event-file-path
   "Return a java.io.File for a new event file in the operator subdirectory.

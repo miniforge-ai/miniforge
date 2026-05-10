@@ -100,6 +100,26 @@
             "mark-terminal must load → transition → save in order")
         (is (true? @(:marked? handle)))))))
 
+(deftest mark-manifest-terminal!-leaves-marked?-false-when-manifest-absent
+  ;; load-manifest returns nil when the file isn't on disk (e.g. the
+  ;; archive flow moved it between ticks). Marking must not flip the
+  ;; idempotency flag in that case — otherwise the finally's
+  ;; :cancelled fallback (and any future retry) would be permanently
+  ;; suppressed even though no terminal status ever got written.
+  (let [calls (atom [])
+        nil-load-mocks (assoc (mock-manifest-fns calls)
+                              'load-manifest (fn [_dir] nil))]
+    (with-redefs [sut/manifest-fn (fn [sym] (get nil-load-mocks sym))
+                  es/workflow-dir (fn [wid] (java.io.File. (str "/tmp/test-" wid)))]
+      (let [handle (sut/start-workflow-manifest! :wid :fake-es)]
+        (reset! calls [])
+        (sut/mark-manifest-terminal! handle :completed)
+        (is (false? @(:marked? handle))
+            "absent manifest → marked? stays false so subsequent
+             attempts can still try to write the terminal status")
+        (is (= [:load] (mapv first @calls))
+            "load was attempted but no save fired (nothing to update)")))))
+
 (deftest mark-manifest-terminal!-idempotent-via-marked?
   (with-mocked-manifest
     (fn [calls]
@@ -143,3 +163,26 @@
       (let [handle (sut/start-workflow-manifest! :wid :fake-es)]
         (is (nil? (sut/finish-workflow-manifest! handle))
             "stop-heartbeat! throw must not propagate")))))
+
+(deftest finish-workflow-manifest!-restores-interrupt-flag
+  ;; stop-heartbeat! raises InterruptedException via awaitTermination.
+  ;; Swallowing it without restoring the thread's interrupt flag
+  ;; breaks cooperative cancellation — outer frames lose the signal
+  ;; that they're being asked to shut down. We re-interrupt and
+  ;; still return nil so cleanup stays best-effort.
+  (let [calls (atom [])
+        interrupt-mocks (assoc (mock-manifest-fns calls)
+                               'stop-heartbeat! (fn [_]
+                                                  (throw (InterruptedException. "shutdown"))))]
+    ;; Clear any leaked interrupt before the test.
+    (Thread/interrupted)
+    (with-redefs [sut/manifest-fn (fn [sym] (get interrupt-mocks sym))
+                  es/workflow-dir (fn [_] (java.io.File. "/tmp/test"))]
+      (let [handle (sut/start-workflow-manifest! :wid :fake-es)]
+        (is (nil? (sut/finish-workflow-manifest! handle))
+            "InterruptedException is still swallowed (best-effort cleanup)")
+        ;; `Thread/interrupted` reads-and-clears; if we set the flag
+        ;; correctly it should return true now.
+        (is (true? (Thread/interrupted))
+            "current thread's interrupt flag must be restored
+             so cooperative-cancellation callers above us see it")))))
