@@ -51,6 +51,49 @@
   [relative-path]
   (core/path->ns-symbol relative-path))
 
+(defn stable-tag-globs
+  "Return the stable-tag glob patterns recognized by Miniforge's
+   stable-derived test scope."
+  []
+  (core/stable-tag-globs))
+
+(defn stable-tags-present?
+  "True when `tags` contains at least one recognized stable tag."
+  [tags]
+  (core/stable-tags-present? tags))
+
+(defn parse-project-selector
+  "Parse a Polylith project selector or env value into project names."
+  [selector]
+  (core/parse-project-selector selector))
+
+(defn format-project-selector
+  "Render an explicit Polylith project selector from project names."
+  [projects]
+  (core/format-project-selector projects))
+
+(defn changed-projects-command
+  "Return the argv that asks Polylith for changed-or-affected projects."
+  []
+  (core/changed-projects-command))
+
+(defn parse-project-list-output
+  "Parse a changed-or-affected project list response into project names."
+  [output]
+  (core/parse-project-list-output output))
+
+(defn sanitize-git-worktree-env
+  "Remove git worktree/index variables that must not leak into child
+   processes spawned from git hook contexts."
+  [env]
+  (core/sanitize-git-worktree-env env))
+
+(defn heartbeat-seconds
+  "Return the configured heartbeat interval in seconds for long-running
+   test commands."
+  [env]
+  (core/heartbeat-seconds env))
+
 (defn classify-coverage-paths
   "Pure helper: split merged classpath paths into source and test roots
    suitable for Cloverage."
