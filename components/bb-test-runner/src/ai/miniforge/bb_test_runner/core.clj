@@ -236,6 +236,18 @@
           parsed
           default-heartbeat-seconds)))))
 
+(defn- parse-long-arg
+  [arg prefix]
+  (let [raw (subs arg (count prefix))]
+    (try
+      (Long/parseLong raw)
+      (catch NumberFormatException ex
+        (throw (ex-info "Invalid stable-derived diagnostic argument."
+                        {:arg arg
+                         :prefix prefix
+                         :expected-format (str prefix "N")}
+                        ex))))))
+
 (defn parse-diagnostic-args
   "Parse supported stable-derived diagnostic CLI arguments.
 
@@ -257,8 +269,7 @@
        (assoc acc :projects (parse-project-selector arg))
 
        (str/starts-with? arg "start-size:")
-       (let [raw (subs arg (count "start-size:"))]
-         (assoc acc :start-size (Long/parseLong raw)))
+       (assoc acc :start-size (parse-long-arg arg "start-size:"))
 
        (str/starts-with? arg "direction:")
        (assoc acc :direction (keyword (subs arg (count "direction:"))))
@@ -267,8 +278,7 @@
        (assoc acc :order (keyword (subs arg (count "order:"))))
 
        (str/starts-with? arg "seed:")
-       (let [raw (subs arg (count "seed:"))]
-         (assoc acc :seed (Long/parseLong raw)))
+       (assoc acc :seed (parse-long-arg arg "seed:"))
 
        :else acc))
    {}

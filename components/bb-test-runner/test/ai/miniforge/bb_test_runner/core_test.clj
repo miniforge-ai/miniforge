@@ -237,12 +237,31 @@
              "order:random"
              "seed:17"])))))
 
+(deftest test-parse-diagnostic-args-rejects-invalid-numeric-values
+  (testing "numeric diagnostic args fail with contextual ex-info"
+    (is (thrown-with-msg?
+         clojure.lang.ExceptionInfo
+         #"Invalid stable-derived diagnostic argument"
+         (sut/parse-diagnostic-args ["start-size:abc"])))
+    (is (thrown-with-msg?
+         clojure.lang.ExceptionInfo
+         #"Invalid stable-derived diagnostic argument"
+         (sut/parse-diagnostic-args ["seed:not-a-number"])))))
+
 (deftest test-order-projects-supports-declared-and-backward-order
   (testing "diagnostic ordering keeps stable sequences controllable"
     (is (= ["a" "b" "c"]
            (sut/order-projects ["a" "b" "c"] {:order :declared})))
     (is (= ["c" "b" "a"]
            (sut/order-projects ["a" "b" "c"] {:direction :back})))))
+
+(deftest test-order-projects-random-order-is-deterministic-for-a-seed
+  (testing "random ordering is stable for the same input seed"
+    (is (= ["a" "c" "e" "d" "b"]
+           (sut/order-projects
+            ["a" "b" "c" "d" "e"]
+            {:order :random
+             :seed 17})))))
 
 
 ;------------------------------------------------------------------------------ Rich Comment
