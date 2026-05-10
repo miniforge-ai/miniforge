@@ -251,13 +251,18 @@
 
 (defn- ->epoch-millis
   "Coerce a :execution/started-at / :execution/ended-at value to a
-   long epoch-millis. Different writers use different representations
-   (context.clj writes Long via System/currentTimeMillis;
-   runner.clj writes java.time.Instant via Instant/now), and we
-   need to subtract them — that inconsistency is its own bug, but
-   coercing here keeps the wall-clock stamp from NPE-ing on either
-   shape. Returns nil for unrecognised inputs so the caller skips
-   the stamp instead of producing nonsense."
+   long epoch-millis. Different writers use different
+   representations (context.clj writes Long via
+   System/currentTimeMillis; runner.clj writes java.time.Instant via
+   Instant/now), and the wall-clock stamp needs to subtract them.
+   That inconsistency is its own bug; coercing here keeps the stamp
+   from failing on either shape — specifically:
+
+     - nil started-at / ended-at → nil here, caller skips the stamp;
+     - Instant input → unguarded subtraction would
+       ClassCastException (java.time.Instant is not a Number);
+     - any unrecognised type → nil, caller skips rather than
+       producing nonsense."
   [t]
   (cond
     (number? t)                          (long t)

@@ -31,59 +31,58 @@
   "Fixed instant in epoch ms — keeps the assertion deterministic."
   1000000000)
 
-(def ^:private synthetic-ended-at
-  "Synthetic-started + 50 minutes. Matches the dogfood scenario
-   that surfaced this bug: ~50m wall, banner reported 9.7m."
-  (+ synthetic-started-at (* 50 60 1000)))
-
-(def ^:private fifty-minutes-ms
-  (* 50 60 1000))
+;; transition-to-completed and transition-to-failed both stamp
+;; :execution/ended-at with (System/currentTimeMillis) at call
+;; time, so we never preset it in the input ctx. Pre-fix tests
+;; were assoc'ing a synthetic ended-at that the transition
+;; immediately overwrote — misleading to readers and didn't
+;; tighten the assertion.
 
 (deftest transition-to-completed-stamps-wall-clock-duration-test
   (testing "transition-to-completed sets :execution/metrics :duration-ms
-            to (ended-at − started-at), overwriting any sum-of-phases
-            value the merge-phase-metrics step accumulated. Tokens
-            and cost stay summed across phases — those represent
-            independent per-phase resource consumption — but
-            duration is wall-clock so the runner banner shows the
-            user how long the run actually took."
+            to (ended-at − started-at) — exact difference, not just
+            a value larger than something. Pin the difference
+            semantic by computing the expected delta from the
+            ended-at the transition itself stamps. Tokens and cost
+            stay summed across phases (independent per-phase
+            resource consumption); duration is wall-clock so the
+            runner banner shows the user how long the run took."
     (let [ctx {:execution/started-at synthetic-started-at
                :execution/metrics    {:tokens 25864
                                       :cost-usd 0.42
                                       :duration-ms 582000}}
           completed (with-redefs [context/transition-execution identity]
-                      (-> ctx
-                          (assoc :execution/ended-at synthetic-ended-at)
-                          context/transition-to-completed))]
-      ;; transition-to-completed re-stamps :execution/ended-at with
-      ;; (System/currentTimeMillis); we control started-at so the
-      ;; computed duration is approximately (now − synthetic-started)
-      ;; — which dwarfs any plausible run, so an exact assertion
-      ;; would be brittle. Assert the inequality + ordering instead.
-      (is (>= (get-in completed [:execution/metrics :duration-ms])
-              fifty-minutes-ms)
-          "wall-clock duration is at least the synthetic 50m gap —
-           the actual stamp uses currentTimeMillis so it's larger,
-           not smaller, than the synthetic gap")
+                      (context/transition-to-completed ctx))
+          stamped-ended-at (:execution/ended-at completed)
+          expected-duration (- stamped-ended-at synthetic-started-at)]
+      (is (= expected-duration
+             (get-in completed [:execution/metrics :duration-ms]))
+          ":duration-ms is the exact (ended-at − started-at) delta —
+           pins the difference semantic so a future regression that
+           accidentally stamps the raw timestamp (or any other large
+           value) fails this assertion")
       (is (= 25864 (get-in completed [:execution/metrics :tokens]))
           "tokens preserved")
       (is (= 0.42 (get-in completed [:execution/metrics :cost-usd]))
           "cost preserved"))))
 
 (deftest transition-to-failed-stamps-wall-clock-duration-test
-  (testing "Failed workflows also report wall-clock duration so
-            the user can see how long the run ran before failing."
+  (testing "Failed workflows also report wall-clock duration so the
+            user can see how long the run ran before failing. Same
+            difference-semantic assertion as the completed-path test
+            (not just '>= some floor')."
     (let [ctx {:execution/started-at synthetic-started-at
                :execution/metrics    {:tokens 1000
                                       :cost-usd 0.01
                                       :duration-ms 30000}}
           failed (with-redefs [context/transition-execution identity]
-                   (-> ctx
-                       (assoc :execution/ended-at synthetic-ended-at)
-                       context/transition-to-failed))]
-      (is (>= (get-in failed [:execution/metrics :duration-ms])
-              fifty-minutes-ms)
-          "duration reflects the synthetic 50m gap floor"))))
+                   (context/transition-to-failed ctx))
+          stamped-ended-at (:execution/ended-at failed)
+          expected-duration (- stamped-ended-at synthetic-started-at)]
+      (is (= expected-duration
+             (get-in failed [:execution/metrics :duration-ms]))
+          ":duration-ms is the exact (ended-at − started-at) delta
+           on the failure path too"))))
 
 (deftest transition-without-started-at-leaves-duration-untouched-test
   (testing "When :execution/started-at is missing (older callers /
@@ -105,25 +104,31 @@
             :execution/started-at as System/currentTimeMillis (Long),
             runner.clj writes it as java.time.Instant/now. The
             wall-clock stamp must coerce either shape to epoch
-            millis before subtracting, otherwise it ClassCastException
-            on Instant inputs and crashes the workflow's terminal
-            transition.
+            millis before subtracting, otherwise it
+            ClassCastException-s on Instant inputs and crashes the
+            workflow's terminal transition.
 
             Surfaced by run-pipeline-empty-test + fsm-state-tracked-
             test in the pre-commit suite — both use the runner
             path and were ERROR-ing on the unguarded subtraction
-            until ->epoch-millis was added."
+            until ->epoch-millis was added.
+
+            Same difference-semantic assertion as the Long-path
+            test: :duration-ms must equal (ended-at − coerced-
+            started-at), not just clear the no-throw bar."
     (let [started-instant (java.time.Instant/ofEpochMilli synthetic-started-at)
           ctx {:execution/started-at started-instant
                :execution/metrics    {:tokens 0 :cost-usd 0.0
                                       :duration-ms 0}}
           completed (with-redefs [context/transition-execution identity]
-                      (-> ctx
-                          (assoc :execution/ended-at synthetic-ended-at)
-                          context/transition-to-completed))]
-      (is (>= (get-in completed [:execution/metrics :duration-ms])
-              fifty-minutes-ms)
-          "Instant-shaped started-at coerces to millis without throwing"))))
+                      (context/transition-to-completed ctx))
+          stamped-ended-at (:execution/ended-at completed)
+          expected-duration (- stamped-ended-at
+                               (.toEpochMilli started-instant))]
+      (is (= expected-duration
+             (get-in completed [:execution/metrics :duration-ms]))
+          "Instant-shaped started-at coerces correctly AND stamps
+           the right delta (not just survives without throwing)"))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
