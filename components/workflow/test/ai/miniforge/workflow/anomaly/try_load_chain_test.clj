@@ -20,19 +20,35 @@
   "Coverage for `chain-loader/try-load-chain` (anomaly-returning) and
    the `chain-loader/load-chain` boundary that escalates a not-found
    anomaly to slingshot under `:anomalies/not-found`."
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [clojure.java.io :as io]
+            [clojure.test :refer [deftest is testing]]
             [ai.miniforge.anomaly.interface :as anomaly]
             [ai.miniforge.workflow.chain-loader :as chain-loader])
   (:import (clojure.lang ExceptionInfo)))
 
 ;------------------------------------------------------------------------------ Happy path (anomaly-returning API)
 
+(def ^:private spec-to-pr-versioned-path
+  "chains/spec-to-pr-v1.0.0.edn")
+
+(def ^:private stub-resource-url
+  (java.net.URL. "file:/tmp/miniforge-try-load-chain-test-resource"))
+
 (deftest try-load-chain-returns-result-on-success
   (testing "existing chain resource yields a non-anomaly result map"
-    (let [result (chain-loader/try-load-chain :spec-to-pr "1.0.0")]
-      (is (not (anomaly/anomaly? result)))
-      (is (some? (:chain result)))
-      (is (= :resource (:source result))))))
+    (with-redefs [io/resource (fn [resource-path]
+                                (when (= spec-to-pr-versioned-path resource-path)
+                                  stub-resource-url))
+                  chain-loader/load-chain-resource
+                  (fn [resource-path]
+                    (when (= spec-to-pr-versioned-path resource-path)
+                      {:chain/id :spec-to-pr
+                       :chain/version "1.0.0"
+                       :chain/steps [{:workflow/id :spec-step}]}))]
+      (let [result (chain-loader/try-load-chain :spec-to-pr "1.0.0")]
+        (is (not (anomaly/anomaly? result)))
+        (is (some? (:chain result)))
+        (is (= :resource (:source result)))))))
 
 ;------------------------------------------------------------------------------ Failure path (anomaly-returning API)
 

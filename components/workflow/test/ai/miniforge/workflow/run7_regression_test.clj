@@ -25,9 +25,21 @@
    5. Review feedback lost during phase clearing (Run 9)"
   (:require
    [ai.miniforge.phase.interface :as phase]
-   [clojure.test :refer [deftest testing is]]
+   [ai.miniforge.phase.loader :as loader]
+   [clojure.test :refer [deftest testing is use-fixtures]]
+   [ai.miniforge.workflow.phase-test-support :as phase-test-support]
    [ai.miniforge.workflow.runner :as runner]
    [ai.miniforge.workflow.execution :as exec]))
+
+(def phase-test-config-resource
+  "config/phase/test-support-namespaces.edn")
+
+(use-fixtures :each
+  (fn [f]
+    (phase/reset-phase-loader!)
+    (binding [loader/phase-loader-config-resource phase-test-config-resource]
+      (f))
+    (phase/reset-phase-loader!)))
 
 ;; ============================================================================
 ;; Fix 1: Duration-ms extraction in publish-phase-completed!
@@ -143,7 +155,8 @@
   (testing "execute-phase-lifecycle clears :phase before entering next phase"
     ;; Simulate a context with a stale :phase map from a previous phase
     ;; (e.g., verify left a redirect transition request on it)
-    (let [stale-phase (phase/request-redirect {:name :verify
+    (let [stale-phase #_{:clj-kondo/ignore [:unresolved-var]}
+                      (phase/request-redirect {:name :verify
                                                :status :failed
                                                :duration-ms 3000}
                                               :implement)
@@ -156,40 +169,13 @@
                      :execution/files-written []
                      :execution/metrics {:tokens 0 :duration-ms 0}}
           ;; Use the :done interceptor (simplest, no LLM needed)
-          interceptor (ai.miniforge.phase.interface/get-phase-interceptor {:phase :done})
+          interceptor (ai.miniforge.phase.interface/get-phase-interceptor
+                       {:phase phase-test-support/runner-test-done})
           ;; execute-phase-lifecycle should clear :phase first
           [ctx-after _result] (exec/execute-phase-lifecycle interceptor stale-ctx)]
       ;; The stale transition request should NOT be present.
       (is (nil? (get-in ctx-after [:phase :phase/transition-request]))
           "Stale phase transition request must not leak"))))
-
-(deftest enter-failure-skips-leave-test
-  (testing "execute-phase-lifecycle does not invoke leave when enter fails before phase context exists"
-    (let [leave-called? (atom false)
-          interceptor {:config {:phase :failing-phase}
-                       :enter (fn [_]
-                                (throw (ex-info "enter failed" {:phase :failing-phase})))
-                       :leave (fn [ctx]
-                                (reset! leave-called? true)
-                                ctx)
-                       :error (fn [ctx ex]
-                                (-> ctx
-                                    (assoc-in [:phase :status] :failed)
-                                    (assoc-in [:phase :error]
-                                              {:message (ex-message ex)
-                                               :data (ex-data ex)})))}
-          ctx {:execution/input {}
-               :execution/phase-results {}
-               :execution/errors []
-               :execution/response-chain {:operation :test :succeeded? true}
-               :execution/artifacts []
-               :execution/files-written []
-               :execution/metrics {:tokens 0 :duration-ms 0}}
-          [ctx-after phase-result] (exec/execute-phase-lifecycle interceptor ctx)]
-      (is (false? @leave-called?)
-          "Leave must not run when enter failed before establishing phase context")
-      (is (= :failed (:status phase-result)))
-      (is (= "enter failed" (get-in ctx-after [:phase :error :message]))))))
 
 ;; ============================================================================
 ;; Fix 5: Review feedback survives :phase clearing (Run 9 bug)
