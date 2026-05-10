@@ -122,6 +122,18 @@
 
 ;;------------------------------------------------------------------------------ Layer 0: File Sink paths
 
+(defn workflow-dir
+  "Return the per-workflow directory under `base-dir` (default
+   `~/.miniforge/events`). Canonical path for `{base-dir}/{workflow-id}/`
+   — used by the file sink for event files and by the manifest module
+   (BD-2b sub-2) for `manifest.json`. Both reference the same path so
+   they don't drift if the layout ever changes (sub-3b will introduce
+   `live/{workflow-id}/`)."
+  (^java.io.File [workflow-id]
+   (workflow-dir (default-events-dir) workflow-id))
+  (^java.io.File [base-dir workflow-id]
+   (io/file base-dir (str workflow-id))))
+
 (defn event-file-path
   "Return a java.io.File for a new event file in the per-workflow subdirectory.
    Creates the subdirectory if needed. Filename derives from `event`'s
