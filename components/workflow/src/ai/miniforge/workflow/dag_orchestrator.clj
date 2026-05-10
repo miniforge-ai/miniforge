@@ -50,15 +50,22 @@
 
 ;--- Layer 0: Result Constructors
 
+(def zero-metrics
+  "Canonical zeroed metrics for DAG / inner-workflow results. Used as
+   the default when no per-task metrics flow through. Single source
+   of truth — configurable.clj aliases this so the workflow stack
+   doesn't drift on what an empty metrics map looks like."
+  {:tokens 0 :cost-usd 0.0 :duration-ms 0})
+
 (defn workflow-success [artifact metrics]
   {:success? true
    :artifact artifact
-   :metrics (or metrics {:tokens 0 :cost-usd 0.0 :duration-ms 0})})
+   :metrics (or metrics zero-metrics)})
 
 (defn workflow-failure [error metrics]
   {:success? false
    :error error
-   :metrics (or metrics {:tokens 0 :cost-usd 0.0 :duration-ms 0})})
+   :metrics (or metrics zero-metrics)})
 
 (defn dag-execution-result [completed failed artifacts metrics-agg & {:keys [unreached] :or {unreached 0}}]
   {:success? (and (zero? failed) (zero? unreached))
@@ -1252,7 +1259,7 @@
            :description description
            :status :implemented
            :artifacts []
-           :metrics {:tokens 0 :cost-usd 0.0}}))
+           :metrics zero-metrics}))
 
 (defn execute-single-task [task-def context]
   (let [task-id (:task/id task-def)

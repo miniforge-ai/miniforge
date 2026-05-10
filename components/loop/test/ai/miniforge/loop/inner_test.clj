@@ -326,6 +326,50 @@
       (is (:success result))
       (is (= 1 (:iterations result))))))
 
+;------------------------------------------------------------------------------ sum-repair-result-metrics — pin per-attempt aggregation
+
+(def ^:private sum-repair-result-metrics
+  (var-get #'inner/sum-repair-result-metrics))
+
+;; Cost epsilon for IEEE-double tolerance — 0.005 + 0.012 ≈ 0.017
+;; round-trips through doubles without exact equality.
+(def ^:private cost-usd-epsilon 1.0e-6)
+
+(def ^:private repair-result-fixture
+  "Shape that matches what repair/attempt-repair returns:
+   per-attempt entries live under :results, NOT at the top level.
+   Aggregation has to traverse :results to see real token / cost
+   counts."
+  {:success? false
+   :attempts 2
+   :results  [{:strategy :llm-fix :tokens-used 500  :cost-usd 0.005}
+              {:strategy :retry   :tokens-used 0    :cost-usd 0.0}
+              {:strategy :llm-fix :tokens-used 1200 :cost-usd 0.012}]
+   :errors   [{:code :test}]})
+
+(deftest sum-repair-result-metrics-aggregates-from-results-vector-test
+  (testing "Per-attempt metrics in :results sum into the returned
+            map. Pin the contract: callers can thread the result
+            into update-metrics and have it flow into :loop/metrics
+            instead of always reading zeros from the top-level keys
+            (which repair/attempt-repair never sets)."
+    (let [{:keys [tokens cost-usd]}
+          (sum-repair-result-metrics repair-result-fixture)]
+      (is (= 1700 tokens)
+          "tokens summed across all repair attempts")
+      (is (< (Math/abs (- 0.017 cost-usd)) cost-usd-epsilon)
+          "cost-usd summed within IEEE rounding tolerance"))))
+
+(deftest sum-repair-result-metrics-handles-empty-or-missing-results-test
+  (testing "Empty / missing :results returns zero metrics rather
+            than nil — keeps downstream merge-with + safe."
+    (let [no-results {:success? false :attempts 0}]
+      (is (= {:tokens 0 :cost-usd 0.0}
+             (sum-repair-result-metrics no-results))))
+    (let [empty-results {:success? false :attempts 0 :results []}]
+      (is (= {:tokens 0 :cost-usd 0.0}
+             (sum-repair-result-metrics empty-results))))))
+
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
   (test/run-tests 'ai.miniforge.loop.inner-test)

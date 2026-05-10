@@ -175,6 +175,20 @@
   [loop-state metric-updates]
   (update loop-state :loop/metrics add-metric-values metric-updates))
 
+(defn- sum-repair-result-metrics
+  "repair/attempt-repair returns top-level shapes that hold per-attempt
+   results in `:results`. The metrics fields (`:tokens-used`,
+   `:cost-usd`) are on those entries, not on the outer map. Sum
+   them so the loop's :cost-usd / :tokens accumulators see what
+   each repair iteration actually cost.
+
+   Returns a `{:tokens N :cost-usd N}` map ready to thread into
+   `update-metrics`. Empty / missing :results yields zeros."
+  [repair-result]
+  (let [results (:results repair-result [])]
+    {:tokens   (->> results (map #(or (:tokens-used %) 0))  (reduce + 0))
+     :cost-usd (->> results (map #(or (:cost-usd %) 0.0))   (reduce + 0.0))}))
+
 (defn add-gate-results
   "Add gate results to loop state."
   [loop-state results]
@@ -389,15 +403,19 @@
                      iteration
                      errors
                      result)
+            ;; repair/attempt-repair returns aggregate shapes
+            ;; (make-success-result / make-max-attempts-result /
+            ;; make-exhausted-strategies-result / make-escalation-
+            ;; result) that put per-attempt metrics under :results,
+            ;; not at the top level. Reading (:tokens-used result)
+            ;; would always default to zero and starve the loop's
+            ;; :cost-usd / :tokens accumulation. Sum the per-attempt
+            ;; entries before threading them into update-metrics.
+            repair-totals (sum-repair-result-metrics result)
             loop-state (-> loop-state
                            (add-repair-attempt attempt)
-                           ;; Same :cost-usd forwarding as the
-                           ;; generate-step. Repair calls were
-                           ;; previously dropping cost on every
-                           ;; iteration.
-                           (update-metrics {:tokens (:tokens-used result 0)
-                                            :cost-usd (:cost-usd result 0.0)
-                                            :repair-calls 1}))]
+                           (update-metrics
+                            (assoc repair-totals :repair-calls 1)))]
         (cond
           ;; Repair succeeded
           (repair/succeeded? result)
