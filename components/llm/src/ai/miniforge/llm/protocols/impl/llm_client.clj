@@ -26,6 +26,7 @@
    [babashka.process :as p]
    [org.httpkit.client :as http]
    [ai.miniforge.logging.interface :as log]
+   [ai.miniforge.llm.cost :as cost]
    [ai.miniforge.llm.progress-monitor :as pm]
    [ai.miniforge.response.interface :as response]
    [slingshot.slingshot :refer [throw+ try+]])
@@ -1328,13 +1329,26 @@
                       {:data {:stop-reason stop-reason :num-turns num-turns
                               :content-length (count final-content)}}))
           (if (zero? exit-code)
-            (cond-> (streaming-success-response final-content exit-code
-                                                usage @accumulated-cost
-                                                stop-reason num-turns
-                                                tool-call-count final-message-preview
-                                                (:err result))
-              (seq tools) (assoc :tools-called tools)
-              session-id  (assoc :session-id session-id))
+            ;; Cost fallback: some backends (e.g. older Claude Code
+            ;; CLI versions, codex stream parser) don't surface
+            ;; total_cost_usd in the result frame, so
+            ;; @accumulated-cost stays nil and the runner banner
+            ;; reports $0.0000 despite real backend costs. When
+            ;; cost is nil but usage carries tokens, compute the
+            ;; fallback estimate from the model + usage via
+            ;; cost/estimate-cost. Models without pricing in the
+            ;; table return 0.0 (no false-positive cost), so this
+            ;; is a non-decreasing fix — never produces a wrong-
+            ;; direction value.
+            (let [resolved-cost (or @accumulated-cost
+                                    (cost/estimate-cost usage model))]
+              (cond-> (streaming-success-response final-content exit-code
+                                                  usage resolved-cost
+                                                  stop-reason num-turns
+                                                  tool-call-count final-message-preview
+                                                  (:err result))
+                (seq tools) (assoc :tools-called tools)
+                session-id  (assoc :session-id session-id)))
             (cond-> (streaming-error-response final-content exit-code (:err result)
                                               diagnostic-content
                                               timeout-info stop-reason num-turns
