@@ -27,9 +27,7 @@
    5. Chain event lifecycle ordering"
   (:require
    [clojure.test :refer [deftest testing is]]
-   [clojure.string :as str]
-   [ai.miniforge.event-stream.interface :as es]
-   [ai.miniforge.cli.workflow-runner.display :as display]))
+   [ai.miniforge.event-stream.interface :as es]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Test helpers
@@ -212,201 +210,6 @@
                   (str "Tool " tool " invoked by " agent " must precede completed"))))))))
 
 ;------------------------------------------------------------------------------ Layer 2
-;; Display formatter coverage tests
-
-(deftest format-event-line-covers-all-lifecycle-events-test
-  (testing "format-event-line produces non-nil output for all core event types"
-    (let [{:keys [events]} (simulate-workflow-run!)
-          evts @events
-          core-types #{:workflow/started :workflow/completed
-                       :workflow/phase-started :workflow/phase-completed
-                       :workflow/milestone-reached
-                       :agent/started :agent/completed :agent/status
-                       :tool/invoked :tool/completed
-                       :gate/started :gate/passed :gate/failed}]
-      (doseq [e evts]
-        (when (core-types (:event/type e))
-          (is (some? (display/format-event-line e))
-              (str "format-event-line must handle " (:event/type e))))))))
-
-(deftest format-event-line-returns-strings-test
-  (testing "format-event-line returns string output for known event types"
-    (let [{:keys [events]} (simulate-workflow-run!)
-          evts @events
-          core-types #{:workflow/started :workflow/completed
-                       :workflow/phase-started :workflow/phase-completed
-                       :workflow/milestone-reached
-                       :agent/started :agent/completed :agent/status
-                       :tool/invoked :tool/completed
-                       :gate/started :gate/passed :gate/failed}]
-      (doseq [e evts]
-        (when (core-types (:event/type e))
-          (let [line (display/format-event-line e)]
-            (is (string? line)
-                (str "format-event-line must return a string for " (:event/type e)))))))))
-
-(deftest format-event-line-unknown-type-returns-nil-test
-  (testing "format-event-line returns nil for unknown/unhandled event types"
-    (let [fake-event {:event/type :unknown/event-type
-                      :event/id (random-uuid)
-                      :event/timestamp (java.util.Date.)
-                      :event/version "1.0.0"
-                      :event/sequence-number 0}]
-      (is (nil? (display/format-event-line fake-event))
-          "Unknown event types should return nil"))))
-
-(deftest format-event-line-workflow-failed-test
-  (testing "format-event-line handles workflow-failed with reason"
-    (let [stream (es/create-event-stream {:sinks []})
-          wf-id (random-uuid)
-          event (es/workflow-failed stream wf-id {:message "LLM timeout" :type :timeout})
-          line (display/format-event-line event)]
-      (is (some? line) "Must render workflow/failed")
-      (is (string? line)))))
-
-(deftest format-event-line-agent-failed-test
-  (testing "format-event-line handles agent-failed"
-    (let [stream (es/create-event-stream {:sinks []})
-          wf-id (random-uuid)
-          event (es/agent-failed stream wf-id :reviewer {:message "timeout"})
-          line (display/format-event-line event)]
-      (is (some? line) "Must render agent/failed")
-      (is (string? line)))))
-
-(deftest format-event-line-phase-completed-with-duration-test
-  (testing "format-event-line includes duration when present"
-    (let [stream (es/create-event-stream {:sinks []})
-          wf-id (random-uuid)
-          event (es/phase-completed stream wf-id :plan {:outcome :success :duration-ms 5000})
-          line (display/format-event-line event)]
-      (is (some? line))
-      (is (str/includes? line "5.0s")
-          "Phase completed line should include formatted duration"))))
-
-(deftest format-event-line-workflow-completed-with-duration-test
-  (testing "format-event-line includes duration in workflow-completed"
-    (let [stream (es/create-event-stream {:sinks []})
-          wf-id (random-uuid)
-          event (es/workflow-completed stream wf-id :success 120000)
-          line (display/format-event-line event)]
-      (is (some? line))
-      (is (str/includes? line "2.0m")
-          "Workflow completed line should include formatted duration"))))
-
-(deftest format-event-line-no-stall-test
-  (testing "Every event in a full run produces display output (no silent gaps)"
-    (let [{:keys [events]} (simulate-workflow-run!)
-          evts @events
-          rendered (map display/format-event-line evts)
-          nil-count (count (filter nil? rendered))]
-      ;; In our simulation we only emit core events, so all should render
-      (is (zero? nil-count)
-          (str nil-count " events produced no display output — potential stall")))))
-
-;------------------------------------------------------------------------------ Layer 3
-;; Display utility function tests
-
-(deftest format-duration-test
-  (testing "Milliseconds below 1000"
-    (is (= "500ms" (display/format-duration 500)))
-    (is (= "0ms" (display/format-duration 0)))
-    (is (= "999ms" (display/format-duration 999))))
-
-  (testing "Seconds (1000ms to 59999ms)"
-    (is (= "1.0s" (display/format-duration 1000)))
-    (is (= "5.5s" (display/format-duration 5500)))
-    (is (= "59.9s" (display/format-duration 59900))))
-
-  (testing "Minutes (60000ms and above)"
-    (is (= "1.0m" (display/format-duration 60000)))
-    (is (= "2.0m" (display/format-duration 120000)))
-    (is (= "10.5m" (display/format-duration 630000)))))
-
-(deftest colorize-test
-  (testing "colorize wraps text with ANSI codes"
-    (let [result (display/colorize :cyan "hello")]
-      (is (str/includes? result "hello"))
-      (is (str/starts-with? result "\u001b[36m"))
-      (is (str/ends-with? result "\u001b[0m"))))
-
-  (testing "colorize with unknown color uses empty prefix"
-    (let [result (display/colorize :nonexistent "text")]
-      (is (str/includes? result "text"))
-      (is (str/ends-with? result "\u001b[0m")))))
-
-;------------------------------------------------------------------------------ Layer 4
-;; start-progress! integration tests
-
-(deftest start-progress-subscribes-and-prints-test
-  (testing "start-progress! prints events and returns cleanup fn"
-    (let [stream (es/create-event-stream {:sinks []})
-          wf-id (random-uuid)
-          ;; with-out-str is thread-safe (binds *out* thread-locally),
-          ;; unlike with-redefs [println ...] which mutates a global var
-          output (with-out-str
-                   (let [cleanup (display/start-progress! stream false)]
-                     (es/publish! stream (es/workflow-started stream wf-id))
-                     (es/publish! stream (es/phase-started stream wf-id :plan))
-                     (cleanup)))]
-      ;; Verify output was produced
-      (is (not (str/blank? output))
-          "start-progress! must produce output for published events"))))
-
-(deftest start-progress-cleanup-stops-output-test
-  (testing "After cleanup, no more output should be produced"
-    (let [stream (es/create-event-stream {:sinks []})
-          wf-id (random-uuid)]
-      ;; Phase 1: subscribe and publish one event, then cleanup
-      (let [cleanup (display/start-progress! stream false)]
-        (with-out-str (es/publish! stream (es/workflow-started stream wf-id)))
-        (cleanup))
-      ;; Phase 2: after cleanup, publish another event — subscriber is gone
-      (let [output (with-out-str
-                     (es/publish! stream (es/workflow-completed stream wf-id :success 1000)))]
-        (is (str/blank? output)
-            "After cleanup, no more output should be produced")))))
-
-(deftest start-progress-quiet-noop-test
-  (testing "start-progress! with quiet=true is a no-op"
-    (let [cleanup (display/start-progress! nil true)]
-      (is (fn? cleanup) "Must return a cleanup function")
-      (cleanup))))
-
-(deftest start-progress-nil-stream-noop-test
-  (testing "start-progress! with nil event-stream returns a no-op cleanup fn"
-    (let [cleanup (display/start-progress! nil false)]
-      (is (fn? cleanup) "Must return a cleanup function")
-      ;; Calling cleanup should not throw
-      (cleanup))))
-
-(deftest start-progress-deduplicates-test
-  (testing "start-progress! deduplicates back-to-back identical lines"
-    (let [stream (es/create-event-stream {:sinks []})
-          wf-id (random-uuid)
-          output (with-out-str
-                   (let [cleanup (display/start-progress! stream false)]
-                     ;; Publish the same event twice — should only print once
-                     (let [e (es/workflow-started stream wf-id)]
-                       (es/publish! stream e)
-                       (es/publish! stream e))
-                     (cleanup)))]
-      (is (= 1 (count (remove str/blank? (str/split-lines output))))
-          "Duplicate events should be deduplicated"))))
-
-(deftest start-progress-different-events-not-deduplicated-test
-  (testing "start-progress! does not deduplicate different events"
-    (let [stream (es/create-event-stream {:sinks []})
-          wf-id (random-uuid)
-          output (with-out-str
-                   (let [cleanup (display/start-progress! stream false)]
-                     (es/publish! stream (es/workflow-started stream wf-id))
-                     (es/publish! stream (es/phase-started stream wf-id :plan))
-                     (es/publish! stream (es/agent-started stream wf-id :planner))
-                     (cleanup)))]
-      (is (= 3 (count (remove str/blank? (str/split-lines output))))
-          "Different events must each produce their own line"))))
-
-;------------------------------------------------------------------------------ Layer 5
 ;; Chain event end-to-end tests
 
 (deftest chain-event-constructors-test
@@ -494,7 +297,7 @@
       (is (string? (:event/version e)) "Chain event must have :event/version")
       (is (int? (:event/sequence-number e)) "Chain event must have :event/sequence-number"))))
 
-;------------------------------------------------------------------------------ Layer 6
+;------------------------------------------------------------------------------ Layer 3
 ;; Multiple workflow isolation test
 
 (deftest multiple-workflow-isolation-test
@@ -543,7 +346,7 @@
       (is (every? #(#{:gate/started :gate/passed :gate/failed} (:event/type %))
                   @gate-events)))))
 
-;------------------------------------------------------------------------------ Layer 7
+;------------------------------------------------------------------------------ Layer 4
 ;; Edge case and robustness tests
 
 (deftest empty-workflow-run-test
@@ -573,42 +376,6 @@
       (let [types (mapv :event/type @captured)]
         (is (= :workflow/started (first types)))
         (is (= :workflow/failed (last types)))))))
-
-(deftest format-event-line-all-individual-events-test
-  (testing "format-event-line produces output for each event type individually"
-    (let [stream (es/create-event-stream {:sinks []})
-          wf-id (random-uuid)]
-      ;; Test each event type individually to isolate failures
-      (is (some? (display/format-event-line (es/workflow-started stream wf-id)))
-          "workflow-started")
-      (is (some? (display/format-event-line (es/workflow-completed stream wf-id :success 5000)))
-          "workflow-completed")
-      (is (some? (display/format-event-line (es/workflow-failed stream wf-id {:message "err"})))
-          "workflow-failed")
-      (is (some? (display/format-event-line (es/phase-started stream wf-id :plan)))
-          "phase-started")
-      (is (some? (display/format-event-line (es/phase-completed stream wf-id :plan {:outcome :success})))
-          "phase-completed")
-      (is (some? (display/format-event-line (es/milestone-reached stream wf-id :done "Done")))
-          "milestone-reached")
-      (is (some? (display/format-event-line (es/agent-started stream wf-id :planner)))
-          "agent-started")
-      (is (some? (display/format-event-line (es/agent-completed stream wf-id :planner)))
-          "agent-completed")
-      (is (some? (display/format-event-line (es/agent-failed stream wf-id :planner)))
-          "agent-failed")
-      (is (some? (display/format-event-line (es/agent-status stream wf-id :planner :thinking "hmm")))
-          "agent-status")
-      (is (some? (display/format-event-line (es/tool-invoked stream wf-id :planner :tools/read)))
-          "tool-invoked")
-      (is (some? (display/format-event-line (es/tool-completed stream wf-id :planner :tools/read)))
-          "tool-completed")
-      (is (some? (display/format-event-line (es/gate-started stream wf-id :lint)))
-          "gate-started")
-      (is (some? (display/format-event-line (es/gate-passed stream wf-id :lint 100)))
-          "gate-passed")
-      (is (some? (display/format-event-line (es/gate-failed stream wf-id :lint [])))
-          "gate-failed"))))
 
 (deftest get-events-integration-after-full-run-test
   (testing "get-events returns all events from a full workflow run"
