@@ -525,6 +525,17 @@
   :pr/resume-dispatch-listener-failed "pr resume-dispatch: listener {lid} — [{code}] {message}"
   :pr/resume-dispatch-failed "pr resume-dispatch failed: {message}"
 
+  ;; PR Policy-Respond (N13 §2.5 Comment Response Agent — deterministic path)
+  :pr/policy-respond-usage "pr policy-respond: requires <pr-url>"
+  :pr/policy-respond-bad-url "pr policy-respond: failed to parse <pr-url>"
+  :pr/policy-respond-checkout "pr policy-respond: gh pr checkout #{n}"
+  :pr/policy-respond-checkout-failed "pr policy-respond: gh pr checkout #{n} failed"
+  :pr/policy-respond-on-branch "pr policy-respond: on branch {branch}"
+  :pr/policy-respond-fetch-failed "pr policy-respond: failed to fetch comments for PR #{n}"
+  :pr/policy-respond-summary "pr policy-respond: PR #{n} — applied={applied} failed={failed} escalated={escalated} skipped={skipped} commit={commit}"
+  :pr/policy-respond-escalated "pr policy-respond: comment {cid} escalated — {reason}"
+  :pr/policy-respond-failed "pr policy-respond: PR #{n} — [{code}] {message}"
+
   ;; PR Monitor
   :pr/monitor-starting "Starting PR monitor for author: {author}"
   :pr/monitor-polling "Polling every {seconds}s in {dir}"
