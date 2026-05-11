@@ -164,17 +164,22 @@
       (atomic-rename! tmp final))))
 
 (defn- mark-archive-complete!
-  "Step 7–8: touch the archived marker, stamp `archived_at` and the
-   final `archive_status = :archived` on the manifest, and fsync the
-   archive directory plus its parent so the rename + marker hit
-   disk."
+  "Step 7–8: stamp `archived_at` and `archive_status = :archived` on the
+   manifest FIRST, then touch the archived marker, then fsync the archive
+   directory plus its parent so both writes hit disk.
+
+   Order matters for crash safety: writing the manifest before the marker
+   ensures `scan-incomplete-archives` can detect a crash between the two
+   steps (manifest `:archived` but marker absent) and trigger recovery.
+   Writing the marker first would produce a directory that appears complete
+   to the scanner even though the manifest still reads `:archiving`."
   [^File archived-dir]
-  (touch-marker! (marker-path archived-dir))
   (let [m (manifest/load-manifest archived-dir)
         completed (-> m
                       (manifest/transition-archive :archived)
                       (assoc :archived_at (str (java.time.Instant/now))))]
     (manifest/save-manifest! archived-dir completed)
+    (touch-marker! (marker-path archived-dir))
     (fsync-dir! archived-dir)
     (fsync-dir! (.getParentFile archived-dir))
     completed))

@@ -122,10 +122,10 @@
                                  (name workflow-id)
                                  (str workflow-id)))]
     (cond
-      (.exists archived) archived
-      (.exists live)     live
-      (.exists legacy)   legacy
-      :else              nil)))
+      (.isDirectory archived) archived
+      (.isDirectory live)     live
+      (.isDirectory legacy)   legacy
+      :else                   nil)))
 
 (defn read-workflow-events-by-id
   "Convenience: read events for a workflow id under a base events dir.
