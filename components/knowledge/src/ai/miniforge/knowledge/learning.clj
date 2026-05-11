@@ -150,10 +150,17 @@
    any content-bearing field resets `:zettel/trust-level` back to
    `:untrusted`. Re-promotion is the only path back to `:trusted`.
 
-   The store path bypasses `update-zettel` on purpose — `:zettel/
-   trust-level` is in the updater's `derived-fields` set, so a
-   producer can't ride trust onto a new revision through the edit
-   path. Promotion remains an explicit, store-direct gesture.
+   Flow: routes the type / uid / source / dewey transition through
+   `zettel/update-zettel` so the digest + revision-id re-stamp
+   happens in the canonical place (the type flip alone rotates
+   the revision since `:zettel/type` is content-bearing), then
+   asserts `:zettel/trust-level :trusted` on the returned value
+   AFTER the update. The post-assoc is the one path allowed to
+   override `update-zettel`'s reset-on-rotation default — promotion
+   is the explicit gesture that grants trust on the new revision.
+   `:zettel/trust-level` is in `update-zettel`'s `derived-fields`
+   set, so producers cannot reach this state through the edit
+   path on their own.
 
    Arguments:
    - store       - Knowledge store

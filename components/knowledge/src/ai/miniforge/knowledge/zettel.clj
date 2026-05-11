@@ -89,17 +89,26 @@
 
 (def ^:private derived-fields
   "Fields the constructor / updater own — callers cannot override them
-   directly. They're recomputed from `content-projection` so the
-   relationship between content and revision identity stays
-   tamper-evident.
+   directly via `update-zettel`'s `changes` map; they're recomputed
+   from `content-projection` so the relationship between content
+   and revision identity stays tamper-evident.
 
-   `:zettel/trust-level` is owned by the constructor (defaults to
-   `:untrusted`) + `update-zettel` (resets to `:untrusted` on
-   revision rotation). Only `knowledge.learning/promote-learning`
-   stamps `:trusted`, and it does so via `store/put-zettel`
-   directly — bypassing this updater on purpose, which is what
-   makes a re-promotion an explicit step rather than a side
-   effect of an edit."
+   `:zettel/trust-level` joins `:zettel/digest` + `:zettel/revision-id`
+   for the same reason: the constructor stamps `:untrusted`,
+   `update-zettel` resets to `:untrusted` whenever a content-bearing
+   rotation happens, and `knowledge.learning/promote-learning` is
+   the one path that may post-assoc `:trusted` on the freshly
+   re-stamped revision (it routes through `update-zettel` first
+   for the canonical content re-stamp, then asserts `:trusted`
+   on the result before persisting).
+
+   Note: enforcement here is at the EDIT path. The lower-level
+   `store/put-zettel` is intentionally permissive — it persists
+   whatever map it's given so load-from-disk paths can round-trip
+   legacy stores. Trust-sensitive consumers (e.g., miniforge-fleet's
+   `share-learning` producer-side gate) re-validate at THEIR
+   boundary; the knowledge component supplies the field, the
+   consumer enforces its meaning."
   #{:zettel/digest :zettel/revision-id :zettel/trust-level})
 
 ;------------------------------------------------------------------------------ Layer 1
@@ -152,10 +161,20 @@
                         :zettel/type        type
                         :zettel/created     now
                         :zettel/author      author
-                        ;; Decision 6 + 8 (#836) — every fresh zettel
-                        ;; starts untrusted. Only `learning/promote-
-                        ;; learning` stamps `:trusted`; bypassing
-                        ;; create-zettel doesn't grant trust.
+                        ;; Decision 6 + 8 (#836) — every zettel
+                        ;; minted via this constructor starts
+                        ;; untrusted; `update-zettel` preserves
+                        ;; trust on operational edits and resets
+                        ;; on content rotation; only
+                        ;; `learning/promote-learning` post-asserts
+                        ;; `:trusted` on a freshly re-stamped
+                        ;; revision. The lower-level
+                        ;; `store/put-zettel` persists whatever
+                        ;; it's handed (legacy round-trip path),
+                        ;; so security-sensitive consumers
+                        ;; (fleet's `share-learning` producer
+                        ;; gate) re-validate at their own
+                        ;; boundary — see `derived-fields`.
                         :zettel/trust-level :untrusted}
                  dewey      (assoc :zettel/dewey dewey)
                  (seq tags) (assoc :zettel/tags (vec tags))

@@ -248,9 +248,12 @@
 
 (deftest test-create-zettel-defaults-trust-level-untrusted
   (testing "every fresh zettel starts with :zettel/trust-level :untrusted"
-    ;; Bypassing create-zettel doesn't grant trust — only
-    ;; learning/promote-learning stamps :trusted, and it does so via
-    ;; store/put-zettel (not update-zettel).
+    ;; Constructor default. learning/promote-learning is the only
+    ;; path that post-asserts :trusted; it routes through
+    ;; update-zettel for the canonical content re-stamp first
+    ;; (since `:zettel/type` flipping :learning → :rule rotates
+    ;; the revision), then assoc's :trusted on the returned
+    ;; value before persisting via store/put-zettel.
     (let [z (new-z)]
       (is (= :untrusted (:zettel/trust-level z))))))
 
