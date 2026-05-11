@@ -50,12 +50,16 @@
 
 (def ^:private cost-table
   "Delay-loaded pricing table. Loaded once at namespace init via
-   the resource path; nil-safe when the resource is missing
-   (returns an empty pricing map so callers see $0.00 rather than
-   throwing)."
+   the resource path; defaults to an empty pricing map when the
+   resource is missing so callers see $0.00 rather than throwing.
+   Empty map matches what `pricing-for-model` returns for misses
+   in a populated table — same semantic either way."
   (delay
-    (when-let [res (io/resource cost-table-resource-path)]
-      (-> res slurp edn/read-string :pricing/by-model-id))))
+    (or (some-> (io/resource cost-table-resource-path)
+                slurp
+                edn/read-string
+                :pricing/by-model-id)
+        {})))
 
 ;; Public API
 
@@ -79,16 +83,20 @@
                 \"claude-sonnet-4-6\"). Models not in the cost
                 table estimate to 0.00.
 
-   Returns: a double USD cost. Returns 0.0 for unpriced models
-   and for nil/empty usage — never throws, never returns nil, so
-   downstream merge-with + and cost summing stay safe."
+   Returns: a primitive `double` USD cost. Returns 0.0 for unpriced
+   models and for nil/empty usage — never throws, never returns
+   nil. The explicit `(double ...)` cast normalizes the result
+   regardless of which numeric type the EDN literals + arithmetic
+   produce (BigDecimal when the EDN reader sees `3.00`, Ratio when
+   `/` returns an exact fraction), so downstream `merge-with +`
+   and cost summing see a consistent type."
   [usage model-id]
   (let [{:keys [input-per-1m output-per-1m]} (pricing-for-model model-id)
         in-tokens  (or (:input-tokens usage) 0)
         out-tokens (or (:output-tokens usage) 0)]
     (if (and input-per-1m output-per-1m)
-      (+ (* in-tokens  (/ input-per-1m  tokens-per-million))
-         (* out-tokens (/ output-per-1m tokens-per-million)))
+      (double (+ (* in-tokens  (/ input-per-1m  tokens-per-million))
+                 (* out-tokens (/ output-per-1m tokens-per-million))))
       0.0)))
 
 ;------------------------------------------------------------------------------ Rich Comment

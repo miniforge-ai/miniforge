@@ -25,10 +25,13 @@
    [ai.miniforge.llm.cost :as sut]
    [clojure.test :refer [deftest is testing]]))
 
-;; Cost tolerance — pricing math is exact rationals divided by
-;; tokens-per-million but the result is a Ratio that we'll
-;; eventually serialize as double. Use a tight epsilon for the
-;; assertions so a future cast to double doesn't flake.
+;; Cost tolerance — pricing literals in the EDN table (`3.00`,
+;; `0.25`, …) read as BigDecimal, so the intermediate arithmetic
+;; mixes BigDecimal with int tokens and produces BigDecimal; the
+;; final `(double ...)` cast in estimate-cost normalises to a
+;; primitive double, but a tight epsilon keeps the assertions
+;; stable across any cast-order surprises (and matches the
+;; tolerance pattern used in dag-orchestrator-test).
 (def ^:private cost-usd-epsilon 1.0e-9)
 
 (defn- approx=
