@@ -106,12 +106,10 @@
                 listener/filters listener/callback listener/options]} listener-spec]
     ;; Validate capability
     (when-not (contains? capability-levels capability)
-      (throw (ex-info "Invalid capability level"
-                      {:anomaly (response/make-anomaly
-                                 :anomalies/incorrect
-                                 (str "Invalid capability level: " capability)
-                                 {:capability capability
-                                  :valid capability-levels})})))
+      (response/throw-anomaly! :anomalies/incorrect
+                               (str "Invalid capability level: " capability)
+                               {:capability capability
+                                :valid capability-levels}))
     ;; Build filter function from listener filters + capability enforcement
     (let [user-filter-fn (cond
                            (nil? filters) (constantly true)
@@ -188,19 +186,15 @@
   [stream listener-id annotation]
   (let [listener (get-listener stream listener-id)]
     (when-not listener
-      (throw (ex-info "Listener not found"
-                      {:anomaly (response/make-anomaly
-                                 :anomalies/not-found
-                                 (str "Listener not found: " listener-id)
-                                 {:listener-id listener-id})})))
+      (response/throw-anomaly! :anomalies/not-found
+                               (str "Listener not found: " listener-id)
+                               {:listener-id listener-id}))
     (when-not (capability-sufficient? (:listener/capability listener) :advise)
-      (throw (ex-info "Insufficient capability for annotation"
-                      {:anomaly (response/make-anomaly
-                                 :anomalies/forbidden
-                                 "Insufficient capability for annotation"
-                                 {:listener-id listener-id
-                                  :capability (:listener/capability listener)
-                                  :required :advise})})))
+      (response/throw-anomaly! :anomalies/forbidden
+                               "Insufficient capability for annotation"
+                               {:listener-id listener-id
+                                :capability (:listener/capability listener)
+                                :required :advise}))
     (let [event (core/annotation-created
                  stream
                  (:annotation/workflow-id annotation)
@@ -226,19 +220,15 @@
   [stream listener-id action execution-fn]
   (let [listener (get-listener stream listener-id)]
     (when-not listener
-      (throw (ex-info "Listener not found"
-                      {:anomaly (response/make-anomaly
-                                 :anomalies/not-found
-                                 (str "Listener not found: " listener-id)
-                                 {:listener-id listener-id})})))
+      (response/throw-anomaly! :anomalies/not-found
+                               (str "Listener not found: " listener-id)
+                               {:listener-id listener-id}))
     (when-not (capability-sufficient? (:listener/capability listener) :control)
-      (throw (ex-info "Insufficient capability for control action"
-                      {:anomaly (response/make-anomaly
-                                 :anomalies/forbidden
-                                 "Insufficient capability for control action"
-                                 {:listener-id listener-id
-                                  :capability (:listener/capability listener)
-                                  :required :control})})))
+      (response/throw-anomaly! :anomalies/forbidden
+                               "Insufficient capability for control action"
+                               {:listener-id listener-id
+                                :capability (:listener/capability listener)
+                                :required :control}))
     ;; Delegate to control/execute-control-action!
     (let [execute-fn (requiring-resolve 'ai.miniforge.event-stream.control/execute-control-action!)]
       (execute-fn stream action execution-fn))))
