@@ -91,7 +91,7 @@
         [(str (fs/absolutize f)) (str (fs/absolutize p))]
         (response/throw-anomaly! :anomalies/not-found
                                  (str "Could not find a single pipelines/*.edn under " f)
-                                 {:pack-dir (str f)}))
+                                 {:pack-dir (str (fs/absolutize f))}))
 
       (and (fs/regular-file? f) (str/ends-with? (str f) ".edn"))
       [nil (str (fs/absolutize f))]

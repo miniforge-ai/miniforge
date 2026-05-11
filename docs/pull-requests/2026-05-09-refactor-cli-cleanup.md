@@ -48,10 +48,12 @@ Refactor / per-component cleanup tier.
 `bases/cli/src/.../workflow_runner.clj`:
 
 - 1 throw site migrated. The shutdown-drain failure path (line 840)
-  now routes through `response/throw-anomaly!` with `:anomalies/fault`
-  carrying `:reason :event-stream-drain-failed` and the full
-  `:drain-result` in `:anomaly/data`. The user-facing stderr message
-  remains identical.
+  now routes through `response/throw-anomaly!` with `:anomalies/fault`.
+  Per `response/anomaly`'s contract, the context map is merged onto
+  the thrown anomaly map at the top level (not nested under
+  `:anomaly/data`) — so `:reason :event-stream-drain-failed` and the
+  full `:drain-result` are top-level keys in `ex-data`. The
+  user-facing stderr message remains identical.
 
 `bases/cli/test/.../anomaly/` (new):
 

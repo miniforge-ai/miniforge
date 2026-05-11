@@ -37,19 +37,28 @@
   (testing "empty pack dir with no pipelines/*.edn raises :anomalies/not-found"
     (let [tmp (fs/create-temp-dir {:prefix "cli-etl-test-"})]
       (try
-        (is (thrown-with-msg?
-             ExceptionInfo
-             #"Could not find a single pipelines/\*\.edn"
-             (@#'etl/resolve-pipeline-path (str tmp))))
+        (let [thrown (try (@#'etl/resolve-pipeline-path (str tmp))
+                          nil
+                          (catch ExceptionInfo e e))]
+          (is (some? thrown))
+          (is (re-find #"Could not find a single pipelines/\*\.edn"
+                       (.getMessage thrown)))
+          (is (= :anomalies/not-found
+                 (:anomaly/category (ex-data thrown))))
+          (is (= (str (fs/absolutize tmp))
+                 (:pack-dir (ex-data thrown)))))
         (finally
           (fs/delete-tree tmp))))))
 
 (deftest resolve-pipeline-path-nonexistent-path-throws-incorrect
   (testing "non-dir non-edn path raises :anomalies/incorrect"
-    (is (thrown-with-msg?
-         ExceptionInfo
-         #"Not a pack directory or pipeline EDN"
-         (@#'etl/resolve-pipeline-path "/no/such/thing")))))
+    (let [thrown (try (@#'etl/resolve-pipeline-path "/no/such/thing")
+                      nil
+                      (catch ExceptionInfo e e))]
+      (is (some? thrown))
+      (is (re-find #"Not a pack directory or pipeline EDN" (.getMessage thrown)))
+      (is (= :anomalies/incorrect (:anomaly/category (ex-data thrown))))
+      (is (= "/no/such/thing" (:input (ex-data thrown)))))))
 
 (deftest resolve-pipeline-path-valid-edn-returns-path
   (testing "direct pipeline EDN file returns [nil <abs-path>]"
@@ -64,26 +73,34 @@
 
 (deftest resolve-env-path-nil-throws-incorrect
   (testing "nil env raises :anomalies/incorrect"
-    (is (thrown-with-msg?
-         ExceptionInfo
-         #"missing --env"
-         (@#'etl/resolve-env-path nil nil)))))
+    (let [thrown (try (@#'etl/resolve-env-path nil nil)
+                      nil
+                      (catch ExceptionInfo e e))]
+      (is (some? thrown))
+      (is (re-find #"missing --env" (.getMessage thrown)))
+      (is (= :anomalies/incorrect (:anomaly/category (ex-data thrown)))))))
 
 (deftest resolve-env-path-name-without-pack-dir-throws-incorrect
   (testing "env name without pack-dir raises :anomalies/incorrect"
-    (is (thrown-with-msg?
-         ExceptionInfo
-         #"pass a \.edn path instead"
-         (@#'etl/resolve-env-path "prod" nil)))))
+    (let [thrown (try (@#'etl/resolve-env-path "prod" nil)
+                      nil
+                      (catch ExceptionInfo e e))]
+      (is (some? thrown))
+      (is (re-find #"pass a \.edn path instead" (.getMessage thrown)))
+      (is (= :anomalies/incorrect (:anomaly/category (ex-data thrown))))
+      (is (= "prod" (:env (ex-data thrown)))))))
 
 (deftest resolve-env-path-name-missing-in-pack-throws-not-found
   (testing "env name not found under pack-dir/envs raises :anomalies/not-found"
     (let [tmp (fs/create-temp-dir {:prefix "cli-etl-pack-"})]
       (try
-        (is (thrown-with-msg?
-             ExceptionInfo
-             #"env not found"
-             (@#'etl/resolve-env-path "prod" (str tmp))))
+        (let [thrown (try (@#'etl/resolve-env-path "prod" (str tmp))
+                          nil
+                          (catch ExceptionInfo e e))]
+          (is (some? thrown))
+          (is (re-find #"env not found" (.getMessage thrown)))
+          (is (= :anomalies/not-found (:anomaly/category (ex-data thrown))))
+          (is (= "prod" (:env (ex-data thrown)))))
         (finally
           (fs/delete-tree tmp))))))
 
