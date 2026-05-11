@@ -37,6 +37,7 @@
    [ai.miniforge.cli.main.commands.shared :as shared]
    [ai.miniforge.cli.main.display :as display]
    [ai.miniforge.cli.messages :as messages]
+   [ai.miniforge.response.interface :as response]
    [ai.miniforge.schema.interface :as schema]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -88,13 +89,17 @@
       (fs/directory? f)
       (if-let [p (single-file-under f "pipelines")]
         [(str (fs/absolutize f)) (str (fs/absolutize p))]
-        (throw (ex-info (str "Could not find a single pipelines/*.edn under " f) {})))
+        (response/throw-anomaly! :anomalies/not-found
+                                 (str "Could not find a single pipelines/*.edn under " f)
+                                 {:pack-dir (str f)}))
 
       (and (fs/regular-file? f) (str/ends-with? (str f) ".edn"))
       [nil (str (fs/absolutize f))]
 
       :else
-      (throw (ex-info (str "Not a pack directory or pipeline EDN: " pack-or-pipeline) {})))))
+      (response/throw-anomaly! :anomalies/incorrect
+                               (str "Not a pack directory or pipeline EDN: " pack-or-pipeline)
+                               {:input pack-or-pipeline}))))
 
 (defn- resolve-env-path
   "Resolve `--env`, which may be a `.edn` path or a bare env name that
@@ -103,7 +108,9 @@
   [env pack-dir]
   (cond
     (nil? env)
-    (throw (ex-info "missing --env <env.edn|name>" {}))
+    (response/throw-anomaly! :anomalies/incorrect
+                             "missing --env <env.edn|name>"
+                             {})
 
     (str/ends-with? env ".edn")
     (str (fs/absolutize env))
@@ -112,10 +119,14 @@
     (let [candidate (fs/file pack-dir "envs" (str env ".edn"))]
       (if (fs/regular-file? candidate)
         (str (fs/absolutize candidate))
-        (throw (ex-info (str "env not found: " candidate) {}))))
+        (response/throw-anomaly! :anomalies/not-found
+                                 (str "env not found: " candidate)
+                                 {:env env :candidate (str candidate)})))
 
     :else
-    (throw (ex-info (str "--env was a name but pipeline was given directly; pass a .edn path instead: " env) {}))))
+    (response/throw-anomaly! :anomalies/incorrect
+                             (str "--env was a name but pipeline was given directly; pass a .edn path instead: " env)
+                             {:env env})))
 
 (defn- resolve-pack-paths
   "Given the positional arg to `etl run` / `etl validate` and the `--env`
