@@ -1,0 +1,52 @@
+;; Mapping from our `cost-table.edn` model-id strings to the keys
+;; used by the canonical upstream pricing source (BerriAI/litellm's
+;; model_prices_and_context_window.json). Used by the
+;; refresh-cost-table ETL workflow to look up each priced model
+;; in the upstream JSON without depending on string-matching luck.
+;;
+;; Schema: {our-model-id-string upstream-litellm-key-string}
+;;
+;; When our model-id matches the upstream key directly (newer model
+;; names usually do), the mapping entry is optional — the ETL
+;; falls back to (= our-id upstream-id) and only warns when both
+;; lookups miss.
+;;
+;; To add a new priced model:
+;;   1. Add the model to cost-table.edn with a placeholder estimate.
+;;   2. Add the upstream key to this mapping (or omit if names
+;;      match).
+;;   3. Run `bb scripts/refresh-cost-table.bb` locally to verify
+;;      the lookup resolves and the prices match what you expect.
+;;   4. The next scheduled ETL run will keep it fresh.
+;;
+;; Source: https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json
+
+{:mapping/by-model-id
+ {;; Anthropic Claude. Upstream uses date-stamped ids for the
+  ;; latest revision; our table uses the friendly tier-name ids.
+  "claude-opus-4-7"           "claude-opus-4-1-20250805"
+  "claude-opus-4-6"           "claude-opus-4-20250514"
+  "claude-opus-4"             "claude-opus-4-20250514"
+  "claude-sonnet-4-6"         "claude-sonnet-4-5"
+  "claude-sonnet-4-5-20250929" "claude-sonnet-4-5"
+  "claude-sonnet-4"           "claude-sonnet-4-20250514"
+  "claude-haiku-4-5-20251001" "claude-haiku-4-5"
+  "claude-haiku"              "claude-haiku-4-5"
+
+  ;; OpenAI GPT-5 family. Codex-suffixed ids in our table map to
+  ;; the base gpt-5 pricing upstream (codex is a finetune, same
+  ;; price tier). When upstream introduces a separately-priced
+  ;; codex-mini etc., update the mapping.
+  "gpt-5.4-pro"               "gpt-5-pro"
+  "gpt-5.4"                   "gpt-5"
+  "gpt-5.3-codex"             "gpt-5"
+  "gpt-5.2-codex"             "gpt-5-mini"
+  "gpt-5.1-codex-max"         "gpt-5-mini"
+  "gpt-5.2"                   "gpt-5-mini"
+
+  ;; Google Gemini — friendly ids match upstream directly, so no
+  ;; mapping is required. Listed here for documentation:
+  ;;   "gemini-2.5-pro"        => "gemini-2.5-pro"
+  ;;   "gemini-2.5-flash"      => "gemini-2.5-flash"
+  ;;   "gemini-2.5-flash-lite" => "gemini-2.5-flash-lite"
+  }}
