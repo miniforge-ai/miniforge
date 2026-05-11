@@ -53,7 +53,8 @@
                    nil
                    (catch ExceptionInfo e e))]
       (is (some? thrown))
-      (is (= :bogus (:type (ex-data thrown)))))))
+      (is (= :bogus (:type (ex-data thrown))))
+      (is (= :anomalies/unsupported (:anomaly/category (ex-data thrown)))))))
 
 ;------------------------------------------------------------------------------ create-sink invalid configuration
 
@@ -70,4 +71,5 @@
                    nil
                    (catch ExceptionInfo e e))]
       (is (some? thrown))
-      (is (= "not-a-sink" (:config (ex-data thrown)))))))
+      (is (= "not-a-sink" (:config (ex-data thrown))))
+      (is (= :anomalies/incorrect (:anomaly/category (ex-data thrown)))))))

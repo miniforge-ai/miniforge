@@ -62,7 +62,8 @@
                    (catch ExceptionInfo e e))]
       (is (some? thrown))
       (is (= :wrong (:capability (ex-data thrown))))
-      (is (contains? (set (:valid (ex-data thrown))) :observe)))))
+      (is (contains? (set (:valid (ex-data thrown))) :observe))
+      (is (= :anomalies/incorrect (:anomaly/category (ex-data thrown)))))))
 
 ;------------------------------------------------------------------------------ submit-annotation! — listener not found
 
@@ -118,7 +119,8 @@
       (is (some? thrown))
       (is (= listener-id (:listener-id (ex-data thrown))))
       (is (= :observe (:capability (ex-data thrown))))
-      (is (= :advise (:required (ex-data thrown)))))))
+      (is (= :advise (:required (ex-data thrown))))
+      (is (= :anomalies/forbidden (:anomaly/category (ex-data thrown)))))))
 
 ;------------------------------------------------------------------------------ submit-control-action! — listener not found
 

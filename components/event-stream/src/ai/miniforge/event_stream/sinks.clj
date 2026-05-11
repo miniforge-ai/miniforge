@@ -292,10 +292,11 @@
 
    Returns: Sink function (fn [event] -> nil)"
   [opts]
-  (let [_url (or (:url opts)
+  (let [safe-opts (dissoc opts :api-key :token :secret :password)
+        _url (or (:url opts)
                  (response/throw-anomaly! :anomalies/incorrect
                                           "Fleet sink requires :url"
-                                          {:opts opts}))
+                                          {:opts safe-opts}))
         _api-key (:api-key opts)
         batch-size (:batch-size opts 10)
         flush-interval-ms (:flush-interval-ms opts 5000)
