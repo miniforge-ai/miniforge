@@ -38,41 +38,43 @@
 
 (deftest register-pack-invalid-schema-throws-anomaly
   (testing "schema-invalid pack raises :anomalies/incorrect"
-    (let [reg (new-registry)]
-      (is (thrown-with-msg?
-           ExceptionInfo
-           #"Invalid pack schema"
-           (registry/register-pack reg {:pack/id :bad-pack}))))))
+    (let [reg    (new-registry)
+          thrown (try (registry/register-pack reg {:pack/id :bad-pack}) nil (catch ExceptionInfo e e))]
+      (is (some? thrown))
+      (is (re-find #"Invalid pack schema" (.getMessage thrown)))
+      (is (= :anomalies/incorrect (:anomaly/category (ex-data thrown)))))))
 
 (deftest register-pack-anomaly-carries-pack-id
-  (testing "anomaly ex-data carries :pack-id and :errors"
+  (testing "anomaly ex-data carries :pack-id, :errors, and :anomalies/incorrect category"
     (let [reg (new-registry)
           thrown (try
                    (registry/register-pack reg {:pack/id :bad})
                    nil
                    (catch ExceptionInfo e e))]
       (is (some? thrown))
-      (is (= :bad (:pack-id (ex-data thrown)))))))
+      (is (= :bad (:pack-id (ex-data thrown))))
+      (is (contains? (ex-data thrown) :errors))
+      (is (= :anomalies/incorrect (:anomaly/category (ex-data thrown)))))))
 
 ;------------------------------------------------------------------------------ import-pack — unsupported source
 
 (deftest import-pack-string-source-throws-unsupported
   (testing "string source raises :anomalies/unsupported"
-    (let [reg (new-registry)]
-      (is (thrown-with-msg?
-           ExceptionInfo
-           #"File/URL import not implemented"
-           (registry/import-pack reg "/path/to/pack.edn"))))))
+    (let [reg    (new-registry)
+          thrown (try (registry/import-pack reg "/path/to/pack.edn") nil (catch ExceptionInfo e e))]
+      (is (some? thrown))
+      (is (re-find #"File/URL import not implemented" (.getMessage thrown)))
+      (is (= :anomalies/unsupported (:anomaly/category (ex-data thrown)))))))
 
 ;------------------------------------------------------------------------------ export-pack — pack not found
 
 (deftest export-pack-not-found-throws-anomaly
   (testing "missing pack raises :anomalies/not-found"
-    (let [reg (new-registry)]
-      (is (thrown-with-msg?
-           ExceptionInfo
-           #"Pack not found"
-           (registry/export-pack reg :missing "1.0.0" :edn))))))
+    (let [reg    (new-registry)
+          thrown (try (registry/export-pack reg :missing "1.0.0" :edn) nil (catch ExceptionInfo e e))]
+      (is (some? thrown))
+      (is (re-find #"Pack not found" (.getMessage thrown)))
+      (is (= :anomalies/not-found (:anomaly/category (ex-data thrown)))))))
 
 ;------------------------------------------------------------------------------ export-pack — unsupported / unknown formats
 
