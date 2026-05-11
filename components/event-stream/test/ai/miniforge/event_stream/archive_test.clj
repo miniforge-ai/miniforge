@@ -19,7 +19,7 @@
 (ns ai.miniforge.event-stream.archive-test
   "Tests for the BD-2b sub-3b atomic archive operation."
   (:require
-   [clojure.test :refer [deftest is testing]]
+   [clojure.test :refer [deftest is]]
    [clojure.java.io :as io]
    [ai.miniforge.event-stream.archive :as archive]
    [ai.miniforge.event-stream.manifest :as manifest]

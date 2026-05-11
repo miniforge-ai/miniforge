@@ -55,8 +55,7 @@
    [clojure.java.io :as io])
   (:import
    [java.io File RandomAccessFile]
-   [java.nio.file Files Path StandardCopyOption]
-   [java.nio.file.attribute FileAttribute]))
+   [java.nio.file Files StandardCopyOption]))
 
 ;; STRATIFIED-DESIGN LAYERING
 ;;
@@ -211,7 +210,7 @@
    `recover-incomplete-archive!` — running archive-workflow! on a
    directory whose manifest is already `:archiving` resumes from
    step 5 rather than re-staging from step 3."
-  [workflow-id & [{:keys [snapshot-watermark base-dir] :as opts}]]
+  [workflow-id & [{:keys [base-dir] :as opts}]]
   (let [base       (or base-dir (sinks/default-events-dir))
         live-dir   (sinks/live-workflow-dir base workflow-id)
         archived   (sinks/archived-workflow-dir base workflow-id)

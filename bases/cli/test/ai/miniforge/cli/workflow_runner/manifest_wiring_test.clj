@@ -24,7 +24,7 @@
    orchestration: lifecycle ordering, idempotent terminal marking,
    nil-event-stream short-circuit, exception-tolerant cleanup."
   (:require
-   [clojure.test :refer [deftest is testing]]
+   [clojure.test :refer [deftest is]]
    [ai.miniforge.cli.workflow-runner :as sut]
    [ai.miniforge.event-stream.interface :as es]))
 

@@ -34,6 +34,7 @@
    parsed structure and turns those strings back into keywords /
    stripped strings so downstream code can use keyword accessors."
   (:require
+   [ai.miniforge.event-stream.sinks :as sinks]
    [cheshire.core :as json]
    [clojure.java.io :as io]))
 
@@ -102,16 +103,6 @@
                      (catch Exception _e nil))))
            vec))))
 
-(defn- workflow-id-segment
-  "Normalize a workflow-id into a path segment safe across operating
-   systems (keywords drop the colon). Mirrors the writer-side helper
-   in `sinks.clj` — duplicated here so the reader has no dependency
-   on the sinks namespace."
-  ^String [workflow-id]
-  (if (keyword? workflow-id)
-    (name workflow-id)
-    (str workflow-id)))
-
 (defn workflow-events-dir
   "Resolve the on-disk events directory for `workflow-id` under
    `base-dir`. Probes three locations in priority order and returns
@@ -124,11 +115,12 @@
 
    Returns the matching `java.io.File`, or nil if none exist."
   ^java.io.File [base-dir workflow-id]
-  (let [segment  (workflow-id-segment workflow-id)
-        base     (io/file (str base-dir))
-        archived (io/file base "archived" segment)
-        live     (io/file base "live" segment)
-        legacy   (io/file base segment)]
+  (let [base     (io/file (str base-dir))
+        archived (sinks/archived-workflow-dir base workflow-id)
+        live     (sinks/live-workflow-dir base workflow-id)
+        legacy   (io/file base (if (keyword? workflow-id)
+                                 (name workflow-id)
+                                 (str workflow-id)))]
     (cond
       (.exists archived) archived
       (.exists live)     live
