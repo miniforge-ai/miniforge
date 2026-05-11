@@ -91,8 +91,16 @@
   "Fields the constructor / updater own — callers cannot override them
    directly. They're recomputed from `content-projection` so the
    relationship between content and revision identity stays
-   tamper-evident."
-  #{:zettel/digest :zettel/revision-id})
+   tamper-evident.
+
+   `:zettel/trust-level` is owned by the constructor (defaults to
+   `:untrusted`) + `update-zettel` (resets to `:untrusted` on
+   revision rotation). Only `knowledge.learning/promote-learning`
+   stamps `:trusted`, and it does so via `store/put-zettel`
+   directly — bypassing this updater on purpose, which is what
+   makes a re-promotion an explicit step rather than a side
+   effect of an edit."
+  #{:zettel/digest :zettel/revision-id :zettel/trust-level})
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Zettel creation and manipulation
@@ -137,13 +145,18 @@
              fleet/oss-version]
       :or   {author "user"}}]
   (let [now    (java.util.Date.)
-        zettel (cond-> {:zettel/id      (random-uuid)
-                        :zettel/uid     uid
-                        :zettel/title   title
-                        :zettel/content content
-                        :zettel/type    type
-                        :zettel/created now
-                        :zettel/author  author}
+        zettel (cond-> {:zettel/id          (random-uuid)
+                        :zettel/uid         uid
+                        :zettel/title       title
+                        :zettel/content     content
+                        :zettel/type        type
+                        :zettel/created     now
+                        :zettel/author      author
+                        ;; Decision 6 + 8 (#836) — every fresh zettel
+                        ;; starts untrusted. Only `learning/promote-
+                        ;; learning` stamps `:trusted`; bypassing
+                        ;; create-zettel doesn't grant trust.
+                        :zettel/trust-level :untrusted}
                  dewey      (assoc :zettel/dewey dewey)
                  (seq tags) (assoc :zettel/tags (vec tags))
                  (seq links) (assoc :zettel/links (vec links))
@@ -157,32 +170,56 @@
 (defn update-zettel
   "Update a zettel with new values, setting modified timestamp.
 
-   `:zettel/digest` and `:zettel/revision-id` are DERIVED — any value
-   the caller supplies for either is dropped before the merge.
-   `update-zettel` always re-stamps the result via `stamp-revision`,
-   which is idempotent on unchanged content (same content → same
-   digest → same revision-id) and rotates the revision when a
-   content-bearing field changes (`:zettel/uid` / `:zettel/title` /
-   `:zettel/content` / `:zettel/type` / `:zettel/dewey` /
-   `:zettel/tags` / `:zettel/links` / `:zettel/source`). Two
-   consequences worth pinning:
+   `:zettel/digest`, `:zettel/revision-id`, and `:zettel/trust-level`
+   are DERIVED — any value the caller supplies for any of them is
+   dropped before the merge. `update-zettel` always re-stamps the
+   result via `stamp-revision`, which is idempotent on unchanged
+   content (same content → same digest → same revision-id) and
+   rotates the revision when a content-bearing field changes
+   (`:zettel/uid` / `:zettel/title` / `:zettel/content` /
+   `:zettel/type` / `:zettel/dewey` / `:zettel/tags` /
+   `:zettel/links` / `:zettel/source`). Three consequences worth
+   pinning:
 
      - Operational-metadata-only changes (privacy classification,
        share scope, oss-version, etc.) leave the revision identity
-       intact. Decision 6 attaches trust to the immutable revision,
-       so changing operational policy must NOT silently migrate
-       trust onto a new revision.
+       intact AND preserve the existing `:zettel/trust-level`.
+       Decision 6 attaches trust to the immutable revision, so
+       changing operational policy must NOT silently migrate trust
+       onto a new revision — and must not drop trust on the
+       current revision either.
+
+     - When a content-bearing field rotates the revision-id,
+       `:zettel/trust-level` resets to `:untrusted`. The new
+       revision was never reviewed, so no trust attaches to it.
+       Re-promoting (`learning/promote-learning`) is the only path
+       back to `:trusted`, and it operates via `store/put-zettel`
+       directly so the producer can't smuggle trust through this
+       updater (#836).
 
      - A legacy zettel without `:zettel/digest` / `:zettel/revision-id`
-       receives the stamped fields on its first update — the system
-       converges on a fully-stamped state without an explicit
-       backfill pass."
+       receives the stamped fields on its first update; legacy
+       zettels also receive `:zettel/trust-level :untrusted` on
+       first update, so the system converges on a fully-stamped
+       state without an explicit backfill pass."
   [zettel changes]
-  (let [sanitised (apply dissoc changes derived-fields)
+  (let [old-rev   (:zettel/revision-id zettel)
+        old-trust (:zettel/trust-level zettel)
+        sanitised (apply dissoc changes derived-fields)
         merged    (-> zettel
                       (merge sanitised)
-                      (assoc :zettel/modified (java.util.Date.)))]
-    (stamp-revision merged)))
+                      (assoc :zettel/modified (java.util.Date.)))
+        stamped   (stamp-revision merged)
+        new-rev   (:zettel/revision-id stamped)
+        ;; Trust default for legacy zettels (no :zettel/trust-level
+        ;; field present yet) is :untrusted — same convergence
+        ;; behaviour the digest/revision-id backfill already has.
+        ;; Content rotation always resets to :untrusted.
+        next-trust (cond
+                     (and (some? old-rev) (not= old-rev new-rev)) :untrusted
+                     (some? old-trust)                            old-trust
+                     :else                                        :untrusted)]
+    (assoc stamped :zettel/trust-level next-trust)))
 
 (defn zettel-summary
   "Extract a lightweight summary from a zettel."

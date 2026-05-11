@@ -143,18 +143,28 @@
 (defn promote-learning
   "Promote a learning to a rule after validation.
 
-   This upgrades the zettel type from :learning to :rule,
-   indicating it has been validated and should be treated as authoritative.
+   This upgrades the zettel type from `:learning` to `:rule` AND
+   stamps `:zettel/trust-level :trusted` on the promoted revision
+   (Decision 6 + 8; closes #836). The trust attaches to the
+   IMMUTABLE revision: a subsequent `update-zettel` that rotates
+   any content-bearing field resets `:zettel/trust-level` back to
+   `:untrusted`. Re-promotion is the only path back to `:trusted`.
+
+   The store path bypasses `update-zettel` on purpose — `:zettel/
+   trust-level` is in the updater's `derived-fields` set, so a
+   producer can't ride trust onto a new revision through the edit
+   path. Promotion remains an explicit, store-direct gesture.
 
    Arguments:
    - store       - Knowledge store
    - learning-id - UUID of the learning to promote
    - opts        - Optional map:
-     - :new-uid   - New UID for the rule (generates one if not provided)
-     - :dewey     - Assign Dewey classification
+     - :new-uid     - New UID for the rule (generates one if not provided)
+     - :dewey       - Assign Dewey classification
      - :reviewed-by - Who reviewed/approved this
 
-   Returns the updated zettel as a rule."
+   Returns the updated zettel as a rule (with `:zettel/trust-level
+   :trusted`)."
   [knowledge-store learning-id & [{:keys [new-uid dewey reviewed-by]}]]
   (when-let [learning (store/get-zettel-by-id knowledge-store learning-id)]
     (when (= :learning (:zettel/type learning))
@@ -173,13 +183,22 @@
                                       :source/promoted-from (:zettel/uid learning))
                                (cond-> reviewed-by (assoc :source/reviewed-by reviewed-by)))
 
-            ;; Create updated zettel
+            ;; Build the change set the rotation engine needs and
+            ;; route through `zettel/update-zettel` so the digest +
+            ;; revision-id re-stamp on the new content shape (type
+            ;; flip + uid + source + optional dewey are all
+            ;; content-bearing). Then assoc `:trusted` AFTER
+            ;; update-zettel returns — update-zettel resets trust
+            ;; to `:untrusted` on rotation by design (#836); the
+            ;; promotion gesture is the one path allowed to
+            ;; override that on the new revision.
+            changes (cond-> {:zettel/type   :rule
+                             :zettel/uid    rule-uid
+                             :zettel/source updated-source}
+                      dewey (assoc :zettel/dewey dewey))
             rule (-> learning
-                     (assoc :zettel/type :rule
-                            :zettel/uid rule-uid
-                            :zettel/source updated-source
-                            :zettel/modified (java.util.Date.))
-                     (cond-> dewey (assoc :zettel/dewey dewey)))]
+                     (zettel/update-zettel changes)
+                     (assoc :zettel/trust-level :trusted))]
 
         ;; Delete old learning and store as rule
         (store/delete-zettel knowledge-store learning-id)

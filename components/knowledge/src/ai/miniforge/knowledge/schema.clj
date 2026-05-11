@@ -108,6 +108,27 @@
                     (`:fleet/shareable true` is a hard reject upstream)."
   [:enum :public-org :internal :restricted :secret])
 
+(def TrustLevel
+  "Trust attached to a specific zettel revision (Decision 6 + 8 of
+   miniforge-fleet's Phase E plan; closes the gap filed at
+   miniforge-ai/miniforge#836).
+
+     :untrusted — default. Has not passed (or no longer passes)
+                  the promotion review.
+     :trusted   — set by `knowledge.learning/promote-learning` on the
+                  promoted revision. RESET to `:untrusted`
+                  automatically by `knowledge.zettel/update-zettel`
+                  whenever a content-bearing field rotates the
+                  revision-id, so a content-edit on a trusted zettel
+                  cannot ride the prior revision's trust onto new
+                  content. Operational-metadata-only updates
+                  preserve the existing trust value (revision-id
+                  doesn't rotate).
+
+   Fleet's producer-side `share-learning` gate keys off this rather
+   than the looser `:zettel/type :rule` proxy."
+  [:enum :untrusted :trusted])
+
 ;; ----------------------------------------------------------------------------
 
 (def Zettel
@@ -152,6 +173,13 @@
    [:fleet/shareable        {:optional true} boolean?]
    [:fleet/share-scope      {:optional true} ShareScope]
    [:privacy/classification {:optional true} Classification]
+
+   ;; Per-revision trust (Decision 6 + 8; closes #836). Optional
+   ;; for legacy-zettel round-trip; new zettels get `:untrusted` by
+   ;; default at `create-zettel`, and `update-zettel` resets to
+   ;; `:untrusted` on any content rotation. Only
+   ;; `learning/promote-learning` stamps `:trusted`.
+   [:zettel/trust-level {:optional true} TrustLevel]
 
    ;; Version provenance (Decision 13). Pin to the OSS version that
    ;; produced the zettel; Fleet's E.4 quarantine gate + E.9 migration

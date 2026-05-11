@@ -58,6 +58,10 @@
 ;; `knowledge.schema` directly (Polylith dependency rule).
 (def ShareScope     schema/ShareScope)
 (def Classification schema/Classification)
+;; Per-revision trust enum (closes #836). Surfaced here so fleet's
+;; producer-side share-learning gate can reference it without
+;; reaching into `knowledge.schema` directly.
+(def TrustLevel     schema/TrustLevel)
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Store creation
