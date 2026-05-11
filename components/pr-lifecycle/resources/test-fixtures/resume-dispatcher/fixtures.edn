@@ -1,0 +1,27 @@
+;; Test fixtures for resume-dispatcher tests.
+;; Loaded once at test-namespace load via clojure.edn/read-string —
+;; matches the pattern used by other components/<comp>/test-resources/
+;; entries (see pipeline-config, pipeline-pack, workflow).
+;;
+;; Per the operator review on #848: keeping fixture data in EDN
+;; rather than inline source means future fixture tweaks (new
+;; channel kinds, additional listener fields, alternate PR shapes)
+;; don't require changing the test source.
+
+{:pr-url "https://github.com/o/r/pull/42"
+
+ :base-listener-params
+ {:pr/url         "https://github.com/o/r/pull/42"
+  :pr/repo-id     "o/r"
+  :pr/number      42
+  :agent/id       "agent-A"
+  :runtime        :claude-cli
+  :resume-channel {:channel/kind   :webhook
+                   :channel/target "https://hooks.example.com/agent-A"}
+  :registered-by  :authoring-agent}
+
+ :merged-pr
+ {:pr/url       "https://github.com/o/r/pull/42"
+  :merge/sha    "abc1234deadbeef"
+  :merged-at    #inst "2026-05-10T20:54:45.000-00:00"
+  :diff-summary "+50 / -12 across 3 files"}}
