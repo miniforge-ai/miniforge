@@ -151,7 +151,7 @@
               wf-id (random-uuid)
               event (sample-event {:workflow/id wf-id})]
           (sink event)
-          (let [wf-dir (io/file dir (str wf-id))
+          (let [wf-dir (io/file dir "live" (str wf-id))
                 files (list-files wf-dir)]
             (is (= 1 (count files)))
             (let [parsed (read-transit-json (slurp (first files)))]
@@ -165,7 +165,7 @@
               wf-id (random-uuid)]
           (sink (sample-event {:workflow/id wf-id}))
           (sink (sample-event {:workflow/id wf-id :event/type :workflow/completed}))
-          (let [wf-dir (io/file dir (str wf-id))
+          (let [wf-dir (io/file dir "live" (str wf-id))
                 files (sort-by #(.getName %) (list-files wf-dir))]
             (is (= 2 (count files)))
             (let [events (mapv #(read-transit-json (slurp %)) files)
@@ -192,7 +192,7 @@
               wf-id (random-uuid)
               event (sample-event {:workflow/id wf-id})]
           (sink event)
-          (let [wf-dir (io/file dir (str wf-id))
+          (let [wf-dir (io/file dir "live" (str wf-id))
                 files (list-files wf-dir)
                 content (slurp (first files))]
             ;; Must parse without exception
@@ -207,7 +207,7 @@
                                    :execution/started-at (java.time.Instant/now)
                                    :timestamp (java.time.Instant/now)})]
           (sink event)
-          (let [wf-dir (io/file dir (str wf-id))
+          (let [wf-dir (io/file dir "live" (str wf-id))
                 files (list-files wf-dir)
                 content (slurp (first files))
                 parsed (read-transit-json content)]
@@ -397,11 +397,14 @@
   (testing "file-sink logs write failures to stderr instead of swallowing"
     (with-temp-dir
       (fn [dir]
-        ;; Create a regular file at {dir}/{wf-id} so that when the sink tries to
-        ;; create a subdirectory there (.mkdirs returns false), spit throws an
-        ;; IOException trying to write a child path of a regular file.
+        ;; Create a regular file at {dir}/live/{wf-id} so that when the
+        ;; sink tries to create a subdirectory there (.mkdirs returns
+        ;; false), spit throws an IOException trying to write a child
+        ;; path of a regular file. Path follows the BD-2b sub-3b
+        ;; `{base}/live/{wid}/` layout the file sink writes to.
         (let [wf-id (random-uuid)
-              collision (io/file dir (str wf-id))]
+              _     (.mkdirs (io/file dir "live"))
+              collision (io/file dir "live" (str wf-id))]
           (spit (str collision) "not a dir")
           (let [sink (sinks/file-sink {:base-dir dir})
                 event (sample-event {:workflow/id wf-id})

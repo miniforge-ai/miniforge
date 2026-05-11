@@ -48,9 +48,11 @@
 
 ;;------------------------------------------------------------------------------ Internal helpers
 
-(defn- default-events-dir
-  "Return the default events directory (~/.miniforge/events)."
-  []
+(defn default-events-dir
+  "Return the default events directory (~/.miniforge/events). Public
+   so the BD-2b sub-3b archive module and the cleanup pass (sub-3c)
+   can resolve the same root the file sink writes under."
+  ^java.io.File []
   (io/file (config/miniforge-home) "events"))
 
 (defn- now-sortable-str
@@ -135,25 +137,71 @@
     (name workflow-id)
     (str workflow-id)))
 
-(defn workflow-dir
-  "Return the per-workflow directory under `base-dir` (default
-   `~/.miniforge/events`). Canonical path for `{base-dir}/{workflow-id}/`
-   — used by the file sink for event files and by the manifest module
-   (BD-2b sub-2) for `manifest.json`. Both reference the same path so
-   they don't drift if the layout ever changes (sub-3b will introduce
-   `live/{workflow-id}/`)."
+(def ^:const ^String live-subdir
+  "Subdirectory under `default-events-dir` where in-flight workflows
+   write their events + manifest. BD-2b sub-3b introduces this split
+   from the previous flat layout so the archive operation can do an
+   atomic `mv live/{wid} → archived/{wid}` on the same filesystem."
+  "live")
+
+(def ^:const ^String archived-subdir
+  "Subdirectory under `default-events-dir` where the BD-2b sub-3b
+   archive operation moves workflows that have reached a terminal
+   status. Sub-3c reaps tail events from here while preserving the
+   manifest + snapshot per the `:tombstoned` state."
+  "archived")
+
+(defn live-dir
+  "Return the `{base-dir}/live/` directory that holds in-flight
+   workflows. Public so the archive module and cleanup pass can scan
+   it on boot for recovery / cleanup."
+  (^java.io.File [] (live-dir (default-events-dir)))
+  (^java.io.File [base-dir] (io/file base-dir live-subdir)))
+
+(defn archived-dir
+  "Return the `{base-dir}/archived/` directory that holds workflows
+   whose archive completed via BD-2b sub-3b's atomic move."
+  (^java.io.File [] (archived-dir (default-events-dir)))
+  (^java.io.File [base-dir] (io/file base-dir archived-subdir)))
+
+(defn live-workflow-dir
+  "Return `{base-dir}/live/{workflow-id}/`. Canonical path for an
+   in-flight workflow's event files + manifest."
   (^java.io.File [workflow-id]
-   (workflow-dir (default-events-dir) workflow-id))
+   (live-workflow-dir (default-events-dir) workflow-id))
   (^java.io.File [base-dir workflow-id]
-   (io/file base-dir (workflow-id-segment workflow-id))))
+   (io/file (live-dir base-dir) (workflow-id-segment workflow-id))))
+
+(defn archived-workflow-dir
+  "Return `{base-dir}/archived/{workflow-id}/`. The destination of
+   the BD-2b sub-3b atomic archive operation."
+  (^java.io.File [workflow-id]
+   (archived-workflow-dir (default-events-dir) workflow-id))
+  (^java.io.File [base-dir workflow-id]
+   (io/file (archived-dir base-dir) (workflow-id-segment workflow-id))))
+
+(defn workflow-dir
+  "Return the per-workflow directory for an in-flight workflow. As of
+   BD-2b sub-3b this is an alias for `live-workflow-dir` —
+   `{base-dir}/live/{workflow-id}/`. The file sink for event files
+   and the manifest module (sub-2) both reference the same path so
+   archival's `mv live → archived` rename moves them together."
+  (^java.io.File [workflow-id]
+   (live-workflow-dir workflow-id))
+  (^java.io.File [base-dir workflow-id]
+   (live-workflow-dir base-dir workflow-id)))
 
 (defn event-file-path
   "Return a java.io.File for a new event file in the per-workflow subdirectory.
    Creates the subdirectory if needed. Filename derives from `event`'s
    `:event/id` and `:event/sequence-number` (BD-2b filename grammar).
 
-   File layout: {base-dir}/{workflow-id}/{event-id-hex16}__{seq:012d}.transit.json
-                (or legacy {timestamp}-{uuid}.json for non-snowflake streams).
+   File layout (BD-2b sub-3b):
+     {base-dir}/live/{workflow-id}/{event-id-hex16}__{seq:012d}.transit.json
+                                  (or legacy {timestamp}-{uuid}.json for
+                                   non-snowflake streams).
+   The archive operation moves the whole `live/{wid}/` directory to
+   `archived/{wid}/` on terminal status.
 
    Arguments:
      base-dir    - Base directory (default: ~/.miniforge/events)
@@ -162,7 +210,7 @@
   ([workflow-id event]
    (event-file-path (default-events-dir) workflow-id event))
   ([base-dir workflow-id event]
-   (new-event-file-path (io/file base-dir (workflow-id-segment workflow-id)) event)))
+   (new-event-file-path (live-workflow-dir base-dir workflow-id) event)))
 
 (defn operator-event-file-path
   "Return a java.io.File for a new event file in the operator subdirectory.

@@ -164,6 +164,54 @@
         (is (nil? (sut/finish-workflow-manifest! handle))
             "stop-heartbeat! throw must not propagate")))))
 
+;------------------------------------------------------------------------------ archive-workflow-manifest!
+
+(deftest archive-workflow-manifest!-no-op-when-marked?-false
+  ;; If mark-manifest-terminal! never wrote (manifest absent or no
+  ;; event stream), there's nothing to archive — the archive op
+  ;; would error on the missing manifest. Skip in that case.
+  (let [archive-calls (atom [])]
+    (with-redefs [sut/archive-fn (fn [_]
+                                   (fn [& args]
+                                     (swap! archive-calls conj args)))]
+      (let [handle {:dir (java.io.File. "/tmp/x") :marked? (atom false)}]
+        (sut/archive-workflow-manifest! handle :wid)
+        (is (empty? @archive-calls)
+            "no archive call when marked? is false")))))
+
+(deftest archive-workflow-manifest!-no-op-when-dir-nil
+  ;; nil dir means dashboard-only run; no manifest to archive.
+  (let [archive-calls (atom [])]
+    (with-redefs [sut/archive-fn (fn [_]
+                                   (fn [& args]
+                                     (swap! archive-calls conj args)))]
+      (sut/archive-workflow-manifest! {:dir nil :marked? (atom true)} :wid)
+      (is (empty? @archive-calls)))))
+
+(deftest archive-workflow-manifest!-invokes-archive-workflow!
+  (let [archive-calls (atom [])]
+    (with-redefs [sut/archive-fn (fn [_]
+                                   (fn [& args]
+                                     (swap! archive-calls conj args)))]
+      (sut/archive-workflow-manifest!
+       {:dir (java.io.File. "/tmp/x") :marked? (atom true)}
+       :wid)
+      (is (= [[:wid]] @archive-calls)
+          "archive-workflow! called once with the workflow id"))))
+
+(deftest archive-workflow-manifest!-swallows-archive-failures
+  ;; Per the docstring, archive failures must not propagate — the
+  ;; boot-time recovery pass picks up half-finished archives. A
+  ;; failing archive should log to stderr and return nil.
+  (with-redefs [sut/archive-fn (fn [_]
+                                 (fn [& _]
+                                   (throw (RuntimeException. "rename failed"))))]
+    (binding [*err* (java.io.PrintWriter. (java.io.StringWriter.))]
+      (is (nil? (sut/archive-workflow-manifest!
+                 {:dir (java.io.File. "/tmp/x") :marked? (atom true)}
+                 :wid))
+          "archive exception must not propagate"))))
+
 (deftest finish-workflow-manifest!-restores-interrupt-flag
   ;; stop-heartbeat! raises InterruptedException via awaitTermination.
   ;; Swallowing it without restoring the thread's interrupt flag
