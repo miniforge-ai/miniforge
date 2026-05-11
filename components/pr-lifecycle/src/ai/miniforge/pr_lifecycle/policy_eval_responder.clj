@@ -49,6 +49,7 @@
    [ai.miniforge.pr-lifecycle.github :as github]
    [babashka.fs :as fs]
    [babashka.process :as process]
+   [clojure.java.io :as io]
    [clojure.string :as str]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -135,36 +136,92 @@
 ;------------------------------------------------------------------------------ Layer 2
 ;; Fix-set materialization (file I/O)
 
-(defn- read-lines
-  [path]
-  (vec (str/split-lines (slurp path))))
+(defn- safe-worktree-path
+  "Resolve `relative-path` under `worktree-root`. Returns the
+   canonical absolute path string when the target stays inside the
+   worktree root, or returns nil when `relative-path` escapes
+   (path-traversal guard).
 
-(defn- write-lines!
-  [path lines]
-  (spit path (str/join "\n" lines)))
+   Three layers of defense:
+   1. Syntactic — reject absolute paths (leading `/`) and any
+      `..`-bearing segments up front. Java's `File(parent, child)`
+      constructor converts absolute children into relative ones,
+      so a `getCanonicalPath` check alone wouldn't catch
+      `/etc/passwd` (it'd resolve to `<worktree>/etc/passwd`).
+   2. Canonicalization — resolve symlinks and `.` segments via
+      `getCanonicalPath`.
+   3. Containment — require the canonical target to live under
+      the canonical worktree root."
+  [worktree-root relative-path]
+  (try
+    (let [path-str (str relative-path)]
+      (cond
+        (str/blank? path-str)
+        nil
+
+        ;; Layer 1: syntactic rejection. Absolute paths or any
+        ;; ../ component bail before File-API canonicalization.
+        (str/starts-with? path-str "/")
+        nil
+
+        (some #{".."} (str/split path-str #"[/\\\\]"))
+        nil
+
+        :else
+        (let [root   (.getCanonicalPath (io/file (str worktree-root)))
+              target (.getCanonicalPath (io/file (str worktree-root) path-str))]
+          (when (str/starts-with? target (str root java.io.File/separator))
+            target))))
+    (catch java.io.IOException _ nil)
+    (catch SecurityException _ nil)))
+
+(defn- read-content
+  "Slurp `path` and return `{:lines <vec> :trailing-newline? <bool>}`.
+   Preserves trailing-newline info so round-trips don't drop the final `\\n`
+   or silently normalize CRLF."
+  [path]
+  (let [content  (slurp path)
+        trailing (str/ends-with? content "\n")
+        lines    (vec (str/split-lines content))]
+    {:lines lines :trailing-newline? trailing}))
+
+(defn- write-content!
+  "Join `lines` with `\\n`, append trailing `\\n` when `trailing-newline?`
+   is true, and write to `path`."
+  [path lines trailing-newline?]
+  (spit path (cond-> (str/join "\n" lines)
+               trailing-newline? (str "\n"))))
 
 (defn apply-single-line-replacement!
   "Replace line `line-number` (1-indexed, matching GitHub comment
    line semantics) in `worktree-path/relative-path` with
    `replacement`. Returns DAG result with `{:path :line :before :after}`
-   on success.
+   on success, or `{:path :line :status :already-applied}` when
+   `before == replacement` (idempotency guard — caller should not
+   include this in the commit path).
 
    Fails with typed errors when:
+   - `relative-path` escapes the worktree root (`:policy-eval/path-traversal`)
    - the file doesn't exist (`:policy-eval/file-not-found`)
    - the line number is out of range (`:policy-eval/line-out-of-range`)
    - the read or write throws (`:policy-eval/io-failed`)"
   [worktree-path relative-path line-number replacement]
-  (let [abs (str (fs/path worktree-path relative-path))]
-    (try
+  (try
+    (let [abs (safe-worktree-path worktree-path relative-path)]
       (cond
+        (nil? abs)
+        (dag/err :policy-eval/path-traversal
+                 (str "relative-path escapes worktree root: " relative-path)
+                 {:path relative-path :worktree-path (str worktree-path)})
+
         (not (fs/exists? abs))
         (dag/err :policy-eval/file-not-found
                  (str "file " abs " not present in worktree")
                  {:path relative-path})
 
         :else
-        (let [lines (read-lines abs)
-              idx   (dec line-number)]
+        (let [{:keys [lines trailing-newline?]} (read-content abs)
+              idx (dec line-number)]
           (cond
             (or (neg? idx) (>= idx (count lines)))
             (dag/err :policy-eval/line-out-of-range
@@ -174,15 +231,18 @@
 
             :else
             (let [before (nth lines idx)
-                  after  replacement
-                  next-lines (assoc lines idx after)]
-              (write-lines! abs next-lines)
-              (dag/ok {:path relative-path :line line-number
-                       :before before :after after})))))
-      (catch Throwable e
-        (dag/err :policy-eval/io-failed
-                 (str "failed to apply fix to " abs ": " (.getMessage e))
-                 {:path relative-path :line line-number})))))
+                  after  replacement]
+              (if (= before after)
+                (dag/ok {:path relative-path :line line-number
+                         :status :already-applied :before before :after after})
+                (do
+                  (write-content! abs (assoc lines idx after) trailing-newline?)
+                  (dag/ok {:path relative-path :line line-number
+                           :before before :after after}))))))))
+    (catch Throwable e
+      (dag/err :policy-eval/io-failed
+               (str "failed to apply fix to " relative-path ": " (.getMessage e))
+               {:path relative-path :line line-number}))))
 
 (defn materialize-fix!
   "Apply one planned `:to-apply` entry's suggested-fix to disk.
@@ -326,12 +386,17 @@
   (let [policy-comments (filterv policy-eval-comment? comments)
         plan            (plan-fixes policy-comments)
         results         (mapv #(materialize-fix! worktree-path %) (:to-apply plan))
-        applied-ok      (filter dag/ok? results)
+        ok-results      (filter dag/ok? results)
+        ;; :already-applied no-ops must not enter the commit path
+        applied-ok      (filter #(not= :already-applied (-> % :data :status)) ok-results)
+        noop-ok         (filter #(= :already-applied (-> % :data :status)) ok-results)
         applied         (mapv :data applied-ok)
+        already-applied (mapv :data noop-ok)
         failed-to-apply (mapv :error (filter (complement dag/ok?) results))]
     (cond
       (empty? applied)
       (dag/ok {:applied         []
+               :already-applied already-applied
                :failed-to-apply failed-to-apply
                :escalated       (:to-escalate plan)
                :skipped         (:to-skip plan)
@@ -346,6 +411,7 @@
           (let [{:keys [commit-sha pushed?]} (:data push-r)
                 replies (reply-and-resolve-fixed! worktree-path pr-number commit-sha applied)]
             (dag/ok {:applied         applied
+                     :already-applied already-applied
                      :failed-to-apply failed-to-apply
                      :escalated       (:to-escalate plan)
                      :skipped         (:to-skip plan)

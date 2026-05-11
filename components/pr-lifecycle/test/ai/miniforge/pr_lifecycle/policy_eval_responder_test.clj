@@ -173,6 +173,44 @@
     (is (= :policy-eval/line-out-of-range (get-in r [:error :code])))
     (is (= 999 (get-in r [:error :data :line])))))
 
+(deftest apply-single-line-replacement-rejects-path-traversal
+  (testing "absolute paths + ..-segments are rejected before any file I/O"
+    (write-file! "src/inside.clj" "ok\n")
+    (doseq [bad ["/etc/passwd"
+                 "../../../etc/passwd"
+                 "src/../../../escape.clj"]]
+      (let [r (sut/apply-single-line-replacement! *worktree* bad 1 "(x)")]
+        (is (not (dag/ok? r)) (str "should reject " bad))
+        (is (= :policy-eval/path-traversal (get-in r [:error :code]))
+            (str "should be :path-traversal for " bad))))
+    (testing "the legitimate inside file still wrote fine"
+      (is (= "ok" (str/trim (read-file "src/inside.clj")))))))
+
+(deftest apply-single-line-replacement-no-op-when-already-applied
+  (testing "before == replacement → :already-applied, no file rewrite, no spurious diff"
+    (write-file! "src/idem.clj" "(ns idem)\n(def x 1)\n")
+    (let [before-mtime (.lastModified (java.io.File. (str (fs/path *worktree* "src/idem.clj"))))]
+      (Thread/sleep 10) ; ensure mtime tick differs if a write does happen
+      (let [r (sut/apply-single-line-replacement!
+               *worktree* "src/idem.clj" 2 "(def x 1)")]
+        (is (dag/ok? r))
+        (is (= :already-applied (-> r :data :status)))
+        (let [after-mtime (.lastModified (java.io.File. (str (fs/path *worktree* "src/idem.clj"))))]
+          (is (= before-mtime after-mtime)
+              "file mtime unchanged — write was skipped"))))))
+
+(deftest apply-single-line-replacement-preserves-trailing-newline
+  (testing "file with trailing newline keeps its trailing newline after edit"
+    (write-file! "src/trail.clj" "line1\nline2\nline3\n")
+    (sut/apply-single-line-replacement! *worktree* "src/trail.clj" 2 "line2-new")
+    (is (str/ends-with? (read-file "src/trail.clj") "\n")
+        "trailing newline preserved"))
+  (testing "file without trailing newline still has no trailing newline after edit"
+    (write-file! "src/no-trail.clj" "line1\nline2\nline3")
+    (sut/apply-single-line-replacement! *worktree* "src/no-trail.clj" 2 "line2-new")
+    (is (not (str/ends-with? (read-file "src/no-trail.clj") "\n"))
+        "no spurious trailing newline added")))
+
 ;; ── materialize-fix! decorates with comment-id ───────────────────────
 
 (deftest materialize-fix-decorates-with-comment-id-on-success
@@ -276,3 +314,20 @@
           (is (dag/ok? r))
           (is (false? (-> r :data :pushed?))
               "pushed? is false when nothing applied — no git operations"))))))
+
+(deftest respond-end-to-end-already-applied-skips-commit
+  (testing "all-:already-applied path doesn't commit (would be empty diff)"
+    (write-file! "src/idem.clj" "(ns idem)\n(anomaly/throw-anomaly :foo/bad-state {})\n")
+    (let [stub (fn [_ & args] (throw (ex-info "should not be called" {:args args})))]
+      (with-redefs [process/shell stub]
+        ;; Comment's suggested-fix already matches line 2's content
+        (let [c (comment-with "src/idem.clj" 2 fixable-payload :id 1)
+              r (sut/respond-to-policy-comments! *worktree* 42 [c])
+              d (:data r)]
+          (is (dag/ok? r))
+          (is (empty? (:applied d))
+              ":already-applied entries don't enter :applied")
+          (is (= 1 (count (:already-applied d)))
+              ":already-applied entries surface in their own bucket")
+          (is (nil? (:commit-sha d))
+              "no commit when all fixes are no-ops"))))))
