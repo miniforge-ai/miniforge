@@ -422,13 +422,24 @@
    files have landed on the task branch and `git status --porcelain`
    reports nothing. Asserting cleanliness here means the regression
    test cannot accidentally pass via the legacy `git-dirty-files`
-   path — it forces the rehydrate-from-paths code under test."
+   path — it forces the rehydrate-from-paths code under test.
+
+   Defeats global GPG / signing configuration (1Password, GPG agents)
+   that would otherwise intercept the commit and intermittently fail
+   with `error: <agent> returned an error` — the same pattern the
+   v2 multi-parent merge fixtures had to solve. With
+   commit.gpgsign=false locally on this repo AND --no-gpg-sign
+   --no-verify on the commit itself, the fixture runs hermetically
+   regardless of the dev machine's signing setup."
   [worktree]
   (write-mock-files-to-worktree! worktree)
   (sh-must-succeed! worktree ["git" "config" "user.email" "test@example.com"])
   (sh-must-succeed! worktree ["git" "config" "user.name" "Test"])
+  (sh-must-succeed! worktree ["git" "config" "commit.gpgsign" "false"])
+  (sh-must-succeed! worktree ["git" "config" "tag.gpgsign" "false"])
   (sh-must-succeed! worktree ["git" "add" "."])
-  (sh-must-succeed! worktree ["git" "commit" "-m" "implement-phase-boundary commit"])
+  (sh-must-succeed! worktree ["git" "commit" "--no-gpg-sign" "--no-verify"
+                              "-m" "implement-phase-boundary commit"])
   (let [{:keys [out]} (sh-must-succeed! worktree ["git" "status" "--porcelain"])]
     (when-not (str/blank? out)
       (throw (ex-info "fixture left worktree dirty after commit"

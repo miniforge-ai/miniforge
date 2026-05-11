@@ -122,6 +122,44 @@
       (is (empty? unmatched))
       (is (empty? changed)))))
 
+;; ----------------------------------------------------------------- extract-preamble
+
+(deftest extract-preamble-pulls-text-before-first-brace-test
+  (testing "Pre-map text is the file's comment header — license,
+            documentation, provider-group dividers. extract-preamble
+            grabs everything up to (but not including) the first `{`.
+            Real cost-table.edn shape: many comment lines, then the
+            map opener — comments must round-trip across rewrites."
+    (let [raw (str ";; License header line 1\n"
+                   ";; License header line 2\n"
+                   ";;\n"
+                   ";; Documentation block\n"
+                   "\n"
+                   "{:pricing/by-model-id {\"a\" {:input-per-1m 1}}}\n")]
+      (is (= (str ";; License header line 1\n"
+                  ";; License header line 2\n"
+                  ";;\n"
+                  ";; Documentation block\n"
+                  "\n")
+             (extract-preamble raw))
+          "everything up to the first `{` is preserved verbatim"))))
+
+(deftest extract-preamble-empty-when-no-comments-test
+  (testing "EDN file with no pre-map content (the file starts with
+            `{` directly) yields an empty preamble — preserves the
+            existing behaviour of writing a clean EDN map without
+            phantom leading whitespace."
+    (is (= "" (extract-preamble "{:pricing/by-model-id {}}\n")))))
+
+(deftest extract-preamble-handles-nil-and-no-brace-test
+  (testing "Defensive: nil input (missing file) and brace-less
+            input (corrupted file) both return empty string so the
+            caller still produces a well-formed EDN map."
+    (is (= "" (extract-preamble nil))
+        "nil → empty preamble, no NPE")
+    (is (= "" (extract-preamble ";; comment with no map content\n"))
+        "no `{` → empty preamble, caller's data block still writes")))
+
 ;; ----------------------------------------------------------------- Driver
 
 (let [{:keys [fail error]} (test/run-tests 'user)]

@@ -40,7 +40,6 @@
          '[babashka.fs :as fs]
          '[cheshire.core :as json]
          '[clojure.edn :as edn]
-         '[clojure.pprint :as pprint]
          '[clojure.string :as str])
 
 ;; ----------------------------------------------------------------- Constants
@@ -75,16 +74,33 @@
   [path]
   (-> path slurp edn/read-string))
 
+(defn- extract-preamble
+  "Pull everything before the first `{` out of an EDN file's raw text.
+   That's the comment header (license + documentation) the
+   refresh-cost-table flow must preserve across rewrites — EDN
+   parsing strips comments, so the structured data round-trip can't
+   carry them forward on its own.
+
+   Returns the preamble string (may include trailing whitespace
+   before the `{`) or an empty string if the file has no
+   pre-map content. Defensive: a missing file or one without `{`
+   yields `\"\"` so the caller still produces valid EDN."
+  [raw-text]
+  (if-let [open-idx (str/index-of (or raw-text "") "{")]
+    (subs raw-text 0 open-idx)
+    ""))
+
 (defn- write-edn-file
-  "Write `data` as pretty-printed EDN to `path`. The output is hand-
-   readable: each model-id gets its own line, with `:input-per-1m`
-   and `:output-per-1m` columns aligned for visual diff. Sticks to
-   the same shape `cost-table.edn` is hand-edited as, so a
-   refresh PR reads as a per-cell update rather than a wholesale
-   reformat."
+  "Write `data` as pretty-readable EDN to `path`, preserving the
+   existing file's header comments (license + docs) so a refresh
+   doesn't permanently lose the documentation. Each model-id gets
+   its own line, with `:input-per-1m` and `:output-per-1m` columns
+   aligned for visual diff. Sticks to the same shape
+   `cost-table.edn` is hand-edited as, so a refresh PR reads as a
+   per-cell update rather than a wholesale reformat."
   [path data]
-  (let [models  (:pricing/by-model-id data)
-        ordered (->> models (sort-by key))
+  (let [models    (:pricing/by-model-id data)
+        ordered   (->> models (sort-by key))
         key-width (->> ordered (map (comp count pr-str key))
                        (reduce max 0))
         rows (->> ordered
@@ -92,11 +108,13 @@
                          (format "  %s {:input-per-1m %6.2f :output-per-1m %6.2f}"
                                  (format (str "%-" key-width "s") (pr-str k))
                                  (double input-per-1m)
-                                 (double output-per-1m)))))]
+                                 (double output-per-1m)))))
+        preamble (extract-preamble (when (fs/exists? path) (slurp path)))]
     (spit path
-          (str "{:pricing/by-model-id\n"
-               " {"
-               (->> rows (str/join "\n") (str/triml))
+          (str preamble
+               "{:pricing/by-model-id\n"
+               " {\n"
+               (->> rows (str/join "\n"))
                "}}\n"))))
 
 ;; ----------------------------------------------------------------- Fetch + transform
@@ -108,7 +126,9 @@
   []
   (try
     (let [{:keys [status body]} (curl/get upstream-json-url
-                                          {:throw false})]
+                                          {:throw false
+                                           :connect-timeout 30
+                                           :max-time 30})]
       (if (= 200 status)
         {:ok true :body (json/parse-string body true)}
         {:ok false :error (str "HTTP " status " from " upstream-json-url)}))
@@ -182,7 +202,11 @@
 (defn -main
   [& _args]
   (let [current  (read-edn-file cost-table-path)
-        mapping  (-> mapping-path read-edn-file :mapping/by-model-id)
+        mapping  (if (fs/exists? mapping-path)
+                   (-> mapping-path read-edn-file :mapping/by-model-id)
+                   (do (println "WARN: mapping file not found, defaulting to identity mapping:"
+                                mapping-path)
+                       {}))
         fetch    (fetch-upstream-json)]
     (cond
       (not (:ok fetch))
