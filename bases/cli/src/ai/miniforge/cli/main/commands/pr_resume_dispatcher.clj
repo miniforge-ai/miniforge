@@ -86,6 +86,44 @@
               acc)))
         {})))
 
+(defn- print-listener-failure!
+  "Render one per-listener failure entry from the dispatch summary's
+   `:failed` vector to a typed error line. Pulled out so the
+   `doseq` body stays a single named call."
+  [failure]
+  (display/print-error
+   (messages/t :pr/resume-dispatch-listener-failed
+               {:lid     (str (:listener/id failure))
+                :code    (str (get-in failure [:error :code]))
+                :message (or (get-in failure [:error :message]) "")})))
+
+(defn- print-dispatch-result!
+  "Render the operator-facing summary of one
+   `dispatch-pr-merge!` call. Branches on `(dag/ok? r)` first
+   because the dispatcher returns a DAG result (per its public
+   contract); only the success branch unwraps `(:data r)` for the
+   per-PR summary line + per-listener failure lines."
+  [pr-number pr-url r]
+  (cond
+    (not (dag/ok? r))
+    (display/print-error
+     (messages/t :pr/resume-dispatch-pr-error
+                 {:n       pr-number
+                  :url     pr-url
+                  :code    (str (get-in r [:error :code]))
+                  :message (or (get-in r [:error :message]) "")}))
+
+    :else
+    (let [summary (:data r)]
+      (display/print-info
+       (messages/t :pr/resume-dispatch-pr-summary
+                   {:n      pr-number
+                    :url    pr-url
+                    :ok     (count (:dispatched summary))
+                    :failed (count (:failed summary))
+                    :total  (:listener-count summary)}))
+      (run! print-listener-failure! (:failed summary)))))
+
 (defn- dispatch-merged-pr!
   "For one PR with at least one `:active` listener: query gh, decide
    if merged, dispatch + mark on yes."
@@ -103,35 +141,10 @@
                    {:n pr-number :state (str (:state gh))}))
 
       :else
-      (let [merged-pr (merged-pr-record (first listeners) gh)
-            r (pr-lifecycle/dispatch-pr-merge! worktree-path pr-url merged-pr)]
-        (cond
-          ;; dispatch-pr-merge! returns a DAG result. Bubble registry-
-          ;; read failures (or any other top-level error) as a typed
-          ;; line; only access summary keys when (dag/ok? r).
-          (not (dag/ok? r))
-          (display/print-error
-           (messages/t :pr/resume-dispatch-pr-error
-                       {:n       pr-number
-                        :url     pr-url
-                        :code    (str (get-in r [:error :code]))
-                        :message (or (get-in r [:error :message]) "")}))
-
-          :else
-          (let [summary (:data r)]
-            (display/print-info
-             (messages/t :pr/resume-dispatch-pr-summary
-                         {:n      pr-number
-                          :url    pr-url
-                          :ok     (count (:dispatched summary))
-                          :failed (count (:failed summary))
-                          :total  (:listener-count summary)}))
-            (doseq [f (:failed summary)]
-              (display/print-error
-               (messages/t :pr/resume-dispatch-listener-failed
-                           {:lid     (str (:listener/id f))
-                            :code    (str (get-in f [:error :code]))
-                            :message (or (get-in f [:error :message]) "")})))))))))
+      (print-dispatch-result!
+       pr-number pr-url
+       (pr-lifecycle/dispatch-pr-merge!
+        worktree-path pr-url (merged-pr-record (first listeners) gh))))))
 
 (defn- run-pass!
   "One pass: read registry, group active listeners by PR, dispatch each."

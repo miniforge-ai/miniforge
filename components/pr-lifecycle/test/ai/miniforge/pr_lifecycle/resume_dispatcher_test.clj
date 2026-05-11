@@ -21,6 +21,8 @@
   (:require [babashka.fs :as fs]
             [babashka.process :as process]
             [cheshire.core :as json]
+            [clojure.edn :as edn]
+            [clojure.java.io :as io]
             [clojure.test :refer [deftest is testing use-fixtures]]
             [ai.miniforge.dag-executor.interface :as dag]
             [ai.miniforge.pr-lifecycle.listener-registry :as registry]
@@ -39,24 +41,21 @@
 (use-fixtures :each worktree-fixture)
 
 ;; ── fixtures ─────────────────────────────────────────────────────────
+;; Loaded from `resources/test-fixtures/resume-dispatcher/fixtures.edn`
+;; rather than inlined here. Future fixture tweaks (new channel kinds,
+;; alternate PR shapes) don't need source edits. Matches the
+;; `resources/test-fixtures/` convention compliance-scanner uses —
+;; placing the file under `resources/` keeps it on the workspace
+;; classpath without per-component test-alias tweaks.
 
-(def ^:private pr-url "https://github.com/o/r/pull/42")
+(def ^:private fixtures
+  (-> (io/resource "test-fixtures/resume-dispatcher/fixtures.edn")
+      slurp
+      edn/read-string))
 
-(def ^:private base-listener-params
-  {:pr/url         pr-url
-   :pr/repo-id     "o/r"
-   :pr/number      42
-   :agent/id       "agent-A"
-   :runtime        :claude-cli
-   :resume-channel {:channel/kind   :webhook
-                    :channel/target "https://hooks.example.com/agent-A"}
-   :registered-by  :authoring-agent})
-
-(def ^:private merged-pr
-  {:pr/url       pr-url
-   :merge/sha    "abc1234deadbeef"
-   :merged-at    #inst "2026-05-10T20:54:45.000-00:00"
-   :diff-summary "+50 / -12 across 3 files"})
+(def ^:private pr-url               (:pr-url fixtures))
+(def ^:private base-listener-params (:base-listener-params fixtures))
+(def ^:private merged-pr            (:merged-pr fixtures))
 
 (defn- register-listener!
   [overrides]

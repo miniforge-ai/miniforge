@@ -187,10 +187,32 @@
                {:target target-url}))))
 
 (defn sleep!
-  "Wrapper around `Thread/sleep`. Public (rather than `defn-`) so the
-   retry loop's sleep can be `with-redefs`'d to a no-op in unit tests
-   — `with-redefs` on a private var requires `#'ns/var` quoting which
-   is verbose; promoting this to public is the cheaper test seam."
+  "Synchronous backoff wait between retry attempts. Wraps
+   `Thread/sleep` in a redefable var so unit tests can null it out
+   without forcing `#'ns/var` quoting on a private.
+
+   Why a real `Thread/sleep` rather than core.async timeout / a
+   ScheduledExecutorService:
+
+   - The dispatcher is a serial batch orchestrator. `dispatch-pr-merge!`
+     iterates listeners sequentially; each listener's
+     `dispatch-via-webhook!` is itself a blocking shell-out to curl.
+     The whole pass is single-threaded by design.
+   - Within one listener's retry loop, `Thread/sleep` between attempts
+     blocks the same thread that's already blocked on the curl
+     subprocess. There's no concurrency to recover, no other work to
+     interleave, so async-timer machinery would add complexity (an
+     executor, a callback chain, lifecycle management) without any
+     throughput or latency benefit.
+   - When per-PR concurrency lands (a future change — `pmap` over the
+     PR-grouped listener buckets in the CLI orchestrator), each parallel
+     branch is still serial within itself, so the per-listener retry
+     loop's `sleep!` keeps making sense at that level. The concurrency
+     would live one level up, not inside this loop.
+
+   So: sync sleep is the right primitive at THIS layer. Async
+   timer infrastructure is reserved for the concurrency upgrade above
+   it, if and when it lands."
   [ms]
   (Thread/sleep (long ms)))
 
