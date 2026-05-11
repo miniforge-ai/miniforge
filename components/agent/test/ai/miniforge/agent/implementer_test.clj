@@ -274,7 +274,7 @@
              (get-in result [:output :code/files])))))
 
   (testing "already-implemented fails closed on a repair attempt without artifact evidence"
-    (let [[logger _] (log/collecting-logger {:min-level :trace})
+    (let [[logger entries] (log/collecting-logger {:min-level :trace})
           response (llm-response :content "{:status :already-implemented :summary \"done\"}"
                                  :tokens 11
                                  :cost-usd 0.01)
@@ -300,10 +300,21 @@
                                (fn [_ _] nil)]
                    (@#'implementer/invoke-with-llm
                     nil "prompt" "system" {} {} nil logger []
-                    {:task/review-feedback ["Fix the blocking issues"]}))]
+                    {:task/review-feedback ["Fix the blocking issues"]}))
+          rejected-log (find-log-entry entries :implementer/response-rejected)]
       (is (response/error? result))
       (is (= :implementer/unverified-already-implemented
-             (get-in result [:error :data :code])))))
+             (get-in result [:error :data :code])))
+      ;; Observability: the reject reason must surface as a structured
+      ;; event so dogfood runs read WHY each iteration failed inline
+      ;; instead of forcing a deep-dive trace read. Pin the new event
+      ;; shape + the :reject/reason keyword the caller picks.
+      (is (some? rejected-log)
+          ":implementer/response-rejected event emitted on the
+           unverified-already-implemented reject path")
+      (is (= :unverified-already-implemented
+             (get-in rejected-log [:data :reject/reason])))
+      (is (true? (get-in rejected-log [:data :repair-attempt?])))))
 
   (testing "parseable already-implemented content survives an unsuccessful backend wrapper"
     (let [[logger _] (log/collecting-logger {:min-level :trace})
