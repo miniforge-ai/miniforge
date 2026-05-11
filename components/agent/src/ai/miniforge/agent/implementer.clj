@@ -439,32 +439,63 @@
      :code/summary "Implementation from code blocks"
      :code/created-at (java.util.Date.)}))
 
+(defn- log-implementer-rejection
+  "Emit a structured :implementer/response-rejected event when the
+   implementer can't build a success response from the LLM turn.
+   Surfaces WHY each iteration failed so the next dogfood reads the
+   reject pattern (parse-failed, unverified-already-implemented,
+   etc.) inline instead of forcing a deep-dive through the trace.
+
+   Two reject paths today; both wrap response/error. The reject
+   reason is a keyword the caller picks before invoking — keeps
+   the event taxonomy stable as new reject paths get added."
+  [logger reason context input artifact-source content tools]
+  (when logger
+    (log/warn logger :implementer :implementer/response-rejected
+              {:data {:reject/reason reason
+                      :artifact-source artifact-source
+                      :tools-called tools
+                      :content-length (count (or content ""))
+                      :repair-attempt? (boolean (repair-attempt? input))}})))
+
 (defn- process-llm-response
   "Normalize structured implementer outputs from any submission channel:
-   worktree metadata, MCP artifact, file fallback, or parseable stdout."
+   worktree metadata, MCP artifact, file fallback, or parseable stdout.
+
+   When no channel yields a usable artifact, emits a structured
+   :implementer/response-rejected event with `:reject/reason` so the
+   next dogfood surfaces WHY each iteration failed without forcing
+   the operator into a deep-dive trace read."
   [{:keys [content structured-artifact parsed-content derived-artifact
            artifact-source tokens cost-usd tools-called]}
    context logger input]
-  (let [parsed (or structured-artifact parsed-content)]
-    (let [tools tools-called]
-      (when (nil? artifact-source)
-        (log/warn logger :implementer :implementer/mcp-tool-not-called
-                  {:data {:content-length (count (or content ""))
-                          :tools-called tools
-                          :has-code-blocks? (boolean (re-find #"```" (or content "")))}})))
+  (let [parsed (or structured-artifact parsed-content)
+        tools tools-called]
+    (when (nil? artifact-source)
+      (log/warn logger :implementer :implementer/mcp-tool-not-called
+                {:data {:content-length (count (or content ""))
+                        :tools-called tools
+                        :has-code-blocks? (boolean (re-find #"```" (or content "")))}}))
     (cond
       (code-artifact? structured-artifact)
       (build-code-response structured-artifact context tokens cost-usd)
 
       (= :already-implemented (:status parsed))
       (if (repair-attempt? input)
-        (unverified-already-implemented-response input tokens)
+        (do (log-implementer-rejection
+             logger :unverified-already-implemented
+             context input artifact-source content tools)
+            (unverified-already-implemented-response input tokens))
         (build-already-implemented-response parsed tokens cost-usd))
 
       :else
       (if-let [code (or parsed derived-artifact)]
         (build-code-response code context tokens cost-usd)
-        (response/error (messages/t :error/parse-failed) {:tokens tokens})))))
+        (do (log-implementer-rejection
+             logger :parse-failed
+             context input artifact-source content tools)
+            (response/error (messages/t :error/parse-failed)
+                            {:tokens tokens}))))))
 
 (def ^:private session-checkpoint-filename ".miniforge/session-id")
 
