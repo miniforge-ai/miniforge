@@ -85,34 +85,37 @@
   (and (string? suggested-fix)
        (str/includes? suggested-fix "\n")))
 
+(defn- plan-decision
+  "Factory: build a `classify-fix` result map. Single source of
+   truth for the `{:action :reason :payload}` shape — avoids hand-
+   constructing the same map at every cond branch in `classify-fix`."
+  [action reason payload]
+  {:action  action
+   :reason  reason
+   :payload payload})
+
 (defn classify-fix
   "Pure: decide what to do with a single policy-eval comment.
    Returns `{:action :apply | :escalate | :skip
              :reason  <keyword>
-             :payload <payload-map-or-nil>}`."
+             :payload <payload-map-or-nil>}` via `plan-decision`."
   [comment]
   (let [payload (extract-policy-payload comment)]
     (cond
       (nil? payload)
-      {:action :skip :reason :no-payload :payload nil}
+      (plan-decision :skip :no-payload nil)
 
       (false? (:violation/auto-fixable? payload))
-      {:action :escalate
-       :reason :violation/auto-fixable?-false
-       :payload payload}
+      (plan-decision :escalate :violation/auto-fixable?-false payload)
 
       (str/blank? (:violation/suggested-fix payload))
-      {:action :escalate
-       :reason :no-suggested-fix
-       :payload payload}
+      (plan-decision :escalate :no-suggested-fix payload)
 
       (multi-line? (:violation/suggested-fix payload))
-      {:action :escalate
-       :reason :policy-eval/multi-line-not-supported
-       :payload payload}
+      (plan-decision :escalate :policy-eval/multi-line-not-supported payload)
 
       :else
-      {:action :apply :reason :ok :payload payload})))
+      (plan-decision :apply :ok payload))))
 
 (defn plan-fixes
   "Pure: walk a vector of comments, classify each, and partition into
@@ -306,22 +309,19 @@
 
 (defn commit-and-push!
   "Stage all touched files, commit, push. Returns DAG result with
-   `{:commit-sha :pushed?}` on success."
+   `{:commit-sha :pushed?}` on success.
+
+   Uses `dag/when-let-ok` (railway-binding macro) — see
+   `.cursor/rules/languages/clojure-railway-binding.mdc` (dewey 211).
+   Each step short-circuits to its failure result on `(not (ok? r))`."
   [worktree-path applied-fixes]
-  (let [stage-r (stage-paths! worktree-path applied-fixes)]
-    (if-not (dag/ok? stage-r)
-      stage-r
-      (let [commit-r (git-sh worktree-path "commit" "-m" (commit-message applied-fixes))]
-        (if-not (dag/ok? commit-r)
-          commit-r
-          (let [sha-r (git-sh worktree-path "rev-parse" "HEAD")]
-            (if-not (dag/ok? sha-r)
-              sha-r
-              (let [push-r (git-sh worktree-path "push")]
-                (if-not (dag/ok? push-r)
-                  push-r
-                  (dag/ok {:commit-sha (:output (:data sha-r))
-                           :pushed?    true}))))))))))
+  (dag/when-let-ok
+   [_stage-r  (stage-paths! worktree-path applied-fixes)
+    _commit-r (git-sh worktree-path "commit" "-m" (commit-message applied-fixes))
+    sha-r     (git-sh worktree-path "rev-parse" "HEAD")
+    _push-r   (git-sh worktree-path "push")]
+   (dag/ok {:commit-sha (:output (:data sha-r))
+            :pushed?    true})))
 
 (defn- short-sha
   [sha]
@@ -405,16 +405,18 @@
                :replies         []})
 
       :else
-      (let [push-r (commit-and-push! worktree-path applied)]
-        (if-not (dag/ok? push-r)
-          push-r
-          (let [{:keys [commit-sha pushed?]} (:data push-r)
-                replies (reply-and-resolve-fixed! worktree-path pr-number commit-sha applied)]
-            (dag/ok {:applied         applied
-                     :already-applied already-applied
-                     :failed-to-apply failed-to-apply
-                     :escalated       (:to-escalate plan)
-                     :skipped         (:to-skip plan)
-                     :commit-sha      commit-sha
-                     :pushed?         pushed?
-                     :replies         replies})))))))
+      ;; Railway-binding chain — see clojure-railway-binding rule
+      ;; (dewey 211). Push failure short-circuits with the typed
+      ;; err result; success body builds the summary.
+      (dag/when-let-ok
+       [push-r (commit-and-push! worktree-path applied)]
+       (let [{:keys [commit-sha pushed?]} (:data push-r)
+             replies (reply-and-resolve-fixed! worktree-path pr-number commit-sha applied)]
+         (dag/ok {:applied         applied
+                  :already-applied already-applied
+                  :failed-to-apply failed-to-apply
+                  :escalated       (:to-escalate plan)
+                  :skipped         (:to-skip plan)
+                  :commit-sha      commit-sha
+                  :pushed?         pushed?
+                  :replies         replies}))))))

@@ -69,6 +69,52 @@
   "Extract data from an ok result, or return default if error."
   result/unwrap-or)
 
+;------------------------------------------------------------------------------ Layer 0.5
+;; Railway-binding macro
+;; (.cursor/rules/languages/clojure-railway-binding.mdc — dewey 211)
+
+(defmacro when-let-ok
+  "Sequentially bind each symbol to its expression's value. If any
+   expression returns a non-ok DAG result (i.e. `(not (ok? value))`),
+   short-circuit and return that value as the form's value. If every
+   binding produces an ok result, evaluate `body` with all bindings
+   in scope and return its value.
+
+   Replaces nested `(if-not (dag/ok? r) r (let [next-r ...] ...))`
+   chains with a flat binding vector — see the per-codebase rule:
+   `.cursor/rules/languages/clojure-railway-binding.mdc` (dewey 211).
+
+   Example:
+
+     (dag/when-let-ok [a (step-1)
+                       b (step-2 a)
+                       c (step-3 b)]
+       (dag/ok {:result c}))
+
+   Expands to (conceptually):
+
+     (let [a (step-1)]
+       (if-not (dag/ok? a) a
+         (let [b (step-2 a)]
+           (if-not (dag/ok? b) b
+             (let [c (step-3 b)]
+               (if-not (dag/ok? c) c
+                 (dag/ok {:result c})))))))"
+  [bindings & body]
+  (when-not (vector? bindings)
+    (throw (IllegalArgumentException. "when-let-ok requires a binding vector")))
+  (when-not (even? (count bindings))
+    (throw (IllegalArgumentException. "when-let-ok requires an even number of binding forms")))
+  (let [pairs (partition 2 bindings)]
+    (reduce
+     (fn [acc [sym expr]]
+       `(let [~sym ~expr]
+          (if (ai.miniforge.dag-executor.result/ok? ~sym)
+            ~acc
+            ~sym)))
+     `(do ~@body)
+     (reverse pairs))))
+
 ;------------------------------------------------------------------------------ Layer 1
 ;; Task workflow state
 

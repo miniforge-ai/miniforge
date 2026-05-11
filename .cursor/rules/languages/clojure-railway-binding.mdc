@@ -1,0 +1,150 @@
+---
+dewey: "211"
+description: Use `dag/when-let-ok` over nested `if-not (dag/ok? r)` chains
+globs:
+  - "components/**/src/**/*.clj"
+  - "components/**/src/**/*.cljc"
+  - "bases/**/src/**/*.clj"
+  - "bases/**/src/**/*.cljc"
+  - "projects/**/src/**/*.clj"
+  - "projects/**/src/**/*.cljc"
+---
+
+# Railway-binding chains over DAG results
+
+## Context
+
+When an orchestrator runs N sequential steps that each return a DAG
+result (`{:ok? true :data …}` / `{:ok? false :error …}`) and the
+contract is "any step failure short-circuits with that step's err
+result," the naive shape is a nested-if-not chain:
+
+```clojure
+(let [r1 (step-1)]
+  (if-not (dag/ok? r1) r1
+    (let [r2 (step-2)]
+      (if-not (dag/ok? r2) r2
+        (let [r3 (step-3)]
+          (if-not (dag/ok? r3) r3
+            (dag/ok {:final r3})))))))
+```
+
+Each step adds two layers of nesting (`let` + `if-not`). At three
+steps the success body is buried inside six closing parens; the
+control flow is hidden by indentation. At four steps it's
+illegible.
+
+The codebase exposes a `dag/when-let-ok` macro that compiles to the
+same nested shape but reads as a flat binding vector — see
+`components/dag-executor/src/ai/miniforge/dag_executor/interface.clj`.
+
+## Requirements
+
+- **ALWAYS** use `dag/when-let-ok` (or another result-monad combinator
+  from `dag-executor.interface`) when chaining ≥ 2 DAG-result steps
+  with short-circuit-on-failure semantics.
+- **NEVER** hand-write the nested `(if-not (dag/ok? r) r (let [next-r …] …))`
+  shape past one level.
+- A single-step `if-not (dag/ok? r) r …` is acceptable when the
+  body needs control flow that doesn't fit the macro (e.g. a
+  destructure on `:data` plus side-effecting reduce).
+- When kondo flags binding symbols inside `when-let-ok` as
+  unresolved, the codebase's `.clj-kondo/config.edn` registers
+  `when-let-ok` under `:lint-as clojure.core/let` — no per-call-site
+  suppression required.
+- The macro accepts `_`-prefixed binding names for steps whose
+  result is only used for its ok/err signal (intermediate steps
+  that the success body doesn't read).
+
+## Examples
+
+<example>
+
+Three-step git operation chain — failure of any step returns that
+step's err result verbatim; success body has `sha-r` in scope to
+build the final ok result. Compare with the BAD example below for
+the same logic written as nested `if-not`.
+
+```clojure
+(defn commit-and-push!
+  [worktree-path applied-fixes]
+  (dag/when-let-ok
+   [_stage-r  (stage-paths! worktree-path applied-fixes)
+    _commit-r (git-sh worktree-path "commit" "-m" (commit-message applied-fixes))
+    sha-r     (git-sh worktree-path "rev-parse" "HEAD")
+    _push-r   (git-sh worktree-path "push")]
+   (dag/ok {:commit-sha (:output (:data sha-r))
+            :pushed?    true})))
+```
+
+</example>
+
+<example type="invalid">
+
+Same logic, nested `if-not (dag/ok? r) r (let [next-r …] …)`. Each
+step adds two layers; the success body is buried; the control flow
+is implicit in the indentation. This is the shape `dag/when-let-ok`
+replaces.
+
+```clojure
+(defn commit-and-push!
+  [worktree-path applied-fixes]
+  (let [stage-r (stage-paths! worktree-path applied-fixes)]
+    (if-not (dag/ok? stage-r)
+      stage-r
+      (let [commit-r (git-sh worktree-path "commit" "-m" (commit-message applied-fixes))]
+        (if-not (dag/ok? commit-r)
+          commit-r
+          (let [sha-r (git-sh worktree-path "rev-parse" "HEAD")]
+            (if-not (dag/ok? sha-r)
+              sha-r
+              (let [push-r (git-sh worktree-path "push")]
+                (if-not (dag/ok? push-r)
+                  push-r
+                  (dag/ok {:commit-sha (:output (:data sha-r))
+                           :pushed?    true}))))))))))
+```
+
+</example>
+
+<example>
+
+Single-step short-circuit before a body that does work the macro
+can't express (destructure + side-effecting reduce + multi-return).
+A flat `dag/when-let-ok` with one binding is still preferred over
+a `let` + `if-not`:
+
+```clojure
+(dag/when-let-ok
+ [push-r (commit-and-push! worktree-path applied)]
+ (let [{:keys [commit-sha pushed?]} (:data push-r)
+       replies (reply-and-resolve-fixed!
+                worktree-path pr-number commit-sha applied)]
+   (dag/ok {:applied applied
+            :commit-sha commit-sha
+            :pushed? pushed?
+            :replies replies})))
+```
+
+</example>
+
+## Agent behavior
+
+When creating/editing a namespace that calls a sequence of DAG-returning
+functions and forwards the first failure:
+
+1. Reach for `dag/when-let-ok` before writing `if-not (dag/ok? r) r …`.
+2. If you find an existing nested-if-not chain past one level, refactor
+   it to `dag/when-let-ok` as part of the change — flag it explicitly
+   in the commit message.
+3. Use `_`-prefixed names for steps whose result is only relevant for
+   its ok/err signal.
+4. Do not introduce a new project-local `if-let*` / `when-let*` variant
+   — the canonical macro lives in `dag-executor.interface` so consumers
+   reach it via `[ai.miniforge.dag-executor.interface :as dag]`.
+
+## References
+
+- Macro: `components/dag-executor/src/ai/miniforge/dag_executor/interface.clj` (search `when-let-ok`)
+- Tests: `components/dag-executor/test/ai/miniforge/dag_executor/when_let_ok_test.clj`
+- kondo registration: `.clj-kondo/config.edn` (`:lint-as` entry)
