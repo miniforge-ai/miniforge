@@ -149,7 +149,22 @@
       "Usage limit reached for this hour"
       "You've exceeded your quota for the day"
       "Service too busy — back off"
-      "Please slow down and retry shortly")))
+      "Please slow down and retry shortly"
+      ;; Strings the legacy runner-side inline regex used to catch
+      ;; (`rate.?limit|429|hit your limit|quota.?exceeded`). The
+      ;; central :provider-rate-limit pattern absorbs them now so the
+      ;; runner can pure-delegate instead of carrying its own copy.
+      "You've hit your rate limit"
+      "API quota exceeded for this model"
+      "HTTP 429 Too Many Requests"
+      "rate-limit error returned by backend")))
+
+(deftest test-rate-limit-word-boundary-on-status-codes
+  (testing "529 / 429 word boundaries — don't match inside larger numerics"
+    (are [text] (not (resilience/rate-limit-in-text? text))
+      "url=https://example.com/page?id=1429"   ;; 429 inside 1429
+      "request-id=5298765"                      ;; 529 inside 5298765
+      "Compiled 14290 lines in 3s")))           ;; 429 inside 14290
 
 (deftest test-rate-limit-in-text-rejects-normal-text
   (testing "does not flag normal text"
