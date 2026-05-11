@@ -114,7 +114,7 @@ interval daemon into the command.
 - [x] `resume-dispatcher-test`: 15 tests / 50 assertions pass.
 - [x] `listener-registry-test`: 25 tests / 76 assertions still pass.
 - [x] Full namespace tree loads under `:dev:test`.
-- [x] `bb pre-commit`: pending (will run on commit).
+- [x] `bb pre-commit`: ✅ ALL PRE-COMMIT CHECKS PASSED.
 - [ ] Live smoke test against a real merged PR with a registered
       webhook listener (manual, post-merge).
 

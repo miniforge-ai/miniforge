@@ -521,6 +521,7 @@
   :pr/resume-dispatch-gh-failed "pr resume-dispatch: PR #{n} ({url}) — failed to query gh, skipping"
   :pr/resume-dispatch-not-merged "pr resume-dispatch: PR #{n} state={state}, not merged — skipping"
   :pr/resume-dispatch-pr-summary "pr resume-dispatch: PR #{n} ({url}) — {ok}/{total} delivered ({failed} failed)"
+  :pr/resume-dispatch-pr-error "pr resume-dispatch: PR #{n} ({url}) — [{code}] {message}"
   :pr/resume-dispatch-listener-failed "pr resume-dispatch: listener {lid} — [{code}] {message}"
   :pr/resume-dispatch-failed "pr resume-dispatch failed: {message}"
 

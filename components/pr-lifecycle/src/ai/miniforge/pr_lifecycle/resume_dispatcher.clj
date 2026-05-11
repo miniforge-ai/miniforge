@@ -150,6 +150,16 @@
   [attempt]
   (* webhook-backoff-base-ms (long (Math/pow 2 attempt))))
 
+(defn- timeout-seconds
+  "Convert `webhook-timeout-ms` to a curl `--max-time` string with
+   millisecond precision. `curl --max-time` accepts decimals, so we
+   format `<seconds>.<thousandths>` rather than `(quot ms 1000)` —
+   the latter truncates to 0 if operators tune `:webhook/timeout-ms`
+   below 1000ms, and `--max-time 0` disables the timeout entirely
+   (would let the dispatcher hang on a slow/broken endpoint)."
+  []
+  (format "%.3f" (/ (double webhook-timeout-ms) 1000.0)))
+
 (defn- post-webhook-once
   "Single HTTP POST attempt to the listener's `:channel/target` URL.
    Returns DAG result. Curl invoked via `babashka.process` to keep
@@ -161,7 +171,7 @@
                             :err :string
                             :continue true}
                            "curl" "--silent" "--show-error" "--fail"
-                           "--max-time" (str (quot webhook-timeout-ms 1000))
+                           "--max-time" (timeout-seconds)
                            "-X" "POST"
                            "-H" "Content-Type: application/json"
                            "--data-binary" "@-"
@@ -186,25 +196,32 @@
 
 (defn- post-webhook-with-retry
   "Webhook POST with bounded retries + exponential backoff.
-   Returns the first successful DAG result, or the last failure
-   after `webhook-max-attempts` attempts."
-  [target-url json-body]
-  (loop [attempt 0
-         last-err nil]
-    (cond
-      (>= attempt webhook-max-attempts)
-      (or last-err
-          (dag/err :resume-dispatcher/webhook-exhausted
-                   "webhook attempts exhausted with no captured error"
-                   {:target target-url}))
 
-      :else
-      (let [r (post-webhook-once target-url json-body)]
-        (if (dag/ok? r)
-          r
-          (do
-            (when (pos? attempt) (sleep! (backoff-ms attempt)))
-            (recur (inc attempt) r)))))))
+   Backoff schedule: a failed attempt at index `i` sleeps
+   `(backoff-ms i)` before attempt `i+1`. The final attempt's
+   failure does NOT sleep (no retry follows). Concretely with
+   defaults (max-attempts=3, base=500ms):
+
+     attempt 0 fails → sleep 500ms  → attempt 1
+     attempt 1 fails → sleep 1000ms → attempt 2
+     attempt 2 fails → return error (no sleep)
+
+   Returns the first successful DAG result, or the last failure."
+  [target-url json-body]
+  (loop [attempt 0]
+    (let [r (post-webhook-once target-url json-body)
+          last-attempt? (>= (inc attempt) webhook-max-attempts)]
+      (cond
+        (dag/ok? r)
+        r
+
+        last-attempt?
+        r
+
+        :else
+        (do
+          (sleep! (backoff-ms attempt))
+          (recur (inc attempt)))))))
 
 (defn- dispatch-via-webhook!
   "Send the primer to the listener's webhook URL. Returns DAG result.
@@ -287,25 +304,35 @@
 
 (defn dispatch-pr-merge!
   "Walk every `:active` listener for `pr-url` and dispatch each.
-   Returns a summary `{:dispatched [...] :failed [...]}`. Per-listener
-   failures don't abort the pass — they're collected and surfaced.
+   Always returns a DAG result for shape consistency:
+
+   - On registry-read failure: the upstream `(dag/err ...)` is bubbled
+     unchanged so callers can branch on `(dag/ok? r)` rather than
+     guarding for two return shapes.
+   - On success (including zero active listeners): `(dag/ok summary)`
+     where summary is `{:pr-url <s> :listener-count <int> :dispatched [...]
+     :failed [...]}`.
+
+   Per-listener failures don't abort the pass — they're collected
+   into `:failed` and the overall call still returns `(dag/ok ...)`.
 
    `merged-pr` is the caller-provided merge record (see `build-primer`)."
   [worktree-path pr-url merged-pr]
   (let [r (registry/read-registry worktree-path)]
     (if-not (dag/ok? r)
       r
-      (let [actives (registry/active-entries-for-pr (:data r) pr-url)]
-        (reduce
-         (fn [acc listener]
-           (let [d (dispatch-listener! worktree-path merged-pr listener)]
-             (if (dag/ok? d)
-               (update acc :dispatched conj (:data d))
-               (update acc :failed conj
-                       {:listener/id (:listener/id listener)
-                        :error       (:error d)}))))
-         {:pr-url pr-url
-          :listener-count (count actives)
-          :dispatched []
-          :failed     []}
-         actives)))))
+      (let [actives (registry/active-entries-for-pr (:data r) pr-url)
+            summary (reduce
+                     (fn [acc listener]
+                       (let [d (dispatch-listener! worktree-path merged-pr listener)]
+                         (if (dag/ok? d)
+                           (update acc :dispatched conj (:data d))
+                           (update acc :failed conj
+                                   {:listener/id (:listener/id listener)
+                                    :error       (:error d)}))))
+                     {:pr-url pr-url
+                      :listener-count (count actives)
+                      :dispatched []
+                      :failed     []}
+                     actives)]
+        (dag/ok summary)))))

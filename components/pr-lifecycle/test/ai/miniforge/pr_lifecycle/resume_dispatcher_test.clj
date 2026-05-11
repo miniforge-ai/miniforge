@@ -160,6 +160,24 @@
             (is (= pr-url (:resume/pr-url payload)))
             (is (= "abc1234deadbeef" (:resume/merge-sha payload)))))))))
 
+(deftest dispatch-webhook-passes-fractional-seconds-to-curl
+  (testing "curl --max-time receives fractional seconds (so a sub-1000ms timeout doesn't truncate to 0)"
+    (let [calls (atom [])
+          stub  (capture-shell calls {:exit 0 :out "" :err ""})]
+      (with-redefs [process/shell stub
+                    ;; Simulate operator tuning timeout below 1000ms.
+                    sut/webhook-timeout-ms 250]
+        (let [listener (assoc base-listener-params :listener/id (random-uuid))
+              primer (sut/build-primer merged-pr listener)]
+          (sut/dispatch-to-channel! primer listener)
+          (let [args (:args (first @calls))
+                idx  (.indexOf ^java.util.List args "--max-time")
+                seconds-str (when (>= idx 0) (nth args (inc idx)))]
+            (is (= "0.250" seconds-str)
+                "fractional precision preserved; --max-time would truncate to 0 if we used (quot ms 1000)")
+            (is (not= "0" seconds-str)
+                "--max-time 0 would disable the timeout entirely (would let dispatcher hang)")))))))
+
 (deftest dispatch-webhook-rejects-blank-target
   (let [listener (assoc base-listener-params
                         :listener/id (random-uuid)
@@ -186,6 +204,22 @@
               r (sut/dispatch-to-channel! primer listener)]
           (is (dag/ok? r))
           (is (= 3 @calls) "retried twice before success"))))))
+
+(deftest dispatch-webhook-backoff-schedule
+  (testing "backoff sleeps after attempts 0 + 1 (with backoff-ms 0 + 1) but NOT after attempt 2 (last)"
+    (let [sleeps (atom [])
+          ;; Always fail so we exhaust all attempts.
+          stub   (fn [_opts & _args]
+                   {:exit 22 :out "" :err "HTTP/1.1 500 Internal Server Error"})]
+      (with-redefs [process/shell stub
+                    sut/sleep! (fn [ms] (swap! sleeps conj ms))]
+        (let [listener (assoc base-listener-params :listener/id (random-uuid))
+              primer (sut/build-primer merged-pr listener)
+              _ (sut/dispatch-to-channel! primer listener)]
+          (is (= [(* sut/webhook-backoff-base-ms 1)   ; sleep before retry to attempt 1
+                  (* sut/webhook-backoff-base-ms 2)]  ; sleep before retry to attempt 2
+                 @sleeps)
+              "backoff schedule: base*1 then base*2; no sleep after the final attempt"))))))
 
 (deftest dispatch-webhook-exhausts-attempts
   (testing "persistent failure exhausts webhook-max-attempts and returns the last error"
@@ -246,13 +280,15 @@
               ;; simulate a previous run.
               _ (registry/unregister! *worktree* pr-url b)
               _ (registry/mark-dispatched! *worktree* pr-url c (random-uuid))
-              r (sut/dispatch-pr-merge! *worktree* pr-url merged-pr)]
-          (is (= pr-url (:pr-url r)))
-          (is (= 1 (:listener-count r))
+              r (sut/dispatch-pr-merge! *worktree* pr-url merged-pr)
+              summary (:data r)]
+          (is (dag/ok? r) "dispatch-pr-merge! always returns a DAG result")
+          (is (= pr-url (:pr-url summary)))
+          (is (= 1 (:listener-count summary))
               "only the still-active listener (a) is in scope")
-          (is (= 1 (count (:dispatched r))))
-          (is (= 0 (count (:failed r))))
-          (is (= a (-> r :dispatched first :listener/id))))))))
+          (is (= 1 (count (:dispatched summary))))
+          (is (= 0 (count (:failed summary))))
+          (is (= a (-> summary :dispatched first :listener/id))))))))
 
 (deftest dispatch-pr-merge-collects-failures-without-aborting
   (testing "per-listener failures don't abort the pass — they're collected"
@@ -278,11 +314,13 @@
                   {:agent/id "agent-B"
                    :resume-channel {:channel/kind   :webhook
                                     :channel/target "https://hooks.example.com/ok"}})
-              r (sut/dispatch-pr-merge! *worktree* pr-url merged-pr)]
-          (is (= 2 (:listener-count r)))
-          (is (= 1 (count (:failed r)))
+              r (sut/dispatch-pr-merge! *worktree* pr-url merged-pr)
+              summary (:data r)]
+          (is (dag/ok? r))
+          (is (= 2 (:listener-count summary)))
+          (is (= 1 (count (:failed summary)))
               "agent-A failure collected; agent-B unaffected")
-          (is (= 1 (count (:dispatched r)))
+          (is (= 1 (count (:dispatched summary)))
               "agent-B success despite agent-A failure"))))))
 
 (deftest dispatch-pr-merge-pty-listener-not-yet-wired
@@ -291,8 +329,25 @@
                            {:agent/id "pty-agent"
                             :resume-channel {:channel/kind :pty
                                              :channel/target "pty-1"}})
-          r (sut/dispatch-pr-merge! *worktree* pr-url merged-pr)]
-      (is (= 1 (count (:failed r))))
+          r (sut/dispatch-pr-merge! *worktree* pr-url merged-pr)
+          summary (:data r)]
+      (is (dag/ok? r))
+      (is (= 1 (count (:failed summary))))
       (is (= :resume-dispatcher/not-yet-wired
-             (get-in (first (:failed r)) [:error :code])))
-      (is (= pty-listener-id (get-in (first (:failed r)) [:error :data :listener/id]))))))
+             (get-in (first (:failed summary)) [:error :code])))
+      (is (= pty-listener-id (get-in (first (:failed summary)) [:error :data :listener/id]))))))
+
+(deftest dispatch-pr-merge-bubbles-registry-read-failure-as-dag-err
+  (testing "registry read failure bubbles up as the same DAG error shape (not a partial summary)"
+    (with-redefs [registry/read-registry
+                  (fn [_]
+                    {:ok? false
+                     :error {:code :listener-registry/read-failed
+                             :message "synthetic disk failure"
+                             :data {:path "/dev/null"}}})]
+      (let [r (sut/dispatch-pr-merge! *worktree* pr-url merged-pr)]
+        (is (not (dag/ok? r))
+            "registry-read failure bubbles as DAG err, not a half-built summary")
+        (is (= :listener-registry/read-failed (get-in r [:error :code])))
+        (is (nil? (:dispatched r))
+            "no summary keys present on the err return — caller branches on dag/ok?")))))
