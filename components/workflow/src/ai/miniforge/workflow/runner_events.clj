@@ -121,7 +121,18 @@
                                    events with no payload because of this
                                    missing branch)
    4. `:phase/gate-errors`       — gate validation failures
-   5. `(:message result)`        — last-resort string message"
+   5. `(:message result)`        — last-resort string message
+
+   On failure events, `:meta` is populated with LLM diagnostic fields
+   propagated from the agent response:
+
+   - `:stop-reason`           — why the LLM stopped (e.g. :end-turn, :max-tokens)
+   - `:final-message-preview` — truncated final assistant message for post-mortem
+   - `:turn-count`            — number of turns the agent ran (from :num-turns)
+   - `:tool-call-count`       — total tool calls made during the phase
+
+   All fields are optional; `:meta` is omitted entirely on success events
+   and on failures where none of the fields are present."
   [result]
   (let [succeeded? (and (get result :success? (phase/succeeded-or-done? result))
                         (not (inner-result-failed? result)))
@@ -141,12 +152,23 @@
         tokens   (get-in result [:metrics :tokens]
                    (get-in result [:phase/metrics :tokens]))
         cost-usd (get-in result [:metrics :cost-usd]
-                   (get-in result [:phase/metrics :cost-usd]))]
+                   (get-in result [:phase/metrics :cost-usd]))
+        meta-data (when-not succeeded?
+                    (let [stop-reason           (get-in result [:result :stop-reason])
+                          final-message-preview (get-in result [:result :final-message-preview])
+                          turn-count            (get-in result [:result :num-turns])
+                          tool-call-count       (get-in result [:result :tool-call-count])]
+                      (cond-> {}
+                        stop-reason           (assoc :stop-reason stop-reason)
+                        final-message-preview (assoc :final-message-preview final-message-preview)
+                        turn-count            (assoc :turn-count turn-count)
+                        tool-call-count       (assoc :tool-call-count tool-call-count))))]
     (cond-> {:outcome outcome :duration-ms duration-ms}
-      error-info    (assoc :error error-info)
+      error-info         (assoc :error error-info)
       transition-request (assoc :phase/transition-request transition-request)
-      tokens        (assoc :tokens tokens)
-      cost-usd      (assoc :cost-usd cost-usd))))
+      tokens             (assoc :tokens tokens)
+      cost-usd           (assoc :cost-usd cost-usd)
+      (seq meta-data)    (assoc :meta meta-data))))
 
 ;------------------------------------------------------------------------------ Layer 1.5
 ;; Supervisory entity builders
