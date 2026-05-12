@@ -153,22 +153,22 @@
                    (get-in result [:phase/metrics :tokens]))
         cost-usd (get-in result [:metrics :cost-usd]
                    (get-in result [:phase/metrics :cost-usd]))
-        meta-data (when-not succeeded?
-                    (let [stop-reason           (get-in result [:result :stop-reason])
-                          final-message-preview (get-in result [:result :final-message-preview])
-                          turn-count            (get-in result [:result :num-turns])
-                          tool-call-count       (get-in result [:result :tool-call-count])]
-                      (cond-> {}
-                        stop-reason           (assoc :stop-reason stop-reason)
-                        final-message-preview (assoc :final-message-preview final-message-preview)
-                        turn-count            (assoc :turn-count turn-count)
-                        tool-call-count       (assoc :tool-call-count tool-call-count))))]
+        diagnostic-fields (when-not succeeded?
+                            (let [stop-reason           (get-in result [:result :stop-reason])
+                                  final-message-preview (get-in result [:result :final-message-preview])
+                                  turn-count            (get-in result [:result :num-turns])
+                                  tool-call-count       (get-in result [:result :tool-call-count])]
+                              (cond-> {}
+                                stop-reason           (assoc :stop-reason stop-reason)
+                                final-message-preview (assoc :final-message-preview final-message-preview)
+                                turn-count            (assoc :turn-count turn-count)
+                                tool-call-count       (assoc :tool-call-count tool-call-count))))]
     (cond-> {:outcome outcome :duration-ms duration-ms}
-      error-info         (assoc :error error-info)
-      transition-request (assoc :phase/transition-request transition-request)
-      tokens             (assoc :tokens tokens)
-      cost-usd           (assoc :cost-usd cost-usd)
-      (seq meta-data)    (assoc :meta meta-data))))
+      error-info              (assoc :error error-info)
+      transition-request      (assoc :phase/transition-request transition-request)
+      tokens                  (assoc :tokens tokens)
+      cost-usd                (assoc :cost-usd cost-usd)
+      (seq diagnostic-fields) (assoc :meta diagnostic-fields))))
 
 ;------------------------------------------------------------------------------ Layer 1.5
 ;; Supervisory entity builders

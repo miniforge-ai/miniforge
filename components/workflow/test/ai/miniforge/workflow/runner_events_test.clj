@@ -152,68 +152,75 @@
         (is (= :implement (get-in event [:phase/transition-request :transition/target])))))))
 
 ;------------------------------------------------------------------------------ :meta diagnostic fields
+;; es/phase-completed stores data under namespaced keys:
+;;   :outcome → :phase/outcome
+;;   :meta    → :phase/meta   (added by this PR to core.clj)
 
 (deftest phase-completed-failure-includes-meta-stop-reason-test
-  (testing "failure events carry :meta with stop-reason and other LLM diagnostics"
+  (testing "failure events carry :phase/meta with stop-reason and other LLM diagnostics"
     (let [stream (create-stream)
           ctx    (test-context)
-          phase-result {:status  :failed
+          phase-result {:status   :failed
                         :success? false
-                        :result  {:status               :failed
-                                  :stop-reason          :max-tokens
-                                  :final-message-preview "Sorry, I ran out of tokens mid-"
-                                  :num-turns            12
-                                  :tool-call-count      37}}]
+                        :result   {:status                :failed
+                                   :stop-reason           :max-tokens
+                                   :final-message-preview "Sorry, I ran out of tokens mid-"
+                                   :num-turns             12
+                                   :tool-call-count       37}}]
       (events/publish-phase-completed! stream ctx :implement phase-result)
       (let [event (first-event stream)
-            meta  (:meta event)]
-        (is (= :failure (:outcome event)))
-        (is (some? meta) ":meta must be present on failure events with LLM diagnostics")
+            meta  (:phase/meta event)]
+        (is (some? event) "event must be published — stream must be non-empty")
+        (is (= :failure (:phase/outcome event)))
+        (is (some? meta) ":phase/meta must be present on failure events with LLM diagnostics")
         (is (= :max-tokens (:stop-reason meta)))
         (is (= "Sorry, I ran out of tokens mid-" (:final-message-preview meta)))
         (is (= 12 (:turn-count meta)))
         (is (= 37 (:tool-call-count meta)))))))
 
 (deftest phase-completed-failure-meta-omitted-when-no-diagnostic-fields-test
-  (testing "failure events without LLM diagnostic fields do not carry :meta"
+  (testing "failure events without LLM diagnostic fields do not carry :phase/meta"
     (let [stream (create-stream)
           ctx    (test-context)
-          phase-result {:status  :failed
+          phase-result {:status   :failed
                         :success? false
-                        :error   {:message "network timeout"}}]
+                        :error    {:message "network timeout"}}]
       (events/publish-phase-completed! stream ctx :implement phase-result)
       (let [event (first-event stream)]
-        (is (= :failure (:outcome event)))
-        (is (nil? (:meta event)) ":meta must be absent when no diagnostic fields are present")))))
+        (is (some? event) "event must be published — stream must be non-empty")
+        (is (= :failure (:phase/outcome event)))
+        (is (nil? (:phase/meta event)) ":phase/meta must be absent when no diagnostic fields are present")))))
 
 (deftest phase-completed-success-has-no-meta-test
-  (testing "success events do not carry :meta diagnostic fields"
+  (testing "success events do not carry :phase/meta diagnostic fields"
     (let [stream (create-stream)
           ctx    (test-context)
-          phase-result {:status  :completed
+          phase-result {:status   :completed
                         :success? true
-                        :result  {:status               :completed
-                                  :stop-reason          :end-turn
-                                  :final-message-preview "Done."
-                                  :num-turns            5
-                                  :tool-call-count      10}}]
+                        :result   {:status                :completed
+                                   :stop-reason           :end-turn
+                                   :final-message-preview "Done."
+                                   :num-turns             5
+                                   :tool-call-count       10}}]
       (events/publish-phase-completed! stream ctx :plan phase-result)
       (let [event (first-event stream)]
-        (is (= :success (:outcome event)))
-        (is (nil? (:meta event)) ":meta must not appear on success events")))))
+        (is (some? event) "event must be published — stream must be non-empty")
+        (is (= :success (:phase/outcome event)))
+        (is (nil? (:phase/meta event)) ":phase/meta must not appear on success events")))))
 
 (deftest phase-completed-failure-partial-meta-fields-test
-  (testing "partial LLM diagnostic fields yield partial :meta"
+  (testing "partial LLM diagnostic fields yield partial :phase/meta"
     (let [stream (create-stream)
           ctx    (test-context)
-          phase-result {:status  :failed
+          phase-result {:status   :failed
                         :success? false
-                        :result  {:status      :failed
-                                  :stop-reason :end-turn}}]
+                        :result   {:status      :failed
+                                   :stop-reason :end-turn}}]
       (events/publish-phase-completed! stream ctx :review phase-result)
       (let [event (first-event stream)
-            meta  (:meta event)]
-        (is (= :failure (:outcome event)))
+            meta  (:phase/meta event)]
+        (is (some? event) "event must be published — stream must be non-empty")
+        (is (= :failure (:phase/outcome event)))
         (is (= :end-turn (:stop-reason meta)))
         (is (nil? (:final-message-preview meta)))
         (is (nil? (:turn-count meta)))
