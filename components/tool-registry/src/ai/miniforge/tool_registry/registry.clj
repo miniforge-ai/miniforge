@@ -24,6 +24,7 @@
    Layer 2: Query and filter operations
    Layer 3: Status and statistics"
   (:require
+   [ai.miniforge.response.interface :as response]
    [ai.miniforge.tool-registry.schema :as schema]
    [ai.miniforge.logging.interface :as log]
    [clojure.string :as str]))
@@ -50,12 +51,14 @@
   (register-tool [_this tool]
     (let [{:keys [valid? errors]} (schema/validate-tool tool)]
       (when-not valid?
-        (throw (ex-info "Invalid tool configuration"
-                        {:tool-id (:tool/id tool)
-                         :errors errors})))
+        (response/throw-anomaly! :anomalies/incorrect
+                                 "Invalid tool configuration"
+                                 {:tool-id (:tool/id tool)
+                                  :errors errors}))
       (when-not (schema/valid-tool-id? (:tool/id tool))
-        (throw (ex-info "Tool ID must be a namespaced keyword"
-                        {:tool-id (:tool/id tool)})))
+        (response/throw-anomaly! :anomalies/incorrect
+                                 "Tool ID must be a namespaced keyword"
+                                 {:tool-id (:tool/id tool)}))
       (let [normalized (schema/normalize-tool tool)
             tool-id (:tool/id normalized)
             logger (:logger @state)]
@@ -111,11 +114,15 @@
   (update-tool [_this tool-id updates]
     (let [current (get @(:tools @state) tool-id)]
       (when-not current
-        (throw (ex-info "Tool not found" {:tool-id tool-id})))
+        (response/throw-anomaly! :anomalies/not-found
+                                 "Tool not found"
+                                 {:tool-id tool-id}))
       (let [updated (merge current updates)
             {:keys [valid? errors]} (schema/validate-tool updated)]
         (when-not valid?
-          (throw (ex-info "Invalid update" {:tool-id tool-id :errors errors})))
+          (response/throw-anomaly! :anomalies/incorrect
+                                   "Invalid update"
+                                   {:tool-id tool-id :errors errors}))
         (swap! (:tools @state) assoc tool-id updated)
         updated)))
 
