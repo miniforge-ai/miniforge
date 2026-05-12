@@ -34,6 +34,7 @@
    parsed structure and turns those strings back into keywords /
    stripped strings so downstream code can use keyword accessors."
   (:require
+   [ai.miniforge.event-stream.sinks :as sinks]
    [cheshire.core :as json]
    [clojure.java.io :as io]))
 
@@ -102,14 +103,41 @@
                      (catch Exception _e nil))))
            vec))))
 
+(defn workflow-events-dir
+  "Resolve the on-disk events directory for `workflow-id` under
+   `base-dir`. Probes three locations in priority order and returns
+   the first one that exists:
+
+     1. `{base-dir}/archived/{wid}/` — terminal workflows the BD-2b
+        sub-3b archive moved.
+     2. `{base-dir}/live/{wid}/` — in-flight workflows.
+     3. `{base-dir}/{wid}/` — legacy flat layout from before sub-3b.
+
+   Returns the matching `java.io.File`, or nil if none exist."
+  ^java.io.File [base-dir workflow-id]
+  (let [base     (io/file (str base-dir))
+        archived (sinks/archived-workflow-dir base workflow-id)
+        live     (sinks/live-workflow-dir base workflow-id)
+        legacy   (io/file base (if (keyword? workflow-id)
+                                 (name workflow-id)
+                                 (str workflow-id)))]
+    (cond
+      (.isDirectory archived) archived
+      (.isDirectory live)     live
+      (.isDirectory legacy)   legacy
+      :else                   nil)))
+
 (defn read-workflow-events-by-id
   "Convenience: read events for a workflow id under a base events dir.
+   Probes archived → live → legacy layouts via `workflow-events-dir`
+   and reads from the first one that exists.
 
    Arguments:
    - `base-dir` — base events directory (e.g. `~/.miniforge/events`)
-   - `workflow-id` — UUID or string
+   - `workflow-id` — UUID, keyword, or string
 
    Returns a vector of parsed event maps, or nil if the workflow
-   directory does not exist."
+   directory does not exist in any of the three layouts."
   [base-dir workflow-id]
-  (read-workflow-events (io/file (str base-dir) (str workflow-id))))
+  (when-let [dir (workflow-events-dir base-dir workflow-id)]
+    (read-workflow-events dir)))

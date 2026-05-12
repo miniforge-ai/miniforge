@@ -1,0 +1,10 @@
+;; Event-stream storage layout names (BD-2b sub-3b). These are contract
+;; values, not behavior: producers, archive recovery, and future consumers
+;; need to agree on the same on-disk paths without copying literals through
+;; implementation namespaces.
+{:live-subdir "live"
+ :archived-subdir "archived"
+ :operator-subdir "operator"
+ :snapshot-filename "snapshot.transit.json"
+ :snapshot-tmp-filename "snapshot.transit.json.tmp"
+ :archived-marker-filename "archived.marker"}

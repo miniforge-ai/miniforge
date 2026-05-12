@@ -819,16 +819,19 @@
 ;; jvm-only deferrals in this file (event-stream.interface lazy
 ;; require around line 853, the resume command at line 1024).
 ;;
-;; Stratified-design layering: `manifest-fn` is the lone Layer 1
-;; helper; `start-/mark-/finish-workflow-manifest!` sit at Layer 2
-;; and each independently call `manifest-fn` (never each other).
-;; `run-workflow!` (further down) is the Layer 3 orchestrator that
-;; calls all three lifecycle helpers.
+;; Stratified-design layering: `manifest-fn` / `archive-fn` are the
+;; lone Layer 1 helpers; `start-/mark-/finish-/archive-workflow-manifest!`
+;; sit at Layer 2 and each independently call the Layer 1 resolvers
+;; (never each other). `run-workflow!` (further down) is the Layer 3
+;; orchestrator that composes them.
 
-;------------------------------------------------------------------------------ Layer 1 — manifest var resolution
+;------------------------------------------------------------------------------ Layer 1 — var resolution
 
 (defn manifest-fn [sym]
   (requiring-resolve (symbol "ai.miniforge.event-stream.manifest" (name sym))))
+
+(defn archive-fn [sym]
+  (requiring-resolve (symbol "ai.miniforge.event-stream.archive" (name sym))))
 
 ;------------------------------------------------------------------------------ Layer 2 — lifecycle helpers (compose Layer 1)
 ;; Peers; none calls another. `run-workflow!` composes them at Layer 3.
@@ -890,6 +893,30 @@
         (.interrupt (Thread/currentThread))
         nil)
       (catch Exception _ nil))))
+
+(defn archive-workflow-manifest!
+  "Run BD-2b sub-3b's atomic archive on `workflow-id`'s `live/`
+   directory. Called from the happy path after `mark-manifest-terminal!`
+   succeeds — at that point the manifest is at terminal status with
+   `archive_status = :live` and ready to transition to `:archived`.
+
+   Best-effort: archive failures (e.g. the manifest disappeared
+   between mark and archive, or the rename hit an IO error) are
+   logged to stderr but don't propagate. The boot-time
+   `archive/recover-all-incomplete!` pass picks up any half-finished
+   archives on next start. The finally's `:cancelled` fallback does
+   NOT archive — those workflows wait for the scheduled cleanup
+   pass (sub-3c) so a crashing pipeline can't get half-archived state
+   stuck on disk via the recovery flow."
+  [{:keys [dir marked?]} workflow-id]
+  (when (and dir @marked?)
+    (try
+      ((archive-fn 'archive-workflow!) workflow-id)
+      (catch Exception e
+        (binding [*out* *err*]
+          (println (str "WARNING: archive of workflow " workflow-id
+                        " failed: " (.getMessage e)
+                        " (will be recovered by the cleanup pass)")))))))
 
 (defn- event-stream-shutdown!
   "Run the BD-2a shutdown sequence on `es`: quiesce publishers for
@@ -965,6 +992,13 @@
             ;; flush. Without this, headless exits could land before the
             ;; producer-side completion event was durable.
             (let [shutdown (event-stream-shutdown! es workflow-id opts)]
+              ;; BD-2b sub-3b: archive happens after drain so any
+              ;; events that landed between mark-terminal and drain
+              ;; are inside live/{wid}/ before the rename. Best-effort
+              ;; — failures are logged but don't propagate; the
+              ;; boot-time recovery pass picks up half-finished
+              ;; archives on next start.
+              (archive-workflow-manifest! manifest-handle workflow-id)
               (display/print-result result opts)
               (cond-> result
                 (some? shutdown) (assoc :event-durability shutdown))))
