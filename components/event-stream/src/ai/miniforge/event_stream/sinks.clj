@@ -37,6 +37,7 @@
   (:require
    [ai.miniforge.config.interface :as config]
    [ai.miniforge.event-stream.snowflake :as snowflake]
+   [ai.miniforge.event-stream.storage-layout :as layout]
    [clojure.java.io :as io]
    [clojure.string :as str]
    [clojure.pprint :as pprint]
@@ -137,32 +138,18 @@
     (name workflow-id)
     (str workflow-id)))
 
-(def ^:const ^String live-subdir
-  "Subdirectory under `default-events-dir` where in-flight workflows
-   write their events + manifest. BD-2b sub-3b introduces this split
-   from the previous flat layout so the archive operation can do an
-   atomic `mv live/{wid} → archived/{wid}` on the same filesystem."
-  "live")
-
-(def ^:const ^String archived-subdir
-  "Subdirectory under `default-events-dir` where the BD-2b sub-3b
-   archive operation moves workflows that have reached a terminal
-   status. Sub-3c reaps tail events from here while preserving the
-   manifest + snapshot per the `:tombstoned` state."
-  "archived")
-
 (defn live-dir
   "Return the `{base-dir}/live/` directory that holds in-flight
    workflows. Public so the archive module and cleanup pass can scan
    it on boot for recovery / cleanup."
   (^java.io.File [] (live-dir (default-events-dir)))
-  (^java.io.File [base-dir] (io/file base-dir live-subdir)))
+  (^java.io.File [base-dir] (io/file base-dir (layout/live-subdir))))
 
 (defn archived-dir
   "Return the `{base-dir}/archived/` directory that holds workflows
    whose archive completed via BD-2b sub-3b's atomic move."
   (^java.io.File [] (archived-dir (default-events-dir)))
-  (^java.io.File [base-dir] (io/file base-dir archived-subdir)))
+  (^java.io.File [base-dir] (io/file base-dir (layout/archived-subdir))))
 
 (defn live-workflow-dir
   "Return `{base-dir}/live/{workflow-id}/`. Canonical path for an
@@ -225,7 +212,7 @@
   ([event]
    (operator-event-file-path (default-events-dir) event))
   ([base-dir event]
-   (new-event-file-path (io/file base-dir "operator") event)))
+   (new-event-file-path (io/file base-dir (layout/operator-subdir)) event)))
 
 (defn cleanup-stale-events!
   "Delete event files older than TTL from the events directory.

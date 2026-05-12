@@ -52,6 +52,7 @@
   (:require
    [ai.miniforge.event-stream.manifest :as manifest]
    [ai.miniforge.event-stream.sinks :as sinks]
+   [ai.miniforge.event-stream.storage-layout :as layout]
    [clojure.java.io :as io])
   (:import
    [java.io File RandomAccessFile]
@@ -68,15 +69,6 @@
 ;;            (recover-all-incomplete!)
 
 ;------------------------------------------------------------------------------ Layer 0 — atomic file primitives
-
-(def ^:const ^String snapshot-filename
-  "snapshot.transit.json")
-
-(def ^:const ^String snapshot-tmp-filename
-  "snapshot.transit.json.tmp")
-
-(def ^:const ^String archived-marker-filename
-  "archived.marker")
 
 (defn- fsync-file!
   "Force-flush `file`'s data + metadata to disk. No-op when `file`
@@ -126,15 +118,15 @@
 
 (defn- snapshot-path
   ^File [^File workflow-dir]
-  (io/file workflow-dir snapshot-filename))
+  (io/file workflow-dir (layout/snapshot-filename)))
 
 (defn- snapshot-tmp-path
   ^File [^File workflow-dir]
-  (io/file workflow-dir snapshot-tmp-filename))
+  (io/file workflow-dir (layout/snapshot-tmp-filename)))
 
 (defn- marker-path
   ^File [^File workflow-dir]
-  (io/file workflow-dir archived-marker-filename))
+  (io/file workflow-dir (layout/archived-marker-filename)))
 
 ;------------------------------------------------------------------------------ Layer 1 — manifest-bound transitions over Layer 0
 
