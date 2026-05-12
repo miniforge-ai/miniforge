@@ -54,10 +54,20 @@ jobs:
         # We treat 0 + 3 as "ETL completed; maybe open a PR" and
         # only fail the job on 2 (genuine source-fetch failure
         # that an operator should investigate).
+        # Use `set -o pipefail` + ${PIPESTATUS[0]} so the bb script's
+        # exit code is what `rc` captures, not tee's. Without this,
+        # the documented exit-code semantics (0 / 2 / 3) would be
+        # silently masked by tee's zero — the workflow would proceed
+        # to "maybe open a PR" even when the ETL itself failed.
+        # GH Actions' default Linux shell omits pipefail; opt in
+        # explicitly here.
+        shell: bash
         run: |
           set +e
+          set -o pipefail
           bb scripts/refresh-cost-table.bb | tee /tmp/etl-summary.txt
-          rc=$?
+          rc=${PIPESTATUS[0]}
+          set +o pipefail
           set -e
           {
             echo "exit_code=$rc"
@@ -81,7 +91,6 @@ jobs:
 
       - name: Prepare PR body
         if: steps.diff.outputs.changed == 'true'
-        id: pr-body
         # Build the PR body in a real file with all interpolated
         # values plumbed through `env:` instead of inlined into the
         # heredoc — keeps untrusted inputs (workflow_dispatch reason)
