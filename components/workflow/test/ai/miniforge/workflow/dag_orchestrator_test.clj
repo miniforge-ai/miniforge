@@ -19,7 +19,8 @@
 (ns ai.miniforge.workflow.dag-orchestrator-test
   "Tests for DAG orchestrator: stratum wiring, conflict-aware batching,
    plan-to-DAG conversion with new decomposition fields, per-task base
-   branch chaining, and forest validation at plan time."
+   branch chaining, forest validation at plan time, and artifact-of-record
+   selection across multi-iteration repair cycles."
   (:require
    [clojure.test :refer [deftest testing is]]
    [ai.miniforge.dag-executor.interface :as dag]
@@ -368,6 +369,70 @@
       (is (= 0 (:total-tokens agg)))
       (is (= 0.0 (:total-cost agg)))
       (is (= 0 (:total-duration agg))))))
+
+;------------------------------------------------------------------------------ Layer 4
+;; Artifact-of-record selection across repair iterations.
+;;
+;; `:execution/artifacts` accumulates across every phase invocation
+;; (state.clj:186 `update :execution/artifacts into ...`). When a task
+;; succeeds after one or more review:changes-requested cycles, the
+;; vector ends up holding the failing-iteration artifacts AHEAD of
+;; the succeeding ones'. `run-mini-workflow` must pick the LAST
+;; entry so the `:dag/task-completed` event reports the artifact
+;; that actually shipped — not an early failing iteration that was
+;; later repaired. Bug observed 2026-05-12 on PR #861.
+
+(deftest run-mini-workflow-selects-last-artifact-test
+  (testing "When :execution/artifacts has multiple entries from repair
+            iterations, the wf-result :artifact must be the LAST entry
+            (the final iteration's), not the first (an earlier failing
+            iteration's). See project_dogfood_findings_2026_05_12.md
+            → 'Stale verifier feedback'."
+    (let [early-artifact  {:status :success
+                           :summary "iter 1 — runner_events.clj modified but core change is absent"}
+          middle-artifact {:status :success
+                           :summary "iter 2 — still broken"}
+          final-artifact  {:status :success
+                           :environment-id "task-7bedbf77"
+                           :summary "iter 3 — :meta diagnostic block added, tests pass"}
+          stub-result     {:execution/status :completed
+                           :execution/artifacts [early-artifact middle-artifact final-artifact]
+                           :execution/metrics {:tokens 100 :cost-usd 0.05 :duration-ms 1000}
+                           :execution/phase-results {}}
+          context         {:execution/run-pipeline-fn (fn [_sw _in _opts] stub-result)
+                           :execution/workflow {:workflow/pipeline []}
+                           :execution/opts {:branch "main"}}
+          task-def        {:task/id id-a
+                           :task/description "Test multi-iter task"
+                           :task/deps #{}}
+          wf-result       (dag-orch/run-mini-workflow task-def context)]
+      (is (:success? wf-result)
+          "phase/succeeded? recognizes :execution/status :completed")
+      (is (= final-artifact (:artifact wf-result))
+          "artifact-of-record is the LAST entry, not the first — picking
+           `(first artifacts)` would surface the iter-1 'core change is absent'
+           summary even though iter 3 shipped the fix"))))
+
+(deftest run-mini-workflow-single-artifact-still-selected-test
+  (testing "Single-iteration happy path: with exactly one artifact in the
+            vector, `(last artifacts)` selects it just as `(first artifacts)`
+            would. Confirms the fix doesn't regress the no-repair case."
+    (let [only-artifact {:status :success
+                         :summary "shipped first time"}
+          stub-result   {:execution/status :completed
+                         :execution/artifacts [only-artifact]
+                         :execution/metrics {:tokens 50 :cost-usd 0.02 :duration-ms 500}
+                         :execution/phase-results {}}
+          context       {:execution/run-pipeline-fn (fn [_sw _in _opts] stub-result)
+                         :execution/workflow {:workflow/pipeline []}
+                         :execution/opts {:branch "main"}}
+          task-def      {:task/id id-a
+                         :task/description "Happy path task"
+                         :task/deps #{}}
+          wf-result     (dag-orch/run-mini-workflow task-def context)]
+      (is (:success? wf-result))
+      (is (= only-artifact (:artifact wf-result))
+          "single-artifact case still works"))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

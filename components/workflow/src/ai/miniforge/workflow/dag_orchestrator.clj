@@ -1229,8 +1229,20 @@
             metrics      (:execution/metrics result)
             pr-info      (extract-pr-info-from-result result task-def)
             task-branch  (task-result-branch result)]
+        ;; `:execution/artifacts` accumulates across phases AND across repair
+        ;; iterations (each `update :execution/artifacts into ...` in state.clj
+        ;; / execution.clj appends). When a task succeeds after one or more
+        ;; review:changes-requested cycles, the vector ends up holding the
+        ;; failing-iteration verifier output AHEAD of the succeeding one's.
+        ;; Picking `(first artifacts)` would make the task-completed event
+        ;; report the EARLIEST iteration as the artifact-of-record — that's
+        ;; what the 2026-05-12 dogfood showed for PR #861 (verifier said
+        ;; "core change is absent" while the merged diff was correct).
+        ;; `(last artifacts)` picks the artifact from the final iteration
+        ;; that actually shipped the work. See
+        ;; project_dogfood_findings_2026_05_12.md → "Stale verifier feedback".
         (if (phase/succeeded? result)
-          (cond-> (workflow-success (first artifacts) metrics)
+          (cond-> (workflow-success (last artifacts) metrics)
             pr-info (assoc :pr-info pr-info)
             ;; Carry sub-workflow's worktree path so apply-dag-success can
             ;; merge changes back into the parent worktree for release.
