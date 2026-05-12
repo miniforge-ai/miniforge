@@ -945,8 +945,10 @@
                        (not quiet) (->> (display/colorize :yellow))
                        best-effort? (str " [MINIFORGE_BEST_EFFORT_SHUTDOWN=1, continuing]"))))
           (when-not best-effort?
-            (throw (ex-info msg {:reason :event-stream-drain-failed
-                                 :drain-result drain-result})))))
+            (response/throw-anomaly! :anomalies/fault
+                                     msg
+                                     {:reason :event-stream-drain-failed
+                                      :drain-result drain-result}))))
       drain-result)))
 
 (defn run-workflow! [workflow-id {:keys [version output quiet event-stream dashboard-url]
