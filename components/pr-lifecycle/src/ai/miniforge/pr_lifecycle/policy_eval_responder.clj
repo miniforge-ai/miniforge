@@ -17,18 +17,23 @@
 ;; limitations under the License.
 
 (ns ai.miniforge.pr-lifecycle.policy-eval-responder
-  "N13 §2.5 Comment Response Agent — structured-payload path.
+  "N13 §2.5 Comment Response Agent — orchestrator.
 
-   Existing `pr-lifecycle.responder` handles general human review
-   comments via LLM. This namespace is the deterministic path for
-   the one bot we own: `miniforge-policy-evaluator[bot]` (the
-   N13 §2.2 Standards Reviewer).
+   The deterministic counterpart to `pr-lifecycle.responder` (which
+   handles general human review comments via LLM). Targets the one
+   bot we own — `miniforge-policy-evaluator[bot]` (the N13 §2.2
+   Standards Reviewer) — applies its `:violation/suggested-fix`
+   deterministically, commits, pushes, and replies + resolves on
+   each fixed thread.
 
-   Each such comment carries an embedded `:comment/payload` EDN block
-   per N13 §2.3. We parse it, apply the `:violation/suggested-fix`
-   in-place at the comment's `(path, line)`, commit + push, then
-   reply on each fixed thread with the commit SHA and resolve the
-   conversation.
+   The work is split across one namespace per stratum (each ~50–150
+   lines), this namespace being the orchestration / re-export shim:
+
+     ┌─ policy-eval/payload.clj  (Layer 0: classification)
+     ├─ policy-eval/plan.clj     (Layer 1: pure plan)
+     ├─ policy-eval/fs.clj       (Layer 2: file I/O)
+     ├─ policy-eval/git.clj      (Layer 3a: commit + push)
+     └─ policy-eval/reply.clj    (Layer 3b: reply + resolve)
 
    v0 scope:
    - Single-line `:violation/suggested-fix` (the common case for
@@ -39,343 +44,75 @@
    - Non-fixable comments (`:violation/auto-fixable? false`) are
      escalated as attention items, not auto-applied.
 
-   Layer 0: marker / extraction helpers (delegates to compliance-scanner)
-   Layer 1: per-fix planning + application (pure)
-   Layer 2: fix-set materialization (file I/O)
-   Layer 3: git commit + push + reply-resolve orchestration"
+   Pipeline contract (`respond-to-policy-comments!`):
+     1. Filter to policy-eval comments only.
+     2. plan/plan-fixes → :apply / :escalate / :skip buckets.
+     3. fs/materialize-fix! per :to-apply entry → applied + failed.
+     4. git/commit-and-push! the applied paths.
+     5. reply/reply-and-resolve-fixed! on each applied thread."
   (:require
-   [ai.miniforge.compliance-scanner.interface :as scanner]
    [ai.miniforge.dag-executor.interface :as dag]
-   [ai.miniforge.pr-lifecycle.github :as github]
-   [babashka.fs :as fs]
-   [babashka.process :as process]
-   [clojure.java.io :as io]
-   [clojure.string :as str]))
+   [ai.miniforge.pr-lifecycle.policy-eval.fs :as fs]
+   [ai.miniforge.pr-lifecycle.policy-eval.git :as git]
+   [ai.miniforge.pr-lifecycle.policy-eval.payload :as payload]
+   [ai.miniforge.pr-lifecycle.policy-eval.plan :as plan]
+   [ai.miniforge.pr-lifecycle.policy-eval.reply :as reply]))
 
-;------------------------------------------------------------------------------ Layer 0
-;; Comment classification + payload extraction
+;; ── re-exports ───────────────────────────────────────────────────────
+;;
+;; The public surface of the responder is what `pr-lifecycle/interface`
+;; (and the test suite) reaches for. Keeping the names accessible at
+;; the umbrella namespace lets callers stay decoupled from the internal
+;; decomposition — they touch one ns, not five.
 
-(def policy-eval-author
-  "GitHub login the renderer posts under (per
-   `compliance-scanner.comments/violation->comment`)."
-  "miniforge-policy-evaluator[bot]")
+(def policy-eval-author      payload/policy-eval-author)
+(def policy-eval-comment?    payload/policy-eval-comment?)
+(def classify-fix            plan/classify-fix)
+(def plan-fixes              plan/plan-fixes)
+(def apply-single-line-replacement! fs/apply-single-line-replacement!)
+(def materialize-fix!        fs/materialize-fix!)
 
-(defn policy-eval-comment?
-  "True when `comment` was posted by the N13 Standards Reviewer
-   (matched by author login). Comments from other bots / humans are
-   handled by the general LLM responder, not by this module."
-  [comment]
-  (= policy-eval-author (:comment/author comment)))
+;; ── orchestrator ─────────────────────────────────────────────────────
+;;
+;; The whole point of decomposition is here: a top-to-bottom pipeline
+;; with each strata's work landing in its own ns, and the orchestrator
+;; doing only the assembly. No nested cond, no inline business rules.
 
-(defn extract-policy-payload
-  "Return the embedded `:comment/payload` map from `comment`'s body,
-   or nil. Delegates to `compliance-scanner.interface/extract-comment-payload`
-   so the round-trip is the inverse of the renderer."
-  [comment]
-  (scanner/extract-comment-payload (:comment/body comment)))
+(defn- bucket-results
+  "Pure: partition `materialize-fix!` results into the three buckets
+   the summary needs. `:already-applied` no-ops must NOT enter the
+   commit path — they're returned in their own bucket so the caller
+   surfaces them in the summary without producing an empty diff."
+  [results]
+  (let [ok-results      (filter dag/ok? results)
+        already-applied? (fn [r] (= :already-applied (-> r :data :status)))
+        applied-ok      (remove already-applied? ok-results)
+        noop-ok         (filter already-applied? ok-results)]
+    {:applied         (mapv :data applied-ok)
+     :already-applied (mapv :data noop-ok)
+     :failed-to-apply (mapv :error (filter (complement dag/ok?) results))}))
 
-;------------------------------------------------------------------------------ Layer 1
-;; Per-fix planning (pure)
-
-(defn- multi-line?
-  "True when the suggested-fix spans more than one line. v0 skips
-   these because applying a multi-line replacement requires knowing
-   the original span, which the comment doesn't carry directly."
-  [suggested-fix]
-  (and (string? suggested-fix)
-       (str/includes? suggested-fix "\n")))
-
-(defn- plan-decision
-  "Factory: build a `classify-fix` result map. Single source of
-   truth for the `{:action :reason :payload}` shape — avoids hand-
-   constructing the same map at every cond branch in `classify-fix`."
-  [action reason payload]
-  {:action  action
-   :reason  reason
-   :payload payload})
-
-(defn classify-fix
-  "Pure: decide what to do with a single policy-eval comment.
-   Returns `{:action :apply | :escalate | :skip
-             :reason  <keyword>
-             :payload <payload-map-or-nil>}` via `plan-decision`."
-  [comment]
-  (let [payload (extract-policy-payload comment)]
-    (cond
-      (nil? payload)
-      (plan-decision :skip :no-payload nil)
-
-      (false? (:violation/auto-fixable? payload))
-      (plan-decision :escalate :violation/auto-fixable?-false payload)
-
-      (str/blank? (:violation/suggested-fix payload))
-      (plan-decision :escalate :no-suggested-fix payload)
-
-      (multi-line? (:violation/suggested-fix payload))
-      (plan-decision :escalate :policy-eval/multi-line-not-supported payload)
-
-      :else
-      (plan-decision :apply :ok payload))))
-
-(defn plan-fixes
-  "Pure: walk a vector of comments, classify each, and partition into
-   `{:to-apply [...] :to-escalate [...] :to-skip [...]}`. Each entry
-   carries the original comment + its classification."
-  [comments]
-  (reduce
-   (fn [acc comment]
-     (let [c (classify-fix comment)
-           bucket (case (:action c)
-                    :apply    :to-apply
-                    :escalate :to-escalate
-                    :skip     :to-skip)]
-       (update acc bucket conj
-               {:comment comment
-                :payload (:payload c)
-                :reason  (:reason c)})))
-   {:to-apply [] :to-escalate [] :to-skip []}
-   comments))
-
-;------------------------------------------------------------------------------ Layer 2
-;; Fix-set materialization (file I/O)
-
-(defn- safe-worktree-path
-  "Resolve `relative-path` under `worktree-root`. Returns the
-   canonical absolute path string when the target stays inside the
-   worktree root, or returns nil when `relative-path` escapes
-   (path-traversal guard).
-
-   Three layers of defense:
-   1. Syntactic — reject absolute paths (leading `/`) and any
-      `..`-bearing segments up front. Java's `File(parent, child)`
-      constructor converts absolute children into relative ones,
-      so a `getCanonicalPath` check alone wouldn't catch
-      `/etc/passwd` (it'd resolve to `<worktree>/etc/passwd`).
-   2. Canonicalization — resolve symlinks and `.` segments via
-      `getCanonicalPath`.
-   3. Containment — require the canonical target to live under
-      the canonical worktree root."
-  [worktree-root relative-path]
-  (try
-    (let [path-str (str relative-path)]
-      (cond
-        (str/blank? path-str)
-        nil
-
-        ;; Layer 1: syntactic rejection. Absolute paths or any
-        ;; ../ component bail before File-API canonicalization.
-        (str/starts-with? path-str "/")
-        nil
-
-        (some #{".."} (str/split path-str #"[/\\\\]"))
-        nil
-
-        :else
-        (let [root   (.getCanonicalPath (io/file (str worktree-root)))
-              target (.getCanonicalPath (io/file (str worktree-root) path-str))]
-          (when (str/starts-with? target (str root java.io.File/separator))
-            target))))
-    (catch java.io.IOException _ nil)
-    (catch SecurityException _ nil)))
-
-(defn- read-content
-  "Slurp `path` and return `{:lines <vec> :trailing-newline? <bool>}`.
-   Preserves trailing-newline info so round-trips don't drop the final `\\n`
-   or silently normalize CRLF."
-  [path]
-  (let [content  (slurp path)
-        trailing (str/ends-with? content "\n")
-        lines    (vec (str/split-lines content))]
-    {:lines lines :trailing-newline? trailing}))
-
-(defn- write-content!
-  "Join `lines` with `\\n`, append trailing `\\n` when `trailing-newline?`
-   is true, and write to `path`."
-  [path lines trailing-newline?]
-  (spit path (cond-> (str/join "\n" lines)
-               trailing-newline? (str "\n"))))
-
-(defn apply-single-line-replacement!
-  "Replace line `line-number` (1-indexed, matching GitHub comment
-   line semantics) in `worktree-path/relative-path` with
-   `replacement`. Returns DAG result with `{:path :line :before :after}`
-   on success, or `{:path :line :status :already-applied}` when
-   `before == replacement` (idempotency guard — caller should not
-   include this in the commit path).
-
-   Fails with typed errors when:
-   - `relative-path` escapes the worktree root (`:policy-eval/path-traversal`)
-   - the file doesn't exist (`:policy-eval/file-not-found`)
-   - the line number is out of range (`:policy-eval/line-out-of-range`)
-   - the read or write throws (`:policy-eval/io-failed`)"
-  [worktree-path relative-path line-number replacement]
-  (try
-    (let [abs (safe-worktree-path worktree-path relative-path)]
-      (cond
-        (nil? abs)
-        (dag/err :policy-eval/path-traversal
-                 (str "relative-path escapes worktree root: " relative-path)
-                 {:path relative-path :worktree-path (str worktree-path)})
-
-        (not (fs/exists? abs))
-        (dag/err :policy-eval/file-not-found
-                 (str "file " abs " not present in worktree")
-                 {:path relative-path})
-
-        :else
-        (let [{:keys [lines trailing-newline?]} (read-content abs)
-              idx (dec line-number)]
-          (cond
-            (or (neg? idx) (>= idx (count lines)))
-            (dag/err :policy-eval/line-out-of-range
-                     (str "line " line-number " out of range (file has "
-                          (count lines) " lines)")
-                     {:path relative-path :line line-number :file-lines (count lines)})
-
-            :else
-            (let [before (nth lines idx)
-                  after  replacement]
-              (if (= before after)
-                (dag/ok {:path relative-path :line line-number
-                         :status :already-applied :before before :after after})
-                (do
-                  (write-content! abs (assoc lines idx after) trailing-newline?)
-                  (dag/ok {:path relative-path :line line-number
-                           :before before :after after}))))))))
-    (catch Throwable e
-      (dag/err :policy-eval/io-failed
-               (str "failed to apply fix to " relative-path ": " (.getMessage e))
-               {:path relative-path :line line-number}))))
-
-(defn materialize-fix!
-  "Apply one planned `:to-apply` entry's suggested-fix to disk.
-   Returns the DAG result from `apply-single-line-replacement!`
-   decorated with the originating comment-id for traceability."
-  [worktree-path entry]
-  (let [{:keys [comment payload]} entry
-        path (:comment/path comment)
-        line (:comment/line comment)
-        fix  (:violation/suggested-fix payload)
-        r    (apply-single-line-replacement! worktree-path path line fix)]
-    (if (dag/ok? r)
-      (dag/ok (assoc (:data r) :comment/id (:comment/id comment)))
-      (update r :error (fn [err]
-                         (-> err
-                             (update :data (fnil assoc {})
-                                     :comment/id (:comment/id comment))))))))
-
-;------------------------------------------------------------------------------ Layer 3
-;; Git + reply-resolve orchestration
-
-(defn- git-sh
-  "Run `git -C worktree-path <args>`. Returns DAG result."
-  [worktree-path & args]
-  (try
-    (let [r (apply process/shell
-                   {:dir (str worktree-path)
-                    :out :string :err :string :continue true}
-                   "git" "-C" (str worktree-path) args)]
-      (if (zero? (:exit r))
-        (dag/ok {:output (str/trim (:out r ""))})
-        (dag/err :policy-eval/git-failed
-                 (str/trim (:err r ""))
-                 {:exit-code (:exit r) :args (vec args)})))
-    (catch Throwable e
-      (dag/err :policy-eval/git-failed (.getMessage e) {:args (vec args)}))))
-
-(defn- stage-paths!
-  "git add each unique path in `applied-fixes`."
-  [worktree-path applied-fixes]
-  (let [paths (distinct (map :path applied-fixes))]
-    (reduce
-     (fn [acc path]
-       (let [r (git-sh worktree-path "add" "--" path)]
-         (if (dag/ok? r) acc (reduced r))))
-     (dag/ok {:staged-count (count paths)})
-     paths)))
-
-(defn- commit-message
-  "Build a commit message summarizing the applied fixes."
-  [applied-fixes]
-  (let [n (count applied-fixes)]
-    (str "fix(policy-eval): apply " n " standards-pack auto-fix"
-         (when (not= n 1) "es")
-         "\n\n"
-         (str/join "\n"
-                   (for [f applied-fixes]
-                     (str "- " (:path f) ":" (:line f))))
-         "\n\n"
-         "Applied by miniforge pr-lifecycle/policy-eval-responder per N13 §2.5.")))
-
-(defn commit-and-push!
-  "Stage all touched files, commit, push. Returns DAG result with
-   `{:commit-sha :pushed?}` on success.
-
-   Uses `dag/when-let-ok` (railway-binding macro) — see
-   `.cursor/rules/languages/clojure-railway-binding.mdc` (dewey 211).
-   Each step short-circuits to its failure result on `(not (ok? r))`."
-  [worktree-path applied-fixes]
-  (dag/when-let-ok
-   [_stage-r  (stage-paths! worktree-path applied-fixes)
-    _commit-r (git-sh worktree-path "commit" "-m" (commit-message applied-fixes))
-    sha-r     (git-sh worktree-path "rev-parse" "HEAD")
-    _push-r   (git-sh worktree-path "push")]
-   (dag/ok {:commit-sha (:output (:data sha-r))
-            :pushed?    true})))
-
-(defn- short-sha
-  [sha]
-  (subs sha 0 (min 10 (count sha))))
-
-(defn- fix-reply-message
-  [commit-sha fix]
-  (str "Auto-applied in `" (short-sha commit-sha) "`:\n\n"
-       "```diff\n"
-       "- " (:before fix) "\n"
-       "+ " (:after fix) "\n"
-       "```\n\n"
-       "<sub>Posted by `policy-eval-responder` per N13 §2.5</sub>"))
-
-(defn reply-and-resolve-one!
-  "Post the reply on `comment-id`, look up the thread id, resolve it.
-   Returns DAG result with `{:reply-posted :resolved :thread-id?}`.
-   Resolution is best-effort — if the thread lookup or resolve call
-   fails, we still surface the successful reply."
-  [worktree-path pr-number commit-sha fix]
-  (let [cid (:comment/id fix)
-        msg (fix-reply-message commit-sha fix)
-        reply-r (github/reply-to-comment worktree-path pr-number cid msg)]
-    (if-not (dag/ok? reply-r)
-      reply-r
-      (let [thread-r (github/get-thread-id worktree-path pr-number cid)]
-        (if-not (dag/ok? thread-r)
-          (dag/ok {:reply-posted true :resolved false :thread-error (:error thread-r)})
-          (let [tid (-> thread-r :data :thread-id)
-                resolve-r (github/resolve-conversation worktree-path tid)]
-            (dag/ok {:reply-posted true
-                     :resolved (dag/ok? resolve-r)
-                     :thread-id tid
-                     :reply-url (-> reply-r :data :url)})))))))
-
-(defn reply-and-resolve-fixed!
-  "For each applied fix, post a reply on its comment thread + resolve.
-   Returns a vector of per-fix DAG results."
-  [worktree-path pr-number commit-sha applied-fixes]
-  (mapv (fn [fix] (reply-and-resolve-one! worktree-path pr-number commit-sha fix))
-        applied-fixes))
+(defn- summary
+  "Build the DAG-ok summary map. `git-data` is nil when no commit
+   was attempted (zero applied fixes); otherwise it carries
+   `{:commit-sha :pushed?}`."
+  [{:keys [applied already-applied failed-to-apply]} plan-result git-data replies]
+  (dag/ok {:applied         applied
+           :already-applied already-applied
+           :failed-to-apply failed-to-apply
+           :escalated       (:to-escalate plan-result)
+           :skipped         (:to-skip plan-result)
+           :commit-sha      (:commit-sha git-data)
+           :pushed?         (boolean (:pushed? git-data))
+           :replies         (or replies [])}))
 
 (defn respond-to-policy-comments!
-  "Top-level entry point.
-
-   Steps:
-   1. Filter `comments` to policy-eval comments only.
-   2. `plan-fixes` to decide :apply / :escalate / :skip per comment.
-   3. Materialize each :apply via `materialize-fix!`.
-   4. Stage / commit / push the applied fixes.
-   5. Reply + resolve on each successfully-applied comment thread.
+  "Top-level entry point. See namespace docstring for pipeline
+   contract and bucket semantics.
 
    Returns DAG result with summary:
      {:applied         [<materialize-result>...]
+      :already-applied [<materialize-result>...]
       :failed-to-apply [<dag-err>...]
       :escalated       [<plan-entry>...]
       :skipped         [<plan-entry>...]
@@ -383,40 +120,20 @@
       :pushed?         <bool>?
       :replies         [<dag-result>...]?}"
   [worktree-path pr-number comments]
-  (let [policy-comments (filterv policy-eval-comment? comments)
-        plan            (plan-fixes policy-comments)
-        results         (mapv #(materialize-fix! worktree-path %) (:to-apply plan))
-        ok-results      (filter dag/ok? results)
-        ;; :already-applied no-ops must not enter the commit path
-        applied-ok      (filter #(not= :already-applied (-> % :data :status)) ok-results)
-        noop-ok         (filter #(= :already-applied (-> % :data :status)) ok-results)
-        applied         (mapv :data applied-ok)
-        already-applied (mapv :data noop-ok)
-        failed-to-apply (mapv :error (filter (complement dag/ok?) results))]
-    (cond
-      (empty? applied)
-      (dag/ok {:applied         []
-               :already-applied already-applied
-               :failed-to-apply failed-to-apply
-               :escalated       (:to-escalate plan)
-               :skipped         (:to-skip plan)
-               :commit-sha      nil
-               :pushed?         false
-               :replies         []})
-
-      :else
+  (let [policy-comments (filterv payload/policy-eval-comment? comments)
+        plan-result     (plan/plan-fixes policy-comments)
+        results         (mapv #(fs/materialize-fix! worktree-path %)
+                              (:to-apply plan-result))
+        buckets         (bucket-results results)
+        applied         (:applied buckets)]
+    (if (empty? applied)
+      (summary buckets plan-result nil nil)
       ;; Railway-binding chain — see clojure-railway-binding rule
       ;; (dewey 211). Push failure short-circuits with the typed
       ;; err result; success body builds the summary.
       (dag/when-let-ok
-       [push-r (commit-and-push! worktree-path applied)]
-       (let [{:keys [commit-sha pushed?]} (:data push-r)
-             replies (reply-and-resolve-fixed! worktree-path pr-number commit-sha applied)]
-         (dag/ok {:applied         applied
-                  :already-applied already-applied
-                  :failed-to-apply failed-to-apply
-                  :escalated       (:to-escalate plan)
-                  :skipped         (:to-skip plan)
-                  :commit-sha      commit-sha
-                  :pushed?         pushed?
-                  :replies         replies}))))))
+       [push-r (git/commit-and-push! worktree-path applied)]
+       (let [git-data (:data push-r)
+             replies  (reply/reply-and-resolve-fixed!
+                       worktree-path pr-number (:commit-sha git-data) applied)]
+         (summary buckets plan-result git-data replies))))))

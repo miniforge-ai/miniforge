@@ -23,7 +23,13 @@
    fix generation for general human review comments. This command
    targets the one bot we own (`miniforge-policy-evaluator[bot]`) and
    applies its `:violation/suggested-fix` deterministically — no LLM
-   call, no operator hand."
+   call, no operator hand.
+
+   Pipeline shape — every step is a ctx-transformer that either
+   passes the ctx through enriched, or attaches `:error {:kind ...}`
+   and short-circuits subsequent steps. The terminal step
+   `pr-policy-finalize!` reads `ctx` and prints exactly one of:
+   error → failure → summary."
   (:require
    [babashka.process :as process]
    [clojure.string :as str]
@@ -32,34 +38,20 @@
    [ai.miniforge.dag-executor.interface :as dag]
    [ai.miniforge.pr-lifecycle.interface :as pr-lifecycle]))
 
-;; ── helpers ──────────────────────────────────────────────────────────
+;; ── error rendering ──────────────────────────────────────────────────
 
-(defn- checkout-pr!
-  "Run `gh pr checkout <pr-number>` in `worktree-path`. Returns the
-   current branch on success, nil on failure."
-  [worktree-path pr-number]
-  (try
-    (let [r (process/shell {:dir (str worktree-path)
-                            :out :string :err :string :continue true}
-                           "gh" "pr" "checkout" (str pr-number))]
-      (when (zero? (:exit r))
-        (let [b (process/shell {:dir (str worktree-path)
-                                :out :string :err :string :continue true}
-                               "git" "branch" "--show-current")]
-          (when (zero? (:exit b))
-            (str/trim (:out b ""))))))
-    (catch Throwable _ nil)))
+(defn- error-message
+  "Translate the typed `:error` map on `ctx` into the operator-facing
+   string. New `:kind`s should land here (and in the messages catalog)
+   rather than re-stringifying at call sites."
+  [{:keys [error]}]
+  (case (:kind error)
+    :usage           (messages/t :pr/policy-respond-usage)
+    :bad-url         (messages/t :pr/policy-respond-bad-url)
+    :checkout-failed (messages/t :pr/policy-respond-checkout-failed {:n (:n error)})
+    :fetch-failed    (messages/t :pr/policy-respond-fetch-failed    {:n (:n error)})))
 
-(defn- fetch-comments
-  "Fetch the raw PR comments via the existing `pr-poller`. Returns
-   the comments vector or nil on failure."
-  [worktree-path pr-number]
-  (let [poller-fetch (requiring-resolve 'ai.miniforge.pr-lifecycle.pr-poller/fetch-pr-comments)
-        r (poller-fetch worktree-path pr-number)]
-    (when (dag/ok? r)
-      (get-in r [:data :comments]))))
-
-(defn- print-summary
+(defn- print-summary!
   [pr-number r]
   (let [d (:data r)
         applied   (count (:applied d))
@@ -80,7 +72,7 @@
                    {:cid (str (-> e :comment :comment/id))
                     :reason (str (:reason e))})))))
 
-(defn- print-failure
+(defn- print-failure!
   [pr-number r]
   (display/print-error
    (messages/t :pr/policy-respond-failed
@@ -88,53 +80,115 @@
                 :code (str (get-in r [:error :code]))
                 :message (or (get-in r [:error :message]) "")})))
 
+;; ── infra helpers (worktree-scoped shell ops) ────────────────────────
+
+(defn- checkout-pr!
+  "Run `gh pr checkout <pr-number>` in `worktree-path`. Returns the
+   current branch on success, nil on failure."
+  [worktree-path pr-number]
+  (try
+    (let [r (process/shell {:dir (str worktree-path)
+                            :out :string :err :string :continue true}
+                           "gh" "pr" "checkout" (str pr-number))]
+      (when (zero? (:exit r))
+        (let [b (process/shell {:dir (str worktree-path)
+                                :out :string :err :string :continue true}
+                               "git" "branch" "--show-current")]
+          (when (zero? (:exit b))
+            (str/trim (:out b ""))))))
+    (catch Throwable _ nil)))
+
+(defn- fetch-comments
+  "Fetch the raw PR comments via the pr-lifecycle interface. Returns
+   the comments vector or nil on failure."
+  [worktree-path pr-number]
+  (let [r (pr-lifecycle/fetch-pr-comments worktree-path pr-number)]
+    (when (dag/ok? r)
+      (get-in r [:data :comments]))))
+
+;; ── pipeline steps ───────────────────────────────────────────────────
+;;
+;; Each step takes ctx, returns ctx. If ctx already carries `:error`
+;; the step is a no-op (early-bail) so downstream stages don't need
+;; per-step guards. Names match the operator's pipeline-style example.
+
+(defn- pr-policy-parse-url!
+  "Step 1: parse the operator-supplied URL, derive the PR number."
+  [{:keys [opts error] :as ctx}]
+  (if error
+    ctx
+    (let [url (:url opts)]
+      (cond
+        (or (nil? url) (str/blank? url))
+        (assoc ctx :error {:kind :usage})
+
+        :else
+        (let [{:keys [number]} (pr-lifecycle/parse-pr-url url)]
+          (if-not number
+            (assoc ctx :error {:kind :bad-url})
+            (assoc ctx :url url :number number)))))))
+
+(defn- pr-policy-checkout!
+  "Step 2: switch the working tree to the PR branch via `gh pr checkout`."
+  [{:keys [error number] :as ctx}]
+  (if error
+    ctx
+    (let [cwd (System/getProperty "user.dir")]
+      (display/print-info (messages/t :pr/policy-respond-checkout {:n number}))
+      (if-let [branch (checkout-pr! cwd number)]
+        (assoc ctx :cwd cwd :branch branch)
+        (assoc ctx :error {:kind :checkout-failed :n number})))))
+
+(defn- pr-policy-fetch-comments!
+  "Step 3: pull every PR comment via pr-lifecycle."
+  [{:keys [error cwd number branch] :as ctx}]
+  (if error
+    ctx
+    (do
+      (display/print-info (messages/t :pr/policy-respond-on-branch {:branch branch}))
+      (if-let [comments (fetch-comments cwd number)]
+        (assoc ctx :comments comments)
+        (assoc ctx :error {:kind :fetch-failed :n number})))))
+
+(defn- pr-policy-respond!
+  "Step 4: hand off to the deterministic responder. Its DAG-result
+   becomes `:result` on the ctx — the finalize step decides whether
+   to render summary or failure."
+  [{:keys [error cwd number comments] :as ctx}]
+  (if error
+    ctx
+    (assoc ctx :result
+           (pr-lifecycle/respond-to-policy-comments! cwd number comments))))
+
+(defn- pr-policy-finalize!
+  "Step 5: terminal render. Three exclusive branches in order:
+   ctx-level error, responder-level error, success summary."
+  [{:keys [error number result] :as ctx}]
+  (cond
+    error               (display/print-error (error-message ctx))
+    (not (dag/ok? result)) (print-failure! number result)
+    :else               (print-summary! number result))
+  ctx)
+
 ;; ── command entry ────────────────────────────────────────────────────
 
 (defn pr-policy-respond-cmd
   "CLI entry for `bb miniforge pr policy-respond <pr-url>`.
 
-   Steps:
-   1. Parse the URL, derive PR number.
-   2. `gh pr checkout <n>` to switch the worktree to the PR branch.
-   3. Fetch all comments via `pr-poller/fetch-pr-comments`.
-   4. Filter / plan / apply / commit / push / reply via
-      `pr-lifecycle/respond-to-policy-comments!`.
-   5. Print per-class counts to operator."
+   Pipeline: parse-url → checkout → fetch-comments → respond → finalize.
+   Any step may attach `:error {:kind ... :n? ...}` to the ctx — later
+   steps then short-circuit and `pr-policy-finalize!` prints exactly
+   one message per invocation. Unhandled throws are caught at the
+   outer try and rendered as the generic `pr/policy-respond-failed`
+   message with `:code \"exception\"`."
   [opts]
   (try
-    (let [{:keys [url]} opts]
-      (cond
-        (or (nil? url) (str/blank? url))
-        (display/print-error (messages/t :pr/policy-respond-usage))
-
-        :else
-        (let [parse-url (requiring-resolve 'ai.miniforge.pr-lifecycle.interface/parse-pr-url)
-              {:keys [number]} (parse-url url)]
-          (cond
-            (not number)
-            (display/print-error (messages/t :pr/policy-respond-bad-url))
-
-            :else
-            (let [cwd (System/getProperty "user.dir")
-                  _ (display/print-info (messages/t :pr/policy-respond-checkout {:n number}))
-                  branch (checkout-pr! cwd number)]
-              (cond
-                (nil? branch)
-                (display/print-error (messages/t :pr/policy-respond-checkout-failed {:n number}))
-
-                :else
-                (do
-                  (display/print-info (messages/t :pr/policy-respond-on-branch {:branch branch}))
-                  (let [comments (fetch-comments cwd number)]
-                    (cond
-                      (nil? comments)
-                      (display/print-error (messages/t :pr/policy-respond-fetch-failed {:n number}))
-
-                      :else
-                      (let [r (pr-lifecycle/respond-to-policy-comments! cwd number comments)]
-                        (if (dag/ok? r)
-                          (print-summary number r)
-                          (print-failure number r))))))))))))
+    (-> {:opts opts}
+        pr-policy-parse-url!
+        pr-policy-checkout!
+        pr-policy-fetch-comments!
+        pr-policy-respond!
+        pr-policy-finalize!)
     (catch Exception e
       (display/print-error
        (messages/t :pr/policy-respond-failed
