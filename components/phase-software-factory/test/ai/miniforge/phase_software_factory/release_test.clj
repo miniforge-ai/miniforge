@@ -425,7 +425,6 @@
    path — it forces the rehydrate-from-paths code under test.
 
    Defeats global GPG / signing configuration (1Password, GPG agents)
-   that would otherwise intercept the commit and intermittently fail
    with `error: <agent> returned an error`. With commit.gpgsign=false
    locally on this repo AND --no-gpg-sign --no-verify on the commit
    itself, the fixture runs hermetically regardless of the dev
