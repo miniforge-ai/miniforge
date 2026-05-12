@@ -505,13 +505,15 @@
                      (when (code-artifact? parsed) parsed))]
         (if code
           (build-code-response code context tokens cost-usd)
-          (do (log-implementer-rejection
-               logger (if (and (some? parsed) (not (code-artifact? parsed)))
-                        :narrative-only-response
-                        :parse-failed)
-               input artifact-source content tools)
-              (response/error (messages/t :error/parse-failed)
-                              {:tokens tokens})))))))
+          (let [reject-reason (if (and (some? parsed) (not (code-artifact? parsed)))
+                                :narrative-only-response
+                                :parse-failed)]
+            (log-implementer-rejection
+             logger reject-reason
+             input artifact-source content tools)
+            (response/error (messages/t :error/parse-failed)
+                            {:tokens tokens
+                             :data   {:reject/reason reject-reason}})))))))
 
 (def ^:private session-checkpoint-filename ".miniforge/session-id")
 

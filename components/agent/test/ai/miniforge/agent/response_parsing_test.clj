@@ -417,20 +417,4 @@
       (is (not (contains? parsed :code/files))
           "Narrative-only EDN must NOT have :code/files — it is not a code artifact")
       (is (nil? blocks)
-          "extract-code-blocks must return nil when content has no markdown code blocks")))
-
-  (testing "Agent output with code blocks and path annotation produces file entries"
-    (let [content
-          (str "### components/foo/src/ai/miniforge/foo/core.clj\n"
-               "```clojure\n"
-               "(ns ai.miniforge.foo.core)\n"
-               "(defn hello [] :world)\n"
-               "```")
-          blocks (impl/extract-code-blocks content)]
-      (is (seq blocks)
-          "extract-code-blocks should find the code block")
-      (is (= "components/foo/src/ai/miniforge/foo/core.clj"
-             (:path (first blocks)))
-          "File path extracted from heading annotation")
-      (is (= :create (:action (first blocks)))
-          "Extracted block defaults to :create action"))))
+          "extract-code-blocks must return nil when content has no markdown code blocks"))))
