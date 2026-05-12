@@ -25,6 +25,7 @@
   (:require
    [ai.miniforge.policy-pack.crypto :as crypto]
    [ai.miniforge.policy-pack.schema :as schema]
+   [ai.miniforge.response.interface :as response]
    [clojure.string :as str]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -198,9 +199,10 @@
               version (:pack/version pack)]
           (swap! state assoc-in [:packs pack-id version] pack)
           pack)
-        (throw (ex-info "Invalid pack schema"
-                        {:errors errors
-                         :pack-id (:pack/id pack)})))))
+        (response/throw-anomaly! :anomalies/incorrect
+                                 "Invalid pack schema"
+                                 {:errors errors
+                                  :pack-id (:pack/id pack)}))))
 
   (get-pack [this pack-id]
     (let [versions (get-in @state [:packs pack-id])]
@@ -256,20 +258,28 @@
       ;; Assume source is already a pack map
       (register-pack this source)
       ;; String path - would need loader integration
-      (throw (ex-info "File/URL import not implemented in registry"
-                      {:source source
-                       :hint "Use loader/load-pack-from-file instead"}))))
+      (response/throw-anomaly! :anomalies/unsupported
+                               "File/URL import not implemented in registry"
+                               {:source source
+                                :hint "Use loader/load-pack-from-file instead"})))
 
   (export-pack [_this pack-id version format]
     (if-let [pack (get-in @state [:packs pack-id version])]
       (case format
         :edn (pr-str pack)
-        :json (throw (ex-info "JSON export not implemented" {:format format}))
-        :directory (throw (ex-info "Directory export not implemented" {:format format}))
-        (throw (ex-info "Unknown export format" {:format format})))
-      (throw (ex-info "Pack not found"
-                      {:pack-id pack-id
-                       :version version}))))
+        :json (response/throw-anomaly! :anomalies/unsupported
+                                       "JSON export not implemented"
+                                       {:format format})
+        :directory (response/throw-anomaly! :anomalies/unsupported
+                                            "Directory export not implemented"
+                                            {:format format})
+        (response/throw-anomaly! :anomalies/incorrect
+                                 "Unknown export format"
+                                 {:format format}))
+      (response/throw-anomaly! :anomalies/not-found
+                               "Pack not found"
+                               {:pack-id pack-id
+                                :version version})))
 
   (validate-pack [_this pack]
     (schema/validate-pack pack))

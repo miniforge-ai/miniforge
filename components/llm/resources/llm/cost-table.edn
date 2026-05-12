@@ -1,0 +1,40 @@
+;; Per-1M-token USD pricing for backends that don't surface
+;; total_cost_usd in their streaming result frame. Used as a fallback
+;; when ai.miniforge.llm.cost/estimate-cost needs to compute a cost
+;; from the usage block alone.
+;;
+;; Source: published provider pricing as of 2026-05; update when a
+;; backend price moves or a new priced model lands.
+;;
+;; Models absent from this map estimate as $0.00 (cleaner default
+;; for free / local / unpriced backends than throwing). The fallback
+;; only fires when the streaming response itself didn't carry
+;; :cost-usd, so $0 here is also the right answer for models whose
+;; CLI already surfaces cost.
+;;
+;; All values are USD per 1,000,000 tokens.
+
+{:pricing/by-model-id
+ {;; Anthropic Claude
+  "claude-opus-4-7"           {:input-per-1m  5.00  :output-per-1m  25.00}
+  "claude-opus-4-6"           {:input-per-1m  5.00  :output-per-1m  25.00}
+  "claude-opus-4"             {:input-per-1m 15.00  :output-per-1m  75.00}
+  "claude-sonnet-4-6"         {:input-per-1m  3.00  :output-per-1m  15.00}
+  "claude-sonnet-4-5-20250929" {:input-per-1m 3.00  :output-per-1m  15.00}
+  "claude-sonnet-4"           {:input-per-1m  3.00  :output-per-1m  15.00}
+  "claude-haiku-4-5-20251001" {:input-per-1m  0.25  :output-per-1m   1.25}
+  "claude-haiku"              {:input-per-1m  0.25  :output-per-1m   1.25}
+
+  ;; OpenAI GPT-5 family. Codex CLI doesn't currently surface
+  ;; total_cost_usd; fallback estimate is what users will see.
+  "gpt-5.4-pro"               {:input-per-1m 15.00  :output-per-1m  75.00}
+  "gpt-5.4"                   {:input-per-1m  5.00  :output-per-1m  25.00}
+  "gpt-5.3-codex"             {:input-per-1m  5.00  :output-per-1m  25.00}
+  "gpt-5.2-codex"             {:input-per-1m  3.00  :output-per-1m  15.00}
+  "gpt-5.1-codex-max"         {:input-per-1m  3.00  :output-per-1m  15.00}
+  "gpt-5.2"                   {:input-per-1m  3.00  :output-per-1m  15.00}
+
+  ;; Google Gemini
+  "gemini-2.5-pro"            {:input-per-1m  3.50  :output-per-1m  10.50}
+  "gemini-2.5-flash"          {:input-per-1m  0.30  :output-per-1m   2.50}
+  "gemini-2.5-flash-lite"     {:input-per-1m  0.10  :output-per-1m   0.40}}}

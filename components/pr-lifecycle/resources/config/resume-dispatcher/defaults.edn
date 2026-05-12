@@ -1,0 +1,15 @@
+;; Resume Signal Dispatcher — per-component configuration defaults.
+;;
+;; Loaded once at namespace load via `clojure.edn/read-string`.
+;; Operators tuning retry budget / timeouts shouldn't recompile.
+;;
+;; Per N13 §2.7 + specs/informative/n13-listener-registry.md.
+
+{;; Webhook channel — total POST attempts (initial + retries).
+ :webhook/max-attempts     3
+
+ ;; Per-attempt curl timeout (--max-time, seconds-resolution).
+ :webhook/timeout-ms       10000
+
+ ;; Initial backoff for exponential retry (doubled per attempt).
+ :webhook/backoff-base-ms  500}

@@ -41,6 +41,8 @@
    [ai.miniforge.pr-lifecycle.fix-loop :as fix]
    [ai.miniforge.pr-lifecycle.github :as github]
    [ai.miniforge.pr-lifecycle.listener-registry :as listener-registry]
+   [ai.miniforge.pr-lifecycle.policy-eval-responder :as policy-eval-responder]
+   [ai.miniforge.pr-lifecycle.resume-dispatcher :as resume-dispatcher]
    [ai.miniforge.pr-lifecycle.review-scheduler :as review-scheduler]
    [ai.miniforge.pr-lifecycle.triage :as triage]
    [ai.miniforge.pr-lifecycle.merge :as merge]
@@ -459,6 +461,70 @@
   "Pure: return all entries (any status) bound to `agent-id` across
    all PRs."
   listener-registry/entries-for-agent)
+
+;------------------------------------------------------------------------------ Layer 2.8
+;; Resume Signal Dispatcher (N13 §2.7 §Dispatch)
+
+(def resume-dispatcher-supported-channel-kinds
+  "Channel kinds with a real handler in v0 (`#{:webhook}`)."
+  resume-dispatcher/supported-channel-kinds)
+
+(def build-resume-primer
+  "Pure: build the N13 §2.7 resume primer from a merged-PR record
+   + a single listener entry. See `resume-dispatcher/build-primer`."
+  resume-dispatcher/build-primer)
+
+(def channel-supported?
+  "Pure predicate: true when the listener's channel kind has a real
+   handler in v0."
+  resume-dispatcher/channel-supported?)
+
+(def dispatch-resume-listener!
+  "Build primer + dispatch via the listener's channel + mark
+   `:dispatched` on success. Returns DAG result. Channel-side
+   failures decorate `:error :data` with `:listener/id` for
+   correlation."
+  resume-dispatcher/dispatch-listener!)
+
+(def dispatch-pr-merge!
+  "Walk every `:active` listener for `pr-url` and dispatch each.
+   Returns `{:pr-url :listener-count :dispatched [...] :failed [...]}`.
+   Per-listener failures don't abort — they're collected."
+  resume-dispatcher/dispatch-pr-merge!)
+
+;------------------------------------------------------------------------------ Layer 2.9
+;; Comment Response Agent — policy-eval path (N13 §2.5)
+
+(def policy-eval-author
+  "GitHub login the N13 Standards Reviewer posts under
+   (`miniforge-policy-evaluator[bot]`)."
+  policy-eval-responder/policy-eval-author)
+
+(def policy-eval-comment?
+  "True when `comment` was posted by the N13 Standards Reviewer."
+  policy-eval-responder/policy-eval-comment?)
+
+(def classify-policy-eval-fix
+  "Pure: decide what to do with one policy-eval comment. Returns
+   `{:action :apply | :escalate | :skip :reason ... :payload ...}`."
+  policy-eval-responder/classify-fix)
+
+(def plan-policy-eval-fixes
+  "Pure: partition a vector of comments into
+   `{:to-apply [...] :to-escalate [...] :to-skip [...]}`."
+  policy-eval-responder/plan-fixes)
+
+(def respond-to-policy-comments!
+  "Top-level entry: filter to policy-eval comments, plan, apply
+   single-line `:violation/suggested-fix` patches in-place, commit
+   + push, reply + resolve on each fixed thread.
+
+   Multi-line / non-fixable comments escalate via the result's
+   `:escalated` vector — operator (or future Comment Response
+   Agent's LLM dispatch) handles those.
+
+   Returns DAG result with the full per-pass summary."
+  policy-eval-responder/respond-to-policy-comments!)
 
 ;------------------------------------------------------------------------------ Layer 3
 ;; Fix loop

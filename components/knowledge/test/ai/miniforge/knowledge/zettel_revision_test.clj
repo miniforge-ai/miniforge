@@ -242,3 +242,98 @@
                   :zettel/created (java.util.Date.)
                   :zettel/author  "user"}]
       (is (m/validate schema/Zettel legacy)))))
+
+;------------------------------------------------------------------------------ Layer 5
+;; :zettel/trust-level — per-revision trust (Decision 6 + 8; closes #836).
+
+(deftest test-create-zettel-defaults-trust-level-untrusted
+  (testing "every fresh zettel starts with :zettel/trust-level :untrusted"
+    ;; Constructor default. learning/promote-learning is the only
+    ;; path that post-asserts :trusted; it routes through
+    ;; update-zettel for the canonical content re-stamp first
+    ;; (since `:zettel/type` flipping :learning → :rule rotates
+    ;; the revision), then assoc's :trusted on the returned
+    ;; value before persisting via store/put-zettel.
+    (let [z (new-z)]
+      (is (= :untrusted (:zettel/trust-level z))))))
+
+(deftest test-trust-level-resets-on-content-rotation
+  (testing "editing :zettel/content rotates revision-id AND resets trust to :untrusted"
+    ;; The gap #836 closes: a producer who has already promoted a
+    ;; zettel to :trusted and then edits its content must NOT
+    ;; carry trust onto the new revision. update-zettel detects
+    ;; the rotation (new revision-id != old) and forces
+    ;; :untrusted on the result.
+    (let [z1     (-> (new-z) (assoc :zettel/trust-level :trusted))
+          z2     (zettel/update-zettel z1 {:zettel/content "# Brand new content"})]
+      (is (not= (:zettel/revision-id z1) (:zettel/revision-id z2))
+          "revision rotated")
+      (is (= :untrusted (:zettel/trust-level z2))
+          "trust reset on content rotation"))))
+
+(deftest test-trust-level-resets-on-tag-rotation
+  (testing "any content-bearing rotation resets trust — not just :zettel/content"
+    (let [z1 (-> (new-z :tags [:a]) (assoc :zettel/trust-level :trusted))
+          z2 (zettel/update-zettel z1 {:zettel/tags [:a :b]})]
+      (is (not= (:zettel/revision-id z1) (:zettel/revision-id z2)))
+      (is (= :untrusted (:zettel/trust-level z2))))))
+
+(deftest test-trust-level-preserved-on-operational-only-update
+  (testing "operational-metadata-only updates preserve trust (no revision rotation)"
+    ;; Decision 6: changing operational policy must NOT silently
+    ;; downgrade trust either. The current revision is still the
+    ;; one that was reviewed.
+    (let [z1 (-> (new-z) (assoc :zettel/trust-level :trusted))
+          z2 (zettel/update-zettel z1 {:privacy/classification :restricted})
+          z3 (zettel/update-zettel z2 {:fleet/share-scope :team})
+          z4 (zettel/update-zettel z3 {:fleet/oss-version "1.0.1"})]
+      (is (= (:zettel/revision-id z1) (:zettel/revision-id z4))
+          "revision identity intact across operational updates")
+      (is (= :trusted (:zettel/trust-level z2)))
+      (is (= :trusted (:zettel/trust-level z3)))
+      (is (= :trusted (:zettel/trust-level z4))))))
+
+(deftest test-update-zettel-ignores-caller-supplied-trust-level
+  (testing "callers cannot stamp :zettel/trust-level via update-zettel changes"
+    ;; The full closure: even if a producer attempts to override
+    ;; trust through the edit path, update-zettel drops it from
+    ;; the merge (it's in derived-fields), then the
+    ;; rotation/preserve logic recomputes the right value.
+    (let [z1 (new-z)
+          ;; Caller tries to stamp :trusted on an untrusted zettel
+          ;; with no content change at all
+          z2 (zettel/update-zettel z1 {:zettel/trust-level :trusted})]
+      (is (= :untrusted (:zettel/trust-level z2))
+          "caller-supplied :trusted dropped; trust stays at the previous value"))
+
+    (testing "and the same lock holds when combined with a content edit"
+      (let [z1 (-> (new-z) (assoc :zettel/trust-level :trusted))
+            z2 (zettel/update-zettel z1 {:zettel/content     "# Edited"
+                                         :zettel/trust-level :trusted})]
+        (is (= :untrusted (:zettel/trust-level z2))
+            "content edit forces :untrusted; spoof attempt at :trusted ignored")))))
+
+(deftest test-update-zettel-backfills-trust-level-on-legacy-zettel
+  (testing "a legacy zettel (no :zettel/trust-level) gets :untrusted on first update"
+    ;; Same convergence pattern the digest/revision-id backfill uses
+    ;; — no explicit migration needed.
+    (let [legacy  {:zettel/id      (java.util.UUID/randomUUID)
+                   :zettel/uid     "legacy-trust"
+                   :zettel/title   "Legacy"
+                   :zettel/content "Body."
+                   :zettel/type    :rule
+                   :zettel/created (java.util.Date.)
+                   :zettel/author  "user"}
+          updated (zettel/update-zettel legacy {:fleet/oss-version "1.0.0"})]
+      (is (= :untrusted (:zettel/trust-level updated))))))
+
+(deftest test-trust-level-schema-rejects-bad-value
+  (testing ":zettel/trust-level outside the closed enum fails schema validation"
+    (let [z (assoc (new-z) :zettel/trust-level :very-trusted)]
+      (is (false? (m/validate schema/Zettel z))))))
+
+(deftest test-trust-level-schema-accepts-both-values
+  (testing ":zettel/trust-level :trusted and :untrusted both validate"
+    (doseq [t [:trusted :untrusted]]
+      (let [z (assoc (new-z) :zettel/trust-level t)]
+        (is (m/validate schema/Zettel z))))))

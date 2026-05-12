@@ -1,7 +1,9 @@
 {:paths ["src" "resources"]
- :deps {ai.miniforge/coerce {:local/root "../coerce"}
+ :deps {ai.miniforge/anomaly {:local/root "../anomaly"}
+        ai.miniforge/coerce {:local/root "../coerce"}
         ai.miniforge/algorithms {:local/root "../algorithms"}
         ai.miniforge/config {:local/root "../config"}
+        ai.miniforge/response {:local/root "../response"}
         metosin/malli {:mvn/version "0.16.4"}}
  :aliases {:test {:extra-paths ["test"]
                   :extra-deps {}}}}

@@ -38,6 +38,7 @@
    [ai.miniforge.config.interface :as config]
    [ai.miniforge.event-stream.snowflake :as snowflake]
    [ai.miniforge.event-stream.storage-layout :as layout]
+   [ai.miniforge.response.interface :as response]
    [clojure.java.io :as io]
    [clojure.string :as str]
    [clojure.pprint :as pprint]
@@ -351,7 +352,11 @@
 
    Returns: Sink function (fn [event] -> nil)"
   [opts]
-  (let [_url (or (:url opts) (throw (ex-info "Fleet sink requires :url" {})))
+  (let [safe-opts (dissoc opts :api-key :token :secret :password)
+        _url (or (:url opts)
+                 (response/throw-anomaly! :anomalies/incorrect
+                                          "Fleet sink requires :url"
+                                          {:opts safe-opts}))
         _api-key (:api-key opts)
         batch-size (:batch-size opts 10)
         flush-interval-ms (:flush-interval-ms opts 5000)
@@ -433,14 +438,18 @@
       :stderr (stderr-sink (dissoc sink-config :type))
       :fleet (fleet-sink (dissoc sink-config :type))
       :multi (multi-sink (map create-sink (:sinks sink-config)))
-      (throw (ex-info "Unknown sink type" {:type (:type sink-config)})))
+      (response/throw-anomaly! :anomalies/unsupported
+                               "Unknown sink type"
+                               {:type (:type sink-config)}))
 
     ;; Vector - treat as multi-sink
     (vector? sink-config)
     (multi-sink (map create-sink sink-config))
 
     :else
-    (throw (ex-info "Invalid sink configuration" {:config sink-config}))))
+    (response/throw-anomaly! :anomalies/incorrect
+                             "Invalid sink configuration"
+                             {:config sink-config})))
 
 (defn create-sinks-from-config
   "Create sinks from user configuration.
