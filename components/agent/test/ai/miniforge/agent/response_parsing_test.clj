@@ -24,6 +24,7 @@
   (:require
    [clojure.test :refer [deftest testing is]]
    [clojure.edn :as edn]
+   [ai.miniforge.agent.implementer :as impl]
    [ai.miniforge.response.interface :as response]))
 
 ;------------------------------------------------------------------------------ Mock Data
@@ -400,3 +401,36 @@
 
       (is (= parsed1 parsed2)
           "Parsing should be idempotent"))))
+
+(deftest narrative-only-response-test
+  (testing "Agent narrative EDN summary without :code/files produces no code blocks"
+    (let [;; Exact shape of what the agent emitted in the failing dogfood run:
+          ;; agent narrated success but never called Write
+          narrative-content
+          "{:summary \"Created the classification Polylith component from scratch.\"
+           :breaking-change? false
+           :rationale \"All six files are net-new under components/classification/\"}"
+          parsed  (impl/parse-code-response narrative-content)
+          blocks  (impl/extract-code-blocks narrative-content)]
+      (is (map? parsed)
+          "parse-code-response should parse the EDN map")
+      (is (not (contains? parsed :code/files))
+          "Narrative-only EDN must NOT have :code/files — it is not a code artifact")
+      (is (nil? blocks)
+          "extract-code-blocks must return nil when content has no markdown code blocks")))
+
+  (testing "Agent output with code blocks and path annotation produces file entries"
+    (let [content
+          (str "### components/foo/src/ai/miniforge/foo/core.clj\n"
+               "```clojure\n"
+               "(ns ai.miniforge.foo.core)\n"
+               "(defn hello [] :world)\n"
+               "```")
+          blocks (impl/extract-code-blocks content)]
+      (is (seq blocks)
+          "extract-code-blocks should find the code block")
+      (is (= "components/foo/src/ai/miniforge/foo/core.clj"
+             (:path (first blocks)))
+          "File path extracted from heading annotation")
+      (is (= :create (:action (first blocks)))
+          "Extracted block defaults to :create action"))))
