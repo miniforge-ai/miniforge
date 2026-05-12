@@ -78,9 +78,16 @@
       (is (> cost 17.0))
       (is (< cost 18.0))))
 
-  (testing "uses default pricing for unknown model"
+  (testing "returns 0.0 for unknown / unpriced models — behaviour
+            change from the pre-dedupe inline pricing table. The
+            old default fell back to claude-sonnet-4 pricing for
+            any unknown model; that was a misleading estimate
+            ('pretend it's sonnet' rather than 'we don't know').
+            Delegated to llm/cost — single source of truth for
+            token → USD."
     (let [cost (core/estimate-cost 1000 500 "unknown-model")]
-      (is (pos? cost)))))
+      (is (= 0.0 cost)
+          "unknown model → 0.0, not a fake sonnet-priced default"))))
 
 ;------------------------------------------------------------------------------ Layer 2
 ;; Agent creation tests

@@ -20,6 +20,7 @@
   "Public API for LLM client using CLI backends.
    Supports claude CLI, cursor CLI, and mock backends."
   (:require
+   [ai.miniforge.llm.cost :as cost]
    [ai.miniforge.llm.interface.protocols.llm-client :as p]
    [ai.miniforge.llm.protocols.impl.llm-client :as impl]
    [ai.miniforge.llm.protocols.records.llm-client :as records]
@@ -366,6 +367,23 @@
 (def capsule-exec-fn
   "Build a capsule-aware exec function for LLM clients running inside executors."
   impl/capsule-exec-fn)
+
+;------------------------------------------------------------------------------ Layer 6
+;; Cost estimation — single source of truth for token → USD pricing.
+;; See ai.miniforge.llm.cost for the table and the arithmetic; this
+;; re-export lets agent / workflow callers reach pricing without
+;; depending on the impl namespace directly.
+
+(def estimate-cost
+  "Estimate USD from {:input-tokens N :output-tokens N} usage and a
+   model-id string. Returns 0.0 for unknown / unpriced models.
+   See ai.miniforge.llm.cost/estimate-cost."
+  cost/estimate-cost)
+
+(def pricing-for-model
+  "Look up {:input-per-1m :output-per-1m} pricing for a model-id.
+   Returns nil when the model isn't in the cost table."
+  cost/pricing-for-model)
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
