@@ -230,8 +230,9 @@
   "Publish :dag/task-failed event for diagnostics.
    Mirrors emit-dag-task-completed! on the failure path so post-mortems
    can see WHY a task died without trace-grepping. Selects :error +
-   :status from the dag/err result so the event carries the anomaly
-   shape (category, message, data) without the full agent transcript."
+   :status from the dag/err result so the event carries the err shape
+   `{:error {:code <kw> :message <str> :data <map>}}` without the full
+   agent transcript."
   [event-stream workflow-id task-id result]
   (when event-stream
     (try

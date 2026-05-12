@@ -1619,6 +1619,11 @@
             ;; alongside :dag/task-completed.
             (register-batch-branches! registry-atom results)
             (emit-completed-checkpoints! completed results event-stream workflow-id)
+            ;; Emit :dag/task-failed for non-rate-limited failures only.
+            ;; Rate-limited tasks will be retried after the cooldown — emitting
+            ;; a failure event for them would be premature and would lie about
+            ;; the run's actual state.
+            (emit-failed-checkpoints! other-failed-ids results event-stream workflow-id)
 
             (if (seq rate-limited-ids)
               (let [decision (handle-rate-limit-in-batch
