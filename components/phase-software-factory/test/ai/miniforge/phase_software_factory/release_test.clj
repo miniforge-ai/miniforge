@@ -425,12 +425,10 @@
    path — it forces the rehydrate-from-paths code under test.
 
    Defeats global GPG / signing configuration (1Password, GPG agents)
-   that would otherwise intercept the commit and intermittently fail
-   with `error: <agent> returned an error` — the same pattern the
-   v2 multi-parent merge fixtures had to solve. With
-   commit.gpgsign=false locally on this repo AND --no-gpg-sign
-   --no-verify on the commit itself, the fixture runs hermetically
-   regardless of the dev machine's signing setup."
+   with `error: <agent> returned an error`. With commit.gpgsign=false
+   locally on this repo AND --no-gpg-sign --no-verify on the commit
+   itself, the fixture runs hermetically regardless of the dev
+   machine's signing setup. (Same fix also applied via PR #858.)"
   [worktree]
   (write-mock-files-to-worktree! worktree)
   (sh-must-succeed! worktree ["git" "config" "user.email" "test@example.com"])

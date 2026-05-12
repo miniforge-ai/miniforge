@@ -127,7 +127,44 @@
       "API rate limit exceeded"
       "429 Too Many Requests"
       "Quota exceeded for this billing period"
-      "resets 3pm (US/Pacific)")))
+      "resets 3pm (US/Pacific)"
+      ;; Anthropic 529 / overloaded_error — the current random-throttling
+      ;; signal. The implementer's phase-local regex caught this already;
+      ;; the centralised resilience layer did not until the
+      ;; :anthropic-overloaded pattern was added.
+      "API Error: 529 {\"error\":{\"type\":\"overloaded_error\",\"message\":\"Overloaded\"}}"
+      "anthropic response: overloaded_error"
+      "HTTP 529 service capacity exceeded"
+      ;; OpenAI/Codex structured error shapes
+      "openai: rate_limit_exceeded — please slow down"
+      "codex error: insufficient_quota for current billing tier"
+      "OpenAI: 30 requests per minute exceeded"
+      "openai response: model is currently overloaded with other requests"
+      "codex: 503 service unavailable, try again later"
+      ;; Free-text / prose-only rate-limit signals — vendors that don't
+      ;; bother with a standard HTTP code or JSON shape
+      "We're throttling your requests, please try again in 60 seconds"
+      "Service is at capacity. Please back off and retry."
+      "API is temporarily overloaded — please wait"
+      "Usage limit reached for this hour"
+      "You've exceeded your quota for the day"
+      "Service too busy — back off"
+      "Please slow down and retry shortly"
+      ;; Strings the legacy runner-side inline regex used to catch
+      ;; (`rate.?limit|429|hit your limit|quota.?exceeded`). The
+      ;; central :provider-rate-limit pattern absorbs them now so the
+      ;; runner can pure-delegate instead of carrying its own copy.
+      "You've hit your rate limit"
+      "API quota exceeded for this model"
+      "HTTP 429 Too Many Requests"
+      "rate-limit error returned by backend")))
+
+(deftest test-rate-limit-word-boundary-on-status-codes
+  (testing "529 / 429 word boundaries — don't match inside larger numerics"
+    (are [text] (not (resilience/rate-limit-in-text? text))
+      "url=https://example.com/page?id=1429"   ;; 429 inside 1429
+      "request-id=5298765"                      ;; 529 inside 5298765
+      "Compiled 14290 lines in 3s")))           ;; 429 inside 14290
 
 (deftest test-rate-limit-in-text-rejects-normal-text
   (testing "does not flag normal text"

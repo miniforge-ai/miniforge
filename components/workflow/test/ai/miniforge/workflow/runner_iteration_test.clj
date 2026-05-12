@@ -77,6 +77,26 @@
   (testing "handles nil input"
     (is (false? (rate-limited? nil)))))
 
+(deftest rate-limited-recognises-shapes-the-resilience-layer-knows-test
+  (testing "Runner's rate-limited? now delegates to dag-resilience/rate-limit-in-text?,
+            so the workflow-phase path catches every shape the resilience layer
+            knows — not just the narrow set the prior inline regex covered. The
+            patterns themselves live in error-patterns/external.edn and can be
+            extended without touching runner.clj. Without this unification a
+            vendor-prose throttle signal (e.g. 'resets 2pm') in mid-implement
+            would fall through to plain backoff instead of routing through
+            apply-rate-limit-failure (which writes a typed terminal so the
+            workflow can be resumed cleanly via `mf resume`)."
+    ;; Reset-time phrasing without the word "rate" — covered by
+    ;; :provider-rate-limit via "resets \\d", NOT by the prior inline
+    ;; regex (`rate.?limit|429|hit your limit|quota.?exceeded`). This is
+    ;; the marker assertion that proves the delegation went through.
+    (is (true? (rate-limited? "Claude CLI exhausted: resets 2pm (America/Los_Angeles)")))
+    (is (true? (rate-limited? "exhausted — resets in 30 minutes")))
+    ;; Still rejects non-rate-limit errors
+    (is (false? (rate-limited? "Syntax error in foo.clj")))
+    (is (false? (rate-limited? "Connection refused")))))
+
 ;; ============================================================================
 ;; backoff-ms
 ;; ============================================================================

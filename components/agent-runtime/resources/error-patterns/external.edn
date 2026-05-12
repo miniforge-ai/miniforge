@@ -10,11 +10,45 @@
    :dependency/class :rate-limit
    :dependency/retryability :retryable}
 
+  ;; Anthropic returns HTTP 529 + type:overloaded_error during random
+  ;; rate-limiting / capacity throttling — operationally a rate limit
+  ;; (the resilience layer should back off and consider backend-switch,
+  ;; not treat it as a code defect). 2026-05-10 dogfood note: the
+  ;; implementer's phase-local regex catches "overloaded" already, but
+  ;; the centralised external patterns did not.
+  ;;
+  ;; Vendor-scoped on purpose — `\b529\b` and `overloaded_error` are
+  ;; matched only when an Anthropic identifier (`anthropic|claude`) is
+  ;; within 80 chars on either side, so a stray "1529" or another
+  ;; provider's "overloaded" doesn't get misclassified as Anthropic.
+  ;; Vendor-neutral overload phrasing lives in :provider-throttle-text.
+  {:id :anthropic-overloaded
+   :regex "(?i)(anthropic|claude)[^\\n]{0,80}(\\b529\\b|overloaded_error|overloaded[^.]{0,40}(error|response|status))|(\\b529\\b|overloaded_error|overloaded[^.]{0,40}(error|response|status))[^\\n]{0,80}(anthropic|claude)"
+   :vendor "Anthropic"
+   :description "Anthropic capacity / overload (HTTP 529, overloaded_error)"
+   :failure/source :external-provider
+   :failure/vendor :anthropic
+   :dependency/class :rate-limit
+   :dependency/retryability :retryable}
+
   {:id :openai-rate-limit
-   :regex "(openai|codex).*(rate limit|429|too many requests)"
+   :regex "(openai|codex).*(rate limit|429|too many requests|rate_limit_exceeded|insufficient_quota|requests per minute|RPM exceeded|TPM exceeded)"
    :vendor "OpenAI"
    :description "OpenAI or Codex provider rate limit"
    :failure/source :external-provider
+   :failure/vendor :openai
+   :dependency/class :rate-limit
+   :dependency/retryability :retryable}
+
+  ;; OpenAI 503 / "model is currently overloaded" mirrors Anthropic's
+  ;; 529 path. Operationally a rate limit — back off + consider
+  ;; backend-switch, don't classify as a code defect.
+  {:id :openai-overloaded
+   :regex "(?i)(openai|codex|chatgpt).{0,40}(overloaded|service unavailable|503|temporarily unavailable|try again later)"
+   :vendor "OpenAI"
+   :description "OpenAI capacity / overload (503, model is overloaded)"
+   :failure/source :external-provider
+   :failure/vendor :openai
    :dependency/class :rate-limit
    :dependency/retryability :retryable}
 
@@ -27,10 +61,35 @@
    :dependency/class :rate-limit
    :dependency/retryability :retryable}
 
+  ;; Permissive noun-form coverage: bare "rate limit" / "rate-limit"
+  ;; with word boundaries, plus the verb-anchored variants, plus the
+  ;; common reset-time phrasing. The word-boundary guard on `429`
+  ;; prevents matches inside larger numerics (e.g. "1429" in a URL or
+  ;; log line). This entry intentionally absorbs the cases the prior
+  ;; runner-side inline regex was catching, so the workflow-runner can
+  ;; pure-delegate to dag-resilience/rate-limit-in-text? without
+  ;; carrying its own copy.
   {:id :provider-rate-limit
-   :regex "API rate limit exceeded|rate limit exceeded|Rate limit reached|rate-limit error|429|Too Many Requests|too many requests|Quota exceeded|You've hit your limit|resets \\d|resets in \\d+"
+   :regex "(?i)\\brate.?limit\\b|API rate limit exceeded|rate limit exceeded|Rate limit reached|rate-limit error|\\b429\\b|Too Many Requests|too many requests|Quota exceeded|quota.?exceeded|You've hit your( rate)? limit|hit your limit|resets \\d|resets in \\d+"
    :vendor "External Service"
    :description "Provider or platform rate limit"
+   :failure/source :external-provider
+   :dependency/class :rate-limit
+   :dependency/retryability :retryable}
+
+  ;; Catch-all for free-text rate-limit / throttle / overload signals
+  ;; that don't carry a standard HTTP code or structured JSON. Some
+  ;; vendors only surface a sentence in stderr — "we're throttling
+  ;; your requests", "service is at capacity", "please slow down" —
+  ;; and the resilience layer needs to recognise those as rate-limit
+  ;; class so it can back off / switch backend rather than treating
+  ;; them as opaque agent failures. Permissive on purpose: a false
+  ;; positive costs one extra backoff cycle; a false negative burns
+  ;; the entire run.
+  {:id :provider-throttle-text
+   :regex "(?i)(throttl(ed|ing)|back ?off|please (slow down|try again|retry)|try again (later|in \\d+)|is overloaded|at capacity|service capacity|usage limit reached|usage cap reached|please wait|too busy|exceeded your quota|temporarily (overloaded|throttled|throttling)|overloaded_error|\\b529 (overloaded|too many|capacity)\\b)"
+   :vendor "External Service"
+   :description "Free-text rate-limit / throttle / overload signal — vendor used prose, not a standard code"
    :failure/source :external-provider
    :dependency/class :rate-limit
    :dependency/retryability :retryable}

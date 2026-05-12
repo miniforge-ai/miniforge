@@ -55,11 +55,13 @@
    Empty map matches what `pricing-for-model` returns for misses
    in a populated table — same semantic either way."
   (delay
-    (or (some-> (io/resource cost-table-resource-path)
-                slurp
-                edn/read-string
-                :pricing/by-model-id)
-        {})))
+    (try
+      (or (some-> (io/resource cost-table-resource-path)
+                  slurp
+                  edn/read-string
+                  :pricing/by-model-id)
+          {})
+      (catch Exception _ {}))))
 
 ;; Public API
 

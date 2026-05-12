@@ -54,6 +54,7 @@
    [ai.miniforge.cli.main.commands.monitoring :as cmd-monitoring]
    [ai.miniforge.cli.main.commands.fleet :as cmd-fleet]
    [ai.miniforge.cli.main.commands.pr :as cmd-pr]
+   [ai.miniforge.cli.main.commands.pr-policy-respond :as cmd-pr-policy]
    [ai.miniforge.cli.main.commands.pr-resume-dispatcher :as cmd-pr-resume]
    [ai.miniforge.cli.main.commands.pr-review-monitor :as cmd-pr-review-monitor]
    [ai.miniforge.cli.main.commands.control-plane :as cmd-cp]
@@ -324,6 +325,7 @@
 (defn pr-monitor-cmd [m] (cmd-pr/pr-monitor-cmd (get-opts m)))
 (defn pr-review-monitor-cmd [m] (cmd-pr-review-monitor/pr-review-monitor-cmd (get-opts m)))
 (defn pr-resume-dispatcher-cmd [m] (cmd-pr-resume/pr-resume-dispatcher-cmd (get-opts m)))
+(defn pr-policy-respond-cmd [m] (cmd-pr-policy/pr-policy-respond-cmd (get-opts m)))
 
 ;; Control Plane commands
 (defn cp-status-cmd [m] (cmd-cp/status-cmd (get-opts m)))
@@ -625,6 +627,11 @@
     :fn pr-resume-dispatcher-cmd
     :spec {:repo {}
            :once {:coerce :boolean :default true}}}
+
+   ;; N13 §2.5 Comment Response Agent — policy-eval (deterministic) path
+   {:cmds ["pr" "policy-respond"]
+    :fn pr-policy-respond-cmd
+    :args->opts [:url]}
 
    ;; Control Plane subcommands
    {:cmds ["control-plane" "status"]    :fn cp-status-cmd}

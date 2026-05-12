@@ -36,6 +36,7 @@
             [ai.miniforge.supervisory-state.interface :as supervisory]
             [ai.miniforge.workflow.checkpoint-store :as checkpoint-store]
             [ai.miniforge.workflow.context :as ctx]
+            [ai.miniforge.workflow.dag-resilience :as resilience]
             [ai.miniforge.workflow.execution :as exec]
             [ai.miniforge.workflow.fsm :as workflow-fsm]
             [ai.miniforge.workflow.messages :as messages]
@@ -126,12 +127,33 @@
 
 ;------------------------------------------------------------------------------ Layer 1: Iteration helpers
 
+(def ^:private inline-rate-limit-pattern
+  "Permissive noun-form fallback (`rate limit`, `429`, `hit your
+   limit`, `quota exceeded`) the central error-patterns table doesn't
+   carry — those patterns are vendor-scoped or anchored on verbs
+   (`exceeded`, `reached`). Both matchers union so the workflow-phase
+   path catches everything either side knows."
+  #"(?i)rate.?limit|429|hit your limit|quota.?exceeded")
+
 (defn- rate-limited?
-  "True when a phase error message indicates API rate limiting."
+  "True when a phase error message indicates API rate limiting.
+
+   Union of two matchers:
+   - `dag-resilience/rate-limit-in-text?` — loads per-provider patterns
+     from `error-patterns/external.edn`, so the workflow-phase path
+     catches the same shapes the DAG-batch resilience layer does
+     (Anthropic 529, OpenAI 503 / `model overloaded`, free-text
+     throttle prose, etc.).
+   - `inline-rate-limit-pattern` — permissive noun-form fallback.
+
+   Without this matcher unification a 529 in mid-implement would fall
+   through to plain backoff instead of `apply-rate-limit-failure`
+   (which writes a typed terminal so the workflow can be resumed
+   cleanly via `mf resume`)."
   [error-msg]
-  (boolean
-   (re-find #"(?i)rate.?limit|429|hit your limit|quota.?exceeded"
-            (str error-msg))))
+  (let [s (str error-msg)]
+    (boolean (or (re-find inline-rate-limit-pattern s)
+                 (resilience/rate-limit-in-text? s)))))
 
 (defn- backoff-ms
   "Exponential backoff duration for retry iteration, capped."
