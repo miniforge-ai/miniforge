@@ -9,4 +9,12 @@
    ;; hooks/slingshot/try_plus.clj for sync instructions.
    slingshot.slingshot/try+ hooks.slingshot.try-plus/try+}}
 
+ ;; Treat the railway-binding macro as `let` for linting purposes —
+ ;; kondo doesn't understand custom binding macros otherwise and would
+ ;; flag the body's references to the binding symbols as unresolved.
+ ;; See `.cursor/rules/languages/clojure-railway-binding.mdc` (dewey 211)
+ ;; for the macro semantics; for kondo it's enough that the bindings
+ ;; are in scope of the body, exactly like `let`.
+ :lint-as {ai.miniforge.dag-executor.interface/when-let-ok clojure.core/let}
+
  :linters {:underscore-in-namespace {:level :off}}}
