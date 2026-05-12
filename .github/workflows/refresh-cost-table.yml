@@ -1,0 +1,171 @@
+name: Refresh cost-table
+
+# Refresh `components/llm/resources/llm/cost-table.edn` from the
+# canonical upstream pricing source (BerriAI/litellm's
+# `model_prices_and_context_window.json`) and open a PR if the
+# refreshed prices differ from what we have committed.
+#
+# Scheduled weekly Monday 06:00 UTC. `workflow_dispatch` lets a
+# human trigger the ETL ad-hoc — useful when a provider announces
+# a price change and we want the table refreshed before next
+# Monday.
+#
+# Auto-PR is the right delivery shape: an LLM cost is a financial
+# fact, not an operational config. A human reviews the diff,
+# confirms the upstream source moved (and didn't get vandalised),
+# and merges.
+
+on:
+  schedule:
+    # Monday 06:00 UTC — Sunday-evening US Pacific. After the
+    # provider weekend dust settles, before Monday-morning meetings.
+    - cron: '0 6 * * 1'
+  workflow_dispatch:
+    inputs:
+      reason:
+        description: 'Why are you triggering this manually? (recorded in the PR body)'
+        required: false
+        default: 'Manual refresh'
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  refresh:
+    name: Refresh cost-table from upstream
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Babashka
+        uses: DeLaGuardo/setup-clojure@12.5
+        with:
+          bb: latest
+
+      - name: Run cost-table ETL
+        id: etl
+        # Exit codes from the script:
+        #   0 — cost-table is current OR was refreshed cleanly
+        #   2 — upstream JSON couldn't be fetched
+        #   3 — one or more priced models had no upstream match
+        #
+        # We treat 0 + 3 as "ETL completed; maybe open a PR" and
+        # only fail the job on 2 (genuine source-fetch failure
+        # that an operator should investigate).
+        # Use `set -o pipefail` + ${PIPESTATUS[0]} so the bb script's
+        # exit code is what `rc` captures, not tee's. Without this,
+        # the documented exit-code semantics (0 / 2 / 3) would be
+        # silently masked by tee's zero — the workflow would proceed
+        # to "maybe open a PR" even when the ETL itself failed.
+        # GH Actions' default Linux shell omits pipefail; opt in
+        # explicitly here.
+        shell: bash
+        run: |
+          set +e
+          set -o pipefail
+          bb scripts/refresh-cost-table.bb | tee /tmp/etl-summary.txt
+          rc=${PIPESTATUS[0]}
+          set +o pipefail
+          set -e
+          {
+            echo "exit_code=$rc"
+            echo 'summary<<EOF_SUMMARY'
+            cat /tmp/etl-summary.txt
+            echo 'EOF_SUMMARY'
+          } >> "$GITHUB_OUTPUT"
+          if [ "$rc" -eq 2 ]; then
+            echo "::error::Upstream fetch failed — investigate before retrying."
+            exit 2
+          fi
+
+      - name: Check for diff
+        id: diff
+        run: |
+          if git diff --quiet components/llm/resources/llm/cost-table.edn; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true"  >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Prepare PR body
+        if: steps.diff.outputs.changed == 'true'
+        # Build the PR body in a real file with all interpolated
+        # values plumbed through `env:` instead of inlined into the
+        # heredoc — keeps untrusted inputs (workflow_dispatch reason)
+        # out of shell-parsed positions even though they only end up
+        # in markdown.
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          REASON: ${{ inputs.reason }}
+          ETL_SUMMARY: ${{ steps.etl.outputs.summary }}
+        run: |
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            TRIGGER="manual ($REASON)"
+          else
+            TRIGGER="scheduled weekly Monday 06:00 UTC"
+          fi
+          {
+            echo "## Summary"
+            echo ""
+            echo "Auto-refresh of \`components/llm/resources/llm/cost-table.edn\` from the canonical upstream pricing source (BerriAI/litellm's \`model_prices_and_context_window.json\`)."
+            echo ""
+            echo "**Trigger**: $TRIGGER"
+            echo ""
+            echo "## ETL summary"
+            echo ""
+            echo '```'
+            printf '%s\n' "$ETL_SUMMARY"
+            echo '```'
+            echo ""
+            echo "## Review checklist"
+            echo ""
+            echo "- [ ] Diff matches what the upstream source actually says (check https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json)"
+            echo "- [ ] No provider listed a price *decrease* — those happen but warrant a double-check before merging"
+            echo "- [ ] Unmatched models in the ETL summary still have plausible (manually-curated) prices"
+            echo ""
+            echo "## ETL design"
+            echo ""
+            echo "Source-of-truth lives at \`components/llm/resources/llm/cost-source-mapping.edn\` (our-model-id → upstream-litellm-key). The ETL refreshes *existing* entries only — it doesn't add new models. To add a model: hand-edit \`cost-table.edn\` first (and \`cost-source-mapping.edn\` if upstream's id differs), then the next refresh keeps it current."
+            echo ""
+            echo "🤖 Generated by \`.github/workflows/refresh-cost-table.yml\`"
+          } > /tmp/pr-body.md
+
+      - name: Open pull request
+        if: steps.diff.outputs.changed == 'true'
+        uses: peter-evans/create-pull-request@v7
+        with:
+          branch: bot/cost-table-refresh
+          base: main
+          commit-message: |
+            chore(llm): refresh cost-table from upstream pricing source
+
+            Auto-generated by .github/workflows/refresh-cost-table.yml.
+
+            Upstream: BerriAI/litellm model_prices_and_context_window.json
+          title: 'chore(llm): refresh cost-table from upstream pricing source'
+          body-path: /tmp/pr-body.md
+          delete-branch: true
+          labels: |
+            automated
+            dependencies
+            cost-table
+
+      - name: Annotate run summary
+        if: always()
+        env:
+          ETL_EXIT_CODE: ${{ steps.etl.outputs.exit_code }}
+          DIFF_PRESENT: ${{ steps.diff.outputs.changed }}
+          ETL_SUMMARY: ${{ steps.etl.outputs.summary }}
+        run: |
+          {
+            echo "### ETL exit code: ${ETL_EXIT_CODE:-unknown}"
+            echo ""
+            echo "### Diff present: ${DIFF_PRESENT:-unknown}"
+            echo ""
+            echo "### ETL output"
+            echo '```'
+            printf '%s\n' "${ETL_SUMMARY:-}"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
