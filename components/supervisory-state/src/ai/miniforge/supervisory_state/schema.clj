@@ -110,6 +110,19 @@
 (def dependency-statuses
   [:healthy :degraded :unavailable :misconfigured :operator-action-required])
 
+(def spec-statuses
+  "Lifecycle states a long-lived Spec passes through (N5-delta-3 §5.1).
+
+   - :draft     — created, no MiniforgeRun yet
+   - :active    — at least one WorkflowRun in flight (or recently completed)
+   - :completed — operator-marked done; no future runs expected
+   - :archived  — operator-archived; suppressed from default UI surfaces
+
+   Vector (not set) for deterministic enum ordering in malli printed
+   schemas / error messages, matching `workflow-run-statuses` /
+   `pr-statuses` / etc. throughout this namespace."
+  [:draft :active :completed :archived])
+
 ;------------------------------------------------------------------------------ Layer 0a
 ;; Registry extensions for supervisory v1
 
@@ -179,7 +192,14 @@
    ;; DependencyHealth
    :dependency/id                keyword?
    :dependency/kind              (into [:enum] dependency-kinds)
-   :dependency/status            (into [:enum] dependency-statuses)})
+   :dependency/status            (into [:enum] dependency-statuses)
+
+   ;; Spec (N5-delta-3 §3.1, §5.1). Long-lived supervisory entity that
+   ;; owns N WorkflowRuns over its lifetime. Distinct from the per-run
+   ;; `:workflow-run/spec` snapshot (BD-1, miniforge#793) which captures
+   ;; spec identity at run-start time only.
+   :spec/id                      :id/uuid
+   :spec/status                  (into [:enum] spec-statuses)})
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Entity schemas — open maps, mirror N5-delta-1 §3.1
@@ -209,6 +229,12 @@
      [:spec/title       {:optional true} [:string {:min 1}]]
      [:spec/description {:optional true} [:string {:min 1}]]
      [:spec/intent      {:optional true} map?]]]
+   ;; N14: foreign key to the long-lived `Spec` entity that owns this
+   ;; run. Optional — runs without a derivable spec identity (no title
+   ;; on the snapshot) remain Specless. Distinct from
+   ;; `:workflow-run/spec` (the per-run snapshot above) and stable
+   ;; across re-executions of the same spec.
+   [:workflow-run/spec-id {:optional true} :spec/id]
    [:workflow-run/prs {:optional true}
     [:vector
      [:map
@@ -219,6 +245,37 @@
       [:pr/title {:optional true} [:maybe string?]]
       [:pr/author {:optional true} [:maybe string?]]
       [:pr/merge-order {:optional true} [:maybe :common/non-neg-int]]]]]])
+
+(def Spec
+  "A long-lived supervisory entity representing the operator's
+   top-level unit of work (N5-delta-3 §3.1, §5.1). One Spec owns N
+   WorkflowRuns over its lifetime.
+
+   Open map: additional keys pass through validation. Field types
+   chosen to be compatible with the existing per-run snapshot
+   (`:workflow-run/spec` above) and the spec-parser's `SpecIntent`
+   shape:
+
+   - `:spec/intent` is a structured map (per `SpecIntent` in
+     `spec-parser/.../schema.clj`); kept as open `map?` here so we
+     don't re-validate against the producer-side schema.
+   - `:spec/tags` accepts strings OR keywords (existing tag
+     conventions elsewhere in the codebase).
+   - `:spec/origin` discriminates `:miniforge` (specs known to this
+     runtime) from `:local-synthetic` (the Rust-core consumer
+     creates these ahead of upstream knowing about them, per
+     N5-delta-3 §5.3 reconciliation)."
+  [:map {:registry registry}
+   [:spec/id         :spec/id]
+   [:spec/title      [:string {:min 1}]]
+   [:spec/status     :spec/status]
+   [:spec/created-at :common/timestamp]
+   [:spec/updated-at :common/timestamp]
+   [:spec/description {:optional true} :string]
+   [:spec/intent      {:optional true} map?]
+   [:spec/repo-url    {:optional true} :string]
+   [:spec/tags        {:optional true} [:vector [:or :string :keyword]]]
+   [:spec/origin      {:optional true} keyword?]])
 
 (def AgentSession
   "An external or internal agent observable to the supervisory plane.
@@ -468,6 +525,7 @@
 (def EntityTable
   "Aggregate state held by the supervisory-state component."
   [:map
+   [:specs         [:map-of :id/uuid Spec]]
    [:workflows     [:map-of :id/uuid WorkflowRun]]
    [:agents        [:map-of :id/uuid AgentSession]]
    [:prs           [:map-of [:tuple string? :common/non-neg-int] PrFleetEntry]]
@@ -480,7 +538,8 @@
 
 (def empty-table
   "Initial empty entity table."
-  {:workflows {}
+  {:specs {}
+   :workflows {}
    :agents {}
    :prs {}
    :policy-evals {}

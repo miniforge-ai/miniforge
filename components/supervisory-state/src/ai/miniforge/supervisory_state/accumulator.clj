@@ -168,6 +168,87 @@
             intent      (assoc :spec/intent intent))]
     (when (seq m) m)))
 
+(defn- derive-spec-id-from-title
+  "Deterministic UUIDv3 (name-based) keyed on the spec title.
+
+   The same title always produces the same UUID, so two `:workflow/started`
+   events citing the same spec link to the same `Spec` entity without any
+   producer-side coordination (N5-delta-3 §3.2). This is the v1 mechanism
+   for `Spec` identity — explicit `:spec/id` on the producer's `:workflow/spec`
+   payload, when it lands later, overrides this derived value via
+   [[extract-long-lived-spec-identity]]."
+  [title]
+  (when title
+    (java.util.UUID/nameUUIDFromBytes (.getBytes ^String title "UTF-8"))))
+
+(defn- extract-long-lived-spec-identity
+  "Pull a long-lived `Spec` entity identity from a workflow event. Returns
+   nil when the event carries no derivable identity.
+
+   Distinct from [[extract-spec-identity]] above — that builds the per-run
+   `:workflow-run/spec` snapshot (BD-1). This builds the parent `Spec`
+   entity (N14, N5-delta-3 §5.1). Both can populate from the same event;
+   the snapshot captures point-in-time spec metadata, the entity links N
+   runs to one long-lived identity.
+
+   `:spec/id` is sourced as:
+   1. Producer-supplied `:spec/id` on `:workflow/spec` (preferred; future).
+   2. Deterministic UUIDv3 from the trimmed `:spec/title` (v1 fallback).
+
+   Other entity fields (`:spec/title`, `:spec/description`, `:spec/intent`,
+   `:spec/repo-url`, `:spec/tags`, `:spec/origin`) are lifted from the
+   `:workflow/spec` payload when present."
+  [event]
+  (let [spec        (:workflow/spec event)
+        clean       (fn [v] (when (string? v) (not-empty (str/trim v))))
+        title       (or (clean (:spec/title spec))       (clean (:title spec)))
+        explicit-id (:spec/id spec)
+        spec-id     (or explicit-id (derive-spec-id-from-title title))]
+    (when (and spec-id title)
+      (cond-> {:spec/id    spec-id
+               :spec/title title}
+        (clean (:spec/description spec)) (assoc :spec/description (clean (:spec/description spec)))
+        (clean (:description spec))      (assoc :spec/description (clean (:description spec)))
+        (:spec/intent spec)              (assoc :spec/intent (:spec/intent spec))
+        (clean (:spec/repo-url spec))    (assoc :spec/repo-url (clean (:spec/repo-url spec)))
+        (seq (:spec/tags spec))          (assoc :spec/tags (vec (:spec/tags spec)))
+        (:spec/origin spec)              (assoc :spec/origin (:spec/origin spec))))))
+
+(defn- upsert-spec
+  "Insert or update a `Spec` entry in `:specs` keyed by `:spec/id`.
+
+   On first observation: creates a `Spec` with `:status :active` and
+   `:created-at`/`:updated-at` set to the event timestamp. Defaults
+   `:spec/origin :miniforge` so the entity reads as upstream-known
+   (the Rust core uses `:local-synthetic` for its locally-created Specs
+   per N5-delta-3 §5.3).
+
+   On re-observation (same `:spec/id` already in the table): merges new
+   metadata fields onto the existing entity and bumps `:updated-at`.
+   `:created-at` is preserved. Status transitions are NOT performed here
+   — that's the job of explicit `:spec/updated` / `:spec/archived`
+   handlers (N14-5, deferred)."
+  [table spec-identity ts]
+  (let [spec-id  (:spec/id spec-identity)
+        existing (get-in table [:specs spec-id])
+        entity   (cond
+                   ;; First observation
+                   (nil? existing)
+                   (merge {:spec/status     :active
+                           :spec/origin     :miniforge
+                           :spec/created-at ts
+                           :spec/updated-at ts}
+                          spec-identity)
+
+                   ;; Re-observation — merge new metadata, bump updated-at,
+                   ;; preserve created-at + status + origin.
+                   :else
+                   (merge existing
+                          (dissoc spec-identity :spec/id)
+                          {:spec/updated-at ts}))]
+    (cond-> table
+      spec-id (assoc-in [:specs spec-id] entity))))
+
 ;------------------------------------------------------------------------------ Layer 1
 ;; WorkflowRun handlers
 
@@ -182,7 +263,8 @@
         wf-key   (or (:workflow/key spec)
                      (some-> spec :workflow/spec name)
                      (workflow-key-fallback id))
-        spec-identity (extract-spec-identity event)
+        spec-identity     (extract-spec-identity event)
+        long-spec-identity (extract-long-lived-spec-identity event)
         run      (cond-> (merge {:workflow-run/id              id
                                  :workflow-run/workflow-key    wf-key
                                  :workflow-run/intent          intent
@@ -194,16 +276,25 @@
                                  :workflow-run/correlation-id  id}
                                 ;; Preserve fields from a prior phase-* event that
                                 ;; arrived before workflow/started. `:workflow-run/spec`
-                                ;; is preserved here too so a placeholder set by an
-                                ;; earlier spec-bearing event survives if this event
-                                ;; has none; an event-derived identity overrides it
-                                ;; below.
+                                ;; and `:workflow-run/spec-id` are preserved too so a
+                                ;; placeholder set by an earlier spec-bearing event
+                                ;; survives if this event has none; an event-derived
+                                ;; identity overrides them below.
                                 (select-keys existing
                                              [:workflow-run/current-phase
                                               :workflow-run/workflow-key
-                                              :workflow-run/spec]))
-                   spec-identity (assoc :workflow-run/spec spec-identity))]
-    (assoc-in table [:workflows id] run)))
+                                              :workflow-run/spec
+                                              :workflow-run/spec-id]))
+                   spec-identity      (assoc :workflow-run/spec spec-identity)
+                   ;; N14: link this WorkflowRun to the long-lived Spec entity.
+                   long-spec-identity (assoc :workflow-run/spec-id
+                                             (:spec/id long-spec-identity)))]
+    (cond-> (assoc-in table [:workflows id] run)
+      ;; N14: upsert the long-lived Spec entity into `:specs` keyed by
+      ;; `:spec/id`. Idempotent on re-observation; status transitions
+      ;; (`:completed`, `:archived`) are out of scope for N14 and land in
+      ;; N14-5 via explicit `:spec/*` events.
+      long-spec-identity (upsert-spec long-spec-identity ts))))
 
 (defn- ensure-workflow
   "Create a placeholder WorkflowRun if we see a phase event before
@@ -573,6 +664,12 @@
 ;; A `:supervisory/*-upserted` event carries the canonical entity in
 ;; :supervisory/entity; we trust it as the baseline state.
 
+(defn supervisory-spec-upserted
+  [table event]
+  (let [entity (:supervisory/entity event)]
+    (cond-> table
+      entity (assoc-in [:specs (:spec/id entity)] entity))))
+
 (defn supervisory-workflow-upserted
   [table event]
   (let [entity (:supervisory/entity event)]
@@ -860,6 +957,7 @@
    :gate/passed                            gate-passed
    :gate/failed                            gate-failed
    ;; Snapshot events (used during replay)
+   :supervisory/spec-upserted              supervisory-spec-upserted
    :supervisory/workflow-upserted          supervisory-workflow-upserted
    :supervisory/agent-upserted             supervisory-agent-upserted
    :supervisory/pr-upserted                supervisory-pr-upserted

@@ -151,6 +151,7 @@
   [component]
   (:table @component))
 
+(defn specs       [component] (vals (get-in @component [:table :specs])))
 (defn workflows   [component] (vals (get-in @component [:table :workflows])))
 (defn agents      [component] (vals (get-in @component [:table :agents])))
 (defn prs         [component] (vals (get-in @component [:table :prs])))
