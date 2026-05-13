@@ -45,8 +45,10 @@ via `:supervisory/spec-upserted` from the existing
   the consumer can operate with Spec as a direct parent of
   WorkflowRun for v1. Adding `MiniforgeRun` is a follow-on.
 - **Does not change `WorkflowRunSpec`.** The run-owned snapshot
-  remains as it was after BD-1; it now carries an additional
-  `:workflow-run-spec/spec-id` pointer at the long-lived Spec.
+  (`:workflow-run/spec`) remains as BD-1 / miniforge#793 landed
+  it. The long-lived Spec foreign key lives on the WorkflowRun
+  itself as a new optional `:workflow-run/spec-id` field — see
+  below — not inside the snapshot.
 - **Does not formalize spec status transitions or workflow
   authoring tooling.** Spec creation is left to whatever currently
   produces `:workflow/spec` payloads (the planner, the CLI, etc.).
@@ -66,8 +68,12 @@ Add to `components/supervisory-state/src/ai/miniforge/supervisory_state/schema.c
    - :draft     — created, no MiniforgeRun yet
    - :active    — at least one MiniforgeRun in flight (or recently completed)
    - :completed — operator-marked done; no future MiniforgeRuns expected
-   - :archived  — operator-archived; suppressed from default UI surfaces"
-  #{:draft :active :completed :archived})
+   - :archived  — operator-archived; suppressed from default UI surfaces
+
+   Vector (not set) for deterministic enum ordering in malli printed
+   schemas / error messages, matching the convention used for
+   `workflow-run-statuses`, `pr-statuses`, etc. throughout `schema.clj`."
+  [:draft :active :completed :archived])
 
 ;; ... extend the registry:
 
@@ -82,7 +88,11 @@ Add to `components/supervisory-state/src/ai/miniforge/supervisory_state/schema.c
    top-level unit of work. One Spec owns N MiniforgeRuns (each of
    which owns N WorkflowRuns) over its lifetime.
 
-   Open map: additional keys pass through validation."
+   Open map: additional keys pass through validation. Field types
+   chosen to be compatible with existing spec payload shapes
+   (`SpecIntent` in `components/spec-parser/.../schema.clj` and
+   the run-owned `:workflow-run/spec` snapshot in this component's
+   `schema.clj`)."
   [:map {:registry registry}
    [:spec/id           :spec/id]
    [:spec/title        [:string {:min 1}]]
@@ -91,9 +101,15 @@ Add to `components/supervisory-state/src/ai/miniforge/supervisory_state/schema.c
    [:spec/updated-at   :common/timestamp]
    ;; Optional metadata (open — see N5-delta-3 §5.1):
    [:spec/description     {:optional true} :string]
-   [:spec/intent          {:optional true} :string]
+   ;; `:spec/intent` is a structured map per `SpecIntent` (`:type`
+   ;; + `:scope`); kept as open `map?` here to match the existing
+   ;; `:workflow-run/spec` snapshot rather than re-validating against
+   ;; the producer-side schema.
+   [:spec/intent          {:optional true} map?]
    [:spec/repo-url        {:optional true} :string]
-   [:spec/tags            {:optional true} [:vector :string]]
+   ;; Tags may be strings OR keywords (matches existing tag
+   ;; conventions elsewhere in the codebase).
+   [:spec/tags            {:optional true} [:vector [:or :string :keyword]]]
    ;; Origin discriminator — `:miniforge` for specs known to this
    ;; runtime; reserved for `:local-synthetic` when a Rust-core
    ;; consumer creates a Spec ahead of upstream knowing about it
@@ -140,22 +156,39 @@ In `components/supervisory-state/src/ai/miniforge/supervisory_state/emitter.clj`
       (assoc :supervisory/entity spec-entity)))
 ```
 
-Plus the corresponding diff-and-emit pair following the same
-pattern as the existing `workflow-*`, `agent-*`, `pr-*`,
-`policy-*`, `attention-*` emitter pairs.
+Then extend the existing `diff-and-emit!` function (single
+top-level fn in `emitter.clj`) with one additional `emit-diff!`
+call for the new `:specs` table:
+
+```clojure
+(defn diff-and-emit!
+  [stream old-table new-table]
+  (let [...]
+    (emit-diff! stream spec-upserted     (:specs        old-table) (:specs        new-table))  ;; NEW
+    (emit-diff! stream workflow-upserted (:workflows    old-table) (:workflows    new-table))
+    ;; ... existing emit-diff! calls unchanged ...
+    ))
+```
+
+No new per-entity diff function is needed — the existing
+`emit-diff!` helper is generic over its constructor argument.
 
 ## Accumulator additions
 
 `components/supervisory-state/src/ai/miniforge/supervisory_state/accumulator.clj`
 gains:
 
-1. **`extract-spec-identity`** helper, mirroring the existing
-   `extract-spec-identity` used for `WorkflowRunSpec` (BD-1).
-   Distinct function name (`extract-long-lived-spec` or similar)
-   to disambiguate — they project from different event shapes.
+1. **`extract-long-lived-spec-identity`** — new private helper,
+   distinct from the existing `extract-spec-identity` (BD-1, line
+   146) which projects the per-run snapshot. The two extract from
+   different event shapes: BD-1's helper builds the
+   `:workflow-run/spec` snapshot; this RFC's helper extracts the
+   long-lived `Spec` entity fields (`:spec/id`, `:spec/title`,
+   `:spec/intent`, `:spec/repo-url`, `:spec/tags`, `:spec/origin`).
 2. **`upsert-spec`** handler, invoked when:
    - A `:workflow/started` event arrives carrying a fresh
-     spec-id not yet in the `:specs` table → create.
+     spec-id not yet in the `:specs` table → create with
+     status `:active`.
    - A `:spec/updated` or `:spec/archived` event arrives → mutate.
 3. **`link-workflow-to-spec`** — on `:workflow/started`, the
    accumulator records `:workflow-run/spec-id` on the
@@ -190,8 +223,9 @@ ready to handle them when they arrive.
 
 ## Migration / back-compat
 
-- **Existing WorkflowRuns without `spec-id`:** valid. Consumer
-  projects to Specless bucket. No data migration required.
+- **Existing WorkflowRuns without `:workflow-run/spec-id`:**
+  valid. Consumer projects to Specless bucket. No data migration
+  required.
 - **Pre-existing `~/.miniforge/events/` event files:** consumed
   by `event-client` on replay; new `:supervisory/spec-upserted`
   events arrive in chronological order alongside existing
@@ -199,9 +233,13 @@ ready to handle them when they arrive.
   emission of Spec snapshots for historical WorkflowRuns — they
   remain Specless until the operator classifies them via the
   Rust-core path.
-- **Schema deserialization:** the new `:specs` table key is
-  appended; older snapshots without it deserialize to
-  `{:specs {} ...}` via malli's open-map handling.
+- **In-memory supervisory state:** `supervisory-state/core` is
+  an in-memory view cache with no across-restart persistence;
+  the new `:specs` table key joins the other top-level table
+  keys via the existing accumulator initialization path
+  (`empty-table` extended to include `:specs {}`). No
+  deserialization-of-old-snapshots concern — there is no
+  snapshot format to migrate.
 
 ## Sequencing (the burndown)
 
