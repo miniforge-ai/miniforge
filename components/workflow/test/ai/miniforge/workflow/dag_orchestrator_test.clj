@@ -19,13 +19,15 @@
 (ns ai.miniforge.workflow.dag-orchestrator-test
   "Tests for DAG orchestrator: stratum wiring, conflict-aware batching,
    plan-to-DAG conversion with new decomposition fields, per-task base
-   branch chaining, forest validation at plan time, and artifact-of-record
-   selection across multi-iteration repair cycles."
+   branch chaining, forest validation at plan time, artifact-of-record
+   selection across multi-iteration repair cycles, and per-task event
+   emission on both success and failure paths."
   (:require
    [clojure.test :refer [deftest testing is]]
    [ai.miniforge.dag-executor.interface :as dag]
    [ai.miniforge.logging.interface :as log]
-   [ai.miniforge.workflow.dag-orchestrator :as dag-orch]))
+   [ai.miniforge.workflow.dag-orchestrator :as dag-orch]
+   [ai.miniforge.workflow.dag-resilience :as resilience]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Test fixtures
@@ -433,6 +435,72 @@
       (is (:success? wf-result))
       (is (= only-artifact (:artifact wf-result))
           "single-artifact case still works"))))
+
+;------------------------------------------------------------------------------ Layer 5
+;; emit-batch-events! per-task event emission
+;;
+;; Stub at the resilience emit fns rather than the event-stream
+;; interface — the orchestrator's contract is "call the right emit
+;; fn with the right args"; what those fns do with publish! is the
+;; resilience namespace's concern.
+
+;; Number of tasks in the all-success and all-failure emit-batch test fixtures.
+;; Both tests build a results map of {id-a ..., id-b ...} — two tasks — so
+;; "all tasks completed" and "all tasks failed" both expect this count.
+(def ^:private emit-batch-task-count 2)
+
+;; Sentinel for the complementary side of a one-sided batch (i.e. when all
+;; tasks succeed the failure count is zero, and vice-versa).
+(def ^:private emit-batch-no-calls 0)
+
+(deftest emit-batch-events-emits-task-completed-for-success-test
+  (testing ":dag/task-completed fires for every dag/ok? result in batch"
+    (let [completed-calls (atom [])
+          failed-calls    (atom [])]
+      (with-redefs [resilience/emit-dag-task-completed!
+                    (fn [_es _wf tid result] (swap! completed-calls conj [tid result]))
+                    resilience/emit-dag-task-failed!
+                    (fn [_es _wf tid result] (swap! failed-calls conj [tid result]))]
+        (let [results {id-a {:ok? true :data {:summary "done a"}}
+                       id-b {:ok? true :data {:summary "done b"}}}]
+          (dag-orch/emit-batch-events! results ::stream "wf-1")
+          (is (= emit-batch-task-count (count @completed-calls)))
+          (is (= emit-batch-no-calls (count @failed-calls)))
+          (is (= #{id-a id-b} (set (map first @completed-calls)))))))))
+
+(deftest emit-batch-events-emits-task-failed-for-failures-test
+  (testing ":dag/task-failed fires for every dag/err? result in batch"
+    (let [completed-calls (atom [])
+          failed-calls    (atom [])]
+      (with-redefs [resilience/emit-dag-task-completed!
+                    (fn [_es _wf tid result] (swap! completed-calls conj [tid result]))
+                    resilience/emit-dag-task-failed!
+                    (fn [_es _wf tid result] (swap! failed-calls conj [tid result]))]
+        (let [results {id-a {:ok? false :error {:code :ci-failed :message "boom a"}}
+                       id-b {:ok? false :error {:code :ci-failed :message "boom b"}}}]
+          (dag-orch/emit-batch-events! results ::stream "wf-1")
+          (is (= emit-batch-no-calls (count @completed-calls)))
+          (is (= emit-batch-task-count (count @failed-calls)))
+          (is (= #{id-a id-b} (set (map first @failed-calls))))
+          (is (= #{"boom a" "boom b"}
+                 (set (map #(get-in (second %) [:error :message]) @failed-calls)))))))))
+
+(deftest emit-batch-events-emits-both-events-for-mixed-batch-test
+  (testing "mixed batch produces completed for ok and failed for err.
+            Asserts set membership not vector order — results is a hash-map
+            and iteration order is not guaranteed across JVM / Clojure
+            implementations."
+    (let [completed-calls (atom [])
+          failed-calls    (atom [])]
+      (with-redefs [resilience/emit-dag-task-completed!
+                    (fn [_es _wf tid _result] (swap! completed-calls conj tid))
+                    resilience/emit-dag-task-failed!
+                    (fn [_es _wf tid _result] (swap! failed-calls conj tid))]
+        (let [results {id-a {:ok? true :data {:summary "ok"}}
+                       id-b {:ok? false :error {:code :timeout :message "fail"}}}]
+          (dag-orch/emit-batch-events! results ::stream "wf-1")
+          (is (= #{id-a} (set @completed-calls)))
+          (is (= #{id-b} (set @failed-calls))))))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

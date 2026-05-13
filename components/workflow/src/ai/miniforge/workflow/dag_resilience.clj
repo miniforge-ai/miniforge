@@ -226,6 +226,25 @@
                    :dag/result (select-keys result [:data :status])}))
       (catch Exception _ nil))))
 
+(defn emit-dag-task-failed!
+  "Publish :dag/task-failed event for diagnostics.
+   Mirrors emit-dag-task-completed! on the failure path so post-mortems
+   can see WHY a task died without trace-grepping. Selects :error +
+   :status from the dag/err result so the event carries the err shape
+   `{:error {:code <kw> :message <str> :data <map>}}` without the full
+   agent transcript."
+  [event-stream workflow-id task-id result]
+  (when event-stream
+    (try
+      (let [publish! (requiring-resolve 'ai.miniforge.event-stream.interface/publish!)]
+        (publish! event-stream
+                  {:event/type :dag/task-failed
+                   :event/timestamp (str (java.time.Instant/now))
+                   :workflow/id workflow-id
+                   :dag/task-id task-id
+                   :dag/result (select-keys result [:error :status])}))
+      (catch Exception _ nil))))
+
 (defn emit-dag-paused!
   "Publish :dag/paused event with completed task IDs for resume."
   [event-stream workflow-id completed-ids reason]

@@ -1488,14 +1488,30 @@
   (doseq [tid completed-task-ids]
     (resilience/emit-dag-task-completed! event-stream workflow-id tid (get results tid))))
 
+(defn emit-failed-checkpoints!
+  "Emit :dag/task-failed diagnostic events for failed results in a batch.
+   Mirrors emit-completed-checkpoints! on the failure path so dogfood
+   post-mortems can see WHY individual tasks died — :dag-result aggregates
+   tasks-failed counts but without per-task events those failures are
+   invisible to tooling that scans the event stream."
+  [failed-task-ids results event-stream workflow-id]
+  (doseq [tid failed-task-ids]
+    (resilience/emit-dag-task-failed! event-stream workflow-id tid (get results tid))))
+
 (defn emit-batch-events!
-  "Emit checkpointing events for successful results in a completed batch.
+  "Emit checkpointing + diagnostic events for a completed batch.
+   Successful results get :dag/task-completed; failed results get
+   :dag/task-failed. Both paths emit so dogfood and TUI can see the
+   full task disposition without grepping trace logs.
    Returns nil to keep event emission side-effect only."
   [results event-stream workflow-id]
-  (let [completed-task-ids (->> results
-                                (filter (fn [[_task-id result]] (dag/ok? result)))
-                                (map first))]
+  (let [grouped (group-by (fn [[_task-id result]]
+                            (if (dag/ok? result) :completed :failed))
+                          results)
+        completed-task-ids (map first (:completed grouped))
+        failed-task-ids    (map first (:failed grouped))]
     (emit-completed-checkpoints! completed-task-ids results event-stream workflow-id)
+    (emit-failed-checkpoints! failed-task-ids results event-stream workflow-id)
     nil))
 
 (defn find-unreached-tasks
@@ -1603,6 +1619,11 @@
             ;; alongside :dag/task-completed.
             (register-batch-branches! registry-atom results)
             (emit-completed-checkpoints! completed results event-stream workflow-id)
+            ;; Emit :dag/task-failed for non-rate-limited failures only.
+            ;; Rate-limited tasks will be retried after the cooldown — emitting
+            ;; a failure event for them would be premature and would lie about
+            ;; the run's actual state.
+            (emit-failed-checkpoints! other-failed-ids results event-stream workflow-id)
 
             (if (seq rate-limited-ids)
               (let [decision (handle-rate-limit-in-batch
