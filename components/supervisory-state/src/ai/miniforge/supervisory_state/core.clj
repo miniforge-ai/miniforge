@@ -82,7 +82,8 @@
 (defn- handle-event!
   [component event]
   ;; Ignore our own snapshot events to prevent re-emit loops.
-  (when-not (#{:supervisory/workflow-upserted
+  (when-not (#{:supervisory/spec-upserted
+               :supervisory/workflow-upserted
                :supervisory/agent-upserted
                :supervisory/pr-upserted
                :supervisory/policy-evaluated

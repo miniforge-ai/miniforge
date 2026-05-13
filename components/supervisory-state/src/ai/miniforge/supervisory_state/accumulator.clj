@@ -217,22 +217,28 @@
 (defn- upsert-spec
   "Insert or update a `Spec` entry in `:specs` keyed by `:spec/id`.
 
-   On first observation: creates a `Spec` with `:status :active` and
-   `:created-at`/`:updated-at` set to the event timestamp. Defaults
-   `:spec/origin :miniforge` so the entity reads as upstream-known
-   (the Rust core uses `:local-synthetic` for its locally-created Specs
-   per N5-delta-3 §5.3).
+   On first observation: creates a `Spec` with `:spec/status :active`
+   and `:spec/created-at`/`:spec/updated-at` set to the event timestamp.
+   Defaults `:spec/origin :miniforge` so the entity reads as upstream-
+   known (the Rust core uses `:local-synthetic` for its locally-created
+   Specs per N5-delta-3 §5.3).
 
    On re-observation (same `:spec/id` already in the table): merges new
-   metadata fields onto the existing entity and bumps `:updated-at`.
-   `:created-at` is preserved. Status transitions are NOT performed here
-   — that's the job of explicit `:spec/updated` / `:spec/archived`
-   handlers (N14-5, deferred)."
+   *mutable metadata* fields onto the existing entity and bumps
+   `:spec/updated-at`. The following fields are **immutable after first
+   observation** and are NOT overwritten by subsequent events: `:spec/id`
+   (key), `:spec/origin` (provenance — set once when the entity is born),
+   `:spec/created-at`, `:spec/status` (status transitions are explicit
+   `:spec/updated` / `:spec/archived` events, N14-5, deferred)."
   [table spec-identity ts]
-  (let [spec-id  (:spec/id spec-identity)
-        existing (get-in table [:specs spec-id])
+  (let [spec-id           (:spec/id spec-identity)
+        existing          (get-in table [:specs spec-id])
+        ;; Fields the producer-side identity must NOT clobber on
+        ;; re-observation. `:spec/id` is the key (never merged anyway);
+        ;; `:spec/origin` is set once at first observation and stays.
+        immutable-on-merge #{:spec/id :spec/origin}
         entity   (cond
-                   ;; First observation
+                   ;; First observation — full construction with defaults.
                    (nil? existing)
                    (merge {:spec/status     :active
                            :spec/origin     :miniforge
@@ -240,11 +246,11 @@
                            :spec/updated-at ts}
                           spec-identity)
 
-                   ;; Re-observation — merge new metadata, bump updated-at,
-                   ;; preserve created-at + status + origin.
+                   ;; Re-observation — merge mutable metadata only, bump
+                   ;; updated-at, preserve created-at + status + origin.
                    :else
                    (merge existing
-                          (dissoc spec-identity :spec/id)
+                          (apply dissoc spec-identity immutable-on-merge)
                           {:spec/updated-at ts}))]
     (cond-> table
       spec-id (assoc-in [:specs spec-id] entity))))

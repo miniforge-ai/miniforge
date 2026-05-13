@@ -203,6 +203,25 @@
         "new metadata merged on re-observation")
     (is (= :active (:spec/status s)) "status preserved")))
 
+(deftest workflow-started-second-observation-preserves-origin
+  ;; `:spec/origin` is set once at first observation and MUST NOT be
+  ;; overwritten by subsequent events — origin is provenance, not
+  ;; mutable metadata. Regression for the Copilot-flagged bug.
+  (let [spec-with-origin {:spec/title "Provenance Test"
+                          :spec/origin :local-synthetic}
+        spec-with-different-origin {:spec/title "Provenance Test"
+                                    :spec/origin :miniforge}
+        table (-> schema/empty-table
+                  (acc/apply-event (ev :workflow/started
+                                       {:workflow/id   (random-uuid)
+                                        :workflow/spec spec-with-origin}))
+                  (acc/apply-event (ev :workflow/started
+                                       {:workflow/id   (random-uuid)
+                                        :workflow/spec spec-with-different-origin})))
+        s     (first (vals (:specs table)))]
+    (is (= :local-synthetic (:spec/origin s))
+        "origin from first observation preserved across re-observation")))
+
 (deftest supervisory-spec-upserted-replay-populates-specs
   ;; Snapshot-event replay path: a `:supervisory/spec-upserted` event
   ;; carries the canonical Spec entity in `:supervisory/entity`.
