@@ -154,10 +154,23 @@
         cost-usd (get-in result [:metrics :cost-usd]
                    (get-in result [:phase/metrics :cost-usd]))
         diagnostic-fields (when-not succeeded?
-                            (let [stop-reason           (get-in result [:result :stop-reason])
-                                  final-message-preview (get-in result [:result :final-message-preview])
-                                  turn-count            (get-in result [:result :num-turns])
-                                  tool-call-count       (get-in result [:result :tool-call-count])]
+                            (let [;; Agent failures go through result-boundary/error-response →
+                                  ;; response/error, which nests stop-reason and num-turns under
+                                  ;; [:result :error :data ...].  Success paths (planner) surface
+                                  ;; the same fields under [:result :metrics ...].  Fall back to
+                                  ;; [:result ...] for any legacy shapes that set them top-level.
+                                  stop-reason           (or (get-in result [:result :error :data :stop-reason])
+                                                            (get-in result [:result :metrics :stop-reason])
+                                                            (get-in result [:result :stop-reason]))
+                                  final-message-preview (or (get-in result [:result :error :data :final-message-preview])
+                                                            (get-in result [:result :metrics :final-message-preview])
+                                                            (get-in result [:result :final-message-preview]))
+                                  turn-count            (or (get-in result [:result :error :data :num-turns])
+                                                            (get-in result [:result :metrics :num-turns])
+                                                            (get-in result [:result :num-turns]))
+                                  tool-call-count       (or (get-in result [:result :error :data :tool-call-count])
+                                                            (get-in result [:result :metrics :tool-call-count])
+                                                            (get-in result [:result :tool-call-count]))]
                               (cond-> {}
                                 stop-reason           (assoc :stop-reason stop-reason)
                                 final-message-preview (assoc :final-message-preview final-message-preview)
