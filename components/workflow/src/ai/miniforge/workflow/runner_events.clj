@@ -121,7 +121,18 @@
                                    events with no payload because of this
                                    missing branch)
    4. `:phase/gate-errors`       — gate validation failures
-   5. `(:message result)`        — last-resort string message"
+   5. `(:message result)`        — last-resort string message
+
+   On failure events, `:meta` is populated with LLM diagnostic fields
+   propagated from the agent response:
+
+   - `:stop-reason`           — why the LLM stopped (e.g. :end-turn, :max-tokens)
+   - `:final-message-preview` — truncated final assistant message for post-mortem
+   - `:turn-count`            — number of turns the agent ran (from :num-turns)
+   - `:tool-call-count`       — total tool calls made during the phase
+
+   All fields are optional; `:meta` is omitted entirely on success events
+   and on failures where none of the fields are present."
   [result]
   (let [succeeded? (and (get result :success? (phase/succeeded-or-done? result))
                         (not (inner-result-failed? result)))
@@ -141,12 +152,36 @@
         tokens   (get-in result [:metrics :tokens]
                    (get-in result [:phase/metrics :tokens]))
         cost-usd (get-in result [:metrics :cost-usd]
-                   (get-in result [:phase/metrics :cost-usd]))]
+                   (get-in result [:phase/metrics :cost-usd]))
+        diagnostic-fields (when-not succeeded?
+                            (let [;; Agent failures go through result-boundary/error-response →
+                                  ;; response/error, which nests stop-reason and num-turns under
+                                  ;; [:result :error :data ...].  Success paths (planner) surface
+                                  ;; the same fields under [:result :metrics ...].  Fall back to
+                                  ;; [:result ...] for any legacy shapes that set them top-level.
+                                  stop-reason           (or (get-in result [:result :error :data :stop-reason])
+                                                            (get-in result [:result :metrics :stop-reason])
+                                                            (get-in result [:result :stop-reason]))
+                                  final-message-preview (or (get-in result [:result :error :data :final-message-preview])
+                                                            (get-in result [:result :metrics :final-message-preview])
+                                                            (get-in result [:result :final-message-preview]))
+                                  turn-count            (or (get-in result [:result :error :data :num-turns])
+                                                            (get-in result [:result :metrics :num-turns])
+                                                            (get-in result [:result :num-turns]))
+                                  tool-call-count       (or (get-in result [:result :error :data :tool-call-count])
+                                                            (get-in result [:result :metrics :tool-call-count])
+                                                            (get-in result [:result :tool-call-count]))]
+                              (cond-> {}
+                                stop-reason           (assoc :stop-reason stop-reason)
+                                final-message-preview (assoc :final-message-preview final-message-preview)
+                                turn-count            (assoc :turn-count turn-count)
+                                tool-call-count       (assoc :tool-call-count tool-call-count))))]
     (cond-> {:outcome outcome :duration-ms duration-ms}
-      error-info    (assoc :error error-info)
-      transition-request (assoc :phase/transition-request transition-request)
-      tokens        (assoc :tokens tokens)
-      cost-usd      (assoc :cost-usd cost-usd))))
+      error-info              (assoc :error error-info)
+      transition-request      (assoc :phase/transition-request transition-request)
+      tokens                  (assoc :tokens tokens)
+      cost-usd                (assoc :cost-usd cost-usd)
+      (seq diagnostic-fields) (assoc :meta diagnostic-fields))))
 
 ;------------------------------------------------------------------------------ Layer 1.5
 ;; Supervisory entity builders

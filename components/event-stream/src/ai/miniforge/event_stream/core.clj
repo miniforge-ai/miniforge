@@ -498,7 +498,8 @@
           transition-request (assoc :phase/transition-request transition-request)
           redirect-to (assoc :phase/redirect-to redirect-to)
           (:tokens result) (assoc :phase/tokens (:tokens result))
-          (:cost-usd result) (assoc :phase/cost-usd (:cost-usd result))))))
+          (:cost-usd result) (assoc :phase/cost-usd (:cost-usd result))
+          (:meta result) (assoc :phase/meta (:meta result))))))
 
 (defn workspace-persisted
   "Build a :workspace/persisted event recording that a phase's worktree was

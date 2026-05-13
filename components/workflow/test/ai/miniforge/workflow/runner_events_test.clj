@@ -150,3 +150,88 @@
       (let [event (first-event stream)]
         (is (= :workflow/phase-completed (:event/type event)))
         (is (= :implement (get-in event [:phase/transition-request :transition/target])))))))
+
+;------------------------------------------------------------------------------ :meta diagnostic fields
+;; es/phase-completed stores data under namespaced keys:
+;;   :outcome → :phase/outcome
+;;   :meta    → :phase/meta   (added by this PR to core.clj)
+
+(deftest phase-completed-failure-includes-meta-stop-reason-test
+  (testing "failure events carry :phase/meta with stop-reason and num-turns from error-data"
+    ;; result-boundary/error-response → response/error produces:
+    ;;   {:status :error
+    ;;    :error  {:message "..." :data {:stop-reason X :num-turns N}}
+    ;;    :metrics {:tokens N :duration-ms 0}}
+    ;; That whole map is what lands under :result in the phase-result.
+    (let [stream (create-stream)
+          ctx    (test-context)
+          phase-result {:status   :failed
+                        :success? false
+                        :result   {:status  :error
+                                   :error   {:message "LLM call failed"
+                                             :data    {:stop-reason :max-tokens
+                                                       :num-turns   12}}
+                                   :metrics {:tokens 0 :duration-ms 0}}}]
+      (events/publish-phase-completed! stream ctx :implement phase-result)
+      (let [event (first-event stream)
+            meta  (:phase/meta event)]
+        (is (some? event) "event must be published — stream must be non-empty")
+        (is (= :failure (:phase/outcome event)))
+        (is (some? meta) ":phase/meta must be present on failure events with LLM diagnostics")
+        (is (= :max-tokens (:stop-reason meta)))
+        (is (= 12 (:turn-count meta)))))))
+
+(deftest phase-completed-failure-meta-omitted-when-no-diagnostic-fields-test
+  (testing "failure events without LLM diagnostic fields do not carry :phase/meta"
+    (let [stream (create-stream)
+          ctx    (test-context)
+          phase-result {:status   :failed
+                        :success? false
+                        :error    {:message "network timeout"}}]
+      (events/publish-phase-completed! stream ctx :implement phase-result)
+      (let [event (first-event stream)]
+        (is (some? event) "event must be published — stream must be non-empty")
+        (is (= :failure (:phase/outcome event)))
+        (is (nil? (:phase/meta event)) ":phase/meta must be absent when no diagnostic fields are present")))))
+
+(deftest phase-completed-success-has-no-meta-test
+  (testing "success events do not carry :phase/meta diagnostic fields"
+    ;; Planner success shape (response/success) puts stop-reason under :metrics.
+    ;; Even with diagnostics present, :phase/meta must be absent on success.
+    (let [stream (create-stream)
+          ctx    (test-context)
+          phase-result {:status   :completed
+                        :success? true
+                        :result   {:status  :success
+                                   :output  {}
+                                   :metrics {:tokens      500
+                                             :duration-ms 3000
+                                             :stop-reason :end-turn
+                                             :num-turns   5}}}]
+      (events/publish-phase-completed! stream ctx :plan phase-result)
+      (let [event (first-event stream)]
+        (is (some? event) "event must be published — stream must be non-empty")
+        (is (= :success (:phase/outcome event)))
+        (is (nil? (:phase/meta event)) ":phase/meta must not appear on success events")))))
+
+(deftest phase-completed-failure-partial-meta-fields-test
+  (testing "partial LLM diagnostic fields (only stop-reason) yield partial :phase/meta"
+    ;; When only stop-reason made it into the error data (num-turns absent),
+    ;; :phase/meta should carry :stop-reason but no :turn-count.
+    (let [stream (create-stream)
+          ctx    (test-context)
+          phase-result {:status   :failed
+                        :success? false
+                        :result   {:status  :error
+                                   :error   {:message "LLM call failed"
+                                             :data    {:stop-reason :end-turn}}
+                                   :metrics {:tokens 0 :duration-ms 0}}}]
+      (events/publish-phase-completed! stream ctx :review phase-result)
+      (let [event (first-event stream)
+            meta  (:phase/meta event)]
+        (is (some? event) "event must be published — stream must be non-empty")
+        (is (= :failure (:phase/outcome event)))
+        (is (= :end-turn (:stop-reason meta)))
+        (is (nil? (:final-message-preview meta)))
+        (is (nil? (:turn-count meta)))
+        (is (nil? (:tool-call-count meta)))))))
