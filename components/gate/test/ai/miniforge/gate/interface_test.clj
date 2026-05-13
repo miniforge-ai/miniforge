@@ -27,7 +27,8 @@
    [ai.miniforge.gate.syntax]
    [ai.miniforge.gate.lint]
    [ai.miniforge.gate.test]
-   [ai.miniforge.gate.policy]))
+   [ai.miniforge.gate.policy]
+   [ai.miniforge.gate.format]))
 
 ;; ============================================================================
 ;; Registry tests
@@ -153,6 +154,18 @@
   (testing "check-gates passes for empty gate list"
     (let [result (gate/check-gates [] {} {})]
       (is (:passed? result)))))
+
+(deftest check-gates-response-shaped-gate-test
+  (testing "check-gates correctly handles gates that return response/success shape"
+    ;; The format gate returns response/success (no :passed? key) — always passes.
+    ;; Before the fix, (every? :passed? results) saw nil for response-shaped results
+    ;; and declared overall :passed? false despite the gate passing.
+    (let [artifact {:code/files [{:path "src/foo.clj" :content "(+ 1 2)" :action :create}]}
+          result   (gate/check-gates [:format] artifact {})]
+      (is (true? (:passed? result))
+          "check-gates must return :passed? true when gate passes via response/success shape")
+      (is (empty? (:failed-gates result))
+          "failed-gates must be empty when gate passes"))))
 
 ;; ============================================================================
 ;; Repair gate tests
