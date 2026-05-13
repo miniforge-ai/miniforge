@@ -33,6 +33,14 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Event constructors (match N3 §3.19 schemas)
 
+(defn spec-upserted
+  [stream spec-entity]
+  (-> (es/create-envelope stream
+                          :supervisory/spec-upserted
+                          nil
+                          (str "Spec " (:spec/title spec-entity) " upserted"))
+      (assoc :supervisory/entity spec-entity)))
+
 (defn workflow-upserted
   [stream workflow-entity]
   (-> (es/create-envelope stream
@@ -130,6 +138,7 @@
    Returns the number of events published, mainly for testing."
   [stream old-table new-table]
   (let [before (count (es/get-events stream))]
+    (emit-diff! stream spec-upserted      (:specs        old-table) (:specs        new-table))
     (emit-diff! stream workflow-upserted  (:workflows    old-table) (:workflows    new-table))
     (emit-diff! stream agent-upserted     (:agents       old-table) (:agents       new-table))
     (emit-diff! stream pr-upserted        (:prs          old-table) (:prs          new-table))

@@ -221,25 +221,33 @@ tooling or by the Rust-core consumer's
 them is out of scope for this RFC; the accumulator should be
 ready to handle them when they arrive.
 
-## Migration / back-compat
+## Data-model semantics
 
-- **Existing WorkflowRuns without `:workflow-run/spec-id`:**
-  valid. Consumer projects to Specless bucket. No data migration
-  required.
-- **Pre-existing `~/.miniforge/events/` event files:** consumed
-  by `event-client` on replay; new `:supervisory/spec-upserted`
-  events arrive in chronological order alongside existing
-  `:supervisory/workflow-upserted` events. No retroactive
-  emission of Spec snapshots for historical WorkflowRuns — they
-  remain Specless until the operator classifies them via the
-  Rust-core path.
-- **In-memory supervisory state:** `supervisory-state/core` is
-  an in-memory view cache with no across-restart persistence;
-  the new `:specs` table key joins the other top-level table
-  keys via the existing accumulator initialization path
-  (`empty-table` extended to include `:specs {}`). No
-  deserialization-of-old-snapshots concern — there is no
-  snapshot format to migrate.
+Miniforge is unreleased; there is no installed base to be
+backward-compatible *with*. The discipline is "skip all backward-
+compat shims and transition periods" (operator policy). This
+section therefore documents the **v1 data-model semantics**, not a
+migration story.
+
+- **Specless workflows are a first-class state, not a carve-out.**
+  `:workflow-run/spec-id` is genuinely optional because some
+  `:workflow/started` events don't carry a `:workflow/spec`
+  payload at all (exploratory runs, runs whose spec identity the
+  operator hasn't classified yet). Such runs project into the
+  Specless bucket per N5-delta-3 §3.3. The optional schema marker
+  reflects this data-model truth — it is NOT a kindness to
+  pre-existing data shapes.
+- **Event-stream ordering.** New `:supervisory/spec-upserted`
+  events interleave with existing `:supervisory/workflow-upserted`
+  events in chronological order on the same event-client channel.
+  Producers emit the spec snapshot the first time a workflow
+  cites a fresh spec identity; consumers see it before the
+  workflow upsert that links to it.
+- **In-memory supervisory state.** `supervisory-state/core` is an
+  in-memory view cache with no across-restart persistence. The new
+  `:specs` table key joins the other top-level table keys via the
+  accumulator's `empty-table` initialization — no separate
+  snapshot format to think about.
 
 ## Sequencing (the burndown)
 

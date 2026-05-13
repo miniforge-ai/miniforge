@@ -82,7 +82,8 @@
 (defn- handle-event!
   [component event]
   ;; Ignore our own snapshot events to prevent re-emit loops.
-  (when-not (#{:supervisory/workflow-upserted
+  (when-not (#{:supervisory/spec-upserted
+               :supervisory/workflow-upserted
                :supervisory/agent-upserted
                :supervisory/pr-upserted
                :supervisory/policy-evaluated
@@ -151,6 +152,7 @@
   [component]
   (:table @component))
 
+(defn specs       [component] (vals (get-in @component [:table :specs])))
 (defn workflows   [component] (vals (get-in @component [:table :workflows])))
 (defn agents      [component] (vals (get-in @component [:table :agents])))
 (defn prs         [component] (vals (get-in @component [:table :prs])))

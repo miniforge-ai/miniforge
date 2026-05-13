@@ -103,6 +103,141 @@
     (is (= "Bare Title" (get-in run [:workflow-run/spec :spec/title])))
     (is (= "raw" (get-in run [:workflow-run/spec :spec/description])))))
 
+;------------------------------------------------------------------------------ Spec (N14)
+;; The long-lived `Spec` entity (N5-delta-3 §5.1) is derived from
+;; `:workflow/started` events. `:spec/id` is computed deterministically
+;; from the trimmed `:spec/title` so two runs citing the same spec link
+;; to one `Spec` row without producer-side coordination.
+
+(deftest workflow-started-upserts-spec-on-first-observation
+  (let [wf-id (random-uuid)
+        spec  {:spec/title "N13 Closed-Loop PR Pipeline"
+               :spec/description "Eliminate the operator-as-message-bus role"
+               :spec/intent {:type :feature}}
+        table (acc/apply-event schema/empty-table
+                               (ev :workflow/started
+                                   {:workflow/id   wf-id
+                                    :workflow/spec spec}))
+        specs (vals (:specs table))]
+    (is (= 1 (count specs))
+        "first observation creates exactly one Spec entry")
+    (let [s (first specs)]
+      (is (= "N13 Closed-Loop PR Pipeline" (:spec/title s)))
+      (is (= :active (:spec/status s)))
+      (is (= :miniforge (:spec/origin s)))
+      (is (some? (:spec/created-at s)))
+      (is (some? (:spec/updated-at s)))
+      (is (= "Eliminate the operator-as-message-bus role" (:spec/description s)))
+      (is (= {:type :feature} (:spec/intent s))))))
+
+(deftest workflow-started-links-workflow-run-to-spec-id
+  (let [wf-id (random-uuid)
+        spec  {:spec/title "Some Spec"}
+        table (acc/apply-event schema/empty-table
+                               (ev :workflow/started
+                                   {:workflow/id wf-id :workflow/spec spec}))
+        run   (get-in table [:workflows wf-id])
+        spec-id (first (keys (:specs table)))]
+    (is (some? spec-id))
+    (is (= spec-id (:workflow-run/spec-id run))
+        "the WorkflowRun.spec-id points at the upserted Spec")))
+
+(deftest workflow-started-reuses-spec-id-on-second-observation
+  (let [spec  {:spec/title "Same Title"}
+        wf-a  (random-uuid)
+        wf-b  (random-uuid)
+        table (-> schema/empty-table
+                  (acc/apply-event (ev :workflow/started
+                                       {:workflow/id wf-a :workflow/spec spec}))
+                  (acc/apply-event (ev :workflow/started
+                                       {:workflow/id wf-b :workflow/spec spec})))]
+    (is (= 1 (count (:specs table)))
+        "two runs citing the same title collapse to one Spec entity")
+    (is (= (get-in table [:workflows wf-a :workflow-run/spec-id])
+           (get-in table [:workflows wf-b :workflow-run/spec-id]))
+        "both runs point at the same spec-id")))
+
+(deftest workflow-started-omits-spec-id-when-no-spec
+  (let [wf-id (random-uuid)
+        table (acc/apply-event schema/empty-table
+                               (ev :workflow/started {:workflow/id wf-id}))
+        run   (get-in table [:workflows wf-id])]
+    (is (empty? (:specs table))
+        "no Spec entity is created when the event carries none")
+    (is (nil? (:workflow-run/spec-id run))
+        "WorkflowRun stays Specless when no spec identity is derivable")))
+
+(deftest workflow-started-omits-spec-id-when-only-blank-title
+  ;; Whitespace-only title should not produce a Spec — same discipline as
+  ;; the run-owned snapshot in `workflow-started-omits-blank-spec-fields`.
+  (let [wf-id (random-uuid)
+        table (acc/apply-event schema/empty-table
+                               (ev :workflow/started
+                                   {:workflow/id wf-id
+                                    :workflow/spec {:spec/title "   "}}))
+        run   (get-in table [:workflows wf-id])]
+    (is (empty? (:specs table)))
+    (is (nil? (:workflow-run/spec-id run)))))
+
+(deftest workflow-started-second-observation-bumps-updated-at-only
+  ;; Re-observing the same Spec preserves :spec/created-at + :spec/status
+  ;; + :spec/origin but bumps :spec/updated-at and merges new metadata.
+  (let [t1    (java.util.Date. 1700000000000)
+        t2    (java.util.Date. 1800000000000)
+        spec1 {:spec/title "Evolving Spec"}
+        spec2 {:spec/title "Evolving Spec"
+               :spec/repo-url "https://example.com/repo"}
+        table (-> schema/empty-table
+                  (acc/apply-event (ev :workflow/started
+                                       {:workflow/id     (random-uuid)
+                                        :workflow/spec   spec1
+                                        :event/timestamp t1}))
+                  (acc/apply-event (ev :workflow/started
+                                       {:workflow/id     (random-uuid)
+                                        :workflow/spec   spec2
+                                        :event/timestamp t2})))
+        s     (first (vals (:specs table)))]
+    (is (= t1 (:spec/created-at s)) "created-at preserved from first observation")
+    (is (= t2 (:spec/updated-at s)) "updated-at bumped to second observation")
+    (is (= "https://example.com/repo" (:spec/repo-url s))
+        "new metadata merged on re-observation")
+    (is (= :active (:spec/status s)) "status preserved")))
+
+(deftest workflow-started-second-observation-preserves-origin
+  ;; `:spec/origin` is set once at first observation and MUST NOT be
+  ;; overwritten by subsequent events — origin is provenance, not
+  ;; mutable metadata. Regression for the Copilot-flagged bug.
+  (let [spec-with-origin {:spec/title "Provenance Test"
+                          :spec/origin :local-synthetic}
+        spec-with-different-origin {:spec/title "Provenance Test"
+                                    :spec/origin :miniforge}
+        table (-> schema/empty-table
+                  (acc/apply-event (ev :workflow/started
+                                       {:workflow/id   (random-uuid)
+                                        :workflow/spec spec-with-origin}))
+                  (acc/apply-event (ev :workflow/started
+                                       {:workflow/id   (random-uuid)
+                                        :workflow/spec spec-with-different-origin})))
+        s     (first (vals (:specs table)))]
+    (is (= :local-synthetic (:spec/origin s))
+        "origin from first observation preserved across re-observation")))
+
+(deftest supervisory-spec-upserted-replay-populates-specs
+  ;; Snapshot-event replay path: a `:supervisory/spec-upserted` event
+  ;; carries the canonical Spec entity in `:supervisory/entity`.
+  (let [spec-id (random-uuid)
+        entity  {:spec/id         spec-id
+                 :spec/title      "Replayed Spec"
+                 :spec/status     :active
+                 :spec/origin     :miniforge
+                 :spec/created-at (java.util.Date.)
+                 :spec/updated-at (java.util.Date.)}
+        table   (acc/apply-event schema/empty-table
+                                 (ev :supervisory/spec-upserted
+                                     {:supervisory/entity entity}))]
+    (is (= entity (get-in table [:specs spec-id]))
+        "replay populates :specs from the snapshot envelope")))
+
 (deftest workflow-phase-started-updates-phase
   (let [wf-id (random-uuid)
         table (-> schema/empty-table

@@ -31,6 +31,7 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Schemas (re-exports)
 
+(def Spec             schema/Spec)
 (def WorkflowRun      schema/WorkflowRun)
 (def AgentSession     schema/AgentSession)
 (def PrFleetEntry     schema/PrFleetEntry)
@@ -54,6 +55,7 @@
 ;; `:supervisory/*-upserted` events on the event stream)
 
 (def table         core/table)
+(def specs         core/specs)
 (def workflows     core/workflows)
 (def agents        core/agents)
 (def prs           core/prs)
