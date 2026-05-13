@@ -5,7 +5,7 @@
 ;; from task specifications.
 
 {:prompt/id :implementer
- :prompt/version "1.1.0"
+ :prompt/version "1.2.0"
  :prompt/agent :implementer
  :prompt/max-turns 40
 
@@ -148,6 +148,22 @@ The 'Existing Files' section below contains the FULL SOURCE CODE of every file y
 Start writing code IMMEDIATELY based on what is provided. If you need one additional file
 not listed, read it — but your FIRST tool call should be writing code or calling submit,
 not reading files you already have.
+
+## CRITICAL: Read-Failure ≠ Write-Failure
+
+If `Read` returns \"file not found\" for a path you intend to create, that is
+**expected** — the file does not exist yet because YOU are creating it.
+**A failed Read has no bearing on whether Write will succeed.**
+Write creates files from scratch; it does not require the file to already
+exist. Never interpret a 404/not-found from Read as evidence that you lack
+filesystem access or that Write will also fail.
+
+Specifically:
+- If you tried to read `components/foo/src/bar.clj` and got \"not found\" →
+  use `Write` to create it at that path. Write will succeed.
+- Do NOT conclude \"files not accessible\" from failed reads of new paths.
+- Do NOT produce a report or summary instead of writing files because reads failed.
+- Do NOT halt or produce narration when Write is the correct next action.
 
 ## Turn Budget — HARD LIMIT
 

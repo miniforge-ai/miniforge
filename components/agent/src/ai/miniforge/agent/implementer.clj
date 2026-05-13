@@ -496,13 +496,24 @@
         (build-already-implemented-response parsed tokens cost-usd))
 
       :else
-      (if-let [code (or parsed derived-artifact)]
-        (build-code-response code context tokens cost-usd)
-        (do (log-implementer-rejection
-             logger :parse-failed
+      ;; Prefer derived-artifact (code blocks extracted from text) over a
+      ;; non-code parsed map. An agent that narrates "I created X" but never
+      ;; calls Write produces a summary EDN with no :code/files key; treating
+      ;; that as a code artifact yields a success with 0 files and silently
+      ;; discards the work. Only fall back to parsed when it IS a code artifact.
+      (let [code (or derived-artifact
+                     (when (code-artifact? parsed) parsed))]
+        (if code
+          (build-code-response code context tokens cost-usd)
+          (let [reject-reason (if (and (some? parsed) (not (code-artifact? parsed)))
+                                :narrative-only-response
+                                :parse-failed)]
+            (log-implementer-rejection
+             logger reject-reason
              input artifact-source content tools)
             (response/error (messages/t :error/parse-failed)
-                            {:tokens tokens}))))))
+                            {:tokens tokens
+                             :data   {:reject/reason reject-reason}})))))))
 
 (def ^:private session-checkpoint-filename ".miniforge/session-id")
 
