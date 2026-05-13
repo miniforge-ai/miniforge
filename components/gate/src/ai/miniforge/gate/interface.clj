@@ -189,8 +189,8 @@
      {:passed? bool :results [...]}"
   [gate-kws artifact ctx]
   (let [results (mapv #(check-gate % artifact ctx) gate-kws)
-        passed? (every? passed? results)]
-    {:passed? passed?
+        all-passed? (every? passed? results)]
+    {:passed? all-passed?
      :results results
      :failed-gates (filterv failed? results)}))
 
