@@ -337,7 +337,27 @@
    {:constructor "zettel-promoted"
     :event-type  :zettel/promoted
     :json-string "zettel/promoted"
-    :browser?    false}])
+    :browser?    false}
+
+   ;; GROUP 1+2 foundation: tool-call lifecycle + phase heartbeat
+   {:constructor "agent-tool-call-started"
+    :event-type  :agent/tool-call-started
+    :json-string "agent/tool-call-started"
+    :browser?    false
+    :note        "Marks the start of a single tool-call execution; pairs with tool/call-completed via :tool/call-id for latency spans."}
+
+   {:constructor "tool-call-completed"
+    :event-type  :tool/call-completed
+    :json-string "tool/call-completed"
+    :browser?    false
+    :note        "Closes the latency span opened by agent/tool-call-started."}
+
+   {:constructor "phase-heartbeat"
+    :event-type  :workflow/phase-heartbeat
+    :json-string "workflow/phase-heartbeat"
+    :browser?    false
+    :asymmetry?  true
+    :asymmetry-note "Constructor name implies namespace 'phase'; actual namespace is 'workflow'"}])
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Derived views

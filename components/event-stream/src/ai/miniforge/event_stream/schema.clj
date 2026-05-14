@@ -376,6 +376,71 @@
     [:status/progress-percent {:optional true} int?]
     [:message string?]]))
 
+;------------------------------------------------------------------------------ Layer 2.5
+;; Tool-call lifecycle and phase heartbeat schemas (GROUP 1+2 foundation)
+
+(def AgentToolCallStarted
+  "Schema for agent/tool-call-started event.
+
+   Emitted when an agent begins executing a single tool call.  Distinct
+   from the legacy :agent/tool-call which records tool calls in aggregate;
+   this event marks the precise start of execution for one call so
+   latency and stuck-call detection are possible."
+  (with-identity
+   [:map
+      [:event/type [:= :agent/tool-call-started]]
+    [:event/id uuid?]
+    [:event/timestamp inst?]
+    [:event/version string?]
+    [:event/sequence-number int?]
+    [:workflow/id uuid?]
+    [:tool/name string?]
+    [:tool/args-digest map?]
+    [:tool/call-id string?]
+    [:agent/id keyword?]
+    [:message string?]]))
+
+(def ToolCallCompleted
+  "Schema for tool/call-completed event.
+
+   Emitted when a tool call finishes (success or failure).  Pairs with
+   :agent/tool-call-started via :tool/call-id to close the latency span."
+  (with-identity
+   [:map
+      [:event/type [:= :tool/call-completed]]
+    [:event/id uuid?]
+    [:event/timestamp inst?]
+    [:event/version string?]
+    [:event/sequence-number int?]
+    [:workflow/id uuid?]
+    [:tool/call-id string?]
+    [:tool/result-digest map?]
+    [:tool/duration-ms int?]
+    [:tool/success? boolean?]
+    [:tool/error {:optional true} map?]
+    [:message string?]]))
+
+(def PhaseHeartbeat
+  "Schema for workflow/phase-heartbeat event.
+
+   Emitted periodically by long-running phases so supervisors can
+   detect stalls without requiring the phase to complete.  Carries
+   the time elapsed since the phase became active and the gap since
+   the last substantive event, enabling gap-based alerting."
+  (with-identity
+   [:map
+      [:event/type [:= :workflow/phase-heartbeat]]
+    [:event/id uuid?]
+    [:event/timestamp inst?]
+    [:event/version string?]
+    [:event/sequence-number int?]
+    [:workflow/id uuid?]
+    [:phase/active-since inst?]
+    [:phase/events-emitted int?]
+    [:phase/last-event-at inst?]
+    [:phase/gap-since-last-event-ms int?]
+    [:message string?]]))
+
 ;------------------------------------------------------------------------------ Layer 3
 ;; Self-healing event schemas
 
