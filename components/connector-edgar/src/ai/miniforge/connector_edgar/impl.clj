@@ -5,6 +5,7 @@
   (:require [ai.miniforge.connector.interface :as connector]
             [ai.miniforge.connector-edgar.messages :as msg]
             [ai.miniforge.connector-http.interface :as http]
+            [ai.miniforge.response.interface :as response]
             [ai.miniforge.schema.interface :as schema]
             [babashka.http-client :as bb-http]
             [cheshire.core :as cheshire]
@@ -193,9 +194,15 @@
         user-agent (:edgar/user-agent config)
         aggregation (:edgar/aggregation config)]
     (cond
-      (nil? form-type)   (throw (ex-info (msg/t :edgar/form-type-required) {:config config}))
-      (nil? user-agent)  (throw (ex-info (msg/t :edgar/user-agent-required) {:config config}))
-      (nil? aggregation) (throw (ex-info (msg/t :edgar/aggregation-required) {:config config}))
+      (nil? form-type)   (response/throw-anomaly! :anomalies/incorrect
+                                                  (msg/t :edgar/form-type-required)
+                                                  {:config config})
+      (nil? user-agent)  (response/throw-anomaly! :anomalies/incorrect
+                                                  (msg/t :edgar/user-agent-required)
+                                                  {:config config})
+      (nil? aggregation) (response/throw-anomaly! :anomalies/incorrect
+                                                  (msg/t :edgar/aggregation-required)
+                                                  {:config config})
       :else
       (let [handle (str (UUID/randomUUID))]
         (store-handle! handle {:config config})
@@ -227,8 +234,9 @@
                      :monthly-buy-sell-ratio
                      (aggregate-buy-sell-ratio config user-agent)
 
-                     (throw (ex-info (msg/t :edgar/aggregation-unknown {:agg (:edgar/aggregation config)})
-                                     {:aggregation (:edgar/aggregation config)})))]
+                     (response/throw-anomaly! :anomalies/unsupported
+                                              (msg/t :edgar/aggregation-unknown {:agg (:edgar/aggregation config)})
+                                              {:aggregation (:edgar/aggregation config)}))]
     (connector/extract-result records nil false)))
 
 (defn do-checkpoint [cursor-state]

@@ -5,6 +5,7 @@
             [ai.miniforge.connector-file.reader :as reader]
             [ai.miniforge.connector-file.writer :as writer]
             [ai.miniforge.connector-file.messages :as msg]
+            [ai.miniforge.response.interface :as response]
             [clojure.java.io :as io])
   (:import [java.util UUID]))
 
@@ -24,10 +25,16 @@
   (let [path (:file/path config)
         fmt  (:file/format config)]
     (cond
-      (nil? path) (throw (ex-info (msg/t :file/path-required) {:config config}))
-      (nil? fmt)  (throw (ex-info (msg/t :file/format-required) {:config config}))
+      (nil? path) (response/throw-anomaly! :anomalies/incorrect
+                                           (msg/t :file/path-required)
+                                           {:config config})
+      (nil? fmt)  (response/throw-anomaly! :anomalies/incorrect
+                                           (msg/t :file/format-required)
+                                           {:config config})
       (not (contains? supported-formats fmt))
-      (throw (ex-info (msg/t :file/format-unsupported {:format fmt}) {:format fmt}))
+      (response/throw-anomaly! :anomalies/unsupported
+                               (msg/t :file/format-unsupported {:format fmt})
+                               {:format fmt})
 
       :else
       (let [handle (str (UUID/randomUUID))]
@@ -61,7 +68,9 @@
   (let [{:file/keys [path format]} (require-handle! handle)
         file (io/file path)]
     (when-not (.exists file)
-      (throw (ex-info (msg/t :file/not-found {:path path}) {:path path})))
+      (response/throw-anomaly! :anomalies/not-found
+                               (msg/t :file/not-found {:path path})
+                               {:path path}))
     (let [all-records (reader/read-file path format)
           batch-size  (or (:extract/batch-size opts) (count all-records))
           offset      (or (get-in opts [:extract/cursor :cursor/value]) 0)

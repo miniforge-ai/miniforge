@@ -9,6 +9,7 @@
    Layer 2: Request execution and post-request helpers"
   (:require [ai.miniforge.connector-http.etag :as etag]
             [ai.miniforge.connector-http.pagination :as page]
+            [ai.miniforge.response.interface :as response]
             [ai.miniforge.schema.interface :as schema]
             [babashka.http-client :as http]
             [cheshire.core :as json]))
@@ -73,10 +74,17 @@
       :else                       (error-fn status resp))))
 
 (defn throw-on-failure!
-  "Throw an ex-info if result is a failure. Returns result unchanged on success."
+  "Throw an anomaly if result is a failure. Returns result unchanged on success.
+
+   The thrown ExceptionInfo carries `:anomaly/category :anomalies/unavailable`
+   alongside the legacy `:error-type` key in ex-data, so callers that branch
+   on `:error-type` continue to work while new callers can use the typed
+   anomaly category."
   [result]
   (when-not (:success? result)
-    (throw (ex-info (str (:error result)) {:error-type (:error-type result)})))
+    (response/throw-anomaly! :anomalies/unavailable
+                             (str (:error result))
+                             {:error-type (:error-type result)}))
   result)
 
 (defn next-url

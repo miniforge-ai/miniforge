@@ -4,6 +4,7 @@
   (:require [ai.miniforge.connector.interface :as connector]
             [ai.miniforge.connector-http.pagination :as page]
             [ai.miniforge.connector-http.messages :as msg]
+            [ai.miniforge.response.interface :as response]
             [ai.miniforge.schema.interface :as schema]
             [babashka.http-client :as http]
             [cheshire.core :as json])
@@ -109,8 +110,12 @@
   (let [base-url (:http/base-url config)
         endpoint (:http/endpoint config)]
     (cond
-      (nil? base-url) (throw (ex-info (msg/t :http/base-url-required) {:config config}))
-      (nil? endpoint) (throw (ex-info (msg/t :http/endpoint-required) {:config config}))
+      (nil? base-url) (response/throw-anomaly! :anomalies/incorrect
+                                               (msg/t :http/base-url-required)
+                                               {:config config})
+      (nil? endpoint) (response/throw-anomaly! :anomalies/incorrect
+                                               (msg/t :http/endpoint-required)
+                                               {:config config})
 
       :else
       (let [handle       (str (UUID/randomUUID))
@@ -132,7 +137,9 @@
   (if-let [{:keys [config]} (get-handle handle)]
     (connector/discover-result [{:schema/name    (:http/endpoint config)
                               :schema/base-url (:http/base-url config)}])
-    (throw (ex-info (msg/t :http/handle-not-found {:handle handle}) {:handle handle}))))
+    (response/throw-anomaly! :anomalies/not-found
+                             (msg/t :http/handle-not-found {:handle handle})
+                             {:handle handle})))
 
 (defn- fetch-single
   "Fetch one page of records for a single query-params set.
@@ -145,7 +152,9 @@
                             (build-page-params pagination offset cursor-value batch-size))
         resp         (do-request url headers query-params)]
     (when-not (:success? resp)
-      (throw (ex-info (str (:error resp)) {:error-type (:error-type resp)})))
+      (response/throw-anomaly! :anomalies/unavailable
+                               (str (:error resp))
+                               {:error-type (:error-type resp)}))
     (let [body     (:body resp)
           records  (extract-records body response-path)
           has-more (page-has-more? pagination body offset (count records))
@@ -190,7 +199,9 @@
             (touch-handle! handle)
             (connector/extract-result records cursor has-more)))))
 
-    (throw (ex-info (msg/t :http/handle-not-found {:handle handle}) {:handle handle}))))
+    (response/throw-anomaly! :anomalies/not-found
+                             (msg/t :http/handle-not-found {:handle handle})
+                             {:handle handle})))
 
 (defn do-checkpoint [cursor-state]
   (connector/checkpoint-result cursor-state))
