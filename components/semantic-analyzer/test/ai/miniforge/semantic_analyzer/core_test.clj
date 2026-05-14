@@ -221,7 +221,21 @@
    :rule/category "001"
    :rule/severity :minor
    :rule/knowledge-content "Test rule."
-   :rule/applies-to {:file-globs ["components/semantic-analyzer/test/**/*.clj"]}})
+   :rule/applies-to {:file-globs ["src/*.clj"]}})
+
+(defn- with-temp-repo
+  "Create a tiny repo fixture for analyzer tests."
+  [f]
+  (let [dir  (.toFile (java.nio.file.Files/createTempDirectory "semantic-analyzer-test" (make-array java.nio.file.attribute.FileAttribute 0)))
+        src  (io/file dir "src")
+        file (io/file src "core.clj")]
+    (.mkdirs src)
+    (spit file "(ns sample.core)\n(defn ok [] :ok)\n")
+    (try
+      (f (.getPath dir))
+      (finally
+        (doseq [child (reverse (file-seq dir))]
+          (.delete child))))))
 
 ;; ============================================================================
 ;; Parallel execution with timeouts
@@ -234,8 +248,9 @@
                  (assoc base-rule :rule/id :std/r3)]
           mock-complete (fn [_client _request]
                           {:success true :content "[]"})
-          results (sut/analyze-rules-parallel :mock mock-complete "." rules
-                                              {:timeout-ms 30000 :max-parallel 3})]
+          results (with-temp-repo
+                    #(sut/analyze-rules-parallel :mock mock-complete % rules
+                                                 {:timeout-ms 30000 :max-parallel 3}))]
       (is (= 3 (count results)))
       (is (every? #(= :completed (:status %)) results))))
 
@@ -244,7 +259,8 @@
           mock-complete (fn [_client _request]
                           (Thread/sleep 10000)
                           {:success true :content "[]"})
-          results (sut/analyze-rules-parallel :mock mock-complete "." [slow-rule]
-                                              {:timeout-ms 1000 :max-parallel 1})]
+          results (with-temp-repo
+                    #(sut/analyze-rules-parallel :mock mock-complete % [slow-rule]
+                                                 {:timeout-ms 1000 :max-parallel 1}))]
       (is (= 1 (count results)))
       (is (= :timeout (:status (first results)))))))
