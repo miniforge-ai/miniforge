@@ -19,6 +19,15 @@
   ;; Status payload published when the agent calls one or more tools.
   :stream/agent-calling-tool  "Agent calling tool"
 
+  ;; Tool-call lifecycle events.
+  :tool-call/started          "Agent starting tool call{tool-name-suffix}"
+  :tool-call/succeeded        "Tool call succeeded"
+  :tool-call/failed           "Tool call failed"
+  :tool-call/completed        "Tool call completed"
+
+  ;; Long-running phase liveness.
+  :phase/heartbeat            "Phase heartbeat: {phase}"
+
   ;; Snowflake event-id generator (BD-2b). All emitted at process
   ;; boundaries — generator startup is the only place these can be
   ;; raised, so an exception is the right shape rather than a data

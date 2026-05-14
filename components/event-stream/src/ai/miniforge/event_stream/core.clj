@@ -563,6 +563,79 @@
     tool-call-id        (assoc :tool/call-id tool-call-id)
     tool-args-preview   (assoc :tool/args-preview tool-args-preview)))
 
+(defn agent-tool-call-started
+  "Build an :agent/tool-call-started event marking the moment an agent
+   begins executing a single named tool call.
+
+   Arguments:
+   - stream:      event stream
+   - workflow-id: owning workflow UUID
+   - agent-id:    keyword identifying the agent (e.g. :implementer)
+   - opts:        {:tool/name     string  — tool being called when known
+                   :tool/args-digest map   — bounded digest of tool args
+                   :tool/call-id  string  — provider-supplied call id}"
+  [stream workflow-id agent-id
+   {:keys [:tool/name :tool/args-digest :tool/call-id]}]
+  (cond-> (create-envelope stream :agent/tool-call-started workflow-id
+                           (messages/t :tool-call/started
+                                       {:tool-name-suffix
+                                        (if name (str ": " name) "")}))
+    true            (assoc :agent/id agent-id)
+    name            (assoc :tool/name name)
+    args-digest     (assoc :tool/args-digest args-digest)
+    call-id         (assoc :tool/call-id call-id)))
+
+(defn tool-call-completed
+  "Build a :tool/call-completed event closing the latency span opened by
+   :agent/tool-call-started.
+
+   Arguments:
+   - stream:      event stream
+   - workflow-id: owning workflow UUID
+   - opts:        {:tool/call-id       string   — matches the started event
+                   :tool/result-digest map      — bounded digest of result
+                   :tool/duration-ms   int      — elapsed ms
+                   :tool/success?      boolean  — outcome
+                   :tool/error         map      — populated on failure}"
+  [stream workflow-id
+   {:keys [:tool/call-id :tool/result-digest :tool/duration-ms
+           :tool/success? :tool/error] :as _opts}]
+  (cond-> (create-envelope stream :tool/call-completed workflow-id
+                           (messages/t (cond
+                                         (true? success?) :tool-call/succeeded
+                                         (false? success?) :tool-call/failed
+                                         :else :tool-call/completed)))
+    call-id         (assoc :tool/call-id call-id)
+    result-digest   (assoc :tool/result-digest result-digest)
+    duration-ms     (assoc :tool/duration-ms duration-ms)
+    (some? success?) (assoc :tool/success? success?)
+    error           (assoc :tool/error error)))
+
+(defn phase-heartbeat
+  "Build a :workflow/phase-heartbeat event for long-running phase liveness
+   signalling.
+
+   Arguments:
+   - stream:      event stream
+   - workflow-id: owning workflow UUID
+   - phase:       keyword identifying the current phase
+   - opts:        {:phase/active-since              inst
+                   :phase/events-emitted            int
+                   :phase/last-event-at             inst
+                   :phase/gap-since-last-event-ms   int}"
+  [stream workflow-id phase
+   {:keys [:phase/active-since :phase/events-emitted
+           :phase/last-event-at :phase/gap-since-last-event-ms]}]
+  (cond-> (create-envelope stream :workflow/phase-heartbeat workflow-id
+                           (messages/t :phase/heartbeat
+                                       {:phase (name phase)}))
+    true                       (assoc :workflow/phase phase)
+    active-since               (assoc :phase/active-since active-since)
+    (some? events-emitted)     (assoc :phase/events-emitted events-emitted)
+    last-event-at              (assoc :phase/last-event-at last-event-at)
+    (some? gap-since-last-event-ms)
+    (assoc :phase/gap-since-last-event-ms gap-since-last-event-ms)))
+
 (defn workflow-completed [stream workflow-id status & [duration-ms opts]]
   (-> (create-envelope stream :workflow/completed workflow-id
                        (str "Workflow " (name status)))

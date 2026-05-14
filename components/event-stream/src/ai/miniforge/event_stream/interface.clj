@@ -28,6 +28,7 @@
    [ai.miniforge.event-stream.interface.events :as events]
    [ai.miniforge.event-stream.interface.listeners :as listeners]
    [ai.miniforge.event-stream.interface.stream :as stream]
+   [ai.miniforge.event-stream.digest :as digest]
    [ai.miniforge.event-stream.reader :as reader]
    [ai.miniforge.event-stream.sinks :as sinks]))
 
@@ -54,6 +55,8 @@
 ;; sink on where a workflow's events + manifest live.
 (def workflow-dir sinks/workflow-dir)
 
+(def digest-content digest/digest-content)
+
 ;; BD-2a shutdown-ordering primitives.
 (def quiesce! stream/quiesce!)
 (def drain! stream/drain!)
@@ -68,6 +71,9 @@
 (def agent-chunk events/agent-chunk)
 (def agent-status events/agent-status)
 (def agent-tool-call events/agent-tool-call)
+(def agent-tool-call-started events/agent-tool-call-started)
+(def tool-call-completed events/tool-call-completed)
+(def phase-heartbeat events/phase-heartbeat)
 (def workflow-completed events/workflow-completed)
 (def workflow-failed events/workflow-failed)
 (def llm-request events/llm-request)

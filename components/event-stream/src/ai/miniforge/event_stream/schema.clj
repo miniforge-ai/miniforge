@@ -30,7 +30,9 @@
    deployments populate them with stable singleton values; multi-
    tenant deployments populate per-request. The `core/create-envelope`
    constructor accepts them via an optional options map (5-arg
-   arity) and stamps them onto the envelope when present.")
+   arity) and stamps them onto the envelope when present."
+  (:require
+   [ai.miniforge.event-stream.digest :as digest]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Shared payload schemas
@@ -63,6 +65,17 @@
    payload while every event accepts the same identity set."
   [base-schema]
   (into base-schema identity-entries))
+
+(def ^:private sha256-hex-pattern
+  "Lowercase SHA-256 hexadecimal digest shape."
+  (re-pattern (str "^[0-9a-f]{" digest/sha256-hex-length "}$")))
+
+(def DigestSummary
+  "Schema for bounded digest payloads attached to tool lifecycle events."
+  [:map
+   [:digest/preview string?]
+   [:digest/sha256 [:re sha256-hex-pattern]]
+   [:digest/original-size [:and int? [:>= 0]]]])
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Event envelope (base schema all events must conform to)
@@ -374,6 +387,71 @@
     [:status/type [:enum :reading :thinking :generating :validating :repairing :running :waiting :communicating]]
     [:status/detail {:optional true} string?]
     [:status/progress-percent {:optional true} int?]
+    [:message string?]]))
+
+;------------------------------------------------------------------------------ Layer 2.5
+;; Tool-call lifecycle and phase heartbeat schemas (GROUP 1+2 foundation)
+
+(def AgentToolCallStarted
+  "Schema for agent/tool-call-started event.
+
+   Emitted when an agent begins executing a single tool call.  Distinct
+   from the legacy :agent/tool-call which records tool calls in aggregate;
+   this event marks the precise start of execution for one call so
+   latency and stuck-call detection are possible."
+  (with-identity
+   [:map
+      [:event/type [:= :agent/tool-call-started]]
+    [:event/id uuid?]
+    [:event/timestamp inst?]
+    [:event/version string?]
+    [:event/sequence-number int?]
+    [:workflow/id uuid?]
+    [:tool/name {:optional true} string?]
+    [:tool/args-digest {:optional true} DigestSummary]
+    [:tool/call-id {:optional true} string?]
+    [:agent/id keyword?]
+    [:message string?]]))
+
+(def ToolCallCompleted
+  "Schema for tool/call-completed event.
+
+   Emitted when a tool call finishes (success or failure).  Pairs with
+   :agent/tool-call-started via :tool/call-id to close the latency span."
+  (with-identity
+   [:map
+      [:event/type [:= :tool/call-completed]]
+    [:event/id uuid?]
+    [:event/timestamp inst?]
+    [:event/version string?]
+    [:event/sequence-number int?]
+    [:workflow/id uuid?]
+    [:tool/call-id {:optional true} string?]
+    [:tool/result-digest {:optional true} DigestSummary]
+    [:tool/duration-ms {:optional true} int?]
+    [:tool/success? {:optional true} boolean?]
+    [:tool/error {:optional true} map?]
+    [:message string?]]))
+
+(def PhaseHeartbeat
+  "Schema for workflow/phase-heartbeat event.
+
+   Emitted periodically by long-running phases so supervisors can
+   detect stalls without requiring the phase to complete.  Carries
+   the time elapsed since the phase became active and the gap since
+   the last substantive event, enabling gap-based alerting."
+  (with-identity
+   [:map
+      [:event/type [:= :workflow/phase-heartbeat]]
+    [:event/id uuid?]
+    [:event/timestamp inst?]
+    [:event/version string?]
+    [:event/sequence-number int?]
+    [:workflow/id uuid?]
+    [:phase/active-since inst?]
+    [:phase/events-emitted int?]
+    [:phase/last-event-at inst?]
+    [:phase/gap-since-last-event-ms int?]
     [:message string?]]))
 
 ;------------------------------------------------------------------------------ Layer 3

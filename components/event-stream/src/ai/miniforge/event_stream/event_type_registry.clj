@@ -337,6 +337,22 @@
    {:constructor "zettel-promoted"
     :event-type  :zettel/promoted
     :json-string "zettel/promoted"
+    :browser?    false}
+
+   ;; GROUP 1+2 foundation: tool-call lifecycle + phase heartbeat
+   {:constructor "agent-tool-call-started"
+    :event-type  :agent/tool-call-started
+    :json-string "agent/tool-call-started"
+    :browser?    false}
+
+   {:constructor "tool-call-completed"
+    :event-type  :tool/call-completed
+    :json-string "tool/call-completed"
+    :browser?    false}
+
+   {:constructor "phase-heartbeat"
+    :event-type  :workflow/phase-heartbeat
+    :json-string "workflow/phase-heartbeat"
     :browser?    false}])
 
 ;------------------------------------------------------------------------------ Layer 0
