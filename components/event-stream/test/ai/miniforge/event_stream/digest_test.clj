@@ -20,80 +20,109 @@
   "Tests for the content-digest utility."
   (:require
    [clojure.test :refer [deftest is testing]]
-   [ai.miniforge.event-stream.digest :as digest]))
+   [ai.miniforge.event-stream.digest :as digest])
+  (:import
+   [java.nio.charset StandardCharsets]))
+
+(def ^:private empty-content "")
+(def ^:private hello-content "hello")
+(def ^:private multibyte-content "héllo")
+(def ^:private short-content "short content")
+(def ^:private fox-content "the quick brown fox")
+(def ^:private deterministic-content "deterministic test string")
+(def ^:private two-byte-codepoint "é")
+(def ^:private two-byte-codepoint-width 2)
+(def ^:private emoji-codepoint "😀")
+(def ^:private emoji-codepoint-width 4)
+(def ^:private empty-sha256
+  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855")
+(def ^:private hello-sha256
+  "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824")
+(def ^:private lowercase-hex-shape #"^[0-9a-f]+$")
+(def ^:private sample-map {:tool/name "Read" :file "/foo.clj"})
+
+(defn- utf8-size
+  [^String s]
+  (alength (.getBytes s StandardCharsets/UTF_8)))
 
 ;------------------------------------------------------------------------------ happy path
 
 (deftest returns-required-keys
   (testing "digest-content always returns all three keys"
-    (let [result (digest/digest-content "hello")]
+    (let [result (digest/digest-content hello-content)]
       (is (contains? result :digest/preview))
       (is (contains? result :digest/sha256))
       (is (contains? result :digest/original-size)))))
 
 (deftest known-sha256-for-empty-string
   (testing "SHA-256 of empty string matches well-known value"
-    ;; echo -n "" | sha256sum = e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
-    (let [{:keys [:digest/sha256]} (digest/digest-content "")]
-      (is (= "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
-             sha256)))))
+    (let [{:keys [:digest/sha256]} (digest/digest-content empty-content)]
+      (is (= empty-sha256 sha256)))))
 
 (deftest known-sha256-for-hello
   (testing "SHA-256 of 'hello' matches well-known value"
-    ;; echo -n "hello" | sha256sum = 2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824
-    (let [{:keys [:digest/sha256]} (digest/digest-content "hello")]
-      (is (= "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"
-             sha256)))))
+    (let [{:keys [:digest/sha256]} (digest/digest-content hello-content)]
+      (is (= hello-sha256 sha256)))))
 
 (deftest original-size-matches-utf8-byte-length
   (testing "original-size is the byte count, not char count"
-    (let [s      "héllo"                ; 'é' is 2 bytes in UTF-8
-          result (digest/digest-content s)
-          ba     (.getBytes ^String s "UTF-8")]
-      (is (= (alength ba) (:digest/original-size result))))))
+    (let [result (digest/digest-content multibyte-content)]
+      (is (= (utf8-size multibyte-content) (:digest/original-size result))))))
 
-(deftest preview-capped-at-1024-chars
-  (testing "preview is at most 1024 characters regardless of input length"
-    (let [big    (apply str (repeat 2000 "x"))
+(deftest preview-capped-at-max-preview-bytes
+  (testing "preview is at most max-preview-bytes regardless of input length"
+    (let [big    (apply str (repeat (* 2 digest/max-preview-bytes) "x"))
           result (digest/digest-content big)]
-      (is (= 1024 (count (:digest/preview result)))))))
+      (is (= digest/max-preview-bytes (utf8-size (:digest/preview result)))))))
+
+(deftest preview-capped-by-utf8-byte-length
+  (testing "preview cap counts UTF-8 bytes instead of characters"
+    (let [content (apply str (repeat digest/max-preview-bytes two-byte-codepoint))
+          preview (:digest/preview (digest/digest-content content))]
+      (is (<= (utf8-size preview) digest/max-preview-bytes))
+      (is (= (quot digest/max-preview-bytes two-byte-codepoint-width)
+             (count preview))))))
+
+(deftest preview-keeps-code-points-intact
+  (testing "preview truncation does not split surrogate pairs"
+    (let [content     (apply str (repeat digest/max-preview-bytes emoji-codepoint))
+          preview     (:digest/preview (digest/digest-content content))
+          code-points (.codePointCount ^String preview 0 (.length ^String preview))]
+      (is (<= (utf8-size preview) digest/max-preview-bytes))
+      (is (= (quot digest/max-preview-bytes emoji-codepoint-width) code-points)))))
 
 (deftest preview-is-exact-for-short-strings
-  (testing "preview equals the full string when shorter than 1024"
-    (let [s      "short content"
-          result (digest/digest-content s)]
-      (is (= s (:digest/preview result))))))
+  (testing "preview equals the full string when shorter than the byte cap"
+    (let [result (digest/digest-content short-content)]
+      (is (= short-content (:digest/preview result))))))
 
 ;------------------------------------------------------------------------------ edge cases
 
 (deftest accepts-byte-array
   (testing "byte arrays are digested without conversion error"
-    (let [ba     (.getBytes "hello" "UTF-8")
+    (let [ba     (.getBytes hello-content StandardCharsets/UTF_8)
           result (digest/digest-content ba)]
-      (is (= "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"
-             (:digest/sha256 result)))
-      (is (= 5 (:digest/original-size result))))))
+      (is (= hello-sha256 (:digest/sha256 result)))
+      (is (= (utf8-size hello-content) (:digest/original-size result))))))
 
 (deftest accepts-map-via-str-coercion
   (testing "non-string non-bytes values are str-coerced before hashing"
-    (let [m      {:tool/name "Read" :file "/foo.clj"}
-          result (digest/digest-content m)]
+    (let [result (digest/digest-content sample-map)]
       (is (string? (:digest/preview result)))
-      (is (= 64 (count (:digest/sha256 result))))
+      (is (= digest/sha256-hex-length (count (:digest/sha256 result))))
       (is (pos? (:digest/original-size result))))))
 
 (deftest sha256-is-lowercase-hex
   (testing "SHA-256 output is exactly 64 lowercase hex chars"
-    (doseq [content ["" "hello" "the quick brown fox"]]
+    (doseq [content [empty-content hello-content fox-content]]
       (let [{:keys [:digest/sha256]} (digest/digest-content content)]
-        (is (= 64 (count sha256))
+        (is (= digest/sha256-hex-length (count sha256))
             (str "wrong length for: " content))
-        (is (re-matches #"^[0-9a-f]{64}$" sha256)
+        (is (re-matches lowercase-hex-shape sha256)
             (str "not lowercase hex for: " content))))))
 
 (deftest deterministic-for-same-input
   (testing "two calls with equal input produce equal digests"
-    (let [content "deterministic test string"
-          r1      (digest/digest-content content)
-          r2      (digest/digest-content content)]
+    (let [r1 (digest/digest-content deterministic-content)
+          r2 (digest/digest-content deterministic-content)]
       (is (= r1 r2)))))

@@ -571,14 +571,15 @@
    - stream:      event stream
    - workflow-id: owning workflow UUID
    - agent-id:    keyword identifying the agent (e.g. :implementer)
-   - opts:        {:tool/name     string  — tool being called (required)
+   - opts:        {:tool/name     string  — tool being called when known
                    :tool/args-digest map   — bounded digest of tool args
                    :tool/call-id  string  — provider-supplied call id}"
   [stream workflow-id agent-id
-   {:keys [:tool/name :tool/args-digest :tool/call-id] :as opts}]
+   {:keys [:tool/name :tool/args-digest :tool/call-id]}]
   (cond-> (create-envelope stream :agent/tool-call-started workflow-id
-                           (str "Agent starting tool call"
-                                (when name (str ": " name))))
+                           (messages/t :tool-call/started
+                                       {:tool-name-suffix
+                                        (if name (str ": " name) "")}))
     true            (assoc :agent/id agent-id)
     name            (assoc :tool/name name)
     args-digest     (assoc :tool/args-digest args-digest)
@@ -600,7 +601,10 @@
    {:keys [:tool/call-id :tool/result-digest :tool/duration-ms
            :tool/success? :tool/error] :as _opts}]
   (cond-> (create-envelope stream :tool/call-completed workflow-id
-                           (if success? "Tool call succeeded" "Tool call failed"))
+                           (messages/t (cond
+                                         (true? success?) :tool-call/succeeded
+                                         (false? success?) :tool-call/failed
+                                         :else :tool-call/completed)))
     call-id         (assoc :tool/call-id call-id)
     result-digest   (assoc :tool/result-digest result-digest)
     duration-ms     (assoc :tool/duration-ms duration-ms)
@@ -623,7 +627,8 @@
    {:keys [:phase/active-since :phase/events-emitted
            :phase/last-event-at :phase/gap-since-last-event-ms]}]
   (cond-> (create-envelope stream :workflow/phase-heartbeat workflow-id
-                           (str "Phase heartbeat: " (name phase)))
+                           (messages/t :phase/heartbeat
+                                       {:phase (name phase)}))
     true                       (assoc :workflow/phase phase)
     active-since               (assoc :phase/active-since active-since)
     (some? events-emitted)     (assoc :phase/events-emitted events-emitted)

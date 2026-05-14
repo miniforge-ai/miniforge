@@ -29,9 +29,26 @@
    [clojure.test :refer [deftest is testing]]
    [malli.core :as m]
    [ai.miniforge.event-stream.interface :as es]
+   [ai.miniforge.event-stream.messages :as messages]
    [ai.miniforge.event-stream.schema :as schema]))
 
 (defn- stream [] (es/create-event-stream))
+
+(def ^:private sample-args-digest
+  (es/digest-content {:file "/tmp/input.clj"}))
+
+(def ^:private sample-result-digest
+  (es/digest-content {:outcome :ok}))
+
+(def ^:private short-tool-duration-ms 42)
+(def ^:private failure-tool-duration-ms 10)
+(def ^:private sample-error-code 404)
+(def ^:private heartbeat-gap-ms 3000)
+(def ^:private heartbeat-events-emitted 17)
+(def ^:private stale-heartbeat-gap-ms 5000)
+(def ^:private heartbeat-event-count 42)
+(def ^:private zero-heartbeat-gap-ms 0)
+(def ^:private zero-heartbeat-event-count 0)
 
 ;------------------------------------------------------------------------------ :agent/tool-call-started
 
@@ -40,7 +57,7 @@
     (let [ev (es/agent-tool-call-started
               (stream) (random-uuid) :implementer
               {:tool/name "Read" :tool/call-id "tc_001"
-               :tool/args-digest {:digest/sha256 "abc" :digest/original-size 42}})]
+               :tool/args-digest sample-args-digest})]
       (is (= :agent/tool-call-started (:event/type ev)))
       (is (m/validate schema/AgentToolCallStarted ev)))))
 
@@ -50,7 +67,7 @@
           ev    (es/agent-tool-call-started
                  (stream) wf-id :planner
                  {:tool/name "Write" :tool/call-id "tc_002"
-                  :tool/args-digest {:digest/sha256 "abc" :digest/original-size 10}})]
+                  :tool/args-digest sample-args-digest})]
       (is (= wf-id (:workflow/id ev)))
       (is (= :planner (:agent/id ev)))
       (is (= "Write" (:tool/name ev)))
@@ -72,7 +89,7 @@
     (let [ev (es/agent-tool-call-started
               (stream) (random-uuid) :tester
               {:tool/name "Bash" :tool/call-id "tc_003"
-               :tool/args-digest {:digest/sha256 "def" :digest/original-size 5}})]
+               :tool/args-digest sample-args-digest})]
       (is (uuid? (:event/id ev)))
       (is (inst? (:event/timestamp ev)))
       (is (string? (:event/version ev)))
@@ -85,8 +102,8 @@
     (let [ev (es/tool-call-completed
               (stream) (random-uuid)
               {:tool/call-id "tc_001" :tool/success? true
-               :tool/result-digest {:digest/sha256 "xyz" :digest/original-size 100}
-               :tool/duration-ms 42})]
+               :tool/result-digest sample-result-digest
+               :tool/duration-ms short-tool-duration-ms})]
       (is (= :tool/call-completed (:event/type ev)))
       (is (m/validate schema/ToolCallCompleted ev)))))
 
@@ -96,12 +113,12 @@
           ev    (es/tool-call-completed
                  (stream) wf-id
                  {:tool/call-id "tc_002" :tool/success? true
-                  :tool/result-digest {:digest/sha256 "rrr" :digest/original-size 50}
-                  :tool/duration-ms 123})]
+                  :tool/result-digest sample-result-digest
+                  :tool/duration-ms short-tool-duration-ms})]
       (is (= wf-id (:workflow/id ev)))
       (is (= "tc_002" (:tool/call-id ev)))
       (is (true? (:tool/success? ev)))
-      (is (= 123 (:tool/duration-ms ev)))
+      (is (= short-tool-duration-ms (:tool/duration-ms ev)))
       (is (map? (:tool/result-digest ev))))))
 
 (deftest tool-call-completed-failure-carries-error
@@ -109,19 +126,30 @@
     (let [ev (es/tool-call-completed
               (stream) (random-uuid)
               {:tool/call-id "tc_003" :tool/success? false
-               :tool/result-digest {:digest/sha256 "yyy" :digest/original-size 0}
-               :tool/duration-ms 10
-               :tool/error {:message "file not found" :code 404}})]
+               :tool/result-digest sample-result-digest
+               :tool/duration-ms failure-tool-duration-ms
+               :tool/error {:message "file not found" :code sample-error-code}})]
       (is (false? (:tool/success? ev)))
-      (is (= {:message "file not found" :code 404} (:tool/error ev))))))
+      (is (= {:message "file not found" :code sample-error-code} (:tool/error ev))))))
 
 (deftest tool-call-completed-no-error-on-success
   (testing "error key absent when not supplied"
     (let [ev (es/tool-call-completed
               (stream) (random-uuid)
               {:tool/call-id "tc_004" :tool/success? true
-               :tool/result-digest {} :tool/duration-ms 5})]
+               :tool/result-digest sample-result-digest
+               :tool/duration-ms failure-tool-duration-ms})]
       (is (not (contains? ev :tool/error))))))
+
+(deftest tool-call-completed-unknown-outcome-message
+  (testing "omitted success flag produces neutral completion message"
+    (let [ev (es/tool-call-completed
+              (stream) (random-uuid)
+              {:tool/call-id "tc_005"
+               :tool/result-digest sample-result-digest})]
+      (is (= (messages/t :tool-call/completed) (:message ev)))
+      (is (not (contains? ev :tool/success?)))
+      (is (m/validate schema/ToolCallCompleted ev)))))
 
 ;------------------------------------------------------------------------------ :workflow/phase-heartbeat
 
@@ -131,9 +159,9 @@
           ev  (es/phase-heartbeat
                (stream) (random-uuid) :implement
                {:phase/active-since              now
-                :phase/events-emitted            17
+                :phase/events-emitted            heartbeat-events-emitted
                 :phase/last-event-at             now
-                :phase/gap-since-last-event-ms   3000})]
+                :phase/gap-since-last-event-ms   heartbeat-gap-ms})]
       (is (= :workflow/phase-heartbeat (:event/type ev)))
       (is (m/validate schema/PhaseHeartbeat ev)))))
 
@@ -145,15 +173,15 @@
           ev           (es/phase-heartbeat
                         (stream) wf-id :plan
                         {:phase/active-since              active-since
-                         :phase/events-emitted            42
+                         :phase/events-emitted            heartbeat-event-count
                          :phase/last-event-at             last-event
-                         :phase/gap-since-last-event-ms   5000})]
+                         :phase/gap-since-last-event-ms   stale-heartbeat-gap-ms})]
       (is (= wf-id (:workflow/id ev)))
       (is (= :plan (:workflow/phase ev)))
       (is (= active-since (:phase/active-since ev)))
-      (is (= 42 (:phase/events-emitted ev)))
+      (is (= heartbeat-event-count (:phase/events-emitted ev)))
       (is (= last-event (:phase/last-event-at ev)))
-      (is (= 5000 (:phase/gap-since-last-event-ms ev))))))
+      (is (= stale-heartbeat-gap-ms (:phase/gap-since-last-event-ms ev))))))
 
 (deftest phase-heartbeat-zero-gap-is-valid
   (testing "gap of 0ms is a valid value (not treated as falsy)"
@@ -161,11 +189,11 @@
           ev  (es/phase-heartbeat
                (stream) (random-uuid) :review
                {:phase/active-since              now
-                :phase/events-emitted            0
+                :phase/events-emitted            zero-heartbeat-event-count
                 :phase/last-event-at             now
-                :phase/gap-since-last-event-ms   0})]
-      (is (= 0 (:phase/gap-since-last-event-ms ev)))
-      (is (= 0 (:phase/events-emitted ev))))))
+                :phase/gap-since-last-event-ms   zero-heartbeat-gap-ms})]
+      (is (= zero-heartbeat-gap-ms (:phase/gap-since-last-event-ms ev)))
+      (is (= zero-heartbeat-event-count (:phase/events-emitted ev))))))
 
 ;------------------------------------------------------------------------------ backward compatibility
 

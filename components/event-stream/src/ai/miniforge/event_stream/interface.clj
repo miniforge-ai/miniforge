@@ -28,6 +28,7 @@
    [ai.miniforge.event-stream.interface.events :as events]
    [ai.miniforge.event-stream.interface.listeners :as listeners]
    [ai.miniforge.event-stream.interface.stream :as stream]
+   [ai.miniforge.event-stream.digest :as digest]
    [ai.miniforge.event-stream.reader :as reader]
    [ai.miniforge.event-stream.sinks :as sinks]))
 
@@ -53,6 +54,8 @@
 ;; component (cli workflow runner, sub-3 cleanup) agree with the file
 ;; sink on where a workflow's events + manifest live.
 (def workflow-dir sinks/workflow-dir)
+
+(def digest-content digest/digest-content)
 
 ;; BD-2a shutdown-ordering primitives.
 (def quiesce! stream/quiesce!)

@@ -25,7 +25,32 @@
    directly in the event log.
 
    All functions are pure — no IO, no side effects."
-  (:import [java.security MessageDigest]))
+  (:import
+   [java.nio.charset StandardCharsets]
+   [java.security MessageDigest]))
+
+;------------------------------------------------------------------------------ Layer 0
+;; Constants
+
+(def ^:const max-preview-bytes
+  "Maximum UTF-8 byte length retained in :digest/preview."
+  1024)
+
+(def ^:const sha256-hex-length
+  "Length of a SHA-256 digest rendered as lowercase hexadecimal."
+  64)
+
+(def ^:private byte-hex-format
+  "Format string for rendering a byte as two lowercase hexadecimal chars."
+  "%02x")
+
+(def ^:private unsigned-byte-mask
+  "Mask used to render signed JVM bytes as unsigned byte values."
+  0xff)
+
+(def ^:private sha256-algorithm
+  "JCA algorithm name for SHA-256 digests."
+  "SHA-256")
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Internal helpers
@@ -39,19 +64,43 @@
   ^bytes [content]
   (cond
     (bytes? content)  content
-    (string? content) (.getBytes ^String content "UTF-8")
-    :else             (.getBytes ^String (str content) "UTF-8")))
+    (string? content) (.getBytes ^String content StandardCharsets/UTF_8)
+    :else             (.getBytes ^String (str content) StandardCharsets/UTF_8)))
 
 (defn- bytes->hex
   "Convert a byte array to a lowercase hexadecimal string."
   [^bytes ba]
-  (apply str (map #(format "%02x" (bit-and (int %) 0xff)) ba)))
+  (apply str (map #(format byte-hex-format
+                           (bit-and (int %) unsigned-byte-mask))
+                  ba)))
 
 (defn- sha256-hex
-  "Return the SHA-256 digest of `ba` as a 64-character lowercase hex string."
+  "Return the SHA-256 digest of `ba` as a lowercase hex string."
   [^bytes ba]
-  (let [^MessageDigest md (MessageDigest/getInstance "SHA-256")]
+  (let [^MessageDigest md (MessageDigest/getInstance sha256-algorithm)]
     (bytes->hex (.digest md ba))))
+
+(defn- utf8-preview
+  "Return the longest Unicode-safe prefix whose UTF-8 byte count fits
+   within `max-bytes`."
+  [^String s max-bytes]
+  (let [length (.length s)]
+    (loop [idx        0
+           byte-count 0
+           out        (StringBuilder.)]
+      (if (>= idx length)
+        (str out)
+        (let [code-point (.codePointAt s idx)
+              chars      (String/valueOf (Character/toChars code-point))
+              char-count (Character/charCount code-point)
+              next-bytes (alength (.getBytes chars StandardCharsets/UTF_8))]
+          (if (> (+ byte-count next-bytes) max-bytes)
+            (str out)
+            (do
+              (.append out chars)
+              (recur (+ idx char-count)
+                     (+ byte-count next-bytes)
+                     out))))))))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Public API
@@ -62,9 +111,9 @@
    Accepts strings, byte arrays, or any value (coerced via `str`).
 
    Returns:
-     {:digest/preview       — first 1 024 characters of the string
-                              representation (safe for event log)
-      :digest/sha256        — 64-char lowercase hex SHA-256 of the
+     {:digest/preview       — Unicode-safe UTF-8 prefix capped at
+                              `max-preview-bytes`
+      :digest/sha256        — lowercase hex SHA-256 of the
                               UTF-8-encoded content
       :digest/original-size — byte length of the UTF-8 representation}
 
@@ -74,8 +123,8 @@
         size     (alength ba)
         as-str   (if (string? content)
                    content
-                   (new String ^bytes ba "UTF-8"))
-        preview  (subs as-str 0 (min 1024 (count as-str)))]
+                   (String. ^bytes ba StandardCharsets/UTF_8))
+        preview  (utf8-preview as-str max-preview-bytes)]
     {:digest/preview       preview
      :digest/sha256        (sha256-hex ba)
      :digest/original-size size}))
@@ -91,10 +140,10 @@
 
   (digest-content {:tool/name "Read" :tool/args {:file_path "/foo/bar.clj"}})
 
-  ;; Large payload — preview is capped at 1024 chars
-  (let [big (apply str (repeat 2000 "x"))]
+  ;; Large payload — preview is capped at max-preview-bytes.
+  (let [big (apply str (repeat (* 2 max-preview-bytes) "x"))]
     (-> (digest-content big)
         (update :digest/preview count)))
-  ;; => {:digest/preview 1024 ...}
+  ;; => {:digest/preview max-preview-bytes ...}
 
   :leave-this-here)

@@ -343,21 +343,17 @@
    {:constructor "agent-tool-call-started"
     :event-type  :agent/tool-call-started
     :json-string "agent/tool-call-started"
-    :browser?    false
-    :note        "Marks the start of a single tool-call execution; pairs with tool/call-completed via :tool/call-id for latency spans."}
+    :browser?    false}
 
    {:constructor "tool-call-completed"
     :event-type  :tool/call-completed
     :json-string "tool/call-completed"
-    :browser?    false
-    :note        "Closes the latency span opened by agent/tool-call-started."}
+    :browser?    false}
 
    {:constructor "phase-heartbeat"
     :event-type  :workflow/phase-heartbeat
     :json-string "workflow/phase-heartbeat"
-    :browser?    false
-    :asymmetry?  true
-    :asymmetry-note "Constructor name implies namespace 'phase'; actual namespace is 'workflow'"}])
+    :browser?    false}])
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Derived views

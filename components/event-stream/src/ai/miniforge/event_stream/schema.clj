@@ -30,7 +30,9 @@
    deployments populate them with stable singleton values; multi-
    tenant deployments populate per-request. The `core/create-envelope`
    constructor accepts them via an optional options map (5-arg
-   arity) and stamps them onto the envelope when present.")
+   arity) and stamps them onto the envelope when present."
+  (:require
+   [ai.miniforge.event-stream.digest :as digest]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Shared payload schemas
@@ -63,6 +65,17 @@
    payload while every event accepts the same identity set."
   [base-schema]
   (into base-schema identity-entries))
+
+(def ^:private sha256-hex-pattern
+  "Lowercase SHA-256 hexadecimal digest shape."
+  (re-pattern (str "^[0-9a-f]{" digest/sha256-hex-length "}$")))
+
+(def DigestSummary
+  "Schema for bounded digest payloads attached to tool lifecycle events."
+  [:map
+   [:digest/preview string?]
+   [:digest/sha256 [:re sha256-hex-pattern]]
+   [:digest/original-size [:and int? [:>= 0]]]])
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Event envelope (base schema all events must conform to)
@@ -395,7 +408,7 @@
     [:event/sequence-number int?]
     [:workflow/id uuid?]
     [:tool/name {:optional true} string?]
-    [:tool/args-digest {:optional true} map?]
+    [:tool/args-digest {:optional true} DigestSummary]
     [:tool/call-id {:optional true} string?]
     [:agent/id keyword?]
     [:message string?]]))
@@ -414,7 +427,7 @@
     [:event/sequence-number int?]
     [:workflow/id uuid?]
     [:tool/call-id {:optional true} string?]
-    [:tool/result-digest {:optional true} map?]
+    [:tool/result-digest {:optional true} DigestSummary]
     [:tool/duration-ms {:optional true} int?]
     [:tool/success? {:optional true} boolean?]
     [:tool/error {:optional true} map?]
