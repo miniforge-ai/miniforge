@@ -21,6 +21,7 @@
    Handles SARIF v2.1.0 structure (tool -> runs[] -> results[] -> locations[]).
    Provides pluggable CSV parsing with configurable column mapping."
   (:require [ai.miniforge.coerce.interface :as coerce]
+            [ai.miniforge.response.interface :as response]
             [cheshire.core :as json]
             [clojure.java.io :as io]
             [clojure.string :as str]
@@ -165,4 +166,6 @@
     (case actual-fmt
       :sarif (parse-sarif path)
       :csv   (parse-csv path csv-columns)
-      (throw (ex-info (str "Unsupported format: " actual-fmt) {:path path :format actual-fmt})))))
+      (response/throw-anomaly! :anomalies/unsupported
+                               (str "Unsupported format: " actual-fmt)
+                               {:path path :format actual-fmt}))))

@@ -1,4 +1,5 @@
-(ns ai.miniforge.connector-retry.backoff)
+(ns ai.miniforge.connector-retry.backoff
+  (:require [ai.miniforge.response.interface :as response]))
 
 (defn- fixed-delay
   [{:retry/keys [initial-delay-ms]}]
@@ -29,7 +30,9 @@
     :fixed (fixed-delay policy)
     :exponential (exponential-delay policy attempt)
     :jittered-exponential (jittered-exponential-delay policy attempt)
-    (throw (ex-info (str "Unknown retry strategy: " strategy) {:strategy strategy}))))
+    (response/throw-anomaly! :anomalies/unsupported
+                             (str "Unknown retry strategy: " strategy)
+                             {:strategy strategy})))
 
 (defn should-retry?
   "Returns true if retry should be attempted."

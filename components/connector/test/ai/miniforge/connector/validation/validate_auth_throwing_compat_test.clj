@@ -51,3 +51,11 @@
       (is false "should have thrown")
       (catch clojure.lang.ExceptionInfo e
         (is (seq (:errors (ex-data e))))))))
+
+(deftest validate-auth-bang-ex-data-carries-anomaly-category
+  (testing "thrown ex-data carries :anomalies/incorrect via response/throw-anomaly!"
+    (try
+      (connector/validate-auth! invalid-auth)
+      (is false "should have thrown")
+      (catch clojure.lang.ExceptionInfo e
+        (is (= :anomalies/incorrect (:anomaly/category (ex-data e))))))))

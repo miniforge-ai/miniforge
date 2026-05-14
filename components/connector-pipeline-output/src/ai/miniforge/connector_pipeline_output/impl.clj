@@ -3,7 +3,8 @@
   (:require [ai.miniforge.connector.interface :as connector]
             [ai.miniforge.connector-pipeline-output.format :as fmt]
             [ai.miniforge.connector-pipeline-output.messages :as msg]
-            [ai.miniforge.connector-pipeline-output.schema :as schema])
+            [ai.miniforge.connector-pipeline-output.schema :as schema]
+            [ai.miniforge.response.interface :as response])
   (:import [java.time Instant]
            [java.util UUID]))
 
@@ -20,8 +21,9 @@
   "Retrieve handle state or throw."
   [handle]
   (or (get-handle handle)
-      (throw (ex-info (msg/t :output/handle-not-found {:handle handle})
-                      {:handle handle}))))
+      (response/throw-anomaly! :anomalies/not-found
+                               (msg/t :output/handle-not-found {:handle handle})
+                               {:handle handle})))
 
 ;;------------------------------------------------------------------------------ Layer 1
 ;; Lifecycle

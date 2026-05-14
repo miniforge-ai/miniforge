@@ -44,7 +44,8 @@
    migration path."
   (:require [ai.miniforge.anomaly.interface :as anomaly]
             [ai.miniforge.connector-auth.interface :as auth]
-            [ai.miniforge.connector.handles :as handles]))
+            [ai.miniforge.connector.handles :as handles]
+            [ai.miniforge.response.interface :as response]))
 
 ;;------------------------------------------------------------------------------ Layer 0
 ;; No in-namespace dependencies — anomaly-returning primitives.
@@ -90,8 +91,9 @@
   ([store handle {:keys [message] :as opts}]
    (let [result (require-handle store handle opts)]
      (if (anomaly/anomaly? result)
-       (throw (ex-info (or message (:anomaly/message result))
-                       (:anomaly/data result)))
+       (response/throw-anomaly! :anomalies/not-found
+                                (or message (:anomaly/message result))
+                                (:anomaly/data result))
        result))))
 
 (defn validate-auth
@@ -130,8 +132,9 @@
   ([auth {:keys [message] :as opts}]
    (let [result (validate-auth auth opts)]
      (when (anomaly/anomaly? result)
-       (throw (ex-info (or message (:anomaly/message result))
-                       (:anomaly/data result)))))))
+       (response/throw-anomaly! :anomalies/incorrect
+                                (or message (:anomaly/message result))
+                                (:anomaly/data result))))))
 
 (defn validate-auth-or-throw!
   "Validate `auth`; on failure throw `ex-info` with a *localized*
@@ -159,5 +162,6 @@
   [auth translator message-key]
   (when-let [a (validate-auth auth)]
     (let [errors (:errors (:anomaly/data a))]
-      (throw (ex-info (translator message-key {:errors errors})
-                      {:errors errors})))))
+      (response/throw-anomaly! :anomalies/incorrect
+                               (translator message-key {:errors errors})
+                               {:errors errors}))))

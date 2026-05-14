@@ -1,5 +1,6 @@
 {:paths ["src" "resources"]
  :deps {ai.miniforge/connector {:local/root "../connector"}
+        ai.miniforge/response  {:local/root "../response"}
         metosin/malli             {:mvn/version "0.16.4"}
         cheshire/cheshire          {:mvn/version "5.13.0"}}
  :aliases {:test {:extra-paths ["test"]
