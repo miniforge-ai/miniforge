@@ -27,7 +27,9 @@
      - Are accessible through the public interface"
   (:require
    [clojure.test :refer [deftest is testing]]
-   [ai.miniforge.event-stream.interface :as es]))
+   [malli.core :as m]
+   [ai.miniforge.event-stream.interface :as es]
+   [ai.miniforge.event-stream.schema :as schema]))
 
 (defn- stream [] (es/create-event-stream))
 
@@ -39,7 +41,8 @@
               (stream) (random-uuid) :implementer
               {:tool/name "Read" :tool/call-id "tc_001"
                :tool/args-digest {:digest/sha256 "abc" :digest/original-size 42}})]
-      (is (= :agent/tool-call-started (:event/type ev))))))
+      (is (= :agent/tool-call-started (:event/type ev)))
+      (is (m/validate schema/AgentToolCallStarted ev)))))
 
 (deftest agent-tool-call-started-required-fields
   (testing "carries tool name, call-id, and agent-id"
@@ -59,6 +62,7 @@
     (let [ev (es/agent-tool-call-started
               (stream) (random-uuid) :reviewer {})]
       (is (= :agent/tool-call-started (:event/type ev)))
+      (is (m/validate schema/AgentToolCallStarted ev))
       (is (not (contains? ev :tool/name)))
       (is (not (contains? ev :tool/call-id)))
       (is (not (contains? ev :tool/args-digest))))))
@@ -83,7 +87,8 @@
               {:tool/call-id "tc_001" :tool/success? true
                :tool/result-digest {:digest/sha256 "xyz" :digest/original-size 100}
                :tool/duration-ms 42})]
-      (is (= :tool/call-completed (:event/type ev))))))
+      (is (= :tool/call-completed (:event/type ev)))
+      (is (m/validate schema/ToolCallCompleted ev)))))
 
 (deftest tool-call-completed-success-fields
   (testing "success path carries all expected keys"
@@ -129,7 +134,8 @@
                 :phase/events-emitted            17
                 :phase/last-event-at             now
                 :phase/gap-since-last-event-ms   3000})]
-      (is (= :workflow/phase-heartbeat (:event/type ev))))))
+      (is (= :workflow/phase-heartbeat (:event/type ev)))
+      (is (m/validate schema/PhaseHeartbeat ev)))))
 
 (deftest phase-heartbeat-required-fields
   (testing "carries phase timing and event-count fields"

@@ -394,9 +394,9 @@
     [:event/version string?]
     [:event/sequence-number int?]
     [:workflow/id uuid?]
-    [:tool/name string?]
-    [:tool/args-digest map?]
-    [:tool/call-id string?]
+    [:tool/name {:optional true} string?]
+    [:tool/args-digest {:optional true} map?]
+    [:tool/call-id {:optional true} string?]
     [:agent/id keyword?]
     [:message string?]]))
 
@@ -413,10 +413,10 @@
     [:event/version string?]
     [:event/sequence-number int?]
     [:workflow/id uuid?]
-    [:tool/call-id string?]
-    [:tool/result-digest map?]
-    [:tool/duration-ms int?]
-    [:tool/success? boolean?]
+    [:tool/call-id {:optional true} string?]
+    [:tool/result-digest {:optional true} map?]
+    [:tool/duration-ms {:optional true} int?]
+    [:tool/success? {:optional true} boolean?]
     [:tool/error {:optional true} map?]
     [:message string?]]))
 
