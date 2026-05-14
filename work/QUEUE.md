@@ -16,6 +16,7 @@ Make miniforge capable of running miniforge without paying for
 | tier | r | theme | spec | axes |
 |---|---|---|---|---|
 | blocker | ● | dogfood-resilience | `event-log-tool-visibility.spec.edn` — Event log — capture tool name / args / result on every agent tool call | observation+dogfoodenabler |
+| blocker | ● | dogfood-resilience | `planner-convergence-and-artifact-submission.spec.edn` — Planner convergence — container-promoted plan artifact + forced context-MCP usage | correctness+observation+tokenconservation+dogfoodenabler |
 | blocker | ● | dogfood-resilience | `worktree-persistence-scratch-branch.spec.edn` — Persist worktrees outside /tmp + scratch-branch commits on every write | dogfoodenabler |
 | high | ● | dogfood-resilience | `pedestal-interceptor-chain.spec.edn` — Pedestal-style interceptor chain for phase lifecycle | correctness+dogfoodenabler |
 | high | ● | dogfood-resilience | `tech-registry-doctor-repo-scoped-bootstrap.spec.edn` — Tech-registry-driven runtime bootstrap — repo-scoped, print-don't-install | correctness+ux+dogfoodenabler |
@@ -39,6 +40,19 @@ Miniforge is an agent-CLI-agnostic platform. Every supported CLI
 |---|---|---|---|---|
 | blocker | ● | multi-backend-parity | `multi-backend-cli-parity.spec.edn` — Multi-backend CLI parity — make codex / cursor-agent / copilot / open-codex first-class planners and implementers | correctness+scale+dogfoodenabler |
 
+## Theme — Operational Policy Synthesis (OPSV) (`operational-policy-synthesis`, status: planned)
+
+Discover scaling + budget signals via governed experiments, synthesize
+   operational policies, verify against acceptance criteria, and emit
+   them as auditable artifacts. Any numeric knob whose optimal value we
+   currently guess — agent max-tokens, tool-call caps, timeouts, K8s
+   container CPU/memory, I/O bandwidth — is an OPSV target.
+
+| tier | r | theme | spec | axes |
+|---|---|---|---|---|
+| high | ○ | operational-policy-synthesis | `n07-opsv-agent-budgets.spec.edn` — OPSV: converge agent max-tokens + phase-iteration budgets | observation+tokenconservation+dogfoodenabler |
+| medium | ○ | operational-policy-synthesis | `workflow-policy-convergence.spec.edn` — Workflow Policy Convergence: learned workflow selection | workfloworchestration+governance+reliability |
+
 ## Theme — DAG orchestration (`dag-orchestration`, status: in-flight)
 
 Miniforge's DAG executor exists and is wired but never fires for
@@ -52,18 +66,7 @@ Miniforge's DAG executor exists and is wired but never fires for
 | tier | r | theme | spec | axes |
 |---|---|---|---|---|
 | blocker | ● | dag-orchestration | `plan-from-agent-dag-wiring.spec.edn` — plan-from-agent must emit :plan/id so the DAG orchestrator activates | observation+tokenconservation+dogfoodenabler |
-
-## Theme — Operational Policy Synthesis (OPSV) (`operational-policy-synthesis`, status: planned)
-
-Discover scaling + budget signals via governed experiments, synthesize
-   operational policies, verify against acceptance criteria, and emit
-   them as auditable artifacts. Any numeric knob whose optimal value we
-   currently guess — agent max-tokens, tool-call caps, timeouts, K8s
-   container CPU/memory, I/O bandwidth — is an OPSV target.
-
-| tier | r | theme | spec | axes |
-|---|---|---|---|---|
-| high | ○ | operational-policy-synthesis | `n07-opsv-agent-budgets.spec.edn` — OPSV: converge agent max-tokens + phase-iteration budgets | observation+tokenconservation+dogfoodenabler |
+| high | ● | dag-orchestration | `per-task-base-chaining.spec.edn` — Per-Task Base Chaining for DAG Sub-Workflows | workfloworchestration+dagexecution+localmodefidelity |
 
 ## Theme — unassigned (`unassigned`, status: planned)
 
@@ -79,6 +82,7 @@ Discover scaling + budget signals via governed experiments, synthesize
 | medium | ● | unassigned | `control-plane-completion.spec.edn` — Control Plane Completion — Decision Wiring, Events, and Dashboard | - |
 | medium | ● | unassigned | `dashboard-production-ready.spec.edn` — Build Production-Ready Web Dashboard with High Fidelity | - |
 | medium | ● | unassigned | `environment-promotion-pipeline.spec.edn` — Environment Promotion Pipeline | - |
+| medium | ● | unassigned | `external-dependency-health-and-failure-attribution.spec.edn` — External dependency health and failure attribution | - |
 | medium | ● | unassigned | `fleet-supervisory-deferred.spec.edn` —  | - |
 | medium | ● | unassigned | `gitlab-support-tasks.spec.edn` — GitLab Support — Detailed Implementation Tasks | - |
 | medium | ● | unassigned | `gitlab-support.spec.edn` — Add GitLab Support for MR Lifecycle Management | - |
@@ -127,3 +131,13 @@ Discover scaling + budget signals via governed experiments, synthesize
 | medium | ● | unassigned | `tui-ws5-attention-intervention.spec.edn` — WS5: Attention and Bounded Intervention | - |
 | medium | ● | unassigned | `wire-self-repair-chain.spec.edn` — Wire Self-Repair Chain Into Workflow Execution | - |
 | medium | ● | unassigned | `workflow-redesign-use-case-targeted.spec.edn` — Redesign Workflows: Use-Case Targeted with Safety by Default | - |
+
+## Theme — semantic-supervision (`semantic-supervision`, status: planned)
+
+(no theme description)
+
+| tier | r | theme | spec | axes |
+|---|---|---|---|---|
+| critical | ● | semantic-supervision | `progress-detector-semantic-loop-detection.spec.edn` — Progress detector stage 1 — tool-loop and repair-loop anomaly detection | agentquality+supervision+dogfoodenabler |
+| critical | ○ | semantic-supervision | `progress-detector-stage-2.spec.edn` — Progress detector stage 2 — event envelope + tool-loop + repair-loop + supervisor wiring | agentquality+supervision+dogfoodenabler |
+| critical | ○ | semantic-supervision | `progress-detector-stage-3.spec.edn` — Progress detector stage 3 — agent.invoke runtime wiring + per-category :on-anomaly policy | agentquality+supervision+dogfoodenabler |

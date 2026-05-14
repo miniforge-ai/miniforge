@@ -112,7 +112,8 @@
   []
   (tools/register-handler! :context-read  context-cache/handle-context-read)
   (tools/register-handler! :context-grep  context-cache/handle-context-grep)
-  (tools/register-handler! :context-glob  context-cache/handle-context-glob))
+  (tools/register-handler! :context-glob  context-cache/handle-context-glob)
+  (tools/register-handler! :submit        context-cache/handle-submit))
 
 (defn run-server
   "Run the MCP context server loop, reading JSON-RPC messages from stdin.

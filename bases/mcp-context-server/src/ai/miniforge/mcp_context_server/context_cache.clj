@@ -29,7 +29,8 @@
             [clojure.edn :as edn]
             [clojure.java.io :as io]
             [clojure.java.shell :as shell]
-            [clojure.string :as str]))
+            [clojure.string :as str]
+            [clojure.walk :as walk]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Pure helpers
@@ -148,12 +149,12 @@
 
 ;; Cache atom holding :files (path → content) and :misses (recorded cache misses).
 (defonce cache-state
-  (atom {:files {} :misses [] :source-root nil}))
+  (atom {:files {} :misses [] :source-root nil :artifact-dir nil}))
 
 (defn reset-state!
   "Reset cache state. Intended for test isolation."
   []
-  (reset! cache-state {:files {} :misses [] :source-root nil}))
+  (reset! cache-state {:files {} :misses [] :source-root nil :artifact-dir nil}))
 
 (defn- source-root
   []
@@ -172,7 +173,9 @@
   ([artifact-dir source-root]
    (let [path (str artifact-dir "/context-cache.edn")
          f (io/file path)]
-     (swap! cache-state assoc :source-root source-root)
+     (swap! cache-state assoc
+            :source-root source-root
+            :artifact-dir artifact-dir)
      (when (.exists f)
        (try
          (let [data (edn/read-string (slurp f))]
@@ -192,6 +195,49 @@
         (spit path (pr-str misses))
         (binding [*out* *err*]
           (println (msg/t :cache/misses-written {:count (count misses) :path path})))))))
+
+(defn- artifact-dir
+  []
+  (:artifact-dir @cache-state))
+
+(defn- string-key->keyword
+  "Convert JSON object keys into EDN keywords, preserving namespaces."
+  [k]
+  (cond
+    (keyword? k) k
+    (and (string? k) (str/includes? k "/"))
+    (let [[ns n] (str/split k #"/" 2)]
+      (keyword ns n))
+
+    (string? k) (keyword k)
+    :else k))
+
+(defn- keywordize-artifact-keys
+  "Keywordize MCP JSON arguments before persisting them as EDN."
+  [artifact]
+  (walk/postwalk
+   (fn [v]
+     (if (map-entry? v)
+       [(string-key->keyword (key v)) (val v)]
+       v))
+   artifact))
+
+(defn handle-submit
+  "Persist a structured artifact payload to artifact.edn.
+
+   Agents use this tool as the structured confirmation channel. The runtime
+   may still derive file contents from the working tree; this payload carries
+   metadata such as :code/summary and :code/tests-needed?."
+  [params]
+  (let [dir (artifact-dir)]
+    (when (str/blank? dir)
+      (throw (ex-info "artifact-dir is not configured" {:code -32603})))
+    (let [artifact (keywordize-artifact-keys params)
+          path (str dir "/artifact.edn")]
+      (io/make-parents path)
+      (spit path (pr-str artifact))
+      {:content [{:type "text"
+                  :text (str "Artifact submitted to " path)}]})))
 
 (defn- record-miss!
   "Record a cache miss for meta-loop learning."

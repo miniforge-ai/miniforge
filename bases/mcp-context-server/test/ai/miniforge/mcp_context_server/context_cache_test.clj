@@ -211,6 +211,22 @@
         (is (= "(ns b)" (get-in @cache/cache-state [:files "src/b.clj"])))
         (is (= "/tmp/repo-root" (:source-root @cache/cache-state)))))))
 
+(deftest handle-submit-writes-artifact-test
+  (testing "submit persists keywordized artifact metadata"
+    (with-temp-dir
+      (fn [dir]
+        (cache/load-cache! dir "/tmp/repo-root")
+        (let [result (cache/handle-submit {"code/summary" "Added event tools"
+                                           "code/tests-needed?" true
+                                           "code/dependencies-added" ["org/example"]})
+              artifact-file (io/file dir "artifact.edn")
+              artifact (edn/read-string (slurp artifact-file))]
+          (is (re-find #"Artifact submitted" (get-in result [:content 0 :text])))
+          (is (= {:code/summary "Added event tools"
+                  :code/tests-needed? true
+                  :code/dependencies-added ["org/example"]}
+                 artifact)))))))
+
 (deftest handle-context-read-source-root-fallback-test
   (testing "relative file reads resolve from source-root when cache is empty"
     (with-temp-dir
