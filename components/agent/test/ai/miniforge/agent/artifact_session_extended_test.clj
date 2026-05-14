@@ -285,7 +285,7 @@
   (testing "context-server MCP tools are present"
     (let [mcp-entries (filter map? session/mcp-tools)]
       (is (every? #(= :context (:mcp/server %)) mcp-entries))
-      (is (= #{:context_read :context_grep :context_glob}
+      (is (= #{:context_read :context_grep :context_glob :submit}
              (into #{} (map :mcp/tool) mcp-entries)))))
 
   (testing "native Write is auto-approved — plan.edn submission path"

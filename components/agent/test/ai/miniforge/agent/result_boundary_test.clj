@@ -48,6 +48,26 @@
       (is (= :already-implemented (:status (:parsed-content normalized))))
       (is (true? (sut/usable-content? normalized))))))
 
+(deftest normalize-llm-result-merges-submit-metadata-with-file-fallback
+  (testing "MCP submit metadata does not hide files collected from Write/Edit"
+    (let [normalized (sut/normalize-llm-result
+                      {:role :implement
+                       :response {:success true :content ""}
+                       :artifact {:code/summary "Added tool-call events"
+                                  :code/tests-needed? true}
+                       :fallback-artifact {:code/files [{:path "src/core.clj"
+                                                         :content "(ns core)"
+                                                         :action :modify}]
+                                           :code/summary "fallback summary"
+                                           :code/language "clojure"}})
+          payload (sut/authoritative-payload normalized)]
+      (is (= :mcp-with-file-fallback (:artifact-source normalized)))
+      (is (= "Added tool-call events" (:code/summary payload)))
+      (is (true? (:code/tests-needed? payload)))
+      (is (= [{:path "src/core.clj" :content "(ns core)" :action :modify}]
+             (:code/files payload)))
+      (is (= "clojure" (:code/language payload))))))
+
 (deftest error-response-preserves-backend-error-shape
   (testing "error-response carries raw backend data and response metadata through"
     (let [normalized {:llm-error {:message "Adaptive timeout"

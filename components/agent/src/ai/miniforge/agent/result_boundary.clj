@@ -32,12 +32,21 @@
         content (or (extract-content response) "")
         worktree-artifact (when role
                             (get worktree-artifacts role))
+        artifact-with-fallback (when (and artifact
+                                          fallback-artifact
+                                          (map? artifact)
+                                          (map? fallback-artifact)
+                                          (contains? fallback-artifact :code/files)
+                                          (not (contains? artifact :code/files)))
+                                 (merge fallback-artifact artifact))
         artifact-source (cond
                           worktree-artifact :worktree-metadata
+                          artifact-with-fallback :mcp-with-file-fallback
                           artifact :mcp
                           fallback-artifact :file-fallback
                           :else nil)
-        structured-artifact (or worktree-artifact artifact fallback-artifact)
+        structured-artifact (or worktree-artifact artifact-with-fallback
+                                artifact fallback-artifact)
         parsed-content (when parse-response
                          (parse-response content))
         derived-artifact (when derive-artifact
