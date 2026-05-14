@@ -23,8 +23,13 @@
    [clojure.string :as str]))
 
 (def ^:private default-spec-path
-  "Default dogfood target when no explicit spec path is supplied."
-  "work/planner-convergence-and-artifact-submission.spec.edn")
+  "Default dogfood target when no explicit spec path is supplied.
+
+   Keep this aligned with the top ready dogfood-resilience target in
+   `work/QUEUE.md`. Prefer passing an explicit spec path during active
+   dogfood sessions so resumed work cannot accidentally restart another
+   spec."
+  "work/event-log-tool-visibility.spec.edn")
 
 (defn command-available? [cmd]
   (zero? (:exit (p/sh {:continue true :out :discard :err :discard} "which" cmd))))
@@ -125,6 +130,9 @@
     (println)
     (println "Command:")
     (println command)
+    (println)
+    (println "Resume interrupted workflows with:")
+    (println "bb miniforge resume <workflow-id>")
     (when-not (every? val checks)
       (println)
       (println "Prerequisite failures:")
@@ -134,7 +142,12 @@
 
 (defn run
   "Run dogfooding via the development CLI.
-   Usage: bb dogfood [spec-path]"
+   Usage: bb dogfood [spec-path]
+
+   If a previous run checkpointed, resume it with:
+     bb miniforge resume <workflow-id>
+
+   Do not restart the same spec unless there is no useful checkpoint."
   [& args]
   (let [{:keys [spec-path github-auth checks]}
         (prerequisite-status args)]

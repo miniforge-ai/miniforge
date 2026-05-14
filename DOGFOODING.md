@@ -6,260 +6,179 @@
 
 # Miniforge Dogfooding Guide
 
-> This guide is for dogfooding **Miniforge SDLC** — using the autonomous software factory to build and improve itself.
+This guide is for running Miniforge SDLC on the Miniforge repository itself.
+The current loop is work-spec based: choose the next prioritized
+`work/*.spec.edn`, run it through `bb miniforge run`, and resume from the
+workflow checkpoint whenever a run is interrupted.
 
-## Overview
+## Pick the Next Spec
 
-This guide explains how to have miniforge work on itself using the DAG orchestration system.
-
-## Quick Start
-
-### 1. Set Environment Variables
-
-```bash
-# Required
-export GITHUB_TOKEN="ghp_your_token_here"
-export ANTHROPIC_API_KEY="sk-ant-your_key_here"
-
-# Optional
-export MINIFORGE_MAX_PARALLEL=2
-export MINIFORGE_MAX_TOKENS=1000000
-export MINIFORGE_MAX_COST_USD=100.0
-```
-
-### 2. Prepare Task DAG
-
-Create a local `dogfood-tasks.edn` file with your task definitions:
-
-```clojure
-{:dag-id "dogfood-2026-02-06"
- :description "Miniforge working on itself - task-executor improvements"
- :tasks
- [{:task/id "task-1"
-   :task/deps #{}
-   :description "Wire in actual LLM backend to generate.clj"
-   :files ["components/task-executor/src/ai/miniforge/task_executor/generate.clj"]
-   :acceptance-criteria "Replace mock implementation with actual loop/run-simple integration"
-   :context "Currently generate.clj has a TODO to wire in the actual LLM backend."}
-
-  {:task/id "task-2"
-   :task/deps #{"task-1"}
-   :description "Add integration tests for runner and orchestrator"
-   :files ["components/task-executor/test/ai/miniforge/task_executor/runner_test.clj"
-           "components/task-executor/test/ai/miniforge/task_executor/orchestrator_test.clj"]
-   :acceptance-criteria "Create working integration tests with proper mocking"
-   :context "Tests were removed due to mock setup issues. Need proper tests."}
-
-  {:task/id "task-3"
-   :task/deps #{"task-1"}
-   :description "Add task execution metrics collection"
-   :files ["components/task-executor/src/ai/miniforge/task_executor/runner.clj"]
-   :acceptance-criteria "Collect metrics: tokens, cost, iterations, time-to-merge"
-   :context "Runner has update-task-metrics! but needs comprehensive collection."}]}
-```
-
-**Note**: This file is local-only (in `.gitignore`). Each dogfooding session creates
-its own task list based on current needs
-
-### 3. Run Dogfooding Session
+Render the queue before every dogfood session:
 
 ```bash
-# Dry run (check configuration)
-bb scripts/dogfood-dag.clj
-
-# Full execution (when ready)
-bb dogfood --dag dogfood-tasks.edn --monitor
+bb work:queue
 ```
+
+Use `work/QUEUE.md` as the source of truth. Start with the highest-priority
+ready spec in the active dogfood theme unless the current session has a more
+specific target. In practice this usually means the first `blocker` or `high`
+row under `dogfood-resilience` whose dependency marker is ready.
+
+Prefer passing the spec path explicitly:
+
+```bash
+bb dogfood work/worktree-persistence-scratch-branch.spec.edn
+```
+
+If no spec path is provided, `bb dogfood` uses the current default in
+`tasks/dogfood.clj`.
+
+## Prerequisites
+
+`bb dogfood:check <spec>` verifies the pieces that matter for a live run:
+
+```bash
+bb dogfood:check work/worktree-persistence-scratch-branch.spec.edn
+```
+
+Required:
+
+- A supported LLM backend. The checker accepts an installed `codex` CLI,
+  `ANTHROPIC_API_KEY`, or `OPENAI_API_KEY`.
+- GitHub auth. Either set `GITHUB_TOKEN` or authenticate `gh`.
+- A clean tracked working tree. Untracked local files are allowed, but staged
+  or unstaged tracked changes must be handled before a dogfood run.
+- The target spec file exists.
+
+Useful optional environment:
+
+```bash
+export MINIFORGE_CHECKPOINT_DIR="$HOME/.miniforge/checkpoints"
+```
+
+The checkpoint directory defaults to `~/.miniforge/checkpoints`.
+
+## Start a Run
+
+Dry-run the exact command first:
+
+```bash
+bb dogfood:dry-run work/worktree-persistence-scratch-branch.spec.edn
+```
+
+Start the run:
+
+```bash
+bb dogfood work/worktree-persistence-scratch-branch.spec.edn
+```
+
+`bb dogfood` is a thin development wrapper around:
+
+```bash
+bb miniforge run <spec-path>
+```
+
+When `gh` is authenticated but `GITHUB_TOKEN` is not exported, the wrapper
+passes `GITHUB_TOKEN=$(gh auth token)` into the Miniforge process.
+
+## Resume, Do Not Restart
+
+When a dogfood run stops, do not re-run the same spec from scratch if a
+checkpoint exists. Resume the workflow:
+
+```bash
+bb miniforge resume <workflow-id>
+```
+
+`bb miniforge run <spec> --resume <workflow-id>` still exists for
+compatibility, but `bb miniforge resume <workflow-id>` is the preferred
+surface.
+
+Use status to inspect a run:
+
+```bash
+bb miniforge status <workflow-id>
+```
+
+Use checkpoint discovery to find recoverable workflows and task bundles:
+
+```bash
+bb harvest
+```
+
+Checkpoint data is stored under:
+
+```text
+~/.miniforge/checkpoints/<workflow-id>/
+```
+
+or under `MINIFORGE_CHECKPOINT_DIR` when that environment variable is set.
+
+## Recover Task Work
+
+Some runs persist task bundles for completed DAG tasks. To fetch those bundles
+back into the host repository as inspectable branches:
+
+```bash
+bb harvest <workflow-id>
+```
+
+Each bundle becomes a branch-like ref:
+
+```text
+harvest/<workflow-id>/<task-id>
+```
+
+Inspect with normal Git tools:
+
+```bash
+git log harvest/<workflow-id>/<task-id>
+git diff main...harvest/<workflow-id>/<task-id>
+```
+
+Cherry-pick or merge only after reviewing the recovered work. Harvesting is a
+manual recovery tool; it does not update the current branch automatically.
 
 ## Monitoring
 
-### Real-time Progress
+Use the CLI status command for a specific workflow:
 
 ```bash
-# Watch logs
-tail -f logs/dogfood-$(date +%Y%m%d)-*.log
-
-# Watch task states
-watch -n 5 'gh pr list | grep "task-"'
-
-# Check DAG status
-bb dogfood-status
+bb miniforge status <workflow-id>
 ```
 
-### Monitoring Dashboard
-
-The execution will show:
-
-- ✅ Tasks completed (merged PRs)
-- 🔄 Tasks in progress (open PRs, CI running)
-- ⏸️  Tasks pending (waiting on dependencies)
-- ❌ Tasks failed (with error details)
-
-### Metrics Collected
-
-Per task:
-
-- Tokens used
-- Cost (USD)
-- Iterations (inner loop cycles)
-- PR events (opened, CI runs, reviews, merged)
-- Time to merge
-
-## Safety & Control
-
-### Manual Intervention
-
-If you need to intervene:
+Use the local dashboard when you want a live view:
 
 ```bash
-# Pause execution (completes current tasks)
-bb dogfood-pause
-
-# Resume paused execution
-bb dogfood-resume
-
-# Cancel specific task
-gh pr close <pr-number>
-
-# Force stop all
-pkill -f dogfood-dag
+bb miniforge web --port 7878
 ```
 
-### Budget Limits
-
-Execution automatically stops when:
-
-- Max tokens exceeded
-- Max cost exceeded
-- All tasks completed
-- Critical error encountered
-
-### Review Gates
-
-Configure auto-merge policy:
-
-- `auto-merge: always` - Merge when CI passes
-- `auto-merge: after-review` - Wait for human approval
-- `auto-merge: never` - Manual merge only
-
-Default: `after-review` (safe for dogfooding)
-
-## Current Status
-
-**Phase**: Setup
-**Blockers**:
-
-- ❌ GitHub token not configured
-- ❌ Anthropic API key not configured
-- ⚠️  LLM backend not wired in generate.clj (task-1 will fix this!)
-
-**Next Steps**:
-
-1. Set environment variables
-2. Verify GitHub permissions (PR creation, merge)
-3. Run dry-run to validate setup
-4. Start dogfooding session with monitoring
-
-## Architecture
-
-```text
-User
- └─> bb dogfood
-      └─> Load dogfood-tasks.edn
-           └─> task-executor/execute-dag!
-                ├─> Task 1: Fix generate.clj (parallel with Task 3)
-                ├─> Task 3: Add metrics (parallel with Task 1)
-                └─> Task 2: Add tests (after Task 1 completes)
-                     └─> Each task:
-                          ├─> Generate code (agent + loop)
-                          ├─> Create PR
-                          ├─> Monitor CI
-                          ├─> Handle reviews
-                          └─> Auto-merge
-```
-
-## Expected Timeline
-
-Based on similar tasks:
-
-- **Task 1** (wire LLM): ~10-15 minutes
-  - Code generation: 3-5 min
-  - CI: 2-3 min
-  - Review (if required): 5-10 min
-- **Task 2** (add tests): ~15-20 minutes
-  - More complex, multiple files
-- **Task 3** (add metrics): ~10 minutes
-  - Straightforward enhancement
-
-**Total**: ~30-45 minutes for all 3 tasks
-
-## Troubleshooting
-
-### Task stuck in CI
+GitHub PRs created by a dogfood run still use the normal GitHub workflow:
 
 ```bash
-# Check CI logs
-gh pr view <pr-number> --web
-
-# Restart CI if needed
-gh pr comment <pr-number> -b "/rerun"
+gh pr list
+gh pr view <number> --web
+gh pr checks <number> --watch
 ```
 
-### Task failed repeatedly
+## Stop Policy
 
-```bash
-# View error logs
-bb dogfood-logs --task <task-id>
+If you need to stop a run:
 
-# Mark as skip and continue
-bb dogfood-skip --task <task-id>
-```
+1. Prefer letting the current phase finish so Miniforge writes the newest
+   checkpoint.
+2. If the process is stuck, interrupt it.
+3. Find the workflow id in output, events, status, or `bb harvest`.
+4. Resume with `bb miniforge resume <workflow-id>`.
+5. Only start `bb dogfood <spec>` again when there is no useful checkpoint.
 
-### Need to add task
+## After a Run
 
-```bash
-# Edit dogfood-tasks.edn
-vim dogfood-tasks.edn
+Dogfooding is successful when the run either completes the spec or exposes a
+reproducible product bug. After each run:
 
-# Reload (preserves running tasks)
-bb dogfood-reload
-```
-
-## Post-Dogfooding
-
-After successful completion:
-
-1. Review merged PRs
-2. Check metrics dashboard
-3. Collect learnings for operator component
-4. Plan next dogfooding session
-
-## Example Session
-
-```bash
-$ export GITHUB_TOKEN="ghp_..."
-$ export ANTHROPIC_API_KEY="sk-ant-..."
-$ bb dogfood --dag dogfood-tasks.edn
-
-🤖 Starting dogfooding session: dogfood-2026-02-06
-📋 Tasks: 3 total, 2 can start immediately
-
-[10:00:00] Task 1: Wire LLM backend → :implementing
-[10:00:00] Task 3: Add metrics → :implementing
-[10:03:45] Task 1: PR opened (#121)
-[10:05:12] Task 3: PR opened (#122)
-[10:05:45] Task 1: CI passed ✅
-[10:06:23] Task 3: CI passed ✅
-[10:08:15] Task 1: Merged! 🎉
-[10:08:15] Task 2: Add tests → :implementing (unblocked)
-[10:09:01] Task 3: Merged! 🎉
-[10:13:30] Task 2: PR opened (#123)
-[10:15:45] Task 2: CI passed ✅
-[10:18:22] Task 2: Merged! 🎉
-
-✨ Dogfooding complete!
-   Tasks: 3 completed, 0 failed
-   Time: 18m 22s
-   Cost: $2.34
-   PRs merged: #121, #122, #123
-```
+1. Review any PR it opened and get it through merge.
+2. Record or fix the next blocking bug surfaced by the run.
+3. Re-render `bb work:queue`.
+4. Resume the same workflow if it checkpointed, otherwise start the next
+   highest-priority ready spec.
