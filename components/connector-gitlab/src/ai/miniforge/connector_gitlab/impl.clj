@@ -5,7 +5,8 @@
             [ai.miniforge.connector-gitlab.messages :as msg]
             [ai.miniforge.connector-gitlab.resources :as resources]
             [ai.miniforge.connector-gitlab.schema :as schema]
-            [ai.miniforge.connector-http.interface :as http])
+            [ai.miniforge.connector-http.interface :as http]
+            [ai.miniforge.response.interface :as response])
   (:import [java.util UUID]))
 
 ;;------------------------------------------------------------------------------ Layer 0
@@ -135,8 +136,9 @@
   "Look up resource def or throw."
   [schema-name]
   (or (resources/get-resource (keyword schema-name))
-      (throw (ex-info (msg/t :gitlab/resource-unknown {:resource schema-name})
-                      {:resource schema-name}))))
+      (response/throw-anomaly! :anomalies/not-found
+                               (msg/t :gitlab/resource-unknown {:resource schema-name})
+                               {:resource schema-name})))
 
 (defn- resource-records
   [handle resource-def config auth-headers cursor opts]
@@ -192,7 +194,9 @@
   (let [config (assoc config :gitlab/base-url
                       (get config :gitlab/base-url "https://gitlab.com"))]
     (when-not (has-project? config)
-      (throw (ex-info (msg/t :gitlab/project-required) {:config config})))
+      (response/throw-anomaly! :anomalies/incorrect
+                               (msg/t :gitlab/project-required)
+                               {:config config}))
     (schema/validate! schema/GitLabConfig config)
     (validate-auth! auth)
     (let [handle (str (UUID/randomUUID))]

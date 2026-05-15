@@ -5,7 +5,8 @@
             [ai.miniforge.connector-jira.messages :as msg]
             [ai.miniforge.connector-jira.resources :as resources]
             [ai.miniforge.connector-jira.schema :as schema]
-            [ai.miniforge.connector-http.interface :as http])
+            [ai.miniforge.connector-http.interface :as http]
+            [ai.miniforge.response.interface :as response])
   (:import [java.util Base64 UUID]))
 
 ;;------------------------------------------------------------------------------ Layer 0
@@ -68,8 +69,9 @@
   "Look up resource def or throw."
   [schema-name]
   (or (resources/get-resource (keyword schema-name))
-      (throw (ex-info (msg/t :jira/resource-unknown {:resource schema-name})
-                      {:resource schema-name}))))
+      (response/throw-anomaly! :anomalies/not-found
+                               (msg/t :jira/resource-unknown {:resource schema-name})
+                               {:resource schema-name})))
 
 (defn- timestamp-value
   [record]
@@ -101,7 +103,9 @@
   "Validate config at boundary, register handle."
   [config auth]
   (when-not (:jira/site config)
-    (throw (ex-info (msg/t :jira/site-required) {:config config})))
+    (response/throw-anomaly! :anomalies/incorrect
+                             (msg/t :jira/site-required)
+                             {:config config}))
   (schema/validate! schema/JiraConfig config)
   (validate-auth! auth)
   (let [handle (str (UUID/randomUUID))
