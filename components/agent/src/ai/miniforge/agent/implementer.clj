@@ -590,6 +590,20 @@
          base-refs))
       (file-artifacts/collect-worktree-files working-dir base-refs))))
 
+(defn- collect-session-artifact
+  "Collect a file artifact when the agent did not submit one explicitly."
+  [context session-mode working-dir pre-session-snapshot]
+  (or (collect-promoted-artifact context session-mode working-dir)
+      (if (= :capsule session-mode)
+        (file-artifacts/collect-written-files-via-executor
+         pre-session-snapshot
+         @(requiring-resolve 'ai.miniforge.dag-executor.executor/execute!)
+         (:execution/executor context)
+         (:execution/environment-id context)
+         working-dir)
+        (file-artifacts/collect-written-files pre-session-snapshot
+                                              working-dir))))
+
 (defn- invoke-with-llm
   "Invoke the implementer via the LLM backend."
   [llm-client user-prompt effective-system-prompt config context on-chunk logger
@@ -603,16 +617,10 @@
                                        config context on-chunk existing-files working-dir))
         response llm-result
         file-artifact (when-not artifact
-                        (or (collect-promoted-artifact context session-mode working-dir)
-                            (if (= :capsule session-mode)
-                              (file-artifacts/collect-written-files-via-executor
-                               pre-session-snapshot
-                               @(requiring-resolve 'ai.miniforge.dag-executor.executor/execute!)
-                               (:execution/executor context)
-                               (:execution/environment-id context)
-                               working-dir)
-                              (file-artifacts/collect-written-files pre-session-snapshot
-                                                                    working-dir))))
+                        (collect-session-artifact context
+                                                  session-mode
+                                                  working-dir
+                                                  pre-session-snapshot))
         normalized (result-boundary/normalize-llm-result
                     {:role :implement
                      :response response
