@@ -91,17 +91,35 @@
                     :workflow/pipeline [{:phase :implement}
                                         {:phase :verify}]}
           workflow-id (random-uuid)
+          failed-started-at 1000
           restored (ctx/restore-context
                     workflow
                     {:task "Test"}
                     {:execution/id workflow-id
+                     :execution/input {:task "From snapshot"}
                      :execution/status :failed
-                     :execution/fsm-state {:_state :failed}}
+                     :execution/fsm-state {:_state :failed}
+                     :execution/started-at failed-started-at
+                     :execution/ended-at 2000
+                     :execution/output {:status :failed}
+                     :execution/errors [{:type :boom}]
+                     :execution/response-chain {:old :failure}
+                     :execution/metrics {:tokens 9
+                                         :cost-usd 1.2
+                                         :duration-ms 1000}}
                     {:plan {:status :completed}}
                     {:resume-reset-terminal? true})]
       (is (= workflow-id (:execution/id restored)))
+      (is (= {:task "From snapshot"} (:execution/input restored)))
       (is (= :running (:execution/status restored)))
       (is (= :implement (:execution/current-phase restored)))
+      (is (nil? (:execution/ended-at restored)))
+      (is (nil? (:execution/output restored)))
+      (is (= [] (:execution/errors restored)))
+      (is (= {:tokens 0 :cost-usd 0.0 :duration-ms 0}
+             (:execution/metrics restored)))
+      (is (not= failed-started-at (:execution/started-at restored)))
+      (is (not= {:old :failure} (:execution/response-chain restored)))
       (is (= {:plan {:status :completed}}
              (:execution/phase-results restored))))))
 
