@@ -4,7 +4,8 @@
    Two categories of schemas:
    1. Config schemas — validated at connect time (inbound from user)
    2. Response schemas — validated at extract time (inbound from Jira API)"
-  (:require [malli.core :as m]
+  (:require [ai.miniforge.response.interface :as response]
+            [malli.core :as m]
             [malli.error :as me]))
 
 ;;------------------------------------------------------------------------------ Layer 0
@@ -92,9 +93,10 @@
   "Validate and throw on failure."
   [schema value]
   (when-not (m/validate schema value)
-    (throw (ex-info "Jira config validation failed"
-                    {:errors (me/humanize (m/explain schema value))
-                     :value value})))
+    (response/throw-anomaly! :anomalies/incorrect
+                             "Jira config validation failed"
+                             {:errors (me/humanize (m/explain schema value))
+                              :value value}))
   value)
 
 (defn validate-response

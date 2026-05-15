@@ -1,7 +1,8 @@
 (ns ai.miniforge.connector-jira.resources
   "Jira Cloud REST API resource type registry and URL/param builders.
    Resource definitions are loaded from an EDN resource file at startup."
-  (:require [clojure.edn :as edn]
+  (:require [ai.miniforge.response.interface :as response]
+            [clojure.edn :as edn]
             [clojure.java.io :as io]
             [clojure.string :as str]))
 
@@ -13,8 +14,9 @@
 (defn- load-resources []
   (if-let [res (io/resource resource-path)]
     (edn/read-string (slurp res))
-    (throw (ex-info (str "Jira resource definitions not found: " resource-path)
-                    {:path resource-path}))))
+    (response/throw-anomaly! :anomalies/not-found
+                             (str "Jira resource definitions not found: " resource-path)
+                             {:path resource-path})))
 
 (def jira-resources
   "Registry of Jira Cloud REST API resource types, loaded from EDN."

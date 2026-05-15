@@ -2,6 +2,7 @@
   "GitHub resource type registry and URL/param builders.
    Resource definitions are loaded from an EDN resource file at startup."
   (:require [ai.miniforge.connector-github.messages :as msg]
+            [ai.miniforge.response.interface :as response]
             [clojure.edn :as edn]
             [clojure.java.io :as io]
             [clojure.string :as str]))
@@ -11,8 +12,9 @@
 (defn- load-resources []
   (if-let [res (io/resource resource-path)]
     (edn/read-string (slurp res))
-    (throw (ex-info (msg/t :github/resources-not-found {:path resource-path})
-                    {:path resource-path}))))
+    (response/throw-anomaly! :anomalies/not-found
+                             (msg/t :github/resources-not-found {:path resource-path})
+                             {:path resource-path})))
 
 (def github-resources
   "Registry of GitHub REST API v3 resource types, loaded from EDN."

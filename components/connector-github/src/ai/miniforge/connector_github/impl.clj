@@ -4,7 +4,8 @@
             [ai.miniforge.connector-github.messages :as msg]
             [ai.miniforge.connector-github.resources :as resources]
             [ai.miniforge.connector-github.schema :as gh-schema]
-            [ai.miniforge.connector-http.interface :as http])
+            [ai.miniforge.connector-http.interface :as http]
+            [ai.miniforge.response.interface :as response])
   (:import [java.util UUID]))
 
 ;; -- Handle state --
@@ -167,8 +168,9 @@
   "Look up resource def or throw."
   [schema-name]
   (or (resources/get-resource (keyword schema-name))
-      (throw (ex-info (msg/t :github/resource-unknown {:resource schema-name})
-                      {:resource schema-name}))))
+      (response/throw-anomaly! :anomalies/not-found
+                               (msg/t :github/resource-unknown {:resource schema-name})
+                               {:resource schema-name})))
 
 (defn- validation-errors
   "Extract errors from a validation result, centralizing knowledge of the :errors key."
@@ -184,10 +186,14 @@
     (cond
       (gh-schema/invalid? config-result)
       (let [errs (validation-errors config-result)]
-        (throw (ex-info (msg/t :github/config-invalid {:errors errs}) {:errors errs})))
+        (response/throw-anomaly! :anomalies/incorrect
+                                 (msg/t :github/config-invalid {:errors errs})
+                                 {:errors errs}))
 
       (and (nil? (:github/org config)) (nil? (:github/owner config)))
-      (throw (ex-info (msg/t :github/owner-or-org-required) {:config config}))
+      (response/throw-anomaly! :anomalies/incorrect
+                               (msg/t :github/owner-or-org-required)
+                               {:config config})
 
       :else
       (connector/validate-auth-or-throw! auth msg/t :github/auth-invalid))))
