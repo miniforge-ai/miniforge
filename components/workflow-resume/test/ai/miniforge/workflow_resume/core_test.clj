@@ -211,6 +211,32 @@
 (defn- write-event! [^java.io.File dir filename event-map]
   (spit (io/file dir filename) (json/generate-string event-map)))
 
+(def resume-checkpoint-config
+  {:base-machine-snapshot {:execution/workflow-id :canonical-sdlc
+                           :execution/workflow-version "1.0.0"
+                           :execution/status :failed}
+   :blocked-review {:manifest {:workflow/phases-completed [:explore
+                                                           :plan
+                                                           :implement
+                                                           :review
+                                                           :release]}
+                    :phase-results {:explore {:status :completed}
+                                    :plan {:status :completed}
+                                    :implement {:status :completed}
+                                    :review {:status :completed
+                                             :review/decision :changes-requested}
+                                    :release {:status :retrying}}}
+   :damaged-manifest {:manifest {:workflow/phases-completed [:release :plan]}
+                      :phase-results {:release {:status :retrying}
+                                      :plan {:status :completed}}}})
+
+(defn- configured-checkpoint-data
+  [config-key workflow-id]
+  (let [checkpoint (get resume-checkpoint-config config-key)]
+    (assoc checkpoint :machine-snapshot
+           (assoc (:base-machine-snapshot resume-checkpoint-config)
+                  :execution/id workflow-id))))
+
 (deftest reconstruct-context-integration-test
   (with-temp-events-dir
     (fn [base-dir]
@@ -290,17 +316,8 @@
 (deftest reconstruct-context-trims-only-completed-checkpoint-phases-test
   (testing "checkpoint manifests may list failed/retrying phases; resume skips only completed results"
     (let [workflow-id (str (random-uuid))
-          checkpoint-data {:machine-snapshot {:execution/id workflow-id
-                                             :execution/workflow-id :canonical-sdlc
-                                             :execution/workflow-version "1.0.0"
-                                             :execution/status :failed}
-                           :manifest {:workflow/phases-completed [:explore :plan :implement :review :release]}
-                           :phase-results {:explore {:status :completed}
-                                           :plan {:status :completed}
-                                           :implement {:status :completed}
-                                           :review {:status :completed
-                                                    :review/decision :changes-requested}
-                                           :release {:status :retrying}}}]
+          checkpoint-data (configured-checkpoint-data :blocked-review
+                                                      workflow-id)]
       (with-redefs [workflow/load-checkpoint-data (fn [_workflow-run-id] checkpoint-data)
                     es/read-workflow-events-by-id (fn [_events-dir _workflow-run-id] nil)]
         (let [ctx (core/reconstruct-context "/tmp/unused-events" workflow-id)]
@@ -309,13 +326,8 @@
 (deftest reconstruct-context-merges-latest-successful-events-with-checkpoint-test
   (testing "a damaged manifest can still resume from successful event history"
     (let [workflow-id (str (random-uuid))
-          checkpoint-data {:machine-snapshot {:execution/id workflow-id
-                                             :execution/workflow-id :canonical-sdlc
-                                             :execution/workflow-version "1.0.0"
-                                             :execution/status :failed}
-                           :manifest {:workflow/phases-completed [:release :plan]}
-                           :phase-results {:release {:status :retrying}
-                                           :plan {:status :completed}}}
+          checkpoint-data (configured-checkpoint-data :damaged-manifest
+                                                      workflow-id)
           events [{:event/type :workflow/phase-completed
                    :workflow/phase :explore
                    :phase/outcome :success}

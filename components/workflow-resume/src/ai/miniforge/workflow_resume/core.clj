@@ -39,6 +39,8 @@
    [ai.miniforge.response.interface :as response]
    [ai.miniforge.workflow.interface :as workflow]
    [ai.miniforge.workflow-resume.schema :as schema]
+   [clojure.edn :as edn]
+   [clojure.java.io :as io]
    [clojure.string :as str]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -142,13 +144,31 @@
   (or (boolean (seq (get by-type :workflow/failed)))
       (= :failed (checkpoint-status checkpoint-data))))
 
+(def ^:private resume-config-resource
+  "config/workflow-resume/resume.edn")
+
+(defn- read-resume-config
+  []
+  (if-let [resource (io/resource resume-config-resource)]
+    (:workflow-resume/resume (edn/read-string (slurp resource)))
+    (response/throw-anomaly! :anomalies/not-found
+                             "Workflow resume config resource not found"
+                             {:resource resume-config-resource})))
+
+(def ^:private resume-config
+  (delay (read-resume-config)))
+
+(defn- config-set
+  [k]
+  (set (get @resume-config k)))
+
 (def completed-phase-statuses
   "Phase result statuses that are safe to skip on resume."
-  #{:completed :success :succeeded :already-implemented :already-satisfied})
+  (config-set :completed-phase-statuses))
 
 (def blocking-review-decisions
   "Review decisions that must resume the repair path."
-  #{:changes-requested :rejected})
+  (config-set :blocking-review-decisions))
 
 (defn- phase-result-status
   [phase-result]
