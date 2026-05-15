@@ -142,10 +142,73 @@
   (or (boolean (seq (get by-type :workflow/failed)))
       (= :failed (checkpoint-status checkpoint-data))))
 
+(def completed-phase-statuses
+  "Phase result statuses that are safe to skip on resume."
+  #{:completed :success :succeeded :already-implemented :already-satisfied})
+
+(def blocking-review-decisions
+  "Review decisions that must resume the repair path."
+  #{:changes-requested :rejected})
+
+(defn- phase-result-status
+  [phase-result]
+  (or (:status phase-result)
+      (:phase/status phase-result)
+      (:outcome phase-result)
+      (:phase/outcome phase-result)
+      (get-in phase-result [:result :status])
+      (get-in phase-result [:phase/result :status])))
+
+(defn- review-blocked?
+  [phase-id phase-result]
+  (and (= :review phase-id)
+       (contains? blocking-review-decisions
+                  (or (:review/decision phase-result)
+                      (get-in phase-result [:result :review/decision])
+                      (get-in phase-result [:result :output :review/decision])
+                      (get-in phase-result [:phase/result :review/decision])
+                      (get-in phase-result [:phase/result :output :review/decision])
+                      (get-in phase-result [:result :decision])
+                      (:decision phase-result)))))
+
+(defn- completed-phase-result?
+  [phase-id phase-result]
+  (and phase-result
+       (not (review-blocked? phase-id phase-result))
+       (contains? completed-phase-statuses
+                  (phase-result-status phase-result))))
+
+(defn- checkpoint-phase-order
+  [checkpoint-data phase-results]
+  (let [manifest-order (get-in checkpoint-data [:manifest :workflow/phases-completed])]
+    (vec (concat manifest-order
+                 (remove (set manifest-order) (keys phase-results))))))
+
+(defn- event-phase-order
+  [events]
+  (->> events
+       (filter #(= :workflow/phase-completed (:event/type %)))
+       (map :workflow/phase)
+       distinct
+       vec))
+
+(defn- completed-checkpoint-phases
+  [checkpoint-data phase-results]
+  (->> (checkpoint-phase-order checkpoint-data phase-results)
+       (filter #(completed-phase-result? % (get phase-results %)))))
+
+(defn- completed-event-phases
+  [events]
+  (let [event-results (extract-phase-results events)]
+    (->> (event-phase-order events)
+         (filter #(completed-phase-result? % (get event-results %))))))
+
 (defn- restored-completed-phases
-  [checkpoint-data events]
-  (or (some-> checkpoint-data :manifest :workflow/phases-completed)
-      (extract-completed-phases events)))
+  [checkpoint-data events phase-results]
+  (->> (concat (completed-event-phases events)
+               (completed-checkpoint-phases checkpoint-data phase-results))
+       distinct
+       vec))
 
 (defn- restored-phase-results
   [checkpoint-data events]
@@ -217,8 +280,8 @@
         events (vec (filter schema/valid-event? raw-events))
         _ (ensure-reconstruction-source! checkpoint-data events-dir workflow-id raw-events)
         by-type (group-by :event/type events)
-        completed-phases (restored-completed-phases checkpoint-data events)
         phase-results (restored-phase-results checkpoint-data events)
+        completed-phases (restored-completed-phases checkpoint-data events phase-results)
         workflow-spec (find-workflow-spec events)
         started-event (first (get by-type :workflow/started))
         machine-snapshot (:machine-snapshot checkpoint-data)
@@ -257,8 +320,8 @@
                     {:workflow workflow :completed-phases completed-phases}
                     {:message "Invalid trim-pipeline input"})
   (let [completed-set (set completed-phases)
-        remaining (vec (remove #(completed-set (:phase %))
-                               (get workflow :workflow/pipeline [])))]
+        remaining (vec (drop-while #(completed-set (:phase %))
+                                   (get workflow :workflow/pipeline [])))]
     (assoc workflow :workflow/pipeline remaining)))
 
 ;------------------------------------------------------------------------------ Layer 1

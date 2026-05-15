@@ -475,6 +475,7 @@
                                  (ctx/transition-to-failed)))))
              output-ctx (-> final-ctx validate-completion extract-output)]
          (vreset! output-ctx-vol output-ctx)
+         (checkpoint-store/persist-execution-state! output-ctx)
          (when-not skip-lifecycle?
            (events/publish-workflow-completed! event-stream output-ctx))
          output-ctx)

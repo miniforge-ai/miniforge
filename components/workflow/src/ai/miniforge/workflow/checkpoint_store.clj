@@ -191,14 +191,23 @@
 
 (defn build-manifest
   "Build the durable checkpoint manifest for an execution context."
-  [ctx checkpoint-root]
+  ([ctx checkpoint-root]
+   (build-manifest ctx checkpoint-root nil))
+  ([ctx checkpoint-root existing-manifest]
   (let [workflow-run-id (:execution/id ctx)
-        phase-ids (ordered-phase-ids ctx)
-        phase-paths (into {}
-                          (map (fn [phase-id]
-                                 [phase-id
-                                  (phase-checkpoint-path checkpoint-root workflow-run-id phase-id)]))
-                          phase-ids)]
+        current-phase-ids (ordered-phase-ids ctx)
+        existing-phase-paths (:workflow/phase-checkpoints existing-manifest)
+        phase-ids (vec (concat (keys existing-phase-paths)
+                               (remove (set (keys existing-phase-paths))
+                                       current-phase-ids)))
+        current-phase-paths (into {}
+                                  (map (fn [phase-id]
+                                         [phase-id
+                                          (phase-checkpoint-path checkpoint-root
+                                                                 workflow-run-id
+                                                                 phase-id)]))
+                                  current-phase-ids)
+        phase-paths (merge existing-phase-paths current-phase-paths)]
     (serialize-checkpoint-value
      {:workflow/id workflow-run-id
       :workflow/workflow-id (:execution/workflow-id ctx)
@@ -207,7 +216,7 @@
       :workflow/machine-snapshot-path
       (machine-snapshot-path checkpoint-root workflow-run-id)
       :workflow/phase-checkpoints phase-paths
-      :workflow/last-checkpoint-at (current-checkpoint-timestamp)})))
+      :workflow/last-checkpoint-at (current-checkpoint-timestamp)}))))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Persistence and restore inputs
@@ -221,8 +230,9 @@
           phase-result (get-in ctx [:execution/phase-results phase-name])
           snapshot-path' (machine-snapshot-path checkpoint-root workflow-run-id)
           manifest-path' (manifest-path checkpoint-root workflow-run-id)
+          existing-manifest (read-edn-file manifest-path')
           snapshot (build-machine-snapshot ctx)
-          manifest (build-manifest ctx checkpoint-root)
+          manifest (build-manifest ctx checkpoint-root existing-manifest)
           checkpoint-data {:checkpoint/root checkpoint-root
                            :manifest manifest
                            :machine-snapshot snapshot

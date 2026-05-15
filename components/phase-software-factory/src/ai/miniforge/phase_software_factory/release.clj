@@ -415,8 +415,13 @@
         iterations (get-in ctx [:phase :iterations] 1)
         max-iterations (get-in ctx [:phase :budget :iterations]
                                (get-in default-config [:budget :iterations]))
-        phase-status (phase/determine-phase-status
-                       agent-status iterations max-iterations)
+        zero-files? (and (= (messages/t :release/zero-files)
+                            (get-in result [:error :message]))
+                         (= :release (get-in result [:error :data :phase])))
+        phase-status (if zero-files?
+                       :failed
+                       (phase/determine-phase-status
+                        agent-status iterations max-iterations))
         pr-info (get-in ctx [:workflow/pr-info])
         updated-ctx (-> ctx
                         (assoc-in [:phase :ended-at] end-time)
