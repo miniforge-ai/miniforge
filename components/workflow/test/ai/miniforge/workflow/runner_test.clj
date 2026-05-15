@@ -84,6 +84,25 @@
           ctx (ctx/create-context workflow {:task "Test"} {:source-root source-root})]
       (is (= source-root (:source-root ctx))))))
 
+(deftest run-pipeline-persists-final-terminal-snapshot-test
+  (testing "terminal failures produced after the loop overwrite the running checkpoint"
+    (with-temp-checkpoint-root
+      (fn [checkpoint-root]
+        (let [workflow {:workflow/id :empty-test
+                        :workflow/version "1.0.0"
+                        :workflow/pipeline []}
+              result (runner/run-pipeline workflow {:task "Test"}
+                                          {:checkpoint/root checkpoint-root
+                                           :skip-lifecycle-events true})
+              checkpoint-data (checkpoint-store/load-checkpoint-data
+                               (:execution/id result)
+                               {:checkpoint/root checkpoint-root})]
+          (is (= :failed (:execution/status result)))
+          (is (= :failed (get-in checkpoint-data
+                                 [:machine-snapshot :execution/status])))
+          (is (seq (get-in checkpoint-data
+                           [:machine-snapshot :execution/errors]))))))))
+
 (deftest restore-context-can-reset-terminal-snapshot-test
   (testing "failed checkpoint snapshots can resume a trimmed workflow"
     (let [workflow {:workflow/id :test

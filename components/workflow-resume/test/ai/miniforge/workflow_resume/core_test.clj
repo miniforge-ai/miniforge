@@ -132,7 +132,21 @@
 
   (testing "all phases completed → empty pipeline"
     (let [wf {:workflow/pipeline [{:phase :a} {:phase :b}]}]
-      (is (= [] (:workflow/pipeline (core/trim-pipeline wf [:a :b])))))))
+      (is (= [] (:workflow/pipeline (core/trim-pipeline wf [:a :b]))))))
+
+  (testing "non-contiguous completed phases do not skip phases after the first gap"
+    (let [wf {:workflow/pipeline [{:phase :explore}
+                                  {:phase :plan}
+                                  {:phase :implement}
+                                  {:phase :verify}
+                                  {:phase :review}
+                                  {:phase :release}]}
+          trimmed (core/trim-pipeline wf [:explore :plan :verify])]
+      (is (= [{:phase :implement}
+              {:phase :verify}
+              {:phase :review}
+              {:phase :release}]
+             (:workflow/pipeline trimmed))))))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; resolve-workflow-identity
@@ -272,6 +286,49 @@
           (is (true? (:dag-paused? ctx)))
           (is (= :rate-limit (:dag-pause-reason ctx)))
           (is (= 0 (:event-count ctx))))))))
+
+(deftest reconstruct-context-trims-only-completed-checkpoint-phases-test
+  (testing "checkpoint manifests may list failed/retrying phases; resume skips only completed results"
+    (let [workflow-id (str (random-uuid))
+          checkpoint-data {:machine-snapshot {:execution/id workflow-id
+                                             :execution/workflow-id :canonical-sdlc
+                                             :execution/workflow-version "1.0.0"
+                                             :execution/status :failed}
+                           :manifest {:workflow/phases-completed [:explore :plan :implement :review :release]}
+                           :phase-results {:explore {:status :completed}
+                                           :plan {:status :completed}
+                                           :implement {:status :completed}
+                                           :review {:status :completed
+                                                    :review/decision :changes-requested}
+                                           :release {:status :retrying}}}]
+      (with-redefs [workflow/load-checkpoint-data (fn [_workflow-run-id] checkpoint-data)
+                    es/read-workflow-events-by-id (fn [_events-dir _workflow-run-id] nil)]
+        (let [ctx (core/reconstruct-context "/tmp/unused-events" workflow-id)]
+          (is (= [:explore :plan :implement] (:completed-phases ctx))))))))
+
+(deftest reconstruct-context-merges-latest-successful-events-with-checkpoint-test
+  (testing "a damaged manifest can still resume from successful event history"
+    (let [workflow-id (str (random-uuid))
+          checkpoint-data {:machine-snapshot {:execution/id workflow-id
+                                             :execution/workflow-id :canonical-sdlc
+                                             :execution/workflow-version "1.0.0"
+                                             :execution/status :failed}
+                           :manifest {:workflow/phases-completed [:release :plan]}
+                           :phase-results {:release {:status :retrying}
+                                           :plan {:status :completed}}}
+          events [{:event/type :workflow/phase-completed
+                   :workflow/phase :explore
+                   :phase/outcome :success}
+                  {:event/type :workflow/phase-completed
+                   :workflow/phase :implement
+                   :phase/outcome :failure}
+                  {:event/type :workflow/phase-completed
+                   :workflow/phase :verify
+                   :phase/outcome :success}]]
+      (with-redefs [workflow/load-checkpoint-data (fn [_workflow-run-id] checkpoint-data)
+                    es/read-workflow-events-by-id (fn [_events-dir _workflow-run-id] events)]
+        (let [ctx (core/reconstruct-context "/tmp/unused-events" workflow-id)]
+          (is (= [:explore :verify :plan] (:completed-phases ctx))))))))
 
 ;------------------------------------------------------------------------------ Layer 3
 ;; Interface re-exports
