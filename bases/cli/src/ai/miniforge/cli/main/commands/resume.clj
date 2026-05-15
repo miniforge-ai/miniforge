@@ -102,7 +102,8 @@
             {:keys [workflow]} (load-workflow workflow-type workflow-version {})
 
             machine-snapshot (:machine-snapshot reconstructed)
-            resume-workflow (if machine-snapshot
+            failed-checkpoint? (and machine-snapshot (:failed? reconstructed))
+            resume-workflow (if (and machine-snapshot (not failed-checkpoint?))
                               workflow
                               (wr/trim-pipeline workflow completed-phases))
             remaining-pipeline (:workflow/pipeline resume-workflow)
@@ -115,7 +116,7 @@
                   (display/print-info
                     (messages/t :resume/new-workflow-id
                                 {:workflow-id resume-run-id})))
-                (if (and (not machine-snapshot) (seq remaining-pipeline))
+                (if (seq remaining-pipeline)
                   (display/print-info
                     (messages/t :resume/resuming-from-phase
                                 {:phase (name (:phase (first remaining-pipeline)))
@@ -135,16 +136,17 @@
                                      {:llm-backend llm-client
                                       :event-stream event-stream
                                       :control-state control-state
-                                     :resume-machine-snapshot machine-snapshot
-                                     :resume-phase-results (:phase-results reconstructed)
-                                     :skip-lifecycle-events false
-                                     :pre-completed-dag-tasks (:completed-dag-tasks reconstructed)
-                                     :pre-completed-artifacts (:completed-dag-artifacts reconstructed)
-                                     :on-phase-start (fn [_ctx interceptor]
-                                                       (when-not quiet
-                                                         (display/print-info
-                                                            (messages/t :resume/phase-starting
-                                                                        {:phase (get-in interceptor [:config :phase])}))))
+                                      :resume-machine-snapshot machine-snapshot
+                                      :resume-reset-terminal? failed-checkpoint?
+                                      :resume-phase-results (:phase-results reconstructed)
+                                      :skip-lifecycle-events false
+                                      :pre-completed-dag-tasks (:completed-dag-tasks reconstructed)
+                                      :pre-completed-artifacts (:completed-dag-artifacts reconstructed)
+                                      :on-phase-start (fn [_ctx interceptor]
+                                                        (when-not quiet
+                                                          (display/print-info
+                                                           (messages/t :resume/phase-starting
+                                                                       {:phase (get-in interceptor [:config :phase])}))))
                                       :on-phase-complete (fn [_ctx _interceptor _result] nil)})]
             (when-not quiet
               (display/print-info

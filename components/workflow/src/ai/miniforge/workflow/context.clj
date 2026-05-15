@@ -140,6 +140,17 @@
      :execution/streaming-activity []
      :execution/files-written #{}}))
 
+(defn- reset-terminal-snapshot-fields
+  [machine-snapshot workflow]
+  (-> machine-snapshot
+      (dissoc :execution/ended-at
+              :execution/output
+              :execution/completed-with-warnings?)
+      (assoc :execution/errors []
+             :execution/response-chain (response/create (:workflow/id workflow))
+             :execution/metrics {:tokens 0 :cost-usd 0.0 :duration-ms 0}
+             :execution/started-at (System/currentTimeMillis))))
+
 (defn sync-machine-projections
   "Project workflow fields from the authoritative machine snapshot."
   [ctx]
@@ -224,6 +235,13 @@
   "Restore execution context from a durable machine snapshot and phase checkpoints."
   [workflow input machine-snapshot phase-results opts]
   (let [execution-machine (fsm/compile-execution-machine workflow)
+        machine-snapshot (cond-> machine-snapshot
+                           (:resume-reset-terminal? opts)
+                           (reset-terminal-snapshot-fields workflow))
+        fsm-state (if (:resume-reset-terminal? opts)
+                    (->> (fsm/initialize-execution execution-machine)
+                         (fsm/start-execution execution-machine))
+                    (:execution/fsm-state machine-snapshot))
         checkpoint-root (checkpoint-store/resolve-checkpoint-root
                          (merge opts machine-snapshot))]
     (sync-machine-projections
@@ -233,7 +251,7 @@
        :execution/workflow-id (:workflow/id workflow)
        :execution/workflow-version (:workflow/version workflow)
        :execution/fsm-machine execution-machine
-       :execution/fsm-state (:execution/fsm-state machine-snapshot)
+       :execution/fsm-state fsm-state
        :execution/input (get machine-snapshot :execution/input input)
        :execution/phase-results phase-results
        :execution/opts opts
