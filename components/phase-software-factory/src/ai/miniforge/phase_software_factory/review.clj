@@ -79,13 +79,13 @@
    most-direct (full content already in the result) to last-resort
    (rebuild from the worktree).
 
-   1. Outer `:artifact` already includes `:code/files`.
-   2. Inner result's `:artifact` already includes `:code/files`.
-   3. Result map IS the artifact (has `:code/files`).
-   4. Inner result's `:output` includes `:code/files`.
-   5. Lightweight outer artifact (paths-only) — read content from disk
+   1. Lightweight outer artifact (paths-only) — read content from disk
       using `:code/file-paths` so review sees what landed even though
       the phase-boundary persist already cleaned the worktree.
+   2. Outer `:artifact` already includes `:code/files`.
+   3. Inner result's `:artifact` already includes `:code/files`.
+   4. Result map IS the artifact (has `:code/files`).
+   5. Inner result's `:output` includes `:code/files`.
    6. Metadata-only outer artifact merged over a worktree
       git-status snapshot (legacy fallback).
    7. Worktree git-status snapshot alone (env-promotion model)."
@@ -108,11 +108,11 @@
                                  (agent/collect-written-files (agent/empty-snapshot)
                                                               worktree-path)))]
     (or
+     (rehydrate-from-paths outer-artifact worktree-path)
      (when (:code/files outer-artifact)        outer-artifact)
      (when (:code/files inner-artifact)        inner-artifact)
      (when (:code/files implement-phase-result) implement-phase-result)
      (when (:code/files inner-output)          inner-output)
-     (rehydrate-from-paths outer-artifact worktree-path)
      (when (and outer-artifact worktree-artifact)
        (merge worktree-artifact outer-artifact))
      worktree-artifact)))
