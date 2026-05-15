@@ -2,10 +2,15 @@
 
 ## Overview
 
-Adds the test coverage that PRs #871 (data-source connectors) and #874
-(VCS connectors) review flagged as missing. The migrated throw sites
-were correct but lacked direct test coverage, so a future regression
-could go undetected.
+Adds the test coverage that PR #871 (data-source connectors) review
+flagged as missing. The migrated throw sites were correct but lacked
+direct test coverage, so a future regression could go undetected.
+
+Scope note: #874 (VCS connectors) had similar review feedback, but the
+auto-fix pass that landed before #874 merged already added direct tests
+for every flagged VCS path (`do-connect-invalid-schema-throws-anomaly`,
+`load-resources-missing-edn-throws-anomaly` × 3, etc.). The remaining
+gaps are #871-only.
 
 ## What This Adds
 
@@ -32,18 +37,21 @@ could go undetected.
 
 ## Why
 
-PRs #871 and #874 received review feedback that several escalation
-paths listed in the per-site classification tables had no direct test
-coverage. Specifically:
+PR #871 received review feedback that several escalation paths listed
+in the per-site classification table had no direct test coverage.
+Specifically:
 
 - excel `parse-sheet` not-found path
 - excel `download-to-temp` non-2xx path
 - edgar `do-extract` unknown-aggregation path
 - http `fetch-single` request-failure path
 
-The PR docs claimed "every escalation path" was covered, which wasn't
-strictly true for these four sites. This PR closes those gaps and
-removes the regression-risk window.
+The #871 PR doc claimed "every escalation path" was covered, which
+wasn't strictly true for these four sites. This PR closes those gaps
+and removes the regression-risk window.
+
+PR #874 had similar feedback but the auto-fix pass already added the
+missing VCS tests pre-merge; no additional VCS coverage is needed.
 
 ## Testing Plan
 
@@ -54,7 +62,8 @@ removes the regression-risk window.
 ## Related Issues/PRs
 
 - Follow-up to PR #871 (data-source connectors)
-- Follow-up to PR #874 (VCS connectors)
+- PR #874 (VCS connectors) gaps were closed by the pre-merge auto-fix
+  pass; referenced here for completeness only
 - Part of the exceptions-as-data cleanup tracked in PR #691
 
 ## Checklist
