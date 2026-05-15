@@ -84,6 +84,27 @@
           ctx (ctx/create-context workflow {:task "Test"} {:source-root source-root})]
       (is (= source-root (:source-root ctx))))))
 
+(deftest restore-context-can-reset-terminal-snapshot-test
+  (testing "failed checkpoint snapshots can resume a trimmed workflow"
+    (let [workflow {:workflow/id :test
+                    :workflow/version "1.0.0"
+                    :workflow/pipeline [{:phase :implement}
+                                        {:phase :verify}]}
+          workflow-id (random-uuid)
+          restored (ctx/restore-context
+                    workflow
+                    {:task "Test"}
+                    {:execution/id workflow-id
+                     :execution/status :failed
+                     :execution/fsm-state {:_state :failed}}
+                    {:plan {:status :completed}}
+                    {:resume-reset-terminal? true})]
+      (is (= workflow-id (:execution/id restored)))
+      (is (= :running (:execution/status restored)))
+      (is (= :implement (:execution/current-phase restored)))
+      (is (= {:plan {:status :completed}}
+             (:execution/phase-results restored))))))
+
 ;; ============================================================================
 ;; Pipeline building tests
 ;; ============================================================================

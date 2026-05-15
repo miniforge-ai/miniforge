@@ -111,6 +111,7 @@
 (deftest resume-workflow-passes-dag-recovery-data-test
   (let [workflow-id (random-uuid)
         run-pipeline-opts (atom nil)
+        run-pipeline-workflow (atom nil)
         reconstructed {:completed-phases [:plan]
                        :event-count 0
                        :completed-dag-tasks #{:task-a}
@@ -139,12 +140,65 @@
                                     :workflow/pipeline [{:phase :verify}]}})
 
                       (= sym 'ai.miniforge.workflow.interface/run-pipeline)
-                      (fn [_workflow _input opts]
+                      (fn [workflow _input opts]
+                        (reset! run-pipeline-workflow workflow)
                         (reset! run-pipeline-opts opts)
                         {:execution/status :completed})))]
       (let [result (sut/resume-workflow workflow-id {:quiet true})]
         (is (= :completed (:execution/status result)))
+        (is (= [{:phase :verify}]
+               (:workflow/pipeline @run-pipeline-workflow)))
+        (is (nil? (:resume-reset-terminal? @run-pipeline-opts)))
         (is (= #{:task-a}
                (:pre-completed-dag-tasks @run-pipeline-opts)))
         (is (= [{:artifact/id "art-1"}]
                (:pre-completed-artifacts @run-pipeline-opts)))))))
+
+(deftest resume-workflow-trims-failed-checkpoint-before-running-test
+  (let [workflow-id (random-uuid)
+        run-pipeline-opts (atom nil)
+        run-pipeline-workflow (atom nil)
+        reconstructed {:completed-phases [:plan]
+                       :event-count 0
+                       :failed? true
+                       :completed-dag-tasks #{}
+                       :completed-dag-artifacts []
+                       :phase-results {:plan {:status :completed}}
+                       :machine-snapshot {:execution/id workflow-id
+                                          :execution/status :failed
+                                          :execution/fsm-state {:_state :failed}}
+                       :workflow-spec {:name "canonical-sdlc"
+                                       :version "1.0.0"}}]
+    (with-redefs [wr/reconstruct-context (fn [_events-dir _workflow-id] reconstructed)
+                  sut/resolve-resume-workflow (fn [_] {:workflow-type :canonical-sdlc
+                                                       :workflow-version "1.0.0"})
+                  context/create-llm-client (fn [_workflow _provider _quiet] :llm-client)
+                  es/create-event-stream (fn [] :event-stream)
+                  supervisory/attach! (fn [_event-stream] nil)
+                  dashboard/start-command-poller! (fn [_workflow-id _control-state]
+                                                    (fn [] nil))
+                  main-display/print-info (fn [& _] nil)
+                  main-display/print-error (fn [& _] nil)
+                  clojure.core/requiring-resolve
+                  (fn [sym]
+                    (cond
+                      (= sym 'ai.miniforge.workflow.interface/load-workflow)
+                      (fn [_workflow-type _workflow-version _opts]
+                        {:workflow {:workflow/id :canonical-sdlc
+                                    :workflow/version "1.0.0"
+                                    :workflow/pipeline [{:phase :plan}
+                                                        {:phase :implement}
+                                                        {:phase :verify}]}})
+
+                      (= sym 'ai.miniforge.workflow.interface/run-pipeline)
+                      (fn [workflow _input opts]
+                        (reset! run-pipeline-workflow workflow)
+                        (reset! run-pipeline-opts opts)
+                        {:execution/status :completed})))]
+      (let [result (sut/resume-workflow workflow-id {:quiet true})]
+        (is (= :completed (:execution/status result)))
+        (is (= [{:phase :implement} {:phase :verify}]
+               (:workflow/pipeline @run-pipeline-workflow)))
+        (is (true? (:resume-reset-terminal? @run-pipeline-opts)))
+        (is (= workflow-id
+               (get-in @run-pipeline-opts [:resume-machine-snapshot :execution/id])))))))

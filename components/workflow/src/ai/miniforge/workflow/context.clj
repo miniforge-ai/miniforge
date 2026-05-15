@@ -224,6 +224,10 @@
   "Restore execution context from a durable machine snapshot and phase checkpoints."
   [workflow input machine-snapshot phase-results opts]
   (let [execution-machine (fsm/compile-execution-machine workflow)
+        fsm-state (if (:resume-reset-terminal? opts)
+                    (->> (fsm/initialize-execution execution-machine)
+                         (fsm/start-execution execution-machine))
+                    (:execution/fsm-state machine-snapshot))
         checkpoint-root (checkpoint-store/resolve-checkpoint-root
                          (merge opts machine-snapshot))]
     (sync-machine-projections
@@ -233,7 +237,7 @@
        :execution/workflow-id (:workflow/id workflow)
        :execution/workflow-version (:workflow/version workflow)
        :execution/fsm-machine execution-machine
-       :execution/fsm-state (:execution/fsm-state machine-snapshot)
+       :execution/fsm-state fsm-state
        :execution/input (get machine-snapshot :execution/input input)
        :execution/phase-results phase-results
        :execution/opts opts
