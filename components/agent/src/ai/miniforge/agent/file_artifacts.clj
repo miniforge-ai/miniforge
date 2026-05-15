@@ -33,6 +33,36 @@
   "Optional metadata manifest written by the agent."
   "miniforge-artifact.edn")
 
+(def ^:private failed-exit-code
+  "Default process exit code for missing executor status."
+  1)
+
+(def ^:private empty-changed-paths
+  {:create #{} :modify #{} :delete #{}})
+
+(defn- shell-quote
+  "Quote a value for a POSIX shell command string."
+  [value]
+  (str "'" (str/replace (str value) #"'" "'\"'\"'") "'"))
+
+(defn- valid-base-ref?
+  "True when `base-ref` can be used as a git diff base candidate."
+  [base-ref]
+  (and (string? base-ref) (not (str/blank? base-ref))))
+
+(defn- successful-exec?
+  "True when executor result reports success and a zero exit code."
+  [result]
+  (let [exit-code (get-in result [:data :exit-code] failed-exit-code)]
+    (and (:ok? result)
+         (zero? exit-code))))
+
+(defn- normalize-base-refs
+  [base-refs]
+  (if (sequential? base-refs)
+    base-refs
+    [base-refs]))
+
 (defn- tracked-addition?
   "Return true when the porcelain status indicates a newly added tracked file."
   [status]
@@ -63,30 +93,31 @@
   [line]
   (when (>= (count line) 3)
     (let [status (subs line 0 2)
-        raw-path (subs line 3)
-        path (if (str/includes? raw-path " -> ")
-               (second (str/split raw-path #" -> " 2))
-               raw-path)]
-    (cond
-      (= status "??") {:bucket :untracked :path path}
-      (deleted? status) {:bucket :deleted :path path}
-      (tracked-addition? status) {:bucket :added :path path}
-      (modified? status) {:bucket :modified :path path}
-      :else nil))))
+          raw-path (subs line 3)
+          path (if (str/includes? raw-path " -> ")
+                 (second (str/split raw-path #" -> " 2))
+                 raw-path)]
+      (cond
+        (= status "??") {:bucket :untracked :path path}
+        (deleted? status) {:bucket :deleted :path path}
+        (tracked-addition? status) {:bucket :added :path path}
+        (modified? status) {:bucket :modified :path path}
+        :else nil))))
 
-(defn- name-status-entry
-  "Parse one `git diff --name-status` line into an action/path pair."
+(defn- name-status-entries
+  "Parse one `git diff --name-status` line into action/path entries."
   [line]
   (let [[status old-path new-path] (str/split line #"\t")
         code (some-> status first)]
     (case code
-      \A {:action :create :path old-path}
-      \D {:action :delete :path old-path}
-      \R {:action :modify :path new-path}
-      \C {:action :create :path new-path}
-      \M {:action :modify :path old-path}
-      \T {:action :modify :path old-path}
-      nil)))
+      \A [{:action :create :path old-path}]
+      \D [{:action :delete :path old-path}]
+      \R [{:action :delete :path old-path}
+          {:action :create :path new-path}]
+      \C [{:action :create :path new-path}]
+      \M [{:action :modify :path old-path}]
+      \T [{:action :modify :path old-path}]
+      [])))
 
 (defn empty-snapshot
   "Return an empty working tree snapshot."
@@ -164,18 +195,27 @@
 (defn- diff-against-ref
   "Return changed paths between `base-ref` and the current working tree."
   [working-dir base-ref]
-  (when (and working-dir (string? base-ref) (not (str/blank? base-ref)))
+  (when (and working-dir (valid-base-ref? base-ref))
     (let [{:keys [exit out]} (shell/sh "git" "-C" working-dir
                                        "diff" "--name-status" base-ref "--")]
       (when (zero? exit)
         (reduce add-diff-entry
-                {:create #{} :modify #{} :delete #{}}
-                (keep name-status-entry (str/split-lines out)))))))
+                empty-changed-paths
+                (mapcat name-status-entries (str/split-lines out)))))))
 
 (defn- first-diff-against-ref
   "Try base refs in order and return the first successful diff."
   [working-dir base-refs]
-  (some #(diff-against-ref working-dir %) (filter some? base-refs)))
+  (some #(diff-against-ref working-dir %)
+        (filter valid-base-ref? base-refs)))
+
+(defn- worktree-changed-paths
+  "Merge committed task diff and current dirty snapshot paths."
+  [working-dir base-refs snapshot]
+  (merge-changed
+   (or (first-diff-against-ref working-dir (normalize-base-refs base-refs))
+       empty-changed-paths)
+   (snapshot->changed-paths snapshot)))
 
 (defn- synthetic-artifact
   "Build a synthetic code artifact from written file sets."
@@ -238,7 +278,7 @@
   (let [result (exec! executor env-id
                       "git status --porcelain=v1 --untracked-files=all --ignored=no -- ."
                       {:workdir working-dir})]
-    (if (and (:ok? result) (zero? (get-in result [:data :exit-code] 1)))
+    (if (successful-exec? result)
       (reduce add-entry
               (empty-snapshot)
               (keep porcelain-entry (str/split-lines (get-in result [:data :stdout] ""))))
@@ -282,14 +322,10 @@
      (try
        (let [snap (snapshot-working-dir working-dir)]
          (when-not (anomaly/anomaly? snap)
-           (let [changed (merge-changed
-                          (or (first-diff-against-ref working-dir
-                                                      (if (sequential? base-refs)
-                                                        base-refs
-                                                        [base-refs]))
-                              {:create #{} :modify #{} :delete #{}})
-                          (snapshot->changed-paths snap))]
-             (synthetic-artifact working-dir changed))))
+           (synthetic-artifact working-dir
+                               (worktree-changed-paths working-dir
+                                                       base-refs
+                                                       snap))))
        (catch Exception _
          nil)))))
 
@@ -378,16 +414,16 @@
 (defn- read-file-via-executor
   "Read a file's content from the capsule. Returns empty string on failure."
   [exec! executor env-id working-dir path]
-  (let [r (exec! executor env-id (str "cat " (pr-str path)) {:workdir working-dir})]
+  (let [r (exec! executor env-id (str "cat " (shell-quote path)) {:workdir working-dir})]
     (get-in r [:data :stdout] "")))
 
 (defn- read-manifest-via-executor
   "Read the artifact manifest from the capsule, if present."
   [exec! executor env-id working-dir]
   (let [r (exec! executor env-id
-                 (str "cat " (pr-str artifact-manifest-name))
+                 (str "cat " (shell-quote artifact-manifest-name))
                  {:workdir working-dir})]
-    (when (and (:ok? r) (zero? (get-in r [:data :exit-code] 1)))
+    (when (successful-exec? r)
       (try (-> (get-in r [:data :stdout])
                edn/read-string
                (select-keys [:code/summary :code/tests-needed?]))
@@ -416,21 +452,42 @@
 (defn- diff-against-ref-via-executor
   "Return changed paths between `base-ref` and the capsule working tree."
   [exec! executor env-id working-dir base-ref]
-  (when (and base-ref (not (str/blank? base-ref)))
+  (when (valid-base-ref? base-ref)
     (let [result (exec! executor env-id
-                        (str "git diff --name-status " (pr-str base-ref) " --")
+                        (str "git diff --name-status "
+                             (shell-quote base-ref)
+                             " --")
                         {:workdir working-dir})]
-      (when (and (:ok? result) (zero? (get-in result [:data :exit-code] 1)))
+      (when (successful-exec? result)
         (reduce add-diff-entry
-                {:create #{} :modify #{} :delete #{}}
-                (keep name-status-entry
-                      (str/split-lines (get-in result [:data :stdout] ""))))))))
+                empty-changed-paths
+                (mapcat name-status-entries
+                        (str/split-lines (get-in result [:data :stdout] ""))))))))
 
 (defn- first-diff-against-ref-via-executor
   "Try base refs in order inside the capsule."
   [exec! executor env-id working-dir base-refs]
   (some #(diff-against-ref-via-executor exec! executor env-id working-dir %)
-        (filter some? base-refs)))
+        (filter valid-base-ref? base-refs)))
+
+(defn- worktree-changed-paths-via-executor
+  "Merge committed task diff and current dirty snapshot paths in a capsule."
+  [exec! executor env-id working-dir base-refs snapshot]
+  (merge-changed
+   (or (first-diff-against-ref-via-executor
+        exec! executor env-id working-dir (normalize-base-refs base-refs))
+       empty-changed-paths)
+   (snapshot->changed-paths snapshot)))
+
+(defn- worktree-artifact-via-executor
+  [exec! executor env-id working-dir changed]
+  (let [files (changed-paths->file-entries changed exec! executor env-id working-dir)]
+    (when (seq files)
+      (merge {:code/files files
+              :code/summary (str (count files)
+                                 " files collected from capsule working directory (no MCP submit)")
+              :code/tests-needed? true}
+             (read-manifest-via-executor exec! executor env-id working-dir)))))
 
 (defn collect-written-files-via-executor
   "Like collect-written-files but runs git status inside a capsule via executor.
@@ -458,19 +515,9 @@
    (when working-dir
      (try
        (let [snap (snapshot-via-executor exec! executor env-id working-dir)
-             changed (merge-changed
-                      (or (first-diff-against-ref-via-executor
-                           exec! executor env-id working-dir
-                           (if (sequential? base-refs) base-refs [base-refs]))
-                          {:create #{} :modify #{} :delete #{}})
-                      (snapshot->changed-paths snap))
-             files (changed-paths->file-entries changed exec! executor env-id working-dir)]
-         (when (seq files)
-           (merge {:code/files files
-                   :code/summary (str (count files)
-                                      " files collected from capsule working directory (no MCP submit)")
-                   :code/tests-needed? true}
-                  (read-manifest-via-executor exec! executor env-id working-dir))))
+             changed (worktree-changed-paths-via-executor
+                      exec! executor env-id working-dir base-refs snap)]
+         (worktree-artifact-via-executor exec! executor env-id working-dir changed))
        (catch Exception _
          nil)))))
 
