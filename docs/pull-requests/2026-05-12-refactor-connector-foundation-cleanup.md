@@ -46,10 +46,11 @@ Refactor / per-component cleanup tier.
 - 3 boundary helpers (`require-handle!`, `validate-auth!`,
   `validate-auth-or-throw!`) route through `response/throw-anomaly!`.
 - Per `response/anomaly`'s contract, the thrown `ex-data` now carries
-  `:anomaly/category` at top level alongside the existing context keys
-  (`:handle`, `:errors`, etc.). External slingshot callers and
-  `(thrown? ExceptionInfo)` consumers see the same shape with one extra
-  diagnostic key.
+  canonical anomaly metadata (`:anomaly/category`, `:anomaly/message`,
+  `:anomaly/id`, and `:anomaly/timestamp`) at top level alongside the
+  existing context keys (`:handle`, `:errors`, etc.). External slingshot
+  callers and `(thrown? ExceptionInfo)` consumers see the same context
+  shape with added diagnostic keys.
 
 `components/connector-retry/deps.edn`:
 
