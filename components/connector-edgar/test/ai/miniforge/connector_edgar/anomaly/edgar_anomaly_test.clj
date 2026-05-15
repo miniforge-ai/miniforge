@@ -1,9 +1,26 @@
-(ns ai.miniforge.connector-edgar.anomaly.edgar-anomaly-test
-  "Coverage for `impl/do-connect` and `impl/do-extract` boundary
-   escalation via `response/throw-anomaly!`.
+;; Title: Miniforge.ai
+;; Subtitle: An agentic SDLC / fleet-control platform
+;; Author: Christopher Lester
+;; Line: Founder, Miniforge.ai (project)
+;; Copyright 2025-2026 Christopher Lester (christopher@miniforge.ai)
+;;
+;; Licensed under the Apache License, Version 2.0 (the "License");
+;; you may not use this file except in compliance with the License.
+;; You may obtain a copy of the License at
+;;
+;;     http://www.apache.org/licenses/LICENSE-2.0
+;;
+;; Unless required by applicable law or agreed to in writing, software
+;; distributed under the License is distributed on an "AS IS" BASIS,
+;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+;; See the License for the specific language governing permissions and
+;; limitations under the License.
 
-   Missing config keys → `:anomalies/incorrect`. Unknown aggregation →
-   `:anomalies/unsupported`."
+(ns ai.miniforge.connector-edgar.anomaly.edgar-anomaly-test
+  "Coverage for `impl/do-connect` boundary escalation via
+   `response/throw-anomaly!`.
+
+   Missing config keys → `:anomalies/incorrect`."
   (:require [clojure.test :refer [deftest is testing]]
             [ai.miniforge.connector-edgar.impl :as impl])
   (:import (clojure.lang ExceptionInfo)))

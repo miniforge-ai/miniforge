@@ -2,7 +2,7 @@
 
 ## Overview
 
-Migrates 18 throw sites across four data-source connectors:
+Migrates 19 throw sites across four data-source connectors:
 `connector-edgar`, `connector-excel`, `connector-file`, `connector-http`.
 Same mechanical shape as the connector-foundation PR — every site routes
 through `response/throw-anomaly!` with a typed `:anomaly/category` in
@@ -53,7 +53,7 @@ Refactor / per-component cleanup tier.
 - `do-connect` unsupported format → `:anomalies/unsupported`.
 - `do-extract` file-not-found → `:anomalies/not-found`.
 
-`connector-http/src/.../impl.clj` (4 sites) + `request.clj` (1 site):
+`connector-http/src/.../impl.clj` (5 sites) + `request.clj` (1 site):
 
 - `do-connect` missing base-url/endpoint → `:anomalies/incorrect`.
 - `do-discover` / `do-extract` handle-not-found → `:anomalies/not-found`.
@@ -71,8 +71,9 @@ New decomposed anomaly tests, one per connector:
 - `connector-file/test/.../anomaly/file_anomaly_test.clj`
 - `connector-http/test/.../anomaly/http_anomaly_test.clj`
 
-Each asserts `:anomaly/category` and key context fields on every
-escalation path.
+Together they assert `:anomaly/category` and key context fields across the
+main boundary escalation families. They intentionally cover representative
+paths per connector rather than every migrated throw site.
 
 ## Per-site classification
 
@@ -105,9 +106,10 @@ escalation path.
 
 ## Testing Plan
 
-- New `anomaly.*` tests assert message + `:anomaly/category` +
-  key context fields. Tests would fail if a future refactor reverts
-  to plain `(throw (ex-info ...))` with the same message.
+- New `anomaly.*` tests assert `:anomaly/category` and key context fields
+  across representative connector escalation paths. Tests would fail if a
+  covered path reverts to plain `(throw (ex-info ...))` with the same
+  message.
 - Local component-test runs blocked by the `cognitect/test-runner`
   classpath gap noted in prior PRs — CI validates.
 
@@ -127,7 +129,7 @@ existing callers branching on that key are unaffected.
 
 ## Checklist
 
-- [x] All 18 in-scope throw sites migrated
+- [x] All 19 in-scope throw sites migrated
 - [x] Single API per site (`response/throw-anomaly!`)
 - [x] New decomposed test files (four — one per connector)
 - [x] No new throws in anomaly-returning code paths
