@@ -108,12 +108,26 @@
     :title (messages/t :layout/share-title)}
    (messages/t :layout/share-label)])
 
-(defn- theme-button
+(def ^:private theme-options
+  [["warm_light"    "Warm Light"]
+   ["cool_light"    "Cool Light"]
+   ["royal_light"   "Royal Light"]
+   ["aurora_light"  "Aurora Light"]
+   ["warm_dark"     "Warm Dark"]
+   ["cool_dark"     "Cool Dark"]
+   ["royal_dark"    "Royal Dark"]
+   ["aurora_dark"   "Aurora Dark"]
+   ["high-contrast" "High Contrast"]])
+
+(defn- theme-picker
   []
-  [:button.btn.btn-sm.btn-ghost
-   {:onclick "window.miniforge.cycleTheme()"
-    :title (messages/t :layout/theme-title)}
-   (messages/t :layout/theme-label)])
+  [:div.theme-picker
+   [:label {:for "theme-select"} (messages/t :layout/theme-label)]
+   [:select#theme-select.theme-select
+    {:onchange "window.miniforge.switchTheme(this.value)"
+     :title    (messages/t :layout/theme-title)}
+    (for [[value label] theme-options]
+      [:option {:value value} label])]])
 
 (defn- refresh-button
   []
@@ -128,7 +142,7 @@
     [:span#ws-indicator.status-dot.disconnected]
     [:span#ws-text.ws-text (messages/t :layout/ws-connected)]]
    (share-button)
-   (theme-button)
+   (theme-picker)
    (refresh-button)])
 
 (defn- top-banner
