@@ -189,13 +189,37 @@
   [implementer-result]
   (get-in implementer-result [:output :code/files]))
 
+(defn- artifact-files
+  [artifact]
+  (:code/files artifact))
+
+(defn- executor-worktree-artifact
+  [{:keys [executor execute-fn env-id worktree-path base-refs]}]
+  (file-artifacts/collect-worktree-files-via-executor
+   execute-fn executor env-id worktree-path base-refs))
+
+(defn- executor-session-artifact
+  [{:keys [pre-session-snapshot executor execute-fn env-id worktree-path]}]
+  (when pre-session-snapshot
+    (file-artifacts/collect-written-files-via-executor
+     pre-session-snapshot execute-fn executor env-id worktree-path)))
+
 (defn- files-via-executor
   "Collect files via capsule executor (governed mode)."
-  [{:keys [pre-session-snapshot executor execute-fn env-id worktree-path]}]
-  (when (and pre-session-snapshot executor execute-fn env-id worktree-path)
-    (get (file-artifacts/collect-written-files-via-executor
-          pre-session-snapshot execute-fn executor env-id worktree-path)
-         :code/files)))
+  [{:keys [executor execute-fn env-id worktree-path] :as input}]
+  (when (and executor execute-fn env-id worktree-path)
+    (artifact-files (or (executor-worktree-artifact input)
+                        (executor-session-artifact input)))))
+
+(defn- local-worktree-artifact
+  [{:keys [worktree-path base-refs]}]
+  (file-artifacts/collect-worktree-files worktree-path base-refs))
+
+(defn- local-session-artifact
+  [{:keys [pre-session-snapshot worktree-path]}]
+  (file-artifacts/collect-written-files
+   (or pre-session-snapshot (file-artifacts/empty-snapshot))
+   worktree-path))
 
 (defn- files-via-local-snapshot
   "Collect files via local git status (non-capsule fallback).
@@ -208,12 +232,10 @@
    the implementer wrote substantive files before the throw — observed
    in the 2026-05-08 dogfood (Run 7 produced 285 LOC that the curator
    rejected because the snapshot path short-circuited)."
-  [{:keys [pre-session-snapshot worktree-path]}]
+  [{:keys [worktree-path] :as input}]
   (when worktree-path
-    (get (file-artifacts/collect-written-files
-          (or pre-session-snapshot (file-artifacts/empty-snapshot))
-          worktree-path)
-         :code/files)))
+    (artifact-files (or (local-worktree-artifact input)
+                        (local-session-artifact input)))))
 
 (def non-substantive-paths
   "Paths the curator drops before assessing 'files written.'
@@ -555,8 +577,7 @@
            :conflicted-paths (vec (sort paths))}}))
 
 (defmethod curate :merge-resolution
-  [{:keys [worktree-path prior-conflicted-paths]
-    :as input}]
+  [{:keys [worktree-path prior-conflicted-paths]}]
   (let [current-paths (scan-conflicted-paths worktree-path)
         ;; Coerce prior-conflicted-paths to a set so callers can feed
         ;; the previous iteration's :conflicted-paths (a sorted vector

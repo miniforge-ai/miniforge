@@ -136,13 +136,16 @@
   [base-path repo-path worktree-name branch]
   (locking worktree-lock
     (let [worktree-path (str base-path "/" worktree-name)
-          base-ref      (or (resolve-branch-sha repo-path branch) branch)]
+          base-sha      (resolve-branch-sha repo-path branch)
+          base-ref      (or base-sha branch)]
       (ensure-directory base-path)
       (let [result (run-git "-C" repo-path
                             "worktree" "add" "-b" worktree-name
                             worktree-path base-ref)]
         (if (zero? (:exit result))
-          (result/ok {:worktree-path worktree-path})
+          (result/ok {:worktree-path worktree-path
+                      :base-sha base-sha
+                      :base-ref branch})
           ;; Failed — clean up stale branch/directory from a prior run and retry
           (do
             (run-shell "rm" "-rf" worktree-path)
@@ -152,13 +155,17 @@
                                    "worktree" "add" "-b" worktree-name
                                    worktree-path base-ref)]
               (if (zero? (:exit result2))
-                (result/ok {:worktree-path worktree-path})
+                (result/ok {:worktree-path worktree-path
+                            :base-sha base-sha
+                            :base-ref branch})
                 ;; Still failing — detached HEAD as last resort
                 (let [result3 (run-git "-C" repo-path
                                        "worktree" "add" "--detach"
                                        worktree-path)]
                   (if (zero? (:exit result3))
-                    (result/ok {:worktree-path worktree-path})
+                    (result/ok {:worktree-path worktree-path
+                                :base-sha base-sha
+                                :base-ref branch})
                     (result/err :worktree-create-failed (:err result3))))))))))))
 
 (defn remove-worktree
@@ -568,12 +575,14 @@
           branch (get env-config :branch "main")
           create-result (create-worktree base-path repo-path worktree-name branch)]
       (if (result/ok? create-result)
-        (let [worktree-path (:worktree-path (:data create-result))]
+        (let [data (:data create-result)
+              worktree-path (:worktree-path data)]
           (result/ok (proto/create-environment-record
                       worktree-name :worktree task-id worktree-path
                       (assoc env-config
                              :metadata {:worktree-path worktree-path
                                         :repo-path repo-path
+                                        :base-sha (:base-sha data)
                                         ;; Stored so persist-workspace! can bundle
                                         ;; the right base..HEAD range without
                                         ;; guessing the parent branch.

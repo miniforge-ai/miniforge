@@ -564,6 +564,46 @@
       (write-session-checkpoint! working-dir new-session-id))
     result))
 
+(defn- base-ref-candidates
+  "Return candidate refs for computing the promoted task diff."
+  [context]
+  (let [base-sha (get-in context [:execution/environment-metadata :base-sha])
+        base-branch (or (get-in context [:execution/environment-metadata :base-branch])
+                        (get-in context [:execution/opts :branch])
+                        (get-in context [:execution/input :branch]))]
+    (cond-> []
+      base-sha (conj base-sha)
+      base-branch (conj (str "origin/" base-branch) base-branch))))
+
+(defn- collect-promoted-artifact
+  "Collect code files from the current promoted worktree/container state."
+  [context session-mode working-dir]
+  (let [base-refs (base-ref-candidates context)]
+    (if (= :capsule session-mode)
+      (when-let [exec! (or (:execution/execute-fn context)
+                           @(requiring-resolve 'ai.miniforge.dag-executor.executor/execute!))]
+        (file-artifacts/collect-worktree-files-via-executor
+         exec!
+         (:execution/executor context)
+         (:execution/environment-id context)
+         working-dir
+         base-refs))
+      (file-artifacts/collect-worktree-files working-dir base-refs))))
+
+(defn- collect-session-artifact
+  "Collect a file artifact when the agent did not submit one explicitly."
+  [context session-mode working-dir pre-session-snapshot]
+  (or (collect-promoted-artifact context session-mode working-dir)
+      (if (= :capsule session-mode)
+        (file-artifacts/collect-written-files-via-executor
+         pre-session-snapshot
+         @(requiring-resolve 'ai.miniforge.dag-executor.executor/execute!)
+         (:execution/executor context)
+         (:execution/environment-id context)
+         working-dir)
+        (file-artifacts/collect-written-files pre-session-snapshot
+                                              working-dir))))
+
 (defn- invoke-with-llm
   "Invoke the implementer via the LLM backend."
   [llm-client user-prompt effective-system-prompt config context on-chunk logger
@@ -577,15 +617,10 @@
                                        config context on-chunk existing-files working-dir))
         response llm-result
         file-artifact (when-not artifact
-                        (if (= :capsule session-mode)
-                          (file-artifacts/collect-written-files-via-executor
-                           pre-session-snapshot
-                           @(requiring-resolve 'ai.miniforge.dag-executor.executor/execute!)
-                           (:execution/executor context)
-                           (:execution/environment-id context)
-                           working-dir)
-                          (file-artifacts/collect-written-files pre-session-snapshot
-                                                                working-dir)))
+                        (collect-session-artifact context
+                                                  session-mode
+                                                  working-dir
+                                                  pre-session-snapshot))
         normalized (result-boundary/normalize-llm-result
                     {:role :implement
                      :response response

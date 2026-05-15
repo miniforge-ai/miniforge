@@ -187,6 +187,10 @@
   "Collect files written during the agent session into a synthetic code artifact."
   file-artifacts/collect-written-files)
 
+(def collect-worktree-files
+  "Collect the promoted task artifact from the current worktree."
+  file-artifacts/collect-worktree-files)
+
 (def rehydrate-files
   "Reconstitute :code/files from recorded paths by reading the worktree.
    Used by downstream phases when the implement phase persisted only

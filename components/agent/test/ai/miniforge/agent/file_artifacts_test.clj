@@ -26,6 +26,12 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Test helpers
 
+(def success-exit-code
+  0)
+
+(def missing-base-exit-code
+  128)
+
 (defn- temp-dir
   "Create a temp directory for file artifact tests."
   []
@@ -65,7 +71,7 @@
   (testing "parses git porcelain output into working tree buckets"
     (with-redefs [clojure.java.shell/sh
                   (fn [& _]
-                    {:exit 0
+                    {:exit success-exit-code
                      :out (str "?? src/new_file.clj\n"
                                " M src/changed.clj\n"
                                "D  src/deleted.clj\n"
@@ -138,6 +144,69 @@
                   :code/language "clojure"
                   :code/tests-needed? false}
                  (sut/collect-written-files pre dir))))
+        (finally
+          (delete-tree! dir))))))
+
+(deftest collect-worktree-files-test
+  (testing "collects committed task diff plus current dirty files"
+    (let [dir (temp-dir)]
+      (try
+        (write-file! dir "src/committed.clj" "(ns committed)")
+        (write-file! dir "src/dirty.clj" "(ns dirty)")
+        (with-redefs [ai.miniforge.agent.file-artifacts/snapshot-working-dir
+                      (fn [_]
+                        (make-snapshot :modified #{"src/dirty.clj"}))
+                      clojure.java.shell/sh
+                      (fn [& _]
+                        {:exit success-exit-code
+                         :out "M\tsrc/committed.clj\n"
+                         :err ""})]
+          (let [artifact (sut/collect-worktree-files dir ["base-sha"])
+                paths (mapv :path (:code/files artifact))]
+            (is (= ["src/committed.clj" "src/dirty.clj"] paths))
+            (is (= #{:modify} (set (map :action (:code/files artifact)))))))
+        (finally
+          (delete-tree! dir)))))
+
+  (testing "falls back to dirty worktree when base ref cannot be diffed"
+    (let [dir (temp-dir)]
+      (try
+        (write-file! dir "src/dirty.clj" "(ns dirty)")
+        (with-redefs [ai.miniforge.agent.file-artifacts/snapshot-working-dir
+                      (fn [_]
+                        (make-snapshot :modified #{"src/dirty.clj"}))
+                      clojure.java.shell/sh
+                      (fn [& _]
+                        {:exit missing-base-exit-code
+                         :out ""
+                         :err "bad revision"})]
+          (is (= [{:path "src/dirty.clj"
+                   :content "(ns dirty)"
+                   :action :modify}]
+                 (:code/files (sut/collect-worktree-files dir ["missing-base"])))))
+        (finally
+          (delete-tree! dir))))))
+
+(deftest collect-worktree-files-rename-test
+  (testing "diff renames delete the old path and create the new path"
+    (let [dir (temp-dir)]
+      (try
+        (write-file! dir "src/new.clj" "(ns new)")
+        (with-redefs [ai.miniforge.agent.file-artifacts/snapshot-working-dir
+                      (fn [_]
+                        (sut/empty-snapshot))
+                      clojure.java.shell/sh
+                      (fn [& _]
+                        {:exit success-exit-code
+                         :out "R100\tsrc/old.clj\tsrc/new.clj\n"
+                         :err ""})]
+          (is (= [{:path "src/new.clj"
+                   :content "(ns new)"
+                   :action :create}
+                  {:path "src/old.clj"
+                   :content ""
+                   :action :delete}]
+                 (:code/files (sut/collect-worktree-files dir ["base-sha"])))))
         (finally
           (delete-tree! dir))))))
 
