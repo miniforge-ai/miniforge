@@ -577,6 +577,7 @@
                  "components/event-stream/resources"
                  "components/supervisory-state/src"
                  "components/workflow-resume/src"
+                 "components/workflow-resume/resources"
                  "components/dag-primitives/src"
                  "components/dag-executor/src"
                  "components/dag-executor/resources"
