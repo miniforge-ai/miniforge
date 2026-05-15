@@ -3,6 +3,7 @@
    Downloads a remote Excel file and extracts records using column mappings."
   (:require [ai.miniforge.connector.interface :as connector]
             [ai.miniforge.connector-excel.messages :as msg]
+            [ai.miniforge.response.interface :as response]
             [ai.miniforge.schema.interface :as schema]
             [babashka.http-client :as http])
   (:import [java.io File FileOutputStream]
@@ -67,8 +68,9 @@
                             (or (nil? row-filter) (row-filter record)))
                      (conj! records record)
                      records))))))
-    (throw (ex-info (msg/t :excel/sheet-not-found {:sheet sheet-name})
-                    {:sheet sheet-name}))))
+    (response/throw-anomaly! :anomalies/not-found
+                             (msg/t :excel/sheet-not-found {:sheet sheet-name})
+                             {:sheet sheet-name})))
 
 ;; -- Filtering --
 
@@ -107,8 +109,9 @@
                             :throw   false})
         status (:status resp)]
     (when-not (<= 200 status 299)
-      (throw (ex-info (msg/t :excel/download-failed {:error (str "HTTP " status)})
-                      {:status status})))
+      (response/throw-anomaly! :anomalies/unavailable
+                               (msg/t :excel/download-failed {:error (str "HTTP " status)})
+                               {:status status}))
     (let [tmp (File/createTempFile "connector-excel-" ".xls")]
       (.deleteOnExit tmp)
       (with-open [out (FileOutputStream. tmp)]
@@ -124,9 +127,15 @@
         sheet-name (:excel/sheet-name config)
         columns    (:excel/columns config)]
     (cond
-      (nil? url)        (throw (ex-info (msg/t :excel/url-required) {:config config}))
-      (nil? sheet-name) (throw (ex-info (msg/t :excel/sheet-required) {:config config}))
-      (nil? columns)    (throw (ex-info (msg/t :excel/columns-required) {:config config}))
+      (nil? url)        (response/throw-anomaly! :anomalies/incorrect
+                                                 (msg/t :excel/url-required)
+                                                 {:config config})
+      (nil? sheet-name) (response/throw-anomaly! :anomalies/incorrect
+                                                 (msg/t :excel/sheet-required)
+                                                 {:config config})
+      (nil? columns)    (response/throw-anomaly! :anomalies/incorrect
+                                                 (msg/t :excel/columns-required)
+                                                 {:config config})
       :else
       (let [handle (str (UUID/randomUUID))
             tmp-file (download-to-temp url)

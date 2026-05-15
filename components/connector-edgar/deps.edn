@@ -3,6 +3,7 @@
         ai.miniforge/connector-auth  {:local/root "../connector-auth"}
         ai.miniforge/connector-http  {:local/root "../connector-http"}
         ai.miniforge/connector-retry {:local/root "../connector-retry"}
+        ai.miniforge/response        {:local/root "../response"}
         cheshire/cheshire        {:mvn/version "5.13.0"}
         org.babashka/http-client {:mvn/version "0.4.22"}
         org.clojure/data.xml     {:mvn/version "0.2.0-alpha9"}}
