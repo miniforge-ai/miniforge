@@ -191,10 +191,13 @@
 
 (defn- files-via-executor
   "Collect files via capsule executor (governed mode)."
-  [{:keys [pre-session-snapshot executor execute-fn env-id worktree-path]}]
-  (when (and pre-session-snapshot executor execute-fn env-id worktree-path)
-    (get (file-artifacts/collect-written-files-via-executor
-          pre-session-snapshot execute-fn executor env-id worktree-path)
+  [{:keys [pre-session-snapshot executor execute-fn env-id worktree-path base-refs]}]
+  (when (and executor execute-fn env-id worktree-path)
+    (get (or (file-artifacts/collect-worktree-files-via-executor
+              execute-fn executor env-id worktree-path base-refs)
+             (when pre-session-snapshot
+               (file-artifacts/collect-written-files-via-executor
+                pre-session-snapshot execute-fn executor env-id worktree-path)))
          :code/files)))
 
 (defn- files-via-local-snapshot
@@ -208,11 +211,12 @@
    the implementer wrote substantive files before the throw — observed
    in the 2026-05-08 dogfood (Run 7 produced 285 LOC that the curator
    rejected because the snapshot path short-circuited)."
-  [{:keys [pre-session-snapshot worktree-path]}]
+  [{:keys [pre-session-snapshot worktree-path base-refs]}]
   (when worktree-path
-    (get (file-artifacts/collect-written-files
-          (or pre-session-snapshot (file-artifacts/empty-snapshot))
-          worktree-path)
+    (get (or (file-artifacts/collect-worktree-files worktree-path base-refs)
+             (file-artifacts/collect-written-files
+              (or pre-session-snapshot (file-artifacts/empty-snapshot))
+              worktree-path))
          :code/files)))
 
 (def non-substantive-paths
@@ -555,8 +559,7 @@
            :conflicted-paths (vec (sort paths))}}))
 
 (defmethod curate :merge-resolution
-  [{:keys [worktree-path prior-conflicted-paths]
-    :as input}]
+  [{:keys [worktree-path prior-conflicted-paths]}]
   (let [current-paths (scan-conflicted-paths worktree-path)
         ;; Coerce prior-conflicted-paths to a set so callers can feed
         ;; the previous iteration's :conflicted-paths (a sorted vector

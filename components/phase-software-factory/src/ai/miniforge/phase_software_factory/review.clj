@@ -95,9 +95,18 @@
         inner-output       (get-in implement-phase-result [:result :output])
         worktree-path      (or (get ctx :execution/worktree-path)
                                (get ctx :worktree-path))
+        base-branch        (or (get-in ctx [:execution/environment-metadata :base-branch])
+                               (get-in ctx [:execution/opts :branch])
+                               (get-in ctx [:execution/input :branch]))
+        base-refs          (cond-> []
+                             (get-in ctx [:execution/environment-metadata :base-sha])
+                             (conj (get-in ctx [:execution/environment-metadata :base-sha]))
+                             base-branch
+                             (conj (str "origin/" base-branch) base-branch))
         worktree-artifact  (when worktree-path
-                             (agent/collect-written-files (agent/empty-snapshot)
-                                                          worktree-path))]
+                             (or (agent/collect-worktree-files worktree-path base-refs)
+                                 (agent/collect-written-files (agent/empty-snapshot)
+                                                              worktree-path)))]
     (or
      (when (:code/files outer-artifact)        outer-artifact)
      (when (:code/files inner-artifact)        inner-artifact)

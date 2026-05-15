@@ -105,6 +105,17 @@
       (throw (ex-info (messages/t :implement/no-worktree)
                       {:ctx-keys (keys ctx)}))))
 
+(defn- base-ref-candidates
+  "Return candidate refs for collecting the promoted task artifact."
+  [ctx]
+  (let [base-sha (get-in ctx [:execution/environment-metadata :base-sha])
+        base-branch (or (get-in ctx [:execution/environment-metadata :base-branch])
+                        (get-in ctx [:execution/opts :branch])
+                        (get-in ctx [:execution/input :branch]))]
+    (cond-> []
+      base-sha (conj base-sha)
+      base-branch (conj (str "origin/" base-branch) base-branch))))
+
 (defn- resolve-files-in-scope
   "Resolve files-in-scope from input, checking context and intent."
   [input]
@@ -267,6 +278,7 @@
             :executor (get ctx :execution/executor)
             :execute-fn (get ctx :execution/execute-fn)
             :pre-session-snapshot (get ctx :execution/pre-session-snapshot)
+            :base-refs (base-ref-candidates ctx)
             :intent-scope (get-in ctx [:execution/input :intent :scope])
             :spec-description (get-in ctx [:execution/input :description])
             :llm-client (get ctx :llm-backend)
