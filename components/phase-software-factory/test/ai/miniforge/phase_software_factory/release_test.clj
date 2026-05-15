@@ -634,6 +634,20 @@
       (is (= 0 (get-in result [:phase :duration-ms]))
           "Duration should default to 0 when start-time is nil"))))
 
+(deftest leave-release-detects-zero-files-by-error-type-test
+  (testing "zero-files failures do not depend on localized error text"
+    (let [interceptor (phase/get-phase-interceptor {:phase :release})
+          ctx {:phase {:started-at (System/currentTimeMillis)
+                       :result {:status :success
+                                :error {:message "translated message"
+                                        :data {:type :release/zero-files
+                                               :phase :release}}}
+                       :budget {:iterations 2}
+                       :iterations 1}
+               :execution/metrics {:tokens 0 :duration-ms 0}}
+          result ((:leave interceptor) ctx)]
+      (is (= :failed (get-in result [:phase :status]))))))
+
 ;------------------------------------------------------------------------------ Layer 2: Interceptor Leave Tests
 
 (deftest leave-release-records-metrics-test

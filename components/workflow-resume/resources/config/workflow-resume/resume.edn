@@ -1,0 +1,8 @@
+{:workflow-resume/resume
+ {:completed-phase-statuses #{:completed
+                              :success
+                              :succeeded
+                              :already-implemented
+                              :already-satisfied}
+  :blocking-review-decisions #{:changes-requested
+                               :rejected}}}

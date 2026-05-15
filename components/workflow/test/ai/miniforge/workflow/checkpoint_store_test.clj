@@ -95,6 +95,48 @@
                               #"Invalid checkpoint data"
                               (checkpoint-store/persist-execution-state! invalid-ctx)))))))
 
+(deftest persist-execution-state-preserves-existing-phase-checkpoints-test
+  (testing "a resumed partial pipeline does not shrink the checkpoint manifest"
+    (with-temp-checkpoint-root
+      (fn [checkpoint-root]
+        (let [workflow-id (random-uuid)
+              initial-workflow {:workflow/id :test
+                                :workflow/version "1.0.0"
+                                :workflow/pipeline [{:phase :explore}
+                                                    {:phase :plan}
+                                                    {:phase :implement}
+                                                    {:phase :review}]}
+              resumed-workflow {:workflow/id :test
+                                :workflow/version "1.0.0"
+                                :workflow/pipeline [{:phase :release}]}
+              initial-ctx (-> (ctx/create-context initial-workflow {:task "Test"}
+                                                  {:checkpoint/root checkpoint-root})
+                              (assoc :execution/id workflow-id)
+                              (assoc :execution/phase-results
+                                     {:explore {:status :completed}
+                                      :plan {:status :completed}
+                                      :implement {:status :completed}
+                                      :review {:status :completed}}))
+              resumed-ctx (-> (ctx/create-context resumed-workflow {:task "Test"}
+                                                  {:checkpoint/root checkpoint-root})
+                              (assoc :execution/id workflow-id)
+                              (assoc :execution/phase-results
+                                     {:plan {:status :completed}
+                                      :implement {:status :completed}
+                                      :release {:status :failed}})
+                              (assoc :execution/current-phase :release))]
+          (checkpoint-store/persist-execution-state! initial-ctx)
+          (checkpoint-store/persist-execution-state! resumed-ctx)
+          (let [checkpoint-data (checkpoint-store/load-checkpoint-data
+                                 workflow-id
+                                 {:checkpoint/root checkpoint-root})]
+            (is (= [:explore :plan :implement :review :release]
+                   (get-in checkpoint-data [:manifest :workflow/phases-completed])))
+            (is (= {:status :completed}
+                   (get-in checkpoint-data [:phase-results :explore])))
+            (is (= {:status :failed}
+                   (get-in checkpoint-data [:phase-results :release])))))))))
+
 (deftest load-checkpoint-data-validates-at-interface-boundary-test
   (testing "invalid checkpoint payloads are rejected at the public interface"
     (with-redefs [checkpoint-store/load-checkpoint-data
