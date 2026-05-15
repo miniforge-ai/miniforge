@@ -424,6 +424,17 @@
            (println "✅ Git hooks reset to default (.git/hooks/)"))}
 
   ;; ──────────────────────────────────────────────────────────────────────────
+  ;; GitHub inspection — PR reviews, inline comments
+  ;; ──────────────────────────────────────────────────────────────────────────
+
+  gh:pr
+  {:doc "Summarize a GitHub PR: state, reviews, and inline comments.
+   Usage: bb gh:pr --pr <n> [--repo owner/repo] [--reviews] [--comments]
+   Repo defaults to the origin of the current working directory."
+   :requires ([gh])
+   :task (gh/pr! *command-line-args*)}
+
+  ;; ──────────────────────────────────────────────────────────────────────────
   ;; Artifact Utilities
   ;; ──────────────────────────────────────────────────────────────────────────
 
