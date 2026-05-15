@@ -21,6 +21,7 @@
   (:require [ai.miniforge.connector.interface :as connector]
             [ai.miniforge.connector-sarif.format :as fmt]
             [ai.miniforge.connector-sarif.schema :as schema]
+            [ai.miniforge.response.interface :as response]
             [clojure.string :as str]))
 
 ;; --------------------------------------------------------------------------
@@ -49,7 +50,9 @@
   [config]
   (let [{:keys [valid? errors]} (schema/validate-config config)]
     (when-not valid?
-      (throw (ex-info "Invalid SARIF config" {:errors errors})))
+      (response/throw-anomaly! :anomalies/incorrect
+                               "Invalid SARIF config"
+                               {:errors errors}))
     (let [handle (generate-handle)]
       (connector/store-handle! handles handle
                                {:sarif/source-path (:sarif/source-path config)

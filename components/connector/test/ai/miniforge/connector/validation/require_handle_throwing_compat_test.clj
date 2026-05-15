@@ -44,3 +44,12 @@
         (is false "should have thrown")
         (catch clojure.lang.ExceptionInfo e
           (is (= "missing" (:handle (ex-data e)))))))))
+
+(deftest require-handle-bang-ex-data-carries-anomaly-category
+  (testing "thrown ex-data carries :anomalies/not-found category via response/throw-anomaly!"
+    (let [store (connector/create-handle-registry)]
+      (try
+        (connector/require-handle! store "missing")
+        (is false "should have thrown")
+        (catch clojure.lang.ExceptionInfo e
+          (is (= :anomalies/not-found (:anomaly/category (ex-data e)))))))))

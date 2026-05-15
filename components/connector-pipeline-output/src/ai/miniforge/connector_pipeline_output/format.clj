@@ -1,7 +1,8 @@
 (ns ai.miniforge.connector-pipeline-output.format
   "Pluggable format transforms for pipeline output.
    Each format writes records and returns the filename used."
-  (:require [cheshire.core :as json]
+  (:require [ai.miniforge.response.interface :as response]
+            [cheshire.core :as json]
             [clojure.java.io :as io]
             [clojure.string]))
 
@@ -29,8 +30,9 @@
 
 (defmethod write-records :default
   [format _ _ _]
-  (throw (ex-info (str "Unsupported output format: " format)
-                  {:format format})))
+  (response/throw-anomaly! :anomalies/unsupported
+                           (str "Unsupported output format: " format)
+                           {:format format}))
 
 (defn- sanitize-name
   "Sanitize a dataset name for use in filenames."
