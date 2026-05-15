@@ -84,6 +84,7 @@
                        "components/supervisory-state/src"
                        "components/pr-scoring/src"
                        "components/workflow-resume/src"
+                       "components/workflow-resume/resources"
                        "components/tui-engine/src"
                        "components/tui-engine/resources"
                        "components/tui-views/src"
