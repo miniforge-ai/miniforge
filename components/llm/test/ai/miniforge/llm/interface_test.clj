@@ -927,6 +927,29 @@
       (is (zero? exit))
       (is (= "" out)))))
 
+(deftest default-exec-fn-honors-workdir-test
+  (testing ":workdir opt becomes the subprocess working directory"
+    (let [workdir (.getCanonicalPath (java.io.File. (System/getProperty "java.io.tmpdir")))
+          {:keys [out exit]} (impl/default-exec-fn ["pwd"] {:workdir workdir})
+          actual (.getCanonicalPath (java.io.File. (str/trim out)))]
+      (is (zero? exit))
+      (is (= workdir actual)))))
+
+(deftest complete-impl-passes-workdir-to-exec-fn-test
+  (testing "non-streaming CLI completion runs in the requested workdir"
+    (let [seen-opts (atom nil)
+          exec-fn   (fn
+                      ([_cmd] {:out "ok" :err "" :exit 0})
+                      ([_cmd opts]
+                       (reset! seen-opts opts)
+                       {:out "ok" :err "" :exit 0}))
+          client    (ai.miniforge.llm.protocols.records.llm-client/create-client
+                     {:backend :echo :exec-fn exec-fn})
+          resp      (llm/complete client {:prompt "hello" :workdir "/tmp/task-worktree"})]
+      (is (llm/success? resp))
+      (is (= "/tmp/task-worktree" (:workdir @seen-opts))
+          "fallback/non-streaming calls must not run in the host checkout"))))
+
 (deftest legacy-1-arity-exec-fn-survives-stdin-path-test
   (testing "1-arity user-supplied :exec-fn keeps working when impl invokes 2-arity"
     ;; Backward-compat guard: PR #798 review pointed out that callers
@@ -951,7 +974,7 @@
     (let [seen-opts (atom nil)
           two-arity (fn
                       ([cmd] {:out "" :err "" :exit 0 :seen-cmd cmd})
-                      ([cmd opts]
+                      ([_cmd opts]
                        (reset! seen-opts opts)
                        {:out "ok" :err "" :exit 0}))
           wrapped (impl/normalize-exec-fn two-arity)]

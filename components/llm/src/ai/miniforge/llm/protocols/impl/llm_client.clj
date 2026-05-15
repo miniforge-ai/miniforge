@@ -1087,7 +1087,8 @@
                                      :prompt prompt
                                      :prompt-via prompt-via))
             full-cmd (into [cmd] args)
-            opts     (exec-opts-for-prompt-via prompt-via prompt)
+            opts     (cond-> (exec-opts-for-prompt-via prompt-via prompt)
+                       (:workdir request) (assoc :workdir (:workdir request)))
             result   (run-cli-exec exec-fn full-cmd opts)
             response (parse-cli-output (:out result) (:exit result) (:err result))]
         (log-response logger response)
@@ -1386,15 +1387,17 @@
 (defn default-exec-fn
   "Run `cmd` with `p/shell`, capturing :out / :err / :exit.
 
-   2-arity opts map supports `:stdin` — a string piped to the
-   subprocess's stdin. Absent or blank => zero-length stdin (legacy)."
+   2-arity opts map supports:
+   - `:stdin`  — string piped to the subprocess's stdin
+   - `:workdir` — directory where the subprocess runs"
   ([cmd] (default-exec-fn cmd {}))
-  ([cmd {:keys [stdin]}]
+  ([cmd {:keys [stdin workdir]}]
    (let [timeout-ms 600000
          in-stream  (->stdin-stream stdin)
          result (apply p/shell (cond-> {:out :string :err :string :continue true
                                         :in in-stream :timeout timeout-ms}
-                                 (clean-env) (assoc :env (clean-env))) cmd)]
+                                 (clean-env) (assoc :env (clean-env))
+                                 workdir     (assoc :dir workdir)) cmd)]
      {:out (:out result)
       :err (:err result)
       :exit (:exit result)})))
