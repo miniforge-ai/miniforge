@@ -17,10 +17,11 @@
 ;; limitations under the License.
 
 (ns ai.miniforge.connector-edgar.anomaly.edgar-anomaly-test
-  "Coverage for `impl/do-connect` boundary escalation via
-   `response/throw-anomaly!`.
+  "Coverage for `impl/do-connect` and `impl/do-extract` boundary
+   escalation via `response/throw-anomaly!`.
 
-   Missing config keys → `:anomalies/incorrect`."
+   Missing config keys → `:anomalies/incorrect`. Unknown aggregation at
+   extract time → `:anomalies/unsupported`."
   (:require [clojure.test :refer [deftest is testing]]
             [ai.miniforge.connector-edgar.impl :as impl])
   (:import (clojure.lang ExceptionInfo)))
@@ -49,3 +50,20 @@
       (is false "should have thrown")
       (catch ExceptionInfo e
         (is (= :anomalies/incorrect (:anomaly/category (ex-data e))))))))
+
+(deftest do-extract-unknown-aggregation-throws-anomaly
+  (testing "do-extract with unknown :edgar/aggregation raises :anomalies/unsupported"
+    (let [connect-result (impl/do-connect
+                          {:edgar/form-type "10-K"
+                           :edgar/user-agent "ua"
+                           :edgar/aggregation :bogus-thing}
+                          nil)
+          handle (:connection/handle connect-result)]
+      (try
+        (impl/do-extract handle {})
+        (is false "should have thrown")
+        (catch ExceptionInfo e
+          (is (= :anomalies/unsupported (:anomaly/category (ex-data e))))
+          (is (= :bogus-thing (:aggregation (ex-data e)))))
+        (finally
+          (impl/do-close handle))))))

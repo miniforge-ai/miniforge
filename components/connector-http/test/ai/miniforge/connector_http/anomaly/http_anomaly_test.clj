@@ -76,3 +76,22 @@
   (testing "successful result passes through unchanged"
     (let [success {:success? true :body :data}]
       (is (= success (request/throw-on-failure! success))))))
+
+(deftest fetch-single-request-failure-throws-anomaly
+  (testing "do-extract propagates fetch-single request failure as :anomalies/unavailable"
+    (let [{:keys [connection/handle]} (impl/do-connect {:http/base-url "https://example.test"
+                                                        :http/endpoint "/items"}
+                                                       nil)]
+      (with-redefs [impl/do-request
+                    (fn [_url _headers _query-params]
+                      {:success? false
+                       :error "upstream down"
+                       :error-type :transient})]
+        (try
+          (impl/do-extract handle {})
+          (is false "should have thrown")
+          (catch ExceptionInfo e
+            (is (= :anomalies/unavailable (:anomaly/category (ex-data e))))
+            (is (= :transient (:error-type (ex-data e)))))
+          (finally
+            (impl/do-close handle)))))))
