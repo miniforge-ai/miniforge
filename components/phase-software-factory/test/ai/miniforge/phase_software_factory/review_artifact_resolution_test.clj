@@ -19,10 +19,8 @@
 (ns ai.miniforge.phase-software-factory.review-artifact-resolution-test
   "Tests for resolve-implement-artifact in the review phase.
 
-   Validates the three-strategy resolution:
-   1. Serialized :artifact key on implement result
-   2. Result itself when it contains :code/files (IS the artifact)
-   3. Worktree fallback via agent/collect-written-files"
+   Validates artifact resolution across direct serialized artifacts,
+   environment-promotion metadata, and worktree fallbacks."
   (:require
    [clojure.test :refer [deftest is testing]]
    [ai.miniforge.agent.interface :as agent]
@@ -36,7 +34,7 @@
   #'ai.miniforge.phase-software-factory.review/resolve-implement-artifact)
 
 (defn- make-serialized-artifact
-  "Factory: implement result with an explicit :artifact key (strategy 1)."
+  "Factory: implement result with an explicit :artifact key (strategy 2)."
   []
   {:code/files [{:path "src/core.clj"
                  :content "(ns core)"
@@ -50,7 +48,7 @@
    :some-other-key "metadata"})
 
 (defn- make-code-files-result
-  "Factory: implement result that IS the artifact (has :code/files, strategy 2)."
+  "Factory: implement result that IS the artifact (has :code/files, strategy 4)."
   []
   {:code/files [{:path "src/widget.clj"
                  :content "(ns widget)"
@@ -58,7 +56,7 @@
    :code/summary "code files result"})
 
 (defn- make-bare-result
-  "Factory: implement result with no artifact and no :code/files (strategy 3)."
+  "Factory: implement result with no artifact and no :code/files (strategy 7 fallback)."
   []
   {:status :success
    :metrics {:tokens 500}})
@@ -75,7 +73,7 @@
 ;; Tests
 
 (deftest resolve-serialized-artifact-test
-  (testing "Strategy 1: when implement-result has :artifact key, returns that artifact"
+  (testing "Strategy 2: when implement-result has :artifact key, returns that artifact"
     (let [impl-result (make-implement-result-with-artifact)
           ctx (make-ctx)
           resolved (resolve-implement-artifact impl-result ctx)]
@@ -114,7 +112,7 @@
       (is (= artifact resolved)))))
 
 (deftest resolve-code-files-artifact-test
-  (testing "Strategy 2: when implement-result has :code/files, returns the result itself"
+  (testing "Strategy 4: when implement-result has :code/files, returns the result itself"
     (let [impl-result (make-code-files-result)
           ctx (make-ctx)
           resolved (resolve-implement-artifact impl-result ctx)]
@@ -125,8 +123,8 @@
       (is (= "code files result" (:code/summary resolved))
           "Should preserve the original summary"))))
 
-(deftest resolve-strategy-1-takes-precedence-over-strategy-2-test
-  (testing "Strategy 1 wins over strategy 2 when both :artifact and :code/files present"
+(deftest resolve-strategy-2-takes-precedence-over-strategy-4-test
+  (testing "Strategy 2 wins over strategy 4 when both :artifact and :code/files present"
     (let [inner-artifact {:code/files [{:path "inner.clj" :content "inner" :action :create}]
                           :code/summary "inner"}
           impl-result {:artifact inner-artifact
@@ -138,7 +136,7 @@
           ":artifact key should take precedence over :code/files on result"))))
 
 (deftest resolve-worktree-fallback-test
-  (testing "Strategy 3: when no :artifact and no :code/files, falls back to worktree diff"
+  (testing "Strategy 7: when no artifact source has files, falls back to worktree diff"
     (let [fake-artifact {:code/files [{:path "src/new.clj"
                                        :content "(ns new)"
                                        :action :create}]
@@ -157,7 +155,7 @@
               "Should return the artifact from collect-written-files"))))))
 
 (deftest resolve-worktree-fallback-uses-worktree-path-key-test
-  (testing "Strategy 3 falls back to :worktree-path when :execution/worktree-path is nil"
+  (testing "Strategy 7 falls back to :worktree-path when :execution/worktree-path is nil"
     (let [fake-artifact {:code/files [] :code/summary "alt path"}
           impl-result (make-bare-result)
           ctx (make-ctx {:execution/worktree-path nil
@@ -173,7 +171,7 @@
 
 (deftest resolve-nil-everything-test
   (testing "Returns nil when no strategy succeeds"
-    ;; No worktree path means strategy 3 won't even call collect-written-files
+    ;; No worktree path means strategy 7 won't even call collect-written-files
     (let [impl-result (make-bare-result)
           ctx (make-ctx {:execution/worktree-path nil
                          :worktree-path nil})
@@ -189,12 +187,18 @@
           "Should return nil when implement-result is nil"))))
 
 (deftest resolve-rehydrate-from-paths-test
-  (testing "Strategy 5: paths-only outer artifact rehydrates content from worktree"
+  (testing "Strategy 1: paths-only outer artifact rehydrates content from worktree"
     (let [outer-artifact {:code/summary "lightweight artifact"
                           :code/file-paths ["src/core.clj" "src/util.clj"]
                           :code/file-actions [:create :modify]
                           :code/file-count 2}
-          impl-result {:status :completed :artifact outer-artifact}
+          stale-inner-output {:code/files [{:path "src/core.clj"
+                                            :content "(ns stale)"
+                                            :action :modify}]
+                              :code/summary "stale agent output"}
+          impl-result {:status :completed
+                       :artifact outer-artifact
+                       :result {:output stale-inner-output}}
           ctx (make-ctx)
           rehydrated [{:path "src/core.clj" :content "(ns core)"  :action :create}
                       {:path "src/util.clj" :content "(ns util)" :action :modify}]
@@ -211,11 +215,13 @@
                                     :code/summary "should-not-win"})]
                      (resolve-implement-artifact impl-result ctx))]
       (is (= rehydrated (:code/files resolved)))
+      (is (not= stale-inner-output resolved)
+          "Rehydrated promoted worktree content beats stale serialized agent output")
       (is (= "lightweight artifact" (:code/summary resolved)))
       (is (= ["src/core.clj" "src/util.clj"] (:code/file-paths resolved))
           "Outer-artifact metadata is preserved alongside the rehydrated files")))
 
-  (testing "Strategy 5 falls through to strategy 6/7 when rehydration finds no files"
+  (testing "Strategy 1 falls through to strategy 6/7 when rehydration finds no files"
     (let [outer-artifact {:code/summary "lightweight artifact"
                           :code/file-paths ["src/missing.clj"]}
           impl-result {:status :completed :artifact outer-artifact}
@@ -228,7 +234,7 @@
                      (resolve-implement-artifact impl-result (make-ctx)))]
       (is (= [{:path "src/picked.clj" :content "(ns picked)" :action :create}]
              (:code/files resolved))
-          "Strategy 6 (worktree merge) takes over when strategy 5 returns nothing")
+          "Strategy 6 (worktree merge) takes over when strategy 1 returns nothing")
       (is (= "lightweight artifact" (:code/summary resolved))
           "Outer-artifact metadata still wins on the merge"))))
 
