@@ -48,8 +48,9 @@ deprecation pattern as PR #869 (foundation) and PR #871 (data sources).
 
 ### Tests
 
-3 new decomposed anomaly test files (one per connector), each
-asserting `:anomaly/category` on the boundary escalation paths.
+3 new decomposed anomaly test files (one per connector), each asserting
+`:anomaly/category` and selected context fields on the boundary escalation
+paths.
 
 ## Per-site classification
 
@@ -70,24 +71,26 @@ asserting `:anomaly/category` on the boundary escalation paths.
 
 ## Testing Plan
 
-- 3 new decomposed anomaly tests assert message + `:anomaly/category`
-  on every escalation path. Tests would fail if a future refactor
-  reverts to plain `(throw (ex-info ...))` with the same message.
+- 3 new decomposed anomaly tests assert `:anomaly/category` and selected
+  context fields on every migrated VCS connector escalation path. Tests
+  would fail if a covered path reverts to plain `(throw (ex-info ...))`
+  with the same context.
 - Local component-test runs blocked by the `cognitect/test-runner`
   classpath gap noted in prior PRs — CI validates.
 
 ## Deployment Plan
 
-No migration. ExceptionInfo shape preserved with one extra
-`:anomaly/category` key in ex-data.
+No migration. ExceptionInfo context keys are preserved, with canonical
+anomaly metadata (`:anomaly/category`, `:anomaly/message`, `:anomaly/id`,
+and `:anomaly/timestamp`) added to ex-data.
 
 ## Notes
 
-- **Connector cluster cleanup complete after this PR.** Foundation
-  (#869), data sources (#871), and VCS (this PR) cover every
-  connector-* throw site. Remaining `:cleanup-needed` work lives
-  outside the connector family (workflow residuals, dag-executor,
-  config, gate, etc.).
+- **VCS connector cleanup complete after this PR.** Foundation (#869),
+  data sources (#871), and VCS (this PR) cover the migrated VCS connector
+  throw sites. Remaining `:cleanup-needed` work includes foundation-level
+  connector helpers plus workflow residuals, dag-executor, config, gate,
+  etc.
 
 ## Related Issues/PRs
 
