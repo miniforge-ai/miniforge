@@ -194,29 +194,31 @@
   ([ctx checkpoint-root]
    (build-manifest ctx checkpoint-root nil))
   ([ctx checkpoint-root existing-manifest]
-  (let [workflow-run-id (:execution/id ctx)
-        current-phase-ids (ordered-phase-ids ctx)
-        existing-phase-paths (:workflow/phase-checkpoints existing-manifest)
-        phase-ids (vec (concat (keys existing-phase-paths)
-                               (remove (set (keys existing-phase-paths))
-                                       current-phase-ids)))
-        current-phase-paths (into {}
-                                  (map (fn [phase-id]
-                                         [phase-id
-                                          (phase-checkpoint-path checkpoint-root
-                                                                 workflow-run-id
-                                                                 phase-id)]))
-                                  current-phase-ids)
-        phase-paths (merge existing-phase-paths current-phase-paths)]
-    (serialize-checkpoint-value
-     {:workflow/id workflow-run-id
-      :workflow/workflow-id (:execution/workflow-id ctx)
-      :workflow/workflow-version (:execution/workflow-version ctx)
-      :workflow/phases-completed phase-ids
-      :workflow/machine-snapshot-path
-      (machine-snapshot-path checkpoint-root workflow-run-id)
-      :workflow/phase-checkpoints phase-paths
-      :workflow/last-checkpoint-at (current-checkpoint-timestamp)}))))
+   (let [workflow-run-id (:execution/id ctx)
+         current-phase-ids (ordered-phase-ids ctx)
+         existing-phase-paths (or (:workflow/phase-checkpoints existing-manifest) {})
+         existing-phase-ids (or (not-empty (:workflow/phases-completed existing-manifest))
+                                (sort-by name (keys existing-phase-paths)))
+         phase-ids (vec (concat existing-phase-ids
+                                (remove (set existing-phase-ids)
+                                        current-phase-ids)))
+         current-phase-paths (into {}
+                                   (map (fn [phase-id]
+                                          [phase-id
+                                           (phase-checkpoint-path checkpoint-root
+                                                                  workflow-run-id
+                                                                  phase-id)]))
+                                   current-phase-ids)
+         phase-paths (merge existing-phase-paths current-phase-paths)]
+     (serialize-checkpoint-value
+      {:workflow/id workflow-run-id
+       :workflow/workflow-id (:execution/workflow-id ctx)
+       :workflow/workflow-version (:execution/workflow-version ctx)
+       :workflow/phases-completed phase-ids
+       :workflow/machine-snapshot-path
+       (machine-snapshot-path checkpoint-root workflow-run-id)
+       :workflow/phase-checkpoints phase-paths
+       :workflow/last-checkpoint-at (current-checkpoint-timestamp)}))))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Persistence and restore inputs

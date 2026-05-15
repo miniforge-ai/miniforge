@@ -229,7 +229,8 @@
           files          (or (not-empty committed)
                              (not-empty dirty)
                              (throw (ex-info (messages/t :release/zero-files)
-                                             {:phase          :release
+                                             {:type           :release/zero-files
+                                              :phase          :release
                                               :environment-id (:environment-id impl-result)
                                               :worktree-path  worktree-path})))
           code-artifacts [{:artifact/type    :code
@@ -415,9 +416,8 @@
         iterations (get-in ctx [:phase :iterations] 1)
         max-iterations (get-in ctx [:phase :budget :iterations]
                                (get-in default-config [:budget :iterations]))
-        zero-files? (and (= (messages/t :release/zero-files)
-                            (get-in result [:error :message]))
-                         (= :release (get-in result [:error :data :phase])))
+        zero-files? (= :release/zero-files
+                       (get-in result [:error :data :type]))
         phase-status (if zero-files?
                        :failed
                        (phase/determine-phase-status

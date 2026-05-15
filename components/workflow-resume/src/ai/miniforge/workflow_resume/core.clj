@@ -310,11 +310,12 @@
 ;; Pipeline trimming
 
 (defn trim-pipeline
-  "Drop already-completed phases from a workflow's pipeline.
+  "Drop the already-completed prefix from a workflow's pipeline.
 
    Pure: takes a workflow map with `:workflow/pipeline` and a
-   collection of completed phase keywords; returns the workflow with
-   its pipeline reduced to only the remaining phases."
+   collection of completed phase keywords; returns the workflow with only
+   leading completed phases removed. Completed phases after the first
+   incomplete phase are preserved."
   [workflow completed-phases]
   (schema/validate! schema/TrimPipelineInput
                     {:workflow workflow :completed-phases completed-phases}

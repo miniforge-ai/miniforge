@@ -130,8 +130,8 @@
           (let [checkpoint-data (checkpoint-store/load-checkpoint-data
                                  workflow-id
                                  {:checkpoint/root checkpoint-root})]
-            (is (= #{:explore :plan :implement :review :release}
-                   (set (get-in checkpoint-data [:manifest :workflow/phases-completed]))))
+            (is (= [:explore :plan :implement :review :release]
+                   (get-in checkpoint-data [:manifest :workflow/phases-completed])))
             (is (= {:status :completed}
                    (get-in checkpoint-data [:phase-results :explore])))
             (is (= {:status :failed}
