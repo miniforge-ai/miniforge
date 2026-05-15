@@ -589,7 +589,11 @@
       ;; Set push URL with token so persist-workspace! can push
       (when token
         (exec! (str "git -C " workdir " remote set-url --push origin "
-                    (authenticated-https-url https-url token host-kind)))))))
+                    (authenticated-https-url https-url token host-kind))))
+      (let [sha-r (exec! (str "git -C " workdir " rev-parse HEAD"))
+            base-sha (str/trim (get-in sha-r [:data :stdout] ""))]
+        (cond-> {:base-branch branch}
+          (seq base-sha) (assoc :base-sha base-sha))))))
 
 ;; ============================================================================
 ;; OciCliExecutor Record
@@ -627,16 +631,16 @@
                                           (:resources env-config)
                                           network)]
       (if (result/ok? create-result)
-        (do
-          ;; Bootstrap workspace: clone repo into container if repo-url provided (N11 §4.2)
-          (bootstrap-workspace! descriptor container-name workdir env-config)
-          ;; Capture image SHA256 digest for evidence record (N11 §11 SHOULD)
-          (let [image-digest (container-image-digest descriptor container-name)
-                metadata (cond-> (get create-result :data {})
-                           image-digest (assoc :image-digest image-digest))]
-            (result/ok (proto/create-environment-record
-                        container-name (descriptor/kind descriptor) task-id workdir
-                        (assoc env-config :metadata metadata)))))
+        ;; Bootstrap workspace: clone repo into container if repo-url provided (N11 §4.2)
+        (let [bootstrap-metadata (bootstrap-workspace! descriptor container-name workdir env-config)
+              ;; Capture image SHA256 digest for evidence record (N11 §11 SHOULD)
+              image-digest (container-image-digest descriptor container-name)
+              metadata (cond-> (merge (get create-result :data {})
+                                       bootstrap-metadata)
+                         image-digest (assoc :image-digest image-digest))]
+          (result/ok (proto/create-environment-record
+                      container-name (descriptor/kind descriptor) task-id workdir
+                      (assoc env-config :metadata metadata))))
         create-result)))
 
   (execute! [_this environment-id command opts]

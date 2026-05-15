@@ -74,6 +74,20 @@
       (modified? status) {:bucket :modified :path path}
       :else nil))))
 
+(defn- name-status-entry
+  "Parse one `git diff --name-status` line into an action/path pair."
+  [line]
+  (let [[status old-path new-path] (str/split line #"\t")
+        code (some-> status first)]
+    (case code
+      \A {:action :create :path old-path}
+      \D {:action :delete :path old-path}
+      \R {:action :modify :path new-path}
+      \C {:action :create :path new-path}
+      \M {:action :modify :path old-path}
+      \T {:action :modify :path old-path}
+      nil)))
+
 (defn empty-snapshot
   "Return an empty working tree snapshot."
   []
@@ -125,6 +139,43 @@
     {:create (disj created artifact-manifest-name)
      :modify (disj modified artifact-manifest-name)
      :delete (disj deleted artifact-manifest-name)}))
+
+(defn- add-diff-entry
+  "Add a parsed name-status entry into changed path sets."
+  [changed {:keys [action path]}]
+  (if (and action path)
+    (update changed action conj path)
+    changed))
+
+(defn- merge-changed
+  "Union changed path maps."
+  [& changeds]
+  (apply merge-with set/union changeds))
+
+(defn- snapshot->changed-paths
+  "Convert a current dirty snapshot into changed path sets."
+  [snapshot]
+  {:create (disj (set/union (:untracked snapshot #{})
+                            (:added snapshot #{}))
+                 artifact-manifest-name)
+   :modify (disj (:modified snapshot #{}) artifact-manifest-name)
+   :delete (disj (:deleted snapshot #{}) artifact-manifest-name)})
+
+(defn- diff-against-ref
+  "Return changed paths between `base-ref` and the current working tree."
+  [working-dir base-ref]
+  (when (and working-dir (string? base-ref) (not (str/blank? base-ref)))
+    (let [{:keys [exit out]} (shell/sh "git" "-C" working-dir
+                                       "diff" "--name-status" base-ref "--")]
+      (when (zero? exit)
+        (reduce add-diff-entry
+                {:create #{} :modify #{} :delete #{}}
+                (keep name-status-entry (str/split-lines out)))))))
+
+(defn- first-diff-against-ref
+  "Try base refs in order and return the first successful diff."
+  [working-dir base-refs]
+  (some #(diff-against-ref working-dir %) (filter some? base-refs)))
 
 (defn- synthetic-artifact
   "Build a synthetic code artifact from written file sets."
@@ -214,6 +265,33 @@
                (synthetic-artifact working-dir))))
       (catch Exception _
         nil))))
+
+(defn collect-worktree-files
+  "Collect the promoted worktree artifact.
+
+   Unlike `collect-written-files`, this is not limited to the current
+   LLM session. It compares the current worktree against the task base
+   ref when one is known, then merges in untracked dirty files. This is
+   the environment-promotion path: previously committed repair work is
+   still part of the artifact even when the current session only touched
+   one follow-up file or wrote nothing new."
+  ([working-dir]
+   (collect-worktree-files working-dir nil))
+  ([working-dir base-refs]
+   (when working-dir
+     (try
+       (let [snap (snapshot-working-dir working-dir)]
+         (when-not (anomaly/anomaly? snap)
+           (let [changed (merge-changed
+                          (or (first-diff-against-ref working-dir
+                                                      (if (sequential? base-refs)
+                                                        base-refs
+                                                        [base-refs]))
+                              {:create #{} :modify #{} :delete #{}})
+                          (snapshot->changed-paths snap))]
+             (synthetic-artifact working-dir changed))))
+       (catch Exception _
+         nil)))))
 
 (defn- safe-resolve
   "Resolve `path` under `working-dir` defensively. Returns a regular-file
@@ -335,6 +413,25 @@
                       (sort paths))))
        vec))
 
+(defn- diff-against-ref-via-executor
+  "Return changed paths between `base-ref` and the capsule working tree."
+  [exec! executor env-id working-dir base-ref]
+  (when (and base-ref (not (str/blank? base-ref)))
+    (let [result (exec! executor env-id
+                        (str "git diff --name-status " (pr-str base-ref) " --")
+                        {:workdir working-dir})]
+      (when (and (:ok? result) (zero? (get-in result [:data :exit-code] 1)))
+        (reduce add-diff-entry
+                {:create #{} :modify #{} :delete #{}}
+                (keep name-status-entry
+                      (str/split-lines (get-in result [:data :stdout] ""))))))))
+
+(defn- first-diff-against-ref-via-executor
+  "Try base refs in order inside the capsule."
+  [exec! executor env-id working-dir base-refs]
+  (some #(diff-against-ref-via-executor exec! executor env-id working-dir %)
+        (filter some? base-refs)))
+
 (defn collect-written-files-via-executor
   "Like collect-written-files but runs git status inside a capsule via executor.
    Reads file contents from the capsule for the synthetic artifact."
@@ -352,6 +449,30 @@
                  (read-manifest-via-executor exec! executor env-id working-dir))))
       (catch Exception _
         nil))))
+
+(defn collect-worktree-files-via-executor
+  "Like collect-worktree-files but reads git state and content in a capsule."
+  ([exec! executor env-id working-dir]
+   (collect-worktree-files-via-executor exec! executor env-id working-dir nil))
+  ([exec! executor env-id working-dir base-refs]
+   (when working-dir
+     (try
+       (let [snap (snapshot-via-executor exec! executor env-id working-dir)
+             changed (merge-changed
+                      (or (first-diff-against-ref-via-executor
+                           exec! executor env-id working-dir
+                           (if (sequential? base-refs) base-refs [base-refs]))
+                          {:create #{} :modify #{} :delete #{}})
+                      (snapshot->changed-paths snap))
+             files (changed-paths->file-entries changed exec! executor env-id working-dir)]
+         (when (seq files)
+           (merge {:code/files files
+                   :code/summary (str (count files)
+                                      " files collected from capsule working directory (no MCP submit)")
+                   :code/tests-needed? true}
+                  (read-manifest-via-executor exec! executor env-id working-dir))))
+       (catch Exception _
+         nil)))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
