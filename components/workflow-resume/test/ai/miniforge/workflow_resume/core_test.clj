@@ -313,6 +313,22 @@
           (is (= :rate-limit (:dag-pause-reason ctx)))
           (is (= 0 (:event-count ctx))))))))
 
+(deftest reconstruct-context-uses-checkpoint-status-over-stale-terminal-events-test
+  (testing "a resumed running checkpoint overrides older failed events"
+    (let [workflow-id (str (random-uuid))
+          checkpoint-data {:machine-snapshot {:execution/id workflow-id
+                                             :execution/workflow-id :canonical-sdlc
+                                             :execution/workflow-version "1.0.0"
+                                             :execution/status :running}
+                           :manifest {:workflow/phases-completed [:plan]}
+                           :phase-results {:plan {:status :completed}}}
+          events [{:event/type :workflow/failed}]]
+      (with-redefs [workflow/load-checkpoint-data (fn [_workflow-run-id] checkpoint-data)
+                    es/read-workflow-events-by-id (fn [_events-dir _workflow-run-id] events)]
+        (let [ctx (core/reconstruct-context "/tmp/unused-events" workflow-id)]
+          (is (false? (:failed? ctx)))
+          (is (false? (:completed? ctx))))))))
+
 (deftest reconstruct-context-trims-only-completed-checkpoint-phases-test
   (testing "checkpoint manifests may list failed/retrying phases; resume skips only completed results"
     (let [workflow-id (str (random-uuid))
