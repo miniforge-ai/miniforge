@@ -413,6 +413,44 @@
       (is (= env-id (:execution/environment-id result)))
       (is (= "/tmp/worktree" (:execution/worktree-path result))))))
 
+(deftest run-pipeline-threads-acquired-default-branch-test
+  (testing "the branch used to acquire a worktree is kept in execution opts"
+    (let [acquire-var (resolve 'ai.miniforge.workflow.runner-environment/acquire-execution-environment!)]
+      (with-redefs-fn
+        {acquire-var (fn [_workflow-id env-config]
+                       {:executor ::stub-executor
+                        :environment-id "task-branch-test"
+                        :worktree-path "/tmp/task-branch-test"
+                        :execution-mode :local
+                        :environment-metadata {:base-branch (:branch env-config)}})}
+        (fn []
+          (let [workflow {:workflow/id :test
+                          :workflow/version "1.0.0"
+                          :workflow/pipeline [{:phase test-done-phase}]}
+                result (runner/run-pipeline workflow {:task "Test"} {})]
+            (is (= "main" (get-in result [:execution/opts :branch])))
+            (is (= {:base-branch "main"}
+                   (:execution/environment-metadata result)))))))))
+
+(deftest run-pipeline-resume-preserves-checkpoint-metadata-test
+  (testing "resume keeps checkpoint metadata when no fresh environment metadata is supplied"
+    (let [acquire-var (resolve 'ai.miniforge.workflow.runner-environment/acquire-execution-environment!)
+          workflow {:workflow/id :test
+                    :workflow/version "1.0.0"
+                    :workflow/pipeline [{:phase test-done-phase}]}
+          metadata {:base-branch "trunk"}
+          resume-ctx (assoc (ctx/create-context workflow {:task "Test"} {})
+                            :execution/environment-metadata metadata)]
+      (with-redefs-fn
+        {acquire-var (fn [& _] nil)}
+        (fn []
+          (let [result (runner/run-pipeline workflow
+                                            {:task "Ignored"}
+                                            {:resume-machine-snapshot
+                                             (checkpoint-store/build-machine-snapshot resume-ctx)
+                                             :resume-phase-results {}})]
+            (is (= metadata (:execution/environment-metadata result)))))))))
+
 (deftest run-pipeline-without-executor-skips-env-keys-test
   (testing "when no executor in opts and acquisition yields nil, env keys are absent"
     ;; Force acquisition to return nil for deterministic test isolation.
