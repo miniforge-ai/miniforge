@@ -465,6 +465,18 @@
             (io/file tmp ".miniforge") true)
           (.delete tmp))))))
 
+(deftest base-ref-candidates-avoid-ambiguous-branch-names
+  (testing "bare branch names are not used as diff bases"
+    (let [candidates (@#'implementer/base-ref-candidates
+                      {:execution/environment-metadata {:base-sha "abc123"
+                                                        :base-branch "main"}})]
+      (is (= ["abc123"
+              "refs/remotes/origin/main"
+              "origin/main"
+              "refs/heads/main"]
+             candidates))
+      (is (not (contains? (set candidates) "main"))))))
+
 ;------------------------------------------------------------------------------ Layer 4
 ;; Utility tests
 

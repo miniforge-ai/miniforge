@@ -183,6 +183,11 @@
   [& changeds]
   (apply merge-with set/union changeds))
 
+(defn- has-changed-paths?
+  "True when a diff changed-path map contains at least one path."
+  [changed]
+  (boolean (some seq (vals changed))))
+
 (defn- snapshot->changed-paths
   "Convert a current dirty snapshot into changed path sets."
   [snapshot]
@@ -204,10 +209,17 @@
                 (mapcat name-status-entries (str/split-lines out)))))))
 
 (defn- first-diff-against-ref
-  "Try base refs in order and return the first successful diff."
+  "Try base refs in order and return the first non-empty successful diff."
   [working-dir base-refs]
-  (some #(diff-against-ref working-dir %)
-        (filter valid-base-ref? base-refs)))
+  (loop [[base-ref & remaining] (filter valid-base-ref? base-refs)
+         empty-diff nil]
+    (if base-ref
+      (if-let [changed (diff-against-ref working-dir base-ref)]
+        (if (has-changed-paths? changed)
+          changed
+          (recur remaining changed))
+        (recur remaining empty-diff))
+      empty-diff)))
 
 (defn- worktree-changed-paths
   "Merge committed task diff and current dirty snapshot paths."
@@ -467,8 +479,16 @@
 (defn- first-diff-against-ref-via-executor
   "Try base refs in order inside the capsule."
   [exec! executor env-id working-dir base-refs]
-  (some #(diff-against-ref-via-executor exec! executor env-id working-dir %)
-        (filter valid-base-ref? base-refs)))
+  (loop [[base-ref & remaining] (filter valid-base-ref? base-refs)
+         empty-diff nil]
+    (if base-ref
+      (if-let [changed (diff-against-ref-via-executor
+                        exec! executor env-id working-dir base-ref)]
+        (if (has-changed-paths? changed)
+          changed
+          (recur remaining changed))
+        (recur remaining empty-diff))
+      empty-diff)))
 
 (defn- worktree-changed-paths-via-executor
   "Merge committed task diff and current dirty snapshot paths in a capsule."

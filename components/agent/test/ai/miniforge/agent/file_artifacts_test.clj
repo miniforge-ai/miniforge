@@ -21,6 +21,7 @@
    [ai.miniforge.agent.file-artifacts :as sut]
    [clojure.java.io :as io]
    [clojure.java.shell]
+   [clojure.string :as str]
    [clojure.test :as test :refer [deftest testing is]]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -185,7 +186,63 @@
                    :action :modify}]
                  (:code/files (sut/collect-worktree-files dir ["missing-base"])))))
         (finally
-          (delete-tree! dir))))))
+          (delete-tree! dir)))))
+
+  (testing "skips empty base diffs so a later base can recover committed work"
+    (let [dir (temp-dir)]
+      (try
+        (write-file! dir "src/committed.clj" "(ns committed)")
+        (with-redefs [ai.miniforge.agent.file-artifacts/snapshot-working-dir
+                      (fn [_]
+                        (sut/empty-snapshot))
+                      clojure.java.shell/sh
+                      (fn [& args]
+                        (let [base-ref (nth args 5 nil)]
+                          {:exit success-exit-code
+                           :out (if (= "head-alias" base-ref)
+                                  ""
+                                  "M\tsrc/committed.clj\n")
+                           :err ""}))]
+          (is (= [{:path "src/committed.clj"
+                   :content "(ns committed)"
+                   :action :modify}]
+                 (:code/files (sut/collect-worktree-files
+                               dir
+                               ["head-alias" "base-sha"])))))
+        (finally
+          (delete-tree! dir)))))
+
+  (testing "executor worktree collection also skips empty base diffs"
+    (let [commands (atom [])]
+      (letfn [(exec! [_ _ command _]
+                (swap! commands conj command)
+                (cond
+                  (str/starts-with? command "git status")
+                  {:ok? true :data {:exit-code success-exit-code :stdout ""}}
+
+                  (str/includes? command "'head-alias'")
+                  {:ok? true :data {:exit-code success-exit-code :stdout ""}}
+
+                  (str/includes? command "'base-sha'")
+                  {:ok? true :data {:exit-code success-exit-code
+                                    :stdout "M\tsrc/committed.clj\n"}}
+
+                  (str/starts-with? command "cat ")
+                  {:ok? true :data {:exit-code success-exit-code
+                                    :stdout "(ns committed)"}}
+
+                  :else
+                  {:ok? false :data {:exit-code missing-base-exit-code :stdout ""}}))]
+        (is (= [{:path "src/committed.clj"
+                 :content "(ns committed)"
+                 :action :modify}]
+               (:code/files (sut/collect-worktree-files-via-executor
+                             exec!
+                             :executor
+                             :env
+                             "/work"
+                             ["head-alias" "base-sha"]))))
+        (is (some #(str/includes? % "'base-sha'") @commands))))))
 
 (deftest collect-worktree-files-rename-test
   (testing "diff renames delete the old path and create the new path"
