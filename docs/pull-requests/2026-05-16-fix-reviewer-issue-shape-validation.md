@@ -22,5 +22,6 @@ recognized issue keys.
 
 ## Verification
 
-- `clojure -M:dev:test -e "(require 'ai.miniforge.agent.reviewer-test 'clojure.test) (clojure.test/run-tests
-  'ai.miniforge.agent.reviewer-test)"`
+```bash
+clojure -M:dev:test -e "(require 'ai.miniforge.agent.reviewer-test 'clojure.test) (clojure.test/run-tests 'ai.miniforge.agent.reviewer-test)"
+```
