@@ -3,30 +3,62 @@
  */
 
 // Theme management
+const THEMES = [
+  'warm_light',
+  'cool_light',
+  'royal_light',
+  'aurora_light',
+  'warm_dark',
+  'cool_dark',
+  'royal_dark',
+  'aurora_dark',
+  'high-contrast'
+];
+
+function normalizeTheme(theme) {
+  const legacyMap = {
+    dark: 'aurora_dark',
+    light: 'aurora_light'
+  };
+  const normalized = legacyMap[theme] || theme;
+  return THEMES.includes(normalized) ? normalized : 'aurora_dark';
+}
+
+function syncThemeControls(theme) {
+  const select = document.getElementById('theme-select');
+  if (select && select.value !== theme) {
+    select.value = theme;
+  }
+}
+
 (function initTheme() {
-  // Load saved theme or default to dark
-  const savedTheme = localStorage.getItem('miniforge-theme') || 'dark';
+  // Load saved theme or default to Aurora Dark.
+  const savedTheme = normalizeTheme(localStorage.getItem('miniforge-theme') || 'aurora_dark');
   document.documentElement.setAttribute('data-theme', savedTheme);
+  localStorage.setItem('miniforge-theme', savedTheme);
+  syncThemeControls(savedTheme);
+  document.addEventListener('DOMContentLoaded', () => syncThemeControls(savedTheme), { once: true });
 })();
 
 function switchTheme(theme) {
-  if (!['dark', 'light', 'high-contrast'].includes(theme)) {
+  const normalized = normalizeTheme(theme);
+  if (!THEMES.includes(normalized)) {
     console.error('Invalid theme:', theme);
     return;
   }
 
-  document.documentElement.setAttribute('data-theme', theme);
-  localStorage.setItem('miniforge-theme', theme);
+  document.documentElement.setAttribute('data-theme', normalized);
+  localStorage.setItem('miniforge-theme', normalized);
+  syncThemeControls(normalized);
 
   // Emit custom event for other components to react
-  window.dispatchEvent(new CustomEvent('theme-changed', { detail: { theme } }));
+  window.dispatchEvent(new CustomEvent('theme-changed', { detail: { theme: normalized } }));
 }
 
 function cycleTheme() {
-  const currentTheme = document.documentElement.getAttribute('data-theme') || 'dark';
-  const themes = ['dark', 'light', 'high-contrast'];
-  const currentIndex = themes.indexOf(currentTheme);
-  const nextTheme = themes[(currentIndex + 1) % themes.length];
+  const currentTheme = normalizeTheme(document.documentElement.getAttribute('data-theme') || 'aurora_dark');
+  const currentIndex = THEMES.indexOf(currentTheme);
+  const nextTheme = THEMES[(currentIndex + 1) % THEMES.length];
   switchTheme(nextTheme);
 }
 
@@ -292,7 +324,8 @@ function fleetDiscoverAndSync() {
 window.miniforge = {
   switchTheme,
   cycleTheme,
-  getCurrentTheme: () => document.documentElement.getAttribute('data-theme') || 'dark',
+  getCurrentTheme: () => normalizeTheme(document.documentElement.getAttribute('data-theme') || 'aurora_dark'),
+  getAvailableThemes: () => [...THEMES],
   sendWorkflowCommand,
   postWorkflowCommand,
   addFilterChip,
