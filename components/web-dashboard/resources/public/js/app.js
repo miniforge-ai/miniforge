@@ -36,6 +36,7 @@ function syncThemeControls(theme) {
   const savedTheme = normalizeTheme(localStorage.getItem('miniforge-theme') || 'aurora_dark');
   document.documentElement.setAttribute('data-theme', savedTheme);
   localStorage.setItem('miniforge-theme', savedTheme);
+  syncThemeControls(savedTheme);
   document.addEventListener('DOMContentLoaded', () => syncThemeControls(savedTheme), { once: true });
 })();
 
