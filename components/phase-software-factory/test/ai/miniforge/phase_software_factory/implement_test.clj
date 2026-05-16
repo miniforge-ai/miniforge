@@ -342,17 +342,19 @@
             "Implement should be added to phases-completed")))))
 
 (deftest leave-implement-handles-nil-start-time-test
-  (testing "leave-implement does not NPE when :started-at is nil"
+  (testing "leave-implement does not NPE when resume left timing or iteration fields nil"
     (let [interceptor (phase/get-phase-interceptor {:phase :implement})
           ctx {:phase {:result {:status :error
                                 :error {:message "agent failed"}}
                        :budget {:iterations 2}
-                       :iterations 1}
+                       :iterations nil}
                :execution/metrics {:tokens 0 :duration-ms 0}}
           result ((:leave interceptor) ctx)]
       (is (some? result) "leave-implement should not throw")
       (is (= 0 (get-in result [:phase :duration-ms]))
-          "Duration should default to 0 when start-time is nil"))))
+          "Duration should default to 0 when start-time is nil")
+      (is (= 0 (get-in result [:metrics :implementation :repair-cycles]))
+          "Nil iterations should fall back to first-attempt metrics"))))
 
 (deftest leave-implement-preserves-curated-artifact-test
   (testing "successful implement preserves curated artifact on the outer phase map for downstream review"
