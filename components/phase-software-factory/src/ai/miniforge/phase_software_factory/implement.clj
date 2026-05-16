@@ -492,7 +492,7 @@
   [ctx]
   (let [start-time (get-in ctx [:phase :started-at])
         end-time (System/currentTimeMillis)
-        duration-ms (- end-time start-time)
+        duration-ms (if start-time (- end-time start-time) 0)
         result (get-in ctx [:phase :result])
         agent-status (:status result)
         rate-limited? (and (= :error agent-status) (rate-limit-in-result? result))
