@@ -26,6 +26,7 @@
    [ai.miniforge.logging.interface :as log]
    [ai.miniforge.llm.interface :as llm]
    [ai.miniforge.loop.interface :as loop]
+   [ai.miniforge.messages.interface :as messages]
    [ai.miniforge.response.interface :as response]))
 
 ;------------------------------------------------------------------------------ Regression-floor constants
@@ -70,6 +71,19 @@
 
 (def ^:private backend-timeout-type
   "adaptive_timeout")
+
+(def ^:private test-t
+  (messages/create-translator "config/agent/test-fixtures/en-US.edn"
+                              :agent-reviewer-test/fixtures))
+
+(def ^:private valid-review-blocking-description
+  (test-t :reviewer-test/valid-review-blocking-description))
+
+(def ^:private valid-review-content
+  (test-t :reviewer-test/valid-review-content))
+
+(def ^:private malformed-review-issue-content
+  (test-t :reviewer-test/malformed-review-issue-content))
 
 ;------------------------------------------------------------------------------ Test fixtures
 
@@ -296,7 +310,7 @@
     (with-redefs [model/resolve-llm-client-for-role (fn [_role client] client)
                   llm/chat (fn [_client _prompt _opts]
                              (mock-llm-response
-                              "```clojure\n{:review/decision :changes-requested\n :review/issues [{:severity :blocking :description \"Needs changes\"}]}\n```"
+                              valid-review-content
                               :success? false
                               :tokens parseable-backend-failure-token-count
                               :error {:message "artifact file not found"}))
@@ -308,9 +322,13 @@
             result (core/invoke reviewer {} sample-artifact)
             review (:artifact result)]
         (is (= :changes-requested (:review/decision review)))
-        (is (some #{"Needs changes"} (:review/blocking-issues review)))
+        (is (some #{valid-review-blocking-description} (:review/blocking-issues review)))
         (is (= parseable-backend-failure-token-count
                (get-in result [:metrics :tokens])))))))
+
+(deftest test-reviewer-rejects-structurally-corrupt-llm-issues
+  (testing "valid EDN with malformed issue maps is treated as unparseable"
+    (is (nil? (reviewer/parse-review-response malformed-review-issue-content)))))
 
 (deftest test-reviewer-timeout-only-parseable-failure-is-agent-error
   (testing "timeout-only parsed review failures do not become rejected code-review artifacts"
