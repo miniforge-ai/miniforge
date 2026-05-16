@@ -505,7 +505,7 @@
         ;; are a first-class concept.
         curator-empty-diff? (= :curator/no-files-written
                                (get-in result [:error :data :code]))
-        iterations (get-in ctx [:phase :iterations] 1)
+        iterations (or (get-in ctx [:phase :iterations]) 1)
         max-iterations (get-in ctx [:phase :budget :iterations]
                                (get-in default-config [:budget :iterations]))
         ;; In the environment promotion model the agent writes files directly to
