@@ -135,14 +135,17 @@
 
 (defn- reconstructed-completed?
   [by-type checkpoint-data]
-  (or (boolean (seq (get by-type :workflow/completed)))
-      (= :completed (checkpoint-status checkpoint-data))
-      (= :completed-with-warnings (checkpoint-status checkpoint-data))))
+  (let [status (checkpoint-status checkpoint-data)]
+    (if (some? status)
+      (contains? #{:completed :completed-with-warnings} status)
+      (boolean (seq (get by-type :workflow/completed))))))
 
 (defn- reconstructed-failed?
   [by-type checkpoint-data]
-  (or (boolean (seq (get by-type :workflow/failed)))
-      (= :failed (checkpoint-status checkpoint-data))))
+  (let [status (checkpoint-status checkpoint-data)]
+    (if (some? status)
+      (= :failed status)
+      (boolean (seq (get by-type :workflow/failed))))))
 
 (def ^:private resume-config-resource
   "config/workflow-resume/resume.edn")
