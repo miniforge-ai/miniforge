@@ -2,10 +2,9 @@
 
 ## Overview
 
-This stacked PR fixes the artifact extraction failure that surfaced after the
-checkpoint resume repair. When agents do not submit `artifact.edn`, Miniforge now
-treats the promoted worktree or container workspace as valid artifact
-provenance.
+This PR fixes the artifact extraction failure that surfaced after checkpoint
+resume repair. When agents do not submit `artifact.edn`, Miniforge treats the
+promoted worktree or container workspace as valid artifact provenance.
 
 ## Motivation
 
@@ -30,30 +29,24 @@ the environment itself is what Miniforge promotes.
 - Updated review artifact resolution so downstream phases can recover file
   artifacts from the worktree even when the implement phase missed explicit
   artifact submission.
+- Made promoted artifact diffing skip empty successful base diffs when later
+  base refs can still recover committed work.
+- Stopped using bare branch names such as `main` as promoted-artifact diff bases;
+  fully qualified refs avoid collisions with tags and stale local branches.
 - Covered committed task diff plus dirty-file fallback behavior.
-
-## Stacking
-
-This PR is stacked on:
-
-- `fix/dogfood-resume-checkpoint-repair`
-- PR #875
-
-The resume/checkpoint repair should merge first. This PR addresses the next
-blocker discovered by that dogfood pass.
 
 ## Testing Plan
 
-- Targeted artifact/review tests: 14 tests, 45 assertions, 0 failures, 0 errors.
-- Broader agent/factory/executor targeted tests: 123 tests, 377 assertions, 0
+- `clj-kondo --lint` on changed source and test namespaces passed.
+- Focused file artifact and implementer tests: 19 tests, 105 assertions, 0
   failures, 0 errors.
-- `bb test` passed across the stable-derived test plan with only existing
-  unresolved-var warnings.
+- `bb test brick:agent` passed across the stable-derived test plan with existing
+  warning 207 only.
 
 ## Deployment Plan
 
-Merge after PR #875. No migration is required. The change only broadens fallback
-artifact extraction when explicit MCP artifact submission is missing.
+No migration is required. The change only broadens fallback artifact extraction
+when explicit MCP artifact submission is missing.
 
 ## Checklist
 
@@ -61,3 +54,4 @@ artifact extraction when explicit MCP artifact submission is missing.
 - [x] Files on disk are treated as valid fallback artifacts.
 - [x] Container/worktree base refs are captured for task diffing.
 - [x] Dirty and untracked files remain included when base diffing fails.
+- [x] Ambiguous branch refs do not mask valid promoted worktree artifacts.

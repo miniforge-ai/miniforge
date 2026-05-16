@@ -571,9 +571,16 @@
         base-branch (or (get-in context [:execution/environment-metadata :base-branch])
                         (get-in context [:execution/opts :branch])
                         (get-in context [:execution/input :branch]))]
-    (cond-> []
-      base-sha (conj base-sha)
-      base-branch (conj (str "origin/" base-branch) base-branch))))
+    (into []
+          (distinct)
+          (cond-> []
+            (and base-sha (not (str/blank? base-sha)))
+            (conj base-sha)
+
+            (and base-branch (not (str/blank? base-branch)))
+            (into [(str "refs/remotes/origin/" base-branch)
+                   (str "origin/" base-branch)
+                   (str "refs/heads/" base-branch)])))))
 
 (defn- collect-promoted-artifact
   "Collect code files from the current promoted worktree/container state."
