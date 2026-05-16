@@ -283,7 +283,9 @@
                      :branch          branch
                      :execution-mode  (:execution-mode opts)
                      :executor-config (:executor-config opts)})]
-      [acquired (if acquired (merge opts acquired) opts)])))
+      [acquired (if acquired
+                  (merge opts {:branch branch} acquired)
+                  opts)])))
 
 (defn- wrap-phase-callbacks
   "Wrap caller callbacks with event publishing."
@@ -339,20 +341,23 @@
                            dag-exec/execute!
                            (get opts :executor)
                            (get opts :environment-id)
-                           (get opts :worktree-path (defaults/default-workdir))))]
-    (-> (if (and resume-machine-snapshot resume-phase-results)
-          (ctx/restore-context workflow input
-                               resume-machine-snapshot
-                               resume-phase-results
-                               opts)
-          (ctx/create-context workflow input opts))
+                           (get opts :worktree-path (defaults/default-workdir))))
+        base-context (if (and resume-machine-snapshot resume-phase-results)
+                       (ctx/restore-context workflow input
+                                            resume-machine-snapshot
+                                            resume-phase-results
+                                            opts)
+                       (ctx/create-context workflow input opts))
+        environment-metadata (or (get opts :environment-metadata)
+                                 (:execution/environment-metadata base-context))]
+    (-> base-context
         (assoc :execution/executor (get opts :executor)
                :execution/environment-id (get opts :environment-id)
                :execution/worktree-path (get opts :worktree-path
                                              (get opts :sandbox-workdir))
                :execution/mode mode
                :execution/started-at (java.time.Instant/now)
-               :execution/environment-metadata (get opts :environment-metadata)
+               :execution/environment-metadata environment-metadata
                :execution/execute-fn (when governed? dag-exec/execute!)
                :execution/exec-fn capsule-exec-fn
                :execution/task-branch (when governed?

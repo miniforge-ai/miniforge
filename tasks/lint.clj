@@ -44,7 +44,7 @@
       (let [_ (println "🔍 Linting" (count clj-files) "Clojure file(s)...")
             _ (println "Files:" (str/join ", " clj-files))
             {:keys [exit out err]} (apply p/sh {:out :string :err :string}
-                                         "clj-kondo" "--lint" clj-files)]
+                                         "clj-kondo" "--cache" "true" "--lint" clj-files)]
         (when-not (str/blank? out) (println out))
         (when-not (str/blank? err) (binding [*out* *err*] (println err)))
         ;; Exit 0 = success, 2 = warnings only, 3 = errors

@@ -82,6 +82,7 @@
    :execution/started-at
    :execution/ended-at
    :execution/environment-id
+   :execution/environment-metadata
    :execution/worktree-path
    :execution/mode
    :execution/completed-with-warnings?])
