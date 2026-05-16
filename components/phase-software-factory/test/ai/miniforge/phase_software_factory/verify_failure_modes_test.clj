@@ -26,6 +26,7 @@
    [clojure.string :as str]
    [ai.miniforge.phase.interface :as phase]
    [ai.miniforge.phase.loader :as loader]
+   [ai.miniforge.phase-software-factory.messages :as messages]
    [ai.miniforge.phase-software-factory.verify :as verify]))
 
 (def phase-test-config-resource
@@ -149,8 +150,42 @@
                 interceptor (phase/get-phase-interceptor {:phase :verify})
                 result ((:enter interceptor) ctx)
                 message (get-in result [:phase :result :error :message])]
-            (is (str/includes? message "Test output could not be parsed"))
+            (is (str/includes? message (messages/t :verify/output-unparseable)))
             (is (str/includes? message "Syntax error compiling"))))))))
+
+(deftest parse-test-output-marks-unparseable-output-test
+  (testing "the real parser treats unparseable output as one actionable error"
+    (let [result (verify/parse-test-output "Syntax error compiling at src/example.clj:12:3"
+                                           1)]
+      (is (false? (:passed? result)))
+      (is (true? (:parse-error? result)))
+      (is (= 1 (:error-count result)))
+      (is (= 0 (:fail-count result))))))
+
+(deftest verify-bounds-unparseable-output-preview-test
+  (testing "long unparseable output is bounded in the verify error message"
+    (let [run-var (resolve 'ai.miniforge.phase-software-factory.verify/run-tests!)
+          preview-limit @#'verify/verify-error-preview-limit
+          suffix @#'verify/truncated-output-suffix
+          output (apply str (repeat (+ preview-limit 50) "x"))]
+      (with-redefs-fn
+        {run-var (fn [_ & _opts] {:passed? false
+                                  :test-count 0
+                                  :assertion-count 0
+                                  :fail-count 0
+                                  :error-count 1
+                                  :parse-error? true
+                                  :output output})}
+        (fn []
+          (let [ctx (-> (create-base-context)
+                        (assoc :phase-config {:phase :verify}))
+                interceptor (phase/get-phase-interceptor {:phase :verify})
+                result ((:enter interceptor) ctx)
+                message (get-in result [:phase :result :error :message])
+                prefix (messages/t :verify/output-unparseable)]
+            (is (str/ends-with? message suffix))
+            (is (= (+ (count prefix) 1 preview-limit (count suffix))
+                   (count message)))))))))
 
 ;------------------------------------------------------------------------------ Leave-verify redirect suppression tests (PR #288)
 
@@ -168,6 +203,17 @@
   (testing "normal verify failure with :on-fail configured requests a redirect"
     (let [ctx (make-leave-ctx {:status :error
                                :error {:message "Tests failed: 3 assertions"}}
+                              :implement)
+          result (verify/leave-verify ctx)]
+      (is (= :implement (phase/transition-target (get result :phase))))
+      (is (phase/failed? (get result :phase))))))
+
+(deftest leave-verify-redirects-parse-error-output-with-provider-words-test
+  (testing "parse-error previews are actionable even when test output contains provider-like fragments"
+    (let [ctx (make-leave-ctx {:status :error
+                               :error {:message (str (messages/t :verify/output-unparseable)
+                                                     "\nHTTP 429 from project test output timed out")}
+                               :metrics {:parse-error? true}}
                               :implement)
           result (verify/leave-verify ctx)]
       (is (= :implement (phase/transition-target (get result :phase))))

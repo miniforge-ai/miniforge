@@ -50,6 +50,10 @@
   "Maximum test-runner output included in the verify phase error message."
   2000)
 
+(def ^:private truncated-output-suffix
+  "Suffix appended when test-runner output is truncated for display."
+  "\n...")
+
 ;; Register defaults on load
 (phase/register-phase-defaults! :verify default-config)
 
@@ -107,7 +111,7 @@
   (let [trimmed (str/trim (str output))]
     (cond-> (subs trimmed 0 (min (count trimmed) verify-error-preview-limit))
       (> (count trimmed) verify-error-preview-limit)
-      (str "\n..."))))
+      (str truncated-output-suffix))))
 
 (defn- verify-failure-message
   "Build the user-facing verify failure message from parsed test results."
@@ -209,7 +213,11 @@
         pass-count (get test-results :test-count 0)
         raw-fails  (get test-results :fail-count 0)
         raw-errors (get test-results :error-count 0)
-        metrics    (phase/test-metrics pass-count (+ raw-fails raw-errors) (get test-results :output ""))
+        metrics    (cond-> (phase/test-metrics pass-count
+                                                (+ raw-fails raw-errors)
+                                                (get test-results :output ""))
+                     (:parse-error? test-results)
+                     (assoc :parse-error? true))
         summary    (if passed?
                      (messages/t :verify/tests-passed {:pass-count pass-count})
                      (verify-failure-message test-results raw-fails raw-errors))
@@ -232,10 +240,13 @@
         result (get-in ctx [:phase :result])
         agent-status (:status result)
         gate-failed? (= :failed (:phase/status (get-in ctx [:phase])))
+        parse-error? (true? (get-in result [:metrics :parse-error?]))
         timeout? (and (= :error agent-status)
+                      (not parse-error?)
                       (some-> (get-in result [:error :message])
                               (str/includes? timeout-message-fragment)))
         rate-limited? (and (= :error agent-status)
+                           (not parse-error?)
                            (let [msg (str (get-in result [:error :message]))]
                              (re-find verify-rate-limit-pattern msg)))
         phase-status (cond
