@@ -98,6 +98,10 @@
    resources."
   20)
 
+(def ^:private review-issue-keys
+  "Canonical keys accepted in LLM review issue maps."
+  #{:severity :file :line :description :suggestion})
+
 ;------------------------------------------------------------------------------ Layer 1
 ;; Gate running and feedback
 
@@ -322,6 +326,23 @@
                 (if (string? tests) tests (pr-str tests))))
          "\n\nOutput your review as a Clojure map inside a ```clojure code block.")))
 
+(defn- valid-review-issue-map?
+  "True when an LLM-supplied issue has the canonical ReviewIssue shape.
+   Malli map schemas are intentionally open, so reject extra keys here to
+   catch EDN that parsed only because quoted prose was read as symbols."
+  [issue]
+  (and (map? issue)
+       (every? review-issue-keys (keys issue))
+       (m/validate ReviewIssue issue)))
+
+(defn- valid-review-issues?
+  "True when parsed LLM review issues are absent or structurally canonical."
+  [parsed]
+  (let [issues (find parsed :review/issues)]
+    (or (nil? issues)
+        (and (vector? (val issues))
+             (every? valid-review-issue-map? (val issues))))))
+
 (defn parse-review-response
   "Parse the LLM response to extract review feedback.
    Handles EDN in code blocks and plain EDN."
@@ -330,7 +351,8 @@
     (let [parsed (if-let [match (re-find #"```(?:clojure|edn)?\s*\n([\s\S]*?)\n```" response-content)]
                    (edn/read-string (second match))
                    (edn/read-string response-content))]
-      (when (map? parsed)
+      (when (and (map? parsed)
+                 (valid-review-issues? parsed))
         parsed))
     (catch Exception _
       nil)))

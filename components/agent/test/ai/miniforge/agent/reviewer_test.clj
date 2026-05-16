@@ -71,6 +71,23 @@
 (def ^:private backend-timeout-type
   "adaptive_timeout")
 
+(def ^:private valid-review-content
+  "```clojure\n{:review/decision :changes-requested\n :review/issues [{:severity :blocking :description \"Needs changes\"}]}\n```")
+
+(def ^:private malformed-review-issue-content
+  "```clojure
+{:review/decision :changes-requested
+ :review/issues [{:severity :warning
+                  :description \"ToolCallCompleted omits agent id. Queries like \"
+                  failed tool
+                  show all
+                  :file \"components/event-stream/src/ai/miniforge/event_stream/schema.clj\"
+                  :suggestion \"Add agent id\"
+                  :line 313
+                  the implement
+                  agent \" require joining\"}]}
+```")
+
 ;------------------------------------------------------------------------------ Test fixtures
 
 (defn passing-gate
@@ -296,7 +313,7 @@
     (with-redefs [model/resolve-llm-client-for-role (fn [_role client] client)
                   llm/chat (fn [_client _prompt _opts]
                              (mock-llm-response
-                              "```clojure\n{:review/decision :changes-requested\n :review/issues [{:severity :blocking :description \"Needs changes\"}]}\n```"
+                              valid-review-content
                               :success? false
                               :tokens parseable-backend-failure-token-count
                               :error {:message "artifact file not found"}))
@@ -311,6 +328,10 @@
         (is (some #{"Needs changes"} (:review/blocking-issues review)))
         (is (= parseable-backend-failure-token-count
                (get-in result [:metrics :tokens])))))))
+
+(deftest test-reviewer-rejects-structurally-corrupt-llm-issues
+  (testing "valid EDN with malformed issue maps is treated as unparseable"
+    (is (nil? (reviewer/parse-review-response malformed-review-issue-content)))))
 
 (deftest test-reviewer-timeout-only-parseable-failure-is-agent-error
   (testing "timeout-only parsed review failures do not become rejected code-review artifacts"
