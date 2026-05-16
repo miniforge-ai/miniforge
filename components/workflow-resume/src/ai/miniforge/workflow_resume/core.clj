@@ -77,6 +77,31 @@
        (mapcat #(get-in % [:dag/result :data :artifacts] []))
        vec))
 
+(defn extract-workspace-checkpoints
+  "Workspace persistence records emitted at phase boundaries.
+
+   These are the container/worktree provenance records that survive when
+   a DAG task eventually fails. Completed-DAG artifacts only exist for
+   successful tasks; failed repair loops still need the latest persisted
+   branch or bundle so resume continues from the last real workspace
+   state instead of starting from the spec base again."
+  [events]
+  (->> events
+       (filter #(= :workspace/persisted (:event/type %)))
+       (keep (fn [event]
+               (let [checkpoint {:branch (:workspace/branch event)
+                                 :bundle-path (:workspace/bundle-path event)
+                                 :commit-sha (:workspace/commit-sha event)
+                                 :persist-tier (:workspace/persist-tier event)
+                                 :env-id (:workspace/env-id event)
+                                 :phase (:workflow/phase event)
+                                 :timestamp (:event/timestamp event)}]
+                 (when (and (:branch checkpoint)
+                            (or (:bundle-path checkpoint)
+                                (:commit-sha checkpoint)))
+                   checkpoint))))
+       vec))
+
 (defn extract-dag-pause-info
   "Find the last `:dag/paused` event and extract completed task IDs + reason."
   [events]
@@ -267,6 +292,10 @@
       checkpoint-artifacts
       event-artifacts)))
 
+(defn- restored-workspace-checkpoint
+  [events]
+  (last (extract-workspace-checkpoints events)))
+
 ;------------------------------------------------------------------------------ Layer 1
 ;; Context reconstruction
 
@@ -312,6 +341,7 @@
         failed? (reconstructed-failed? by-type checkpoint-data)
         completed-dag-tasks (restored-completed-dag-tasks checkpoint-data events)
         completed-dag-artifacts (restored-completed-dag-artifacts checkpoint-data events)
+        workspace-checkpoint (restored-workspace-checkpoint events)
         dag-pause-info (restored-dag-pause-info checkpoint-data events)]
     {:phase-results phase-results
      :completed-phases completed-phases
@@ -324,6 +354,7 @@
      :event-count (count events)
      :completed-dag-tasks completed-dag-tasks
      :completed-dag-artifacts completed-dag-artifacts
+     :workspace-checkpoint workspace-checkpoint
      :dag-paused? (boolean dag-pause-info)
      :dag-pause-reason (:pause-reason dag-pause-info)
      :machine-snapshot machine-snapshot

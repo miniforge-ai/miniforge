@@ -84,6 +84,27 @@
       (is (= [{:artifact/id "a"} {:artifact/id "b"} {:artifact/id "c"}]
              (core/extract-completed-dag-artifacts events))))))
 
+(deftest extract-workspace-checkpoints-test
+  (testing "collects persisted workspace provenance for failed-task resume"
+    (let [events [{:event/type :workspace/persisted
+                   :workspace/branch "task-a"
+                   :workspace/bundle-path "/tmp/task-a.bundle"
+                   :workspace/commit-sha "abc"
+                   :workspace/env-id "task-a"
+                   :workflow/phase :review
+                   :event/timestamp "2026-05-16T00:00:00Z"}
+                  {:event/type :workspace/persisted
+                   :workspace/branch "task-b"
+                   :workspace/bundle-path "/tmp/task-b.bundle"
+                   :workspace/commit-sha "def"}
+                  {:event/type :workspace/persisted
+                   :workspace/branch nil
+                   :workspace/bundle-path "/tmp/ignored.bundle"}]
+          checkpoints (core/extract-workspace-checkpoints events)]
+      (is (= 2 (count checkpoints)))
+      (is (= "task-a" (:branch (first checkpoints))))
+      (is (= "/tmp/task-b.bundle" (:bundle-path (second checkpoints)))))))
+
 (deftest extract-dag-pause-info-last-pause-wins-test
   (testing "multiple pause events — latest one wins"
     (let [events [{:event/type :dag/paused
@@ -265,17 +286,32 @@
                       {"~:event/type" "~:workflow/phase-completed"
                        "~:workflow/phase" "~:implement"
                        "~:phase/outcome" "~:failure"})
+        (write-event! wf-dir "20260421T000004Z-w.json"
+                      {"~:event/type" "~:workspace/persisted"
+                       "~:workspace/branch" "task-resume"
+                       "~:workspace/bundle-path" "/tmp/task-resume.bundle"
+                       "~:workspace/commit-sha" "abc123"
+                       "~:workspace/env-id" "task-resume"
+                       "~:workflow/phase" "~:review"})
         (testing "reconstructs context from per-event JSON files"
           (let [ctx (core/reconstruct-context base-dir wf-id)]
             (is (= [:explore :plan] (:completed-phases ctx)))
-            (is (= 4 (:event-count ctx)))
+            (is (= 5 (:event-count ctx)))
             (is (false? (:completed? ctx)))
             (is (false? (:failed? ctx)))
             (is (= wf-id (:workflow-id ctx)))
             (is (= {"name" "resumable" "version" "2.0"}
                    (:workflow-spec ctx)))
             (is (= 123 (get-in ctx [:phase-results :explore :duration-ms])))
-            (is (= :success (get-in ctx [:phase-results :plan :outcome])))))))))
+            (is (= :success (get-in ctx [:phase-results :plan :outcome])))
+            (is (= {:branch "task-resume"
+                    :bundle-path "/tmp/task-resume.bundle"
+                    :commit-sha "abc123"
+                    :persist-tier nil
+                    :env-id "task-resume"
+                    :phase :review
+                    :timestamp nil}
+                   (:workspace-checkpoint ctx)))))))))
 
 (deftest reconstruct-context-missing-workflow-test
   (with-temp-events-dir
@@ -368,6 +404,7 @@
     (is (= core/paused? wr/paused?))
     (is (= core/extract-completed-dag-tasks wr/extract-completed-dag-tasks))
     (is (= core/extract-completed-dag-artifacts wr/extract-completed-dag-artifacts))
+    (is (= core/extract-workspace-checkpoints wr/extract-workspace-checkpoints))
     (is (= core/extract-completed-phases wr/extract-completed-phases))
     (is (= core/reconstruct-context wr/reconstruct-context))
     (is (= core/trim-pipeline wr/trim-pipeline))

@@ -116,6 +116,8 @@
                        :event-count 0
                        :completed-dag-tasks #{:task-a}
                        :completed-dag-artifacts [{:artifact/id "art-1"}]
+                       :workspace-checkpoint {:branch "task-a"
+                                              :bundle-path "/tmp/task-a.bundle"}
                        :phase-results {:plan {:status :completed}}
                        :machine-snapshot {:execution/id workflow-id}
                        :workflow-spec {:name "canonical-sdlc"
@@ -152,7 +154,10 @@
         (is (= #{:task-a}
                (:pre-completed-dag-tasks @run-pipeline-opts)))
         (is (= [{:artifact/id "art-1"}]
-               (:pre-completed-artifacts @run-pipeline-opts)))))))
+               (:pre-completed-artifacts @run-pipeline-opts)))
+        (is (= {:branch "task-a"
+                :bundle-path "/tmp/task-a.bundle"}
+               (:resume-workspace @run-pipeline-opts)))))))
 
 (deftest resume-workflow-trims-failed-checkpoint-before-running-test
   (let [workflow-id (random-uuid)

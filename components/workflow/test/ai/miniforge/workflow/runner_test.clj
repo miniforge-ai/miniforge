@@ -432,6 +432,30 @@
             (is (= {:base-branch "main"}
                    (:execution/environment-metadata result)))))))))
 
+(deftest run-pipeline-threads-resume-workspace-to-acquisition-test
+  (testing "resume workspace checkpoint reaches environment acquisition"
+    (let [acquire-var (resolve 'ai.miniforge.workflow.runner-environment/acquire-execution-environment!)
+          env-config-seen (atom nil)
+          resume-workspace {:branch "task-resume"
+                            :bundle-path "/tmp/task-resume.bundle"}]
+      (with-redefs-fn
+        {acquire-var (fn [_workflow-id env-config]
+                       (reset! env-config-seen env-config)
+                       {:executor ::stub-executor
+                        :environment-id "task-resume"
+                        :worktree-path "/tmp/task-resume"
+                        :execution-mode :local
+                        :environment-metadata {:base-branch (:branch env-config)}})}
+        (fn []
+          (let [workflow {:workflow/id :test
+                          :workflow/version "1.0.0"
+                          :workflow/pipeline [{:phase test-done-phase}]}
+                result (runner/run-pipeline workflow
+                                            {:task "Test"}
+                                            {:resume-workspace resume-workspace})]
+            (is (= resume-workspace (:resume-workspace @env-config-seen)))
+            (is (= :completed (:execution/status result)))))))))
+
 (deftest run-pipeline-resume-preserves-checkpoint-metadata-test
   (testing "resume keeps checkpoint metadata when no fresh environment metadata is supplied"
     (let [acquire-var (resolve 'ai.miniforge.workflow.runner-environment/acquire-execution-environment!)
