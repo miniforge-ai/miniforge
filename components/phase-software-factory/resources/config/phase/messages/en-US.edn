@@ -22,6 +22,7 @@
   :verify/no-environment-hint "Workflow runner must acquire an execution environment before verify phase"
   :verify/tests-passed        "All {pass-count} test(s) passed"
   :verify/tests-failed        "Tests failed: {fail-count} failure(s), {error-count} error(s)"
+  :verify/output-unparseable  "Test output could not be parsed"
   :verify/gate-failed         "Gate validation failed"
   :verify/failed              "Verification failed"
 
