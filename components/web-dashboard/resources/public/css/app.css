@@ -484,6 +484,13 @@ body {
   cursor: pointer;
 }
 
+.theme-select:focus,
+.theme-select:focus-visible {
+  outline: 2px solid var(--border-active);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
 .theme-select option {
   background: var(--bg-secondary);
   color: var(--text-primary);
