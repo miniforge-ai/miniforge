@@ -46,7 +46,10 @@
       (is (str/includes? result "Global Filters:"))
       (is (str/includes? result "event-banner"))
       (is (str/includes? result "window.miniforge.filters.shareCurrentView()"))
-      (is (str/includes? result "window.miniforge.cycleTheme()")))
+      ;; Theme picker is now a `<select>` driving `switchTheme(value)`,
+      ;; replacing the prior single-button cycleTheme() control.
+      (is (str/includes? result "id=\"theme-select\""))
+      (is (str/includes? result "window.miniforge.switchTheme(this.value)")))
     (testing "layout renders supplied body content"
       (is (str/includes? result "Inner body")))))
 
