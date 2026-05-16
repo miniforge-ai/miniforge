@@ -23,6 +23,7 @@
    test runner errors, and leave-verify redirect suppression."
   (:require
    [clojure.test :refer [deftest testing is use-fixtures]]
+   [clojure.string :as str]
    [ai.miniforge.phase.interface :as phase]
    [ai.miniforge.phase.loader :as loader]
    [ai.miniforge.phase-software-factory.verify :as verify]))
@@ -130,6 +131,26 @@
                 "Runner error should produce :error result")
             (is (some? (get-in result [:phase :result :metrics :test-output]))
                 "Test output captured in metrics even on runner error")))))))
+
+(deftest verify-preserves-unparseable-test-output-test
+  (testing "unparseable test output is surfaced as actionable verify feedback"
+    (let [run-var (resolve 'ai.miniforge.phase-software-factory.verify/run-tests!)]
+      (with-redefs-fn
+        {run-var (fn [_ & _opts] {:passed? false
+                                  :test-count 0
+                                  :assertion-count 0
+                                  :fail-count 0
+                                  :error-count 1
+                                  :parse-error? true
+                                  :output "Syntax error compiling at src/example.clj:12:3"})}
+        (fn []
+          (let [ctx (-> (create-base-context)
+                        (assoc :phase-config {:phase :verify}))
+                interceptor (phase/get-phase-interceptor {:phase :verify})
+                result ((:enter interceptor) ctx)
+                message (get-in result [:phase :result :error :message])]
+            (is (str/includes? message "Test output could not be parsed"))
+            (is (str/includes? message "Syntax error compiling"))))))))
 
 ;------------------------------------------------------------------------------ Leave-verify redirect suppression tests (PR #288)
 

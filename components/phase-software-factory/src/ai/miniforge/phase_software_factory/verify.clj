@@ -46,6 +46,10 @@
   "Pattern for non-actionable verify failures caused by provider throttling."
   #"(?i)rate.?limit|429|you've hit your limit|quota.?exceeded")
 
+(def ^:private verify-error-preview-limit
+  "Maximum test-runner output included in the verify phase error message."
+  2000)
+
 ;; Register defaults on load
 (phase/register-phase-defaults! :verify default-config)
 
@@ -95,7 +99,24 @@
            :fail-count fail-count
            :error-count error-count
            :output output})
-        (assoc (test-error-result output) :error-count 0 :parse-error? true)))))
+        (assoc (test-error-result output) :parse-error? true)))))
+
+(defn- bounded-output-preview
+  "Return a bounded, trimmed preview of test runner output."
+  [output]
+  (let [trimmed (str/trim (str output))]
+    (cond-> (subs trimmed 0 (min (count trimmed) verify-error-preview-limit))
+      (> (count trimmed) verify-error-preview-limit)
+      (str "\n..."))))
+
+(defn- verify-failure-message
+  "Build the user-facing verify failure message from parsed test results."
+  [test-results raw-fails raw-errors]
+  (if (:parse-error? test-results)
+    (str (messages/t :verify/output-unparseable)
+         (when-let [preview (not-empty (bounded-output-preview (:output test-results)))]
+           (str "\n" preview)))
+    (messages/t :verify/tests-failed {:fail-count raw-fails :error-count raw-errors})))
 
 (defn infer-test-command
   "Infer the test command from the repo structure.
@@ -191,7 +212,7 @@
         metrics    (phase/test-metrics pass-count (+ raw-fails raw-errors) (get test-results :output ""))
         summary    (if passed?
                      (messages/t :verify/tests-passed {:pass-count pass-count})
-                     (messages/t :verify/tests-failed {:fail-count raw-fails :error-count raw-errors}))
+                     (verify-failure-message test-results raw-fails raw-errors))
         result     (if passed?
                      (phase/success env-id summary metrics)
                      (phase/error   env-id summary summary metrics))]
