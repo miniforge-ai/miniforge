@@ -74,6 +74,10 @@
 
 (def ^:private impl-config-path "config/repo-index/implementer.edn")
 
+(def ^:private current-head-ref
+  "Git ref for the currently acquired promoted workspace."
+  "HEAD")
+
 (defn- load-ext->language []
   (if-let [res (io/resource impl-config-path)]
     (get-in (edn/read-string (slurp res)) [:repo-index/implementer :extension->language] {})
@@ -570,10 +574,23 @@
   (let [base-sha (get-in context [:execution/environment-metadata :base-sha])
         base-branch (or (get-in context [:execution/environment-metadata :base-branch])
                         (get-in context [:execution/opts :branch])
-                        (get-in context [:execution/input :branch]))]
+                        (get-in context [:execution/input :branch]))
+        resume-workspace (get-in context [:execution/opts :resume-workspace])
+        original-commit (get-in context [:execution/input :context :git-commit])
+        original-branch (get-in context [:execution/input :context :git-branch])
+        original-refs (concat (when (and original-commit
+                                         (not (str/blank? original-commit)))
+                                [original-commit])
+                              (when (and original-branch
+                                         (not (str/blank? original-branch)))
+                                [(str "refs/remotes/origin/" original-branch)
+                                 (str "origin/" original-branch)
+                                 (str "refs/heads/" original-branch)]))
+        resume-ranges (when resume-workspace
+                        (map #(str % "..." current-head-ref) original-refs))]
     (into []
           (distinct)
-          (cond-> []
+          (cond-> (vec resume-ranges)
             (and base-sha (not (str/blank? base-sha)))
             (conj base-sha)
 

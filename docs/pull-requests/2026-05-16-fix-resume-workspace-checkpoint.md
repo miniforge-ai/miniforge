@@ -23,6 +23,9 @@ inside a repair loop, there were no completed DAG artifacts, so the next
 - Local environment acquisition restores the checkpoint bundle into the host
   repo before acquiring a worktree and prefers the persisted task branch as the
   acquisition branch.
+- Implement artifact collection adds resume-specific merge-base diff candidates
+  from the original spec commit or branch to the restored workspace `HEAD`, so
+  files already present in the promoted workspace remain valid provenance.
 - Workflow messages now include a localized workspace restore failure message.
 
 ## Dogfood Notes
@@ -33,12 +36,18 @@ inside a repair loop, there were no completed DAG artifacts, so the next
   failed with `:curator/no-files-written`.
 - With this change, resume has enough provenance to continue from the last
   promoted workspace state.
+- A follow-up dogfood resume restored `task-79ca5c82` but failed because
+  artifact collection compared the new worktree against the restored task
+  branch itself. The corrected diff base is the merge-base between the original
+  spec ref and the restored `HEAD`.
 
 ## Testing Plan
 
 - `clojure -M:dev:test -e ... workflow-resume.core-test`
 - `clojure -M:dev:test -e ... cli.main.commands.resume-test`
 - `clojure -M:dev:test -e ... workflow.runner-test`
+- `clojure -M:dev:test -e ... phase-software-factory.implement-test`
+- `clojure -M:dev:test -e ... agent.implementer-test`
 - `bb pre-commit`
 
 ## Deployment Plan
@@ -56,4 +65,6 @@ acquisition.
 - [x] Resume records workspace provenance from persisted events.
 - [x] CLI resume threads workspace checkpoint data into the next run.
 - [x] Local worktree acquisition can start from the persisted task branch.
+- [x] Resumed artifact collection compares restored workspaces against the
+      original spec base via merge-base ranges.
 - [x] Focused tests cover reconstruction, CLI plumbing, and runner plumbing.
