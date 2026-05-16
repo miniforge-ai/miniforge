@@ -1,0 +1,21 @@
+{:agent-reviewer-test/fixtures
+ {:reviewer-test/valid-review-blocking-description "Needs changes"
+  :reviewer-test/valid-review-content
+  "```clojure
+{:review/decision :changes-requested
+ :review/issues [{:severity :blocking :description \"Needs changes\"}]}
+```"
+
+  :reviewer-test/malformed-review-issue-content
+  "```clojure
+{:review/decision :changes-requested
+ :review/issues [{:severity :warning
+                  :description \"ToolCallCompleted omits agent id. Queries like \"
+                  failed tool
+                  show all
+                  :file \"components/event-stream/src/ai/miniforge/event_stream/schema.clj\"
+                  :suggestion \"Add agent id\"
+                  :line 313
+                  the implement
+                  agent \" require joining\"}]}
+```"}}

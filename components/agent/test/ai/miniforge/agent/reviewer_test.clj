@@ -26,6 +26,7 @@
    [ai.miniforge.logging.interface :as log]
    [ai.miniforge.llm.interface :as llm]
    [ai.miniforge.loop.interface :as loop]
+   [ai.miniforge.messages.interface :as messages]
    [ai.miniforge.response.interface :as response]))
 
 ;------------------------------------------------------------------------------ Regression-floor constants
@@ -71,22 +72,18 @@
 (def ^:private backend-timeout-type
   "adaptive_timeout")
 
+(def ^:private test-t
+  (messages/create-translator "config/agent/test-fixtures/en-US.edn"
+                              :agent-reviewer-test/fixtures))
+
+(def ^:private valid-review-blocking-description
+  (test-t :reviewer-test/valid-review-blocking-description))
+
 (def ^:private valid-review-content
-  "```clojure\n{:review/decision :changes-requested\n :review/issues [{:severity :blocking :description \"Needs changes\"}]}\n```")
+  (test-t :reviewer-test/valid-review-content))
 
 (def ^:private malformed-review-issue-content
-  "```clojure
-{:review/decision :changes-requested
- :review/issues [{:severity :warning
-                  :description \"ToolCallCompleted omits agent id. Queries like \"
-                  failed tool
-                  show all
-                  :file \"components/event-stream/src/ai/miniforge/event_stream/schema.clj\"
-                  :suggestion \"Add agent id\"
-                  :line 313
-                  the implement
-                  agent \" require joining\"}]}
-```")
+  (test-t :reviewer-test/malformed-review-issue-content))
 
 ;------------------------------------------------------------------------------ Test fixtures
 
@@ -325,7 +322,7 @@
             result (core/invoke reviewer {} sample-artifact)
             review (:artifact result)]
         (is (= :changes-requested (:review/decision review)))
-        (is (some #{"Needs changes"} (:review/blocking-issues review)))
+        (is (some #{valid-review-blocking-description} (:review/blocking-issues review)))
         (is (= parseable-backend-failure-token-count
                (get-in result [:metrics :tokens])))))))
 
