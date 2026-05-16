@@ -139,6 +139,7 @@
                                       :resume-machine-snapshot machine-snapshot
                                       :resume-reset-terminal? failed-checkpoint?
                                       :resume-phase-results (:phase-results reconstructed)
+                                      :resume-workspace (:workspace-checkpoint reconstructed)
                                       :skip-lifecycle-events false
                                       :pre-completed-dag-tasks (:completed-dag-tasks reconstructed)
                                       :pre-completed-artifacts (:completed-dag-artifacts reconstructed)

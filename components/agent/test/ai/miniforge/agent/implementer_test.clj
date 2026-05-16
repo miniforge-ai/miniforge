@@ -477,6 +477,24 @@
              candidates))
       (is (not (contains? (set candidates) "main"))))))
 
+(deftest base-ref-candidates-use-resume-merge-base-ranges
+  (testing "resumed workspaces compare the original spec base to restored HEAD"
+    (let [candidates (@#'implementer/base-ref-candidates
+                      {:execution/environment-metadata {:base-sha "task-sha"
+                                                        :base-branch "task-restored"}
+                       :execution/opts {:resume-workspace {:branch "task-restored"}}
+                       :execution/input {:context {:git-commit "spec-sha"
+                                                   :git-branch "dogfood/source"}}})]
+      (is (= ["spec-sha...HEAD"
+              "refs/remotes/origin/dogfood/source...HEAD"
+              "origin/dogfood/source...HEAD"
+              "refs/heads/dogfood/source...HEAD"
+              "task-sha"
+              "refs/remotes/origin/task-restored"
+              "origin/task-restored"
+              "refs/heads/task-restored"]
+             candidates)))))
+
 ;------------------------------------------------------------------------------ Layer 4
 ;; Utility tests
 

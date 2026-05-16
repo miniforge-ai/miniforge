@@ -76,6 +76,7 @@
   :env/release-failed       "Environment release failed: {error}"
   :env/persist-message      "{phase} phase completed"
   :env/persist-failed       "Workspace persist failed: {error}"
+  :env/restore-failed       "Workspace restore failed: {error}"
 
   ;; v2 multi-parent merge (DAG orchestrator) — anomaly + log messages
   :dag.merge/branch-unresolvable     "Parent branch could not be resolved to a commit"

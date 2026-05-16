@@ -46,6 +46,7 @@
 (def paused?                     core/paused?)
 (def extract-completed-dag-tasks core/extract-completed-dag-tasks)
 (def extract-completed-dag-artifacts core/extract-completed-dag-artifacts)
+(def extract-workspace-checkpoints core/extract-workspace-checkpoints)
 (def extract-dag-pause-info      core/extract-dag-pause-info)
 (def extract-completed-phases    core/extract-completed-phases)
 (def extract-phase-results       core/extract-phase-results)

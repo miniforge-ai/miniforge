@@ -277,12 +277,15 @@
     [nil opts]
     (let [repo-url (get opts :repo-url (get input :repo-url))
           branch   (get opts :branch (get input :branch "main"))
+          repo-path (get opts :repo-path (get input :repo-path "."))
           acquired (env/acquire-execution-environment!
                     (:workflow/id workflow)
                     {:repo-url        repo-url
                      :branch          branch
+                     :repo-path       repo-path
                      :execution-mode  (:execution-mode opts)
-                     :executor-config (:executor-config opts)})]
+                     :executor-config (:executor-config opts)
+                     :resume-workspace (:resume-workspace opts)})]
       [acquired (if acquired
                   (merge opts {:branch branch} acquired)
                   opts)])))

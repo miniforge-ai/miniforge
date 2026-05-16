@@ -105,6 +105,34 @@
          :execution-mode       mode
          :environment-metadata (:metadata env)}))))
 
+(defn- restore-local-workspace-checkpoint!
+  "Restore a persisted local workspace branch before acquiring a worktree.
+
+   Local resume must make the last persisted branch visible before
+   `git worktree add` runs. Governed runtimes restore inside the capsule;
+   local worktrees are acquired from a host ref, so the host ref has to
+   exist first."
+  [executor repo-path {:keys [bundle-path branch] :as checkpoint}]
+  (when (and executor bundle-path branch)
+    (try
+      (let [result (dag/restore-workspace! executor nil
+                                           {:host-repo-path (or repo-path ".")
+                                            :workdir (or repo-path ".")
+                                            :bundle-path bundle-path
+                                            :branch branch})]
+        (when-not (dag/ok? result)
+          (log/warn env-logger :workflow :workflow/restore-failed
+                    {:message (messages/t :env/restore-failed
+                                          {:error (str result)})
+                     :data checkpoint}))
+        result)
+      (catch Exception e
+        (log/warn env-logger :workflow :workflow/restore-failed
+                  {:message (messages/t :env/restore-failed
+                                        {:error (ex-message e)})
+                   :data checkpoint})
+        nil))))
+
 (defn- acquire-worktree-and-capsule
   "Acquire both a host worktree and a capsule for governed mode."
   [executor workflow-id mode env-config fns]
@@ -125,16 +153,19 @@
 (defn acquire-execution-environment!
   "Acquire an isolated execution environment before pipeline starts.
    Returns env map, or nil (local) / throws (governed) on failure."
-  [workflow-id {:keys [repo-url branch execution-mode executor-config]}]
+  [workflow-id {:keys [repo-url branch repo-path execution-mode executor-config
+                       resume-workspace]}]
   (let [mode (get {:governed :governed} execution-mode :local)]
     (try
       (let [fns      (dag-executor-fns)
             config   (registry-config-for-mode mode executor-config)
             registry ((:create-registry fns) config)
             executor (select-capsule-executor registry mode fns)
+            branch   (or (:branch resume-workspace) branch)
             env-config (cond-> {}
                          repo-url (assoc :repo-url repo-url)
-                         branch   (assoc :branch branch))]
+                         branch   (assoc :branch branch)
+                         repo-path (assoc :repo-path repo-path))]
         (when-let [a (check-executor-for-mode executor mode)]
           ;; Boundary throw: acquire-execution-environment! is the
           ;; runner's escalation point for governed-mode unavailability.
@@ -144,6 +175,8 @@
                                    (:anomaly/message a)
                                    {:anomaly.executor/mode (get-in a [:anomaly/data :mode])
                                     :hint (get-in a [:anomaly/data :hint])}))
+        (when (= :local mode)
+          (restore-local-workspace-checkpoint! executor repo-path resume-workspace))
         (when executor
           (if (= :governed mode)
             (acquire-worktree-and-capsule executor workflow-id mode env-config fns)

@@ -110,6 +110,24 @@
       (is (= :implementer (:agent defaults)))
       (is (= [:syntax :format :lint] (:gates defaults))))))
 
+(deftest base-ref-candidates-include-resume-merge-base-ranges-test
+  (testing "resumed workspaces diff from the original spec base to restored HEAD"
+    (let [candidates (#'implement/base-ref-candidates
+                      {:execution/environment-metadata {:base-sha "task-sha"
+                                                        :base-branch "task-restored"}
+                       :execution/opts {:resume-workspace {:branch "task-restored"}}
+                       :execution/input {:context {:git-commit "spec-sha"
+                                                   :git-branch "dogfood/source"}}})]
+      (is (= ["spec-sha...HEAD"
+              "refs/remotes/origin/dogfood/source...HEAD"
+              "origin/dogfood/source...HEAD"
+              "refs/heads/dogfood/source...HEAD"
+              "task-sha"
+              "refs/remotes/origin/task-restored"
+              "origin/task-restored"
+              "refs/heads/task-restored"]
+             candidates)))))
+
 ;------------------------------------------------------------------------------ Layer 1: Interceptor Enter Tests
 
 (deftest enter-implement-sets-phase-metadata-test

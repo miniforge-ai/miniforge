@@ -53,6 +53,10 @@
    Failure summaries are typically in the first/last 30 lines."
   60)
 
+(def ^:private current-head-ref
+  "Git ref for the currently acquired promoted workspace."
+  "HEAD")
+
 (defn- truncate-test-output
   "Truncate test output to max-test-output-lines, keeping head and tail."
   [output]
@@ -108,13 +112,30 @@
 (defn- base-ref-candidates
   "Return candidate refs for collecting the promoted task artifact."
   [ctx]
-  (let [base-sha (get-in ctx [:execution/environment-metadata :base-sha])
-        base-branch (or (get-in ctx [:execution/environment-metadata :base-branch])
-                        (get-in ctx [:execution/opts :branch])
-                        (get-in ctx [:execution/input :branch]))]
-    (cond-> []
-      base-sha (conj base-sha)
-      base-branch (conj (str "origin/" base-branch) base-branch))))
+  (letfn [(present-string? [value]
+            (and (string? value) (not (str/blank? value))))
+          (branch-refs [branch]
+            (when (present-string? branch)
+              [(str "refs/remotes/origin/" branch)
+               (str "origin/" branch)
+               (str "refs/heads/" branch)]))]
+    (let [base-sha (get-in ctx [:execution/environment-metadata :base-sha])
+          base-branch (or (get-in ctx [:execution/environment-metadata :base-branch])
+                          (get-in ctx [:execution/opts :branch])
+                          (get-in ctx [:execution/input :branch]))
+          resume-workspace (get-in ctx [:execution/opts :resume-workspace])
+          original-commit (get-in ctx [:execution/input :context :git-commit])
+          original-branch (get-in ctx [:execution/input :context :git-branch])
+          original-refs (concat (when (present-string? original-commit)
+                                  [original-commit])
+                                (branch-refs original-branch))
+          resume-ranges (when resume-workspace
+                          (map #(str % "..." current-head-ref) original-refs))]
+      (into []
+            (comp (filter present-string?) (distinct))
+            (concat resume-ranges
+                    [base-sha]
+                    (branch-refs base-branch))))))
 
 (defn- resolve-files-in-scope
   "Resolve files-in-scope from input, checking context and intent."
