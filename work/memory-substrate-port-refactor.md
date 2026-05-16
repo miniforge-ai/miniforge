@@ -2,53 +2,82 @@
 
 **Status:** Draft, ready for agent execution
 **Date:** 2026-04-26
-**Scope:** Port the response-chain pattern from ixi into thesium-workflows, build a consumer-RAG-shaped evidence-record component, wire them together, and apply a standing "exceptions are data" rule across miniforge.
+**Scope:** Port the response-chain pattern from ixi into thesium-workflows, build a consumer-RAG-shaped
+evidence-record component, wire them together, and apply a standing "exceptions are data" rule across
+miniforge.
 
 ## Goal
 
-Bring the agentic memory substrate's runtime-trace and audit patterns into thesium-workflows under its newer architectural opinions (malli, colocated schemas, `ai.thesium.*` namespacing, layer-labeled imports), without copying ixi code wholesale. Apply the underlying error-discipline rule across miniforge to halt and reverse the "agents love exceptions" regression.
+Bring the agentic memory substrate's runtime-trace and audit patterns into thesium-workflows under its newer
+architectural opinions (malli, colocated schemas, `ai.thesium.*` namespacing, layer-labeled imports), without
+copying ixi code wholesale. Apply the underlying error-discipline rule across miniforge to halt and reverse
+the "agents love exceptions" regression.
 
 ## Repos affected
 
 | Repo | Path | Role in this refactor |
 |------|------|------------------------|
-| `miniforge` (OSS, Apache 2) | `/Users/chris/ws/miniforge.ai/miniforge` | **Shared substrate** — gains new common components (`anomaly`, `response-chain`, `boundary`, `content-hash`) plus exceptions-as-data cleanup. Already vendored by every other repo, so nothing extracted, nothing relocated outside. |
-| `thesium-workflows` | `/Users/chris/ws/miniforge.ai/thesium-workflows` | Consumes the new miniforge components; builds `inference-evidence` + memory-operations |
+| `miniforge` (OSS, Apache 2) | `<miniforge>/` | **Shared substrate** — gains new common components (`anomaly`, `response-chain`, `boundary`, `content-hash`) plus exceptions-as-data cleanup. Already vendored by every other repo, so nothing extracted, nothing relocated outside. |
+| `thesium-workflows` | `<thesium-workflows>/` | Consumes the new miniforge components; builds `inference-evidence` + memory-operations |
 | `miniforge-fleet` | *<add path>* | Consumes the new miniforge components. **TODO (user):** add Fleet-specific cleanup tasks once scope is captured. |
-| `miniforge-standards` (pack source) | `/Users/chris/ws/miniforge.ai/miniforge-standards` | New standing rule (exceptions-as-data) |
-| `engrammicai/ixi` | `/Users/chris/ws/engrammicai/ixi` | **Read-only reference.** Do not commit. |
+| `miniforge-standards` (pack source) | `<miniforge-standards>/` | New standing rule (exceptions-as-data) |
+| `engrammicai/ixi` | `<ixi>/` | **Read-only reference.** Do not commit. |
 
-**Architectural rule:** *miniforge OSS is the substrate. Other repos already pull it in.* When something is genuinely cross-cutting Clojure infrastructure, it goes into miniforge as a new component, not into a separate "commons" repo. Don't move things *out* of miniforge unless there's a real benefit; do add things *into* miniforge that should be common. License posture: miniforge is Apache 2 — anything added here is OSS by default. Proprietary repos (thesium-workflows, Fleet) consume freely.
+Path placeholders follow the repo's sanitizer convention (`tasks/standards.clj:28-31`); resolve each to the
+local checkout when executing tasks.
 
-**Sharing rule:** *Share protocols and primitives; specialize schemas.* Anomaly type, response-chain accumulator, boundary wrapper, content hashing → miniforge OSS. Evidence-record *schemas* (SDLC vs RAG vs Fleet-specific) → per-repo. Miniforge keeps its `evidence-bundle` as the SDLC-shaped variant; thesium-workflows builds `inference-evidence` as the RAG-shaped variant.
+**Architectural rule:** *miniforge OSS is the substrate. Other repos already pull it in.* When something is
+genuinely cross-cutting Clojure infrastructure, it goes into miniforge as a new component, not into a
+separate "commons" repo. Don't move things *out* of miniforge unless there's a real benefit; do add things
+*into* miniforge that should be common. License posture: miniforge is Apache 2 — anything added here is OSS
+by default. Proprietary repos (thesium-workflows, Fleet) consume freely.
 
-**Reference rule:** Read ixi for shape and intent. Do not copy code. Reimplement under thesium-workflows' opinions (malli, colocated schemas, layer labels, `ai.thesium.*` namespace). Patterns are not copyrightable; specific implementations are.
+**Sharing rule:** *Share protocols and primitives; specialize schemas.* Anomaly type, response-chain
+accumulator, boundary wrapper, content hashing → miniforge OSS. Evidence-record *schemas* (SDLC vs RAG vs
+Fleet-specific) → per-repo. Miniforge keeps its `evidence-bundle` as the SDLC-shaped variant;
+thesium-workflows builds `inference-evidence` as the RAG-shaped variant.
+
+**Reference rule:** Read ixi for shape and intent. Do not copy code. Reimplement under thesium-workflows'
+opinions (malli, colocated schemas, layer labels, `ai.thesium.*` namespace). Patterns are not copyrightable;
+specific implementations are.
 
 ## Workstream overview
 
 | ID | Workstream | Repo | Blocks | Can run parallel with |
 |----|------------|------|--------|------------------------|
-| **H** | **Add cross-cutting components to miniforge OSS** (anomaly, response-chain, boundary, content-hash extraction) | miniforge | A, B, E | F, G |
+| **H** | **Add cross-cutting components to miniforge OSS** (anomaly, response-chain, boundary, content-hash extraction) | miniforge | A, B, E2, E3 | F, G, E1 |
 | A | Response-chain wiring in thesium-workflows (consumes from miniforge) | thesium-workflows | C, D | F, G |
 | B | Inference-evidence component (consumes miniforge primitives) | thesium-workflows | C | F, G, E |
 | C | Wire chain → evidence at terminal | thesium-workflows | D | F, G, E |
 | D | Semantic port from ixi (encode/recall/etc.) | thesium-workflows | — | F, G, E |
-| E | Exceptions-as-data cleanup pass (uses new anomaly/response-chain components) | miniforge | — | B, C, D, F, G |
+| E1 | Exceptions-as-data inventory (pure audit, no dep on H) | miniforge | E2, E3 | A, B, C, D, F, G, H |
+| E2/E3 | Exceptions-as-data cleanup PRs (use new anomaly/response-chain components) | miniforge | — | B, C, D, F, G |
 | F | Standing rule in standards pack | miniforge-standards | — | A, B, C, D, E, G, H |
 | G | Test-file decomposition discipline | thesium-workflows | — | A, B, C, D, E, F, H |
 | **(Fleet)** | **TBD by user — Fleet-side cleanup + consumption of new miniforge components** | miniforge-fleet | — | most |
 
-**Recommended order:** **H lands first** (new miniforge components). Then A + F + G + E1 (inventory) in parallel. A done → B; A+B done → C; C → D. E2/E3 run in parallel after H + F2 land.
+**Recommended order:** **H lands first** (new miniforge components). E1 (inventory) is a pure audit and can
+run in parallel with H from the start. F1+F2 (rule + linter) and G1 (test-file audit) also run in parallel
+with H. Once H lands → A wires thesium-workflows to consume miniforge components. A done → B; A+B done → C;
+C → D. E2/E3 (the cleanup PRs that actually rewrite throw sites) run in parallel after both H lands (so the
+canonical anomaly + response-chain components exist) and F2 lands (so the linter catches regressions).
 
 ---
 
 ## Workstream H — Add cross-cutting components to miniforge OSS
 
-**Outcome:** Miniforge OSS gains four small, domain-free components that other miniforge-family repos already-pulling-miniforge can consume directly: `anomaly`, `response-chain`, `boundary` (exception wrapper), and `content-hash` (extracted from inside `evidence-bundle`).
+**Outcome:** Miniforge OSS gains four small, domain-free components that other miniforge-family repos
+already-pulling-miniforge can consume directly: `anomaly`, `response-chain`, `boundary` (exception wrapper),
+and `content-hash` (extracted from inside `evidence-bundle`).
 
-**Architectural framing:** Miniforge OSS is the substrate. Thesium-workflows, Fleet, and risk-dashboard already vendor it. Adding these components to miniforge — rather than spinning up a separate commons repo — keeps the dependency graph honest, avoids a new OSS repo to maintain, and makes the patterns available to the broader OSS audience.
+**Architectural framing:** Miniforge OSS is the substrate. Thesium-workflows, Fleet, and risk-dashboard
+already vendor it. Adding these components to miniforge — rather than spinning up a separate commons repo —
+keeps the dependency graph honest, avoids a new OSS repo to maintain, and makes the patterns available to
+the broader OSS audience.
 
-**Discipline:** These components carry zero domain coupling. Pure data shapes, accumulators, validators, crypto helpers. Anything with a domain model attached (workflow state, retrieval result, agent intent) does NOT go here — it belongs in a domain-specific component.
+**Discipline:** These components carry zero domain coupling. Pure data shapes, accumulators, validators,
+crypto helpers. Anything with a domain model attached (workflow state, retrieval result, agent intent) does
+NOT go here — it belongs in a domain-specific component.
 
 ### H1 — `anomaly` component
 
@@ -63,7 +92,14 @@ Bring the agentic memory substrate's runtime-trace and audit patterns into thesi
   - `(anomaly type message data)` — constructor
   - `(anomaly? x)` — predicate
   - `Anomaly` — malli schema
-  - Standard anomaly type vocabulary: `:not-found`, `:invalid-input`, `:unauthorized`, `:fault`, `:unavailable`, `:conflict`, `:timeout`, `:unsupported`, `:fatal` (mirrors cognitect anomalies)
+  - Standard slingshot anomaly-category vocabulary (mirrors cognitect-compatible taxonomy already in
+    `components/response/src/ai/miniforge/response/anomaly.clj`): `:anomalies/unavailable`,
+    `:anomalies/interrupted`, `:anomalies/incorrect`, `:anomalies/forbidden`, `:anomalies/not-found`,
+    `:anomalies/conflict`, `:anomalies/fault`, `:anomalies/unsupported`, `:anomalies/busy`,
+    `:anomalies/timeout`. The bare-keyword `:anomaly/type` vocabulary used in returned anomaly maps is the
+    shorter compatible form (`:not-found`, `:incorrect`, `:forbidden`, `:busy`, etc.). H1 nails down both
+    surfaces. Do NOT introduce a divergent local taxonomy such as `:invalid-input`, `:unauthorized`, or
+    `:fatal`.
 - **Acceptance:**
   - Schema round-trip serializable (anomalies must persist into evidence records)
   - Predicate stable
@@ -77,7 +113,8 @@ Bring the agentic memory substrate's runtime-trace and audit patterns into thesi
 - **Reference reading (do not modify):**
   - `engrammicai/ixi/components/responses-web/src/com/emojixi/responses_web/interface.clj` (shape)
   - `engrammicai/ixi/components/responses-web/src/com/emojixi/responses_web/core.clj` (accumulation logic)
-  - `miniforge/components/evidence-bundle/src/ai/miniforge/evidence_bundle/interface.clj` (style template — license header, layer labels, requiring-resolve discipline)
+  - `miniforge/components/evidence-bundle/src/ai/miniforge/evidence_bundle/interface.clj` (style template — license
+    header, layer labels, requiring-resolve discipline)
 - **Public API (preserve ixi semantics; modernize idioms):**
   - `(create-chain operation-key)` — start a chain
   - `(append-step chain operation-key response)` and `(append-step chain operation-key anomaly response)`
@@ -87,6 +124,7 @@ Bring the agentic memory substrate's runtime-trace and audit patterns into thesi
   - `(last-successful-or chain default)`
   - `(steps chain)`
 - **Data shape (validated by malli):**
+
   ```clojure
   {:operation keyword?
    :succeeded? boolean?
@@ -95,6 +133,7 @@ Bring the agentic memory substrate's runtime-trace and audit patterns into thesi
                      :anomaly [:maybe Anomaly]
                      :response any?}]}
   ```
+
 - **Depends on:** `anomaly` (H1)
 - **Test decomposition:** Match ixi's discipline — one focused test file per behavior:
   - `interface/create_chain_test.clj`
@@ -117,12 +156,18 @@ Bring the agentic memory substrate's runtime-trace and audit patterns into thesi
 - **Namespace:** `ai.miniforge.boundary.*`
 - **API:**
   - `(execute-with-exception-handling exception-category chain operation-key f & args)`
-  - Catches `Throwable`, converts to anomaly step, appends to chain, returns chain
-- **Reference:** ixi's `core/execute-with-exception-handling` (read-only)
+  - Catches `Exception` (NOT `Throwable`), converts to anomaly step, appends to chain, returns chain.
+    JVM-level `Error`s (OOM, StackOverflowError, thread death) propagate untouched — converting them to
+    anomaly data would mask unrecoverable failures and let processes continue in a broken state.
+- **Reference:** ixi's `core/execute-with-exception-handling` (read-only; ixi catches `Throwable`, this
+  reimplementation deliberately narrows to `Exception`)
 - **Depends on:** `anomaly`, `response-chain`
 - **Acceptance:**
-  - Pure-data return (no rethrows except for `:fatal` category)
-  - Anomaly carries throwable summary: `{:type class-name :message :cause :data}`
+  - Pure-data return for `Exception`; caller-chosen fatal policy must rethrow inside the wrapped function
+    before the boundary records an anomaly
+  - `Error` always propagates — verify with an `OutOfMemoryError`-throwing test fn that the wrapper
+    does NOT swallow it
+  - Anomaly carries exception summary: `{:type class-name :message :cause :data}`
   - Tests cover happy path + each category, decomposed per behavior
 
 ### H4 — Extract `content-hash` from `evidence-bundle` into its own component
@@ -151,97 +196,79 @@ Bring the agentic memory substrate's runtime-trace and audit patterns into thesi
 - **Approach:**
   - Document the four new components as the canonical primitives for cross-cutting concerns
   - Note that other miniforge-family repos consume these directly via vendoring
-  - State the discipline: "If a proposed addition to miniforge carries domain coupling, it doesn't belong in `anomaly`, `response-chain`, `boundary`, or `content-hash` — make a new domain component."
+  - State the discipline: "If a proposed addition to miniforge carries domain coupling, it doesn't belong in `anomaly`,
+    `response-chain`, `boundary`, or `content-hash` — make a new domain component."
 - **Acceptance:**
   - Components findable from the readme component index
   - Agents can locate them without grepping
 
 ---
 
-## Workstream A — Response-Chain Wiring (was: response-chain in thesium-workflows; now: consume from commons)
+## Workstream A — Response-Chain Wiring in thesium-workflows
 
-**Outcome:** thesium-workflows depends on `miniforge-clj-commons/response-chain` and `miniforge-clj-commons/boundary` via `:local/root`. The component itself is built in commons (Workstream H4/H5).
+**Outcome:** thesium-workflows depends on miniforge's `response-chain` and `boundary` components (built in
+H2 and H3) via `:local/root`. The components themselves live in miniforge OSS — Workstream A is
+exclusively about wiring thesium-workflows to consume them. A1 and A2 below are placeholder anchors
+preserved for cross-referencing; the real work for those component-build tasks lives in H2/H3.
 
-### A1 — (MOVED to Workstream H2 — component built in miniforge)
+### A1 — (anchor — component built in miniforge as H2)
 
-The component itself is built in miniforge OSS (see H2). Workstream A is now about **wiring thesium-workflows** to consume it.
+The `response-chain` component is built in miniforge OSS at `<miniforge>/components/response-chain/` with
+namespace `ai.miniforge.response-chain.*`. Refer to H2 for the file list, API, schema, and acceptance
+criteria. Do NOT create a parallel `ai.thesium.response-chain` component — that path is closed.
 
-- **Repo:** miniforge (was: thesium-workflows)
-- **Path:** `components/response-chain/` (in miniforge)
-- **Namespace:** `ai.miniforge.response-chain.*`
-- **Reference reading:**
-  - `engrammicai/ixi/components/responses-web/src/com/emojixi/responses_web/interface.clj` (shape)
-  - `engrammicai/ixi/components/responses-web/src/com/emojixi/responses_web/core.clj` (accumulation logic)
-  - `thesium-workflows/components/kg-store/src/ai/thesium/kg_store/interface.clj` (style template)
-- **Files to create:**
-  - `src/ai/thesium/response_chain/interface.clj` — public API
-  - `src/ai/thesium/response_chain/contract.clj` — malli schemas for chain + step + anomaly
-  - `src/ai/thesium/response_chain/core.clj` — accumulator + queries
-  - `src/ai/thesium/response_chain/messages.clj` — i18n strings
-  - `deps.edn`, `resources/response-chain/messages/en-US.edn`
-- **Public API (preserve ixi semantics; modernize idioms):**
-  - `(create-chain operation-key)` — start a chain
-  - `(append-step chain operation-key response)` and `(append-step chain operation-key anomaly response)`
-  - `(succeeded? step-or-chain)`
-  - `(last-response chain)`
-  - `(last-anomaly chain)`
-  - `(last-successful-or chain default)`
-  - `(steps chain)` — return the vector of steps
-  - `(anomaly type message data)` — anomaly constructor
-- **Data shape (validated by malli):**
-  ```clojure
-  {:operation keyword?
-   :succeeded? boolean?
-   :response-chain [{:operation keyword?
-                     :succeeded? boolean?
-                     :anomaly [:maybe Anomaly]
-                     :response any?}]}
-  ```
-- **Acceptance criteria:**
-  - All public functions validated via `boundary-validation/validate!` at entry
-  - Component depends only on `boundary-validation`
-  - Layer-labeled comment headers ("Layer 0/1/2") with matching imports
-  - Apache 2 / proprietary license header on every file (match `kg-store` pattern)
-
-### A2 — (MOVED to Workstream H3 — component built in miniforge)
-
-- **Repo:** miniforge
-- **Path:** `components/boundary/`
-- **Namespace:** `ai.miniforge.boundary.*`
-- **Files to create:**
-  - `src/ai/thesium/response_chain/boundary.clj` — exception→anomaly converter
-- **API:**
-  - `(execute-with-exception-handling exception-category chain operation-key f & args)`
-  - Catches `Throwable` at the boundary, converts to anomaly step, appends to chain, returns chain
-- **Reference:** ixi's `core/execute-with-exception-handling` (read-only)
-- **Acceptance:**
-  - Pure-data return (no rethrows except for `:fatal` category)
-  - Anomaly carries throwable summary: `{:type class-name :message :cause :data}`
-  - Tests cover happy path + each category
-
-### A3 — Test decomposition (set the pattern)
+**thesium-workflows wiring:**
 
 - **Repo:** thesium-workflows
-- **Path:** `components/response-chain/test/ai/thesium/response_chain/`
-- **Files to create (one focused test file per behavior):**
-  - `interface/create_chain_test.clj`
-  - `interface/append_step_test.clj`
-  - `interface/anomaly_construction_test.clj`
-  - `interface/succeeded_predicate_test.clj`
-  - `interface/last_response_test.clj`
-  - `interface/last_anomaly_test.clj`
-  - `interface/exception_boundary_test.clj`
-  - `interface/malli_validation_test.clj`
-  - `interface/multi_step_composition_test.clj`
-- **Reference for pattern:** `engrammicai/ixi/components/engram-memory/test/com/emojixi/engram_memory/interface/` — note the 13 focused files
-- **Acceptance:** Each test file covers exactly one behavior dimension. No mixed-concern test files.
+- **Files to modify:**
+  - `<thesium-workflows>/deps.edn` — add `:local/root` dep on `<miniforge>/components/response-chain`
+  - Any component that produces or consumes response chains imports
+    `ai.miniforge.response-chain.interface` directly
+- **Acceptance:**
+  - No duplicate `ai.thesium.response-chain` namespace in thesium-workflows
+  - At least one consumer (e.g. `kg-retrieval`) imports
+    `[ai.miniforge.response-chain.interface :as response-chain]`
+
+### A2 — (anchor — component built in miniforge as H3)
+
+The `boundary` component is built in miniforge OSS at `<miniforge>/components/boundary/` with namespace
+`ai.miniforge.boundary.*`. Refer to H3 for the API, exception-handling discipline, and acceptance criteria.
+Do NOT create a `ai.thesium.response-chain.boundary` namespace — that path is closed.
+
+**thesium-workflows wiring:**
+
+- **Repo:** thesium-workflows
+- **Files to modify:**
+  - `<thesium-workflows>/deps.edn` — add `:local/root` dep on `<miniforge>/components/boundary`
+  - Replace any local `try/catch` boundary wrappers in non-boundary code with
+    `ai.miniforge.boundary.interface/execute-with-exception-handling`
+- **Acceptance:**
+  - No duplicate `ai.thesium.boundary` namespace in thesium-workflows
+  - Existing exception-handling boundaries in flow-style code consume the shared wrapper
+
+### A3 — Wiring tests (consume from miniforge)
+
+The decomposed unit tests for the components themselves are owned by H2/H3 and live in miniforge
+(`<miniforge>/components/response-chain/test/...` and `<miniforge>/components/boundary/test/...`). A3 covers
+the thesium-workflows wiring tests:
+
+- **Repo:** thesium-workflows
+- **Path:** `<thesium-workflows>/components/<consumer>/test/...`
+- **Acceptance:**
+  - Each consumer that wires in `response-chain` or `boundary` has at least one test confirming the
+    miniforge namespace is reachable and a chain accumulates as expected through the consumer's flow
+  - No tests duplicate the H2/H3 unit coverage — those exist in miniforge
 
 ### A4 — Add anomaly-returning variant to thesium-workflows' boundary-validation
 
 - **Repo:** thesium-workflows
 - **Path:** `components/boundary-validation/src/ai/thesium/boundary_validation/`
-- **Note:** thesium-workflows' `boundary-validation` stays in place (not moved into miniforge for this refactor). H-series components in miniforge use malli directly without a wrapper component, since they're small enough and miniforge may have its own validation conventions to honor. Convergence of validation discipline across repos is out of scope here.
-- **Change:** Add a parallel `validate` (no `!`) that returns `{:valid? bool :explanation ...}` instead of throwing. Keep `validate!` as-is for absolute-boundary use.
+- **Note:** thesium-workflows' `boundary-validation` stays in place (not moved into miniforge for this refactor).
+  H-series components in miniforge use malli directly without a wrapper component, since they're small enough and
+  miniforge may have its own validation conventions to honor. Convergence of validation discipline across repos is out
+  of scope here.
+- **Change:** Add a parallel `validate` (no `!`) that returns `{:valid? bool :explanation ...}` instead of throwing.
+  Keep `validate!` as-is for absolute-boundary use.
 - **Acceptance:**
   - Existing `validate!` callers unchanged
   - New `validate` documented as the in-flow variant
@@ -251,27 +278,31 @@ The component itself is built in miniforge OSS (see H2). Workstream A is now abo
 
 ## Workstream B — Inference-Evidence Component (thesium-workflows)
 
-**Outcome:** A new `ai.thesium.inference-evidence` component that persists a content-hashed, queryable record of completed user interactions for audit, citation, and "why did the AI say this?" answers.
+**Outcome:** A new `ai.thesium.inference-evidence` component that persists a content-hashed, queryable record of
+  completed user interactions for audit, citation, and "why did the AI say this?" answers.
 
-**Critical:** This is a **simpler, consumer-RAG-shaped variant** of miniforge's evidence-bundle. Do NOT copy miniforge's evidence-bundle directly — its workflow/SDLC/Terraform shape is wrong for Thesium apps.
+**Critical:** This is a **simpler, consumer-RAG-shaped variant** of miniforge's evidence-bundle. Do NOT copy miniforge's
+  evidence-bundle directly — its workflow/SDLC/Terraform shape is wrong for Thesium apps.
 
 ### B1 — Scaffold inference-evidence component
 
 - **Repo:** thesium-workflows
-- **Path:** `components/inference-evidence/`
+- **Path:** `<thesium-workflows>/components/inference-evidence/`
 - **Reference reading:**
-  - `miniforge/components/evidence-bundle/src/ai/miniforge/evidence_bundle/interface.clj` (shape, protocol pattern)
-  - `miniforge/components/evidence-bundle/src/ai/miniforge/evidence_bundle/schema.clj` (schema discipline)
-  - `miniforge/components/evidence-bundle/src/ai/miniforge/evidence_bundle/hash.clj` (content hashing — Apache 2, can copy)
+  - `<miniforge>/components/evidence-bundle/src/ai/miniforge/evidence_bundle/interface.clj` (shape, protocol
+    pattern)
+  - `<miniforge>/components/evidence-bundle/src/ai/miniforge/evidence_bundle/schema.clj` (schema discipline)
 - **Files to create:**
   - `src/ai/thesium/inference_evidence/interface.clj`
   - `src/ai/thesium/inference_evidence/contract.clj`
   - `src/ai/thesium/inference_evidence/schema.clj`
-  - `src/ai/thesium/inference_evidence/hash.clj` (port from miniforge — Apache 2)
   - `src/ai/thesium/inference_evidence/messages.clj`
   - `src/ai/thesium/inference_evidence/datalevin_store.clj` (lazy via requiring-resolve, like kg-store)
   - `src/ai/thesium/inference_evidence/interface/protocols/inference_evidence.clj`
+- **Do NOT create** a local `hash.clj` — content hashing is consumed from `ai.miniforge.content-hash`
+  (built as H4). See B2.
 - **Schema (consumer-RAG-shaped, NOT SDLC-shaped):**
+
   ```clojure
   {:inference-evidence/id          uuid?
    :inference-evidence/session-id  uuid?       ;; per-user session
@@ -293,6 +324,7 @@ The component itself is built in miniforge OSS (see H2). Workstream A is now abo
    :inference-evidence/content-hash string?    ;; SHA-256 of canonical EDN
    :inference-evidence/anomalies [...]}
   ```
+
 - **Public API (mirror miniforge structure but slimmer):**
   - `(create-evidence-store opts)` — factory; lazy Datalevin via requiring-resolve
   - Protocol `InferenceEvidence`:
@@ -302,7 +334,7 @@ The component itself is built in miniforge OSS (see H2). Workstream A is now abo
     - `(query-records store criteria)` — filters: `:user-id`, `:time-range`, `:has-anomalies`
     - `(export-record store id output-path)`
 - **Acceptance:**
-  - Component depends only on `boundary-validation` and `response-chain`
+  - Component depends only on `boundary-validation`, `response-chain`, and `content-hash`
   - Datalevin backend lazy-loaded via `requiring-resolve` (kg-store pattern)
   - Schema malli-validated at boundary
 
@@ -316,6 +348,7 @@ The component itself is built in miniforge OSS (see H2). Workstream A is now abo
 ### B3 — Test decomposition
 
 Same pattern as A3:
+
 - `interface/create_record_test.clj`
 - `interface/get_record_test.clj`
 - `interface/query_by_session_test.clj`
@@ -330,11 +363,12 @@ Same pattern as A3:
 
 ## Workstream C — Wire chain → evidence at terminal state
 
-**Outcome:** Retrieval and synthesis flows in thesium-workflows accumulate a response-chain in flight; at terminal, the chain folds into an inference-evidence record and persists.
+**Outcome:** Retrieval and synthesis flows in thesium-workflows accumulate a response-chain in flight; at terminal, the
+  chain folds into an inference-evidence record and persists.
 
 **Blocked by:** A complete, B complete.
 
-### C1 — Folder: chain → evidence
+### C1 — Fold: chain → evidence
 
 - **Repo:** thesium-workflows
 - **Path:** `components/inference-evidence/src/ai/thesium/inference_evidence/`
@@ -367,13 +401,15 @@ Same pattern as A3:
   - At each pipeline terminal, fold the chain and persist via `inference-evidence/create-record`
   - Surface persisted record id back to caller for citation linking
 - **Acceptance:**
-  - End-to-end test: simulated user query → record persisted → query-by-session retrieves it → content hash stable across runs
+  - End-to-end test: simulated user query → record persisted → query-by-session retrieves it → content hash stable
+    across runs
 
 ---
 
 ## Workstream D — Semantic Port from ixi
 
-**Outcome:** ixi's encode/remember/recall/forget/restore/coalesce semantics, multi-user identity-map discipline, and entry-kind taxonomy land in thesium-workflows under modern conventions.
+**Outcome:** ixi's encode/remember/recall/forget/restore/coalesce semantics, multi-user identity-map discipline, and
+  entry-kind taxonomy land in thesium-workflows under modern conventions.
 
 **Blocked by:** C complete (so semantics use the new chain/evidence pipeline).
 
@@ -382,7 +418,8 @@ Same pattern as A3:
 - **Repo:** thesium-workflows
 - **New component:** `entry-taxonomy`
 - **Reference:**
-  - `ixi/components/engram-memory/src/com/emojixi/engram_memory/core.clj` (the `defmulti encode*` block, lines covering `:collection`, `:conversation`, `:event`, `:goal`, `:milestone`, `:note`, etc.)
+  - `ixi/components/engram-memory/src/com/emojixi/engram_memory/core.clj` (the `defmulti encode*` block, lines covering
+    `:collection`, `:conversation`, `:event`, `:goal`, `:milestone`, `:note`, etc.)
 - **Approach:**
   - Express kinds as malli schemas in a contract namespace (don't copy `defmulti` shape if record/protocol fits cleaner)
   - Each kind is a malli schema with required fields per ixi's shapes
@@ -395,7 +432,8 @@ Same pattern as A3:
 - **Repo:** thesium-workflows
 - **New component:** `memory-operations`
 - **Reference:**
-  - `ixi/components/engram-memory/src/com/emojixi/engram_memory/interface.clj` (operations: encode/forget/remember/recall/restore/search/coalesce)
+  - `ixi/components/engram-memory/src/com/emojixi/engram_memory/interface.clj` (operations:
+    encode/forget/remember/recall/restore/search/coalesce)
 - **Approach:**
   - Operations layered on `kg-store` protocol
   - Each operation takes/returns a response-chain (data-first)
@@ -409,17 +447,21 @@ Same pattern as A3:
 - **Repo:** thesium-workflows
 - **Path:** `components/memory-operations/src/ai/thesium/memory_operations/coalesce.clj`
 - **Reference:** `ixi/components/engram-memory/src/com/emojixi/engram_memory/coalesce.clj`
-- **Approach:** Reimplement the cluster-and-merge logic against `kg-store` + vector similarity from `kg-retrieval`. Preserve dry-run semantics.
+- **Approach:** Reimplement the cluster-and-merge logic against `kg-store` + vector similarity from `kg-retrieval`.
+  Preserve dry-run semantics.
 - **Acceptance:**
   - Dry-run returns clusters without mutation
-  - Full run merges, evidence-record captures the merge as anomalies of kind `:claim/coalesced`
+  - Full run merges, evidence-record captures the merge as trace/evidence metadata with event
+    `:claim/coalesced`; anomalies remain reserved for exceptional outcomes
   - Property-based test: coalesce is idempotent on stable input
 
 ---
 
 ## Workstream E — Exceptions-as-Data Cleanup (miniforge)
 
-**Outcome:** `throw`/`ex-info` removed from non-boundary code paths in miniforge components. Anomaly-returning variants used at component interfaces. Boundary handlers (CLI entry, MCP entry, HTTP entry, message consumer) remain the only `try/catch` sites.
+**Outcome:** `throw`/`ex-info` removed from non-boundary code paths in miniforge components. Anomaly-returning variants
+  used at component interfaces. Boundary handlers (CLI entry, MCP entry, HTTP entry, message consumer) remain the only
+  `try/catch` sites.
 
 ### E1 — Inventory pass
 
@@ -437,19 +479,22 @@ Same pattern as A3:
 
 - **Repo:** miniforge
 - **Approach per component:**
-  - Replace `throw (ex-info ...)` with `(response-chain/append-step chain :ns/op (response-chain/anomaly :type msg data))` (or equivalent if response-chain hasn't landed in miniforge yet — emit a plain anomaly map matching the shape)
+  - Replace `throw (ex-info ...)` with `(response-chain/append-step chain :ns/op
+    (response-chain/anomaly :type msg data))` (or equivalent if response-chain hasn't landed in miniforge yet
+    — emit a plain anomaly map matching the shape)
   - Update tests to expect anomalies in return rather than thrown exceptions
   - Keep boundary-level wrappers untouched
 - **Acceptance:**
   - All component tests pass
-  - `bb gate` reports clean
+  - `bb pre-commit` reports clean
   - No new `throw`/`ex-info` introduced
 
 ### E3 — Use the new in-tree `anomaly` and `response-chain` components
 
 - **Repo:** miniforge
 - **Approach:**
-  - E2 cleanups import from the new in-tree `ai.miniforge.anomaly.interface` and `ai.miniforge.response-chain.interface` (built in H1, H2)
+  - E2 cleanups import from the new in-tree `ai.miniforge.anomaly.interface` and `ai.miniforge.response-chain.interface`
+    (built in H1, H2)
   - Deprecate and forward any pre-existing scattered anomaly helpers to the canonical component
 - **Acceptance:**
   - Single anomaly shape across miniforge OSS components
@@ -460,7 +505,8 @@ Same pattern as A3:
 
 ## Workstream F — Standing Rule in Standards Pack
 
-**Outcome:** A standing rule that flags `throw`/`ex-info` outside designated boundary namespaces. Prevents the regression from recurring once cleared.
+**Outcome:** A standing rule that flags `throw`/`ex-info` outside designated boundary namespaces. Prevents the
+  regression from recurring once cleared.
 
 ### F1 — Author the rule
 
@@ -468,7 +514,8 @@ Same pattern as A3:
 - **Approach:**
   - Add rule: "Exceptions only at absolute boundaries; component interfaces return anomalies."
   - Body: rationale, example violation, example correction, exception list (boundary namespaces).
-  - Boundary namespace patterns to permit: `*.cli.*`, `*.boundary.*`, `*.http.*`, `*.mcp.*`, `*-main`, `execute-with-exception-handling` family
+  - Boundary namespace patterns to permit: `*.cli.*`, `*.boundary.*`, `*.http.*`, `*.mcp.*`, `*-main`,
+    `execute-with-exception-handling` family
 - **Acceptance:**
   - Rule lints existing miniforge clean (after E2)
   - Rule documented in standards pack index
@@ -477,7 +524,8 @@ Same pattern as A3:
 
 - **Repo:** miniforge-standards
 - **Approach:**
-  - Add a `bb review` rule that scans for `throw` / `ex-info` in `components/*/src/**/*.clj` excluding the boundary patterns
+  - Add a `bb review` rule that scans for `throw` / `ex-info` in `components/*/src/**/*.clj` and
+    `bases/*/src/**/*.clj` excluding the boundary patterns
   - Output: file:line warnings with suggested anomaly-return rewrite
 - **Acceptance:**
   - Runs in `bb review` workflow
@@ -492,13 +540,15 @@ Same pattern as A3:
 
 ## Workstream G — Test-File Decomposition Discipline (thesium-workflows)
 
-**Outcome:** Heavy components in thesium-workflows have test files decomposed by behavior dimension, matching ixi's pattern (~10–13 files per heavy component).
+**Outcome:** Heavy components in thesium-workflows have test files decomposed by behavior dimension, matching ixi's
+  pattern (~10–13 files per heavy component).
 
 ### G1 — Audit existing components
 
 - **Repo:** thesium-workflows
 - **Output:** `work/test-decomposition-audit.md`
-- **Approach:** For each component, count test files and lines per file. Flag any single-file test that exceeds 200 lines or covers >3 behavior dimensions.
+- **Approach:** For each component, count test files and lines per file. Flag any single-file test that exceeds 200
+  lines or covers >3 behavior dimensions.
 - **Acceptance:** Audit document with per-component recommendations.
 
 ### G2 — Decompose flagged components
@@ -523,7 +573,7 @@ Same pattern as A3:
 
 ## Sequencing diagram
 
-```
+```text
 parallel kickoff:
   ┌─ H1..H5 (new miniforge components: anomaly, response-chain,       ┐
   │         boundary, content-hash extraction, readme update)         │
@@ -545,36 +595,50 @@ A+B done ──→ C (wire chain→evidence at terminal) ───────�
 C done ──→ D (semantic port from ixi) ────────────────────┘            │
                                                                        │
 G2 → G3 (decomposition rolls forward as new components land)───────────┘
-```
+```text
 
 ## Out of scope for this refactor
 
 - Direct merge of ixi code into miniforge-ai. **Port, do not copy.**
 - Changes to ixi itself. ixi is read-only reference.
 - Replacing miniforge's `evidence-bundle` component. It stays as the SDLC-shaped variant for miniforge's own use.
-- Renaming `boundary-validation` or its `validate!` semantics. Add `validate` alongside; don't break the existing surface.
+- Renaming `boundary-validation` or its `validate!` semantics. Add `validate` alongside; don't break the existing
+  surface.
 - Multi-region / multi-tenant concerns for inference-evidence. Single-store, single-tenant for v1.
 
 ## Per-agent task template
 
 When spawning an agent for one of the workstream items, brief it like this:
 
-```
+```text
+
 Repo: <repo path>
 Task ID: <e.g. A1>
 Goal: <one sentence>
 Reference reading (do not modify):
-  - <path>
+
+- <path>
+
 Files to create or modify:
-  - <path>
+
+- <path>
+
 Public API (if applicable):
-  - <signatures>
+
+- <signatures>
+
 Acceptance criteria:
-  - <bullet list>
+
+- <bullet list>
+
 Out of scope for this task:
-  - <bullet list>
+
+- <bullet list>
+
 Coordination:
-  - Blocks task X. Blocked by task Y.
+
+- Blocks task X. Blocked by task Y.
+
 ```
 
 ## Invariants every agent must respect
@@ -587,7 +651,13 @@ Coordination:
 6. **License header on every file.** Match the `kg-store` pattern.
 7. **Test decomposition.** New components ship with behavior-decomposed test files from day one.
 8. **Worktree per workstream.** Never work on `main` directly.
-9. **Don't move things OUT of miniforge.** Miniforge is OSS, already vendored by every other repo. Adding cross-cutting components to miniforge is the right move. Extracting components out of miniforge into a new repo creates a second OSS repo to maintain for no real benefit.
-10. **Domain-free goes in miniforge OSS commons; domain-specific goes per-repo.** The anomaly shape, response-chain accumulator, content-hash logic are domain-free → miniforge OSS components. Evidence-record schemas (SDLC vs RAG vs Fleet-specific), retrieval shapes, agent intents are domain-specific → per-repo components.
-11. **Single anomaly shape across all repos.** Once H1 lands, no local anomaly helpers — every miniforge-family repo imports `ai.miniforge.anomaly` from miniforge.
-12. **Apache 2 by default for new miniforge components.** They become available to the broader OSS audience automatically. Only proprietary content goes into proprietary repos.
+9. **Don't move things OUT of miniforge.** Miniforge is OSS, already vendored by every other repo. Adding cross-cutting
+  components to miniforge is the right move. Extracting components out of miniforge into a new repo creates a second OSS
+  repo to maintain for no real benefit.
+10. **Domain-free goes in miniforge OSS commons; domain-specific goes per-repo.** The anomaly shape, response-chain
+  accumulator, content-hash logic are domain-free → miniforge OSS components. Evidence-record schemas (SDLC vs RAG vs
+  Fleet-specific), retrieval shapes, agent intents are domain-specific → per-repo components.
+11. **Single anomaly shape across all repos.** Once H1 lands, no local anomaly helpers — every miniforge-family repo
+  imports `ai.miniforge.anomaly` from miniforge.
+12. **Apache 2 by default for new miniforge components.** They become available to the broader OSS audience
+  automatically. Only proprietary content goes into proprietary repos.
