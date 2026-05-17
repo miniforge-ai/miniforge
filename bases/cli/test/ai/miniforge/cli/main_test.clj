@@ -65,6 +65,10 @@
 ;------------------------------------------------------------------------------ Layer 1
 ;; Dispatch table coverage
 
+(def ^:private test-running-stale-threshold-ms 300000)
+
+(def ^:private test-reconstructed-event-count 1)
+
 (deftest dispatch-table-includes-pr-monitor-test
   (testing "pr monitor command is registered in dispatch table"
     (let [entries (filter #(= ["pr" "monitor"] (:cmds %)) sut/dispatch-table)]
@@ -80,7 +84,7 @@
           stale-ts "2026-05-17T00:10:59Z"]
       (with-redefs [app-config/events-dir (constantly "/tmp/events")
                     app-config/status-config
-                    (constantly {:running-stale-threshold-ms 300000})
+                    (constantly {:running-stale-threshold-ms test-running-stale-threshold-ms})
                     es/read-workflow-events-by-id
                     (fn [_events-dir _workflow-id]
                       [{:event/type :workflow/phase-completed
@@ -90,7 +94,7 @@
                       {:completed? false
                        :failed? false
                        :dag-paused? false
-                       :event-count 1})
+                       :event-count test-reconstructed-event-count})
                     sut/current-time-ms (constantly now-ms)]
         (is (= :stale
                (:status (#'sut/workflow-status-summary "workflow-id"))))))))
@@ -101,7 +105,7 @@
           recent-ts "2026-05-17T00:12:00Z"]
       (with-redefs [app-config/events-dir (constantly "/tmp/events")
                     app-config/status-config
-                    (constantly {:running-stale-threshold-ms 300000})
+                    (constantly {:running-stale-threshold-ms test-running-stale-threshold-ms})
                     es/read-workflow-events-by-id
                     (fn [_events-dir _workflow-id]
                       [{:event/type :workflow/phase-completed
@@ -111,7 +115,7 @@
                       {:completed? false
                        :failed? false
                        :dag-paused? false
-                       :event-count 1})
+                       :event-count test-reconstructed-event-count})
                     sut/current-time-ms (constantly now-ms)]
         (is (= :running
                (:status (#'sut/workflow-status-summary "workflow-id"))))))))
