@@ -20,6 +20,8 @@
   (:require
    [ai.miniforge.bb-proc.interface :as proc]
    [babashka.process :as p]
+   [clojure.edn :as edn]
+   [clojure.java.io :as io]
    [clojure.string :as str]))
 
 (defn run-stream! [& args]
@@ -101,6 +103,42 @@
     (when-not (zero? exit)
       (println "❌ Conformance tests failed with exit code:" exit)
       (System/exit exit))))
+
+(def ^:private precommit-smoke-config-resource
+  "resources/precommit-smoke-tests.edn")
+
+(defn- read-precommit-smoke-nses!
+  []
+  (let [f (io/file precommit-smoke-config-resource)]
+    (when-not (.exists f)
+      (println "❌ Pre-commit smoke config not found:" precommit-smoke-config-resource)
+      (System/exit 1))
+    (let [{:keys [smoke/namespaces]} (edn/read-string (slurp f))]
+      (when (empty? namespaces)
+        (println "❌ Pre-commit smoke config has no :smoke/namespaces")
+        (System/exit 1))
+      namespaces)))
+
+(defn precommit-smoke
+  "Run the hand-curated pre-commit smoke set.
+
+   Source of truth: resources/precommit-smoke-tests.edn. Goal is
+   < 30 seconds total so the dev loop stays cheap. CI runs
+   `bb test:all` for full coverage."
+  []
+  (println "🧪 Running pre-commit smoke tests...")
+  (let [nses (read-precommit-smoke-nses!)
+        clojure-cmd (proc/clojure-command)
+        require-expr (apply str (map (fn [n] (str " '" n)) nses))
+        run-expr (apply str (map (fn [n] (str " '" n)) nses))
+        expr (str "(require 'clojure.test" require-expr ") "
+                  "(let [r (clojure.test/run-tests" run-expr ")] "
+                  "  (System/exit (if (zero? (+ (:fail r 0) (:error r 0))) 0 1)))")
+        exit (run-stream! clojure-cmd "-M:test:dev" "-e" expr)]
+    (when-not (zero? exit)
+      (println "❌ Pre-commit smoke tests failed with exit code:" exit)
+      (System/exit exit))
+    (println (format "✓ Pre-commit smoke (%d namespaces) passed" (count nses)))))
 
 (defn graalvm []
   (println "🧪 Testing GraalVM/Babashka compatibility...")

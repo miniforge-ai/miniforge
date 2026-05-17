@@ -156,13 +156,18 @@
    :requires ([test-runner])
    :task (test-runner/graalvm)}
 
+  test:precommit
+  {:doc  "Run the hand-curated pre-commit smoke set (resources/precommit-smoke-tests.edn)"
+   :requires ([test-runner])
+   :task (test-runner/precommit-smoke)}
+
   ;; ──────────────────────────────────────────────────────────────────────────
   ;; Pre-commit
   ;; ──────────────────────────────────────────────────────────────────────────
 
   pre-commit
-  {:doc     "Run all pre-commit checks (commit budget, structure, lint, format, test, graalvm)"
-   :depends [commit-budget poly:check lint:clj fmt:md test test:graalvm]
+  {:doc     "Run pre-commit checks (commit budget, structure, lint, format, smoke tests, graalvm). Full test suite runs in CI."
+   :depends [commit-budget poly:check lint:clj fmt:md test:precommit test:graalvm]
    :task    (println "\n✅ ALL PRE-COMMIT CHECKS PASSED\n")}
 
   ;; ──────────────────────────────────────────────────────────────────────────
