@@ -62,24 +62,55 @@
 
 (defn with-acquisition-timeout
   "Run `body-fn` (zero-arity) with a wall-clock deadline. Returns the
-   body's return value when it completes in time, or a
-   `:acquire-timeout` error result when the deadline fires.
+   body's return value when it completes in time, or a `:timeout`
+   error result (the standard dag-executor code) when the deadline
+   fires.
 
    `timeout-ms` of `nil` or `<= 0` disables the timeout (tests that
-   pre-mock the executor wholesale rely on this escape hatch)."
+   pre-mock the executor wholesale rely on this escape hatch).
+
+   Caveats and follow-ups:
+
+   - Exceptions thrown by `body-fn` propagate as the original throwable.
+     `deref` would otherwise wrap them in `ExecutionException`; this fn
+     unwraps via `(.getCause)` so callers that catch `ExceptionInfo` or
+     other specific types still see the original.
+   - `future-cancel` only interrupts the worker thread; it does NOT
+     kill the shell subprocess that `shell/sh` is blocked on. A wedged
+     `docker pull` keeps running until the daemon returns, which can
+     leak threads if acquires pile up. The follow-up — switching
+     `run-runtime-process` to `(.waitFor process ms TimeUnit/MILLISECONDS)`
+     with `.destroyForcibly` on miss — kills the subprocess too. We log
+     a warn on every timeout so the asymmetry is visible in operator
+     logs."
   [timeout-ms body-fn]
   (if (or (nil? timeout-ms) (not (pos? timeout-ms)))
     (body-fn)
-    (let [fut (future (body-fn))
-          result (deref fut timeout-ms ::timeout)]
-      (if (= ::timeout result)
+    (let [fut (future
+                (try
+                  {::ok (body-fn)}
+                  (catch Throwable t {::throwable t})))
+          deref-result (deref fut timeout-ms ::timeout)]
+      (cond
+        (= ::timeout deref-result)
         (do
           (future-cancel fut)
-          (result/err :acquire-timeout
+          (binding [*out* *err*]
+            (println (str "[oci-cli] acquire-environment! deadline " timeout-ms
+                          "ms exceeded; future cancelled but a stuck `"
+                          "docker`/`podman` subprocess may keep running"
+                          " until the daemon returns.")))
+          (result/err :timeout
                       (str "OCI runtime acquire-environment! exceeded "
                            timeout-ms "ms — likely a stuck daemon or image pull")
-                      {:timeout-ms timeout-ms}))
-        result))))
+                      {:timeout-ms timeout-ms
+                       :surface :acquire-environment!}))
+
+        (contains? deref-result ::throwable)
+        (throw (::throwable deref-result))
+
+        :else
+        (::ok deref-result)))))
 
 (def default-stop-timeout
   "Minimum graceful-stop timeout (seconds). Also the floor for the timeout
@@ -631,6 +662,17 @@
 ;; ============================================================================
 
 (defrecord OciCliExecutor [config descriptor image network]
+  ;; Timeout-guard asymmetry: only `acquire-environment!` is wrapped in
+  ;; `with-acquisition-timeout`. The other shell-out paths in this
+  ;; record — `available?`, `execute!`, `release-environment!`,
+  ;; `copy-to!`, `copy-from!` — remain unbounded and can hit the same
+  ;; stuck-daemon failure mode. Acquire is wrapped first because it's
+  ;; the long-running step that surfaced in the 2026-05-16 dogfood
+  ;; (image pull + container create). Symmetric wrapping is a follow-up
+  ;; once `run-runtime-process` learns per-subprocess
+  ;; `(.waitFor ms TimeUnit/MILLISECONDS)` + `.destroyForcibly`, which
+  ;; will let the other surfaces fail fast without leaking the worker
+  ;; thread the way the current `future-cancel`-only path does.
   proto/TaskExecutor
 
   (executor-type [_this]

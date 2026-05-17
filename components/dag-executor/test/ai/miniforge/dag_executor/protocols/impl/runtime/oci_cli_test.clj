@@ -307,13 +307,16 @@
              (oci-cli/with-acquisition-timeout 5000 (fn [] ok-result)))))))
 
 (deftest with-acquisition-timeout-fires-on-deadline-test
-  (testing "body that exceeds the deadline returns :acquire-timeout err"
+  (testing "body that exceeds the deadline returns :timeout err"
     (let [result (oci-cli/with-acquisition-timeout
                    50
                    (fn [] (Thread/sleep 5000) :should-not-see))]
       (is (= false (:ok? result)))
-      (is (= :acquire-timeout (:code (:error result))))
+      (is (= :timeout (:code (:error result)))
+          "Uses the standard dag-executor :timeout code, not a bespoke one")
       (is (= 50 (get-in result [:error :data :timeout-ms])))
+      (is (= :acquire-environment! (get-in result [:error :data :surface]))
+          ":surface tags which protocol method tripped the deadline")
       (is (clojure.string/includes? (:message (:error result)) "stuck daemon")))))
 
 (deftest with-acquisition-timeout-nil-or-nonpositive-disables-guard-test
@@ -325,24 +328,39 @@
 
 (deftest with-acquisition-timeout-cancels-the-future-on-timeout-test
   (testing "the inner future is cancelled when the deadline fires"
-    (let [cancelled? (atom false)
-          fut-ref (atom nil)
+    ;; The body runs an inner sleep that records `cancelled?` via
+    ;; InterruptedException. After the outer deadline fires,
+    ;; future-cancel interrupts the worker thread and the catch
+    ;; branch flips the flag. Assert the flag — without this the
+    ;; test passed even if cancellation regressed.
+    (let [cancelled? (promise)
+          deadline-ms 50
           result (oci-cli/with-acquisition-timeout
-                   50
+                   deadline-ms
                    (fn []
-                     ;; Run the body in a future that records cancellation
-                     ;; via the InterruptedException raised by future-cancel.
-                     (let [f (future
-                               (try
-                                 (Thread/sleep 5000)
-                                 (catch InterruptedException _
-                                   (reset! cancelled? true))))]
-                       (reset! fut-ref f)
-                       (deref f))))]
-      (is (= :acquire-timeout (:code (:error result))))
-      ;; Allow the cancellation propagation to land before asserting.
-      (Thread/sleep 200)
-      (is (some? @fut-ref)))))
+                     (try
+                       (Thread/sleep 5000)
+                       :never
+                       (catch InterruptedException _
+                         (deliver cancelled? true)
+                         :interrupted))))]
+      (is (= :timeout (:code (:error result))))
+      (is (= true (deref cancelled? 2000 :no-interrupt))
+          "future-cancel must propagate InterruptedException into the body"))))
+
+(deftest with-acquisition-timeout-exception-passthrough-test
+  (testing "exceptions thrown by the body propagate as the original throwable, not ExecutionException"
+    (let [thrown (try
+                   (oci-cli/with-acquisition-timeout
+                     5000
+                     (fn [] (throw (ex-info "boom" {:tag :original}))))
+                   nil
+                   (catch clojure.lang.ExceptionInfo e e))]
+      (is (some? thrown) "the original ex-info must propagate")
+      (is (= "boom" (ex-message thrown)))
+      (is (= :original (:tag (ex-data thrown))))
+      ;; Without the unwrap, callers would see java.util.concurrent.ExecutionException.
+      (is (not (instance? java.util.concurrent.ExecutionException thrown))))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
