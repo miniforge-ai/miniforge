@@ -3,7 +3,7 @@
 Replaces `bb test` (stable-derived sweep) in the `bb pre-commit` chain
 with a hand-curated `bb test:precommit` smoke set. Goal: drop the dev
 loop's commit cost from "potentially hangs past 30 min" (PR #893's
-recurring nightmare) to "13 namespaces, ~110 s wall, deterministic." CI
+recurring nightmare) to "12 namespaces, ~110 s wall, deterministic." CI
 still runs `bb test:all` on every PR, so coverage is unchanged.
 
 ## Motivation
@@ -87,8 +87,10 @@ filtering the smoke set by `git diff`-derived component touch.
 
 ## Test plan
 
-- [x] `bb test:precommit` — 270 tests, 964 assertions, 0 failures,
-  ~110 s wall.
+- [x] `bb test:precommit` — 12 namespaces, ~110 s wall, 0 failures.
+  (The historical 13-namespace baseline with runner-test included was
+  270 tests / 964 assertions; the 12-namespace set is similar minus
+  runner-test's count.)
 - [ ] `bb pre-commit` on this branch — runs commit-budget, poly:check,
   lint:clj, fmt:md, test:precommit, test:graalvm. Expected green.
 

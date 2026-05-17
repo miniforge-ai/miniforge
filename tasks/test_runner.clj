@@ -104,35 +104,54 @@
       (println "❌ Conformance tests failed with exit code:" exit)
       (System/exit exit))))
 
-(def ^:private precommit-smoke-config-resource
+(def ^:private precommit-smoke-config-path
+  "Working-directory-relative filesystem path to the smoke-set config.
+   Not loaded via `io/resource` because bb tasks already run from the
+   repo root by convention; if that ever changes the `(.exists f)` guard
+   surfaces the misconfiguration loudly."
   "resources/precommit-smoke-tests.edn")
+
+(defn- valid-namespace-token?
+  "Conservative check: namespace entries in the EDN must look like
+   period-separated, dash-segmented symbol tokens. Rejects strings with
+   whitespace, quotes, comment chars, or any non-symbol character so a
+   typo in the config doesn't silently break the generated -e form."
+  [s]
+  (and (string? s) (re-matches #"[a-zA-Z][a-zA-Z0-9.\-_?!]*" s)))
 
 (defn- read-precommit-smoke-nses!
   []
-  (let [f (io/file precommit-smoke-config-resource)]
+  (let [f (io/file precommit-smoke-config-path)]
     (when-not (.exists f)
-      (println "❌ Pre-commit smoke config not found:" precommit-smoke-config-resource)
+      (println "❌ Pre-commit smoke config not found:" precommit-smoke-config-path)
       (System/exit 1))
     (let [{:keys [smoke/namespaces]} (edn/read-string (slurp f))]
       (when (empty? namespaces)
         (println "❌ Pre-commit smoke config has no :smoke/namespaces")
+        (System/exit 1))
+      (when-let [bad (seq (remove valid-namespace-token? namespaces))]
+        (println "❌ Pre-commit smoke config has invalid namespace tokens:"
+                 (pr-str bad))
         (System/exit 1))
       namespaces)))
 
 (defn precommit-smoke
   "Run the hand-curated pre-commit smoke set.
 
-   Source of truth: resources/precommit-smoke-tests.edn. Goal is
-   < 30 seconds total so the dev loop stays cheap. CI runs
+   Source of truth: resources/precommit-smoke-tests.edn. Aspirational
+   target is <30 s; current realised wall time is ~110 s (dominated by
+   JVM startup, see the PR doc's future-optimisation section). CI runs
    `bb test:all` for full coverage."
   []
   (println "🧪 Running pre-commit smoke tests...")
   (let [nses (read-precommit-smoke-nses!)
         clojure-cmd (proc/clojure-command)
-        require-expr (apply str (map (fn [n] (str " '" n)) nses))
-        run-expr (apply str (map (fn [n] (str " '" n)) nses))
-        expr (str "(require 'clojure.test" require-expr ") "
-                  "(let [r (clojure.test/run-tests" run-expr ")] "
+        ;; The same space-prefixed quoted-namespace string drives both
+        ;; (require …) and (clojure.test/run-tests …) — one expression,
+        ;; one source of truth.
+        ns-args (apply str (map (fn [n] (str " '" n)) nses))
+        expr (str "(require 'clojure.test" ns-args ") "
+                  "(let [r (clojure.test/run-tests" ns-args ")] "
                   "  (System/exit (if (zero? (+ (:fail r 0) (:error r 0))) 0 1)))")
         exit (run-stream! clojure-cmd "-M:test:dev" "-e" expr)]
     (when-not (zero? exit)
