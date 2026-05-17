@@ -26,22 +26,22 @@
    any nested `:properties` map. Returns a seq of [tool-name path key]
    triples to make assertion failures easy to read."
   [tool-name schema]
-  (letfn [(walk [path node]
+  (letfn [(property-entry [path [k v]]
+            (cons [tool-name path k]
+                  (walk (conj path k) v)))
+          (sub-node-entry [path [k v]]
+            (when (not= k :properties)
+              (walk (conj path k) v)))
+          (walk [path node]
             (cond
               (map? node)
               (concat
                 (when-let [props (get node :properties)]
-                  (mapcat (fn [[k v]]
-                            (cons [tool-name path k]
-                                  (walk (conj path k) v)))
-                          props))
-                (mapcat (fn [[k v]]
-                          (when (not= k :properties)
-                            (walk (conj path k) v)))
-                        node))
+                  (mapcat (partial property-entry path) props))
+                (mapcat (partial sub-node-entry path) node))
 
               (sequential? node)
-              (mapcat #(walk path %) node)
+              (mapcat (partial walk path) node)
 
               :else nil))]
     (walk [] schema)))
