@@ -215,11 +215,32 @@ when/why lives upstream.
    already subscribes to event-stream, but its current scope is
    per-workflow not cross-workflow.
 
-2. **GitHub event delivery** — `pr-lifecycle` already polls/listens.
-   Confirm whether the merge-event path is webhook-driven (latency
-   in seconds) or poll-driven (latency in minutes). The dogfood-fix
-   use case can tolerate minutes; some future labels (e.g.
-   `incident-pause`) might not.
+2. ~~**GitHub event delivery**~~ — **resolved.** Two transports
+   behind a single `:pr-events/source` protocol:
+
+   - **Fleet** (hosted control-plane with a public endpoint) uses
+     **GitHub webhooks** subscribed to PR `closed` events with
+     `merged: true`. Sub-second latency, trivial cost, GitHub-App
+     auth.
+   - **OSS** (no public inbound) uses **ETag-cached polling** of
+     `/repos/:owner/:repo/events` on a 30–60 s interval. 304s are
+     near-zero against the rate limit; each user has their own
+     5000/hour PAT bucket so 100 OSS users behind one ASN don't
+     collide (GitHub rate-limits per-token, not per-IP).
+
+   SSE-via-Fleet-relay was considered and deferred. It would mean
+   Fleet's webhook receiver fans out merge events to subscribed OSS
+   clients over an open HTTP stream — workable, but it makes Fleet
+   a hard dependency for OSS notification and the latency win
+   (~30 s) doesn't justify it for `dogfood-fix`. Revisit only if a
+   future label-action genuinely needs sub-second on OSS.
+
+   Latency budget table:
+
+   | Use case | Latency needed | Webhook (Fleet) | ETag-poll (OSS) |
+   |---|---|---|---|
+   | `dogfood-fix` rebase | minutes (next phase boundary anyway) | ✓ | ✓ |
+   | Hypothetical `incident-pause` | seconds | ✓ | ✗ |
 
 3. **Phase-boundary granularity for rebase** — current seam is
    "between phases." Inside a DAG sub-workflow's parallel fan-out,
