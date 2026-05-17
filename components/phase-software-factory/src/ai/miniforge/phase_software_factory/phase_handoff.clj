@@ -37,10 +37,22 @@
 (def ^:private handoff-config-resource
   "config/phase/handoff.edn")
 
+(defn- group-pattern-entry?
+  [entry]
+  (and (map? entry)
+       (string? (:phase-handoff/pattern entry))
+       (string? (:phase-handoff/label entry))))
+
+(defn- validated-handoff-config
+  [config]
+  (let [group-patterns (filterv group-pattern-entry?
+                                (:phase-handoff/group-patterns config))]
+    (assoc config :phase-handoff/group-patterns group-patterns)))
+
 (defn- load-handoff-config
   []
   (if-let [resource (io/resource handoff-config-resource)]
-    (edn/read-string (slurp resource))
+    (validated-handoff-config (edn/read-string (slurp resource)))
     {}))
 
 (def ^:private handoff-config
