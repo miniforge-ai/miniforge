@@ -67,6 +67,8 @@
 
 (def ^:private test-running-stale-threshold-ms 300000)
 
+(def ^:private test-invalid-running-stale-threshold "invalid-threshold")
+
 (def ^:private test-reconstructed-event-count 1)
 
 (deftest dispatch-table-includes-pr-monitor-test
@@ -118,6 +120,27 @@
                        :event-count test-reconstructed-event-count})
                     sut/current-time-ms (constantly now-ms)]
         (is (= :running
+               (:status (#'sut/workflow-status-summary "workflow-id"))))))))
+
+(deftest workflow-status-summary-falls-back-for-invalid-stale-threshold-test
+  (testing "invalid stale threshold config falls back to the default threshold"
+    (let [now-ms (.toEpochMilli (java.time.Instant/parse "2026-05-17T00:16:00Z"))
+          stale-ts "2026-05-17T00:10:59Z"]
+      (with-redefs [app-config/events-dir (constantly "/tmp/events")
+                    app-config/status-config
+                    (constantly {:running-stale-threshold-ms test-invalid-running-stale-threshold})
+                    es/read-workflow-events-by-id
+                    (fn [_events-dir _workflow-id]
+                      [{:event/type :workflow/phase-completed
+                        :event/timestamp stale-ts}])
+                    wr/reconstruct-context
+                    (fn [_events-dir _workflow-id]
+                      {:completed? false
+                       :failed? false
+                       :dag-paused? false
+                       :event-count test-reconstructed-event-count})
+                    sut/current-time-ms (constantly now-ms)]
+        (is (= :stale
                (:status (#'sut/workflow-status-summary "workflow-id"))))))))
 
 ;------------------------------------------------------------------------------ Layer 1

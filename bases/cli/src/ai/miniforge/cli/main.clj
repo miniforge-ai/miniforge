@@ -95,7 +95,8 @@
    :version "2026.01.20.1"
    :description (app-config/description)})
 
-(defn- current-time-ms
+(defn current-time-ms
+  "Current epoch time in milliseconds. Public so CLI tests can rebind it."
   []
   (System/currentTimeMillis))
 
@@ -131,7 +132,11 @@
 (defn- stale-running?
   [last-updated]
   (when-let [last-updated-ms (timestamp->epoch-ms last-updated)]
-    (let [threshold-ms (:running-stale-threshold-ms (app-config/status-config))]
+    (let [configured-threshold-ms (:running-stale-threshold-ms (app-config/status-config))
+          default-threshold-ms (:running-stale-threshold-ms app-config/default-status-config)
+          threshold-ms (if (nat-int? configured-threshold-ms)
+                         configured-threshold-ms
+                         default-threshold-ms)]
       (> (- (current-time-ms) last-updated-ms)
          threshold-ms))))
 
