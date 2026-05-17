@@ -283,6 +283,47 @@
       (is (= :completed (:execution/status result)))
       (is (= (:execution/id resume-ctx) (:execution/id result))))))
 
+(deftest run-pipeline-resume-from-mid-workflow-snapshot-advances-test
+  ;; Regression for the dogfood-2026-05-16 silent fast-fail: resume from a
+  ;; snapshot taken after phase 1 completed must advance through phases 2..N
+  ;; and reach a terminal status. The bug fix lives in PR #896 (loud-fail);
+  ;; this test pins the underlying "must actually advance" contract so a
+  ;; regression in the FSM/snapshot path doesn't silently re-introduce
+  ;; `:running` returns from completed runs.
+  (testing "snapshot captured after phase-1 completes resumes through remaining phases to :completed"
+    (let [workflow {:workflow/id :test-multi-phase
+                    :workflow/version "1.0.0"
+                    :workflow/pipeline [{:phase test-plan-phase}
+                                        {:phase test-implement-phase}
+                                        {:phase test-verify-phase}
+                                        {:phase test-done-phase}]}
+          ;; First run — let plan phase complete, capture mid-run snapshot.
+          full-result (runner/run-pipeline workflow {:task "Test"} {})
+          ;; The full run completes; assert that as a sanity baseline.
+          _ (is (= :completed (:execution/status full-result))
+                "baseline: full run must reach :completed")
+          ;; Now build a snapshot that looks like a checkpoint taken AFTER
+          ;; phase 1 (plan) completed. We use the full-result minus the
+          ;; later phases as a stand-in for that mid-run state.
+          mid-snapshot (-> (checkpoint-store/build-machine-snapshot full-result)
+                           (assoc :execution/status :running
+                                  :execution/phase-index 1
+                                  :execution/current-phase test-implement-phase))
+          ;; Phase-results carrying plan's completion are required so
+          ;; restore-context wires up the run from the snapshot path.
+          phase-results {test-plan-phase
+                         (get-in full-result [:execution/phase-results test-plan-phase])}
+          resumed (runner/run-pipeline workflow
+                                       {:task "Ignored on resume"}
+                                       {:resume-machine-snapshot mid-snapshot
+                                        :resume-phase-results phase-results})]
+      (is (contains? #{:completed :completed-with-warnings :failed :aborted :cancelled}
+                     (:execution/status resumed))
+          (str "resume must reach a terminal status, got "
+               (pr-str (:execution/status resumed))))
+      (is (not= :running (:execution/status resumed))
+          ":running is the silent-fast-fail signature — resume must not return it"))))
+
 ;; ============================================================================
 ;; Phase result recording tests
 ;; ============================================================================
