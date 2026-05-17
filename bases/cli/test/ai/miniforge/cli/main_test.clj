@@ -22,7 +22,9 @@
    [ai.miniforge.cli.app-config :as app-config]
    [ai.miniforge.cli.messages :as messages]
    [ai.miniforge.cli.main :as sut]
-   [ai.miniforge.cli.main.commands.pr :as cmd-pr]))
+   [ai.miniforge.cli.main.commands.pr :as cmd-pr]
+   [ai.miniforge.event-stream.interface :as es]
+   [ai.miniforge.workflow-resume.interface :as wr]))
 
 (deftest help-cmd-uses-generic-workflow-examples-test
   (testing "CLI help shows generic workflow examples instead of SDLC-specific ones"
@@ -71,6 +73,48 @@
       (is (= {:author {:alias :a} :poll-interval {:alias :p}}
              (:spec (first entries)))
           "Spec includes --author and --poll-interval"))))
+
+(deftest workflow-status-summary-marks-quiet-running-checkpoints-stale-test
+  (testing "running workflows with old last events are surfaced as stale"
+    (let [now-ms (.toEpochMilli (java.time.Instant/parse "2026-05-17T00:16:00Z"))
+          stale-ts "2026-05-17T00:10:59Z"]
+      (with-redefs [app-config/events-dir (constantly "/tmp/events")
+                    app-config/status-config
+                    (constantly {:running-stale-threshold-ms 300000})
+                    es/read-workflow-events-by-id
+                    (fn [_events-dir _workflow-id]
+                      [{:event/type :workflow/phase-completed
+                        :event/timestamp stale-ts}])
+                    wr/reconstruct-context
+                    (fn [_events-dir _workflow-id]
+                      {:completed? false
+                       :failed? false
+                       :dag-paused? false
+                       :event-count 1})
+                    sut/current-time-ms (constantly now-ms)]
+        (is (= :stale
+               (:status (#'sut/workflow-status-summary "workflow-id"))))))))
+
+(deftest workflow-status-summary-keeps-recent-running-checkpoints-running-test
+  (testing "running workflows with recent events remain running"
+    (let [now-ms (.toEpochMilli (java.time.Instant/parse "2026-05-17T00:16:00Z"))
+          recent-ts "2026-05-17T00:12:00Z"]
+      (with-redefs [app-config/events-dir (constantly "/tmp/events")
+                    app-config/status-config
+                    (constantly {:running-stale-threshold-ms 300000})
+                    es/read-workflow-events-by-id
+                    (fn [_events-dir _workflow-id]
+                      [{:event/type :workflow/phase-completed
+                        :event/timestamp recent-ts}])
+                    wr/reconstruct-context
+                    (fn [_events-dir _workflow-id]
+                      {:completed? false
+                       :failed? false
+                       :dag-paused? false
+                       :event-count 1})
+                    sut/current-time-ms (constantly now-ms)]
+        (is (= :running
+               (:status (#'sut/workflow-status-summary "workflow-id"))))))))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; pr-monitor-cmd helpers

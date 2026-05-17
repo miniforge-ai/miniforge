@@ -21,4 +21,7 @@
  :cli-app/pr-monitor
  {:default-self-author "miniforge[bot]"
   :min-poll-interval-s 5
-  :max-poll-interval-s 3600}}
+  :max-poll-interval-s 3600}
+
+ :cli-app/status
+ {:running-stale-threshold-ms 300000}}

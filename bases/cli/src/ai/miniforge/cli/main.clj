@@ -95,6 +95,10 @@
    :version "2026.01.20.1"
    :description (app-config/description)})
 
+(defn- current-time-ms
+  []
+  (System/currentTimeMillis))
+
 (defn get-opts
   "Extract opts from dispatch result."
   [m]
@@ -108,6 +112,42 @@
   (let [{:keys [exit]} (process/sh "which" cmd)]
     (zero? exit)))
 
+(defn- timestamp->epoch-ms
+  [timestamp]
+  (cond
+    (instance? java.util.Date timestamp)
+    (.getTime ^java.util.Date timestamp)
+
+    (instance? java.time.Instant timestamp)
+    (.toEpochMilli ^java.time.Instant timestamp)
+
+    (string? timestamp)
+    (try
+      (.toEpochMilli (java.time.Instant/parse timestamp))
+      (catch Exception _ nil))
+
+    :else nil))
+
+(defn- stale-running?
+  [last-updated]
+  (when-let [last-updated-ms (timestamp->epoch-ms last-updated)]
+    (let [threshold-ms (:running-stale-threshold-ms (app-config/status-config))]
+      (> (- (current-time-ms) last-updated-ms)
+         threshold-ms))))
+
+(defn- reconstructed-status
+  [reconstructed last-updated]
+  (cond
+    (wr/completed? reconstructed) :completed
+    (wr/failed? reconstructed) :failed
+    (wr/paused? reconstructed) :paused
+    (stale-running? last-updated) :stale
+    :else :running))
+
+(defn- status-label
+  [status]
+  (messages/t (keyword "status" (str "value-" (name status)))))
+
 (defn- workflow-status-summary
   [workflow-id]
   (let [events-dir (app-config/events-dir)
@@ -115,11 +155,7 @@
         reconstructed (wr/reconstruct-context events-dir workflow-id)
         last-event (last events)]
     {:workflow-id workflow-id
-     :status (cond
-               (wr/completed? reconstructed) :completed
-               (wr/failed? reconstructed) :failed
-               (wr/paused? reconstructed) :paused
-               :else :running)
+     :status (reconstructed-status reconstructed (:event/timestamp last-event))
      :spec-name (some-> reconstructed :workflow-spec :name)
      :event-count (:event-count reconstructed)
      :completed-phases (:completed-phases reconstructed)
@@ -132,7 +168,7 @@
   (let [unknown (messages/t :status/value-unknown)
         none    (messages/t :status/value-none)]
     (display/print-info (messages/t :status/workflow {:workflow-id workflow-id}))
-    (println (messages/t :status/field-status {:value (name status)}))
+    (println (messages/t :status/field-status {:value (status-label status)}))
     (println (messages/t :status/field-spec {:value (or spec-name unknown)}))
     (println (messages/t :status/field-events {:value event-count}))
     (println (messages/t :status/field-last-updated {:value (or last-updated unknown)}))
@@ -214,7 +250,7 @@
           (doseq [{:keys [workflow-id status spec-name last-updated]} summaries]
             (println (messages/t :status/summary-row
                                  {:workflow-id (format "%-36s" workflow-id)
-                                  :status      (format "%-10s" (name status))
+                                  :status      (format "%-10s" (status-label status))
                                   :spec-name   (or spec-name unknown)}))
             (println (messages/t :status/summary-last-updated
                                  {:value (or last-updated unknown)})))

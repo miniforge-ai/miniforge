@@ -30,6 +30,10 @@
   "Classpath resource path for CLI app identity."
   "config/cli/app.edn")
 
+(def default-status-config
+  "Defaults for workflow status rendering and health classification."
+  {:running-stale-threshold-ms 300000})
+
 (defn- normalize-profile
   [profile]
   (-> profile
@@ -49,6 +53,13 @@
   (resource-config/merged-resource-config app-config-resource
                                           :cli-app/pr-monitor
                                           {}))
+
+(defn status-config
+  "Resolve workflow status CLI config from the classpath."
+  []
+  (resource-config/merged-resource-config app-config-resource
+                                          :cli-app/status
+                                          default-status-config))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Identity helpers
