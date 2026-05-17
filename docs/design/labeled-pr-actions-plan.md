@@ -5,14 +5,14 @@
 When a PR that fixes a bug in the workflow runtime merges to main,
 every workflow currently in flight is still executing on the
 pre-merge code. The 2026-05-17 dogfood made the cost concrete: a
-fleet of 20 running workflows all paying ~13 hours per verify cycle
+set of 20 concurrent workflows all paying ~13 hours per verify cycle
 on the old slow pre-commit chain, even after the fix landed —
 because each workflow's task worktree was created off an older
 base.
 
 The first instance we need to solve is **dogfood-fix** rebasing,
 but the broader pattern shows up any time we want a merge event
-to drive an action on running fleet members. Bake the general
+to drive an action on every workflow currently in flight. Bake the general
 mechanism now; the dogfood case is its first user.
 
 ## Goal
@@ -30,7 +30,7 @@ in-flight workflow. Concretely, for `dogfood-fix`:
 3. On match, the **meta-agent** is invoked (LLM, judgement only)
    with `{:pr/number :pr/labels :pr/merge-sha :action
    :matched-workflows [...]}`. It decides whether to inject (default
-   yes), staggers across the fleet to avoid thundering herd, and
+   yes), staggers across matched workflows to avoid thundering herd, and
    emits `:workflow/inject {:workflow-id :action ...}` per approval.
 4. At the next safe seam (phase boundary), the **workflow runner**
    pauses, runs `rebase-onto! origin/main` against the task worktree,
@@ -57,7 +57,7 @@ in-flight workflow. Concretely, for `dogfood-fix`:
 | PR merge-event emission | `components/pr-lifecycle` (`:pr/labeled-pr-merged` event) |
 | Mechanical label → action match | new brick `components/pr-label-watcher` (no LLM, no tokens) |
 | Workflow base-SHA registry | `components/supervisory-state` (new sub-key under `[:execution/environment-metadata :base-sha]`) |
-| Judgement / fleet staggering | meta-agent under `components/agent/src/.../specialized/` (invoked only on watcher hit) |
+| Judgement / multi-workflow staggering | meta-agent under `components/agent/src/.../specialized/` (invoked only on watcher hit) |
 | Pause-rebase-resume actuator | `components/workflow` (new hook honored at the existing `await-resume!` seam in `runner/execute-single-iteration`) |
 | Rebase mechanics | `components/dag-executor` — NEW `rebase-onto!` sibling of `workspace/git-restore!` (NOT `restore-workspace!`, which is the workspace-bundle-restore protocol method, not a rebase) |
 | Config | new resource `resources/config/pr-label-actions.edn` |
@@ -170,7 +170,7 @@ LLM-driven agent:
    The agent's job is the parts that need judgement: does this
    workflow really benefit from the rebase right now (maybe it's
    one phase from release), can the conflict be auto-resolved,
-   should this fleet-wide action be staggered to avoid
+   should this action be staggered across N matched workflows to avoid
    thundering-herd. Token cost scales with merge events, not with
    uptime.
 
@@ -247,7 +247,7 @@ when/why lives upstream.
   workflow runner's actuator can call it through the same surface
   it uses for `restore-workspace!`.
 
-### M4 — Fleet test
+### M4 — Multi-workflow test
 
 - Spin up N≥3 long-running workflows (the dogfood spec is fine).
 - Land a no-op PR labeled `dogfood-fix`.
@@ -263,32 +263,26 @@ when/why lives upstream.
    live today)? Leaning toward a sibling of `pr-lifecycle` so the
    event-source and the matcher stay close, but defer until M2.
 
-2. ~~**GitHub event delivery**~~ — **resolved.** Two transports
-   behind a single `:pr-events/source` protocol:
+2. ~~**GitHub event delivery**~~ — **resolved.** OSS ships
+   **ETag-cached polling** of `/repos/:owner/:repo/events` on a
+   30–60 s interval as the default transport. 304s are near-zero
+   against the rate limit; each user has their own 5000/hour PAT
+   bucket so 100 users behind one ASN don't collide (GitHub
+   rate-limits per-token, not per-IP).
 
-   - **Fleet** (hosted control-plane with a public endpoint) uses
-     **GitHub webhooks** subscribed to PR `closed` events with
-     `merged: true`. Sub-second latency, trivial cost, GitHub-App
-     auth.
-   - **OSS** (no public inbound) uses **ETag-cached polling** of
-     `/repos/:owner/:repo/events` on a 30–60 s interval. 304s are
-     near-zero against the rate limit; each user has their own
-     5000/hour PAT bucket so 100 OSS users behind one ASN don't
-     collide (GitHub rate-limits per-token, not per-IP).
+   Pluggable behind a `:pr-events/source` protocol — a deployment
+   with a public inbound endpoint (webhook receiver, SSE relay,
+   etc.) can swap in a sub-second transport without touching the
+   watcher or the meta-agent. Those alternate transports are NOT
+   part of this OSS plan; downstream products that want them ship
+   their own `:pr-events/source` implementation in their own repo.
 
-   SSE-via-Fleet-relay was considered and deferred. It would mean
-   Fleet's webhook receiver fans out merge events to subscribed OSS
-   clients over an open HTTP stream — workable, but it makes Fleet
-   a hard dependency for OSS notification and the latency win
-   (~30 s) doesn't justify it for `dogfood-fix`. Revisit only if a
-   future label-action genuinely needs sub-second on OSS.
+   Latency budget for the OSS default:
 
-   Latency budget table:
-
-   | Use case | Latency needed | Webhook (Fleet) | ETag-poll (OSS) |
-   |---|---|---|---|
-   | `dogfood-fix` rebase | minutes (next phase boundary anyway) | ✓ | ✓ |
-   | Hypothetical `incident-pause` | seconds | ✓ | ✗ |
+   | Use case | Latency needed | ETag-poll fits? |
+   |---|---|---|
+   | `dogfood-fix` rebase | minutes (next phase boundary anyway) | ✓ |
+   | Hypothetical `incident-pause` | seconds | ✗ — needs a push transport |
 
 3. **Phase-boundary granularity for rebase** — current seam is
    "between phases." Inside a DAG sub-workflow's parallel fan-out,
@@ -319,10 +313,10 @@ when/why lives upstream.
   `bb.edn`), the conflict-injection rate may be high. Mitigation:
   the conflict path is the existing `:attention-required` flow, not
   silent loss.
-- **Fleet thundering herd.** N workflows all rebasing at once
-  spike GitHub API + local git. Mitigation: meta-coordinator
-  serializes the injections with a configurable
-  `:rebase-concurrency` (default 4).
+- **Multi-workflow thundering herd.** N workflows all rebasing at
+  once spike GitHub API + local git. Mitigation: the meta-agent
+  serializes injections with a configurable `:rebase-concurrency`
+  (default 4).
 - **Label drift.** A label added to a PR after merge wouldn't
   trigger because the event already fired. Out-of-scope; document
   as "label-before-merge" hygiene.
