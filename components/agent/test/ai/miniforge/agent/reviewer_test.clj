@@ -85,6 +85,12 @@
 (def ^:private malformed-review-issue-content
   (test-t :reviewer-test/malformed-review-issue-content))
 
+(def ^:private approved-with-nil-line-content
+  (test-t :reviewer-test/approved-with-nil-line-content))
+
+(def ^:private approved-with-nil-optional-fields-content
+  (test-t :reviewer-test/approved-with-nil-optional-fields-content))
+
 ;------------------------------------------------------------------------------ Test fixtures
 
 (defn passing-gate
@@ -329,6 +335,29 @@
 (deftest test-reviewer-rejects-structurally-corrupt-llm-issues
   (testing "valid EDN with malformed issue maps is treated as unparseable"
     (is (nil? (reviewer/parse-review-response malformed-review-issue-content)))))
+
+(deftest test-reviewer-accepts-issues-with-nil-line
+  ;; Reproduces the 2026-05-16 event-log-tool-visibility dogfood
+  ;; gate-vs-verdict mismatch: the LLM emitted :line nil on a
+  ;; file-level issue. The schema's pre-fix shape
+  ;; (`{:optional true} [:int {:min 1}]`) silently rejected the issue,
+  ;; parser returned nil, parse-failed? flipped llm-decision to
+  ;; :rejected, and the :review-approved gate correctly rejected a
+  ;; decision that should have been :approved. With :line wrapped in
+  ;; :maybe, explicit nil now round-trips through the parser.
+  (testing "issue with :line nil parses with :review/decision intact"
+    (let [parsed (reviewer/parse-review-response approved-with-nil-line-content)]
+      (is (some? parsed) "parser must not return nil for a nil-line issue")
+      (is (= :approved (:review/decision parsed)))
+      (is (= 2 (count (:review/issues parsed))))
+      (is (nil? (:line (first (:review/issues parsed))))
+          ":line nil must round-trip through the parser, not get dropped"))))
+
+(deftest test-reviewer-accepts-issues-with-all-optional-fields-nil
+  (testing "issue with :file nil, :line nil, :suggestion nil parses cleanly"
+    (let [parsed (reviewer/parse-review-response approved-with-nil-optional-fields-content)]
+      (is (some? parsed))
+      (is (= :approved (:review/decision parsed))))))
 
 (deftest test-reviewer-timeout-only-parseable-failure-is-agent-error
   (testing "timeout-only parsed review failures do not become rejected code-review artifacts"
