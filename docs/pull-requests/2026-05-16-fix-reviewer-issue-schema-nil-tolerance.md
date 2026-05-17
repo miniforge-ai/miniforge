@@ -2,8 +2,9 @@
 
 ## Overview
 
-The 2026-05-16 event-log-tool-visibility dogfood (see
-[project_dogfood_findings_2026_05_16](../../.claude/projects/-Users-chris-ws-miniforge-ai-miniforge/memory/project_dogfood_findings_2026_05_16.md))
+The 2026-05-16 event-log-tool-visibility dogfood (full root-cause trace
+in this PR doc; the run's spec lives at
+`work/event-log-tool-visibility.spec.edn`)
 walked plan → implement → verify (78m, all 35 tests passed) → reviewer-emits
 `:review/decision :approved` on a real GROUP 1 build. The `:review-approved`
 gate then failed and the workflow died. The gate was right; the artifact
@@ -123,7 +124,8 @@ and a valid T value, so any existing valid review still parses.
 - Same shape as PR #867 (`:passed?` predicate gate bug).
 - Dogfood checkpoint: `c1abda63-3072-4f57-9871-6c177384968e`.
 - Spec: `work/event-log-tool-visibility.spec.edn`.
-- Memory: `project_dogfood_findings_2026_05_16.md` — full root-cause trace.
+- Full root-cause trace: this PR doc (above), under "Motivation" and
+  "Changes in Detail" — no external memory link needed.
 
 ## Bonus: pre-commit hang fix
 

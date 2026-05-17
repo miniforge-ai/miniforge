@@ -58,9 +58,9 @@
    and cascade through `parse-review-response` → `llm-review = nil`
    → `llm-decision = :rejected`, flipping a real :approved verdict
    into a rejected one. The 2026-05-16 event-log-tool-visibility
-   dogfood (see project_dogfood_findings_2026_05_16) shipped a
-   verifier-pass + LLM-:approved build that the gate refused for
-   exactly this reason."
+   dogfood shipped a verifier-pass + LLM-:approved build that the
+   gate refused for exactly this reason; the root-cause trace lives
+   in `docs/pull-requests/2026-05-16-fix-reviewer-issue-schema-nil-tolerance.md`."
   [:map
    [:severity [:enum :blocking :warning :nit]]
    [:file {:optional true} [:maybe [:string {:min 1}]]]
