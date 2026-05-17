@@ -30,6 +30,64 @@
    [ai.miniforge.workflow.messages :as messages]
    [ai.miniforge.workflow.phase-test-support :as phase-test-support]))
 
+;; ---------------------------------------------------------------------------- mock capsule executor
+;; The governed-mode tests below assert that run-pipeline routes mode/worktree
+;; metadata correctly. They should never touch a real Docker daemon —
+;; create-executor-registry's Docker branch can block indefinitely when the
+;; daemon is busy or stuck (which is exactly the hang documented in PR #893's
+;; PR doc, where bb pre-commit's stable-derived sweep stalled here for 300s+).
+;; Mock the dag-executor surface so these tests stay deterministic.
+
+(defn- mock-capsule-registry
+  "Drop-in for `dag-exec/create-executor-registry` that returns a synthetic
+   capsule executor without ever talking to Docker."
+  [_config]
+  {:docker   ::mock-capsule
+   :worktree ::mock-worktree})
+
+(defn- mock-capsule-select
+  "Drop-in for `dag-exec/select-executor` — returns the stub capsule
+   under governed mode and the stub worktree otherwise."
+  ([registry] (:docker registry))
+  ([registry & opts]
+   (let [{:keys [preferred]} (apply hash-map opts)]
+     (case preferred
+       :worktree (:worktree registry)
+       (:docker registry)))))
+
+(defn- mock-capsule-acquire
+  "Drop-in for `dag-exec/acquire-environment!`. Returns a host-path
+   environment record so :execution/worktree-path looks like a real
+   host worktree, not the container-internal /workspace."
+  [_executor task-id _config]
+  (dag-exec/ok {:environment-id (str "mock-env-" task-id)
+                :workdir        "/tmp/mock-host-worktree"
+                :metadata       {:base-branch "main"}}))
+
+(defn- mock-capsule-type
+  "Drop-in for `dag-exec/executor-type`. The capsule stub is :docker,
+   the worktree stub is :worktree — matches what the runner expects so
+   N11 §7.4's no-silent-downgrade check still discriminates."
+  [executor]
+  (case executor
+    ::mock-capsule  :docker
+    ::mock-worktree :worktree
+    :unknown))
+
+(defmacro ^:private with-mock-capsule-executor
+  "Run body with the dag-executor surface mocked out so governed-mode
+   path doesn't reach a real Docker daemon. Also no-ops release and
+   persist so the cleanup path doesn't log protocol-mismatch warnings
+   against the stub keyword executor."
+  [& body]
+  `(with-redefs [dag-exec/create-executor-registry mock-capsule-registry
+                 dag-exec/select-executor          mock-capsule-select
+                 dag-exec/acquire-environment!     mock-capsule-acquire
+                 dag-exec/executor-type            mock-capsule-type
+                 dag-exec/release-environment!     (fn [& _#] (dag-exec/ok {}))
+                 dag-exec/persist-workspace!       (fn [& _#] (dag-exec/ok {}))]
+     ~@body))
+
 (use-fixtures :each phase-test-support/with-workflow-phase-test-support)
 
 (def ^:private runner-test-plan
@@ -264,29 +322,22 @@
 
 (deftest run-pipeline-governed-mode-sets-execution-mode-test
   (testing ":governed mode sets :execution/mode :governed on context"
-    ;; Governed mode requires Docker or K8s. This test verifies the mode is
-    ;; propagated to the context regardless of which executor is selected.
-    ;; In environments without Docker/K8s, governed mode throws instead
-    ;; (N11 §7 no-silent-downgrade) — tested separately via mock.
     (let [wf {:workflow/id :test
               :workflow/version "1.0.0"
               :workflow/pipeline [{:phase runner-test-done}]}]
-      (try
-        (let [result (runner/run-pipeline wf {:task "Test"} {:execution-mode :governed})]
-          ;; Docker was available — mode should be :governed on context
-          (is (= :governed (:execution/mode result))))
-        (catch Exception e
-          ;; Docker unavailable — exception message should match N11 spec language
-          (is (re-find #"(?i)No capsule executor" (ex-message e))))))))
+      (with-mock-capsule-executor
+        (let [result (runner/run-pipeline wf {:task "Test"}
+                                          {:execution-mode :governed})]
+          (is (= :governed (:execution/mode result))))))))
 
 (deftest run-pipeline-governed-mode-has-host-worktree-test
   (testing ":governed mode provides a host-accessible worktree-path (not /workspace)"
     (let [wf {:workflow/id :test
               :workflow/version "1.0.0"
               :workflow/pipeline [{:phase runner-test-done}]}]
-      (try
-        (let [result (runner/run-pipeline wf {:task "Test"} {:execution-mode :governed})]
-          ;; worktree-path should be a host path, not the container-internal /workspace
+      (with-mock-capsule-executor
+        (let [result (runner/run-pipeline wf {:task "Test"}
+                                          {:execution-mode :governed})]
           (is (some? (:execution/worktree-path result))
               "Should have a worktree path")
           (is (not= "/workspace" (:execution/worktree-path result))
@@ -294,10 +345,7 @@
           (is (some? (:execution/executor result))
               "Should have a capsule executor")
           (is (some? (:execution/environment-id result))
-              "Should have a capsule environment-id"))
-        (catch Exception _e
-          ;; Docker unavailable — skip test
-          nil)))))
+              "Should have a capsule environment-id"))))))
 
 (deftest run-pipeline-governed-mode-rejects-worktree-fallback-test
   (testing ":governed mode does not fall through to worktree (N11 §7.4 no-silent-downgrade)"
@@ -306,7 +354,9 @@
     (let [wf {:workflow/id :test
               :workflow/version "1.0.0"
               :workflow/pipeline [{:phase runner-test-done}]}]
-      (with-redefs [dag-exec/executor-type (constantly :worktree)]
+      (with-redefs [dag-exec/create-executor-registry mock-capsule-registry
+                    dag-exec/select-executor          mock-capsule-select
+                    dag-exec/executor-type            (constantly :worktree)]
         (is (thrown-with-msg?
              Exception #"(?i)No capsule executor available"
              (runner/run-pipeline wf {:task "Test"}

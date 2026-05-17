@@ -48,13 +48,25 @@
    [:duration-ms {:optional true} [:int {:min 0}]]])
 
 (def ReviewIssue
-  "Schema for a single review issue from LLM analysis."
+  "Schema for a single review issue from LLM analysis.
+
+   Optional fields are wrapped in `:maybe` because the LLM frequently
+   emits explicit `nil` for fields that don't apply to a given issue
+   (e.g. `:line nil` on a file-level concern). Bare `{:optional true}`
+   only permits the key to be absent, not present-but-nil — a strict
+   read of the schema would silently reject an otherwise-fine review
+   and cascade through `parse-review-response` → `llm-review = nil`
+   → `llm-decision = :rejected`, flipping a real :approved verdict
+   into a rejected one. The 2026-05-16 event-log-tool-visibility
+   dogfood shipped a verifier-pass + LLM-:approved build that the
+   gate refused for exactly this reason; the root-cause trace lives
+   in `docs/pull-requests/2026-05-16-fix-reviewer-issue-schema-nil-tolerance.md`."
   [:map
    [:severity [:enum :blocking :warning :nit]]
-   [:file {:optional true} [:string {:min 1}]]
-   [:line {:optional true} [:int {:min 1}]]
+   [:file {:optional true} [:maybe [:string {:min 1}]]]
+   [:line {:optional true} [:maybe [:int {:min 1}]]]
    [:description [:string {:min 1}]]
-   [:suggestion {:optional true} [:string {:min 1}]]])
+   [:suggestion {:optional true} [:maybe [:string {:min 1}]]]])
 
 (def ReviewArtifact
   "Schema for the reviewer's output."
