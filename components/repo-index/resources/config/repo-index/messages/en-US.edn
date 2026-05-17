@@ -22,6 +22,9 @@
   ;; task->text section headers
   :prompt/plan-header             "Plan"
   :prompt/intent-header           "Intent"
+  :prompt/phase-handoff-header    "Phase Handoff (MUST FIX)"
+  :prompt/phase-handoff-intro
+  "The previous phase emitted this structured repair request. Treat it as the durable phase-transition contract for this attempt:"
   :prompt/review-feedback-header  "Review Feedback (MUST FIX)"
   :prompt/review-feedback-intro   "The previous implementation was reviewed and changes were requested. You MUST address ALL of the following issues:"
   :prompt/test-failures-header    "Test Failures (MUST FIX)"

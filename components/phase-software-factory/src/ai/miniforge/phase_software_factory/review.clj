@@ -22,15 +22,16 @@
    Performs code review and quality checks.
    Agent: :reviewer
    Default gates: [:review-approved :quality-check]"
-  (:require            [ai.miniforge.phase.interface :as phase]
-            [ai.miniforge.phase-software-factory.messages :as messages]
-            [ai.miniforge.phase-software-factory.phase-config :as phase-config]
-
-            [ai.miniforge.phase-software-factory.knowledge-helpers :as kb-helpers]
-            [ai.miniforge.agent.interface :as agent]
-            [ai.miniforge.knowledge.interface :as knowledge]
-            [ai.miniforge.response.interface :as response]
-            [clojure.string :as str]))
+  (:require
+   [ai.miniforge.phase.interface :as phase]
+   [ai.miniforge.phase-software-factory.messages :as messages]
+   [ai.miniforge.phase-software-factory.phase-config :as phase-config]
+   [ai.miniforge.phase-software-factory.phase-handoff :as phase-handoff]
+   [ai.miniforge.phase-software-factory.knowledge-helpers :as kb-helpers]
+   [ai.miniforge.agent.interface :as agent]
+   [ai.miniforge.knowledge.interface :as knowledge]
+   [ai.miniforge.response.interface :as response]
+   [clojure.string :as str]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Defaults
@@ -209,11 +210,20 @@
   "Update phase to redirect back to :implement with review feedback for
    repair. Caller is responsible for the iteration-budget guard."
   [updated-ctx feedback]
-  (let [phase-result (-> (:phase updated-ctx)
+  (let [handoff (phase-handoff/repair-request
+                 {:workflow-id (:execution/id updated-ctx)
+                  :source-phase :review
+                  :target-phase :implement
+                  :phase-attempt (get-in updated-ctx [:phase :iterations])
+                  :feedback feedback})
+        phase-result (-> (:phase updated-ctx)
                          (update :iterations (fnil inc 1))
                          (assoc :review-feedback feedback)
+                         (assoc :phase/handoff handoff)
                          (phase/request-redirect :implement))]
-    (assoc updated-ctx :phase phase-result)))
+    (-> updated-ctx
+        (assoc :phase phase-result)
+        (phase-handoff/append-execution-handoff handoff))))
 
 (defn- record-fingerprint
   "Append the latest review fingerprint to [:execution :review-fingerprints]."

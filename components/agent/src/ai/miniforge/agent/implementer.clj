@@ -188,6 +188,13 @@
        (messages/t :prompt/review-feedback-intro) "\n\n"
        (if (string? review-feedback) review-feedback (pr-str review-feedback))))
 
+(defn- format-phase-handoff-section
+  "Format a structured phase handoff as a prominent repair section."
+  [phase-handoff]
+  (str "\n\n## " (messages/t :prompt/phase-handoff-header) "\n\n"
+       (messages/t :prompt/phase-handoff-intro) "\n\n"
+       (pr-str phase-handoff)))
+
 (defn- format-verify-section
   "Format verify failures as a markdown section."
   [verify-failures]
@@ -215,12 +222,15 @@
     (map? task) (let [desc (or (:task/description task) (:description task) (:content task))
                       plan (:task/plan task)
                       intent (:task/intent task)
+                      phase-handoff (:task/phase-handoff task)
                       review-feedback (:task/review-feedback task)
                       verify-failures (:task/verify-failures task)
                       prior-attempts (:task/prior-attempts task)
                       parts (cond-> []
                               prior-attempts
                               (conj (format-prior-attempts-section prior-attempts))
+                              phase-handoff
+                              (conj (format-phase-handoff-section phase-handoff))
                               desc
                               (conj desc)
                               plan

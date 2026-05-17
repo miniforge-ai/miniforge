@@ -74,6 +74,7 @@
    :execution/fsm-state
    :execution/response-chain
    :execution/errors
+   :execution/phase-handoffs
    :execution/artifacts
    :execution/dag-result
    :execution/dag-pr-infos

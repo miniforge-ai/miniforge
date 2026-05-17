@@ -137,6 +137,33 @@
             (is (= {:status :failed}
                    (get-in checkpoint-data [:phase-results :release])))))))))
 
+(deftest persist-execution-state-preserves-phase-handoffs-test
+  (with-temp-checkpoint-root
+    (fn [checkpoint-root]
+      (let [handoff {:frame/kind :repair-request
+                     :transition/from :review
+                     :transition/to :implement}
+            workflow {:workflow/id :test
+                      :workflow/version "1.0.0"
+                      :workflow/pipeline [{:phase :review}]}
+            execution-ctx (-> (ctx/create-context workflow {:task "Test"}
+                                                  {:checkpoint/root checkpoint-root})
+                              (assoc :execution/phase-handoffs [handoff])
+                              (assoc-in [:execution/phase-results :review]
+                                        {:status :failed
+                                         :phase/handoff handoff})
+                              (assoc :execution/current-phase :review))
+            _ (checkpoint-store/persist-execution-state! execution-ctx)
+            checkpoint-data (checkpoint-store/load-checkpoint-data
+                             (:execution/id execution-ctx)
+                             {:checkpoint/root checkpoint-root})]
+        (is (= [handoff]
+               (get-in checkpoint-data
+                       [:machine-snapshot :execution/phase-handoffs])))
+        (is (= handoff
+               (get-in checkpoint-data
+                       [:phase-results :review :phase/handoff])))))))
+
 (deftest load-checkpoint-data-validates-at-interface-boundary-test
   (testing "invalid checkpoint payloads are rejected at the public interface"
     (with-redefs [checkpoint-store/load-checkpoint-data

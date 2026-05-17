@@ -29,6 +29,7 @@
    [ai.miniforge.agent.implementer :as implementer]
    [ai.miniforge.llm.interface :as llm]
    [ai.miniforge.logging.interface :as log]
+   [ai.miniforge.repo-index.interface :as messages]
    [ai.miniforge.response.interface :as response]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -573,6 +574,21 @@
                                         :task/review-feedback {:issues ["no validation" "no tests"]}})]
       (is (str/includes? text "## Review Feedback (MUST FIX)"))
       (is (str/includes? text "no validation")))))
+
+(deftest task->text-phase-handoff-test
+  (testing "includes phase handoff before review feedback"
+    (let [phase-handoff-header (str "## " (messages/t :prompt/phase-handoff-header))
+          review-feedback-header (str "## " (messages/t :prompt/review-feedback-header))
+          handoff {:frame/kind :repair-request
+                   :frame/body {:repair/findings
+                                [{:finding/summary "GROUP 3 missing"}]}}
+          text (implementer/task->text {:task/description "Fix it"
+                                        :task/phase-handoff handoff
+                                        :task/review-feedback "Fallback feedback"})]
+      (is (str/includes? text phase-handoff-header))
+      (is (str/includes? text "GROUP 3 missing"))
+      (is (< (str/index-of text phase-handoff-header)
+             (str/index-of text review-feedback-header))))))
 
 (deftest task->text-verify-failures-test
   (testing "includes verify failures with test-results"
