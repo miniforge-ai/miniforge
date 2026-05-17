@@ -159,6 +159,66 @@
                 :bundle-path "/tmp/task-a.bundle"}
                (:resume-workspace @run-pipeline-opts)))))))
 
+(deftest terminal-status-predicate-test
+  (testing "explicit terminal statuses are accepted"
+    (doseq [s [:completed :completed-with-warnings :failed :aborted :cancelled]]
+      (is (sut/terminal-status? s) (str s " must be terminal"))))
+  (testing "non-terminal statuses are rejected"
+    (doseq [s [:running :pending :paused nil :unknown :draining]]
+      (is (not (sut/terminal-status? s)) (str s " must NOT be terminal")))))
+
+(deftest resume-workflow-non-terminal-status-throws-test
+  ;; Regression for the silent fast-fail blocker from the 2026-05-16
+  ;; event-log-tool-visibility dogfood. Resume used to print
+  ;; "Resumed workflow completed with status: :running" and exit 0,
+  ;; losing the prior session's plan/explore/verify token spend.
+  (let [workflow-id (random-uuid)
+        reconstructed {:completed-phases [:plan]
+                       :event-count 0
+                       :machine-snapshot {:execution/id workflow-id
+                                          :execution/current-phase :verify}
+                       :workflow-spec {:name "canonical-sdlc" :version "1.0.0"}}]
+    (with-redefs [wr/reconstruct-context (fn [_ _] reconstructed)
+                  sut/resolve-resume-workflow (fn [_] {:workflow-type :canonical-sdlc
+                                                       :workflow-version "1.0.0"})
+                  context/create-llm-client (fn [_ _ _] :llm-client)
+                  es/create-event-stream (fn [] :event-stream)
+                  supervisory/attach! (fn [_] nil)
+                  dashboard/start-command-poller! (fn [_ _] (fn [] nil))
+                  main-display/print-info (fn [& _] nil)
+                  main-display/print-error (fn [& _] nil)
+                  clojure.core/requiring-resolve
+                  (fn [sym]
+                    (cond
+                      (= sym 'ai.miniforge.workflow.interface/load-workflow)
+                      (fn [& _]
+                        {:workflow {:workflow/id :canonical-sdlc
+                                    :workflow/version "1.0.0"
+                                    :workflow/pipeline [{:phase :verify}]}})
+
+                      (= sym 'ai.miniforge.workflow.interface/run-pipeline)
+                      (fn [& _] {:execution/status :running})))]
+      (is (thrown-with-msg?
+           clojure.lang.ExceptionInfo
+           #"non-terminal status :running"
+           (sut/resume-workflow workflow-id {:quiet true}))
+          "Resume must throw, not silently return, when run-pipeline returns :running"))))
+
+(deftest resume-print-phase-prefers-fsm-snapshot-test
+  (testing "machine snapshot's :execution/current-phase wins over pipeline head"
+    (is (= "verify"
+           (#'sut/resume-print-phase
+             {:execution/current-phase :verify}
+             [{:phase :review} {:phase :release}]))))
+  (testing "no snapshot → falls back to first remaining pipeline entry"
+    (is (= "review"
+           (#'sut/resume-print-phase nil [{:phase :review} {:phase :release}]))))
+  (testing "snapshot present but :execution/current-phase missing → pipeline head"
+    (is (= "review"
+           (#'sut/resume-print-phase {} [{:phase :review}]))))
+  (testing "both empty → nil"
+    (is (nil? (#'sut/resume-print-phase nil [])))))
+
 (deftest resume-workflow-trims-failed-checkpoint-before-running-test
   (let [workflow-id (random-uuid)
         run-pipeline-opts (atom nil)

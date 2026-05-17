@@ -676,6 +676,7 @@
   :resume/completed-phases-none "none"
   :resume/events-found "Events found: {count}"
   :resume/resuming-from-phase "Resuming from phase: {phase} ({count} phases remaining)"
+  :resume/non-terminal-status "Resume returned non-terminal status {status}; treating as failure. The FSM did not advance from the snapshot — check the events log for restore-failed warnings or unhandled exceptions. Workflow id: {workflow-id}"
   :resume/all-phases-completed "All phases already completed."
   :resume/new-workflow-id "New workflow ID: {workflow-id}"
   :resume/restored-workflow-id "Restored workflow ID: {workflow-id}"

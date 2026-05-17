@@ -36,6 +36,7 @@
    [ai.miniforge.cli.workflow-runner.context :as context]
    [ai.miniforge.cli.workflow-runner.dashboard :as dashboard]
    [ai.miniforge.event-stream.interface :as es]
+   [ai.miniforge.response.interface :as response]
    [ai.miniforge.supervisory-state.interface :as supervisory]
    [ai.miniforge.workflow-resume.interface :as wr]))
 
@@ -63,6 +64,33 @@
   (wr/resolve-workflow-identity
     reconstructed
     #(selection-config/resolve-selection-profile :default)))
+
+;------------------------------------------------------------------------------ Layer 1.5
+;; Status semantics
+
+(def terminal-statuses
+  "Workflow execution statuses that mean the run has actually finished —
+   either successfully or definitively failed. Anything outside this set
+   (`:running`, `:pending`, `:paused`, nil) means the runner returned
+   without advancing the FSM to a terminal state, which is the silent
+   fast-fail blocker filed as work/workflow-resume-status-handling.spec.edn."
+  #{:completed :completed-with-warnings :failed :aborted :cancelled})
+
+(defn terminal-status?
+  "True when `status` represents a finished workflow."
+  [status]
+  (contains? terminal-statuses status))
+
+(defn- resume-print-phase
+  "Pick the phase name to render in `Resuming from phase: X`. Prefer
+   the FSM machine snapshot's recorded `:execution/current-phase` so
+   the print reflects where the run actually parked — falling back to
+   the first remaining-pipeline entry only when no snapshot exists
+   (cold pipeline-trim resume)."
+  [machine-snapshot remaining-pipeline]
+  (or (when machine-snapshot
+        (some-> (:execution/current-phase machine-snapshot) name))
+      (some-> (:phase (first remaining-pipeline)) name)))
 
 ;------------------------------------------------------------------------------ Layer 2
 ;; Public API — invoked by both `mf resume <id>` and `mf run --resume`
@@ -119,7 +147,9 @@
                 (if (seq remaining-pipeline)
                   (display/print-info
                     (messages/t :resume/resuming-from-phase
-                                {:phase (name (:phase (first remaining-pipeline)))
+                                {:phase (or (resume-print-phase machine-snapshot
+                                                                remaining-pipeline)
+                                            "?")
                                  :count (count remaining-pipeline)}))
                   (display/print-info (messages/t :resume/all-phases-completed))))
 
@@ -148,11 +178,25 @@
                                                           (display/print-info
                                                            (messages/t :resume/phase-starting
                                                                        {:phase (get-in interceptor [:config :phase])}))))
-                                      :on-phase-complete (fn [_ctx _interceptor _result] nil)})]
+                                      :on-phase-complete (fn [_ctx _interceptor _result] nil)})
+                final-status (:execution/status result)]
             (when-not quiet
               (display/print-info
                 (messages/t :resume/completed-status
-                            {:status (:execution/status result)})))
+                            {:status final-status})))
+            (when-not (terminal-status? final-status)
+              ;; Non-terminal status means run-pipeline returned without
+              ;; advancing the FSM to a terminal state. The CLI used to
+              ;; print this and exit 0 — silently losing the prior
+              ;; session's plan/explore/verify token spend. Throw so
+              ;; main exits non-zero and dogfood drivers see the failure.
+              (response/throw-anomaly!
+                :anomalies.workflow/resume-non-terminal
+                (messages/t :resume/non-terminal-status
+                            {:status final-status
+                             :workflow-id workflow-id})
+                {:workflow-id workflow-id
+                 :status final-status}))
             result)
           (catch Exception e
             (display/print-error (messages/t :resume/failed
