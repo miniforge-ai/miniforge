@@ -263,6 +263,37 @@
       (is (not (str/includes? line "("))
           "Without duration, no parenthesized suffix"))))
 
+(def ^:private red-ansi "[31m")
+(def ^:private green-ansi "[32m")
+(def ^:private yellow-ansi "[33m")
+
+(deftest format-event-line-phase-completed-success-is-green-with-check
+  (let [line (display/format-event-line {:event/type :workflow/phase-completed
+                                         :workflow/phase :plan
+                                         :phase/outcome :success})]
+    (is (str/includes? line green-ansi)
+        "success outcome must render green")
+    (is (str/includes? line "✓")
+        "success outcome must use the ✓ glyph")))
+
+(deftest format-event-line-phase-completed-failure-is-red-with-cross
+  (let [line (display/format-event-line {:event/type :workflow/phase-completed
+                                         :workflow/phase :implement
+                                         :phase/outcome :failure})]
+    (is (str/includes? line red-ansi)
+        "failure outcome must render red so it stops reading as success")
+    (is (str/includes? line "✗")
+        "failure outcome must use the ✗ glyph")
+    (is (not (str/includes? line green-ansi))
+        "failure outcome must not include a green code anywhere in the line")))
+
+(deftest format-event-line-phase-completed-skipped-is-yellow
+  (let [line (display/format-event-line {:event/type :workflow/phase-completed
+                                         :workflow/phase :release
+                                         :phase/outcome :skipped})]
+    (is (str/includes? line yellow-ansi)
+        "skipped outcome must render yellow")))
+
 (deftest format-event-line-agent-status-default-status-test
   (testing "agent/status with no message/status falls back to default-status"
     (let [line (display/format-event-line {:event/type :agent/status

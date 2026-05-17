@@ -112,12 +112,21 @@
                               (str ": " r)))
       :workflow/phase-started (colorize :yellow (messages/t :workflow-runner/phase-started
                                                             {:phase phase}))
-      :workflow/phase-completed (str (colorize :green (messages/t :workflow-runner/phase-completed
-                                                                   {:phase phase
-                                                                    :outcome (name (or (:phase/outcome event)
-                                                                                       :completed))}))
-                                     (when-let [d (:phase/duration-ms event)]
-                                       (str " (" (format-duration d) ")")))
+      :workflow/phase-completed (let [outcome (or (:phase/outcome event) :completed)
+                                      color   (case outcome
+                                                :failure :red
+                                                :skipped :yellow
+                                                :green)
+                                      symbol  (case outcome
+                                                :failure "✗"
+                                                :skipped "○"
+                                                "✓")]
+                                  (str (colorize color (messages/t :workflow-runner/phase-completed
+                                                                   {:symbol symbol
+                                                                    :phase phase
+                                                                    :outcome (name outcome)}))
+                                       (when-let [d (:phase/duration-ms event)]
+                                         (str " (" (format-duration d) ")"))))
       :workflow/milestone-reached (colorize :green (messages/t :workflow-runner/milestone
                                                                 {:message (:message event)}))
       :workspace/persisted (colorize :cyan (messages/t :workflow-runner/workspace-persisted
