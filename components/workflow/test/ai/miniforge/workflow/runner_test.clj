@@ -31,7 +31,33 @@
    [ai.miniforge.workflow.runner :as runner]
    [ai.miniforge.workflow.context :as ctx]))
 
-(use-fixtures :each phase-test-support/with-workflow-phase-test-support)
+(defn- with-stubbed-acquire-environment
+  "Force `acquire-execution-environment!` to return nil for every test
+   in this namespace.
+
+   Why: many tests below call `runner/run-pipeline` without a
+   pre-acquired executor. Default :local mode would otherwise acquire
+   a real worktree at System/getProperty user.dir, and the workflow-
+   tester phases (which call persist-workspace-at-phase-boundary!)
+   would commit phase-completion messages into the test runner's own
+   git checkout. The 2026-05-16 pre-commit-smoke rollout caught this
+   leaking real commits onto active branches; the fix lives once
+   here so individual tests don't have to remember the with-redefs
+   dance, and so any future test that calls run-pipeline inherits
+   the safe default. Tests that genuinely need a real acquired env
+   override with their own with-redefs."
+  [f]
+  (let [acquire-var (requiring-resolve
+                      'ai.miniforge.workflow.runner-environment/acquire-execution-environment!)]
+    (with-redefs-fn {acquire-var (fn [& _] nil)}
+      f)))
+
+;; Compose phase-test-support's loader setup with the acquire-environment
+;; stub. clojure.test/use-fixtures REPLACES prior :each fixtures, so both
+;; must be registered in a single call.
+(use-fixtures :each
+  phase-test-support/with-workflow-phase-test-support
+  with-stubbed-acquire-environment)
 
 (def test-plan-phase
   phase-test-support/runner-test-plan)
@@ -290,43 +316,32 @@
   ;; this test pins the underlying "must actually advance" contract so a
   ;; regression in the FSM/snapshot path doesn't silently re-introduce
   ;; `:running` returns from completed runs.
-  ;;
-  ;; CRITICAL: mock acquire-execution-environment! to return nil so the
-  ;; runner never tries to acquire a real worktree from the host repo.
-  ;; Without this mock the workflow-tester phases trigger
-  ;; persist-workspace-at-phase-boundary! against the test runner's own
-  ;; git worktree, which produced rogue "runner-test-done phase completed"
-  ;; commits on the active branch during the smoke-test rollout.
   (testing "snapshot captured after phase-1 completes resumes through remaining phases to :completed"
-    (let [acquire-var (resolve 'ai.miniforge.workflow.runner-environment/acquire-execution-environment!)
-          workflow {:workflow/id :test-multi-phase
+    (let [workflow {:workflow/id :test-multi-phase
                     :workflow/version "1.0.0"
                     :workflow/pipeline [{:phase test-plan-phase}
                                         {:phase test-implement-phase}
                                         {:phase test-verify-phase}
-                                        {:phase test-done-phase}]}]
-      (with-redefs-fn
-        {acquire-var (fn [& _] nil)}
-        (fn []
-          (let [full-result (runner/run-pipeline workflow {:task "Test"} {})
-                _ (is (= :completed (:execution/status full-result))
-                      "baseline: full run must reach :completed")
-                mid-snapshot (-> (checkpoint-store/build-machine-snapshot full-result)
-                                 (assoc :execution/status :running
-                                        :execution/phase-index 1
-                                        :execution/current-phase test-implement-phase))
-                phase-results {test-plan-phase
-                               (get-in full-result [:execution/phase-results test-plan-phase])}
-                resumed (runner/run-pipeline workflow
-                                             {:task "Ignored on resume"}
-                                             {:resume-machine-snapshot mid-snapshot
-                                              :resume-phase-results phase-results})]
-            (is (contains? #{:completed :completed-with-warnings :failed :aborted :cancelled}
-                           (:execution/status resumed))
-                (str "resume must reach a terminal status, got "
-                     (pr-str (:execution/status resumed))))
-            (is (not= :running (:execution/status resumed))
-                ":running is the silent-fast-fail signature — resume must not return it")))))))
+                                        {:phase test-done-phase}]}
+          full-result (runner/run-pipeline workflow {:task "Test"} {})
+          _ (is (= :completed (:execution/status full-result))
+                "baseline: full run must reach :completed")
+          mid-snapshot (-> (checkpoint-store/build-machine-snapshot full-result)
+                           (assoc :execution/status :running
+                                  :execution/phase-index 1
+                                  :execution/current-phase test-implement-phase))
+          phase-results {test-plan-phase
+                         (get-in full-result [:execution/phase-results test-plan-phase])}
+          resumed (runner/run-pipeline workflow
+                                       {:task "Ignored on resume"}
+                                       {:resume-machine-snapshot mid-snapshot
+                                        :resume-phase-results phase-results})]
+      (is (contains? #{:completed :completed-with-warnings :failed :aborted :cancelled}
+                     (:execution/status resumed))
+          (str "resume must reach a terminal status, got "
+               (pr-str (:execution/status resumed))))
+      (is (not= :running (:execution/status resumed))
+          ":running is the silent-fast-fail signature — resume must not return it"))))
 
 ;; ============================================================================
 ;; Phase result recording tests
