@@ -48,15 +48,27 @@
   [{:severity :blocking
     :description "Missing require"}])
 
-(defn simulate-leave-review
-  "Simulate the leave-review logic for a given decision and iteration state.
-   Returns the phase map after leave-review processing."
+(def ^:private first-review-iteration
+  1)
+
+(def ^:private next-repair-attempt
+  2)
+
+(def ^:private review-repair-budget
+  4)
+
+(def ^:private default-review-issue-summary
+  (:description (first default-review-issues)))
+
+(defn simulate-leave-review-context
+  "Simulate the leave-review logic and return the full context."
   ([decision iterations max-iterations]
-   (simulate-leave-review decision iterations max-iterations {:review/issues default-review-issues}))
+   (simulate-leave-review-context
+    decision iterations max-iterations {:review/issues default-review-issues}))
   ([decision iterations max-iterations review-output]
    (let [result {:output (merge {:review/decision decision} review-output)
                  :metrics {:tokens 100 :duration-ms 5000}}
-        ctx {:phase {:started-at (- (System/currentTimeMillis) 1000)
+         ctx {:phase {:started-at (- (System/currentTimeMillis) 1000)
                      :iterations iterations
                      :budget {:iterations max-iterations}
                      :result result}
@@ -64,11 +76,19 @@
              :execution/phase-results {}
              :execution/input {:description "test task"}
              :execution/metrics {}}
-        ;; Call leave-review via the interceptor
-        interceptor (phase/get-phase-interceptor {:phase :review})
-        leave-fn (:leave interceptor)
-        result-ctx (leave-fn ctx)]
-    (:phase result-ctx))))
+         ;; Call leave-review via the interceptor
+         interceptor (phase/get-phase-interceptor {:phase :review})
+         leave-fn (:leave interceptor)
+         result-ctx (leave-fn ctx)]
+     result-ctx)))
+
+(defn simulate-leave-review
+  "Simulate the leave-review logic for a given decision and iteration state.
+   Returns the phase map after leave-review processing."
+  ([decision iterations max-iterations]
+   (simulate-leave-review decision iterations max-iterations {:review/issues default-review-issues}))
+  ([decision iterations max-iterations review-output]
+   (:phase (simulate-leave-review-context decision iterations max-iterations review-output))))
 
 ;; ============================================================================
 ;; Core behavior tests
@@ -106,6 +126,21 @@
       (is (= default-review-issues
              (:review-feedback phase))
           "Should contain the review issues"))))
+
+(deftest changes-requested-stores-repair-handoff
+  (testing "changes-requested stores a typed repair handoff"
+    (let [result-ctx (simulate-leave-review-context
+                      :changes-requested first-review-iteration review-repair-budget)
+          handoff (get-in result-ctx [:phase :phase/handoff])
+          finding (first (get-in handoff [:frame/body :repair/findings]))]
+      (is (= :repair-request (:frame/kind handoff)))
+      (is (= :review (:transition/from handoff)))
+      (is (= :implement (:transition/to handoff)))
+      (is (= next-repair-attempt (:phase/attempt handoff)))
+      (is (= next-repair-attempt (get-in handoff [:frame/body :repair/attempt])))
+      (is (not (contains? (:frame/body handoff) :repair/raw-feedback)))
+      (is (= [handoff] (:execution/phase-handoffs result-ctx)))
+      (is (= default-review-issue-summary (:finding/summary finding))))))
 
 (deftest rejected-redirects-to-implement-like-changes-requested
   (testing "iter-23 regression: :rejected decision must trigger redirect, not :completed"
@@ -187,6 +222,22 @@
       (is (= [{:severity :blocking :description "Missing require"}]
              (:task/review-feedback task))
           "Task should include review feedback from context"))))
+
+(deftest implement-task-includes-phase-handoff-from-context
+  (testing "build-implement-task passes phase handoff through to task"
+    (let [build-implement-task #'ai.miniforge.phase-software-factory.implement/build-implement-task
+          phase-handoff {:frame/kind :repair-request
+                         :transition/from :review
+                         :transition/to :implement
+                         :frame/body {:repair/findings
+                                      [{:finding/summary "GROUP 3 missing"}]}}
+          ctx {:execution/worktree-path "/tmp/test-worktree"
+               :execution/input {:description "Build widget"}
+               :execution/phase-results {:plan {:result {:output nil}}
+                                         :review {:phase/handoff phase-handoff
+                                                  :result {:output {:review/decision :changes-requested}}}}}
+          {:keys [task]} (build-implement-task ctx)]
+      (is (= phase-handoff (:task/phase-handoff task))))))
 
 (deftest implement-task-omits-review-feedback-when-absent
   (testing "build-implement-task works normally without review feedback"

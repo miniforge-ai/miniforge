@@ -188,6 +188,57 @@
        (messages/t :prompt/review-feedback-intro) "\n\n"
        (if (string? review-feedback) review-feedback (pr-str review-feedback))))
 
+(defn- phase-handoff-findings
+  [phase-handoff]
+  (get-in phase-handoff [:frame/body :repair/findings]))
+
+(defn- format-phase-handoff-detail
+  [label-key value]
+  (when value
+    (let [label (messages/t label-key)]
+      (messages/t :prompt/phase-handoff-detail-line
+                  {:label label
+                   :value value}))))
+
+(defn- finding-location
+  [{:finding/keys [file line]}]
+  (cond
+    (and file line)
+    (messages/t :prompt/phase-handoff-location-value {:file file :line line})
+    file
+    file))
+
+(defn- format-phase-handoff-finding
+  [{:finding/keys [summary group-id severity suggestion] :as finding}]
+  (let [location (finding-location finding)
+        detail-lines (keep identity
+                           [(format-phase-handoff-detail
+                             :prompt/phase-handoff-group-label group-id)
+                            (format-phase-handoff-detail
+                             :prompt/phase-handoff-severity-label severity)
+                            (format-phase-handoff-detail
+                             :prompt/phase-handoff-location-label location)
+                            (format-phase-handoff-detail
+                             :prompt/phase-handoff-suggestion-label suggestion)])
+        summary-line (messages/t :prompt/phase-handoff-finding-line
+                                 {:summary summary})]
+    (str summary-line
+         (when (seq detail-lines)
+           (str "\n" (str/join "\n" detail-lines))))))
+
+(defn- format-phase-handoff-findings
+  [findings]
+  (if (seq findings)
+    (str/join "\n" (map format-phase-handoff-finding findings))
+    (messages/t :prompt/phase-handoff-no-findings)))
+
+(defn- format-phase-handoff-section
+  "Format a structured phase handoff as a prominent repair section."
+  [phase-handoff]
+  (str "\n\n## " (messages/t :prompt/phase-handoff-header) "\n\n"
+       (messages/t :prompt/phase-handoff-intro) "\n\n"
+       (format-phase-handoff-findings (phase-handoff-findings phase-handoff))))
+
 (defn- format-verify-section
   "Format verify failures as a markdown section."
   [verify-failures]
@@ -215,12 +266,15 @@
     (map? task) (let [desc (or (:task/description task) (:description task) (:content task))
                       plan (:task/plan task)
                       intent (:task/intent task)
+                      phase-handoff (:task/phase-handoff task)
                       review-feedback (:task/review-feedback task)
                       verify-failures (:task/verify-failures task)
                       prior-attempts (:task/prior-attempts task)
                       parts (cond-> []
                               prior-attempts
                               (conj (format-prior-attempts-section prior-attempts))
+                              phase-handoff
+                              (conj (format-phase-handoff-section phase-handoff))
                               desc
                               (conj desc)
                               plan

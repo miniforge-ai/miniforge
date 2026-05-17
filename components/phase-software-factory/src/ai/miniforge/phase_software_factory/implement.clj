@@ -22,18 +22,18 @@
    Generates code artifacts from plans.
    Agent: :implementer
    Default gates: [:syntax :lint]"
-  (:require            [ai.miniforge.phase.interface :as phase]
-            [ai.miniforge.phase-software-factory.messages :as messages]
-            
-            [ai.miniforge.phase-software-factory.phase-config :as phase-config]
-            [ai.miniforge.phase-software-factory.knowledge-helpers :as kb-helpers]
-            [ai.miniforge.agent.interface :as agent]
-            [ai.miniforge.context-pack.interface :as context-pack]
-            [ai.miniforge.knowledge.interface :as knowledge]
-            [ai.miniforge.repo-index.interface :as repo-index]
-            [ai.miniforge.logging.interface :as log]
-            [ai.miniforge.response.interface :as response]
-            [clojure.string :as str]))
+  (:require
+   [ai.miniforge.phase.interface :as phase]
+   [ai.miniforge.phase-software-factory.messages :as messages]
+   [ai.miniforge.phase-software-factory.phase-config :as phase-config]
+   [ai.miniforge.phase-software-factory.knowledge-helpers :as kb-helpers]
+   [ai.miniforge.agent.interface :as agent]
+   [ai.miniforge.context-pack.interface :as context-pack]
+   [ai.miniforge.knowledge.interface :as knowledge]
+   [ai.miniforge.repo-index.interface :as repo-index]
+   [ai.miniforge.logging.interface :as log]
+   [ai.miniforge.response.interface :as response]
+   [clojure.string :as str]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Defaults
@@ -179,6 +179,11 @@
   (or (get-in ctx [:execution/phase-results :review :result :output :review/feedback])
       (get-in ctx [:execution/phase-results :review :result :output :review/issues])))
 
+(defn- resolve-phase-handoff
+  "Resolve the current review repair handoff targeting implement."
+  [ctx]
+  (get-in ctx [:execution/phase-results :review :phase/handoff]))
+
 (defn- assoc-optional-task-fields
   "Conditionally assoc repo-map, repo-index, context-pack, and knowledge-context onto a task."
   [task pack-ctx kb-context]
@@ -207,6 +212,7 @@
         behavior-addendum (phase/load-and-filter-behaviors
                             :implement {:task {:task/intent (:intent input)}})
         review-feedback (resolve-review-feedback ctx)
+        phase-handoff (resolve-phase-handoff ctx)
         {:keys [formatted manifest]} (kb-helpers/inject-with-manifest
                                        (:knowledge-store ctx) :implementer (get input :tags []))
         base-task (assoc-optional-task-fields
@@ -227,6 +233,8 @@
                (assoc :task/verify-failures (build-verify-failures verify-failure))
                review-feedback
                (assoc :task/review-feedback review-feedback)
+               phase-handoff
+               (assoc :task/phase-handoff phase-handoff)
                (pos? iteration)
                (assoc :task/prior-attempts
                       {:attempt-number (inc iteration)

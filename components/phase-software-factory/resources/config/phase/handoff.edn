@@ -1,0 +1,9 @@
+{:phase-handoff/group-patterns
+ [{:phase-handoff/pattern "(?i)\\bACCEPTANCE\\s+GROUP\\s+(\\d+)\\b"
+   :phase-handoff/label   "GROUP"}
+  {:phase-handoff/pattern "(?i)\\bGROUP\\s+(\\d+)\\b"
+   :phase-handoff/label   "GROUP"}
+  {:phase-handoff/pattern "(?i)\\bAG[-\\s]*(\\d+)\\b"
+   :phase-handoff/label   "AG"}
+  {:phase-handoff/pattern "(?i)\\bAC[-\\s]*(\\d+)\\b"
+   :phase-handoff/label   "AC"}]}
