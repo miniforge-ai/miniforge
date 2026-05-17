@@ -1,0 +1,79 @@
+;; =============================================================================
+;; Spec: Workflow resume — surface non-terminal status as failure, not success
+;; =============================================================================
+;;
+;; Surfaced by the 2026-05-16 dogfood of event-log-tool-visibility.spec.edn.
+;; Two consecutive `bb miniforge resume <workflow-id>` calls produced:
+;;
+;;   Resuming workflow: 3927baf8-c9db-44d3-b5fb-5a1552dbe554
+;;   Completed phases: explore, plan, verify
+;;   Events found: 4182
+;;   Restored workflow ID: 3927baf8-c9db-44d3-b5fb-5a1552dbe554
+;;   Resuming from phase: explore (8 phases remaining)
+;;   Resumed workflow completed with status: :running
+;;
+;; Process exited 0. Two related defects:
+;;
+;;   (a) Misleading "Resuming from phase: explore" — the print uses the
+;;       FIRST entry of the full pipeline, not the next-uncompleted phase
+;;       from the FSM snapshot. The actual snapshot was past `verify`.
+;;
+;;   (b) Silent fast-fail — `run-pipeline` returned `:execution/status
+;;       :running` and the CLI treats that as terminal. `:running` is not
+;;       a terminal status; the CLI should either keep awaiting the run
+;;       or report the abort path explicitly.
+;;
+;; Today the user discovers the failure only by tailing the events log;
+;; the CLI cheerfully reports "completed" and the dogfood loop loses
+;; the entire prior session's plan/explore/verify token spend.
+
+{:spec/title "Workflow resume — fail loud when the resumed run never enters a terminal status"
+
+ :spec/description
+ "Make resume's exit contract honest: the CLI must distinguish
+  `:completed`, `:completed-with-warnings`, `:failed`, and `:aborted`
+  (all terminal) from `:running` / `:pending` / nil (not terminal).
+  When a resume returns a non-terminal status, treat that as a fault,
+  print a diagnostic with the FSM phase the snapshot left off at,
+  and exit non-zero so dogfood drivers do not silently lose work.
+
+  Then fix the misleading 'Resuming from phase' line in
+  `bases/cli/src/ai/miniforge/cli/main/commands/resume.clj` to render
+  the FSM's current phase from the machine snapshot (when present)
+  rather than `(first remaining-pipeline)`.
+
+  Investigate why `run-pipeline` returns `:running` from a snapshot-
+  restored resume. Hypothesis: the snapshot-driven path skips the
+  pipeline-trim step (`resume-workflow := workflow`) and the FSM
+  evaluator returns the snapshot as-is when it can't determine a next
+  step. Either the FSM should advance from the snapshot, or
+  snapshot-restored resumes should fall back to pipeline-trim semantics
+  when the FSM evaluator stalls."
+
+ :spec/intent
+ {:type :fix
+  :scope ["bases/cli/src/ai/miniforge/cli/main/commands/resume.clj"
+          "components/workflow-resume/src"
+          "components/workflow/src"]}
+
+ :spec/constraints
+ ["CLI must exit non-zero when resume returns a non-terminal status"
+  "'Resuming from phase: X' must reflect the FSM snapshot, not the first pipeline phase"
+  "Backwards-compatible with existing resume callers that pass `:resume-machine-snapshot`"
+  "Add a regression test that drives resume with a snapshot at phase :verify and asserts the next-phase print matches the FSM"]
+
+ :spec/acceptance-criteria
+ ["Resume of a workflow whose `run-pipeline` returns `:execution/status :running` exits non-zero"
+  "Resume print line `Resuming from phase` matches the snapshot's current phase, not the first pipeline phase"
+  "Resume telemetry includes the actual FSM next-phase in the resume event payload"
+  "A snapshot-restored resume that successfully completes still exits 0"]
+
+ :spec/priority
+ {:tier :blocker
+  :axes #{:tokenconservation :dogfoodenabler :observation}
+  :theme :dogfood-resilience
+  :rationale "Today's dogfood lost a full explore+plan+verify session (4182 events) because resume returned without doing anything. Tracks the same pattern as 2026-05-10's planner-convergence dogfood — silent failures cost the most."
+  :blocks []
+  :blocked-by []}
+
+ :spec/workflow-type :canonical-sdlc}

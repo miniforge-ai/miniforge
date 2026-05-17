@@ -29,8 +29,7 @@
             [clojure.edn :as edn]
             [clojure.java.io :as io]
             [clojure.java.shell :as shell]
-            [clojure.string :as str]
-            [clojure.walk :as walk]))
+            [clojure.string :as str]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Pure helpers
@@ -200,42 +199,19 @@
   []
   (:artifact-dir @cache-state))
 
-(defn- string-key->keyword
-  "Convert JSON object keys into EDN keywords, preserving namespaces."
-  [k]
-  (cond
-    (keyword? k) k
-    (and (string? k) (str/includes? k "/"))
-    (let [[ns n] (str/split k #"/" 2)]
-      (keyword ns n))
-
-    (string? k) (keyword k)
-    :else k))
-
-(defn- keywordize-artifact-keys
-  "Keywordize MCP JSON arguments before persisting them as EDN."
-  [artifact]
-  (walk/postwalk
-   (fn [v]
-     (if (map-entry? v)
-       [(string-key->keyword (key v)) (val v)]
-       v))
-   artifact))
-
 (defn handle-submit
   "Persist a structured artifact payload to artifact.edn.
 
-   Agents use this tool as the structured confirmation channel. The runtime
-   may still derive file contents from the working tree; this payload carries
-   metadata such as :code/summary and :code/tests-needed?."
+   Params arrive after the tool registry's `:param-aliases` rewrite
+   in `tools/handle-tool-call`, so callers see EDN-ready keyword keys
+   (e.g. `:code/summary`, `:code/tests-needed?`)."
   [params]
   (let [dir (artifact-dir)]
     (when (str/blank? dir)
       (throw (ex-info "artifact-dir is not configured" {:code -32603})))
-    (let [artifact (keywordize-artifact-keys params)
-          path (str dir "/artifact.edn")]
+    (let [path (str dir "/artifact.edn")]
       (io/make-parents path)
-      (spit path (pr-str artifact))
+      (spit path (pr-str params))
       {:content [{:type "text"
                   :text (str "Artifact submitted to " path)}]})))
 
