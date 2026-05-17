@@ -90,12 +90,12 @@ events through the pure layers.
 Trigger events the correlator watches for, mapped to the Rust contract's
 `RoutingTriggerKind` enum (from `miniforge-control/contracts/.../entities.rs`):
 
-| Trigger event type | Wire form | Rust `RoutingTriggerKind` |
+| Trigger event type (wire form) | Provenance | Rust `RoutingTriggerKind` |
 |---|---|---|
 | `:pr/merged` | existing | `PrMerged` |
-| `:pr-monitor/review-comments-arrived` | new (emitted by pr-monitor when GH webhook delivers review comments) | `ReviewCommentsArrived` |
-| `:pr-monitor/ci-failed` | new (emitted by pr-monitor when CI status transitions to failure) | `CiFailed` |
-| `:standards-review/posted` | new (emitted by standards-reviewer when a review comment lands on a PR) | `StandardsReviewArrived` |
+| `:pr-monitor/review-comments-arrived` | new — emitted by pr-monitor when GH webhook delivers review comments | `ReviewCommentsArrived` |
+| `:pr-monitor/ci-failed` | new — emitted by pr-monitor when CI status transitions to failure | `CiFailed` |
+| `:standards-review/posted` | new — emitted by standards-reviewer when a review comment lands on a PR | `StandardsReviewArrived` |
 | `:workflow/completed` | existing | `WorkflowCompleted` |
 | `:gate/passed`, `:gate/failed` | existing | `GateFired` |
 
@@ -144,9 +144,21 @@ Transitions:
 
 ## Idempotency
 
-`:edge/id` is a deterministic UUIDv5 derived from `(trigger-event-id,
-handler-workflow-id-or-nil)`. Two observations of the same trigger produce
-the same `:edge/id`; replay never duplicates edges.
+`:edge/id` is a deterministic UUIDv5 derived from **`trigger-event-id`
+alone** — not from `(trigger-event-id, handler-workflow-id)`. The reason:
+the edge transitions from `:observed` (no handler yet) through `:handled`
+(handler workflow correlated) over its lifetime, and the entity table must
+update the **same row** on each transition. If the id depended on the
+handler-workflow-id, the row would change keys when the handler was
+discovered (nil → workflow-id), breaking the "each trigger event produces
+exactly one edge over its lifetime" invariant and leaking the initial
+`:observed`-keyed row.
+
+The handler workflow id lives in the dedicated `:handled-by-workflow-run-id`
+field. Status transitions upsert the same `:edge/id`.
+
+Two observations of the same trigger produce the same `:edge/id`; replay
+never duplicates edges.
 
 `:edge/idempotency-key` is the trigger-event-id stringified — exposed for
 downstream consumers (notification arbiter, dashboard) that want to dedup
@@ -287,5 +299,5 @@ Each step is one PR. Total expected merge surface ~6 PRs.
   projection)
 - N13 closed-loop PR pipeline — `components/pr-lifecycle/src/...`
   resume-dispatcher, comment-response-agent, standards-reviewer
-- Operator memory `feedback_no_backwards_compat.md` — this is a new event
-  type emission; no migration of existing events needed
+- Operator-memory `feedback_no_backwards_compat` — this is a new event type
+  emission; no migration of existing events needed.
