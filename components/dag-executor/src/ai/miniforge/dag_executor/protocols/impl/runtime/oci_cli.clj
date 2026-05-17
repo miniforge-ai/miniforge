@@ -50,6 +50,68 @@
 
 (def default-workdir "/workspace")
 
+(def default-acquisition-timeout-ms
+  "Default ceiling on `acquire-environment!` wall-clock duration. Picked
+   so a cold-cache image pull (~60 s on a slow link for the runner
+   images) still fits, while a stuck Docker daemon fails within two
+   minutes instead of blocking the workflow indefinitely. Override per
+   call via `env-config[:acquisition-timeout-ms]`. The 2026-05-16
+   dogfood hung 33+ minutes on stuck Docker acquires before PR #895's
+   test-side mock landed; the production-side guard lives here."
+  120000)
+
+(defn with-acquisition-timeout
+  "Run `body-fn` (zero-arity) with a wall-clock deadline. Returns the
+   body's return value when it completes in time, or a `:timeout`
+   error result (the standard dag-executor code) when the deadline
+   fires.
+
+   `timeout-ms` of `nil` or `<= 0` disables the timeout (tests that
+   pre-mock the executor wholesale rely on this escape hatch).
+
+   Caveats and follow-ups:
+
+   - Exceptions thrown by `body-fn` propagate as the original throwable.
+     `deref` would otherwise wrap them in `ExecutionException`; this fn
+     unwraps via `(.getCause)` so callers that catch `ExceptionInfo` or
+     other specific types still see the original.
+   - `future-cancel` only interrupts the worker thread; it does NOT
+     kill the shell subprocess that `shell/sh` is blocked on. A wedged
+     `docker pull` keeps running until the daemon returns, which can
+     leak threads if acquires pile up. The follow-up — switching
+     `run-runtime-process` to `(.waitFor process ms TimeUnit/MILLISECONDS)`
+     with `.destroyForcibly` on miss — kills the subprocess too. We log
+     a warn on every timeout so the asymmetry is visible in operator
+     logs."
+  [timeout-ms body-fn]
+  (if (or (nil? timeout-ms) (not (pos? timeout-ms)))
+    (body-fn)
+    (let [fut (future
+                (try
+                  {::ok (body-fn)}
+                  (catch Throwable t {::throwable t})))
+          deref-result (deref fut timeout-ms ::timeout)]
+      (cond
+        (= ::timeout deref-result)
+        (do
+          (future-cancel fut)
+          (binding [*out* *err*]
+            (println (str "[oci-cli] acquire-environment! deadline " timeout-ms
+                          "ms exceeded; future cancelled but a stuck `"
+                          "docker`/`podman` subprocess may keep running"
+                          " until the daemon returns.")))
+          (result/err :timeout
+                      (str "OCI runtime acquire-environment! exceeded "
+                           timeout-ms "ms — likely a stuck daemon or image pull")
+                      {:timeout-ms timeout-ms
+                       :surface :acquire-environment!}))
+
+        (contains? deref-result ::throwable)
+        (throw (::throwable deref-result))
+
+        :else
+        (::ok deref-result)))))
+
 (def default-stop-timeout
   "Minimum graceful-stop timeout (seconds). Also the floor for the timeout
    computed from an execution plan's :time-limit-ms — `--stop-timeout`
@@ -600,6 +662,17 @@
 ;; ============================================================================
 
 (defrecord OciCliExecutor [config descriptor image network]
+  ;; Timeout-guard asymmetry: only `acquire-environment!` is wrapped in
+  ;; `with-acquisition-timeout`. The other shell-out paths in this
+  ;; record — `available?`, `execute!`, `release-environment!`,
+  ;; `copy-to!`, `copy-from!` — remain unbounded and can hit the same
+  ;; stuck-daemon failure mode. Acquire is wrapped first because it's
+  ;; the long-running step that surfaced in the 2026-05-16 dogfood
+  ;; (image pull + container create). Symmetric wrapping is a follow-up
+  ;; once `run-runtime-process` learns per-subprocess
+  ;; `(.waitFor ms TimeUnit/MILLISECONDS)` + `.destroyForcibly`, which
+  ;; will let the other surfaces fail fast without leaking the worker
+  ;; thread the way the current `future-cancel`-only path does.
   proto/TaskExecutor
 
   (executor-type [_this]
@@ -614,34 +687,40 @@
         (result/ok {:available? false :reason (.getMessage e)}))))
 
   (acquire-environment! [_this task-id env-config]
-    ;; Lazy image build: ensure the image exists locally before creating the container.
-    ;; Looks up image in task-runner-images by name; builds from bundled Dockerfile if missing.
-    (when-not (image-exists? descriptor image)
-      (when-let [image-key (->> task-runner-images
-                                (some (fn [[k v]] (when (= image (:image v)) k))))]
-        (ensure-image! descriptor image-key)))
-    (let [container-name (str container-name-prefix
-                               (subs (str task-id) 0 container-name-uuid-slice))
-          workdir (get env-config :workdir default-workdir)
-          create-result (create-container descriptor
-                                          container-name
-                                          image
-                                          workdir
-                                          (:env env-config)
-                                          (:resources env-config)
-                                          network)]
-      (if (result/ok? create-result)
-        ;; Bootstrap workspace: clone repo into container if repo-url provided (N11 §4.2)
-        (let [bootstrap-metadata (bootstrap-workspace! descriptor container-name workdir env-config)
-              ;; Capture image SHA256 digest for evidence record (N11 §11 SHOULD)
-              image-digest (container-image-digest descriptor container-name)
-              metadata (cond-> (merge (get create-result :data {})
-                                       bootstrap-metadata)
-                         image-digest (assoc :image-digest image-digest))]
-          (result/ok (proto/create-environment-record
-                      container-name (descriptor/kind descriptor) task-id workdir
-                      (assoc env-config :metadata metadata))))
-        create-result)))
+    ;; Wrap in with-acquisition-timeout so a stuck daemon or hung image
+    ;; pull fails fast (default 120 s) instead of blocking the workflow
+    ;; indefinitely. Per-call override via env-config :acquisition-timeout-ms.
+    (with-acquisition-timeout
+      (get env-config :acquisition-timeout-ms default-acquisition-timeout-ms)
+      (fn []
+        ;; Lazy image build: ensure the image exists locally before creating the container.
+        ;; Looks up image in task-runner-images by name; builds from bundled Dockerfile if missing.
+        (when-not (image-exists? descriptor image)
+          (when-let [image-key (->> task-runner-images
+                                    (some (fn [[k v]] (when (= image (:image v)) k))))]
+            (ensure-image! descriptor image-key)))
+        (let [container-name (str container-name-prefix
+                                   (subs (str task-id) 0 container-name-uuid-slice))
+              workdir (get env-config :workdir default-workdir)
+              create-result (create-container descriptor
+                                              container-name
+                                              image
+                                              workdir
+                                              (:env env-config)
+                                              (:resources env-config)
+                                              network)]
+          (if (result/ok? create-result)
+            ;; Bootstrap workspace: clone repo into container if repo-url provided (N11 §4.2)
+            (let [bootstrap-metadata (bootstrap-workspace! descriptor container-name workdir env-config)
+                  ;; Capture image SHA256 digest for evidence record (N11 §11 SHOULD)
+                  image-digest (container-image-digest descriptor container-name)
+                  metadata (cond-> (merge (get create-result :data {})
+                                           bootstrap-metadata)
+                             image-digest (assoc :image-digest image-digest))]
+              (result/ok (proto/create-environment-record
+                          container-name (descriptor/kind descriptor) task-id workdir
+                          (assoc env-config :metadata metadata))))
+            create-result)))))
 
   (execute! [_this environment-id command opts]
     (try
