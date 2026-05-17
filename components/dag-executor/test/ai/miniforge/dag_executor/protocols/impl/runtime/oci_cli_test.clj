@@ -291,6 +291,59 @@
                     {:runtime-kind kind :image "test:latest"})]
           (is (= kind (proto/executor-type exec))))))))
 
+;; ============================================================================
+;; acquisition timeout — production-side guard against stuck Docker
+;; ============================================================================
+;;
+;; The 2026-05-16 dogfood hung 33+ minutes when the Docker daemon stalled
+;; mid acquire; PR #895 mocked the test side, this guard fails fast in
+;; production. Tests target the with-acquisition-timeout helper directly so
+;; they stay deterministic without a real Docker daemon.
+
+(deftest with-acquisition-timeout-returns-body-result-on-success-test
+  (testing "body that returns in time passes its result through unchanged"
+    (let [ok-result {:ok? true :data {:environment-id "env-1"}}]
+      (is (= ok-result
+             (oci-cli/with-acquisition-timeout 5000 (fn [] ok-result)))))))
+
+(deftest with-acquisition-timeout-fires-on-deadline-test
+  (testing "body that exceeds the deadline returns :acquire-timeout err"
+    (let [result (oci-cli/with-acquisition-timeout
+                   50
+                   (fn [] (Thread/sleep 5000) :should-not-see))]
+      (is (= false (:ok? result)))
+      (is (= :acquire-timeout (:code (:error result))))
+      (is (= 50 (get-in result [:error :data :timeout-ms])))
+      (is (clojure.string/includes? (:message (:error result)) "stuck daemon")))))
+
+(deftest with-acquisition-timeout-nil-or-nonpositive-disables-guard-test
+  (testing "nil / 0 / negative timeout bypasses the deadline check"
+    (doseq [t [nil 0 -1]]
+      (is (= :body-ran
+             (oci-cli/with-acquisition-timeout t (fn [] :body-ran)))
+          (str "timeout " (pr-str t) " must run the body without the guard")))))
+
+(deftest with-acquisition-timeout-cancels-the-future-on-timeout-test
+  (testing "the inner future is cancelled when the deadline fires"
+    (let [cancelled? (atom false)
+          fut-ref (atom nil)
+          result (oci-cli/with-acquisition-timeout
+                   50
+                   (fn []
+                     ;; Run the body in a future that records cancellation
+                     ;; via the InterruptedException raised by future-cancel.
+                     (let [f (future
+                               (try
+                                 (Thread/sleep 5000)
+                                 (catch InterruptedException _
+                                   (reset! cancelled? true))))]
+                       (reset! fut-ref f)
+                       (deref f))))]
+      (is (= :acquire-timeout (:code (:error result))))
+      ;; Allow the cancellation propagation to land before asserting.
+      (Thread/sleep 200)
+      (is (some? @fut-ref)))))
+
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
   (clojure.test/run-tests 'ai.miniforge.dag-executor.protocols.impl.runtime.oci-cli-test)

@@ -50,6 +50,37 @@
 
 (def default-workdir "/workspace")
 
+(def default-acquisition-timeout-ms
+  "Default ceiling on `acquire-environment!` wall-clock duration. Picked
+   so a cold-cache image pull (~60 s on a slow link for the runner
+   images) still fits, while a stuck Docker daemon fails within two
+   minutes instead of blocking the workflow indefinitely. Override per
+   call via `env-config[:acquisition-timeout-ms]`. The 2026-05-16
+   dogfood hung 33+ minutes on stuck Docker acquires before PR #895's
+   test-side mock landed; the production-side guard lives here."
+  120000)
+
+(defn with-acquisition-timeout
+  "Run `body-fn` (zero-arity) with a wall-clock deadline. Returns the
+   body's return value when it completes in time, or a
+   `:acquire-timeout` error result when the deadline fires.
+
+   `timeout-ms` of `nil` or `<= 0` disables the timeout (tests that
+   pre-mock the executor wholesale rely on this escape hatch)."
+  [timeout-ms body-fn]
+  (if (or (nil? timeout-ms) (not (pos? timeout-ms)))
+    (body-fn)
+    (let [fut (future (body-fn))
+          result (deref fut timeout-ms ::timeout)]
+      (if (= ::timeout result)
+        (do
+          (future-cancel fut)
+          (result/err :acquire-timeout
+                      (str "OCI runtime acquire-environment! exceeded "
+                           timeout-ms "ms — likely a stuck daemon or image pull")
+                      {:timeout-ms timeout-ms}))
+        result))))
+
 (def default-stop-timeout
   "Minimum graceful-stop timeout (seconds). Also the floor for the timeout
    computed from an execution plan's :time-limit-ms — `--stop-timeout`
@@ -614,34 +645,40 @@
         (result/ok {:available? false :reason (.getMessage e)}))))
 
   (acquire-environment! [_this task-id env-config]
-    ;; Lazy image build: ensure the image exists locally before creating the container.
-    ;; Looks up image in task-runner-images by name; builds from bundled Dockerfile if missing.
-    (when-not (image-exists? descriptor image)
-      (when-let [image-key (->> task-runner-images
-                                (some (fn [[k v]] (when (= image (:image v)) k))))]
-        (ensure-image! descriptor image-key)))
-    (let [container-name (str container-name-prefix
-                               (subs (str task-id) 0 container-name-uuid-slice))
-          workdir (get env-config :workdir default-workdir)
-          create-result (create-container descriptor
-                                          container-name
-                                          image
-                                          workdir
-                                          (:env env-config)
-                                          (:resources env-config)
-                                          network)]
-      (if (result/ok? create-result)
-        ;; Bootstrap workspace: clone repo into container if repo-url provided (N11 §4.2)
-        (let [bootstrap-metadata (bootstrap-workspace! descriptor container-name workdir env-config)
-              ;; Capture image SHA256 digest for evidence record (N11 §11 SHOULD)
-              image-digest (container-image-digest descriptor container-name)
-              metadata (cond-> (merge (get create-result :data {})
-                                       bootstrap-metadata)
-                         image-digest (assoc :image-digest image-digest))]
-          (result/ok (proto/create-environment-record
-                      container-name (descriptor/kind descriptor) task-id workdir
-                      (assoc env-config :metadata metadata))))
-        create-result)))
+    ;; Wrap in with-acquisition-timeout so a stuck daemon or hung image
+    ;; pull fails fast (default 120 s) instead of blocking the workflow
+    ;; indefinitely. Per-call override via env-config :acquisition-timeout-ms.
+    (with-acquisition-timeout
+      (get env-config :acquisition-timeout-ms default-acquisition-timeout-ms)
+      (fn []
+        ;; Lazy image build: ensure the image exists locally before creating the container.
+        ;; Looks up image in task-runner-images by name; builds from bundled Dockerfile if missing.
+        (when-not (image-exists? descriptor image)
+          (when-let [image-key (->> task-runner-images
+                                    (some (fn [[k v]] (when (= image (:image v)) k))))]
+            (ensure-image! descriptor image-key)))
+        (let [container-name (str container-name-prefix
+                                   (subs (str task-id) 0 container-name-uuid-slice))
+              workdir (get env-config :workdir default-workdir)
+              create-result (create-container descriptor
+                                              container-name
+                                              image
+                                              workdir
+                                              (:env env-config)
+                                              (:resources env-config)
+                                              network)]
+          (if (result/ok? create-result)
+            ;; Bootstrap workspace: clone repo into container if repo-url provided (N11 §4.2)
+            (let [bootstrap-metadata (bootstrap-workspace! descriptor container-name workdir env-config)
+                  ;; Capture image SHA256 digest for evidence record (N11 §11 SHOULD)
+                  image-digest (container-image-digest descriptor container-name)
+                  metadata (cond-> (merge (get create-result :data {})
+                                           bootstrap-metadata)
+                             image-digest (assoc :image-digest image-digest))]
+              (result/ok (proto/create-environment-record
+                          container-name (descriptor/kind descriptor) task-id workdir
+                          (assoc env-config :metadata metadata))))
+            create-result)))))
 
   (execute! [_this environment-id command opts]
     (try
