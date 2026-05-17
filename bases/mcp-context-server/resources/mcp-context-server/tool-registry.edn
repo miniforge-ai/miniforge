@@ -63,11 +63,17 @@
    :inputSchema
    {:type "object"
     :properties
-    {"code/summary" {:type "string" :description "Brief summary of changes made"}
-     "code/tests-needed?" {:type "boolean" :description "Whether tests should be run for the changes"}
-     "code/dependencies-added" {:type "array"
+    {"code_summary" {:type "string" :description "Brief summary of changes made"}
+     "code_tests_needed" {:type "boolean" :description "Whether tests should be run for the changes"}
+     "code_dependencies_added" {:type "array"
                                 :items {:type "string"}
                                 :description "Dependency coordinates added by the change"}
      "status" {:type "string" :description "Status for non-code submissions, for example already-implemented"}
      "summary" {:type "string" :description "Summary for non-code submissions"}}}}
+  :param-aliases
+  {"code_summary"            :code/summary
+   "code_tests_needed"       :code/tests-needed?
+   "code_dependencies_added" :code/dependencies-added
+   "status"                  :status
+   "summary"                 :summary}
   :required-params {}}}

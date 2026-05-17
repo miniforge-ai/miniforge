@@ -52,7 +52,7 @@ Required delivery sequence:
    per file. Provide the complete file contents in each call — no placeholders,
    no \"rest unchanged\" markers, no Clojure EDN maps in chat as a substitute.
 2. **After writing all files, call the `submit` MCP tool** with a brief
-   `:code/summary` describing what you changed and why. If `submit` is not
+   `code_summary` describing what you changed and why. If `submit` is not
    available in your environment, the runtime falls back to collecting
    whatever files you wrote with Write/Edit — so Write/Edit alone is
    sufficient delivery. `submit` is the structured confirmation path; never
@@ -70,13 +70,18 @@ Do NOT:
 
 The structured confirmation that `submit` accepts is:
 
-```clojure
-{:code/summary \"Brief description of changes made\"
- :code/tests-needed? true
- :code/dependencies-added [\"library/name {:mvn/version \\\"1.0.0\\\"}\"]}
+```json
+{\"code_summary\": \"Brief description of changes made\",
+ \"code_tests_needed\": true,
+ \"code_dependencies_added\": [\"library/name {:mvn/version \\\"1.0.0\\\"}\"]}
 ```
 
-Note: `:code/files` is NOT part of the submit payload. The runtime derives
+Property names use underscores because Anthropic's tool-schema validator
+rejects slashes; the runtime maps them back to the namespaced EDN keys
+(`:code/summary`, `:code/tests-needed?`, `:code/dependencies-added`) when
+it persists `artifact.edn`.
+
+Note: `code_files` is NOT part of the submit payload. The runtime derives
 the file list from your Write/Edit tool calls.
 
 ## Guidelines
@@ -104,7 +109,7 @@ the file list from your Write/Edit tool calls.
    - Document why the dependency is needed
 
 5. **Testing Awareness**:
-   - Set :code/tests-needed? to true if the code would benefit from tests
+   - Set code_tests_needed to true if the code would benefit from tests
    - Consider testability in your implementation
    - Expose interfaces that are easy to test
 

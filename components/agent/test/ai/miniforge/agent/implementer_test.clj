@@ -142,7 +142,9 @@
                                llm/get-content
                                :content
                                file-artifacts/collect-written-files
-                               (fn [_ _] fallback-artifact)]
+                               (fn [_ _] fallback-artifact)
+                               file-artifacts/collect-worktree-files
+                               (fn [_ _] nil)]
                    (@#'implementer/invoke-with-llm
                     nil "prompt" "system" {} {} nil logger [] {}))
           fallback-log (find-log-entry entries :implementer/file-artifact-fallback)]
@@ -187,7 +189,9 @@
                                llm/chat
                                (fn [& _] error-response)
                                file-artifacts/collect-written-files
-                               (fn [_ _] fallback-artifact)]
+                               (fn [_ _] fallback-artifact)
+                               file-artifacts/collect-worktree-files
+                               (fn [_ _] nil)]
                    (@#'implementer/invoke-with-llm
                     nil "prompt" "system" {} {} nil logger [] {}))]
       (is (response/success? result)
@@ -224,6 +228,8 @@
                                llm/chat
                                (fn [& _] error-response)
                                file-artifacts/collect-written-files
+                               (fn [_ _] nil)
+                               file-artifacts/collect-worktree-files
                                (fn [_ _] nil)]
                    (@#'implementer/invoke-with-llm
                     nil "prompt" "system" {} {} nil logger [] {}))]
@@ -264,7 +270,9 @@
                                llm/get-content
                                :content
                                file-artifacts/collect-written-files
-                               (fn [_ _] fallback-artifact)]
+                               (fn [_ _] fallback-artifact)
+                               file-artifacts/collect-worktree-files
+                               (fn [_ _] nil)]
                    (@#'implementer/invoke-with-llm
                     nil "prompt" "system" {} {} nil logger [] {}))]
       (is (response/success? result))
@@ -297,6 +305,8 @@
                                llm/get-content
                                :content
                                file-artifacts/collect-written-files
+                               (fn [_ _] nil)
+                               file-artifacts/collect-worktree-files
                                (fn [_ _] nil)]
                    (@#'implementer/invoke-with-llm
                     nil "prompt" "system" {} {} nil logger []
@@ -339,6 +349,8 @@
                                llm/chat
                                (fn [& _] response)
                                file-artifacts/collect-written-files
+                               (fn [_ _] nil)
+                               file-artifacts/collect-worktree-files
                                (fn [_ _] nil)]
                    (@#'implementer/invoke-with-llm
                    nil "prompt" "system" {} {} nil logger [] {}))]
@@ -371,6 +383,8 @@
                                llm/chat
                                (fn [& _] response)
                                file-artifacts/collect-written-files
+                               (fn [_ _] nil)
+                               file-artifacts/collect-worktree-files
                                (fn [_ _] nil)]
                    (@#'implementer/invoke-with-llm
                     nil "prompt" "system" {} {} nil logger [] {}))]

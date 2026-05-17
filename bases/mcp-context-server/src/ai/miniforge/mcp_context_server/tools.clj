@@ -66,6 +66,29 @@
   [s]
   (when-not (str/blank? s) s))
 
+;; -------------------------------------------------------------------------- Param aliases
+;; Anthropic's tool-schema validator rejects property keys outside
+;; `^[a-zA-Z0-9_.-]{1,64}$`, so namespaced keys like "code/summary"
+;; cannot appear in :inputSchema. Tools that want to expose
+;; namespaced-keyword artifacts declare `:param-aliases` in the
+;; registry, mapping the wire-safe property name to the EDN keyword
+;; the handler ultimately wants to receive.
+
+(defn apply-param-aliases
+  "Rename keys in `arguments` per the `aliases` map. Keys not present
+   in `aliases` pass through unchanged. Returns a map whose keys are
+   the aliased values (typically keywords)."
+  [arguments aliases]
+  (if (empty? aliases)
+    arguments
+    (reduce-kv
+      (fn [acc k v]
+        (if-let [aliased (get aliases k)]
+          (assoc acc aliased v)
+          (assoc acc k v)))
+      {}
+      arguments)))
+
 ;------------------------------------------------------------------------------ Layer 1
 ;; Extensible handler registry
 
@@ -143,8 +166,8 @@
    Throws on unknown tool or validation failure."
   [tool-name arguments]
   (let [registry (tool-registry)
-        {:keys [required-params handler]} (get registry tool-name)]
+        {:keys [required-params handler param-aliases]} (get registry tool-name)]
     (when-not handler
       (throw (ex-info (msg/t :tool/unknown {:tool-name tool-name}) {:code -32601})))
     (validate-required-params required-params arguments)
-    ((-> handler resolve-handler) arguments)))
+    ((-> handler resolve-handler) (apply-param-aliases arguments param-aliases))))

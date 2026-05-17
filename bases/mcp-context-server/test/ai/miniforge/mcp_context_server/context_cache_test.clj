@@ -212,13 +212,14 @@
         (is (= "/tmp/repo-root" (:source-root @cache/cache-state)))))))
 
 (deftest handle-submit-writes-artifact-test
-  (testing "submit persists keywordized artifact metadata"
+  (testing "submit persists the aliased keyword-keyed payload"
     (with-temp-dir
       (fn [dir]
         (cache/load-cache! dir "/tmp/repo-root")
-        (let [result (cache/handle-submit {"code/summary" "Added event tools"
-                                           "code/tests-needed?" true
-                                           "code/dependencies-added" ["org/example"]})
+        (let [result (cache/handle-submit
+                       {:code/summary "Added event tools"
+                        :code/tests-needed? true
+                        :code/dependencies-added ["org/example"]})
               artifact-file (io/file dir "artifact.edn")
               artifact (edn/read-string (slurp artifact-file))]
           (is (re-find #"Artifact submitted" (get-in result [:content 0 :text])))
@@ -226,6 +227,30 @@
                   :code/tests-needed? true
                   :code/dependencies-added ["org/example"]}
                  artifact)))))))
+
+(deftest handle-tool-call-submit-end-to-end-aliases-wire-keys-test
+  (testing "an MCP submit call with wire-safe string keys round-trips to namespaced EDN"
+    ;; The MCP server registers handlers lazily; mimic that wiring here so
+    ;; the test can drive `tools/handle-tool-call` like an external caller.
+    (require 'ai.miniforge.mcp-context-server.tools)
+    (let [tools (requiring-resolve 'ai.miniforge.mcp-context-server.tools/handle-tool-call)
+          register (requiring-resolve 'ai.miniforge.mcp-context-server.tools/register-handler!)]
+      (register :submit cache/handle-submit)
+      (with-temp-dir
+        (fn [dir]
+          (cache/load-cache! dir "/tmp/repo-root")
+          (let [result (tools "submit"
+                              {"code_summary" "Wire-safe submit"
+                               "code_tests_needed" false
+                               "code_dependencies_added" []
+                               "summary" "non-code"})
+                artifact (edn/read-string (slurp (io/file dir "artifact.edn")))]
+            (is (re-find #"Artifact submitted" (get-in result [:content 0 :text])))
+            (is (= {:code/summary "Wire-safe submit"
+                    :code/tests-needed? false
+                    :code/dependencies-added []
+                    :summary "non-code"}
+                   artifact))))))))
 
 (deftest handle-context-read-source-root-fallback-test
   (testing "relative file reads resolve from source-root when cache is empty"
