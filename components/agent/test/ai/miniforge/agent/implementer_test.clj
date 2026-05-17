@@ -579,14 +579,22 @@
   (testing "includes phase handoff before review feedback"
     (let [phase-handoff-header (str "## " (messages/t :prompt/phase-handoff-header))
           review-feedback-header (str "## " (messages/t :prompt/review-feedback-header))
+          missing-group-summary "GROUP 3 missing"
+          missing-group-id "GROUP 3"
+          fallback-feedback "Fallback feedback"
+          task-description "Fix it"
           handoff {:frame/kind :repair-request
                    :frame/body {:repair/findings
-                                [{:finding/summary "GROUP 3 missing"}]}}
-          text (implementer/task->text {:task/description "Fix it"
+                                [{:finding/summary missing-group-summary
+                                  :finding/group-id missing-group-id
+                                  :finding/severity :blocking}]}}
+          text (implementer/task->text {:task/description task-description
                                         :task/phase-handoff handoff
-                                        :task/review-feedback "Fallback feedback"})]
+                                        :task/review-feedback fallback-feedback})]
       (is (str/includes? text phase-handoff-header))
-      (is (str/includes? text "GROUP 3 missing"))
+      (is (str/includes? text missing-group-summary))
+      (is (str/includes? text (messages/t :prompt/phase-handoff-group-label)))
+      (is (not (str/includes? text ":frame/kind")))
       (is (< (str/index-of text phase-handoff-header)
              (str/index-of text review-feedback-header))))))
 

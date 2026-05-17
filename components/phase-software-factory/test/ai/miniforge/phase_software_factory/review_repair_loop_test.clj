@@ -48,6 +48,18 @@
   [{:severity :blocking
     :description "Missing require"}])
 
+(def ^:private first-review-iteration
+  1)
+
+(def ^:private next-repair-attempt
+  2)
+
+(def ^:private review-repair-budget
+  4)
+
+(def ^:private default-review-issue-summary
+  (:description (first default-review-issues)))
+
 (defn simulate-leave-review-context
   "Simulate the leave-review logic and return the full context."
   ([decision iterations max-iterations]
@@ -117,16 +129,18 @@
 
 (deftest changes-requested-stores-repair-handoff
   (testing "changes-requested stores a typed repair handoff"
-    (let [result-ctx (simulate-leave-review-context :changes-requested 1 4)
+    (let [result-ctx (simulate-leave-review-context
+                      :changes-requested first-review-iteration review-repair-budget)
           handoff (get-in result-ctx [:phase :phase/handoff])
           finding (first (get-in handoff [:frame/body :repair/findings]))]
       (is (= :repair-request (:frame/kind handoff)))
       (is (= :review (:transition/from handoff)))
       (is (= :implement (:transition/to handoff)))
-      (is (= default-review-issues
-             (get-in handoff [:frame/body :repair/raw-feedback])))
+      (is (= next-repair-attempt (:phase/attempt handoff)))
+      (is (= next-repair-attempt (get-in handoff [:frame/body :repair/attempt])))
+      (is (not (contains? (:frame/body handoff) :repair/raw-feedback)))
       (is (= [handoff] (:execution/phase-handoffs result-ctx)))
-      (is (= "Missing require" (:finding/summary finding))))))
+      (is (= default-review-issue-summary (:finding/summary finding))))))
 
 (deftest rejected-redirects-to-implement-like-changes-requested
   (testing "iter-23 regression: :rejected decision must trigger redirect, not :completed"

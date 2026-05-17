@@ -26,7 +26,6 @@
    [ai.miniforge.phase.interface :as phase]
    [ai.miniforge.phase-software-factory.messages :as messages]
    [ai.miniforge.phase-software-factory.phase-config :as phase-config]
-   [ai.miniforge.phase-software-factory.phase-handoff :as phase-handoff]
    [ai.miniforge.phase-software-factory.knowledge-helpers :as kb-helpers]
    [ai.miniforge.agent.interface :as agent]
    [ai.miniforge.context-pack.interface :as context-pack]
@@ -181,10 +180,9 @@
       (get-in ctx [:execution/phase-results :review :result :output :review/issues])))
 
 (defn- resolve-phase-handoff
-  "Resolve the latest repair handoff targeting implement."
+  "Resolve the current review repair handoff targeting implement."
   [ctx]
-  (or (get-in ctx [:execution/phase-results :review :phase/handoff])
-      (phase-handoff/latest-repair-request ctx :implement)))
+  (get-in ctx [:execution/phase-results :review :phase/handoff]))
 
 (defn- assoc-optional-task-fields
   "Conditionally assoc repo-map, repo-index, context-pack, and knowledge-context onto a task."

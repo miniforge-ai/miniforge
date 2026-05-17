@@ -17,7 +17,10 @@ durable structured input.
 - Add an informative spec for typed phase handoff envelopes.
 - Introduce a narrow repair-request envelope for phase redirects.
 - Preserve missing acceptance-group feedback across repair redirects.
-- Render the structured repair request into the next implement prompt.
+- Render a concise localized repair request into the next implement prompt.
+- Keep group detection patterns in EDN config.
+- Keep durable handoff envelopes compact by storing normalized findings instead
+  of duplicating full reviewer feedback.
 - Add regression coverage for repair handoff preservation.
 
 ## Testing Plan

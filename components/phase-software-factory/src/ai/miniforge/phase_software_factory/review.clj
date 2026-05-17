@@ -210,14 +210,15 @@
   "Update phase to redirect back to :implement with review feedback for
    repair. Caller is responsible for the iteration-budget guard."
   [updated-ctx feedback]
-  (let [handoff (phase-handoff/repair-request
+  (let [repair-attempt (inc (get-in updated-ctx [:phase :iterations] 0))
+        handoff (phase-handoff/repair-request
                  {:workflow-id (:execution/id updated-ctx)
                   :source-phase :review
                   :target-phase :implement
-                  :phase-attempt (get-in updated-ctx [:phase :iterations])
+                  :phase-attempt repair-attempt
                   :feedback feedback})
         phase-result (-> (:phase updated-ctx)
-                         (update :iterations (fnil inc 1))
+                         (assoc :iterations repair-attempt)
                          (assoc :review-feedback feedback)
                          (assoc :phase/handoff handoff)
                          (phase/request-redirect :implement))]

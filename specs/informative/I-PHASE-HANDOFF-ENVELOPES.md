@@ -76,8 +76,8 @@ represented as:
 - Large payloads stay outside the frame and travel by reference.
 - Feedback that drives a redirect is represented as typed findings, not only
   prose.
-- The old payload can be preserved during migration so existing prompt paths and
-  clients continue to work.
+- Compact findings carry the actionable repair contract; full reviewer output
+  remains outside the durable envelope unless represented by a reference.
 - Phase checkpoints and event replay can reconstruct the handoff without
   scraping stdout.
 
@@ -89,10 +89,10 @@ The initial implementation focuses only on review repair redirects:
 2. The handoff preserves reviewer findings and missing acceptance-group labels.
 3. Workflow checkpoints retain the handoff through phase results and execution
    snapshot state.
-4. Implement receives both the old `:task/review-feedback` and a new
-   `:task/phase-handoff`.
-5. The implementer prompt renders the handoff prominently before ordinary task
-   details.
+4. Implement receives both compatibility `:task/review-feedback` and the new
+   `:task/phase-handoff` repair contract.
+5. The implementer prompt renders a concise localized view of the handoff before
+   ordinary task details.
 
 ## Expansion Path
 
