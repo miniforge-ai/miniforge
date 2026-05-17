@@ -21,13 +21,20 @@ A label on a merged PR triggers a configured action on every
 in-flight workflow. Concretely, for `dogfood-fix`:
 
 1. PR labeled `dogfood-fix` merges to main.
-2. The meta-coordinator (one of the existing meta-agents, not the
-   workflow runner) observes the merge event.
-3. For every active workflow whose base SHA is older than the merge
-   SHA, the meta-coordinator queues a `:rebase-and-resume` injection.
-4. At the next safe seam (phase boundary), the workflow runner
-   pauses, fetches origin/main, rebases its task worktree, and
-   resumes — picking up the fix for the remainder of the run.
+2. The **pr-label-watcher** (pure-Clojure, zero-token) observes
+   the merge event, matches the label against the registry, joins
+   with supervisory-state to find active workflows whose base SHA
+   is NOT an ancestor of the merge SHA (`git merge-base
+   --is-ancestor base-sha merge-sha` returns non-zero), and emits a
+   match payload.
+3. On match, the **meta-agent** is invoked (LLM, judgement only)
+   with `{:pr/number :pr/labels :pr/merge-sha :action
+   :matched-workflows [...]}`. It decides whether to inject (default
+   yes), staggers across the fleet to avoid thundering herd, and
+   emits `:workflow/inject {:workflow-id :action ...}` per approval.
+4. At the next safe seam (phase boundary), the **workflow runner**
+   pauses, runs `rebase-onto! origin/main` against the task worktree,
+   and resumes — picking up the fix for the remainder of the run.
 5. If rebase conflicts, the workflow is parked in
    `:attention-required` instead of silently losing work.
 
@@ -39,31 +46,26 @@ in-flight workflow. Concretely, for `dogfood-fix`:
   boundary; previously-completed phases keep their checkpoint
   outputs.
 - A general "workflow restart on any push." This is label-gated
-  and meta-coordinator-driven, not push-driven.
+  and only the named watcher → meta-agent → runner path acts on it.
 
 ## Architecture
 
-### Components touched
+### Components touched (single owner per responsibility)
 
-- **`components/pr-lifecycle`** — already watches PR state changes.
-  Emit a new event when a PR with a labeled set merges. New event
-  shape: `:pr/labeled-pr-merged {:pr/number :pr/labels :pr/merge-sha}`.
-- **`components/supervisory-state`** — owns the active-workflow
-  registry. Add `:workflow/base-sha` to the snapshot keys so the
-  coordinator can compare against the merge SHA.
-- **`components/observer`** (or a sibling under `components/meta-*`)
-  — new responsibility: subscribe to `:pr/labeled-pr-merged`, match
-  label against the action registry, fan out injection requests to
-  the matching workflows. This is the **meta-coordinator** layer.
-- **`components/workflow`** — expose a `pause-rebase-resume!`
-  control-plane hook that the meta-coordinator can invoke. The
-  hook is honored at the next phase boundary (same seam as
-  `await-resume!` / `check-stopped!` in `runner/execute-single-iteration`).
-- **`components/dag-executor`** — `restore-workspace!` already
-  exists; the new rebase action calls it after the fetch.
-- **Config** — new resource `resources/config/pr-label-actions.edn`
-  shipping with one entry (`dogfood-fix`) plus the action registry
-  shape.
+| Responsibility | Owner |
+|---|---|
+| PR merge-event emission | `components/pr-lifecycle` (`:pr/labeled-pr-merged` event) |
+| Mechanical label → action match | new brick `components/pr-label-watcher` (no LLM, no tokens) |
+| Workflow base-SHA registry | `components/supervisory-state` (new sub-key under `[:execution/environment-metadata :base-sha]`) |
+| Judgement / fleet staggering | meta-agent under `components/agent/src/.../specialized/` (invoked only on watcher hit) |
+| Pause-rebase-resume actuator | `components/workflow` (new hook honored at the existing `await-resume!` seam in `runner/execute-single-iteration`) |
+| Rebase mechanics | `components/dag-executor` — NEW `rebase-onto!` sibling of `workspace/git-restore!` (NOT `restore-workspace!`, which is the workspace-bundle-restore protocol method, not a rebase) |
+| Config | new resource `resources/config/pr-label-actions.edn` |
+
+Earlier drafts of this plan used overlapping names ("meta-coordinator",
+"observer-tier coordinator") for the watcher and the meta-agent. The
+table above is the canonical assignment — each responsibility has
+exactly one owner.
 
 ### Data flow (one round trip)
 
@@ -71,14 +73,16 @@ in-flight workflow. Concretely, for `dogfood-fix`:
 PR #N (label: dogfood-fix) merges to main
        │
        ▼
-pr-lifecycle emits :pr/labeled-pr-merged {pr-number labels merge-sha}
+pr-lifecycle emits :pr/labeled-pr-merged {:pr/number :pr/labels :pr/merge-sha}
        │
        ▼
 pr-label-watcher (PURE Clojure, no LLM)
-   - look up label → action in pr-label-actions.edn
-   - dogfood-fix → :rebase-and-resume
+   - look up label (string) → action in pr-label-actions.edn
+   - "dogfood-fix" → :rebase-and-resume
    - join with supervisory-state to find matching workflows
-     (filter where workflow.base-sha < merge-sha)
+     (filter where workflow.base-sha is NOT an ancestor of merge-sha
+      — checked via `git merge-base --is-ancestor base merge`; git
+      SHAs are not orderable so ancestry is the only correct test)
    - emit a single match payload OR nothing
        │            ↓ (nothing → silent, zero tokens)
        │
@@ -93,25 +97,57 @@ workflow runner — at next phase boundary (await-resume! seam):
    - poll inject queue
    - if :rebase-and-resume:
        a. pause the FSM (existing :pause transition)
-       b. dag-exec/restore-workspace! with branch=main
-          (rebase semantics — fast-forward where possible,
-           merge-conflict-aware where not)
+       b. dag-exec/rebase-onto! origin/main into the task worktree
+          (NEW fn sibling of workspace/git-restore!; runs
+           git fetch origin && git rebase origin/main, NOT a
+           workspace-bundle restore)
        c. if conflict → transition to :attention-required;
           emit :workflow/rebase-conflict event with diff hints
        d. else → :resume transition; continue pipeline
 ```
 
-### Configuration shape (proposed)
+### Event and config shapes
+
+`:pr/labeled-pr-merged` event (canonical, all namespaced):
+
+```clojure
+{:pr/number    integer
+ :pr/labels    #{"dogfood-fix" "..."}   ; string labels — GitHub-native
+ :pr/merge-sha "abc123..."}
+```
+
+Watcher match payload (passed to meta-agent on hit):
+
+```clojure
+{:pr/number          integer
+ :pr/labels          #{...}
+ :pr/merge-sha       "abc123..."
+ :action             :rebase-and-resume
+ :matched-workflows  [{:workflow/id ... :base-sha ...} ...]}
+```
+
+`resources/config/pr-label-actions.edn`:
 
 ```clojure
 {:pr-label-actions/registry
- {:dogfood-fix {:action :rebase-and-resume
-                :description "Pause, rebase onto post-merge main, resume"
-                :on-conflict :attention-required
-                :applies-when {:workflow/base-sha :older-than-merge}}
-  ;; Future: room for other label-action pairs without code edits.
-  ;; e.g. :hot-config-reload → reload runtime config from disk
-  ;;      :budget-pause → pause workflows until human reviews quota
+ ;; Registry keys are STRINGS to match GitHub's native label shape
+ ;; (case-sensitive, no whitespace normalization — labels in GitHub
+ ;; are normalized at creation time by the project; this lookup is
+ ;; a literal compare).
+ {"dogfood-fix"
+  {:action      :rebase-and-resume
+   :description "Pause, rebase onto post-merge main, resume"
+   :on-conflict :attention-required
+   ;; Match predicate: workflow's base SHA must NOT be an ancestor
+   ;; of the merge SHA — i.e. the workflow predates the fix and
+   ;; needs to pick it up. Git SHAs are not orderable; ancestry is
+   ;; resolved via `git merge-base --is-ancestor base merge`
+   ;; (exit 0 → ancestor → skip; exit 1 → not ancestor → match).
+   :applies-when {:workflow.base-sha/not-ancestor-of-merge true}}
+
+  ;; Future entries — no code edits required, only registry data.
+  ;; e.g. "hot-config-reload" → reload runtime config from disk
+  ;;      "budget-pause" → pause workflows until human reviews quota
   }}
 ```
 
@@ -155,15 +191,20 @@ when/why lives upstream.
 - Verifies the technical premise: an in-flight worktree CAN be
   patched and verify rolls into the new chain.
 
-### M1 — Label config + merge event
+### M1 — Label config + merge event + base-sha
 
 - New resource `resources/config/pr-label-actions.edn` with the
-  `dogfood-fix → :rebase-and-resume` entry.
+  `"dogfood-fix" → :rebase-and-resume` entry (string-keyed registry).
 - `components/pr-lifecycle` emits `:pr/labeled-pr-merged` on every
   merge whose label set intersects the configured registry.
-- Add `:workflow/base-sha` to `persisted-execution-keys` so the
-  coordinator can compare. Backfill via a one-time scan that reads
-  HEAD from each active checkpoint at startup.
+- Record the workflow's base SHA at `acquire-environment!` time
+  under `[:execution/environment-metadata :base-sha]`. That parent
+  key is already in `persisted-execution-keys`, so adding the
+  sub-key needs no schema-key addition — just populate it.
+- Backfill: for active workflows whose checkpoint predates this
+  change, the watcher's match payload omits them (no base-sha →
+  unknown ancestry → skip); the operator can manually trigger
+  rebase via the existing pause/resume controls.
 
 ### M2 — Mechanical watcher → match payload
 
@@ -190,14 +231,21 @@ when/why lives upstream.
 
 ### M3 — Rebase + resume actuator
 
-- `components/dag-executor/workspace/restore-workspace!` already
-  handles the bundle-restore path. Add a `rebase-onto!` sibling
-  that runs `git fetch origin main && git rebase origin/main`
-  inside the task worktree.
+- Add `rebase-onto!` to `components/dag-executor/src/.../workspace.clj`
+  as a sibling of the existing `git-restore!`. NEW operation —
+  distinct from the `restore-workspace!` protocol method (which
+  bundle-restores or fetch+checkouts a workspace, not a rebase).
+- `rebase-onto!` runs:
+  1. `git -C <worktree> fetch origin main`
+  2. `git -C <worktree> rebase origin/main`
 - On clean rebase: emit `:workflow/rebased` event, resume FSM.
-- On conflict: emit `:workflow/rebase-conflict` event with
-  conflict-file list, transition workflow to `:attention-required`,
-  notify via existing intervention dashboard.
+- On conflict: capture the conflict-file list, emit
+  `:workflow/rebase-conflict`, transition workflow to
+  `:attention-required`, notify via existing intervention dashboard.
+  No silent loss (per `feedback_runtime_state_never_git_tracked`).
+- Expose via `components/dag-executor/interface.clj` so the
+  workflow runner's actuator can call it through the same surface
+  it uses for `restore-workspace!`.
 
 ### M4 — Fleet test
 
@@ -209,11 +257,11 @@ when/why lives upstream.
 
 ## Open questions
 
-1. **Placement of the meta-coordinator brick** — does this live
-   under `components/observer`, `components/orchestrator`, or a
-   new `components/fleet-coordinator`? The existing observer brick
-   already subscribes to event-stream, but its current scope is
-   per-workflow not cross-workflow.
+1. **Placement of the new `pr-label-watcher` brick** — sit next to
+   `components/pr-lifecycle` (where the merge events come from) or
+   under `components/orchestrator` (where cross-workflow concerns
+   live today)? Leaning toward a sibling of `pr-lifecycle` so the
+   event-source and the matcher stay close, but defer until M2.
 
 2. ~~**GitHub event delivery**~~ — **resolved.** Two transports
    behind a single `:pr-events/source` protocol:
@@ -252,12 +300,14 @@ when/why lives upstream.
    a specific pre-fix state)? Probably yes via a workflow-spec
    `:rebase-eligible? false` flag. Default true.
 
-5. **What's the source of truth for `:workflow/base-sha`** — the
-   workflow's first `acquire-environment!` records the branch HEAD
-   but the snapshot today doesn't store the SHA. Add to
-   `persisted-execution-keys` in M1; backfill question is whether
-   any active workflows need their SHA reconstructed from git
-   history vs lost-and-reset.
+5. ~~**What's the source of truth for base SHA**~~ — **resolved.**
+   Record it at `acquire-environment!` time under
+   `[:execution/environment-metadata :base-sha]`. That parent key
+   is already persisted, so no new top-level schema key. Active
+   pre-change workflows have no base-sha → the watcher omits them
+   from the match payload (silent skip, no error). Operator can
+   trigger rebase manually via the existing pause/resume controls
+   if they need to catch a pre-change workflow up.
 
 ## Risks
 
