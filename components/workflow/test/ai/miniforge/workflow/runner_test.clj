@@ -27,6 +27,7 @@
    [ai.miniforge.phase.interface]
    [ai.miniforge.supervisory-state.interface :as supervisory]
    [ai.miniforge.workflow.checkpoint-store :as checkpoint-store]
+   [ai.miniforge.workflow.fsm :as workflow-fsm]
    [ai.miniforge.workflow.phase-test-support :as phase-test-support]
    [ai.miniforge.workflow.runner :as runner]
    [ai.miniforge.workflow.context :as ctx]))
@@ -311,37 +312,59 @@
 
 (deftest run-pipeline-resume-from-mid-workflow-snapshot-advances-test
   ;; Regression for the dogfood-2026-05-16 silent fast-fail: resume from a
-  ;; snapshot taken after phase 1 completed must advance through phases 2..N
-  ;; and reach a terminal status. The bug fix lives in PR #896 (loud-fail);
-  ;; this test pins the underlying "must actually advance" contract so a
-  ;; regression in the FSM/snapshot path doesn't silently re-introduce
+  ;; snapshot whose FSM is actually parked at an intermediate phase must
+  ;; advance through the remaining phases and reach `:completed` (not just
+  ;; any terminal state). The bug fix lives in PR #896 (loud-fail); this
+  ;; test pins the underlying "must actually advance" contract so a
+  ;; regression in the FSM/snapshot path can't silently re-introduce
   ;; `:running` returns from completed runs.
-  (testing "snapshot captured after phase-1 completes resumes through remaining phases to :completed"
+  ;;
+  ;; The snapshot is constructed by driving the execution machine
+  ;; manually from :pending → plan-active → (succeed) → implement-active,
+  ;; so the resumed runner has real remaining work to do.
+  (testing "snapshot parked at implement-active resumes through implement→verify→done to :completed"
     (let [workflow {:workflow/id :test-multi-phase
                     :workflow/version "1.0.0"
                     :workflow/pipeline [{:phase test-plan-phase}
                                         {:phase test-implement-phase}
                                         {:phase test-verify-phase}
                                         {:phase test-done-phase}]}
-          full-result (runner/run-pipeline workflow {:task "Test"} {})
-          _ (is (= :completed (:execution/status full-result))
-                "baseline: full run must reach :completed")
-          mid-snapshot (-> (checkpoint-store/build-machine-snapshot full-result)
-                           (assoc :execution/status :running
-                                  :execution/phase-index 1
-                                  :execution/current-phase test-implement-phase))
-          phase-results {test-plan-phase
-                         (get-in full-result [:execution/phase-results test-plan-phase])}
+          machine (workflow-fsm/compile-execution-machine workflow)
+          ;; Drive the machine from :pending → plan-active → implement-active
+          ;; so the snapshot has real remaining work.
+          initial-state (workflow-fsm/initialize-execution machine)
+          plan-state (workflow-fsm/start-execution machine initial-state)
+          fsm-at-implement (workflow-fsm/transition-execution machine plan-state :phase/succeed)
+          response-chain (requiring-resolve 'ai.miniforge.response.interface/create)
+          mid-snapshot {:execution/id (random-uuid)
+                        :execution/workflow-id (:workflow/id workflow)
+                        :execution/workflow-version (:workflow/version workflow)
+                        :execution/input {:task "Original"}
+                        :execution/status :running
+                        :execution/fsm-state fsm-at-implement
+                        :execution/response-chain (response-chain (:workflow/id workflow))
+                        :execution/phase-results {}
+                        :execution/artifacts []
+                        :execution/errors []
+                        :execution/metrics {:tokens 0 :cost-usd 0.0 :duration-ms 0}
+                        :execution/started-at (System/currentTimeMillis)}
+          seeded-plan-result {:status :success :outcome :success
+                              :summary "plan completed before checkpoint"
+                              :metrics {:tokens 0 :duration-ms 0}}
+          phase-results {test-plan-phase seeded-plan-result}
           resumed (runner/run-pipeline workflow
                                        {:task "Ignored on resume"}
                                        {:resume-machine-snapshot mid-snapshot
                                         :resume-phase-results phase-results})]
-      (is (contains? #{:completed :completed-with-warnings :failed :aborted :cancelled}
-                     (:execution/status resumed))
-          (str "resume must reach a terminal status, got "
+      (is (= :completed (:execution/status resumed))
+          (str "resume must complete the remaining pipeline, got "
                (pr-str (:execution/status resumed))))
-      (is (not= :running (:execution/status resumed))
-          ":running is the silent-fast-fail signature — resume must not return it"))))
+      (is (every? (:execution/phase-results resumed)
+                  [test-implement-phase test-verify-phase test-done-phase])
+          "implement, verify, and done phases must have phase-results recorded after resume")
+      (is (= "plan completed before checkpoint"
+             (get-in resumed [:execution/phase-results test-plan-phase :summary]))
+          "plan phase was already complete in the snapshot — resume must preserve the seeded result, not re-run it"))))
 
 ;; ============================================================================
 ;; Phase result recording tests

@@ -9,10 +9,13 @@
 ;;
 ;; The synthetic test in runner-test
 ;; (`run-pipeline-resume-from-mid-workflow-snapshot-advances-test`,
-;; added alongside this spec) demonstrates that resume from a mid-workflow
-;; snapshot DOES advance to :completed when the snapshot is built in-process.
-;; That test passes. So the production failure mode has at least one of
-;; these extra ingredients:
+;; added alongside this spec) constructs an FSM state parked at
+;; implement-active by driving the execution machine manually
+;; (initialize → start → :phase/succeed), feeds that snapshot through
+;; run-pipeline, and asserts the remaining phases (implement → verify →
+;; done) execute and the run reaches `:completed` with the seeded plan
+;; result preserved. That test passes. So the production failure mode
+;; has at least one of these extra ingredients:
 ;;
 ;;   (a) Workspace restore failure cascade. Production resumes hit
 ;;       `workflow/restore-failed` when the task branch is already checked
