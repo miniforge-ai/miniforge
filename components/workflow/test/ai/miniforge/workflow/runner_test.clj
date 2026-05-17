@@ -27,11 +27,38 @@
    [ai.miniforge.phase.interface]
    [ai.miniforge.supervisory-state.interface :as supervisory]
    [ai.miniforge.workflow.checkpoint-store :as checkpoint-store]
+   [ai.miniforge.workflow.fsm :as workflow-fsm]
    [ai.miniforge.workflow.phase-test-support :as phase-test-support]
    [ai.miniforge.workflow.runner :as runner]
    [ai.miniforge.workflow.context :as ctx]))
 
-(use-fixtures :each phase-test-support/with-workflow-phase-test-support)
+(defn- with-stubbed-acquire-environment
+  "Force `acquire-execution-environment!` to return nil for every test
+   in this namespace.
+
+   Why: many tests below call `runner/run-pipeline` without a
+   pre-acquired executor. Default :local mode would otherwise acquire
+   a real worktree at System/getProperty user.dir, and the workflow-
+   tester phases (which call persist-workspace-at-phase-boundary!)
+   would commit phase-completion messages into the test runner's own
+   git checkout. The 2026-05-16 pre-commit-smoke rollout caught this
+   leaking real commits onto active branches; the fix lives once
+   here so individual tests don't have to remember the with-redefs
+   dance, and so any future test that calls run-pipeline inherits
+   the safe default. Tests that genuinely need a real acquired env
+   override with their own with-redefs."
+  [f]
+  (let [acquire-var (requiring-resolve
+                      'ai.miniforge.workflow.runner-environment/acquire-execution-environment!)]
+    (with-redefs-fn {acquire-var (fn [& _] nil)}
+      f)))
+
+;; Compose phase-test-support's loader setup with the acquire-environment
+;; stub. clojure.test/use-fixtures REPLACES prior :each fixtures, so both
+;; must be registered in a single call.
+(use-fixtures :each
+  phase-test-support/with-workflow-phase-test-support
+  with-stubbed-acquire-environment)
 
 (def test-plan-phase
   phase-test-support/runner-test-plan)
@@ -282,6 +309,62 @@
                                        :resume-phase-results {}})]
       (is (= :completed (:execution/status result)))
       (is (= (:execution/id resume-ctx) (:execution/id result))))))
+
+(deftest run-pipeline-resume-from-mid-workflow-snapshot-advances-test
+  ;; Regression for the dogfood-2026-05-16 silent fast-fail: resume from a
+  ;; snapshot whose FSM is actually parked at an intermediate phase must
+  ;; advance through the remaining phases and reach `:completed` (not just
+  ;; any terminal state). The bug fix lives in PR #896 (loud-fail); this
+  ;; test pins the underlying "must actually advance" contract so a
+  ;; regression in the FSM/snapshot path can't silently re-introduce
+  ;; `:running` returns from completed runs.
+  ;;
+  ;; The snapshot is constructed by driving the execution machine
+  ;; manually from :pending → plan-active → (succeed) → implement-active,
+  ;; so the resumed runner has real remaining work to do.
+  (testing "snapshot parked at implement-active resumes through implement→verify→done to :completed"
+    (let [workflow {:workflow/id :test-multi-phase
+                    :workflow/version "1.0.0"
+                    :workflow/pipeline [{:phase test-plan-phase}
+                                        {:phase test-implement-phase}
+                                        {:phase test-verify-phase}
+                                        {:phase test-done-phase}]}
+          machine (workflow-fsm/compile-execution-machine workflow)
+          ;; Drive the machine from :pending → plan-active → implement-active
+          ;; so the snapshot has real remaining work.
+          initial-state (workflow-fsm/initialize-execution machine)
+          plan-state (workflow-fsm/start-execution machine initial-state)
+          fsm-at-implement (workflow-fsm/transition-execution machine plan-state :phase/succeed)
+          response-chain (requiring-resolve 'ai.miniforge.response.interface/create)
+          mid-snapshot {:execution/id (random-uuid)
+                        :execution/workflow-id (:workflow/id workflow)
+                        :execution/workflow-version (:workflow/version workflow)
+                        :execution/input {:task "Original"}
+                        :execution/status :running
+                        :execution/fsm-state fsm-at-implement
+                        :execution/response-chain (response-chain (:workflow/id workflow))
+                        :execution/phase-results {}
+                        :execution/artifacts []
+                        :execution/errors []
+                        :execution/metrics {:tokens 0 :cost-usd 0.0 :duration-ms 0}
+                        :execution/started-at (System/currentTimeMillis)}
+          seeded-plan-result {:status :success :outcome :success
+                              :summary "plan completed before checkpoint"
+                              :metrics {:tokens 0 :duration-ms 0}}
+          phase-results {test-plan-phase seeded-plan-result}
+          resumed (runner/run-pipeline workflow
+                                       {:task "Ignored on resume"}
+                                       {:resume-machine-snapshot mid-snapshot
+                                        :resume-phase-results phase-results})]
+      (is (= :completed (:execution/status resumed))
+          (str "resume must complete the remaining pipeline, got "
+               (pr-str (:execution/status resumed))))
+      (is (every? (:execution/phase-results resumed)
+                  [test-implement-phase test-verify-phase test-done-phase])
+          "implement, verify, and done phases must have phase-results recorded after resume")
+      (is (= "plan completed before checkpoint"
+             (get-in resumed [:execution/phase-results test-plan-phase :summary]))
+          "plan phase was already complete in the snapshot — resume must preserve the seeded result, not re-run it"))))
 
 ;; ============================================================================
 ;; Phase result recording tests

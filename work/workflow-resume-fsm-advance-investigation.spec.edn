@@ -1,0 +1,94 @@
+;; =============================================================================
+;; Spec: Workflow resume — investigate why FSM doesn't advance from production snapshots
+;; =============================================================================
+;;
+;; Status: PR #896 made resume FAIL LOUD on non-terminal status — operators
+;; now see "resume returned :running" instead of silent exit 0. But the
+;; underlying question — why does run-pipeline return :running when handed
+;; a snapshot from a real dogfood run — is still open.
+;;
+;; The synthetic test in runner-test
+;; (`run-pipeline-resume-from-mid-workflow-snapshot-advances-test`,
+;; added alongside this spec) constructs an FSM state parked at
+;; implement-active by driving the execution machine manually
+;; (initialize → start → :phase/succeed), feeds that snapshot through
+;; run-pipeline, and asserts the remaining phases (implement → verify →
+;; done) execute and the run reaches `:completed` with the seeded plan
+;; result preserved. That test passes. So the production failure mode
+;; has at least one of these extra ingredients:
+;;
+;;   (a) Workspace restore failure cascade. Production resumes hit
+;;       `workflow/restore-failed` when the task branch is already checked
+;;       out at /private/tmp/miniforge-worktrees/task-XXX. `acquire-
+;;       execution-environment!` swallows the failure, returns nil for the
+;;       env, and run-pipeline proceeds with no executor. Phase interceptors
+;;       then fail silently and run-pipeline returns :running.
+;;
+;;   (b) Checkpoint shape drift. Snapshots written by an older miniforge
+;;       commit may not round-trip cleanly into a newer fsm/restore-context.
+;;       The persisted-execution-keys list excludes :execution/fsm-machine
+;;       (rebuilt from the workflow at restore time), so a workflow whose
+;;       state IDs changed between persist and restore would produce a
+;;       fsm-state that points at nothing in the rebuilt machine.
+;;
+;;   (c) DAG sub-workflow snapshots. The dogfood spec triggers DAG
+;;       fan-out; a snapshot taken mid-DAG may not have the right
+;;       :execution/dag-result shape for the restored runner to recognise.
+
+{:spec/title "Workflow resume — make FSM advance from production checkpoints, not just synthetic ones"
+
+ :spec/description
+ "Reproduce the 2026-05-16 dogfood production resume failure inside a
+  unit/integration test, then fix the root cause. Approach:
+
+  1. Pull the actual checkpoint for `c1abda63-3072-4f57-9871-6c177384968e`
+     or a fresh dogfood run from `~/.miniforge/checkpoints/`. Load it
+     into the runner under test and assert the resume reaches a terminal
+     status. The synthetic test in runner-test already covers the happy
+     path; the missing coverage is real-checkpoint-shape.
+
+  2. Investigate the three candidate causes (a)/(b)/(c) above. (a) is the
+     most likely — restore-local-workspace-checkpoint! logs but doesn't
+     escalate, and acquire-execution-environment! treats nil env as
+     'continue without one' for :local mode.
+
+  3. Fix the root cause. Likely shapes:
+     - acquire-execution-environment! escalates workspace-restore failure
+       to a thrown anomaly so the CLI sees a real error instead of
+       :running.
+     - restore-context detects an fsm-state that points at no state in
+       the rebuilt machine and falls back to pipeline-trim resume.
+     - DAG-mid-resume gets its own snapshot shape and code path.
+
+  4. Add the production-checkpoint replay as a permanent regression test
+     so the next FSM/snapshot drift fails at test time."
+
+ :spec/intent
+ {:type :fix
+  :scope ["components/workflow/src/ai/miniforge/workflow/runner_environment.clj"
+          "components/workflow/src/ai/miniforge/workflow/context.clj"
+          "components/workflow/src/ai/miniforge/workflow/runner.clj"
+          "components/workflow-resume/src"
+          "components/workflow/test"]}
+
+ :spec/constraints
+ ["Production checkpoint must round-trip through resume to a terminal status"
+  "Workspace-restore failures must propagate as a thrown error, not a silent log + nil-env continue"
+  "Backwards-compatible — existing successful resumes (synthetic + production) still complete"
+  "Regression test must load a real checkpoint EDN file, not just build snapshots in-process"]
+
+ :spec/acceptance-criteria
+ ["bb miniforge resume on a known-good production checkpoint reaches :completed or :failed (terminal)"
+  "bb miniforge resume on a checkpoint with workspace-restore-failed produces a clear error before run-pipeline"
+  "New replay test in components/workflow/test loads a fixture checkpoint and asserts terminal status"
+  "Existing run-pipeline-resume-* tests in runner-test still pass"]
+
+ :spec/priority
+ {:tier :blocker
+  :axes #{:tokenconservation :dogfoodenabler :observation}
+  :theme :dogfood-resilience
+  :rationale "PR #896 makes resume fail loud, but resume still doesn't work — every dogfood loss still costs the full plan/explore/verify token spend on re-run. This spec makes resume actually save tokens, which is the dogfood-resilience theme's primary goal."
+  :blocks []
+  :blocked-by []}
+
+ :spec/workflow-type :canonical-sdlc}
