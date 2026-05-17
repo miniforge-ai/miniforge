@@ -1,0 +1,48 @@
+;; -----------------------------------------------------------------------------
+;; Pre-commit smoke test surface
+;; -----------------------------------------------------------------------------
+;;
+;; A small, hand-curated set of test namespaces that pre-commit runs on every
+;; commit. The goal is < 30 seconds total so the agent dev loop doesn't pay
+;; the full stable-derived sweep cost on every iteration. CI still runs the
+;; full suite (`bb test:all`) on every PR — this file is the FAST GATE, not
+;; the SOLE GATE.
+;;
+;; Selection criteria for inclusion:
+;;
+;;  1. Load-bearing infrastructure — if this namespace's contract breaks,
+;;     half the codebase breaks (response/anomaly/schema/event-stream).
+;;
+;;  2. Cross-component boundary contracts — when one side of a contract
+;;     changes silently, the dogfood findings file fills up. Recent
+;;     examples pinned here: PR #867 (gate :passed?), PR #872/894
+;;     (Anthropic property keys), PR #895 (reviewer ReviewIssue schema),
+;;     PR #896 (resume terminal-status).
+;;
+;;  3. Fast — sub-second per namespace, no Docker, no network, no large
+;;     fixtures.
+;;
+;;  4. Deterministic — never flaky, never depends on worktree state
+;;     (the runner-extended-test fix in PR #895 was a hard lesson).
+;;
+;; Adding to this list is a deliberate choice — it adds dev-loop time for
+;; every commit. Prefer fixing the test to be fast over keeping it out.
+
+;; ai.miniforge.workflow.runner-test deliberately excluded until PR #897
+;; merges — its tests acquire a real worktree at System/getProperty user.dir
+;; without the fixture-level acquire mock, and would commit phase-completion
+;; messages into the active branch. Re-add once #897 lands.
+
+{:smoke/namespaces
+ ["ai.miniforge.response.interface-test"
+  "ai.miniforge.anomaly.interface.schema-test"
+  "ai.miniforge.event-stream.interface-test"
+  "ai.miniforge.event-stream.core-test"
+  "ai.miniforge.gate.interface-test"
+  "ai.miniforge.gate.policy-test"
+  "ai.miniforge.mcp-context-server.tools-test"
+  "ai.miniforge.mcp-context-server.context-cache-test"
+  "ai.miniforge.cli.main.commands.resume-test"
+  "ai.miniforge.cli.workflow-runner.display-output-test"
+  "ai.miniforge.agent.reviewer-test"
+  "ai.miniforge.phase.interface-test"]}
