@@ -96,3 +96,13 @@
 (deftest open-map-allows-extra-keys
   (testing "extra keys pass through (open map per N5-delta-1 §12.4)"
     (is (validate (assoc observed-edge :some/future-key "value")))))
+
+(deftest idempotency-key-rejects-non-uuid-strings
+  (testing "empty string is rejected — catches mis-stringified producers"
+    (is (false? (validate (assoc observed-edge :edge/idempotency-key "")))))
+  (testing "free-form string is rejected — must be canonical UUIDv5 form"
+    (is (false? (validate (assoc observed-edge :edge/idempotency-key "not-a-uuid")))))
+  (testing "uppercase UUID is rejected — RFC fixes the canonical form as lowercase"
+    (is (false? (validate (assoc observed-edge
+                                 :edge/idempotency-key
+                                 "00000000-0000-0000-0000-00000000000A"))))))

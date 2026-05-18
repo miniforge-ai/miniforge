@@ -92,7 +92,12 @@
    [:edge/trigger-event-id  :edge/trigger-event-id]
    [:edge/trigger-kind      :edge/trigger-kind]
    [:edge/status            :edge/status]
-   [:edge/idempotency-key   string?]
+   ;; Per RFC §Idempotency the key is the canonical UUID-string form of
+   ;; `:edge/trigger-event-id`. Validate the canonical form here so malformed
+   ;; producers are rejected at the wire boundary rather than at the Rust
+   ;; consumer (where the error blames the deserializer, not the source).
+   [:edge/idempotency-key
+    [:re #"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"]]
    [:edge/occurred-at       :common/timestamp]
    [:edge/updated-at        :common/timestamp]
 

@@ -28,11 +28,16 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Schema re-exports
+;;
+;; `schema/registry` is intentionally NOT re-exported: it is an internal
+;; implementation detail that inlines primitive keyword types to avoid a
+;; cross-boundary reach into `ai.miniforge.schema.core/registry`. Exposing it
+;; would invite downstream callers to depend on its exact key set, turning
+;; later consolidation into a breaking change.
 
 (def AutomationEdge          schema/AutomationEdge)
 (def routing-trigger-kinds   schema/routing-trigger-kinds)
 (def automation-edge-statuses schema/automation-edge-statuses)
-(def registry                schema/registry)
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Trigger classification
