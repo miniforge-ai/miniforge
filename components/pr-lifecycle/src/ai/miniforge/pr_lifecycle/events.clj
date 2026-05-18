@@ -135,14 +135,24 @@
                  :comment comment-data}))
 
 (defn merged
-  "Create a merged event."
-  [dag-id run-id task-id pr-id merge-sha]
-  (create-event :pr/merged
-                {:dag/id dag-id
-                 :run/id run-id
-                 :task/id task-id
-                 :pr/id pr-id
-                 :pr/merge-sha merge-sha}))
+  "Create a merged event.
+
+   `labels` is an optional set of strings — the GitHub-native label
+   names attached to the PR at merge time. Carrying them here lets
+   downstream watchers (e.g. the pr-label-actions M2 brick) match
+   without re-querying GitHub. The 5-arity preserves backward
+   compatibility for callers that don't have label data on hand;
+   they default to an empty set."
+  ([dag-id run-id task-id pr-id merge-sha]
+   (merged dag-id run-id task-id pr-id merge-sha #{}))
+  ([dag-id run-id task-id pr-id merge-sha labels]
+   (create-event :pr/merged
+                 {:dag/id dag-id
+                  :run/id run-id
+                  :task/id task-id
+                  :pr/id pr-id
+                  :pr/merge-sha merge-sha
+                  :pr/labels (set labels)})))
 
 (defn closed
   "Create a closed (without merge) event."

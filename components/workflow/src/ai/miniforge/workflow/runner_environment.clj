@@ -29,7 +29,9 @@
    [ai.miniforge.response.interface :as response]
    [ai.miniforge.workflow.context :as context]
    [ai.miniforge.workflow.messages :as messages]
-   [ai.miniforge.workflow.runner-defaults :as defaults]))
+   [ai.miniforge.workflow.runner-defaults :as defaults]
+   [clojure.java.shell :as shell]
+   [clojure.string :as str]))
 
 (defonce ^:private env-logger
   (log/create-logger {:min-level :debug :output :human}))
@@ -92,18 +94,40 @@
 ;------------------------------------------------------------------------------ Layer 1
 ;; Environment record construction
 
+(defn- read-head-sha
+  "Return the current HEAD SHA of `working-dir` as a string, or nil
+   when the directory is missing, not a git repo, or `git rev-parse`
+   exits non-zero. Best-effort — never throws."
+  [working-dir]
+  (when working-dir
+    (try
+      (let [{:keys [exit out]} (shell/sh "git" "-C" (str working-dir)
+                                         "rev-parse" "HEAD")]
+        (when (zero? exit) (str/trim out)))
+      (catch Exception _ nil))))
+
 (defn build-env-record
-  "Acquire environment from executor and build the result map."
+  "Acquire environment from executor and build the result map.
+
+   Records the acquired worktree's HEAD SHA under
+   `[:environment-metadata :base-sha]` so downstream consumers
+   (M1 of the labeled-PR-actions plan: the watcher ancestry-check
+   via `git merge-base --is-ancestor base merge`) can tell whether
+   a workflow predates a given fix without reconstructing history."
   [executor workflow-id mode env-config {:keys [acquire-env! result-ok? result-unwrap]}]
   (let [task-id    (if (uuid? workflow-id) workflow-id (random-uuid))
         env-result (acquire-env! executor task-id env-config)]
     (when (result-ok? env-result)
-      (let [env (result-unwrap env-result)]
+      (let [env       (result-unwrap env-result)
+            workdir   (:workdir env)
+            base-sha  (read-head-sha workdir)
+            metadata  (cond-> (or (:metadata env) {})
+                        base-sha (assoc :base-sha base-sha))]
         {:executor             executor
          :environment-id       (:environment-id env)
-         :worktree-path        (:workdir env)
+         :worktree-path        workdir
          :execution-mode       mode
-         :environment-metadata (:metadata env)}))))
+         :environment-metadata metadata}))))
 
 (defn- restore-local-workspace-checkpoint!
   "Restore a persisted local workspace branch before acquiring a worktree.
