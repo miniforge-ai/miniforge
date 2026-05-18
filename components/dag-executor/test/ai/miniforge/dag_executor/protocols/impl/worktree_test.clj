@@ -430,3 +430,33 @@
                                          :base-ref    "main"})]
         (is (result/err? r))
         (is (= :archive-bundle-failed (get-in r [:error :code])))))))
+
+;; ============================================================================
+;; default-base-path — survives reboots
+;; ============================================================================
+
+(deftest default-base-path-lives-under-home-not-tmp-test
+  ;; Regression for the 2026-04-17 gates-workflow data-loss incident:
+  ;; the old `/tmp/miniforge-worktrees` default got wiped on macOS
+  ;; tmpfs cleanup, taking 8+ minutes of working code with it. Pin
+  ;; the new default to a path that survives reboots.
+  (testing "default-base-path is rooted at the user's home directory"
+    (let [p (worktree/default-base-path)
+          home (System/getProperty "user.home")]
+      (is (.startsWith ^String p home)
+          (str "default-base-path " (pr-str p)
+               " must live under user.home (" home ")"))
+      (is (.endsWith ^String p "/.miniforge/worktrees")
+          "must end with `.miniforge/worktrees` so it sits next to checkpoints")
+      (is (not (.startsWith ^String p "/tmp"))
+          "must NOT be /tmp-rooted — that's the regression we're guarding"))))
+
+(deftest create-worktree-executor-uses-new-default-test
+  (testing "create-worktree-executor with no :base-path picks up the home default"
+    (let [exec (worktree/create-worktree-executor {})]
+      (is (= (worktree/default-base-path) (:base-path exec)))))
+
+  (testing "explicit :base-path override still works (CI ephemeral runs opt in)"
+    (let [exec (worktree/create-worktree-executor
+                {:base-path "/tmp/miniforge-worktrees-ci"})]
+      (is (= "/tmp/miniforge-worktrees-ci" (:base-path exec))))))

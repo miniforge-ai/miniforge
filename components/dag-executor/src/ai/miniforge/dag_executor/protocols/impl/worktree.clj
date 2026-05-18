@@ -35,7 +35,22 @@
 ;; Configuration
 ;; ============================================================================
 
-(def default-base-path "/tmp/miniforge-worktrees")
+(defn default-base-path
+  "Default location for git worktrees acquired by the worktree executor.
+
+   Lives under `~/.miniforge/worktrees/` rather than `/tmp` so the
+   worktree (and any uncommitted implementer file writes living in it)
+   survives reboots and macOS-tmpfs cleanups. The 2026-04-17 gates
+   workflow lost 8+ minutes of working code when its `/tmp` worktree
+   was GC'd on process-tree restart; persistence outside `/tmp` is the
+   foundation for the broader work in
+   `work/worktree-persistence-scratch-branch.spec.edn`.
+
+   Callers that need an ephemeral location (CI runs, sandbox tests)
+   can override via the `:base-path` config arg."
+  []
+  (str (System/getProperty "user.home") "/.miniforge/worktrees"))
+
 (def default-max-concurrent 4)
 
 (defn default-archive-dir
@@ -665,10 +680,15 @@
   "Create a worktree-based executor (fallback).
 
    Config:
-   - :base-path - Base directory for worktrees (default: /tmp/miniforge-worktrees)
+   - :base-path - Base directory for worktrees (default:
+     `~/.miniforge/worktrees`). The previous `/tmp/miniforge-worktrees`
+     default was changed after the 2026-04-17 gates-workflow lost
+     8+ minutes of working code to a macOS tmpfs cleanup. Ephemeral
+     `/tmp`-rooted runs (CI, sandbox tests) opt in explicitly via
+     this key.
    - :max-concurrent - Max concurrent worktrees (default: 4)"
   [config]
   (map->WorktreeExecutor
    {:config config
-    :base-path (get config :base-path default-base-path)
+    :base-path (get config :base-path (default-base-path))
     :max-concurrent (get config :max-concurrent default-max-concurrent)}))
