@@ -1,0 +1,39 @@
+;; -----------------------------------------------------------------------------
+;; PR-label-triggered actions on in-flight workflows
+;; -----------------------------------------------------------------------------
+;;
+;; Source of truth for which PR labels trigger which workflow-runtime
+;; actions when a PR merges to main. See
+;; docs/design/labeled-pr-actions-plan.md for the architecture.
+;;
+;; Keys are STRINGS to match GitHub's native label shape — labels are
+;; normalized at creation time by the GitHub project, and this lookup
+;; is a literal compare (no case-folding, no whitespace stripping).
+;;
+;; Match semantics:
+;;
+;;   :applies-when {:workflow.base-sha/not-ancestor-of-merge true}
+;;
+;; The watcher (M2) resolves "applies?" by running
+;; `git merge-base --is-ancestor base-sha merge-sha` against each
+;; active workflow's recorded base SHA. Exit 0 → ancestor (workflow
+;; already includes the fix) → skip. Exit 1 → not ancestor (workflow
+;; predates the fix) → match. Git SHAs are not orderable; ancestry
+;; is the only correct test.
+;;
+;; This file is the M1 contract. The watcher (M2), meta-agent
+;; (M2b), and rebase actuator (M3) consume but do not modify it.
+
+{:pr-label-actions/registry
+ {"dogfood-fix"
+  {:action       :rebase-and-resume
+   :description  "Pause, rebase the task worktree onto post-merge main, resume from the next phase boundary"
+   :on-conflict  :attention-required
+   :applies-when {:workflow.base-sha/not-ancestor-of-merge true}}
+
+  ;; Future label-action pairs are added here without code edits.
+  ;; Examples from the design plan that may land later:
+  ;;
+  ;;   "hot-config-reload" {:action :reload-runtime-config ...}
+  ;;   "budget-pause"      {:action :pause-until-human-review ...}
+  }}
