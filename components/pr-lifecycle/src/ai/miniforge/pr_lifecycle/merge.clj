@@ -375,6 +375,26 @@
 ;------------------------------------------------------------------------------ Layer 2
 ;; Merge orchestration
 
+(defn fetch-pr-labels!
+  "Fetch the label names attached to a PR via `gh pr view --json labels`.
+
+   Returns a `#{}` of label-name strings (GitHub-native, literal,
+   no case-folding). Returns `#{}` on any failure — label fetch is
+   best-effort and never blocks the merge-event publish path. The
+   first downstream consumer is the M2 pr-label-actions watcher."
+  [worktree-path pr-number]
+  (try
+    (let [result (run-gh-command
+                  ["gh" "pr" "view" (str pr-number) "--json" "labels"]
+                  worktree-path)]
+      (if (dag/ok? result)
+        (let [body (json/parse-string (:output (:data result)) true)]
+          (->> (:labels body)
+               (keep :name)
+               set))
+        #{}))
+    (catch Exception _ #{})))
+
 (defn attempt-merge
   "Attempt to merge a PR, handling common failure cases.
 
@@ -402,15 +422,20 @@
         (let [merge-result (merge-pr! worktree-path pr-number :policy policy)]
           (if (dag/ok? merge-result)
             (do
-              ;; Publish merged event
+              ;; Publish merged event with the PR's labels so downstream
+              ;; watchers (label-actions M2) can match without re-querying
+              ;; GitHub. Label fetch is best-effort — missing labels
+              ;; default to #{}, never block the merge event.
               (when event-bus
                 (let [sha-result (run-gh-command
                                   ["git" "rev-parse" "HEAD"]
                                   worktree-path)
                       merge-sha (when (dag/ok? sha-result)
-                                  (:output (:data sha-result)))]
+                                  (:output (:data sha-result)))
+                      labels (fetch-pr-labels! worktree-path pr-number)]
                   (events/publish! event-bus
-                                   (events/merged dag-id run-id task-id pr-id merge-sha)
+                                   (events/merged dag-id run-id task-id pr-id
+                                                  merge-sha labels)
                                    logger)))
               (when logger
                 (log/info logger :pr-lifecycle :merge/success

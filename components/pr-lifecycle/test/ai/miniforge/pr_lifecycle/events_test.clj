@@ -117,7 +117,21 @@
   (testing "merged creates event with merge SHA"
     (let [event (events/merged dag-id run-id task-id 123 "merge-sha-abc")]
       (is (= :pr/merged (:event/type event)))
-      (is (= "merge-sha-abc" (:pr/merge-sha event))))))
+      (is (= "merge-sha-abc" (:pr/merge-sha event)))
+      (is (= #{} (:pr/labels event))
+          "5-arity defaults labels to empty set for backward compatibility")))
+
+  (testing "6-arity merged carries the PR's labels for downstream watchers"
+    (let [labels ["dogfood-fix" "infrastructure"]
+          event  (events/merged dag-id run-id task-id 123 "merge-sha-abc" labels)]
+      (is (= :pr/merged (:event/type event)))
+      (is (= "merge-sha-abc" (:pr/merge-sha event)))
+      (is (= #{"dogfood-fix" "infrastructure"} (:pr/labels event))
+          "labels are coerced to a set so downstream membership checks are O(1)")))
+
+  (testing "labels passed as a set round-trip unchanged"
+    (let [event (events/merged dag-id run-id task-id 123 "abc" #{"dogfood-fix"})]
+      (is (= #{"dogfood-fix"} (:pr/labels event))))))
 
 (deftest closed-constructor-test
   (testing "closed creates event with reason"
