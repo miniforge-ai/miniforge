@@ -100,7 +100,11 @@
   "Create a worktree-based executor (fallback).
 
    Config:
-   - :base-path - Base directory for worktrees (default: /tmp/miniforge-worktrees)
+   - :base-path - Base directory for worktrees (default:
+     `~/.miniforge/worktrees`). The old `/tmp/miniforge-worktrees`
+     default was removed after the 2026-04-17 gates-workflow lost
+     8+ minutes of working code to a tmpfs cleanup. Opt in via this
+     key for ephemeral runs.
    - :max-concurrent - Max concurrent worktrees (default: 4)"
   worktree/create-worktree-executor)
 
