@@ -120,14 +120,28 @@
 (defn gate-result->feedback
   "Convert a loop gate result to reviewer feedback format.
 
-   Gate identity is resolved from the result first (`:gate/id` /
-   `:gate/type` populated by `loop/pass-result` and `loop/fail-result`),
-   falling back to the gate defrecord's plain `id` / `type-kw` fields.
-   Both the loop's own SyntaxGate/LintGate/CustomGate records and the
-   reviewer-internal `implementation-handoff-gate` rely on this
-   fallback — without it, every gate surfaced as `:unknown` in the
-   `:failing-gate-ids` diagnostic and the 2026-05-18 dogfood couldn't
-   tell which gate flipped its LLM verdict."
+   Gate identity resolution order:
+     1. `:gate/id`   on the result   (populated by `loop/pass-result`
+                                      and `loop/fail-result`)
+     2. `:gate/id`   on the gate     (rare — not set by current records,
+                                      kept for forward-compat)
+     3. `:id`        on the gate     (the plain field on SyntaxGate /
+                                      LintGate / TestGate / PolicyGate /
+                                      CustomGate records)
+     4. `:unknown`   final fallback
+
+   Gate-type resolution differs slightly. Only `CustomGate` carries a
+   `type-kw` field on the record itself; the other gate records hard-
+   code their type at construction (e.g. `SyntaxGate` always passes
+   `:syntax` into the result via `loop/pass-result`). So:
+     1. `:gate/type` on the result
+     2. `:gate/type` on the gate
+     3. `:type-kw`   on the gate     (CustomGate only)
+     4. `:unknown`
+
+   Before this two-step resolution every failing gate surfaced as
+   `:unknown` in the `:failing-gate-ids` diagnostic and the 2026-05-18
+   dogfood couldn't tell which gate flipped its LLM verdict."
   [gate result]
   (let [gate-id   (or (:gate/id result) (:gate/id gate) (:id gate) :unknown)
         gate-type (or (:gate/type result) (:gate/type gate) (:type-kw gate) :unknown)

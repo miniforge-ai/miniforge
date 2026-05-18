@@ -575,6 +575,54 @@
         (is (= :rejected  (get-in override-entry [:data :final-decision])))
         (is (= [:always-fails] (get-in override-entry [:data :failing-gate-ids])))))))
 
+(deftest test-gate-result-feedback-resolves-real-gate-ids
+  ;; Coverage gap exposed by the 2026-05-18 dogfood: gate-result->feedback
+  ;; was reading `:gate/id` off the gate defrecord (where SyntaxGate /
+  ;; LintGate / CustomGate store `id` as a plain field), so every gate
+  ;; surfaced as `:unknown` in the failing-gate-ids diagnostic. Pin
+  ;; resolution from each shape so a regression here flips the test red
+  ;; instead of silently degrading observability.
+  (testing "CustomGate result: gate-id resolved from result's :gate/id"
+    (let [gate (loop/custom-gate :my-custom :policy
+                 (fn [_ _] (loop/pass-result :my-custom :policy)))
+          result (loop/check-gate gate {} {})
+          fb (#'reviewer/gate-result->feedback gate result)]
+      (is (= :my-custom (:gate-id fb)))
+      (is (= :policy (:gate-type fb)))
+      (is (true? (:passed? fb)))))
+
+  (testing "CustomGate result with explicit :gate/id wins over the gate's :id"
+    (let [gate (loop/custom-gate :gate-side :policy (fn [_ _] {}))
+          result {:gate/id :result-side :gate/type :other :gate/passed? false :gate/errors []}
+          fb (#'reviewer/gate-result->feedback gate result)]
+      (is (= :result-side (:gate-id fb))
+          "result's :gate/id always wins — pass-result/fail-result are authoritative")
+      (is (= :other (:gate-type fb)))))
+
+  (testing "CustomGate result without :gate/id falls back to the record's :id"
+    (let [gate (loop/custom-gate :on-the-record :policy (fn [_ _] {}))
+          result {:gate/passed? false :gate/errors [{:message "boom"}]}
+          fb (#'reviewer/gate-result->feedback gate result)]
+      (is (= :on-the-record (:gate-id fb))
+          ":id from the defrecord must surface when the result is bare")
+      (is (= :policy (:gate-type fb))
+          ":type-kw from the CustomGate record must surface when the result is bare")))
+
+  (testing "SyntaxGate result resolves to a real id even though the record has no :type-kw field"
+    (let [gate (loop/syntax-gate)
+          result {:gate/id :syntax :gate/type :syntax :gate/passed? true}
+          fb (#'reviewer/gate-result->feedback gate result)]
+      (is (= :syntax (:gate-id fb))
+          "syntax gate must NOT show as :unknown — it was the canonical regression")
+      (is (= :syntax (:gate-type fb)))))
+
+  (testing "missing-id path falls back to :unknown — keeps the existing safety net"
+    (let [gate {:not-a-record true}    ; non-record map with no id at all
+          result {:gate/passed? false :gate/errors []}
+          fb (#'reviewer/gate-result->feedback gate result)]
+      (is (= :unknown (:gate-id fb)))
+      (is (= :unknown (:gate-type fb))))))
+
 (deftest test-reviewer-no-override-warn-when-gates-and-llm-agree
   (testing "no :reviewer/gate-overrode-llm warn when LLM and gates agree on :approved"
     (with-redefs [model/resolve-llm-client-for-role (fn [_role client] client)
