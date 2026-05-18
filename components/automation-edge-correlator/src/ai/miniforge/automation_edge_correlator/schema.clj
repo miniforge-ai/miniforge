@@ -26,7 +26,22 @@
 
    All maps are open (additional keys pass through) per the supervisory-state
    convention from N5-delta-1 §12.4. Enums are closed sets expressed as
-   `[:enum ...]`.")
+   `[:enum ...]`."
+  (:import
+   (java.util UUID)))
+
+;------------------------------------------------------------------------------ Layer 0
+;; Namespace UUID — stable per-deployment constant for UUIDv5 derivation
+
+(def ^UUID automation-edge-namespace
+  "Per-deployment namespace UUID for `:edge/id` UUIDv5 derivation, per
+   N5-delta-4 §2.3.
+
+   Generated once with `uuid.uuid4()` and frozen as a constant. MUST NOT be
+   the nil UUID and MUST NOT be one of the RFC-4122 well-known namespaces
+   (DNS / URL / OID / X500). A spec bump is required to rotate this value:
+   rotation re-keys every previously-emitted edge in consumer entity tables."
+  (UUID/fromString "5ca660c9-b2a4-42bf-85e4-0086de98dffb"))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Closed enums — match Rust RoutingTriggerKind and AutomationEdgeStatus variants
