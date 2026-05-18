@@ -43,31 +43,35 @@
 ;------------------------------------------------------------------------------ Fixtures
 
 (def ^:private observed-edge
-  "Synthetic :observed edge — trigger seen, no handler correlated yet."
-  {:edge/id              (java.util.UUID/fromString "00000000-0000-0000-0000-000000000001")
-   :edge/trigger-event-id (java.util.UUID/fromString "00000000-0000-0000-0000-000000000002")
-   :edge/trigger-kind    :pr-merged
-   :edge/status          :observed
-   :edge/idempotency-key "00000000-0000-0000-0000-000000000002"
-   :edge/occurred-at     (now)
-   :edge/updated-at      (now)
-   ;; Optional payload fields present on :observed
-   :edge/affected-pr-ids [["miniforge-ai/miniforge" 999]]
-   :edge/affected-agent-session-ids []})
+  "Synthetic :observed edge — trigger seen, no handler correlated yet.
+   `:edge/idempotency-key` is the string form of `:edge/trigger-event-id`
+   per RFC §Idempotency."
+  (let [trigger-id (random-uuid)]
+    {:edge/id              (random-uuid)
+     :edge/trigger-event-id trigger-id
+     :edge/trigger-kind    :pr-merged
+     :edge/status          :observed
+     :edge/idempotency-key (str trigger-id)
+     :edge/occurred-at     (now)
+     :edge/updated-at      (now)
+     ;; Optional payload fields present on :observed
+     :edge/affected-pr-ids [["miniforge-ai/miniforge" 999]]
+     :edge/affected-agent-session-ids []}))
 
 (def ^:private handled-edge
   "Synthetic :handled edge — handler workflow correlated and completed."
-  {:edge/id              (java.util.UUID/fromString "00000000-0000-0000-0000-000000000010")
-   :edge/trigger-event-id (java.util.UUID/fromString "00000000-0000-0000-0000-000000000011")
-   :edge/trigger-kind    :workflow-completed
-   :edge/status          :handled
-   :edge/idempotency-key "00000000-0000-0000-0000-000000000011"
-   :edge/occurred-at     (now)
-   :edge/updated-at      (now)
-   ;; Handler correlation fields populated on :handled
-   :edge/handled-by-workflow-run-id (java.util.UUID/fromString "00000000-0000-0000-0000-000000000012")
-   :edge/affected-pr-ids []
-   :edge/affected-agent-session-ids [(java.util.UUID/fromString "00000000-0000-0000-0000-000000000013")]})
+  (let [trigger-id (random-uuid)]
+    {:edge/id              (random-uuid)
+     :edge/trigger-event-id trigger-id
+     :edge/trigger-kind    :workflow-completed
+     :edge/status          :handled
+     :edge/idempotency-key (str trigger-id)
+     :edge/occurred-at     (now)
+     :edge/updated-at      (now)
+     ;; Handler correlation fields populated on :handled
+     :edge/handled-by-workflow-run-id (random-uuid)
+     :edge/affected-pr-ids []
+     :edge/affected-agent-session-ids [(random-uuid)]}))
 
 ;------------------------------------------------------------------------------ Tests
 
