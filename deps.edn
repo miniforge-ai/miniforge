@@ -82,6 +82,7 @@
                        "components/repo-dag/src"
                        "components/event-stream/src"
                        "components/supervisory-state/src"
+                       "components/automation-edge-correlator/src"
                        "components/pr-scoring/src"
                        "components/workflow-resume/src"
                        "components/workflow-resume/resources"
@@ -237,6 +238,7 @@
                      ai.miniforge/repo-dag {:local/root "components/repo-dag"}
                      ai.miniforge/event-stream {:local/root "components/event-stream"}
                      ai.miniforge/supervisory-state {:local/root "components/supervisory-state"}
+                     ai.miniforge/automation-edge-correlator {:local/root "components/automation-edge-correlator"}
                      ai.miniforge/pr-scoring {:local/root "components/pr-scoring"}
                      ai.miniforge/workflow-resume {:local/root "components/workflow-resume"}
                      ai.miniforge/tui-engine {:local/root "components/tui-engine"}
@@ -355,6 +357,7 @@
                        "components/repo-dag/test"
                        "components/event-stream/test"
                        "components/supervisory-state/test"
+                       "components/automation-edge-correlator/test"
                        "components/pr-scoring/test"
                        "components/workflow-resume/test"
                        "components/tui-engine/test"
@@ -477,6 +480,7 @@
                       ai.miniforge/repo-dag {:local/root "components/repo-dag"}
                       ai.miniforge/event-stream {:local/root "components/event-stream"}
                       ai.miniforge/supervisory-state {:local/root "components/supervisory-state"}
+                      ai.miniforge/automation-edge-correlator {:local/root "components/automation-edge-correlator"}
                       ai.miniforge/pr-scoring {:local/root "components/pr-scoring"}
                       ai.miniforge/workflow-resume {:local/root "components/workflow-resume"}
                       ai.miniforge/tui-engine {:local/root "components/tui-engine"}

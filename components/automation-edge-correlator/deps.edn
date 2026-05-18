@@ -1,0 +1,10 @@
+{:paths ["src" "resources"]
+ ;; N15-1 source surface is pure schema + trigger classification — only malli
+ ;; is consumed.  Cross-component deps (event-stream / logging / schema) are
+ ;; added in N15-3 when `core.clj` + `emitter.clj` start the lifecycle and
+ ;; subscribe to the event stream.  Declaring them prematurely would
+ ;; mis-state the brick's current boundary surface.
+ :deps {metosin/malli {:mvn/version "0.16.4"}}
+ :aliases {:test {:extra-paths ["test"]
+                  :extra-deps {io.github.cognitect-labs/test-runner
+                               {:git/tag "v0.5.1" :git/sha "dfb30dd"}}}}}
