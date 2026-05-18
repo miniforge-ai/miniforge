@@ -44,4 +44,8 @@
   ;; acquire-environment! mock — runner-test tests no longer commit
   ;; phase-completion messages into the host worktree.
   "ai.miniforge.workflow.runner-test"
+  ;; Phase-transition decision + actuator coverage. Each branch of
+  ;; determine-phase-event and apply-phase-transition is pinned here;
+  ;; both functions had zero direct test coverage before this addition.
+  "ai.miniforge.workflow.phase-transitions-test"
   "ai.miniforge.phase.interface-test"]}
