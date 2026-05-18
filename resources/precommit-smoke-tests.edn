@@ -28,11 +28,6 @@
 ;; Adding to this list is a deliberate choice — it adds dev-loop time for
 ;; every commit. Prefer fixing the test to be fast over keeping it out.
 
-;; ai.miniforge.workflow.runner-test deliberately excluded until PR #897
-;; merges — its tests acquire a real worktree at System/getProperty user.dir
-;; without the fixture-level acquire mock, and would commit phase-completion
-;; messages into the active branch. Re-add once #897 lands.
-
 {:smoke/namespaces
  ["ai.miniforge.response.interface-test"
   "ai.miniforge.anomaly.interface.schema-test"
@@ -45,4 +40,8 @@
   "ai.miniforge.cli.main.commands.resume-test"
   "ai.miniforge.cli.workflow-runner.display-output-test"
   "ai.miniforge.agent.reviewer-test"
+  ;; Safe to include now that PR #897 landed the namespace-level
+  ;; acquire-environment! mock — runner-test tests no longer commit
+  ;; phase-completion messages into the host worktree.
+  "ai.miniforge.workflow.runner-test"
   "ai.miniforge.phase.interface-test"]}
