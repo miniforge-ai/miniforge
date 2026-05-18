@@ -118,13 +118,36 @@
 ;; Gate running and feedback
 
 (defn gate-result->feedback
-  "Convert a loop gate result to reviewer feedback format."
+  "Convert a loop gate result to reviewer feedback format.
+
+   Gate identity resolution order:
+     1. `:gate/id`   on the result   (populated by `loop/pass-result`
+                                      and `loop/fail-result`)
+     2. `:gate/id`   on the gate     (rare — not set by current records,
+                                      kept for forward-compat)
+     3. `:id`        on the gate     (the plain field on SyntaxGate /
+                                      LintGate / TestGate / PolicyGate /
+                                      CustomGate records)
+     4. `:unknown`   final fallback
+
+   Gate-type resolution differs slightly. Only `CustomGate` carries a
+   `type-kw` field on the record itself; the other gate records hard-
+   code their type at construction (e.g. `SyntaxGate` always passes
+   `:syntax` into the result via `loop/pass-result`). So:
+     1. `:gate/type` on the result
+     2. `:gate/type` on the gate
+     3. `:type-kw`   on the gate     (CustomGate only)
+     4. `:unknown`
+
+   Before this two-step resolution every failing gate surfaced as
+   `:unknown` in the `:failing-gate-ids` diagnostic and the 2026-05-18
+   dogfood couldn't tell which gate flipped its LLM verdict."
   [gate result]
-  (let [gate-id (:gate/id gate :unknown)
-        gate-type (:gate/type gate :unknown)
-        passed? (:gate/passed? result true)
-        errors (:gate/errors result [])
-        warnings (:gate/warnings result [])]
+  (let [gate-id   (or (:gate/id result) (:gate/id gate) (:id gate) :unknown)
+        gate-type (or (:gate/type result) (:gate/type gate) (:type-kw gate) :unknown)
+        passed?   (:gate/passed? result true)
+        errors    (:gate/errors result [])
+        warnings  (:gate/warnings result [])]
     {:gate-id gate-id
      :gate-type gate-type
      :passed? passed?
@@ -782,15 +805,36 @@
                    logger normalized llm-review gate-result counts duration tokens cost-usd
                    timeout-failure-message)
                   (do
-                    (log/info logger :reviewer :reviewer/review-complete
-                              {:data {:decision final-decision
-                                      :llm-decision llm-decision
-                                      :llm-parse-failed? parse-failed?
-                                      :timeout-only-review? timeout-only-review?
-                                      :gates-passed (:passed counts)
-                                      :gates-failed (:failed counts)
-                                      :llm-issues (count llm-issues)
-                                      :duration-ms duration}})
+                    ;; Observability — when the deterministic gates flip
+                    ;; the LLM's verdict, the operator needs to know
+                    ;; which gate(s) caused it. Without this, the
+                    ;; downstream workflow gate just fails opaquely.
+                    ;; The 2026-05-18 agent-stream-watchdog dogfood
+                    ;; surfaced LLM :approved → final :rejected with no
+                    ;; signal in the event log about which internal gate
+                    ;; produced the override.
+                    (let [failing-gate-ids (->> gate-feedbacks
+                                                (remove :passed?)
+                                                (mapv :gate-id))
+                          gate-overrode-llm? (and (some? llm-decision)
+                                                  (not= llm-decision final-decision))]
+                      (log/info logger :reviewer :reviewer/review-complete
+                                {:data {:decision final-decision
+                                        :llm-decision llm-decision
+                                        :llm-parse-failed? parse-failed?
+                                        :timeout-only-review? timeout-only-review?
+                                        :gates-passed (:passed counts)
+                                        :gates-failed (:failed counts)
+                                        :failing-gate-ids failing-gate-ids
+                                        :gate-overrode-llm? gate-overrode-llm?
+                                        :llm-issues (count llm-issues)
+                                        :duration-ms duration}})
+                      (when gate-overrode-llm?
+                        (log/warn logger :reviewer :reviewer/gate-overrode-llm
+                                  {:data {:llm-decision llm-decision
+                                          :final-decision final-decision
+                                          :failing-gate-ids failing-gate-ids
+                                          :artifact-id artifact-id}})))
 
                     ;; Phase lifecycle: mark review exit with decision
                     (leave-review logger {:review/decision final-decision
