@@ -161,22 +161,30 @@
 
 (defn- emit-upsert!
   "Build an upsert envelope via `emitter/upsert-event` and publish it on
-   the stream. Sequence-number allocation is delegated to
-   `es/create-envelope` for consistency with every other producer — the
-   pure emitter is built around an explicit sequence number, and we
-   thread the stream-allocated value through here."
+   the stream.
+
+   The base envelope is built via `es/create-envelope` so the
+   correlator inherits the canonical `:event/id` (Snowflake-encoded
+   when the stream is so configured), `:event/version`,
+   `:event/sequence-number`, and any identity-propagation fields the
+   stream attaches. The pure emitter then overrides only the edge-
+   specific fields (`:event/timestamp` from `:edge/updated-at`,
+   `:message`, `:supervisory/entity`).
+
+   `:workflow/id` is threaded through `create-envelope`'s positional
+   `workflow-id` arg when the edge has been correlated to a handler
+   (`:edge/handled-by-workflow-run-id` is non-nil). For pre-handler
+   edges (`:observed` with no workflow yet, or triggers like
+   `:pr/merged` that name no workflow) the value is `nil` and the
+   envelope's `:workflow/id` is left absent. Downstream filters use
+   the threaded value for workflow-scoped views."
   [stream edge]
-  (let [;; Use `create-envelope` purely to allocate a sequence-number
-        ;; under the same monotonic counter every other event uses.
-        ;; The emitter then re-shapes the envelope with the correct
-        ;; timestamp (edge's `:edge/updated-at`, not wall clock) and
-        ;; payload — but the sequence-number flows through unchanged.
-        env    (es/create-envelope stream
-                                   self-emitted-type
-                                   nil
-                                   "")
-        seq-no (:event/sequence-number env)
-        event  (emitter/upsert-event edge seq-no)]
+  (let [workflow-id  (:edge/handled-by-workflow-run-id edge)
+        base         (es/create-envelope stream
+                                         self-emitted-type
+                                         workflow-id
+                                         "")
+        event        (emitter/upsert-event base edge)]
     (es/publish! stream event)
     event))
 
@@ -353,40 +361,95 @@
                          (.setDaemon true)))))]
     (.scheduleAtFixedRate scheduler
                           ^Runnable (fn []
-                                      (try (expire-once! handle)
-                                           (catch Throwable _
-                                             ;; Swallow — a single tick
-                                             ;; failure must not kill the
-                                             ;; scheduler. Production
-                                             ;; wires a logger via the
-                                             ;; stream's logger; the
-                                             ;; rethrow path would leave
-                                             ;; the brick silently
-                                             ;; idle.
-                                             nil)))
+                                      (try
+                                        (expire-once! handle)
+                                        (catch Throwable t
+                                          ;; A single tick failure MUST
+                                          ;; NOT kill the scheduler — a
+                                          ;; thrown Throwable from a
+                                          ;; `scheduleAtFixedRate` task
+                                          ;; cancels all future runs
+                                          ;; silently per
+                                          ;; `ScheduledExecutorService`
+                                          ;; contract.  We catch, log to
+                                          ;; stderr (matching the
+                                          ;; sibling event-stream sink
+                                          ;; failure convention), and
+                                          ;; let the next tick try
+                                          ;; again. Operators tail
+                                          ;; stderr in dev; in
+                                          ;; production the journal
+                                          ;; captures it and an alert
+                                          ;; can scrape on the prefix.
+                                          (binding [*out* *err*]
+                                            (println
+                                             (str "WARNING: automation-edge-correlator "
+                                                  "expire-tick failed: "
+                                                  (.getMessage t))))
+                                          nil)))
                           (long expire-tick-ms)
                           (long expire-tick-ms)
                           TimeUnit/MILLISECONDS)
     scheduler))
 
 (defn start!
-  "Subscribe to the stream, replay the prefix, and start the expire
-   ticker. Idempotent — a second call on a started handle is a no-op."
+  "Subscribe to the stream, replay the prefix, drain anything that
+   landed during replay, then start the expire ticker. Idempotent — a
+   second call on a started handle is a no-op.
+
+   ## Race-free replay (Copilot review on PR #908)
+
+   The naïve order replay-then-subscribe loses any event published in
+   the gap between `get-events` snapshot and `subscribe!` registration.
+   Production deployments wire a hot stream where that gap can be
+   non-empty.
+
+   The barrier: subscribe FIRST with a buffering callback that
+   appends to an in-memory queue. Then replay. Then drain the queue
+   through the real handler. Then flip a `replaying?` flag and drain
+   ONE MORE TIME to catch anything that landed between the last drain
+   and the flag flip. After the second drain the buffering callback
+   sees `replaying? = false` and goes direct.
+
+   Overlap is fine: replay-folded events and any buffered events that
+   the replay snapshot already contained will be applied through the
+   pure layer twice — but the state machine is idempotent on
+   re-observation (§2.3 terminal memory; `:pending` membership check)
+   so byte-identical edges flow out either way."
   [handle]
   (let [{:keys [stream subscribed? config]} @handle]
     (when-not subscribed?
       (swap! handle assoc :subscribed? true)
-      ;; Replay BEFORE subscribing so we observe the prefix exactly
-      ;; once. A concurrent publisher between replay and subscribe
-      ;; would lose at most one event; in v1 the lifecycle is brought
-      ;; up alongside the stream, so there is no race in practice.
-      ;; Production deployments that wire a hot stream MUST replay +
-      ;; subscribe under a quiesce barrier; tracked for the operator-
-      ;; surface follow-on.
-      (replay! handle)
-      (es/subscribe! stream subscriber-id
-                     (fn [event] (handle-event! handle event))
-                     not-self-emit?)
+      (let [buffer     (java.util.concurrent.LinkedBlockingQueue.)
+            replaying? (atom true)
+            ;; Buffering subscriber: while replaying, enqueue; after,
+            ;; go direct. The flag flip below is the cutover.
+            handler    (fn [event]
+                         (if @replaying?
+                           (.add buffer event)
+                           (handle-event! handle event)))]
+        (es/subscribe! stream subscriber-id handler not-self-emit?)
+        ;; Replay reads `get-events` as a snapshot. Events that landed
+        ;; before the snapshot are folded here; events that landed
+        ;; after (i.e. concurrent publishers) are in `buffer`.
+        (replay! handle)
+        ;; Drain everything that arrived during replay. Loop until the
+        ;; queue stays empty across one full pass — concurrent
+        ;; publishers might add while we're draining.
+        (loop []
+          (let [batch (java.util.ArrayList.)]
+            (.drainTo buffer batch)
+            (when (pos? (.size batch))
+              (doseq [event batch] (handle-event! handle event))
+              (recur))))
+        ;; Flip the flag, then drain one more time. Any event that
+        ;; landed BEFORE the flip went into the buffer (drained here);
+        ;; anything AFTER goes through the direct path via the
+        ;; subscriber callback.
+        (reset! replaying? false)
+        (let [final-batch (java.util.ArrayList.)]
+          (.drainTo buffer final-batch)
+          (doseq [event final-batch] (handle-event! handle event))))
       (let [scheduler (start-scheduler! handle (:correlator/expire-tick-ms config))]
         (swap! handle assoc :scheduler scheduler)))
     handle))

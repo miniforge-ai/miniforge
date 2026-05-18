@@ -20,16 +20,35 @@
   "Pure envelope construction for `:supervisory/automation-edge-upserted`
    events (N5-delta-4 §4.1).
 
-   Layer 0: no I/O, no clock. Takes an edge map produced by the state
-   machine plus a sequence number allocated by the lifecycle layer and
-   returns the wire envelope per N3 §2.1.
+   Layer 0: no I/O, no clock. Takes a base envelope (already carrying the
+   stream's allocated `:event/id` / `:event/version` /
+   `:event/sequence-number` / identity-propagation fields per the
+   event-stream `create-envelope` contract) plus an edge map from the
+   state machine and layers on the edge-specific fields.
 
-   The lifecycle layer (`core.clj`) is responsible for sequence-number
-   allocation — the brick does not reach into the event-stream's internal
-   counter from here. This keeps the emitter trivially testable: given an
-   edge and a number, it produces a deterministic map."
-  (:require
-   [ai.miniforge.automation-edge-correlator.schema :as schema]))
+   The lifecycle layer (`core.clj`) is responsible for calling
+   `create-envelope`; the emitter only assoc's on top. Two reasons:
+
+   - **Identity propagation.** `create-envelope` ships `:event/id` as a
+     Snowflake-encoded UUID when the stream carries a generator (BD-2b),
+     and threads `:org/id` / `:workspace/id` / `:repo/id` / `:auth/context`
+     identity fields per Phase E Decision 14. Discarding those by
+     re-generating a `random-uuid` here would regress ordering (Snowflake
+     vs random) and lose tenancy context.
+   - **Sequence numbering.** Sequence allocation is racey-without-care;
+     `create-envelope` already wraps the swap-vals! pattern that fixed an
+     earlier race (PR #814). The emitter has no business duplicating that
+     code path.
+
+   The emitter overrides exactly three envelope fields, and only those:
+
+   - `:event/timestamp`     — replaced with the edge's `:edge/updated-at`.
+                              The state machine's transition time is the
+                              source of truth; the wall-clock value
+                              `create-envelope` stamped is discarded so
+                              replay reconstructs byte-identical envelopes.
+   - `:message`             — short human-readable summary.
+   - `:supervisory/entity`  — the full edge map.")
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Message construction
@@ -57,53 +76,41 @@
 ;; Envelope construction
 
 (defn upsert-event
-  "Build a `:supervisory/automation-edge-upserted` event envelope from an
-   `edge` map produced by the state machine. Pure.
+  "Layer the edge-specific fields onto a base envelope from
+   `event-stream/create-envelope`. Pure.
 
-   The envelope follows N3 §2.1:
+   `base-envelope` MUST already carry the stream's allocated `:event/id`
+   (Snowflake-encoded when the stream is so configured), `:event/version`,
+   `:event/sequence-number`, and any identity-propagation fields the
+   caller supplied. `:event/type` is asserted to
+   `:supervisory/automation-edge-upserted` defensively — the lifecycle
+   layer passes that type to `create-envelope` already, but assoc'ing
+   here catches accidental future regressions.
 
-   - `:event/id`              — freshly-generated `random-uuid`. Replay
-                                regenerates this; consumers dedup on
-                                `:edge/id` per N5-delta-4 §2.3.
-   - `:event/type`            — `:supervisory/automation-edge-upserted`
-   - `:event/timestamp`       — the edge's `:edge/updated-at`. Mirrors
-                                the source-of-truth discipline from the
-                                state machine: the envelope clock is the
-                                most-recent transition time, not wall
-                                clock at emission. Replay therefore
-                                reconstructs byte-identical timestamps.
-   - `:event/version`         — `\"1.0.0\"` per N5-delta-4 §4.1.
-   - `:event/sequence-number` — supplied by the lifecycle layer; the
-                                pure emitter does not allocate.
-   - `:supervisory/entity`    — the full edge map.
-   - `:message`               — short human-readable summary.
+   Three fields are overridden / set:
 
-   `:workflow/id` is left absent: the schema marks it `:optional` /
-   `:maybe`, and the edge does not always belong to a single workflow
-   (a `:pr/merged` trigger opens an edge before any handler workflow
-   exists). The downstream filter scopes on `:event/type` instead."
-  [edge sequence-number]
-  {:event/type            :supervisory/automation-edge-upserted
-   :event/id              (random-uuid)
-   :event/timestamp       (:edge/updated-at edge)
-   :event/version         "1.0.0"
-   :event/sequence-number sequence-number
-   :message               (summary-message edge)
-   :supervisory/entity    edge})
-
-;; The schema namespace is required so `clj-kondo` / cljc compilation
-;; finds the dependency even though we currently reach into it only via
-;; the validation hook in core.clj. Touch a value here so the require is
-;; not flagged as unused — `schema/automation-edge-statuses` is a stable,
-;; pure constant suitable for the compile-time anchor.
-(def ^:private referenced-statuses
-  "Compile-time anchor that keeps the `schema` require live. The vector
-   is also useful in the rich comment below for REPL exploration."
-  schema/automation-edge-statuses)
+   - `:event/timestamp`    ← `:edge/updated-at` (replay-stable transition
+                             time, not wall clock).
+   - `:message`            ← short human summary.
+   - `:supervisory/entity` ← the full edge map."
+  [base-envelope edge]
+  (assoc base-envelope
+         :event/type         :supervisory/automation-edge-upserted
+         :event/timestamp    (:edge/updated-at edge)
+         :message            (summary-message edge)
+         :supervisory/entity edge))
 
 (comment
-  ;; REPL — synthesize an edge, wrap it, inspect.
-  (let [edge {:edge/id                          (random-uuid)
+  ;; REPL — synthesize a base envelope (what create-envelope would
+  ;; produce) and an edge, wrap them, inspect.
+  (let [base {:event/type            :supervisory/automation-edge-upserted
+              :event/id              (random-uuid)
+              :event/timestamp       (java.util.Date.)
+              :event/version         "1.0.0"
+              :event/sequence-number 42
+              :workflow/id           nil
+              :message               ""}
+        edge {:edge/id                          (random-uuid)
               :edge/trigger-event-id            (random-uuid)
               :edge/trigger-kind                :pr-merged
               :edge/status                      :observed
@@ -113,8 +120,6 @@
               :edge/affected-pr-ids             [["miniforge-ai/miniforge" 999]]
               :edge/affected-agent-session-ids  []
               :edge/operator-action-required    false}]
-    (upsert-event edge 42))
-
-  referenced-statuses
+    (upsert-event base edge))
 
   :leave-this-here)

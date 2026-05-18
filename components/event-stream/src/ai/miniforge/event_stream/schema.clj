@@ -763,11 +763,21 @@
     [:event/timestamp inst?]
     [:event/version string?]
     [:event/sequence-number int?]
-    ;; `:workflow/id` is :optional/:maybe — an edge MAY be opened by a
-    ;; trigger that names no workflow (e.g. `:pr/merged`), so the envelope
-    ;; field is absent then. When the trigger is workflow-scoped
-    ;; (`:workflow/completed`, `:gate/passed`) the producer threads the
-    ;; workflow id through for downstream filtering.
+    ;; `:workflow/id` is :optional/:maybe — its presence on the envelope
+    ;; tracks the edge's correlation state, not the originating trigger
+    ;; kind:
+    ;;
+    ;; - Pre-handler edges (`:observed` with no handler workflow
+    ;;   correlated yet — the typical state after a `:pr/merged` trigger
+    ;;   and before the responding workflow's `:workflow/started`) have
+    ;;   no `:edge/handled-by-workflow-run-id` yet, so the producer
+    ;;   threads `nil` and `create-envelope` omits the envelope field.
+    ;; - Post-correlation edges (`:handled`, `:failed`, and the
+    ;;   post-terminal `:suppressed` shape that preserved the prior
+    ;;   workflow id) carry `:edge/handled-by-workflow-run-id` on the
+    ;;   entity; the producer threads that value into `create-envelope`
+    ;;   so the envelope's `:workflow/id` is populated for downstream
+    ;;   workflow-scoped filters.
     [:workflow/id {:optional true} [:maybe uuid?]]
     [:supervisory/entity map?]
     [:message string?]]))
