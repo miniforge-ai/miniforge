@@ -19,10 +19,13 @@
 (ns ai.miniforge.automation-edge-correlator.interface
   "Public API for the automation-edge-correlator component.
 
-   N15-1 exposes schema and trigger-classification helpers only.
-   Lifecycle (`start!` / `stop!` / `attach!`) lands in N15-3 once
-   `core.clj` and `emitter.clj` are in place."
+   Exposes schemas, trigger classification (N15-1), and the lifecycle
+   surface (N15-3). The pure state-machine transitions in `correlator.clj`
+   are deliberately NOT re-exported — they are implementation details
+   behind `start!` / `stop!` / `attach!`, and surfacing them would let
+   downstream callers reach past the boundary into the fold internals."
   (:require
+   [ai.miniforge.automation-edge-correlator.core :as core]
    [ai.miniforge.automation-edge-correlator.schema :as schema]
    [ai.miniforge.automation-edge-correlator.triggers :as triggers]))
 
@@ -43,3 +46,10 @@
 ;; Trigger classification
 
 (def classify-trigger triggers/classify-trigger)
+
+;------------------------------------------------------------------------------ Layer 1
+;; Lifecycle — the only surface the rest of the workspace should touch.
+
+(def start!  core/start!)
+(def stop!   core/stop!)
+(def attach! core/attach!)
