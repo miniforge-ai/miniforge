@@ -11,7 +11,7 @@
 - **Status:** Draft
 - **Date:** 2026-05-17
 - **Amends:** N5-delta-supervisory-control-plane-v1 (§3.1 v1 entities, §3.4 supervisory-state component)
-- **Amends:** N5-delta-3-evidence-artifact-task-decision-pack-v1 (entity set extended with `AutomationEdge`)
+- **Amends:** N5-delta-evidence-artifact-task-decision-pack-v1 (entity set extended with `AutomationEdge`)
 - **Related:** N3 (event stream), N8 (observability control), N9 (external PR integration);
   design RFC `docs/design/automation-edge-correlator.md`;
   miniforge-control consumer contract `contracts/crates/supervisory-entities/`
@@ -62,7 +62,7 @@ and selectively override automation.
 - **No change to the on-wire shape of any existing event.** Only new event types are added.
 - **No new intervention surface.** Operator overrides on edges (suppress / unsuppress / re-route)
   flow through the existing intervention vocabulary defined in N5-δ1 §7 and surfaced via
-  N5-δsupervisory-control-plane-v1 §7.
+  N5-delta-supervisory-control-plane-v1 §7.
 
 ### 1.4 Component placement rationale
 
@@ -294,15 +294,22 @@ predicate or an explicit skip in the dispatch handler, but the filter MUST be un
 correlator MUST call this function on every input event and act only when it returns a non-nil
 value. Inputs:
 
-- `:pr/merged` → `:pr-merged`. Affected PRs: `[[:pr/repo :pr/number]]`. Affected agents:
-  `[]` (PR merge does not name an agent in payload v1).
-- `:pr-monitor/review-comments-arrived` → `:review-comments-arrived`. Affected PRs:
-  `[[:pr/repo :pr/number]]`. Affected agents: `[:comments/agent-session-id]` when present.
-- `:pr-monitor/ci-failed` → `:ci-failed`. Affected PRs: `[[:pr/repo :pr/number]]`. Affected
-  agents: `[]`.
-- `:standards-review/posted` → `:standards-review-arrived`. Affected PRs:
-  `[[:pr/repo :pr/number]]`. Affected agents: `[:affected/workflow-run-id]` mapped via the
-  workflow → agent index when available; `[]` otherwise.
+In the descriptions below, "Affected PRs" and "Affected agents" name the **fields** the
+correlator extracts from the trigger payload; the resulting `:edge/affected-pr-ids` is a vector
+of `[<pr/repo-value> <pr/number-value>]` tuples per §2, and `:edge/affected-agent-session-ids`
+is a vector of the extracted session UUIDs.
+
+- `:pr/merged` → `:pr-merged`. Affected PRs: derived from `:pr/repo` + `:pr/number` (one
+  tuple). Affected agents: `[]` (PR merge does not name an agent in payload v1).
+- `:pr-monitor/review-comments-arrived` → `:review-comments-arrived`. Affected PRs: derived
+  from `:pr/repo` + `:pr/number` (one tuple). Affected agents:
+  `[<:comments/agent-session-id>]` when present.
+- `:pr-monitor/ci-failed` → `:ci-failed`. Affected PRs: derived from `:pr/repo` +
+  `:pr/number` (one tuple). Affected agents: `[]`.
+- `:standards-review/posted` → `:standards-review-arrived`. Affected PRs: derived from
+  `:pr/repo` + `:pr/number` (one tuple). Affected agents:
+  `[<:affected/workflow-run-id>]` mapped through the workflow → agent index when available;
+  `[]` otherwise.
 - `:workflow/completed` → `:workflow-completed`. Affected entities derived via the workflow's
   own PR ownership record. NOTE: a `:workflow/completed` event also acts as the **handler
   signal** for a prior trigger (status transition `:observed → :handled`); the correlator MUST
@@ -384,15 +391,23 @@ Three trigger event types are declared first-class supervisory events. Their sch
 added to `event-stream/schema.clj` and their emission sites added to the existing components
 named below.
 
+All three new trigger event types and the envelope addition in §4.3 are presented as malli
+`[:map ...]` schemas, consistent with the §2 entity shape convention. Each schema layers on
+the N3 §2.1 envelope (which contributes `:event/type`, `:event/id`, `:event/timestamp`,
+`:event/version`, `:event/sequence-number`, `:message`); only the event-specific payload
+fields are repeated here.
+
 #### 4.2.1 `:pr-monitor/review-comments-arrived`
 
 ```clojure
-{:event/type                 :pr-monitor/review-comments-arrived
- …envelope…
- :pr/repo                    string
- :pr/number                  :common/non-neg-int
- :comments/count             :common/non-neg-int
- :comments/agent-session-id  {:optional true} [:maybe :id/uuid]}
+[:map
+ ;; N3 §2.1 envelope contributes :event/id, :event/timestamp, :event/version,
+ ;; :event/sequence-number, :message
+ [:event/type                 [:= :pr-monitor/review-comments-arrived]]
+ [:pr/repo                    string?]
+ [:pr/number                  :common/non-neg-int]
+ [:comments/count             :common/non-neg-int]
+ [:comments/agent-session-id  {:optional true} [:maybe :id/uuid]]]
 ```
 
 Emitted by `components/pr-monitor` when the GitHub webhook (or polling fallback) reports new
@@ -401,41 +416,43 @@ review comments on a PR Miniforge owns.
 #### 4.2.2 `:pr-monitor/ci-failed`
 
 ```clojure
-{:event/type           :pr-monitor/ci-failed
- …envelope…
- :pr/repo              string
- :pr/number            :common/non-neg-int
- :ci/check-name        string
- :ci/conclusion        keyword}      ; e.g. :failure | :timed-out | :cancelled
+[:map
+ [:event/type     [:= :pr-monitor/ci-failed]]
+ [:pr/repo        string?]
+ [:pr/number      :common/non-neg-int]
+ [:ci/check-name  string?]
+ [:ci/conclusion  keyword?]]   ; known values: :failure, :timed-out, :cancelled
 ```
 
 Emitted by `components/pr-monitor` when a CI status transitions to a non-success terminal
-state on a PR Miniforge owns.
+state on a PR Miniforge owns. `:ci/conclusion` is an open keyword — known values listed in the
+comment; consumers MUST tolerate additional values for forward compatibility.
 
 #### 4.2.3 `:standards-review/posted`
 
 ```clojure
-{:event/type                 :standards-review/posted
- …envelope…
- :pr/repo                    string
- :pr/number                  :common/non-neg-int
- :affected/workflow-run-id   {:optional true} [:maybe :id/uuid]
- :review/severity            keyword       ; :advisory | :blocking}
+[:map
+ [:event/type                [:= :standards-review/posted]]
+ [:pr/repo                   string?]
+ [:pr/number                 :common/non-neg-int]
+ [:affected/workflow-run-id  {:optional true} [:maybe :id/uuid]]
+ [:review/severity           keyword?]]   ; known values: :advisory, :blocking
 ```
 
 Emitted by `components/standards-reviewer` when a review comment lands on a PR.
+`:review/severity` is an open keyword — known values listed in the comment.
 
 ### 4.3 `:routing/trigger-event-id` envelope addition
 
 Handler workflows fired by N13 routing components MUST attach `:routing/trigger-event-id` to
-their `:workflow/started` event payload:
+their `:workflow/started` event payload. The schema for the relevant fields:
 
 ```clojure
-{:event/type                 :workflow/started
- …envelope…
- :workflow/id                #uuid
- :workflow/spec              keyword
- :routing/trigger-event-id   {:optional true} [:maybe :id/uuid]}
+[:map
+ [:event/type                [:= :workflow/started]]
+ [:workflow/id               :id/uuid]
+ [:workflow/spec             keyword?]
+ [:routing/trigger-event-id  {:optional true} [:maybe :id/uuid]]]
 ```
 
 Producers that MUST attach the field: `components/pr-lifecycle/resume-dispatcher`,
