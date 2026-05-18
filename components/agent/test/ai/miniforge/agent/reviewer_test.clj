@@ -521,6 +521,87 @@
       (is (= :rejected (:review/decision review)))
       (is (some #(re-find #"out-of-scope" %) (:review/blocking-issues review))))))
 
+;; ============================================================================
+;; LLM vs gate disagreement — observability for the 2026-05-18 dogfood
+;; finding (LLM :approved silently overridden by failing internal gates)
+;; ============================================================================
+
+(deftest test-reviewer-emits-gate-overrode-llm-warn-on-disagreement
+  ;; When the LLM emits :approved but a deterministic gate fails, the
+  ;; final decision flips and the workflow gate fails with no signal
+  ;; to the operator about which internal gate caused the override.
+  ;; Pin the diagnostic log + the :failing-gate-ids / :gate-overrode-llm?
+  ;; fields on :reviewer/review-complete, plus the dedicated
+  ;; :reviewer/gate-overrode-llm warn entry.
+  (testing ":reviewer/gate-overrode-llm warn fires when LLM :approved becomes final :rejected"
+    (with-redefs [model/resolve-llm-client-for-role (fn [_role client] client)
+                  llm/chat (fn [_client _prompt _opts]
+                             (mock-llm-response
+                               "```clojure
+{:review/decision :approved
+ :review/issues []
+ :review/summary \"LGTM\"}
+```"))
+                  llm/success? :success?
+                  llm/get-content :content]
+      (let [[logger entries] (log/collecting-logger {:min-level :trace})
+            failing-gate (loop/custom-gate
+                           :always-fails
+                           :policy
+                           (fn [_artifact _ctx]
+                             (loop/fail-result :always-fails :policy
+                                               [(loop/make-error :failed
+                                                                 "deterministic gate")])))
+            reviewer (reviewer/create-reviewer
+                       {:llm-backend ::mock-backend
+                        :gates [failing-gate]
+                        :logger logger})
+            result (core/invoke reviewer {} sample-artifact)
+            complete-entry (some #(when (= :reviewer/review-complete (:log/event %)) %)
+                                 @entries)
+            override-entry (some #(when (= :reviewer/gate-overrode-llm (:log/event %)) %)
+                                 @entries)]
+        (is (= :rejected (:review/decision (:artifact result)))
+            "baseline: failing internal gate flips LLM :approved → :rejected")
+        (is (some? complete-entry)
+            ":reviewer/review-complete must fire")
+        (is (= [:always-fails] (get-in complete-entry [:data :failing-gate-ids]))
+            ":failing-gate-ids on the complete log must name the gate")
+        (is (true? (get-in complete-entry [:data :gate-overrode-llm?]))
+            ":gate-overrode-llm? must be true when LLM and final differ")
+        (is (some? override-entry)
+            ":reviewer/gate-overrode-llm warn must fire on disagreement")
+        (is (= :approved  (get-in override-entry [:data :llm-decision])))
+        (is (= :rejected  (get-in override-entry [:data :final-decision])))
+        (is (= [:always-fails] (get-in override-entry [:data :failing-gate-ids])))))))
+
+(deftest test-reviewer-no-override-warn-when-gates-and-llm-agree
+  (testing "no :reviewer/gate-overrode-llm warn when LLM and gates agree on :approved"
+    (with-redefs [model/resolve-llm-client-for-role (fn [_role client] client)
+                  llm/chat (fn [_client _prompt _opts]
+                             (mock-llm-response
+                               "```clojure
+{:review/decision :approved
+ :review/issues []
+ :review/summary \"LGTM\"}
+```"))
+                  llm/success? :success?
+                  llm/get-content :content]
+      (let [[logger entries] (log/collecting-logger {:min-level :trace})
+            reviewer (reviewer/create-reviewer
+                       {:llm-backend ::mock-backend
+                        :gates []
+                        :logger logger})
+            _result (core/invoke reviewer {} sample-artifact)
+            complete-entry (some #(when (= :reviewer/review-complete (:log/event %)) %)
+                                 @entries)
+            override-entry (some #(when (= :reviewer/gate-overrode-llm (:log/event %)) %)
+                                 @entries)]
+        (is (false? (get-in complete-entry [:data :gate-overrode-llm?])))
+        (is (empty? (get-in complete-entry [:data :failing-gate-ids])))
+        (is (nil? override-entry)
+            "no warn when LLM and gates agree — keeps the signal high-value")))))
+
 ;------------------------------------------------------------------------------ Schema validation tests
 
 (deftest test-validate-review-artifact
