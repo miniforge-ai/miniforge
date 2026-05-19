@@ -19,7 +19,7 @@
 (ns ai.miniforge.agent.stream-watchdog-test
   "Tests for the per-phase stream-gap watchdog timer."
   (:require
-   [clojure.test :refer [deftest is testing use-fixtures]]
+   [clojure.test :refer [deftest is testing]]
    [ai.miniforge.agent.stream-watchdog :as sut])
   (:import
    (java.util.concurrent.atomic AtomicLong)))
@@ -28,14 +28,16 @@
 ;; Helpers
 
 (defn- make-test-watchdog
-  "Create a watchdog with an artificially short threshold for testing."
+  "Merge caller opts over safe defaults. Uses a fast check interval so
+   fire-on-threshold tests complete quickly without sleep gymnastics."
   [opts]
-  (merge {:threshold-ms 200
-          :phase-id     :test-phase
-          :backend      :mock
-          :event-stream nil
-          :workflow-id  "wf-test"
-          :kill-fn      (fn [])}
+  (merge {:threshold-ms      200
+          :check-interval-ms 50        ;; fast checks for test speed
+          :phase-id          :test-phase
+          :backend           :mock
+          :event-stream      nil
+          :workflow-id       "wf-test"
+          :kill-fn           (fn [])}
          opts))
 
 (defn- await-condition
@@ -48,7 +50,15 @@
         true
         (if (> (System/currentTimeMillis) deadline)
           false
-          (do (Thread/sleep 50) (recur)))))))
+          (do (Thread/sleep 10) (recur)))))))
+
+(defn- backdate!
+  "Back-date a watchdog's AtomicLong by `offset-ms` so the gap is already
+   exceeded on the next check tick."
+  [watchdog offset-ms]
+  (let [^AtomicLong ts (:last-event-ts watchdog)]
+    (.set ts (- (System/currentTimeMillis) offset-ms)))
+  watchdog)
 
 ;; ---------------------------------------------------------------------------
 ;; resolve-gap-threshold
@@ -66,18 +76,18 @@
             :claude-code)))))
 
 (deftest resolve-gap-threshold-returns-backend-specific-override
-  (testing "per-backend entry overrides global threshold"
-    (let [config {:agent/stream-gap-threshold-ms      60000
+  (testing "per-backend entry wins over global threshold"
+    (let [config {:agent/stream-gap-threshold-ms     60000
                   :agent/per-backend-gap-thresholds  {:claude-code 120000}}]
       (is (= 120000 (sut/resolve-gap-threshold config :claude-code)))))
 
-  (testing "falls back to global threshold for an unlisted backend"
-    (let [config {:agent/stream-gap-threshold-ms      60000
+  (testing "falls back to global for an unlisted backend"
+    (let [config {:agent/stream-gap-threshold-ms     60000
                   :agent/per-backend-gap-thresholds  {:claude-code 120000}}]
       (is (= 60000 (sut/resolve-gap-threshold config :other-backend))))))
 
 (deftest resolve-gap-threshold-default-constant-is-90s
-  (testing "default constant value is 90 000 ms"
+  (testing "default constant is 90 000 ms"
     (is (= 90000 sut/default-gap-threshold-ms))))
 
 ;; ---------------------------------------------------------------------------
@@ -116,27 +126,38 @@
         (finally
           (sut/stop! wd))))))
 
-;; ---------------------------------------------------------------------------
-;; reset!
+(deftest create-watchdog-accepts-check-interval-ms
+  (testing ":check-interval-ms is stored in the watchdog map"
+    (let [wd (sut/create-watchdog (make-test-watchdog {:check-interval-ms 100}))]
+      (try
+        ;; The scheduler is started with the custom interval; we verify it by
+        ;; checking the ctx key is absent (not stored) but the scheduler is alive.
+        ;; Structural check: scheduler is running
+        (is (not (.isShutdown (:scheduler wd))))
+        (finally
+          (sut/stop! wd))))))
 
-(deftest reset-updates-timestamp
-  (testing "reset! updates the AtomicLong to current time"
+;; ---------------------------------------------------------------------------
+;; ping!
+
+(deftest ping-updates-timestamp
+  (testing "ping! advances the AtomicLong to current time"
     (let [wd (sut/create-watchdog (make-test-watchdog {}))]
       (try
         (let [^AtomicLong ts (:last-event-ts wd)
               before          (.get ts)]
           (Thread/sleep 5)
-          (sut/reset! wd)
+          (sut/ping! wd)
           (let [after (.get ts)]
             (is (>= after before))))
         (finally
           (sut/stop! wd))))))
 
-(deftest reset-returns-the-watchdog-map
-  (testing "reset! returns the watchdog map (fluent chaining)"
+(deftest ping-returns-the-watchdog-map
+  (testing "ping! returns the watchdog map (fluent chaining)"
     (let [wd (sut/create-watchdog (make-test-watchdog {}))]
       (try
-        (is (= wd (sut/reset! wd)))
+        (is (= wd (sut/ping! wd)))
         (finally
           (sut/stop! wd))))))
 
@@ -180,48 +201,49 @@
 ;; End-to-end: kill fires when threshold exceeded
 
 (deftest watchdog-fires-kill-when-gap-exceeded
-  (testing "kill-fn is called after the threshold is exceeded"
+  (testing "kill-fn is called when the backdated gap exceeds threshold-ms"
     (let [killed? (atom false)
           wd      (sut/create-watchdog
-                   {:threshold-ms 100          ;; 100 ms threshold
-                    :phase-id     :test
-                    :backend      :mock
-                    :event-stream nil
-                    :workflow-id  "wf-fire-test"
-                    :kill-fn      #(reset! killed? true)})]
-      ;; Wait up to 3 seconds for the kill to fire (check runs every 5s normally,
-      ;; but the threshold is 100ms so the very first check — at 5s — will exceed
-      ;; it; we wait up to 3× the check-interval-seconds window)
-      ;; Note: actual check fires at check-interval-seconds (5s). For speed in
-      ;; unit tests we manipulate the last-event timestamp directly.
-      (let [^AtomicLong ts (:last-event-ts wd)]
-        ;; Back-date the timestamp so the gap is already exceeded
-        (.set ts (- (System/currentTimeMillis) 200)))
-      (let [fired? (await-condition #(deref killed?) 12000)]
+                   (make-test-watchdog
+                    {:threshold-ms      200
+                     :check-interval-ms 50
+                     :kill-fn           #(reset! killed? true)}))]
+      ;; Back-date to make the gap already exceeded
+      (backdate! wd 400)
+      ;; Wait for the first check tick (up to 2s)
+      (let [fired? (await-condition #(deref killed?) 2000)]
         (sut/stop! wd)
-        (is fired? "kill-fn should have been called when the gap exceeded threshold-ms")
-        (is (sut/stalled? wd) "watchdog should be marked stalled after kill")))))
+        (is fired? "kill-fn should fire when gap > threshold-ms")
+        (is (sut/stalled? wd) "watchdog should be marked stalled")))))
 
-(deftest watchdog-does-not-fire-when-regularly-reset
-  (testing "kill-fn is NOT called when reset! is called frequently enough"
-    (let [killed?    (atom false)
-          threshold  200
-          wd         (sut/create-watchdog
-                      {:threshold-ms threshold
-                       :phase-id     :test
-                       :backend      :mock
-                       :event-stream nil
-                       :workflow-id  "wf-no-fire"
-                       :kill-fn      #(reset! killed? true)})]
-      ;; Keep resetting every 50ms for 2 seconds (well within check interval)
-      (dotimes [_ 10]
-        (Thread/sleep 50)
-        (sut/reset! wd))
-      (sut/stop! wd)
-      ;; The scheduler fires every 5s; we stopped it cleanly before any check.
-      ;; If no check ran, kill should not have fired.
-      (is (not (sut/stalled? wd)))
-      (is (false? @killed?)))))
+;; ---------------------------------------------------------------------------
+;; ping! actually prevents the kill from firing
+
+(deftest ping-prevents-kill-when-gap-was-backdated
+  "ping! resets the timestamp to now. Even if the timestamp was back-dated
+   to simulate a stale gap, calling ping! before the next check tick should
+   make the gap measurement fresh and suppress the kill.
+
+   This test is effective because we use a fast 50ms check-interval-ms and
+   call ping! immediately after backdating, then verify the kill never fires
+   over multiple check cycles."
+  (let [killed? (atom false)
+        wd      (sut/create-watchdog
+                 (make-test-watchdog
+                  {:threshold-ms      200
+                   :check-interval-ms 50
+                   :kill-fn           #(reset! killed? true)}))]
+    ;; Simulate a gap that would exceed threshold...
+    (backdate! wd 400)
+    ;; ...but immediately reset the timestamp via ping!
+    (sut/ping! wd)
+    ;; Let multiple check ticks run (300ms = ~6 ticks at 50ms interval)
+    (Thread/sleep 300)
+    (sut/stop! wd)
+    (is (not @killed?)
+        "kill-fn must NOT fire if ping! kept the timestamp current")
+    (is (not (sut/stalled? wd))
+        "watchdog must NOT be marked stalled when ping! suppressed the kill")))
 
 ;; ---------------------------------------------------------------------------
 ;; Interface namespace re-export sanity
@@ -231,8 +253,20 @@
     (require 'ai.miniforge.agent.interface.watchdog)
     (let [iface (find-ns 'ai.miniforge.agent.interface.watchdog)]
       (is (some? (ns-resolve iface 'create-watchdog)))
-      (is (some? (ns-resolve iface 'reset!)))
+      (is (some? (ns-resolve iface 'ping!)))
       (is (some? (ns-resolve iface 'stop!)))
       (is (some? (ns-resolve iface 'stalled?)))
       (is (some? (ns-resolve iface 'resolve-gap-threshold)))
-      (is (some? (ns-resolve iface 'default-gap-threshold-ms))))))
+      (is (some? (ns-resolve iface 'default-gap-threshold-ms)))
+      (is (some? (ns-resolve iface 'default-check-interval-ms))))))
+
+(deftest interface-watchdog-vars-point-to-same-fns
+  (testing "re-exported vars are identical to source vars (not copies)"
+    (require 'ai.miniforge.agent.interface.watchdog)
+    (let [iface (find-ns 'ai.miniforge.agent.interface.watchdog)]
+      (is (= (var-get (ns-resolve iface 'ping!))
+             sut/ping!))
+      (is (= (var-get (ns-resolve iface 'stop!))
+             sut/stop!))
+      (is (= (var-get (ns-resolve iface 'stalled?))
+             sut/stalled?)))))

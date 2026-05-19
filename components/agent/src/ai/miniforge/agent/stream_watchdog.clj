@@ -25,7 +25,7 @@
    blocks event emission on the hot path.
 
    Layer 0: Config helpers (resolve-gap-threshold)
-   Layer 1: Watchdog lifecycle (create-watchdog, reset!, stop!, stalled?)"
+   Layer 1: Watchdog lifecycle (create-watchdog, ping!, stop!, stalled?)"
   (:require
    [ai.miniforge.event-stream.interface :as event-stream]
    [ai.miniforge.logging.interface :as log])
@@ -34,22 +34,25 @@
    (java.util.concurrent.atomic AtomicLong)))
 
 ;; ---------------------------------------------------------------------------
-;; Layer 0 — configuration helpers
+;; Layer 0 — module-level logger and configuration helpers
+
+(defonce ^:private module-logger
+  (log/create-logger {:min-level :info :output :edn}))
 
 (def ^:const default-gap-threshold-ms
   "Default stream-gap threshold in milliseconds (90 seconds)."
   90000)
 
-(def ^:const check-interval-seconds
-  "How often the scheduled watcher fires, in seconds."
-  5)
+(def ^:const default-check-interval-ms
+  "Default watchdog check interval in milliseconds (5 seconds)."
+  5000)
 
 (defn resolve-gap-threshold
   "Resolve the stream-gap threshold in ms for a given backend.
 
    Precedence (highest wins):
-     1. backend-specific entry in :agent/per-backend-gap-thresholds
-     2. global :agent/stream-gap-threshold-ms in config
+     1. Backend-specific entry in :agent/per-backend-gap-thresholds
+     2. Global :agent/stream-gap-threshold-ms in config
      3. `default-gap-threshold-ms` (90 000 ms)
 
    Example config:
@@ -74,15 +77,15 @@
 
 (defn- emit-stall-event!
   "Publish a :agent/stream-stalled event to the event-stream.
-   Best-effort: log and swallow any emission failure so the watchdog
+   Best-effort — logs and swallows any emission failure so the watchdog
    thread itself does not crash."
   [event-stream workflow-id phase-id backend logger]
   (try
     (let [envelope (event-stream/create-envelope
                     event-stream
                     :agent/stream-stalled
-                    {:phase/id       phase-id
-                     :agent/backend  backend
+                    {:phase/id          phase-id
+                     :agent/backend     backend
                      :event/workflow-id workflow-id}
                     {})]
       (event-stream/publish! event-stream envelope))
@@ -91,14 +94,13 @@
                 {:phase-id phase-id :backend backend :error (ex-message ex)}))))
 
 (defn- build-check-task
-  "Build the Runnable that the scheduler fires every `check-interval-seconds`.
+  "Build the Runnable that the scheduler fires every check interval.
 
-   When the gap between now and the last recorded event timestamp exceeds
-   threshold-ms the task:
+   When (now − last-event-timestamp) exceeds threshold-ms the task:
      a. Calls kill-fn (kills the agent subprocess).
      b. Emits :agent/stream-stalled via event-stream.
      c. Sets the stalled? atom to true.
-     d. Shuts down the scheduler (one-shot; idempotent via isShutdown guard)."
+     d. Shuts down the scheduler (one-shot; non-blocking from own thread)."
   [{:keys [^AtomicLong last-event-ts stalled-atom
            threshold-ms phase-id backend event-stream workflow-id kill-fn
            ^ScheduledExecutorService scheduler logger]}]
@@ -118,9 +120,9 @@
             ;; b. emit stall event
             (emit-stall-event! event-stream workflow-id phase-id backend logger)
             ;; c. mark stalled
-            (reset! stalled-atom true)
-            ;; d. shut down scheduler (one-shot)
-            (future (.shutdown scheduler)))))
+            (clojure.core/reset! stalled-atom true)
+            ;; d. shut down scheduler — safe and non-blocking from own thread
+            (.shutdown scheduler))))
       (catch Exception ex
         (log/error logger "stream-watchdog: unhandled error in check task"
                    {:error (ex-message ex)})))))
@@ -129,21 +131,25 @@
   "Create and start a stream-gap watchdog.
 
    Options map:
-     :threshold-ms  — gap in ms before the kill fires (required)
-     :phase-id      — keyword or string identifying the current phase
-     :backend       — keyword identifying the agent backend (e.g. :claude-code)
-     :event-stream  — event-stream instance to publish the stall event
-     :workflow-id   — UUID or string; embedded in the stall event
-     :kill-fn       — zero-arity fn that terminates the agent subprocess
+     :threshold-ms      — gap in ms before the kill fires (default 90 000)
+     :check-interval-ms — how often to check for a stall (default 5 000)
+     :phase-id          — keyword or string identifying the current phase
+     :backend           — keyword identifying the agent backend (e.g. :claude-code)
+     :event-stream      — event-stream instance to publish the stall event
+     :workflow-id       — UUID or string; embedded in the stall event
+     :kill-fn           — zero-arity fn that terminates the agent subprocess
+     :logger            — optional logger; defaults to the module-level logger
 
-   Returns a watchdog state map. Pass it to `reset!`, `stop!`, and `stalled?`.
+   Returns a watchdog state map. Pass it to `ping!`, `stop!`, and `stalled?`.
 
-   The internal scheduler starts immediately on a daemon thread. Events must be
-   reported via `reset!` on every emission to keep the watchdog from firing."
-  [{:keys [threshold-ms phase-id backend event-stream workflow-id kill-fn]
-    :or   {threshold-ms default-gap-threshold-ms}}]
-  (let [logger       (log/create-logger {:min-level :info :output :edn})
-        last-event-ts (AtomicLong. (System/currentTimeMillis))
+   The internal scheduler starts immediately on a daemon thread. Report every
+   agent event via `ping!` to keep the watchdog from firing."
+  [{:keys [threshold-ms check-interval-ms phase-id backend
+           event-stream workflow-id kill-fn logger]
+    :or   {threshold-ms      default-gap-threshold-ms
+           check-interval-ms default-check-interval-ms
+           logger            module-logger}}]
+  (let [last-event-ts (AtomicLong. (System/currentTimeMillis))
         stalled-atom  (atom false)
         scheduler     (Executors/newSingleThreadScheduledExecutor
                        (daemon-thread-factory "stream-watchdog"))
@@ -161,16 +167,18 @@
     (.scheduleAtFixedRate
      scheduler
      check-task
-     check-interval-seconds
-     check-interval-seconds
-     TimeUnit/SECONDS)
+     check-interval-ms
+     check-interval-ms
+     TimeUnit/MILLISECONDS)
     ctx))
 
-(defn reset!
+(defn ping!
   "Record that an agent event just occurred, resetting the gap timer.
 
    Call this on every event emitted by the agent (tool-call, chunk, status, etc.).
-   Thread-safe via AtomicLong.set — never blocks."
+   Thread-safe via AtomicLong.set — never blocks.
+
+   Named `ping!` (not `reset!`) to avoid shadowing `clojure.core/reset!`."
   [watchdog]
   (when-let [^AtomicLong ts (:last-event-ts watchdog)]
     (.set ts (System/currentTimeMillis)))
@@ -200,21 +208,22 @@
 ;; Rich comment — development examples
 
 (comment
-  ;; Minimal watchdog with a 5-second threshold (fires in ~5s without resets)
+  ;; Minimal watchdog with a 200ms threshold and 50ms check interval (for REPL)
   (def wd
     (create-watchdog
-     {:threshold-ms 5000
-      :phase-id     :implement
-      :backend      :claude-code
-      :event-stream nil
-      :workflow-id  "wf-test-001"
-      :kill-fn      #(println "KILL SIGNAL")}))
+     {:threshold-ms      200
+      :check-interval-ms 50
+      :phase-id          :implement
+      :backend           :claude-code
+      :event-stream      nil
+      :workflow-id       "wf-test-001"
+      :kill-fn           #(println "KILL SIGNAL")}))
 
-  ;; Simulate an event
-  (reset! wd)
+  ;; Simulate an event ping
+  (ping! wd)
 
   ;; Check status
   (stalled? wd)
 
-  ;; Graceful shutdown
+  ;; Graceful shutdown on normal completion
   (stop! wd))
