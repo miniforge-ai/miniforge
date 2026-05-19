@@ -1,0 +1,132 @@
+;; =============================================================================
+;; Spec: Meta-agent intervention on repair-loop temporal stagnation
+;; =============================================================================
+;;
+;; Observed failure mode (dogfood run 2026-05-19, workflow 55eb2c77):
+;;   Implement → verify → review (rejected) → implement → verify → review
+;;   (rejected) → … for 3+ hours. Each iteration's review fingerprint differed
+;;   slightly (different file:line tuples for the same class of bug — mock-shape
+;;   mistakes around java.lang.Process / hang-count atom deref), so the strict
+;;   equality stagnation detector in progress-detector/detectors/repair_loop.clj
+;;   never fired. Per-phase iteration budgets were respected (review default 2),
+;;   but across 7 DAG tasks the workflow burned ~$5+ and 3+ hours of wall clock
+;;   making zero net progress.
+;;
+;; The system has machinery for hangs (PR #915 bounded verify with descendant
+;; kill + handback). It does NOT have machinery for "doing the same thing
+;; wrong over and over." A meta-agent should:
+;;   1. Notice the pattern (same files keep getting flagged, fuzzy-stagnation)
+;;   2. Pause the loop
+;;   3. Analyze the recurring bug class (LLM call over the recent reviews)
+;;   4. Synthesize an instruction addendum for the implementer
+;;   5. Resume implementer with the addendum injected into the task description
+;;
+;; Without (3-5), terminating on fuzzy-stagnation is strictly better than
+;; today (no progress is no progress) but the workflow still fails. WITH the
+;; intervention, the workflow self-heals.
+
+{:spec/title "Meta-agent intervention on repair-loop temporal stagnation"
+
+ :spec/description
+ "Detect repair-loop temporal stagnation via a fuzzy file×severity signal
+  (today's strict-equality detector misses real loops because LLM-generated
+  issue descriptions drift between iterations). When fuzzy-stagnation fires
+  after N=2 consecutive non-progressing reviews, route through a meta-agent
+  that analyzes the recurring failure pattern and synthesizes an instruction
+  addendum injected into the next implementer invocation.
+
+  GROUP 1 — Fuzzy stagnation signal (M1)
+  Extend `components/progress-detector/src/.../detectors/repair_loop.clj`
+  with a second fingerprint mode: `(file × severity)` set equality, returned
+  from a new `review-fingerprint-fuzzy` fn. Existing strict-equality path
+  stays — fuzzy is a parallel signal at lower severity. The detector emits a
+  new anomaly category `:anomalies.review/fuzzy-stagnation` (:class
+  :semantic, :severity :warning) when two consecutive reviews share the same
+  `(file × severity)` set. Strict stagnation still terminates; fuzzy
+  stagnation is observable but doesn't terminate on its own — its job is to
+  signal the meta-agent.
+
+  GROUP 2 — `:intervene` decision type (M2)
+  Extend `components/agent/src/.../meta_protocol.clj` MetaAgent return
+  schema with a third status: `:status :intervene` plus
+  `:intervention/addendum` (string — appended to next implement task
+  description) and `:intervention/scope` (`:next-implement | :next-N-phases
+  | :workflow`). Add `intervene?` predicate alongside `halt?` / `warning?` /
+  `healthy?`. Existing meta-agents stay compatible (return :halt or
+  :healthy as before).
+
+  GROUP 3 — RepairLoopMetaAgent (M3)
+  New meta-agent implementation at
+  `components/agent/src/.../meta/repair_loop_meta_agent.clj`. Consumes the
+  fuzzy-stagnation anomaly stream. When fired, invokes an LLM (Sonnet, same
+  shape as reviewer) with the last N=2 review artifacts + the relevant file
+  diff and asks for a structured response:
+    {:diagnosis            string  ; what class of mistake repeats?
+     :instruction-addendum string  ; what to tell the implementer
+     :confidence           :high | :medium | :low}
+  Returns `:status :intervene :intervention/addendum diagnosis+addendum`
+  when confidence >= :medium; otherwise `:status :warning` (don't intervene
+  on weak signals — they're worse than the loop continuing one more
+  iteration).
+
+  GROUP 4 — Workflow-runner hook (M4)
+  In `components/workflow/src/.../execution.clj`, before `execute-phase-step`
+  routes to implement, check the meta-decision channel for an
+  `:intervene` whose scope covers this phase. If present, append the
+  addendum to the implement task's `:task/description` (or `:task/intent` —
+  whichever the implementer prompt threads), emit a
+  `:meta/intervention-applied` event with the addendum text and source
+  meta-agent id, then proceed. Clear the intervention after consumption
+  (scope `:next-implement` is one-shot; `:next-N-phases` decrements).
+
+  GROUP 5 — Integration test (M5)
+  End-to-end pin: mock reviewer to return 3 consecutive reviews with same
+  `(file × severity)` set but drifting descriptions → fuzzy stagnation
+  fires → RepairLoopMetaAgent (mocked LLM returning fixed addendum) emits
+  `:intervene` → next implement invocation receives the addendum appended
+  to its task. Assert the addendum reaches the agent's input map and an
+  `:meta/intervention-applied` event is recorded."
+
+ :spec/scope
+ {:in-scope ["progress-detector/repair_loop.clj — add fuzzy fingerprint"
+             "agent/meta_protocol.clj — add :intervene + intervene?"
+             "agent/meta/repair_loop_meta_agent.clj — new file"
+             "workflow/execution.clj — intervention hook before implement"
+             "Integration test through all four"
+             "messages/en-US.edn — :meta/intervention-applied label"]
+  :out-of-scope ["Workflow-wide token + wall-clock budget (separate spec)"
+                 "Pause/resume UX in TUI (separate work)"
+                 "Cross-workflow intervention memory (later)"]}
+
+ :spec/acceptance-criteria
+ ["Fuzzy stagnation detector emits :anomalies.review/fuzzy-stagnation when (file × severity) set repeats for 2 consecutive reviews"
+  "Strict equality stagnation path unchanged — existing tests stay green"
+  "MetaAgent protocol accepts :status :intervene with :intervention/addendum and :intervention/scope"
+  "intervene? predicate added alongside halt?/warning?/healthy?"
+  "RepairLoopMetaAgent invokes LLM only when fuzzy-stagnation anomaly is present (no per-tick cost)"
+  "RepairLoopMetaAgent returns :status :warning instead of :intervene when LLM confidence is :low"
+  "Workflow runner appends :intervention/addendum to :task/description before next implement"
+  "Workflow runner emits :meta/intervention-applied event with addendum + source meta-agent id"
+  "Intervention is single-shot for scope :next-implement (cleared after one use)"
+  "End-to-end test: 3 fingerprint-drifting reviews → fuzzy stagnation → mocked-LLM intervention → addendum reaches implementer agent input"]
+
+ :spec/risks
+ ["LLM analysis adds cost per intervention (~2k tokens) — bounded by firing only on fuzzy-stagnation, not per phase"
+  "Bad addendum could push implementer further off course — confidence threshold (>= :medium) is the guard"
+  "Strict-stagnation path may now NEVER fire if fuzzy fires first and terminates → acceptable, both signals point at same problem"
+  "Workflow runner hook is on the critical path — must be defensive about missing/malformed :intervene shapes"
+  "Per-workflow intervention budget may be needed to prevent meta-agent thrashing if the loop is unfixable"]
+
+ :spec/non-goals
+ ["This spec does NOT add workflow-wide token / wall-clock budgets — that is a separate spec (see project_workflow_budget.md follow-up)."
+  "This spec does NOT modify reviewer prompt or behavior — the reviewer is already exhaustive per single-pass; the problem is implementer not absorbing feedback, not reviewer incompleteness."
+  "This spec does NOT introduce pause/resume UX — intervention is synchronous within the phase transition."]
+
+ :spec/test-command "bb test:precommit"
+ :spec/test-timeout-ms 600000
+
+ :spec/related
+ [{:type :pr  :id 915 :reason "Per-process hang detection — sibling work, complements this temporal-loop detection"}
+  {:type :file :id "components/progress-detector/src/ai/miniforge/progress_detector/detectors/repair_loop.clj" :reason "Extension point for fuzzy fingerprint"}
+  {:type :file :id "components/agent/src/ai/miniforge/agent/meta_protocol.clj" :reason ":intervene decision added here"}
+  {:type :file :id "components/phase-software-factory/src/ai/miniforge/phase_software_factory/review.clj" :reason "compute-stagnated? consumes the strict signal; fuzzy joins as a parallel input"}]}
