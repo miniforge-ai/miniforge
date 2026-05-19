@@ -19,7 +19,7 @@
 (ns ai.miniforge.agent.interface.watchdog
   "Public boundary for the per-phase stream-gap watchdog.
 
-   Re-exports the four primary operations and the config helper from
+   Re-exports the five primary operations and the config helper from
    ai.miniforge.agent.stream-watchdog.
 
    Usage:
@@ -33,7 +33,7 @@
                  :workflow-id  workflow-id
                  :kill-fn      kill-subprocess!})]
        ;; on every agent event:
-       (watchdog/reset! wd)
+       (watchdog/ping! wd)
        ;; on normal completion:
        (watchdog/stop! wd)
        ;; to check for stall:
@@ -53,6 +53,10 @@
   "Default stream-gap threshold in ms (90 000)."
   watchdog/default-gap-threshold-ms)
 
+(def default-check-interval-ms
+  "Default watchdog check interval in ms (5 000)."
+  watchdog/default-check-interval-ms)
+
 ;; ---------------------------------------------------------------------------
 ;; Watchdog lifecycle
 
@@ -61,10 +65,11 @@
    See `ai.miniforge.agent.stream-watchdog/create-watchdog`."
   watchdog/create-watchdog)
 
-(def reset!
+(def ping!
   "Record a new agent event, resetting the gap timer.
-   See `ai.miniforge.agent.stream-watchdog/reset!`."
-  watchdog/reset!)
+   Named ping! (not reset!) to avoid shadowing clojure.core/reset!.
+   See `ai.miniforge.agent.stream-watchdog/ping!`."
+  watchdog/ping!)
 
 (def stop!
   "Gracefully shut down the watchdog scheduler.
