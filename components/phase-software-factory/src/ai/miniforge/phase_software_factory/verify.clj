@@ -39,8 +39,19 @@
   (phase-config/defaults-for :verify))
 
 (def ^:private timeout-message-fragment
-  "Substring that marks a non-actionable verify timeout."
+  "Substring that marks a non-actionable verify timeout.
+   Produced by `run-tests!` when the test command exceeds its deadline,
+   and matched by `leave-verify` to skip the redirect-to-implement path
+   (retrying implement won't fix a stalled test process)."
   "timed out")
+
+(def default-test-timeout-ms
+  "Default wall-clock budget for `run-tests!` before the test process is
+   destroyed. Picked so an absent override still bounds the verify phase:
+   30 min covers slow Polylith suites + CI cold cache, but stops the
+   ~indefinite hangs seen when bb test blocks on Docker acquire or stdin.
+   Override per spec via :spec/test-timeout-ms or per phase-config."
+  (* 30 60 1000))
 
 (def ^:private verify-rate-limit-pattern
   "Pattern for non-actionable verify failures caused by provider throttling."
@@ -116,10 +127,19 @@
 (defn- verify-failure-message
   "Build the user-facing verify failure message from parsed test results."
   [test-results raw-fails raw-errors]
-  (if (:parse-error? test-results)
+  (cond
+    ;; Timeout: surface the formatted timeout output directly so the substring
+    ;; matched by `timeout-message-fragment` lands in the phase result, which
+    ;; routes leave-verify to the non-actionable path (no redirect-to-implement).
+    (:timed-out? test-results)
+    (str (:output test-results))
+
+    (:parse-error? test-results)
     (str (messages/t :verify/output-unparseable)
          (when-let [preview (not-empty (bounded-output-preview (:output test-results)))]
            (str "\n" preview)))
+
+    :else
     (messages/t :verify/tests-failed {:fail-count raw-fails :error-count raw-errors})))
 
 (defn infer-test-command
@@ -135,16 +155,40 @@
 (defn run-tests!
   "Run tests in the worktree. Infers the test command from the repo structure
    unless test-cmd is supplied explicitly.
+
+   Bounded by :timeout-ms (default `default-test-timeout-ms`). On timeout
+   the test process and its children are destroyed forcibly and a failed
+   result is returned whose :output contains `timeout-message-fragment` so
+   leave-verify routes it as a non-actionable verify failure rather than
+   redirecting back to implement.
+
    Returns parsed test results map."
-  [worktree-path & {:keys [test-cmd]}]
-  (let [cmd (or test-cmd (infer-test-command worktree-path))]
+  [worktree-path & {:keys [test-cmd timeout-ms]}]
+  (let [cmd        (or test-cmd (infer-test-command worktree-path))
+        timeout-ms (or timeout-ms default-test-timeout-ms)]
     (try
-      (let [result (process/shell
-                     {:dir (str worktree-path)
-                      :out :string :err :string :continue true}
-                     "sh" "-c" cmd)]
-        (parse-test-output (str (:out result "") "\n" (:err result ""))
-                           (:exit result 1)))
+      ;; process/process gives us a Process handle so we can apply our own
+      ;; deadline; process/shell only returns after the child exits and
+      ;; would block here indefinitely on a hung test command.
+      (let [proc     (process/process
+                       {:dir (str worktree-path)
+                        :out :string :err :string :continue true}
+                       "sh" "-c" cmd)
+            done-fut (future @proc)
+            done?    (not= ::timeout (deref done-fut timeout-ms ::timeout))]
+        (if done?
+          (let [result @done-fut]
+            (parse-test-output (str (:out result "") "\n" (:err result ""))
+                               (:exit result 1)))
+          (do
+            (.destroyForcibly ^Process (:proc proc))
+            ;; Let the destroyed process's reader threads finish so the
+            ;; future doesn't leak — bounded wait, ignore the result.
+            (try (deref done-fut 5000 nil) (catch Exception _))
+            (assoc (test-error-result
+                     (messages/t :verify/timed-out
+                                 {:timeout-ms timeout-ms :test-cmd cmd}))
+                   :timed-out? true))))
       (catch Exception e
         (test-error-result (.getMessage e))))))
 
@@ -193,6 +237,16 @@
         test-cmd (or (get-in ctx [:execution/input :spec/test-command])
                      (get-in ctx [:execution/input :test-command]))
 
+        ;; Wall-clock deadline for the test process. Spec wins, then
+        ;; phase-config, then a phase-level default. Without this bound
+        ;; a hung `bb test` (Docker acquire, stdin block, infinite loop)
+        ;; freezes the verify phase indefinitely with zero events —
+        ;; observed 2026-05-18 on workflow aadac7ce.
+        timeout-ms (or (get-in ctx [:execution/input :spec/test-timeout-ms])
+                       (get-in ctx [:execution/input :test-timeout-ms])
+                       (get config :timeout-ms)
+                       default-test-timeout-ms)
+
         ;; Run the test suite — inside capsule for governed mode, on host otherwise
         execute-fn (get ctx :execution/execute-fn)
         test-results (if (and (= :governed (get ctx :execution/mode))
@@ -203,7 +257,9 @@
                                               (get ctx :execution/environment-id)
                                               worktree-path
                                               :test-cmd test-cmd)
-                       (run-tests! worktree-path :test-cmd test-cmd))
+                       (run-tests! worktree-path
+                                   :test-cmd test-cmd
+                                   :timeout-ms timeout-ms))
 
         ;; Phase result carries environment reference and test metrics (N6 environment model).
         ;; No serialized code — changes live in the environment's worktree.

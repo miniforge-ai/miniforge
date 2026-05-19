@@ -23,6 +23,7 @@
    no tester agent. Tests here cover: environment-based test execution,
    fail-fast on missing environment-id, and pass/fail result shapes."
   (:require
+   [clojure.string :as str]
    [clojure.test :refer [deftest testing is use-fixtures]]
    [ai.miniforge.phase-software-factory.verify :as verify]
    [ai.miniforge.phase.interface :as phase]
@@ -158,6 +159,104 @@
                         (assoc :phase-config {:phase :verify}))]
             (verify/enter-verify ctx)
             (is (= "/tmp/my-worktree" @captured-path))))))))
+
+;------------------------------------------------------------------------------ Verify-stall coverage
+;;
+;; Regression coverage for the 2026-05-18 dogfood incident on workflow
+;; aadac7ce. Verify entered, emitted :phase/milestone-started, then went
+;; silent for 30+ minutes because `run-tests!` shelled out to `bb test`
+;; without a deadline. The workflow had no events, no liveness signal, no
+;; recovery — exactly the failure class the running spec was meant to
+;; address for agent streams, surfacing in a sibling code path.
+;;
+;; These tests pin the timeout contract on run-tests! and the propagation
+;; through enter-verify and verify-failure-message into the phase result
+;; (so leave-verify's existing timeout-detection path becomes reachable
+;; instead of being silently dead code).
+
+(deftest run-tests-aborts-hung-process-within-timeout-test
+  (testing "run-tests! must destroy a hung test process when :timeout-ms elapses"
+    (let [t0      (System/currentTimeMillis)
+          ;; sleep 600 = a process that would block run-tests! indefinitely.
+          ;; Before the fix this assertion timed out the entire test run;
+          ;; after the fix the deadline destroys the child within ~1s.
+          result  (verify/run-tests! "/tmp" :test-cmd "sleep 600" :timeout-ms 750)
+          elapsed (- (System/currentTimeMillis) t0)]
+      (is (false? (:passed? result))
+          "a destroyed test process must produce a failed result")
+      (is (true? (:timed-out? result))
+          ":timed-out? sentinel must be set so downstream consumers can branch on cause")
+      (is (str/includes? (str (:output result)) "timed out")
+          ":output must contain the substring `timed out` so leave-verify routes correctly")
+      (is (< elapsed 5000)
+          (str "must abort within seconds, not block the workflow indefinitely "
+               "(elapsed: " elapsed "ms)")))))
+
+(deftest run-tests-honours-default-timeout-when-not-supplied-test
+  (testing "run-tests! falls back to default-test-timeout-ms when no :timeout-ms arg given"
+    ;; Pin the default to a positive number — protects against a refactor
+    ;; that nils the default and silently restores the unbounded behaviour
+    ;; that caused the 2026-05-18 verify hang.
+    (is (pos-int? verify/default-test-timeout-ms))
+    (is (<= verify/default-test-timeout-ms (* 60 60 1000))
+        "default must stay under 1 hour — otherwise a hang still freezes the workflow for too long")))
+
+(deftest enter-verify-propagates-spec-test-timeout-test
+  (testing "enter-verify threads :spec/test-timeout-ms from :execution/input into run-tests!"
+    (let [captured-opts (atom nil)
+          run-var       (resolve 'ai.miniforge.phase-software-factory.verify/run-tests!)]
+      (with-redefs-fn
+        {run-var (fn [_path & opts]
+                   (reset! captured-opts (apply hash-map opts))
+                   {:passed? true :test-count 1 :fail-count 0 :error-count 0})}
+        (fn []
+          (let [ctx (-> (create-base-context)
+                        (assoc-in [:execution/input :spec/test-timeout-ms] 12345)
+                        (assoc :phase-config {:phase :verify}))]
+            (verify/enter-verify ctx)
+            (is (= 12345 (:timeout-ms @captured-opts))
+                (str ":spec/test-timeout-ms must flow into run-tests! — "
+                     "the spec is the user-facing budget surface for the verify deadline"))))))))
+
+(deftest enter-verify-uses-default-timeout-when-no-override-test
+  (testing "enter-verify falls back to default-test-timeout-ms when neither spec nor config sets one"
+    (let [captured-opts (atom nil)
+          run-var       (resolve 'ai.miniforge.phase-software-factory.verify/run-tests!)]
+      (with-redefs-fn
+        {run-var (fn [_path & opts]
+                   (reset! captured-opts (apply hash-map opts))
+                   {:passed? true :test-count 1 :fail-count 0 :error-count 0})}
+        (fn []
+          (let [ctx (-> (create-base-context)
+                        (assoc :phase-config {:phase :verify}))]
+            (verify/enter-verify ctx)
+            (is (= verify/default-test-timeout-ms (:timeout-ms @captured-opts))
+                "default deadline must be applied even when spec is silent")))))))
+
+(deftest enter-verify-timed-out-result-includes-fragment-test
+  (testing "a :timed-out? test result becomes a phase result whose summary contains `timed out`"
+    ;; This is the wiring leave-verify depends on: it scans result :error :message
+    ;; for `timeout-message-fragment` to skip the redirect-to-implement path.
+    ;; If the fragment doesn't survive into the phase result, the dead-code
+    ;; detection in leave-verify stays dead and timeouts get treated as
+    ;; ordinary test failures (and route back to implement — wasting tokens).
+    (let [run-var (resolve 'ai.miniforge.phase-software-factory.verify/run-tests!)]
+      (with-redefs-fn
+        {run-var (fn [_path & _opts]
+                   {:passed? false :test-count 0 :assertion-count 0
+                    :fail-count 0 :error-count 1
+                    :timed-out? true
+                    :output "Verify test runner timed out after 1000ms (cmd: bb test)"})}
+        (fn []
+          (let [ctx (-> (create-base-context)
+                        (assoc :phase-config {:phase :verify}))
+                ctx-after (verify/enter-verify ctx)
+                result (get-in ctx-after [:phase :result])]
+            (is (= :error (:status result)))
+            (is (str/includes? (str (:summary result)) "timed out")
+                ":summary must carry the `timed out` fragment")
+            (is (str/includes? (str (get-in result [:error :message])) "timed out")
+                ":error :message must carry the fragment — leave-verify branches on this")))))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
