@@ -125,10 +125,15 @@
    Takes a context map with :phase-id, :backend, :session-id, :hang-count (atom),
    :config (self-healing config section), and :allowed-failover-backends.
 
-   Returns one of:
-     {:action :resume,   :session-id sid, :backend current-backend-kw}
-     {:action :failover, :new-backend kw}
-     {:action :abort,    :reason \"no healthy backends\"}
+   Decision rules:
+     hang-count = 1, backend healthy   → {:action :resume,   :session-id sid, :backend kw}
+     hang-count = 1, backend unhealthy → {:action :failover, :new-backend kw}
+     hang-count >= 2                   → {:action :failover, :new-backend kw}
+     no candidate                      → {:action :abort,    :reason \"no healthy backends\"}
+
+   Side effects on :failover path:
+     - record-backend-call! marks current backend unhealthy
+     - trigger-backend-switch! records cooldown and updates default-backend
 
    See ai.miniforge.self-healing.stream-recovery/evaluate-stall-recovery."
   stream-recovery/evaluate-stall-recovery)
@@ -137,6 +142,9 @@
   "Restart an agent subprocess using the backend-specific resume flag.
 
    Arguments: backend, session-id, optional extra-args.
+
+   Constructs: <backend-binary> <resume-flag> <session-id> [extra-args...]
+   and launches it with inherited stdio.
 
    Returns a process map {:process, :backend, :session-id, :command} on success,
    or an anomaly map {:anomaly/category, :anomaly/message, :cmd} on IOException.

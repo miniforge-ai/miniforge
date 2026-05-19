@@ -20,25 +20,25 @@
   "Resume-on-kill logic: decide resume vs failover vs abort after a watchdog kill.
 
    After a stall watchdog terminates a hung agent subprocess, the caller must
-   decide what to do next. This namespace provides two functions:
+   decide what to do next.  This namespace provides two functions:
 
    - `evaluate-stall-recovery` — decides :resume / :failover / :abort.
      The :failover and health-gated paths have side effects: they call
      record-backend-call! and trigger-backend-switch! on the backend-health store.
    - `execute-resume!` — side-effecting: relaunches subprocess with resume flag.
-     Returns the process map on success or an anomaly map on IOException.
+     Returns a process map on success or an anomaly map on java.io.IOException.
 
    Decision rules
    --------------
    hang-count = 1, backend healthy   → :resume   (transparent retry)
    hang-count = 1, backend unhealthy → :failover (skip wasted retry)
-   hang-count >= 2                   → :failover (backend is flaky)
+   hang-count >= 2                   → :failover (backend is persistently flaky)
    no candidate                      → :abort    (all failovers exhausted)
 
    NOTE on observability: Decision events are currently emitted to stderr via
    println rather than through ai.miniforge.logging, because that component is
    not a declared dependency of self-healing (adding it would introduce
-   cross-component coupling not yet approved). Follow-up: wire into the
+   cross-component coupling not yet approved).  Follow-up: wire into the
    logging infrastructure once the dependency is reviewed."
   (:require
    [ai.miniforge.self-healing.backend-health :as backend-health]))
@@ -105,7 +105,8 @@
 ;; Process management (isolated for testability)
 
 (defn- start-process!
-  "Launch a subprocess from a command vector. Propagates java.io.IOException.
+  "Launch a subprocess from a command vector.
+   Propagates java.io.IOException — caller is responsible for catching.
 
    Arguments:
      cmd - Seq of strings forming the command
@@ -161,8 +162,15 @@
 
    Decision logic:
      hang-count = 1, backend healthy   → {:action :resume, ...}
+       Backend has no known bad health: attempt transparent resume.
+
      hang-count = 1, backend unhealthy → {:action :failover, ...}
+       Skip the wasted retry: backend is already below threshold.
+       Same side effects as hang-count >= 2.
+
      hang-count >= 2                   → {:action :failover, :new-backend kw}
+       Backend persistently flaky; records failure and switches.
+
      no candidate found                → {:action :abort, :reason \"no healthy backends\"}
 
    Arguments:
@@ -266,7 +274,7 @@
       :command    vector            — the exact command vector launched}
 
    On java.io.IOException (binary not found, not executable, etc.) returns
-   an anomaly map instead of throwing, per the exceptions-as-data convention:
+   an anomaly map per the exceptions-as-data convention:
      {:anomaly/category :anomaly.category/fault
       :anomaly/message  \"<error message>\"
       :cmd              [...]}"

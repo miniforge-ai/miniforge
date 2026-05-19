@@ -348,3 +348,10 @@
         (is (= :anomaly.category/fault (:anomaly/category result)))
         (is (string? (:anomaly/message result)))
         (is (vector? (:cmd result)))))))
+
+(deftest execute-resume-anomaly-cmd-matches-attempted-command
+  (testing "anomaly :cmd is the exact command vector that was attempted"
+    (with-redefs [ai.miniforge.self-healing.stream-recovery/start-process!
+                  (fn [_cmd] (throw (java.io.IOException. "not found")))]
+      (let [result (sut/execute-resume! :codex "sess-fail")]
+        (is (= ["codex" "--resume" "sess-fail"] (:cmd result)))))))
