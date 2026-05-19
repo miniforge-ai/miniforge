@@ -573,6 +573,7 @@
   :config/title "Current Configuration:"
   :config/section-llm "LLM Settings:"
   :config/llm-backend "  backend: {backend} ({provider})"
+  :config/llm-backend-provider-unknown "Unknown"
   :config/llm-model "  model: {model}"
   :config/llm-max-tokens "  max-tokens: {max-tokens}"
   :config/llm-timeout "  timeout: {minutes} minutes"
@@ -626,6 +627,7 @@
   :config/validate-valid "✅ Config file is valid"
   :config/validate-location "   Location: {path}"
   :config/validate-backend-available "   Backend {backend}: {status}"
+  :config/validate-backend-status-available "Available"
   :config/validate-invalid "Config file is invalid or unreadable"
   :config/validate-reset-hint "Try resetting: {command}"
 
