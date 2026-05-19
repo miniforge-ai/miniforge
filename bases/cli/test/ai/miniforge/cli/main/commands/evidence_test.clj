@@ -39,33 +39,73 @@
 
 (use-fixtures :each tmp-dir-fixture)
 
-(defn make-bundle
-  "Build a minimal evidence bundle for testing."
-  ([]
-   (make-bundle {}))
-  ([overrides]
-   (merge {:bundle/id "bundle-1"
-           :bundle/workflow-id "wf-1"
-           :bundle/status "complete"
-           :bundle/created-at "2026-04-13T10:00:00Z"
-           :bundle/artifacts [{:artifact/type :code :artifact/id "art-1"}]
-           :bundle/phases [:plan :implement]}
-          overrides)))
+(defn- make-artifact
+  "Factory for a single bundle artifact entry. Defaults to a code artifact;
+   override `:artifact/type` or `:artifact/id` to vary per test."
+  [& {:as overrides}]
+  (merge {:artifact/type :code
+          :artifact/id   "art-1"}
+         overrides))
 
-(defn make-canonical-bundle
-  [overrides]
-  (merge {:evidence-bundle/id "bundle-2"
-          :evidence-bundle/workflow-id "wf-2"
-          :evidence-bundle/created-at "2026-04-30T10:00:00Z"
-          :evidence/plan {:phase/name :plan}
-          :evidence/implement {:phase/name :implement}
-          :evidence/outcome {:outcome/success false}
-          :evidence/dependency-health {:anthropic {:dependency/id :anthropic
-                                                   :dependency/status :degraded}}
-          :evidence/failure-attribution {:failure/source :external-provider
-                                         :failure/vendor :anthropic
-                                         :dependency/id :anthropic
-                                         :dependency/class :rate-limit}}
+(defn- make-phase
+  "Factory for a phase entry under `:evidence/plan` or `:evidence/implement`."
+  [phase-name & {:as overrides}]
+  (merge {:phase/name phase-name}
+         overrides))
+
+(defn- make-outcome
+  "Factory for an `:evidence/outcome` value."
+  [& {:as overrides}]
+  (merge {:outcome/success false}
+         overrides))
+
+(defn- make-dependency-health
+  "Factory for a single `:evidence/dependency-health` entry."
+  [& {:as overrides}]
+  (merge {:dependency/id     :anthropic
+          :dependency/status :degraded}
+         overrides))
+
+(defn- make-failure-attribution
+  "Factory for an `:evidence/failure-attribution` map."
+  [& {:as overrides}]
+  (merge {:failure/source   :external-provider
+          :failure/vendor   :anthropic
+          :dependency/id    :anthropic
+          :dependency/class :rate-limit}
+         overrides))
+
+(defn- make-bundle
+  "Factory for a minimal legacy evidence bundle. Pass overrides as kwargs."
+  [& {:as overrides}]
+  (merge {:bundle/id          "bundle-1"
+          :bundle/workflow-id "wf-1"
+          :bundle/status      "complete"
+          :bundle/created-at  "2026-04-13T10:00:00Z"
+          :bundle/artifacts   [(make-artifact)]
+          :bundle/phases      [:plan :implement]}
+         overrides))
+
+(defn- make-list-bundle
+  "Factory for the minimal bundle shape returned by the resolver in list output."
+  [& {:as overrides}]
+  (merge {:bundle/id          "b-1"
+          :bundle/workflow-id "wf-1"
+          :bundle/status      "complete"}
+         overrides))
+
+(defn- make-canonical-bundle
+  "Factory for a canonical-form evidence bundle including dependency-health
+   and failure-attribution. Pass overrides as kwargs."
+  [& {:as overrides}]
+  (merge {:evidence-bundle/id           "bundle-2"
+          :evidence-bundle/workflow-id  "wf-2"
+          :evidence-bundle/created-at   "2026-04-30T10:00:00Z"
+          :evidence/plan                (make-phase :plan)
+          :evidence/implement           (make-phase :implement)
+          :evidence/outcome             (make-outcome)
+          :evidence/dependency-health   {:anthropic (make-dependency-health)}
+          :evidence/failure-attribution (make-failure-attribution)}
          overrides))
 
 ;------------------------------------------------------------------------------ Layer 1: Tests
@@ -80,9 +120,7 @@
 (deftest evidence-list-cmd-component-results-test
   (testing "list command displays component results when available"
     (with-redefs [shared/try-resolve-fn
-                  (constantly [{:bundle/id "b-1"
-                                :bundle/workflow-id "wf-1"
-                                :bundle/status "complete"}])]
+                  (constantly [(make-list-bundle)])]
       (let [output (with-out-str (sut/evidence-list-cmd {}))]
         (is (.contains output "b-1"))))))
 
@@ -116,7 +154,7 @@
   (testing "show command normalizes canonical evidence bundle fields"
     (let [evidence-path (str *tmp-dir* "/evidence")]
       (fs/create-dirs evidence-path)
-      (spit (str evidence-path "/canonical-bundle.edn") (pr-str (make-canonical-bundle {})))
+      (spit (str evidence-path "/canonical-bundle.edn") (pr-str (make-canonical-bundle)))
       (with-redefs [shared/try-resolve-fn (constantly nil)
                     app-config/home-dir (constantly *tmp-dir*)]
         (let [output (with-out-str (sut/evidence-show-cmd {:id "canonical-bundle"}))]
