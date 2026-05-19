@@ -18,12 +18,14 @@
 
 (ns ai.miniforge.self-healing.interface
   "Public interface for self-healing system.
-   Exports functions from workaround-registry, workaround-detector, backend-health, and integration."
+   Exports functions from workaround-registry, workaround-detector, backend-health,
+   integration, and stream-recovery."
   (:require
    [ai.miniforge.self-healing.workaround-registry :as registry]
    [ai.miniforge.self-healing.workaround-detector :as detector]
    [ai.miniforge.self-healing.backend-health :as health]
-   [ai.miniforge.self-healing.integration :as integration]))
+   [ai.miniforge.self-healing.integration :as integration]
+   [ai.miniforge.self-healing.stream-recovery :as stream-recovery]))
 
 ;;------------------------------------------------------------------------------ Workaround Registry
 
@@ -114,6 +116,18 @@
 (def reset-backend-health!
   "Reset all backend health data to defaults, clearing stale metrics."
   health/reset-backend-health!)
+
+;;------------------------------------------------------------------------------ Stream Recovery
+
+(def evaluate-stall-recovery
+  "Decide whether to resume, failover, or abort after a watchdog kill.
+   See ai.miniforge.self-healing.stream-recovery/evaluate-stall-recovery."
+  stream-recovery/evaluate-stall-recovery)
+
+(def execute-resume!
+  "Restart an agent subprocess using the backend-specific resume flag.
+   See ai.miniforge.self-healing.stream-recovery/execute-resume!"
+  stream-recovery/execute-resume!)
 
 ;;------------------------------------------------------------------------------ Integration
 
