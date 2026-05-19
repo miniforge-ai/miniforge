@@ -139,9 +139,9 @@
   (println (messages/t :config/section-llm))
   (println (messages/t :config/llm-backend
                        {:backend (format-config-value (get-in config [:llm :backend]))
-                        :provider (get-in backends/backend-specs
-                                          [(get-in config [:llm :backend]) :provider]
-                                          (messages/t :config/llm-backend-provider-unknown))}))
+                        :provider (or (get-in backends/backend-specs
+                                              [(get-in config [:llm :backend]) :provider])
+                                      (messages/t :config/llm-backend-provider-unknown))}))
   (println (messages/t :config/llm-model {:model (get-in config [:llm :model])}))
   (println (messages/t :config/llm-max-tokens {:max-tokens (get-in config [:llm :max-tokens])}))
   (println (messages/t :config/llm-timeout {:minutes (quot (get-in config [:llm :timeout-ms]) 60000)}))
