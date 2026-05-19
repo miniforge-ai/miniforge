@@ -331,9 +331,15 @@
       (is (= :anomalies.review/fuzzy-stagnation
              (get-in (first anoms) [:anomaly/data :anomaly/category]))
           "the emitted anomaly must be the fuzzy category")
-      (is (= :warning
+      (is (= :heuristic
+             (get-in (first anoms) [:anomaly/data :anomaly/class]))
+          "fuzzy is a heuristic detector signal")
+      (is (= :warn
              (get-in (first anoms) [:anomaly/data :anomaly/severity]))
-          "fuzzy fires at :warning severity (meta-agent intervention signal, not terminator)"))))
+          "fuzzy fires at :warn severity (meta-agent intervention signal, not terminator)")
+      (is (= "[[:blocking \"src/foo.clj\"]]"
+             (get-in (first anoms) [:anomaly/data :anomaly/evidence :fingerprint]))
+          "fingerprint evidence is serialized in deterministic order"))))
 
 (deftest detector-emits-only-strict-when-both-would-match-test
   (testing "verbatim repeat fires strict ONLY — no double-emission to confuse downstream consumers"

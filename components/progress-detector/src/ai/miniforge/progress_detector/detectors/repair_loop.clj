@@ -230,7 +230,7 @@
 (defn- build-fuzzy-anomaly
   "Construct a canonical anomaly map for a fuzzy-stagnation event.
 
-   Severity is :warning (not :error) — the fuzzy match is a softer
+   Severity is :warn (not :error) — the fuzzy match is a softer
    signal than strict equality and is intended to drive meta-agent
    intervention rather than direct termination. Carries the
    (file × severity) pair set as :fingerprint so the meta-agent can
@@ -240,14 +240,14 @@
         summary     (msg/t :repair-loop/fuzzy-stagnation {:count match-count})
         evidence    {:summary     summary
                      :event-ids   (filterv some? [(:seq event)])
-                     :fingerprint (pr-str fuzzy-fingerprint)
+                     :fingerprint (pr-str (vec (sort fuzzy-fingerprint)))
                      :threshold   {:n      stagnation-match-count
                                    :window stagnation-window-size}
                      :redacted?   true}
         data        {:detector/kind     detector-kind
                      :detector/version  detector-version
-                     :anomaly/class     :semantic
-                     :anomaly/severity  :warning
+                     :anomaly/class     :heuristic
+                     :anomaly/severity  :warn
                      :anomaly/category  fuzzy-anomaly-category
                      :anomaly/evidence  evidence}]
     (anomaly/anomaly :fault summary data)))

@@ -41,7 +41,7 @@
   from a new `review-fingerprint-fuzzy` fn. Existing strict-equality path
   stays — fuzzy is a parallel signal at lower severity. The detector emits a
   new anomaly category `:anomalies.review/fuzzy-stagnation` (:class
-  :semantic, :severity :warning) when two consecutive reviews share the same
+  :heuristic, :severity :warn) when two consecutive reviews share the same
   `(file × severity)` set. Strict stagnation still terminates; fuzzy
   stagnation is observable but doesn't terminate on its own — its job is to
   signal the meta-agent.
@@ -113,7 +113,7 @@
  :spec/risks
  ["LLM analysis adds cost per intervention (~2k tokens) — bounded by firing only on fuzzy-stagnation, not per phase"
   "Bad addendum could push implementer further off course — confidence threshold (>= :medium) is the guard"
-  "Strict-stagnation path may now NEVER fire if fuzzy fires first and terminates → acceptable, both signals point at same problem"
+  "Fuzzy stagnation may mask strict stagnation in reporting if both signals point at the same recurring problem"
   "Workflow runner hook is on the critical path — must be defensive about missing/malformed :intervene shapes"
   "Per-workflow intervention budget may be needed to prevent meta-agent thrashing if the loop is unfixable"]
 
