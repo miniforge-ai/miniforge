@@ -20,7 +20,8 @@
   "Tests for the per-phase stream-gap watchdog timer."
   (:require
    [clojure.test :refer [deftest is testing]]
-   [ai.miniforge.agent.stream-watchdog :as sut])
+   [ai.miniforge.agent.stream-watchdog :as sut]
+   [ai.miniforge.event-stream.interface :as event-stream-iface])
   (:import
    (java.util.concurrent.atomic AtomicLong)))
 
@@ -208,10 +209,12 @@
                      :kill-fn           #(reset! killed? true)}))]
       ;; Back-date to make the gap already exceeded
       (backdate! wd 400)
-      ;; Wait for the first check tick (up to 2s)
-      (let [fired? (await-condition #(deref killed?) 2000)]
+      ;; Gate on BOTH kill-fn having fired AND stalled? being true so the
+      ;; assertion can never outrun the scheduler thread (which sets
+      ;; stalled-atom after calling kill-fn).
+      (let [fired? (await-condition #(and @killed? (sut/stalled? wd)) 2000)]
         (sut/stop! wd)
-        (is fired? "kill-fn should fire when gap > threshold-ms")
+        (is fired? "kill-fn fired and watchdog marked stalled")
         (is (sut/stalled? wd) "watchdog should be marked stalled")))))
 
 ;; ---------------------------------------------------------------------------
@@ -335,18 +338,29 @@
           (sut/stop! wd))))))
 
 ;; ---------------------------------------------------------------------------
+;; capture-session-id! — idempotency
+
+(deftest capture-session-id-is-idempotent
+  (testing "second call with different session ID is a no-op; first ID is preserved"
+    (let [wd (sut/create-watchdog (make-test-watchdog {}))]
+      (try
+        (sut/capture-session-id! wd {:session_id "first-session-id"})
+        (sut/capture-session-id! wd {:session_id "second-session-id"})
+        (is (= "first-session-id" (sut/get-session-id wd))
+            "second call must not overwrite the first captured session ID")
+        (finally
+          (sut/stop! wd))))))
+
+;; ---------------------------------------------------------------------------
 ;; capture-session-id! — emits :agent/session-captured event
 
 (deftest capture-session-id-emits-event
   (testing "capture-session-id! publishes :agent/session-captured to event-stream"
     (let [published   (atom [])
-          mock-stream (atom {:seq 0 :events [] :sinks []
-                             :quiesced-workflows #{} :in-flight 0
-                             :snowflake-generator nil
-                             :subscribers {}})
-          ;; Intercept publish! by swapping a fake sink
-          _           (swap! mock-stream assoc :sinks
-                             [(fn [evt] (swap! published conj evt))])
+          ;; Use the real create-event-stream so the mock matches the
+          ;; authoritative schema (sequence-numbers, subscribers, etc.).
+          mock-stream (event-stream-iface/create-event-stream
+                       {:sinks [(fn [evt] (swap! published conj evt))]})
           wd          (sut/create-watchdog
                        (make-test-watchdog
                         {:event-stream mock-stream
@@ -355,9 +369,35 @@
                          :workflow-id  "wf-session-test"}))]
       (try
         (sut/capture-session-id! wd {:session_id "cc-emit-test-session"})
-        ;; Allow a moment for synchronous publish
+        ;; Atom store is synchronous; event emission is also synchronous.
         (is (= "cc-emit-test-session" (sut/get-session-id wd))
             "session ID must be stored in atom")
+        (is (= 1 (count @published))
+            "exactly one :agent/session-captured event should be published")
+        (let [evt (first @published)]
+          (is (= :agent/session-captured (:event/type evt)))
+          (is (= "cc-emit-test-session" (:agent/session-id evt)))
+          (is (= :implement (:phase/id evt)))
+          (is (= :claude-code (:agent/backend evt))))
+        (finally
+          (sut/stop! wd))))))
+
+(deftest capture-session-id-emits-event-only-once-when-idempotent
+  (testing "idempotent second call does not emit a second event"
+    (let [published   (atom [])
+          mock-stream (event-stream-iface/create-event-stream
+                       {:sinks [(fn [evt] (swap! published conj evt))]})
+          wd          (sut/create-watchdog
+                       (make-test-watchdog
+                        {:event-stream mock-stream
+                         :phase-id     :implement
+                         :backend      :claude-code
+                         :workflow-id  "wf-idempotent-test"}))]
+      (try
+        (sut/capture-session-id! wd {:session_id "once-only-session"})
+        (sut/capture-session-id! wd {:session_id "second-call-ignored"})
+        (is (= 1 (count @published))
+            "only one event should be published even when called twice")
         (finally
           (sut/stop! wd))))))
 
