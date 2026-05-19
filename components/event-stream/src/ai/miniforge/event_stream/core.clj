@@ -499,7 +499,9 @@
           redirect-to (assoc :phase/redirect-to redirect-to)
           (:tokens result) (assoc :phase/tokens (:tokens result))
           (:cost-usd result) (assoc :phase/cost-usd (:cost-usd result))
-          (:meta result) (assoc :phase/meta (:meta result))))))
+          (:meta result) (assoc :phase/meta (:meta result))
+          (:phase/termination-reason result)
+          (assoc :phase/termination-reason (:phase/termination-reason result))))))
 
 (defn workspace-persisted
   "Build a :workspace/persisted event recording that a phase's worktree was
@@ -1318,6 +1320,34 @@
                        (str "Meta-loop cycle failed: " (ex-message error)))
       (assoc :meta-loop/error (ex-message error)
              :meta-loop/error-class (.getName (class error)))))
+
+;------------------------------------------------------------------------------ Layer 6.5
+;; Agent stream-stall events (GROUP 1+4)
+
+(defn agent-stream-stalled
+  "Build an :agent/stream-stalled event indicating the agent output stream
+   has gone silent beyond the configured gap threshold.
+
+   Consumed by the self-healing supervisor to decide whether to kill the
+   hung backend process and retry on the next eligible backend.
+
+   Arguments:
+   - stream:          event-stream atom
+   - workflow-id:     owning workflow UUID
+   - phase-id:        keyword identifying the current phase (e.g. :implement)
+   - gap-duration-ms: measured silence gap in milliseconds
+   - backend:         keyword identifying the backend (:codex, :claude, etc.)
+
+   Valid `:phase/termination-reason` enum values for `phase-completed`:
+     :agent-stalled, :curator-rejected, :tool-error, :normal"
+  [stream workflow-id phase-id gap-duration-ms backend]
+  (-> (create-envelope stream :agent/stream-stalled workflow-id
+                       (str "Agent stream stalled in " (name phase-id)
+                            " after " gap-duration-ms "ms"
+                            " (backend: " (name backend) ")"))
+      (assoc :phase/id phase-id
+             :stream/gap-duration-ms gap-duration-ms
+             :agent/backend backend)))
 
 ;------------------------------------------------------------------------------ Layer 7
 ;; Observer / knowledge failure events

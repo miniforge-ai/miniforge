@@ -39,7 +39,17 @@
                  :backend-health-threshold 0.90
                  :backend-switch-cooldown-ms 1800000
                  :allowed-failover-backends [:claude :codex]
-                 :max-cost-per-workflow nil}
+                 :max-cost-per-workflow nil
+                 ;; Agent output-stream gap threshold. If no output line is received
+                 ;; from the backend process for this many milliseconds, a
+                 ;; :agent/stream-stalled event is emitted and self-healing may
+                 ;; terminate and retry the phase on a fallback backend.
+                 :agent/stream-gap-threshold-ms 90000
+                 ;; Per-backend overrides for the gap threshold. Keys are backend
+                 ;; keywords; values are millisecond integers. Empty by default.
+                 ;; Example: {:codex 120000} gives Codex 2 extra minutes before
+                 ;; stall detection fires.
+                 :agent/per-backend-gap-thresholds {}}
   :governance {:readiness {}
                :risk {}
                :tiers {}
