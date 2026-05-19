@@ -362,6 +362,20 @@
       ;; Without the unwrap, callers would see java.util.concurrent.ExecutionException.
       (is (not (instance? java.util.concurrent.ExecutionException thrown))))))
 
+(deftest run-runtime-interrupt-destroys-child-process-test
+  (testing "interrupting a runtime call does not wait for the child command to finish"
+    (let [descriptor {:runtime/executable "/bin/sleep"}
+          started? (promise)
+          worker (Thread.
+                   (fn []
+                     (deliver started? true)
+                     (oci-cli/run-runtime descriptor "5")))]
+      (.start worker)
+      (is (= true (deref started? 1000 false)))
+      (.interrupt worker)
+      (.join worker 1500)
+      (is (false? (.isAlive worker))))))
+
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
   (clojure.test/run-tests 'ai.miniforge.dag-executor.protocols.impl.runtime.oci-cli-test)

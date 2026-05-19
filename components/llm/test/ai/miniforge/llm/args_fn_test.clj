@@ -168,12 +168,13 @@
       (is (some #(= "--skip-git-repo-check" %) args))
       (is (= "fix bug" (last args))))))
 
-(deftest codex-args-mcp-required-test
-  (testing "config overrides force the artifact MCP server to be required"
+(deftest codex-args-preflight-safe-config-test
+  (testing "config overrides are safe before artifact MCP config exists"
     (let [args ((private-fn 'codex-args) {:prompt "p"})]
-      ;; mcp_servers.artifact.required=true makes Codex fail loudly if our
-      ;; MCP server doesn't initialize, instead of running without it.
-      (is (some #(= "mcp_servers.artifact.required=true" %) args))
+      ;; The artifact MCP config writer marks the server required. Passing
+      ;; only mcp_servers.artifact.required=true here creates an incomplete
+      ;; server table and current Codex rejects it during generic preflight.
+      (is (not (some #(= "mcp_servers.artifact.required=true" %) args)))
       ;; approval_policy=never is set via -c so any config.toml default
       ;; cannot relax it.
       (is (some #(re-matches #"approval_policy=\"?never\"?" %) args)))))

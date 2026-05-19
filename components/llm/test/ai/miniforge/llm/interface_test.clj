@@ -301,6 +301,7 @@
                          :status "completed"}})
           parsed (impl/parse-codex-stream-line line)]
       (is (= "" (:delta parsed)))
+      (is (= "context_read" (:tool-name parsed)))
       (is (false? (:done? parsed)))))
 
   (testing "reasoning item is ignored"

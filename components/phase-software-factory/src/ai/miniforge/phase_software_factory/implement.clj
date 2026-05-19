@@ -343,6 +343,11 @@
         ;; from a thrown exception in agent/invoke). :already-implemented
         ;; matches none of these, so it correctly bypasses the flag.
         impl-errored? (response/error? impl-result)
+        metadata-only-submit?
+        (and (= :narrative-only-response
+                (get-in impl-result [:error :data :reject/reason]))
+             (= :mcp (get-in impl-result [:error :data :artifact-source])))
+        degraded-handoff? (and impl-errored? (not metadata-only-submit?))
         result (cond
                  ;; Curator found files — use its artifact, even if the
                  ;; implementer reported error. Merge implementer metrics through.
@@ -351,7 +356,7 @@
                      (assoc :status :success
                             :success? true)
                      (assoc :output (:output curator-result))
-                     (cond-> impl-errored?
+                     (cond-> degraded-handoff?
                        (assoc :degraded-handoff? true
                               :raw-agent-status (:status impl-result)
                               :raw-error (:error impl-result)))

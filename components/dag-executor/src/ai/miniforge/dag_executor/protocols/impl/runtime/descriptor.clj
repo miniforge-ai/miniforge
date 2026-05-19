@@ -31,10 +31,12 @@
       :runtime/capabilities #{keyword}}"
   (:require
    [ai.miniforge.dag-executor.protocols.impl.runtime.messages :as messages]
+   [ai.miniforge.dag-executor.protocols.impl.runtime.process :as runtime-process]
    [ai.miniforge.dag-executor.protocols.impl.runtime.registry :as registry]
-   [clojure.java.shell :as shell]
    [clojure.string :as str]
-   [malli.core :as m]))
+   [malli.core :as m])
+  (:import
+   [java.util.concurrent TimeUnit]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Boundary schema
@@ -165,12 +167,27 @@
 ;------------------------------------------------------------------------------ Layer 5
 ;; Probe
 
+(def ^:private probe-timeout-ms 5000)
+
 (defn- run-probe
   "Invoke `<exe> info --format <template>` and return the shell result.
    Wrapped so the executor can mock this in tests."
   [exe template]
   (try
-    (shell/sh exe "info" "--format" template)
+    (let [process (.start (ProcessBuilder. (into-array String [exe "info" "--format" template])))
+          stdout-fut (runtime-process/read-stream-future (.getInputStream process))
+          stderr-fut (runtime-process/read-stream-future (.getErrorStream process))]
+      (if (.waitFor process probe-timeout-ms TimeUnit/MILLISECONDS)
+        {:exit (.exitValue process)
+         :out  (String. ^bytes @stdout-fut "UTF-8")
+         :err  (String. ^bytes @stderr-fut "UTF-8")}
+        (do
+          (runtime-process/destroy-process-tree! process)
+          (future-cancel stdout-fut)
+          (future-cancel stderr-fut)
+          {:exit 124
+           :out  ""
+           :err  (str "Runtime probe timed out after " probe-timeout-ms "ms")})))
     (catch Exception e
       {:exit 1 :err (.getMessage e) :out ""})))
 

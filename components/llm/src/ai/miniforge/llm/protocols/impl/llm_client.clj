@@ -340,6 +340,7 @@
               "mcp_tool_call"
               {:delta "" :done? false :tool-use true
                :tool-name (or (get-in item [:tool :name])
+                              (:tool item)
                               (:tool_name item)
                               (:name item))
                :tool-call-id (:id item)}
@@ -485,7 +486,6 @@
            "--sandbox=workspace-write"
            "--skip-git-repo-check"]
     true   (into ["-c" "approval_policy=never"])
-    true   (into ["-c" "mcp_servers.artifact.required=true"])
     model  (into ["-m" model])
     system (into ["-c" (str "system_prompt=" (json/generate-string system))])
     true   (conj prompt)))
