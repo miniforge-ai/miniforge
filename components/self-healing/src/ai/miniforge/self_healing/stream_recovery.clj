@@ -111,8 +111,8 @@
         (.start))
     (catch java.io.IOException e
       (throw (ex-info "Failed to start agent subprocess"
-                      {:cmd     cmd
-                       :cause   (ex-message e)}
+                      {:cmd   cmd
+                       :cause (ex-message e)}
                       e)))))
 
 ;;------------------------------------------------------------------------------ Layer 2
@@ -120,7 +120,8 @@
 
 (defn- perform-failover
   "Record the current backend as unhealthy, select a candidate from
-   allowed-failover-backends, trigger a switch, and return the decision.
+   allowed-failover-backends via backend-health/select-best-backend,
+   trigger a switch, and return the decision map.
 
    Arguments:
      backend-kw                - Keyword current backend

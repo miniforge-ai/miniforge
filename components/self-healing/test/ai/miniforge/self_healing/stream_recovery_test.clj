@@ -39,17 +39,6 @@
    :config                    base-config
    :allowed-failover-backends allowed-failover})
 
-;;
-;; Stub helpers – shared across multiple tests
-;;
-
-(defn- healthy-health-stub
-  "Returns a health stub with empty backends (all eligible) and standard fallback-order."
-  []
-  {:backends         {}
-   :fallback-order   [:anthropic :openai :codex :ollama :google]
-   :switch-cooldowns {}})
-
 ;;------------------------------------------------------------------------------ resume-flag-for
 
 (deftest resume-flag-for-known-backends
@@ -98,9 +87,9 @@
 
 ;;------------------------------------------------------------------------------ evaluate-stall-recovery – :resume path
 
-(deftest evaluate-stall-recovery-first-hang-healthy-backend-returns-resume
-  (testing "hang-count=1, backend has no health data (eligible) → :resume"
-    (with-redefs [health/get-backend-success-rate (fn [_b] nil) ; no data → healthy
+(deftest evaluate-stall-recovery-first-hang-no-health-data-returns-resume
+  (testing "hang-count=1, backend has no health data (nil rate = eligible) → :resume"
+    (with-redefs [health/get-backend-success-rate (fn [_b] nil)
                   health/record-backend-call!     (fn [_b _s] nil)
                   health/select-best-backend      (fn [& _] nil)
                   health/trigger-backend-switch!  (fn [& _] nil)]
@@ -112,7 +101,7 @@
 
 (deftest evaluate-stall-recovery-first-hang-healthy-rate-returns-resume
   (testing "hang-count=1, backend success-rate >= threshold → :resume"
-    (with-redefs [health/get-backend-success-rate (fn [_b] 0.95)] ; above threshold
+    (with-redefs [health/get-backend-success-rate (fn [_b] 0.95)]
       (let [ctx    (make-ctx :anthropic "sess-ok" 1 [:openai])
             result (sut/evaluate-stall-recovery ctx)]
         (is (= :resume (:action result)))))))
@@ -121,7 +110,7 @@
 
 (deftest evaluate-stall-recovery-first-hang-unhealthy-backend-skips-resume
   (testing "hang-count=1 but backend already below threshold → :failover, not :resume"
-    (with-redefs [health/get-backend-success-rate (fn [_b] 0.50) ; below 0.90 threshold
+    (with-redefs [health/get-backend-success-rate (fn [_b] 0.50)
                   health/record-backend-call!     (fn [_b _s] nil)
                   health/select-best-backend      (fn [& _] :openai)
                   health/trigger-backend-switch!  (fn [& _] nil)]
@@ -132,9 +121,9 @@
 
 (deftest evaluate-stall-recovery-first-hang-unhealthy-no-candidates-aborts
   (testing "hang-count=1, backend unhealthy, no allowed failover candidates → :abort"
-    (with-redefs [health/get-backend-success-rate (fn [_b] 0.30) ; unhealthy
+    (with-redefs [health/get-backend-success-rate (fn [_b] 0.30)
                   health/record-backend-call!     (fn [_b _s] nil)
-                  health/select-best-backend      (fn [& _] nil) ; no candidate
+                  health/select-best-backend      (fn [& _] nil)
                   health/trigger-backend-switch!  (fn [& _] nil)]
       (let [ctx    (make-ctx :anthropic "sess-s" 1 [])
             result (sut/evaluate-stall-recovery ctx)]
@@ -207,7 +196,7 @@
                     health/trigger-backend-switch!  (fn [f t ms]
                                                       (swap! switch-calls conj {:from f :to t :ms ms}))]
         (sut/evaluate-stall-recovery (make-ctx :anthropic "sess-sw" 2 [:openai]))
-        (is (= 1         (count @switch-calls)))
+        (is (= 1          (count @switch-calls)))
         (is (= :anthropic (get-in @switch-calls [0 :from])))
         (is (= :openai    (get-in @switch-calls [0 :to])))
         (is (= 1800000    (get-in @switch-calls [0 :ms])))))))
@@ -249,7 +238,7 @@
   (testing "hang-count>=2 with empty allowed-failover-backends → :abort"
     (with-redefs [health/get-backend-success-rate (fn [_b] nil)
                   health/record-backend-call!     (fn [_b _s] nil)
-                  health/select-best-backend      (fn [& _] nil) ; no candidate
+                  health/select-best-backend      (fn [& _] nil)
                   health/trigger-backend-switch!  (fn [& _] nil)]
       (let [ctx    (make-ctx :anthropic "sess-abort" 2 [])
             result (sut/evaluate-stall-recovery ctx)]
@@ -270,7 +259,7 @@
 
 (deftest execute-resume-returns-expected-shape
   (testing "execute-resume! returns map with :process :backend :session-id :command"
-    ;; Use a plain Object as a sentinel — reify does not support abstract classes.
+    ;; Use a plain Object as sentinel — reify does not support abstract classes.
     (let [fake-proc (Object.)]
       (with-redefs [ai.miniforge.self-healing.stream-recovery/start-process!
                     (fn [_cmd] fake-proc)]
@@ -294,7 +283,7 @@
       (with-redefs [ai.miniforge.self-healing.stream-recovery/start-process!
                     (fn [cmd] (reset! launched cmd) nil)]
         (sut/execute-resume! :ollama "sess-o")
-        (is (= "ollama"    (first @launched)))
+        (is (= "ollama"     (first @launched)))
         (is (= "--continue" (second @launched)))))))
 
 (deftest execute-resume-google-uses-gemini-binary
