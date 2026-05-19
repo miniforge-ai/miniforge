@@ -620,6 +620,10 @@
    :supervision/tool-use-evaluated :internal
    :supervisory/intervention-requested :confidential
    :supervisory/intervention-state-changed :confidential
+   ;; Automation-edge upserts mirror the same operator-attention shape as
+   ;; the other supervisory snapshots; default `:internal` matches the
+   ;; sibling `:supervisory/*-upserted` family.
+   :supervisory/automation-edge-upserted :internal
    :control-action/requested :confidential
    :control-action/executed  :confidential
    :annotation/created       :internal
@@ -734,6 +738,48 @@
     [:intervention/approval-required? {:optional true} boolean?]
     [:intervention/requested-at {:optional true} inst?]
     [:intervention/updated-at {:optional true} inst?]
+    [:message string?]]))
+
+;; Automation-edge correlator emission (N5-delta-4 §4.1)
+;;
+;; The correlator is the sole producer of this event per N5-delta-1 §3.4
+;; invariant 6 (extended in N5-delta-4 §4.1). Wire form mirrors the Rust
+;; `AutomationEdge` struct in `miniforge-control/contracts/crates/
+;; supervisory-entities/src/entities.rs`. The full entity malli schema lives
+;; with the producer in `components/automation-edge-correlator/.../schema.clj`;
+;; here we accept the entity as an open `map?` so that adding fields to the
+;; producer's schema does not require a wire-schema edit in lockstep — the
+;; consumer (Rust core) round-trips the open shape per §1.3.
+(def AutomationEdgeUpserted
+  "Schema for `:supervisory/automation-edge-upserted` event (N5-delta-4 §4.1).
+
+   Carries the full AutomationEdge entity in `:supervisory/entity`. The
+   correlator is the sole producer; consumers (Rust core, native app) dedup
+   on the entity's `:edge/id` so re-emission on replay is safe."
+  (with-identity
+   [:map
+    [:event/type [:= :supervisory/automation-edge-upserted]]
+    [:event/id uuid?]
+    [:event/timestamp inst?]
+    [:event/version string?]
+    [:event/sequence-number int?]
+    ;; `:workflow/id` is :optional/:maybe — its presence on the envelope
+    ;; tracks the edge's correlation state, not the originating trigger
+    ;; kind:
+    ;;
+    ;; - Pre-handler edges (`:observed` with no handler workflow
+    ;;   correlated yet — the typical state after a `:pr/merged` trigger
+    ;;   and before the responding workflow's `:workflow/started`) have
+    ;;   no `:edge/handled-by-workflow-run-id` yet, so the producer
+    ;;   threads `nil` and `create-envelope` omits the envelope field.
+    ;; - Post-correlation edges (`:handled`, `:failed`, and the
+    ;;   post-terminal `:suppressed` shape that preserved the prior
+    ;;   workflow id) carry `:edge/handled-by-workflow-run-id` on the
+    ;;   entity; the producer threads that value into `create-envelope`
+    ;;   so the envelope's `:workflow/id` is populated for downstream
+    ;;   workflow-scoped filters.
+    [:workflow/id {:optional true} [:maybe uuid?]]
+    [:supervisory/entity map?]
     [:message string?]]))
 
 ;; OCI container event schemas
