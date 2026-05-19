@@ -85,6 +85,30 @@
     (is (= ["codex" "--resume" "sid"]
            (sut/build-resume-command "codex" "sid")))))
 
+;;------------------------------------------------------------------------------ evaluate-stall-recovery – guard clauses
+
+(deftest evaluate-stall-recovery-nil-backend-throws
+  (testing "nil :backend throws ex-info with clear message"
+    (is (thrown? clojure.lang.ExceptionInfo
+                 (sut/evaluate-stall-recovery
+                  {:phase-id   :implement
+                   :backend    nil
+                   :session-id "s"
+                   :hang-count (atom 1)
+                   :config     {}
+                   :allowed-failover-backends []})))))
+
+(deftest evaluate-stall-recovery-non-atom-hang-count-throws
+  (testing "non-atom :hang-count throws ex-info with clear message"
+    (is (thrown? clojure.lang.ExceptionInfo
+                 (sut/evaluate-stall-recovery
+                  {:phase-id   :implement
+                   :backend    :anthropic
+                   :session-id "s"
+                   :hang-count 2   ; not an atom
+                   :config     {}
+                   :allowed-failover-backends []})))))
+
 ;;------------------------------------------------------------------------------ evaluate-stall-recovery – :resume path
 
 (deftest evaluate-stall-recovery-first-hang-no-health-data-returns-resume
@@ -100,11 +124,19 @@
         (is (= :anthropic (:backend result)))))))
 
 (deftest evaluate-stall-recovery-first-hang-healthy-rate-returns-resume
-  (testing "hang-count=1, backend success-rate >= threshold → :resume"
-    (with-redefs [health/get-backend-success-rate (fn [_b] 0.95)]
-      (let [ctx    (make-ctx :anthropic "sess-ok" 1 [:openai])
-            result (sut/evaluate-stall-recovery ctx)]
-        (is (= :resume (:action result)))))))
+  (testing "hang-count=1, backend success-rate >= threshold → :resume, no side effects"
+    ;; Stubs all side-effect functions and asserts they were NOT called, proving
+    ;; the resume path is side-effect-free.
+    (let [record-calls (atom [])]
+      (with-redefs [health/get-backend-success-rate (fn [_b] 0.95) ; above threshold
+                    health/record-backend-call!     (fn [b s] (swap! record-calls conj [b s]))
+                    health/select-best-backend      (fn [& _] nil)
+                    health/trigger-backend-switch!  (fn [& _] nil)]
+        (let [ctx    (make-ctx :anthropic "sess-ok" 1 [:openai])
+              result (sut/evaluate-stall-recovery ctx)]
+          (is (= :resume (:action result)))
+          (is (empty? @record-calls)
+              "resume path must not record a backend failure"))))))
 
 ;;------------------------------------------------------------------------------ evaluate-stall-recovery – health gate on count=1
 
@@ -307,3 +339,12 @@
                   (fn [_cmd] nil)]
       (let [result (sut/execute-resume! :anthropic :some-keyword-session)]
         (is (= ":some-keyword-session" (:session-id result)))))))
+
+(deftest execute-resume-returns-anomaly-on-ioexception
+  (testing "IOException from start-process! is returned as anomaly map, not thrown"
+    (with-redefs [ai.miniforge.self-healing.stream-recovery/start-process!
+                  (fn [_cmd] (throw (java.io.IOException. "No such file")))]
+      (let [result (sut/execute-resume! :anthropic "sess-fail")]
+        (is (= :anomaly.category/fault (:anomaly/category result)))
+        (is (string? (:anomaly/message result)))
+        (is (vector? (:cmd result)))))))

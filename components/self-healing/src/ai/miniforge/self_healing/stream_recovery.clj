@@ -20,19 +20,26 @@
   "Resume-on-kill logic: decide resume vs failover vs abort after a watchdog kill.
 
    After a stall watchdog terminates a hung agent subprocess, the caller must
-   decide what to do next.  This namespace provides two functions:
+   decide what to do next. This namespace provides two functions:
 
    - `evaluate-stall-recovery` — decides :resume / :failover / :abort.
-     NOTE: the :failover and health-gated paths have side effects — they call
+     The :failover and health-gated paths have side effects: they call
      record-backend-call! and trigger-backend-switch! on the backend-health store.
-   - `execute-resume!` — side-effecting: relaunch subprocess with resume flag.
+   - `execute-resume!` — side-effecting: relaunches subprocess with resume flag.
+     Returns the process map on success or an anomaly map on IOException.
 
    Decision rules
    --------------
    hang-count = 1, backend healthy   → :resume   (transparent retry)
    hang-count = 1, backend unhealthy → :failover (skip wasted retry)
    hang-count >= 2                   → :failover (backend is flaky)
-   no candidate                      → :abort    (all failovers exhausted)"
+   no candidate                      → :abort    (all failovers exhausted)
+
+   NOTE on observability: Decision events are currently emitted to stderr via
+   println rather than through ai.miniforge.logging, because that component is
+   not a declared dependency of self-healing (adding it would introduce
+   cross-component coupling not yet approved). Follow-up: wire into the
+   logging infrastructure once the dependency is reviewed."
   (:require
    [ai.miniforge.self-healing.backend-health :as backend-health]))
 
@@ -98,22 +105,16 @@
 ;; Process management (isolated for testability)
 
 (defn- start-process!
-  "Launch a subprocess from a command vector.
+  "Launch a subprocess from a command vector. Propagates java.io.IOException.
 
    Arguments:
      cmd - Seq of strings forming the command
 
-   Returns: java.lang.Process, or throws ex-info on java.io.IOException."
+   Returns: java.lang.Process"
   [cmd]
-  (try
-    (-> (ProcessBuilder. ^java.util.List (vec cmd))
-        (.inheritIO)
-        (.start))
-    (catch java.io.IOException e
-      (throw (ex-info "Failed to start agent subprocess"
-                      {:cmd   cmd
-                       :cause (ex-message e)}
-                      e)))))
+  (-> (ProcessBuilder. ^java.util.List (vec cmd))
+      (.inheritIO)
+      (.start)))
 
 ;;------------------------------------------------------------------------------ Layer 2
 ;; Shared failover helper
@@ -160,23 +161,16 @@
 
    Decision logic:
      hang-count = 1, backend healthy   → {:action :resume, ...}
-       Backend has no known bad health: attempt transparent resume.
-
      hang-count = 1, backend unhealthy → {:action :failover, ...}
-       Skip the wasted retry: backend is already below threshold.
-       Same side effects as hang-count >= 2.
-
      hang-count >= 2                   → {:action :failover, :new-backend kw}
-       Backend persistently flaky; records failure and switches.
-
      no candidate found                → {:action :abort, :reason \"no healthy backends\"}
 
    Arguments:
      ctx - Map with:
        :phase-id                  - Any; ID of the stalled phase (used in log events)
-       :backend                   - Keyword or string; current backend
+       :backend                   - Keyword or string; current backend (required, non-nil)
        :session-id                - String session ID to resume
-       :hang-count                - clojure.lang.IAtom<Long>; deref'd to read count
+       :hang-count                - IAtom<Long>; deref'd to read count (required atom)
        :config                    - Map; self-healing config section, may contain
                                     :backend-switch-cooldown-ms and
                                     :backend-health-threshold
@@ -186,7 +180,16 @@
      {:action :resume,   :session-id sid,  :backend current-backend-kw}
      {:action :failover, :new-backend kw}
      {:action :abort,    :reason \"no healthy backends\"}"
-  [{:keys [phase-id backend session-id hang-count config allowed-failover-backends]}]
+  [{:keys [phase-id backend session-id hang-count config allowed-failover-backends]
+    :as ctx}]
+  ;; Guard against programmer errors: fail loudly on the watchdog hot-path
+  ;; rather than producing an opaque NPE.
+  (when-not (instance? clojure.lang.IAtom hang-count)
+    (throw (ex-info ":hang-count must be an IAtom (e.g. (atom 1))"
+                    {:ctx ctx :type (type hang-count)})))
+  (when (nil? backend)
+    (throw (ex-info ":backend is required and must not be nil"
+                    {:ctx ctx})))
   (let [count       @hang-count
         backend-kw  (keyword backend)
         cooldown-ms (get config :backend-switch-cooldown-ms 1800000)
@@ -249,7 +252,6 @@
 
    Constructs a command of the form:
      <backend-binary> <resume-flag> <session-id> [extra-args...]
-
    and launches it with inherited stdio.
 
    Arguments:
@@ -258,21 +260,29 @@
      extra-args - Optional seq of additional CLI arguments
 
    Returns: Map with:
-     {:process    java.lang.Process
-      :backend    backend-kw
-      :session-id session-id-str
-      :command    [...]}
+     {:process    java.lang.Process — the launched agent process
+      :backend    keyword           — normalised backend
+      :session-id string            — normalised session id
+      :command    vector            — the exact command vector launched}
 
-   Throws: ex-info with :cmd and :cause keys if the binary is not found
-   or not executable."
+   On java.io.IOException (binary not found, not executable, etc.) returns
+   an anomaly map instead of throwing, per the exceptions-as-data convention:
+     {:anomaly/category :anomaly.category/fault
+      :anomaly/message  \"<error message>\"
+      :cmd              [...]}"
   ([backend session-id]
    (execute-resume! backend session-id []))
   ([backend session-id extra-args]
    (let [cmd (build-resume-command backend session-id extra-args)]
-     {:process    (start-process! cmd)
-      :backend    (keyword backend)
-      :session-id (str session-id)
-      :command    cmd})))
+     (try
+       {:process    (start-process! cmd)
+        :backend    (keyword backend)
+        :session-id (str session-id)
+        :command    cmd}
+       (catch java.io.IOException e
+         {:anomaly/category :anomaly.category/fault
+          :anomaly/message  (ex-message e)
+          :cmd              cmd})))))
 
 ;;------------------------------------------------------------------------------ Rich comment
 
