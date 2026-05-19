@@ -76,22 +76,27 @@
         (.setDaemon true)))))
 
 (defn- emit-stall-event!
-  "Publish a :agent/stream-stalled event to the event-stream.
-   Best-effort — logs and swallows any emission failure so the watchdog
-   thread itself does not crash."
+  "Publish a :agent/stream-stalled event to event-stream.
+
+   nil event-stream is treated as a legal no-op (useful in tests and in early
+   pipeline stages that have not yet wired an event-stream). Any emission error
+   is caught and logged so the watchdog thread cannot crash."
   [event-stream workflow-id phase-id backend logger]
-  (try
-    (let [envelope (event-stream/create-envelope
-                    event-stream
-                    :agent/stream-stalled
-                    {:phase/id          phase-id
-                     :agent/backend     backend
-                     :event/workflow-id workflow-id}
-                    {})]
-      (event-stream/publish! event-stream envelope))
-    (catch Exception ex
-      (log/warn logger "stream-watchdog: failed to emit :agent/stream-stalled"
-                {:phase-id phase-id :backend backend :error (ex-message ex)}))))
+  (if-not event-stream
+    (log/warn logger "stream-watchdog: no event-stream configured; stall event suppressed"
+              {:phase-id phase-id :backend backend})
+    (try
+      (let [envelope (event-stream/create-envelope
+                      event-stream
+                      :agent/stream-stalled
+                      {:phase/id          phase-id
+                       :agent/backend     backend
+                       :event/workflow-id workflow-id}
+                      {})]
+        (event-stream/publish! event-stream envelope))
+      (catch Exception ex
+        (log/warn logger "stream-watchdog: failed to emit :agent/stream-stalled"
+                  {:phase-id phase-id :backend backend :error (ex-message ex)})))))
 
 (defn- build-check-task
   "Build the Runnable that the scheduler fires every check interval.
@@ -117,11 +122,11 @@
                  (catch Exception ex
                    (log/warn logger "stream-watchdog: kill-fn threw"
                              {:error (ex-message ex)})))
-            ;; b. emit stall event
+            ;; b. emit stall event (nil-safe)
             (emit-stall-event! event-stream workflow-id phase-id backend logger)
             ;; c. mark stalled
             (clojure.core/reset! stalled-atom true)
-            ;; d. shut down scheduler — safe and non-blocking from own thread
+            ;; d. shut down scheduler — non-blocking, safe from own thread
             (.shutdown scheduler))))
       (catch Exception ex
         (log/error logger "stream-watchdog: unhandled error in check task"
@@ -135,7 +140,8 @@
      :check-interval-ms — how often to check for a stall (default 5 000)
      :phase-id          — keyword or string identifying the current phase
      :backend           — keyword identifying the agent backend (e.g. :claude-code)
-     :event-stream      — event-stream instance to publish the stall event
+     :event-stream      — event-stream instance to publish the stall event;
+                          nil is accepted and suppresses event emission
      :workflow-id       — UUID or string; embedded in the stall event
      :kill-fn           — zero-arity fn that terminates the agent subprocess
      :logger            — optional logger; defaults to the module-level logger
@@ -153,16 +159,17 @@
         stalled-atom  (atom false)
         scheduler     (Executors/newSingleThreadScheduledExecutor
                        (daemon-thread-factory "stream-watchdog"))
-        ctx           {:last-event-ts last-event-ts
-                       :stalled-atom  stalled-atom
-                       :threshold-ms  threshold-ms
-                       :phase-id      phase-id
-                       :backend       backend
-                       :event-stream  event-stream
-                       :workflow-id   workflow-id
-                       :kill-fn       (or kill-fn (fn []))
-                       :scheduler     scheduler
-                       :logger        logger}
+        ctx           {:last-event-ts     last-event-ts
+                       :stalled-atom      stalled-atom
+                       :threshold-ms      threshold-ms
+                       :check-interval-ms check-interval-ms
+                       :phase-id          phase-id
+                       :backend           backend
+                       :event-stream      event-stream
+                       :workflow-id       workflow-id
+                       :kill-fn           (or kill-fn (fn []))
+                       :scheduler         scheduler
+                       :logger            logger}
         check-task    (build-check-task ctx)]
     (.scheduleAtFixedRate
      scheduler
@@ -208,11 +215,11 @@
 ;; Rich comment — development examples
 
 (comment
-  ;; Minimal watchdog with a 200ms threshold and 50ms check interval (for REPL)
+  ;; Minimal watchdog with fast settings for REPL experimentation
   (def wd
     (create-watchdog
-     {:threshold-ms      200
-      :check-interval-ms 50
+     {:threshold-ms      1000
+      :check-interval-ms 100
       :phase-id          :implement
       :backend           :claude-code
       :event-stream      nil
