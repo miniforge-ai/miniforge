@@ -24,6 +24,7 @@
    [ai.miniforge.cli.workflow-runner.dashboard :as dashboard]
    [ai.miniforge.event-stream.interface :as es]
    [ai.miniforge.supervisory-state.interface :as supervisory]
+   [ai.miniforge.automation-edge-correlator.interface :as correlator]
    [ai.miniforge.phase.interface :as phase])
   (:import
    [java.util UUID]))
@@ -105,6 +106,8 @@
         workflow (build-execution-workflow plan-id)
         event-stream (es/create-event-stream)
         _supervisor (supervisory/attach! event-stream)
+        ;; N15-6: route routing-causality through the witness surface.
+        _correlator (correlator/attach! event-stream)
         workflow-id (random-uuid)
         control-state (es/create-control-state)
         command-poller-cleanup (dashboard/start-command-poller! workflow-id control-state)

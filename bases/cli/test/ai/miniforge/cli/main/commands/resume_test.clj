@@ -28,6 +28,7 @@
    [ai.miniforge.cli.workflow-selection-config :as selection-config]
    [ai.miniforge.event-stream.interface :as es]
    [ai.miniforge.supervisory-state.interface :as supervisory]
+   [ai.miniforge.automation-edge-correlator.interface :as correlator]
    [ai.miniforge.workflow-resume.interface :as wr]))
 
 (deftest resolve-resume-workflow-test
@@ -128,6 +129,7 @@
                   context/create-llm-client (fn [_workflow _provider _quiet] :llm-client)
                   es/create-event-stream (fn [] :event-stream)
                   supervisory/attach! (fn [_event-stream] nil)
+                  correlator/attach! (fn [_event-stream] nil)
                   dashboard/start-command-poller! (fn [_workflow-id _control-state]
                                                     (fn [] nil))
                   main-display/print-info (fn [& _] nil)
@@ -184,6 +186,7 @@
                   context/create-llm-client (fn [_ _ _] :llm-client)
                   es/create-event-stream (fn [] :event-stream)
                   supervisory/attach! (fn [_] nil)
+                  correlator/attach! (fn [_] nil)
                   dashboard/start-command-poller! (fn [_ _] (fn [] nil))
                   main-display/print-info (fn [& _] nil)
                   main-display/print-error (fn [& _] nil)
@@ -240,6 +243,7 @@
                   context/create-llm-client (fn [_workflow _provider _quiet] :llm-client)
                   es/create-event-stream (fn [] :event-stream)
                   supervisory/attach! (fn [_event-stream] nil)
+                  correlator/attach! (fn [_event-stream] nil)
                   dashboard/start-command-poller! (fn [_workflow-id _control-state]
                                                     (fn [] nil))
                   main-display/print-info (fn [& _] nil)

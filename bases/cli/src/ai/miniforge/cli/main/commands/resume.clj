@@ -38,6 +38,7 @@
    [ai.miniforge.event-stream.interface :as es]
    [ai.miniforge.response.interface :as response]
    [ai.miniforge.supervisory-state.interface :as supervisory]
+   [ai.miniforge.automation-edge-correlator.interface :as correlator]
    [ai.miniforge.workflow-resume.interface :as wr]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -156,6 +157,11 @@
             ;; Runtime wiring (CLI concern — stays here)
             event-stream (es/create-event-stream)
             _supervisor (supervisory/attach! event-stream)
+            ;; N15-6: route routing-causality through the witness surface.
+            ;; Mirrors the meta-loop and workflow-runner attach sites; the
+            ;; correlator emits `:supervisory/automation-edge-upserted`
+            ;; alongside the supervisory snapshots.
+            _correlator (correlator/attach! event-stream)
             control-state (es/create-control-state)
             command-poller-cleanup (dashboard/start-command-poller! resume-run-id control-state)
             llm-client (context/create-llm-client workflow nil quiet)]

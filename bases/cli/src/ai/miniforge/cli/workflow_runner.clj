@@ -25,6 +25,7 @@
    [ai.miniforge.llm.interface :as llm]
    [ai.miniforge.event-stream.interface :as es]
    [ai.miniforge.supervisory-state.interface :as supervisory]
+   [ai.miniforge.automation-edge-correlator.interface :as correlator]
    [ai.miniforge.workflow.interface :as workflow]
    [ai.miniforge.artifact.interface :as artifact]
    [ai.miniforge.agent.interface :as agent]
@@ -95,6 +96,11 @@
   (or @meta-loop-ctx
       (let [operator-stream (es/create-event-stream)
             _supervisor (supervisory/attach! operator-stream)
+            ;; N15-6: route routing-causality through the witness surface.
+            ;; The correlator subscribes to the same stream as
+            ;; supervisory-state and emits `:supervisory/automation-edge-upserted`
+            ;; events; consumers (Rust core, native app) dedup on `:edge/id`.
+            _correlator (correlator/attach! operator-stream)
             ctx (agent/create-meta-loop-context operator-stream)]
         (reset! meta-loop-ctx ctx)
         ctx)))
@@ -1078,6 +1084,8 @@
           artifact-store (create-artifact-store quiet)
           event-stream (es/create-event-stream)
           _supervisor (supervisory/attach! event-stream)
+          ;; N15-6: see meta-loop attach above for rationale.
+          _correlator (correlator/attach! event-stream)
           workflow-id (or (get-in enriched-spec [:spec/metadata :session-id]) (random-uuid))
           ;; Control state for dashboard commands (pause/resume/stop)
           control-state (es/create-control-state)
@@ -1237,6 +1245,8 @@
             chain-input (resolve-chain-input opts)
             event-stream (es/create-event-stream)
             _supervisor (supervisory/attach! event-stream)
+            ;; N15-6: see meta-loop attach above for rationale.
+            _correlator (correlator/attach! event-stream)
             llm-client (context/create-llm-client nil nil quiet)
             callbacks (create-phase-callbacks quiet)
             context (context/create-workflow-context {:callbacks callbacks

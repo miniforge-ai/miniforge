@@ -8,6 +8,7 @@
         ;; Event streaming (TUI subscribes to workflow events)
         ai.miniforge/event-stream {:local/root "../../components/event-stream"}
         ai.miniforge/supervisory-state {:local/root "../../components/supervisory-state"}
+        ai.miniforge/automation-edge-correlator {:local/root "../../components/automation-edge-correlator"}
         ;; Core domain components needed by CLI
         ai.miniforge/schema {:local/root "../../components/schema"}
         ai.miniforge/algorithms {:local/root "../../components/algorithms"}

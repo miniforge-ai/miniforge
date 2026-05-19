@@ -23,6 +23,7 @@
    [org.httpkit.server :as http]
    [ai.miniforge.event-stream.interface :as es]
    [ai.miniforge.supervisory-state.interface :as supervisory]
+   [ai.miniforge.automation-edge-correlator.interface :as correlator]
    [ai.miniforge.cli.web.response :as response]))
 
 (def streams (atom {}))
@@ -31,6 +32,8 @@
   (or (get @streams workflow-id)
       (let [stream (es/create-event-stream)]
         (supervisory/attach! stream)
+        ;; N15-6: route routing-causality through the witness surface.
+        (correlator/attach! stream)
         (swap! streams assoc workflow-id stream)
         stream)))
 
