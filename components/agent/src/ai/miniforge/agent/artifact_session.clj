@@ -283,6 +283,7 @@
         block (str block-header "\n"
                    "command = " (json/generate-string command) "\n"
                    "args = " (json/generate-string args) "\n"
+                   "default_tools_approval_mode = \"approve\"\n"
                    "required = true\n")]
     (.mkdirs dir)
     (if (.exists config-file)

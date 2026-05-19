@@ -41,8 +41,10 @@
    [ai.miniforge.dag-executor.protocols.impl.runtime.registry :as registry]
    [ai.miniforge.response.interface :as response]
    [clojure.java.io]
-   [clojure.java.shell :as shell]
-   [clojure.string :as str]))
+   [clojure.string :as str])
+  (:import
+   [java.lang ProcessHandle]
+   [java.util.concurrent TimeUnit]))
 
 ;; ============================================================================
 ;; Configuration
@@ -76,13 +78,8 @@
      unwraps via `(.getCause)` so callers that catch `ExceptionInfo` or
      other specific types still see the original.
    - `future-cancel` only interrupts the worker thread; it does NOT
-     kill the shell subprocess that `shell/sh` is blocked on. A wedged
-     `docker pull` keeps running until the daemon returns, which can
-     leak threads if acquires pile up. The follow-up — switching
-     `run-runtime-process` to `(.waitFor process ms TimeUnit/MILLISECONDS)`
-     with `.destroyForcibly` on miss — kills the subprocess too. We log
-     a warn on every timeout so the asymmetry is visible in operator
-     logs."
+     interrupt owned child processes now that runtime calls use
+     ProcessBuilder directly instead of `clojure.java.shell/sh`."
   [timeout-ms body-fn]
   (if (or (nil? timeout-ms) (not (pos? timeout-ms)))
     (body-fn)
@@ -97,9 +94,7 @@
           (future-cancel fut)
           (binding [*out* *err*]
             (println (str "[oci-cli] acquire-environment! deadline " timeout-ms
-                          "ms exceeded; future cancelled but a stuck `"
-                          "docker`/`podman` subprocess may keep running"
-                          " until the daemon returns.")))
+                          "ms exceeded; cancelling runtime subprocess.")))
           (result/err :timeout
                       (str "OCI runtime acquire-environment! exceeded "
                            timeout-ms "ms — likely a stuck daemon or image pull")
@@ -153,11 +148,44 @@
   [descriptor & args]
   (apply vector (descriptor/executable descriptor) args))
 
+(defn- destroy-process-tree!
+  [^Process process]
+  (let [handle (.toHandle process)
+        descendants (reverse (iterator-seq (.iterator (.descendants handle))))]
+    (doseq [^ProcessHandle child descendants]
+      (.destroy child))
+    (.destroy process)
+    (when-not (.waitFor process 1 TimeUnit/SECONDS)
+      (doseq [^ProcessHandle child descendants]
+        (when (.isAlive child)
+          (.destroyForcibly child)))
+      (.destroyForcibly process))))
+
+(defn- read-stream-future
+  [stream]
+  (future (.readAllBytes stream)))
+
 (defn run-runtime
   "Execute a runtime CLI command and return the result."
   [descriptor & args]
   (try
-    (apply shell/sh (apply runtime-cmd descriptor args))
+    (let [pb (ProcessBuilder. (into-array String (apply runtime-cmd descriptor args)))
+          process (.start pb)
+          stdout-fut (read-stream-future (.getInputStream process))
+          stderr-fut (read-stream-future (.getErrorStream process))]
+      (try
+        (let [exit-code (.waitFor process)
+              stdout-bytes @stdout-fut
+              stderr-bytes @stderr-fut]
+          {:exit exit-code
+           :out (String. ^bytes stdout-bytes "UTF-8")
+           :err (String. ^bytes stderr-bytes "UTF-8")})
+        (catch InterruptedException e
+          (destroy-process-tree! process)
+          (future-cancel stdout-fut)
+          (future-cancel stderr-fut)
+          (.interrupt (Thread/currentThread))
+          (throw e))))
     (catch Exception e
       {:exit 1 :err (.getMessage e) :out ""})))
 
@@ -166,18 +194,27 @@
   [descriptor args & {:keys [stdin-bytes]}]
   (try
     (let [pb (ProcessBuilder. (into-array String (apply runtime-cmd descriptor args)))
-          process (.start pb)]
+          process (.start pb)
+          stdout-fut (read-stream-future (.getInputStream process))
+          stderr-fut (read-stream-future (.getErrorStream process))]
       (when stdin-bytes
         (with-open [stdin (.getOutputStream process)]
           (.write stdin ^bytes stdin-bytes)))
-      (let [stdout-bytes (.readAllBytes (.getInputStream process))
-            stderr-bytes (.readAllBytes (.getErrorStream process))
-            exit-code (.waitFor process)]
-        {:exit exit-code
-         :out-bytes stdout-bytes
-         :err-bytes stderr-bytes
-         :out (String. ^bytes stdout-bytes "UTF-8")
-         :err (String. ^bytes stderr-bytes "UTF-8")}))
+      (try
+        (let [exit-code (.waitFor process)
+              stdout-bytes @stdout-fut
+              stderr-bytes @stderr-fut]
+          {:exit exit-code
+           :out-bytes stdout-bytes
+           :err-bytes stderr-bytes
+           :out (String. ^bytes stdout-bytes "UTF-8")
+           :err (String. ^bytes stderr-bytes "UTF-8")})
+        (catch InterruptedException e
+          (destroy-process-tree! process)
+          (future-cancel stdout-fut)
+          (future-cancel stderr-fut)
+          (.interrupt (Thread/currentThread))
+          (throw e))))
     (catch Exception e
       {:exit 1 :err (.getMessage e) :out "" :out-bytes (byte-array 0) :err-bytes (byte-array 0)})))
 

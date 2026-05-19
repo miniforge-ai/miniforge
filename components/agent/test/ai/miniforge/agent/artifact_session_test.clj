@@ -296,6 +296,7 @@
         ;; running without it.
         (let [content (slurp codex-file)]
           (is (str/includes? content "[mcp_servers.artifact]"))
+          (is (str/includes? content "default_tools_approval_mode = \"approve\""))
           (is (str/includes? content "required = true")))
         (finally
           (session/cleanup-session! s))))))

@@ -252,6 +252,30 @@
         (is (true? (get-in enter-result [:phase :result :degraded-handoff?]))
             ":success false must still trigger the degraded-handoff flag")))))
 
+(deftest implement-does-not-mark-metadata-only-mcp-submit-as-degraded-test
+  (testing "curator recovery after a metadata-only MCP submit is a normal Codex handoff"
+    (with-redefs [agent/create-implementer (fn [_] {:type :mock-implementer})
+                  agent/invoke (fn [_ _ _]
+                                 (response/error
+                                  "LLM response could not be parsed as code artifact"
+                                  {:data {:reject/reason :narrative-only-response
+                                          :artifact-source :mcp}}))
+                  agent/curate-implement-output
+                  (fn [_]
+                    (response/success {:code/files [{:path "src/core.clj"
+                                                     :content "(ns core)"
+                                                     :action :create}]
+                                       :code/summary "curated recovery"}
+                                      {:metrics {:tokens 25 :duration-ms 50}}))]
+      (let [ctx (create-base-context)
+            ctx-with-config (assoc ctx :phase-config {:phase :implement})
+            interceptor (phase/get-phase-interceptor {:phase :implement})
+            enter-result ((:enter interceptor) ctx-with-config)
+            final-result ((:leave interceptor) enter-result)]
+        (is (= :completed (get-in final-result [:phase :status])))
+        (is (not (get-in enter-result [:phase :result :degraded-handoff?]))
+            "metadata-only MCP submit should not poison deterministic curator recovery")))))
+
 (deftest implement-does-not-mark-already-implemented-as-degraded-handoff-test
   (testing "curator recovery alongside an :already-implemented agent verdict must NOT flag degraded-handoff"
     ;; :already-implemented is a deliberate skip — the agent correctly

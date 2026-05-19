@@ -571,7 +571,9 @@
              input artifact-source content tools)
             (response/error (messages/t :error/parse-failed)
                             {:tokens tokens
-                             :data   {:reject/reason reject-reason}})))))))
+                             :data   (cond-> {:reject/reason reject-reason}
+                                       artifact-source
+                                       (assoc :artifact-source artifact-source))})))))))
 
 (def ^:private session-checkpoint-filename ".miniforge/session-id")
 

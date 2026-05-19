@@ -236,5 +236,5 @@
       (is (= "/Users/chris/.local/bin/codex" (first @seen-cmd)))
       (is (= ["exec" "--json"] (take 2 (rest @seen-cmd))))
       (is (= "Reply with exactly {\"ok\":true}" (last @seen-cmd)))
-      (is (= 10000 @seen-timeout))
+      (is (= 30000 @seen-timeout))
       (is (= "/tmp/runtime-worktree" @seen-workdir)))))
