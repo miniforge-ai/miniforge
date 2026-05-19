@@ -22,19 +22,22 @@
    After a stall watchdog terminates a hung agent subprocess, the caller must
    decide what to do next.  This namespace provides two functions:
 
-   - `evaluate-stall-recovery` — pure decision: resume / failover / abort
-   - `execute-resume!`         — side-effecting: relaunch subprocess with resume flag
+   - `evaluate-stall-recovery` — decides :resume / :failover / :abort.
+     NOTE: the :failover and health-gated paths have side effects — they call
+     record-backend-call! and trigger-backend-switch! on the backend-health store.
+   - `execute-resume!` — side-effecting: relaunch subprocess with resume flag.
 
    Decision rules
    --------------
-   hang-count = 1  → :resume   (same backend, same session — first stall may be transient)
-   hang-count >= 2 → :failover (backend is flaky; record failure, select healthiest alternative)
-   no candidate    → :abort    (all failover backends are in cooldown or unhealthy)"
+   hang-count = 1, backend healthy   → :resume   (transparent retry)
+   hang-count = 1, backend unhealthy → :failover (skip wasted retry)
+   hang-count >= 2                   → :failover (backend is flaky)
+   no candidate                      → :abort    (all failovers exhausted)"
   (:require
    [ai.miniforge.self-healing.backend-health :as backend-health]))
 
 ;;------------------------------------------------------------------------------ Layer 0
-;; Backend-specific resume CLI flags
+;; Backend-specific CLI metadata
 
 (def ^:private backend-resume-flags
   "Map of backend keyword → CLI flag used to resume a prior session."
@@ -44,6 +47,15 @@
    :codex       "--resume"
    :ollama      "--continue"
    :google      "--resume"})
+
+(def ^:private backend-binaries
+  "Map of backend keyword → actual CLI binary name."
+  {:anthropic   "claude"
+   :claude-code "claude"
+   :openai      "openai"
+   :codex       "codex"
+   :ollama      "ollama"
+   :google      "gemini"})
 
 (defn resume-flag-for
   "Return the backend-specific CLI resume flag.
@@ -55,6 +67,16 @@
   [backend]
   (get backend-resume-flags (keyword backend) "--resume"))
 
+(defn- binary-for
+  "Return the CLI binary name for a backend.
+
+   Arguments:
+     backend - Keyword backend name
+
+   Returns: String binary name (defaults to (name backend))"
+  [backend]
+  (get backend-binaries (keyword backend) (name backend)))
+
 (defn build-resume-command
   "Build the full CLI command vector to resume an agent session.
 
@@ -63,13 +85,13 @@
      session-id - String session identifier to resume
      extra-args - Optional seq of additional CLI arguments
 
-   Returns: Vector of strings, e.g. [\"anthropic\" \"--resume\" \"<sid>\"]"
+   Returns: Vector of strings, e.g. [\"claude\" \"--resume\" \"<sid>\"]"
   ([backend session-id]
    (build-resume-command backend session-id []))
   ([backend session-id extra-args]
    (let [backend-kw (keyword backend)
          flag       (resume-flag-for backend-kw)
-         binary     (name backend-kw)]
+         binary     (binary-for backend-kw)]
      (into [binary flag (str session-id)] extra-args))))
 
 ;;------------------------------------------------------------------------------ Layer 1
@@ -81,48 +103,49 @@
    Arguments:
      cmd - Seq of strings forming the command
 
-   Returns: java.lang.Process"
+   Returns: java.lang.Process, or throws ex-info on java.io.IOException."
   [cmd]
-  (-> (ProcessBuilder. ^java.util.List (vec cmd))
-      (doto (.redirectErrorStream true)
-            (.inheritIO))
-      (.start)))
+  (try
+    (-> (ProcessBuilder. ^java.util.List (vec cmd))
+        (.inheritIO)
+        (.start))
+    (catch java.io.IOException e
+      (throw (ex-info "Failed to start agent subprocess"
+                      {:cmd     cmd
+                       :cause   (ex-message e)}
+                      e)))))
 
 ;;------------------------------------------------------------------------------ Layer 2
-;; Failover candidate selection
+;; Shared failover helper
 
-(defn- pick-failover-candidate
-  "Select the best backend from allowed-failover-backends, respecting health data.
-
-   Iterates the global fallback-order (from persistent health) and returns the
-   first backend that:
-     1. Is not the current backend
-     2. Is present in allowed-failover-backends
-     3. Is not in cooldown
-     4. Has no data (treated as healthy) or success-rate >= threshold
+(defn- perform-failover
+  "Record the current backend as unhealthy, select a candidate from
+   allowed-failover-backends, trigger a switch, and return the decision.
 
    Arguments:
-     current-backend          - Keyword current backend to exclude
-     allowed-failover-backends - Seq of keyword backends eligible for failover
-     threshold                - Double success-rate minimum (e.g. 0.90)
-     cooldown-ms              - Long cooldown period in ms
+     backend-kw                - Keyword current backend
+     allowed-failover-backends - Seq of keyword failover candidates
+     threshold                 - Double success-rate minimum
+     cooldown-ms               - Long cooldown in ms
 
-   Returns: Keyword backend or nil if none qualifies"
-  [current-backend allowed-failover-backends threshold cooldown-ms]
-  (let [backend-kw  (keyword current-backend)
-        allowed-set (set (map keyword allowed-failover-backends))
-        health      (backend-health/load-health)
-        order       (:fallback-order health)]
-    (first
-     (filter
-      (fn [b]
-        (and (not= b backend-kw)
-             (contains? allowed-set b)
-             (not (backend-health/in-cooldown? b cooldown-ms))
-             (if-let [rate (backend-health/get-backend-success-rate b)]
-               (>= rate threshold)
-               true)))  ; no data → eligible
-      order))))
+   Returns: {:action :failover, :new-backend kw} or {:action :abort, ...}"
+  [backend-kw allowed-failover-backends threshold cooldown-ms]
+  (backend-health/record-backend-call! backend-kw false)
+  (let [allowed-set (set (map keyword allowed-failover-backends))
+        candidate   (backend-health/select-best-backend
+                     backend-kw threshold cooldown-ms allowed-set)]
+    (if candidate
+      (do
+        (backend-health/trigger-backend-switch! backend-kw candidate cooldown-ms)
+        {:action      :failover
+         :new-backend candidate})
+      (do
+        (binding [*out* *err*]
+          (println (pr-str {:event   :stream-recovery/abort
+                            :backend backend-kw
+                            :reason  "no healthy backends in allowed-failover-backends"})))
+        {:action :abort
+         :reason "no healthy backends"}))))
 
 ;;------------------------------------------------------------------------------ Layer 3
 ;; Core decision function
@@ -130,21 +153,26 @@
 (defn evaluate-stall-recovery
   "Decide whether to resume, failover, or abort after a watchdog kill.
 
+   Side effects on :failover path:
+     - record-backend-call! marks current backend unhealthy
+     - trigger-backend-switch! records cooldown and updates default-backend
+
    Decision logic:
-     hang-count = 1  → {:action :resume, ...}
-       Same backend, same session.  Single stall may be transient.
+     hang-count = 1, backend healthy   → {:action :resume, ...}
+       Backend has no known bad health: attempt transparent resume.
 
-     hang-count >= 2 → {:action :failover, :new-backend kw}
-       Backend is persistently flaky.
-       Side effects: records backend failure via record-backend-call!,
-                     calls trigger-backend-switch! on the chosen candidate.
+     hang-count = 1, backend unhealthy → {:action :failover, ...}
+       Skip the wasted retry: backend is already below threshold.
+       Same side effects as hang-count >= 2.
 
-     no candidate    → {:action :abort, :reason \"no healthy backends\"}
-       All allowed failover backends are in cooldown or unhealthy.
+     hang-count >= 2                   → {:action :failover, :new-backend kw}
+       Backend persistently flaky; records failure and switches.
+
+     no candidate found                → {:action :abort, :reason \"no healthy backends\"}
 
    Arguments:
      ctx - Map with:
-       :phase-id                  - Any; ID of the stalled phase (for logging)
+       :phase-id                  - Any; ID of the stalled phase (used in log events)
        :backend                   - Keyword or string; current backend
        :session-id                - String session ID to resume
        :hang-count                - clojure.lang.IAtom<Long>; deref'd to read count
@@ -157,42 +185,60 @@
      {:action :resume,   :session-id sid,  :backend current-backend-kw}
      {:action :failover, :new-backend kw}
      {:action :abort,    :reason \"no healthy backends\"}"
-  [{:keys [backend session-id hang-count config allowed-failover-backends]
-    :as _ctx}]
+  [{:keys [phase-id backend session-id hang-count config allowed-failover-backends]}]
   (let [count       @hang-count
         backend-kw  (keyword backend)
         cooldown-ms (get config :backend-switch-cooldown-ms 1800000)
         threshold   (get config :backend-health-threshold 0.90)]
     (cond
-      ;; First stall — attempt transparent resume
+      ;; First stall — check backend health before committing to a resume attempt
       (= count 1)
-      {:action     :resume
-       :session-id session-id
-       :backend    backend-kw}
+      (let [rate (backend-health/get-backend-success-rate backend-kw)]
+        (if (and rate (< rate threshold))
+          ;; Backend already known-unhealthy; skip the wasted retry
+          (do
+            (binding [*out* *err*]
+              (println (pr-str {:event      :stream-recovery/early-failover
+                                :phase-id   phase-id
+                                :backend    backend-kw
+                                :hang-count count
+                                :rate       rate
+                                :threshold  threshold})))
+            (perform-failover backend-kw allowed-failover-backends threshold cooldown-ms))
+          ;; Backend healthy or no data yet — attempt transparent resume
+          (do
+            (binding [*out* *err*]
+              (println (pr-str {:event      :stream-recovery/resume
+                                :phase-id   phase-id
+                                :backend    backend-kw
+                                :hang-count count})))
+            {:action     :resume
+             :session-id session-id
+             :backend    backend-kw})))
 
-      ;; Second or subsequent stall — failover
+      ;; Second or subsequent stall — backend is persistently flaky
       (>= count 2)
       (do
-        ;; Record backend as unhealthy
-        (backend-health/record-backend-call! backend-kw false)
-        (let [candidate (pick-failover-candidate
-                         backend-kw
-                         allowed-failover-backends
-                         threshold
-                         cooldown-ms)]
-          (if candidate
-            (do
-              (backend-health/trigger-backend-switch! backend-kw candidate cooldown-ms)
-              {:action      :failover
-               :new-backend candidate})
-            {:action :abort
-             :reason "no healthy backends"})))
+        (binding [*out* *err*]
+          (println (pr-str {:event      :stream-recovery/failover
+                            :phase-id   phase-id
+                            :backend    backend-kw
+                            :hang-count count})))
+        (perform-failover backend-kw allowed-failover-backends threshold cooldown-ms))
 
-      ;; Degenerate: hang-count <= 0 (should not occur) — treat as resume
+      ;; Degenerate: hang-count <= 0 (should not occur in normal operation)
       :else
-      {:action     :resume
-       :session-id session-id
-       :backend    backend-kw})))
+      (do
+        (binding [*out* *err*]
+          (println (pr-str {:event      :stream-recovery/degenerate-hang-count
+                            :phase-id   phase-id
+                            :backend    backend-kw
+                            :hang-count count
+                            :anomaly?   true})))
+        {:action     :resume
+         :session-id session-id
+         :backend    backend-kw
+         :anomaly?   true}))))
 
 ;;------------------------------------------------------------------------------ Layer 4
 ;; Public subprocess restart
@@ -214,7 +260,10 @@
      {:process    java.lang.Process
       :backend    backend-kw
       :session-id session-id-str
-      :command    [...]}"
+      :command    [...]}
+
+   Throws: ex-info with :cmd and :cause keys if the binary is not found
+   or not executable."
   ([backend session-id]
    (execute-resume! backend session-id []))
   ([backend session-id extra-args]
@@ -227,7 +276,7 @@
 ;;------------------------------------------------------------------------------ Rich comment
 
 (comment
-  ;; Simulating a first-stall resume decision
+  ;; First stall: resume (backend healthy)
   (let [hang (atom 1)]
     (evaluate-stall-recovery
      {:phase-id                  :implement
@@ -239,7 +288,7 @@
       :allowed-failover-backends [:openai :codex]}))
   ;; => {:action :resume, :session-id "sess-abc123", :backend :anthropic}
 
-  ;; Simulating a second-stall failover decision
+  ;; Second stall: failover
   (let [hang (atom 2)]
     (evaluate-stall-recovery
      {:phase-id                  :implement
@@ -248,8 +297,8 @@
       :hang-count                hang
       :config                    {}
       :allowed-failover-backends [:openai :codex]}))
-  ;; => {:action :failover, :new-backend :openai}   (or :codex if openai is in cooldown)
+  ;; => {:action :failover, :new-backend :openai}
 
-  ;; Build resume command without launching a process
+  ;; Build command without launching a process
   (build-resume-command :anthropic "sess-xyz" ["--timeout" "120"]))
-  ;; => ["anthropic" "--resume" "sess-xyz" "--timeout" "120"]
+  ;; => ["claude" "--resume" "sess-xyz" "--timeout" "120"]

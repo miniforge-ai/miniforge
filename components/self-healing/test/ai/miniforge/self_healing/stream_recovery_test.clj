@@ -23,7 +23,7 @@
    [ai.miniforge.self-healing.stream-recovery :as sut]
    [ai.miniforge.self-healing.backend-health :as health]))
 
-;;------------------------------------------------------------------------------ helpers
+;;------------------------------------------------------------------------------ Helpers
 
 (def ^:private base-config
   {:backend-switch-cooldown-ms 1800000
@@ -38,6 +38,17 @@
    :hang-count                (atom hang-count-val)
    :config                    base-config
    :allowed-failover-backends allowed-failover})
+
+;;
+;; Stub helpers – shared across multiple tests
+;;
+
+(defn- healthy-health-stub
+  "Returns a health stub with empty backends (all eligible) and standard fallback-order."
+  []
+  {:backends         {}
+   :fallback-order   [:anthropic :openai :codex :ollama :google]
+   :switch-cooldowns {}})
 
 ;;------------------------------------------------------------------------------ resume-flag-for
 
@@ -55,10 +66,20 @@
 
 ;;------------------------------------------------------------------------------ build-resume-command
 
-(deftest build-resume-command-basic
-  (testing "produces [binary flag session-id]"
-    (is (= ["anthropic" "--resume" "sess-abc"]
+(deftest build-resume-command-anthropic-uses-claude-binary
+  (testing ":anthropic backend maps to the 'claude' binary, not 'anthropic'"
+    (is (= ["claude" "--resume" "sess-abc"]
            (sut/build-resume-command :anthropic "sess-abc")))))
+
+(deftest build-resume-command-claude-code-uses-claude-binary
+  (testing ":claude-code backend also maps to the 'claude' binary"
+    (is (= ["claude" "--resume" "s1"]
+           (sut/build-resume-command :claude-code "s1")))))
+
+(deftest build-resume-command-google-uses-gemini-binary
+  (testing ":google backend maps to the 'gemini' binary"
+    (is (= ["gemini" "--resume" "s2"]
+           (sut/build-resume-command :google "s2")))))
 
 (deftest build-resume-command-with-extra-args
   (testing "appends extra args after session-id"
@@ -66,172 +87,152 @@
            (sut/build-resume-command :openai "s123" ["--timeout" "90"])))))
 
 (deftest build-resume-command-ollama-uses-continue
-  (testing "ollama uses --continue flag"
+  (testing "ollama uses --continue flag and 'ollama' binary"
     (is (= ["ollama" "--continue" "s999"]
            (sut/build-resume-command :ollama "s999")))))
 
-(deftest build-resume-command-string-backend
-  (testing "string backend coerced to keyword correctly"
+(deftest build-resume-command-string-backend-coerced
+  (testing "string backend is coerced to keyword for lookup"
     (is (= ["codex" "--resume" "sid"]
            (sut/build-resume-command "codex" "sid")))))
 
 ;;------------------------------------------------------------------------------ evaluate-stall-recovery – :resume path
 
-(deftest evaluate-stall-recovery-first-hang-returns-resume
-  (testing "hang-count = 1 → :resume action with same session and backend"
-    (let [ctx    (make-ctx :anthropic "sess-111" 1 [:openai :codex])
-          result (sut/evaluate-stall-recovery ctx)]
-      (is (= :resume      (:action result)))
-      (is (= "sess-111"   (:session-id result)))
-      (is (= :anthropic   (:backend result))))))
+(deftest evaluate-stall-recovery-first-hang-healthy-backend-returns-resume
+  (testing "hang-count=1, backend has no health data (eligible) → :resume"
+    (with-redefs [health/get-backend-success-rate (fn [_b] nil) ; no data → healthy
+                  health/record-backend-call!     (fn [_b _s] nil)
+                  health/select-best-backend      (fn [& _] nil)
+                  health/trigger-backend-switch!  (fn [& _] nil)]
+      (let [ctx    (make-ctx :anthropic "sess-111" 1 [:openai :codex])
+            result (sut/evaluate-stall-recovery ctx)]
+        (is (= :resume    (:action result)))
+        (is (= "sess-111" (:session-id result)))
+        (is (= :anthropic (:backend result)))))))
 
-(deftest evaluate-stall-recovery-zero-hang-count-returns-resume
-  (testing "hang-count = 0 (degenerate) → :resume action (safe fallback)"
-    (let [ctx    (make-ctx :openai "sess-000" 0 [:anthropic])
-          result (sut/evaluate-stall-recovery ctx)]
-      (is (= :resume (:action result)))
-      (is (= :openai (:backend result))))))
+(deftest evaluate-stall-recovery-first-hang-healthy-rate-returns-resume
+  (testing "hang-count=1, backend success-rate >= threshold → :resume"
+    (with-redefs [health/get-backend-success-rate (fn [_b] 0.95)] ; above threshold
+      (let [ctx    (make-ctx :anthropic "sess-ok" 1 [:openai])
+            result (sut/evaluate-stall-recovery ctx)]
+        (is (= :resume (:action result)))))))
+
+;;------------------------------------------------------------------------------ evaluate-stall-recovery – health gate on count=1
+
+(deftest evaluate-stall-recovery-first-hang-unhealthy-backend-skips-resume
+  (testing "hang-count=1 but backend already below threshold → :failover, not :resume"
+    (with-redefs [health/get-backend-success-rate (fn [_b] 0.50) ; below 0.90 threshold
+                  health/record-backend-call!     (fn [_b _s] nil)
+                  health/select-best-backend      (fn [& _] :openai)
+                  health/trigger-backend-switch!  (fn [& _] nil)]
+      (let [ctx    (make-ctx :anthropic "sess-sick" 1 [:openai :codex])
+            result (sut/evaluate-stall-recovery ctx)]
+        (is (= :failover (:action result)))
+        (is (= :openai   (:new-backend result)))))))
+
+(deftest evaluate-stall-recovery-first-hang-unhealthy-no-candidates-aborts
+  (testing "hang-count=1, backend unhealthy, no allowed failover candidates → :abort"
+    (with-redefs [health/get-backend-success-rate (fn [_b] 0.30) ; unhealthy
+                  health/record-backend-call!     (fn [_b _s] nil)
+                  health/select-best-backend      (fn [& _] nil) ; no candidate
+                  health/trigger-backend-switch!  (fn [& _] nil)]
+      (let [ctx    (make-ctx :anthropic "sess-s" 1 [])
+            result (sut/evaluate-stall-recovery ctx)]
+        (is (= :abort  (:action result)))
+        (is (string? (:reason result)))))))
+
+(deftest evaluate-stall-recovery-first-hang-records-failure-before-early-failover
+  (testing "health-gate path calls record-backend-call! with false"
+    (let [recorded (atom nil)]
+      (with-redefs [health/get-backend-success-rate (fn [_b] 0.50)
+                    health/record-backend-call!     (fn [b s] (reset! recorded {:b b :s s}))
+                    health/select-best-backend      (fn [& _] :openai)
+                    health/trigger-backend-switch!  (fn [& _] nil)]
+        (sut/evaluate-stall-recovery (make-ctx :anthropic "sess-r" 1 [:openai]))
+        (is (= {:b :anthropic :s false} @recorded))))))
+
+;;------------------------------------------------------------------------------ evaluate-stall-recovery – degenerate count
+
+(deftest evaluate-stall-recovery-zero-hang-count-returns-resume-with-anomaly
+  (testing "hang-count=0 (degenerate) → :resume with :anomaly? true"
+    (with-redefs [health/get-backend-success-rate (fn [_b] nil)
+                  health/record-backend-call!     (fn [_b _s] nil)
+                  health/select-best-backend      (fn [& _] nil)
+                  health/trigger-backend-switch!  (fn [& _] nil)]
+      (let [ctx    (make-ctx :openai "sess-000" 0 [:anthropic])
+            result (sut/evaluate-stall-recovery ctx)]
+        (is (= :resume (:action result)))
+        (is (true? (:anomaly? result)))))))
 
 ;;------------------------------------------------------------------------------ evaluate-stall-recovery – :failover path
 
-(deftest evaluate-stall-recovery-second-hang-failover-happy-path
-  (testing "hang-count = 2 with healthy failover backends → :failover"
-    (with-redefs [health/load-health         (constantly
-                                              {:backends      {}
-                                               :fallback-order [:anthropic :openai :codex]
-                                               :switch-cooldowns {}})
-                  health/record-backend-call! (fn [_b _s] nil)
-                  health/in-cooldown?         (fn [_b _ms] false)
-                  health/get-backend-success-rate (fn [_b] nil) ; no data → eligible
-                  health/trigger-backend-switch!  (fn [_f _t _ms] nil)]
+(deftest evaluate-stall-recovery-second-hang-returns-failover
+  (testing "hang-count=2 with healthy allowed failover backend → :failover"
+    (with-redefs [health/get-backend-success-rate (fn [_b] nil)
+                  health/record-backend-call!     (fn [_b _s] nil)
+                  health/select-best-backend      (fn [& _] :openai)
+                  health/trigger-backend-switch!  (fn [& _] nil)]
       (let [ctx    (make-ctx :anthropic "sess-222" 2 [:openai :codex])
             result (sut/evaluate-stall-recovery ctx)]
         (is (= :failover (:action result)))
-        ;; :openai is first eligible from fallback-order that is in allowed-set
-        (is (= :openai (:new-backend result)))))))
+        (is (= :openai   (:new-backend result)))))))
 
 (deftest evaluate-stall-recovery-third-hang-also-failover
-  (testing "hang-count = 3 also triggers :failover path"
-    (with-redefs [health/load-health         (constantly
-                                              {:backends       {}
-                                               :fallback-order [:anthropic :openai :codex]
-                                               :switch-cooldowns {}})
-                  health/record-backend-call! (fn [_b _s] nil)
-                  health/in-cooldown?         (fn [_b _ms] false)
-                  health/get-backend-success-rate (fn [_b] nil)
-                  health/trigger-backend-switch!  (fn [_f _t _ms] nil)]
+  (testing "hang-count=3 also triggers :failover"
+    (with-redefs [health/get-backend-success-rate (fn [_b] nil)
+                  health/record-backend-call!     (fn [_b _s] nil)
+                  health/select-best-backend      (fn [& _] :codex)
+                  health/trigger-backend-switch!  (fn [& _] nil)]
       (let [ctx    (make-ctx :anthropic "sess-333" 3 [:codex])
             result (sut/evaluate-stall-recovery ctx)]
         (is (= :failover (:action result)))
-        (is (= :codex (:new-backend result)))))))
+        (is (= :codex    (:new-backend result)))))))
 
 (deftest evaluate-stall-recovery-records-failure-on-second-hang
-  (testing "hang-count >= 2 calls record-backend-call! with success?=false"
+  (testing "hang-count>=2 calls record-backend-call! with success?=false"
     (let [recorded (atom nil)]
-      (with-redefs [health/load-health         (constantly
-                                                {:backends       {}
-                                                 :fallback-order [:anthropic :openai]
-                                                 :switch-cooldowns {}})
-                    health/record-backend-call! (fn [b s]
-                                                  (reset! recorded {:backend b :success? s}))
-                    health/in-cooldown?         (fn [_b _ms] false)
-                    health/get-backend-success-rate (fn [_b] nil)
-                    health/trigger-backend-switch!  (fn [_f _t _ms] nil)]
-        (sut/evaluate-stall-recovery (make-ctx :anthropic "sess-fail" 2 [:openai]))
-        (is (= {:backend :anthropic :success? false} @recorded))))))
+      (with-redefs [health/get-backend-success-rate (fn [_b] nil)
+                    health/record-backend-call!     (fn [b s] (reset! recorded {:b b :s s}))
+                    health/select-best-backend      (fn [& _] :openai)
+                    health/trigger-backend-switch!  (fn [& _] nil)]
+        (sut/evaluate-stall-recovery (make-ctx :anthropic "sess-f" 2 [:openai]))
+        (is (= {:b :anthropic :s false} @recorded))))))
 
 (deftest evaluate-stall-recovery-calls-trigger-switch-on-failover
-  (testing "hang-count >= 2 with candidate calls trigger-backend-switch!"
+  (testing "failover path calls trigger-backend-switch! with correct args"
     (let [switch-calls (atom [])]
-      (with-redefs [health/load-health         (constantly
-                                                {:backends       {}
-                                                 :fallback-order [:anthropic :openai :codex]
-                                                 :switch-cooldowns {}})
-                    health/record-backend-call! (fn [_b _s] nil)
-                    health/in-cooldown?         (fn [_b _ms] false)
-                    health/get-backend-success-rate (fn [_b] nil)
+      (with-redefs [health/get-backend-success-rate (fn [_b] nil)
+                    health/record-backend-call!     (fn [_b _s] nil)
+                    health/select-best-backend      (fn [& _] :openai)
                     health/trigger-backend-switch!  (fn [f t ms]
                                                       (swap! switch-calls conj {:from f :to t :ms ms}))]
         (sut/evaluate-stall-recovery (make-ctx :anthropic "sess-sw" 2 [:openai]))
-        (is (= 1 (count @switch-calls)))
+        (is (= 1         (count @switch-calls)))
         (is (= :anthropic (get-in @switch-calls [0 :from])))
-        (is (= :openai    (get-in @switch-calls [0 :to])))))))
+        (is (= :openai    (get-in @switch-calls [0 :to])))
+        (is (= 1800000    (get-in @switch-calls [0 :ms])))))))
 
-;;------------------------------------------------------------------------------ evaluate-stall-recovery – :abort path
-
-(deftest evaluate-stall-recovery-no-backends-returns-abort
-  (testing "hang-count >= 2 with no allowed failover → :abort"
-    (with-redefs [health/load-health         (constantly
-                                              {:backends       {}
-                                               :fallback-order [:anthropic :openai]
-                                               :switch-cooldowns {}})
-                  health/record-backend-call! (fn [_b _s] nil)
-                  health/in-cooldown?         (fn [_b _ms] false)
-                  health/get-backend-success-rate (fn [_b] nil)
-                  health/trigger-backend-switch!  (fn [_f _t _ms] nil)]
-      (let [ctx    (make-ctx :anthropic "sess-abort" 2 []) ; empty allowed set
-            result (sut/evaluate-stall-recovery ctx)]
-        (is (= :abort (:action result)))
-        (is (string? (:reason result)))))))
-
-(deftest evaluate-stall-recovery-all-backends-in-cooldown-returns-abort
-  (testing "hang-count >= 2 but all allowed backends in cooldown → :abort"
-    (with-redefs [health/load-health         (constantly
-                                              {:backends       {}
-                                               :fallback-order [:anthropic :openai :codex]
-                                               :switch-cooldowns {}})
-                  health/record-backend-call! (fn [_b _s] nil)
-                  health/in-cooldown?         (fn [_b _ms] true) ; everything in cooldown
-                  health/get-backend-success-rate (fn [_b] nil)
-                  health/trigger-backend-switch!  (fn [_f _t _ms] nil)]
-      (let [ctx    (make-ctx :anthropic "sess-cd" 2 [:openai :codex])
-            result (sut/evaluate-stall-recovery ctx)]
-        (is (= :abort (:action result)))))))
-
-(deftest evaluate-stall-recovery-unhealthy-backends-skipped
-  (testing "backends below threshold are skipped; abort if none survive"
-    (with-redefs [health/load-health         (constantly
-                                              {:backends       {}
-                                               :fallback-order [:anthropic :openai :codex]
-                                               :switch-cooldowns {}})
-                  health/record-backend-call! (fn [_b _s] nil)
-                  health/in-cooldown?         (fn [_b _ms] false)
-                  ;; Both candidates have low success rate
-                  health/get-backend-success-rate (fn [_b] 0.50)
-                  health/trigger-backend-switch!  (fn [_f _t _ms] nil)]
-      (let [ctx    (make-ctx :anthropic "sess-uh" 2 [:openai :codex])
-            result (sut/evaluate-stall-recovery ctx)]
-        (is (= :abort (:action result)))))))
-
-(deftest evaluate-stall-recovery-respects-allowed-set-not-global-order
-  (testing "only backends in allowed-failover-backends are considered, even if fallback-order has more"
-    (with-redefs [health/load-health         (constantly
-                                              {:backends       {}
-                                               :fallback-order [:anthropic :openai :codex :ollama]
-                                               :switch-cooldowns {}})
-                  health/record-backend-call! (fn [_b _s] nil)
-                  health/in-cooldown?         (fn [_b _ms] false)
-                  health/get-backend-success-rate (fn [_b] nil)
-                  health/trigger-backend-switch!  (fn [_f _t _ms] nil)]
-      ;; Only :ollama allowed; :openai and :codex are in fallback-order but not allowed
-      (let [ctx    (make-ctx :anthropic "sess-a" 2 [:ollama])
-            result (sut/evaluate-stall-recovery ctx)]
-        (is (= :failover (:action result)))
-        (is (= :ollama (:new-backend result)))))))
+(deftest evaluate-stall-recovery-forwards-allowed-set-to-select-best-backend
+  (testing "allowed-failover-backends is forwarded to select-best-backend as a set"
+    (let [received-allowed (atom nil)]
+      (with-redefs [health/get-backend-success-rate (fn [_b] nil)
+                    health/record-backend-call!     (fn [_b _s] nil)
+                    health/select-best-backend      (fn [_cur _thr _cool allowed]
+                                                      (reset! received-allowed allowed)
+                                                      :codex)
+                    health/trigger-backend-switch!  (fn [& _] nil)]
+        (sut/evaluate-stall-recovery (make-ctx :anthropic "sess-a" 2 [:codex :ollama]))
+        (is (= #{:codex :ollama} @received-allowed))))))
 
 (deftest evaluate-stall-recovery-uses-cooldown-from-config
-  (testing "custom cooldown-ms from :config is forwarded to health checks"
-    (let [cooldown-seen (atom nil)]
-      (with-redefs [health/load-health         (constantly
-                                                {:backends       {}
-                                                 :fallback-order [:anthropic :openai]
-                                                 :switch-cooldowns {}})
-                    health/record-backend-call! (fn [_b _s] nil)
-                    health/in-cooldown?         (fn [_b ms]
-                                                  (reset! cooldown-seen ms)
-                                                  false)
-                    health/get-backend-success-rate (fn [_b] nil)
-                    health/trigger-backend-switch!  (fn [_f _t _ms] nil)]
+  (testing "custom :backend-switch-cooldown-ms from :config is forwarded"
+    (let [received-cooldown (atom nil)]
+      (with-redefs [health/get-backend-success-rate (fn [_b] nil)
+                    health/record-backend-call!     (fn [_b _s] nil)
+                    health/select-best-backend      (fn [_cur _thr cool _allowed]
+                                                      (reset! received-cooldown cool)
+                                                      :openai)
+                    health/trigger-backend-switch!  (fn [& _] nil)]
         (sut/evaluate-stall-recovery
          {:phase-id                  :plan
           :backend                   :anthropic
@@ -240,20 +241,44 @@
           :config                    {:backend-switch-cooldown-ms 300000
                                       :backend-health-threshold   0.80}
           :allowed-failover-backends [:openai]})
-        (is (= 300000 @cooldown-seen))))))
+        (is (= 300000 @received-cooldown))))))
+
+;;------------------------------------------------------------------------------ evaluate-stall-recovery – :abort path
+
+(deftest evaluate-stall-recovery-no-allowed-backends-returns-abort
+  (testing "hang-count>=2 with empty allowed-failover-backends → :abort"
+    (with-redefs [health/get-backend-success-rate (fn [_b] nil)
+                  health/record-backend-call!     (fn [_b _s] nil)
+                  health/select-best-backend      (fn [& _] nil) ; no candidate
+                  health/trigger-backend-switch!  (fn [& _] nil)]
+      (let [ctx    (make-ctx :anthropic "sess-abort" 2 [])
+            result (sut/evaluate-stall-recovery ctx)]
+        (is (= :abort  (:action result)))
+        (is (string?   (:reason result)))))))
+
+(deftest evaluate-stall-recovery-select-best-nil-returns-abort
+  (testing "hang-count>=2 but select-best-backend returns nil → :abort"
+    (with-redefs [health/get-backend-success-rate (fn [_b] nil)
+                  health/record-backend-call!     (fn [_b _s] nil)
+                  health/select-best-backend      (fn [& _] nil)
+                  health/trigger-backend-switch!  (fn [& _] nil)]
+      (let [ctx    (make-ctx :anthropic "sess-cd" 2 [:openai :codex])
+            result (sut/evaluate-stall-recovery ctx)]
+        (is (= :abort (:action result)))))))
 
 ;;------------------------------------------------------------------------------ execute-resume!
 
 (deftest execute-resume-returns-expected-shape
-  (testing "execute-resume! returns map with :process, :backend, :session-id, :command"
-    (let [fake-proc (reify java.lang.Process)]
+  (testing "execute-resume! returns map with :process :backend :session-id :command"
+    ;; Use a plain Object as a sentinel — reify does not support abstract classes.
+    (let [fake-proc (Object.)]
       (with-redefs [ai.miniforge.self-healing.stream-recovery/start-process!
                     (fn [_cmd] fake-proc)]
         (let [result (sut/execute-resume! :anthropic "sess-xyz")]
-          (is (= fake-proc    (:process result)))
-          (is (= :anthropic   (:backend result)))
-          (is (= "sess-xyz"   (:session-id result)))
-          (is (= ["anthropic" "--resume" "sess-xyz"] (:command result))))))))
+          (is (identical? fake-proc  (:process result)))
+          (is (= :anthropic           (:backend result)))
+          (is (= "sess-xyz"           (:session-id result)))
+          (is (= ["claude" "--resume" "sess-xyz"] (:command result))))))))
 
 (deftest execute-resume-with-extra-args
   (testing "extra-args are appended to the command"
@@ -263,8 +288,8 @@
         (sut/execute-resume! :openai "s42" ["--timeout" "120"])
         (is (= ["openai" "--resume" "s42" "--timeout" "120"] @launched))))))
 
-(deftest execute-resume-ollama-uses-continue-flag
-  (testing "ollama subprocess uses --continue, not --resume"
+(deftest execute-resume-ollama-uses-continue-flag-and-binary
+  (testing "ollama subprocess uses --continue and 'ollama' binary"
     (let [launched (atom nil)]
       (with-redefs [ai.miniforge.self-healing.stream-recovery/start-process!
                     (fn [cmd] (reset! launched cmd) nil)]
@@ -272,9 +297,24 @@
         (is (= "ollama"    (first @launched)))
         (is (= "--continue" (second @launched)))))))
 
+(deftest execute-resume-google-uses-gemini-binary
+  (testing "google subprocess uses 'gemini' binary"
+    (let [launched (atom nil)]
+      (with-redefs [ai.miniforge.self-healing.stream-recovery/start-process!
+                    (fn [cmd] (reset! launched cmd) nil)]
+        (sut/execute-resume! :google "sess-g")
+        (is (= "gemini" (first @launched)))))))
+
 (deftest execute-resume-coerces-string-backend
-  (testing "string backend is coerced to keyword in result"
+  (testing "string backend is coerced to keyword in result map"
     (with-redefs [ai.miniforge.self-healing.stream-recovery/start-process!
                   (fn [_cmd] nil)]
       (let [result (sut/execute-resume! "codex" "sess-s")]
         (is (= :codex (:backend result)))))))
+
+(deftest execute-resume-session-id-coerced-to-string
+  (testing "non-string session-id is coerced to string"
+    (with-redefs [ai.miniforge.self-healing.stream-recovery/start-process!
+                  (fn [_cmd] nil)]
+      (let [result (sut/execute-resume! :anthropic :some-keyword-session)]
+        (is (= ":some-keyword-session" (:session-id result)))))))
