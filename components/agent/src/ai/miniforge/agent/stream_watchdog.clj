@@ -75,6 +75,43 @@
         (.setName (str name-prefix "-" (System/nanoTime)))
         (.setDaemon true)))))
 
+;; ---------------------------------------------------------------------------
+;; Layer 0.5 — session capture helpers
+
+(defn- extract-session-id
+  "Extract session ID from a handshake event map.
+
+   Handles two common backend shapes:
+   - Claude Code: top-level `:session_id` or `\"session_id\"` key
+   - Codex: nested `[:session :id]` or `[\"session\" \"id\"]`
+
+   Returns nil when no recognizable session key is present."
+  [event-map]
+  (or (get event-map :session_id)
+      (get event-map "session_id")
+      (get-in event-map [:session :id])
+      (get-in event-map ["session" "id"])))
+
+(defn- emit-session-captured!
+  "Publish :agent/session-captured via event-stream.
+
+   nil event-stream is a legal no-op (see emit-stall-event! for the same
+   pattern). Any emission error is caught and logged — the capture itself
+   has already been persisted in the atom, so a delivery failure must not
+   lose the session ID."
+  [{:keys [event-stream workflow-id phase-id backend logger]} session-id]
+  (if-not event-stream
+    (log/info logger "stream-watchdog: no event-stream; session-captured suppressed"
+              {:session-id session-id :phase-id phase-id :backend backend})
+    (try
+      (let [envelope (event-stream/agent-session-captured
+                      event-stream workflow-id phase-id session-id backend)]
+        (event-stream/publish! event-stream envelope))
+      (catch Exception ex
+        (log/warn logger "stream-watchdog: failed to emit :agent/session-captured"
+                  {:session-id session-id :phase-id phase-id
+                   :backend backend :error (ex-message ex)})))))
+
 (defn- emit-stall-event!
   "Publish a :agent/stream-stalled event to event-stream.
 
@@ -140,13 +177,14 @@
      :check-interval-ms — how often to check for a stall (default 5 000)
      :phase-id          — keyword or string identifying the current phase
      :backend           — keyword identifying the agent backend (e.g. :claude-code)
-     :event-stream      — event-stream instance to publish the stall event;
+     :event-stream      — event-stream instance to publish stall/session events;
                           nil is accepted and suppresses event emission
-     :workflow-id       — UUID or string; embedded in the stall event
+     :workflow-id       — UUID or string; embedded in emitted events
      :kill-fn           — zero-arity fn that terminates the agent subprocess
      :logger            — optional logger; defaults to the module-level logger
 
-   Returns a watchdog state map. Pass it to `ping!`, `stop!`, and `stalled?`.
+   Returns a watchdog state map. Pass it to `ping!`, `stop!`, `stalled?`,
+   `capture-session-id!`, and `get-session-id`.
 
    The internal scheduler starts immediately on a daemon thread. Report every
    agent event via `ping!` to keep the watchdog from firing."
@@ -155,21 +193,23 @@
     :or   {threshold-ms      default-gap-threshold-ms
            check-interval-ms default-check-interval-ms
            logger            module-logger}}]
-  (let [last-event-ts (AtomicLong. (System/currentTimeMillis))
-        stalled-atom  (atom false)
-        scheduler     (Executors/newSingleThreadScheduledExecutor
-                       (daemon-thread-factory "stream-watchdog"))
-        ctx           {:last-event-ts     last-event-ts
-                       :stalled-atom      stalled-atom
-                       :threshold-ms      threshold-ms
-                       :check-interval-ms check-interval-ms
-                       :phase-id          phase-id
-                       :backend           backend
-                       :event-stream      event-stream
-                       :workflow-id       workflow-id
-                       :kill-fn           (or kill-fn (fn []))
-                       :scheduler         scheduler
-                       :logger            logger}
+  (let [last-event-ts   (AtomicLong. (System/currentTimeMillis))
+        stalled-atom    (atom false)
+        session-id-atom (atom nil)
+        scheduler       (Executors/newSingleThreadScheduledExecutor
+                         (daemon-thread-factory "stream-watchdog"))
+        ctx             {:last-event-ts     last-event-ts
+                         :stalled-atom      stalled-atom
+                         :session-id-atom   session-id-atom
+                         :threshold-ms      threshold-ms
+                         :check-interval-ms check-interval-ms
+                         :phase-id          phase-id
+                         :backend           backend
+                         :event-stream      event-stream
+                         :workflow-id       workflow-id
+                         :kill-fn           (or kill-fn (fn []))
+                         :scheduler         scheduler
+                         :logger            logger}
         check-task    (build-check-task ctx)]
     (.scheduleAtFixedRate
      scheduler
@@ -210,6 +250,52 @@
    Safe to call from any thread; reads an atom."
   [watchdog]
   (boolean (and watchdog @(:stalled-atom watchdog))))
+
+;; ---------------------------------------------------------------------------
+;; Layer 1.5 — session ID capture
+
+(defn capture-session-id!
+  "Parse and persist the session ID from the initial agent handshake event.
+
+   MUST be called synchronously before the first tool call so that
+   resume-on-kill has a valid session ID available.
+
+   Accepts the first parsed JSON event from the agent subprocess as a
+   Clojure map. Supports two common backend handshake shapes:
+   - Claude Code: top-level `:session_id` key
+   - Codex:       nested `[:session :id]` path
+
+   When a session ID is found:
+     1. Stores it in the `:session-id-atom` on the watchdog state (atomic).
+     2. Emits :agent/session-captured via event-stream (nil stream is a no-op).
+
+   When no recognizable session key is present, logs a warning and returns
+   the watchdog unchanged; this is not a fatal condition.
+
+   Thread-safe — atom reset is atomic; safe to call from the stream-parsing
+   thread concurrent with ping! on the watchdog scheduler thread."
+  [watchdog event-map]
+  (if-let [sid (extract-session-id event-map)]
+    (do
+      (reset! (:session-id-atom watchdog) sid)
+      (emit-session-captured! watchdog sid)
+      watchdog)
+    (do
+      (log/warn (:logger watchdog)
+                "stream-watchdog: no session ID found in handshake event"
+                {:event-keys (keys event-map)
+                 :phase-id   (:phase-id watchdog)
+                 :backend    (:backend watchdog)})
+      watchdog)))
+
+(defn get-session-id
+  "Return the captured session ID string, or nil if not yet captured.
+
+   Resume-on-kill reads this to pass the correct --resume flag to the backend.
+   Safe to call from any thread."
+  [watchdog]
+  (when watchdog
+    @(:session-id-atom watchdog)))
 
 ;; ---------------------------------------------------------------------------
 ;; Rich comment — development examples

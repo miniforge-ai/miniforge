@@ -241,6 +241,138 @@
           "watchdog must NOT be marked stalled when ping! suppressed the kill"))))
 
 ;; ---------------------------------------------------------------------------
+;; create-watchdog — session-id-atom key
+
+(deftest create-watchdog-contains-session-id-atom
+  (testing "watchdog map contains :session-id-atom key"
+    (let [wd (sut/create-watchdog (make-test-watchdog {}))]
+      (try
+        (is (contains? wd :session-id-atom))
+        (is (instance? clojure.lang.Atom (:session-id-atom wd)))
+        (finally
+          (sut/stop! wd))))))
+
+(deftest create-watchdog-session-id-initially-nil
+  (testing ":session-id-atom is nil before any capture"
+    (let [wd (sut/create-watchdog (make-test-watchdog {}))]
+      (try
+        (is (nil? @(:session-id-atom wd)))
+        (finally
+          (sut/stop! wd))))))
+
+;; ---------------------------------------------------------------------------
+;; get-session-id
+
+(deftest get-session-id-returns-nil-before-capture
+  (testing "get-session-id returns nil when session not yet captured"
+    (let [wd (sut/create-watchdog (make-test-watchdog {}))]
+      (try
+        (is (nil? (sut/get-session-id wd)))
+        (finally
+          (sut/stop! wd))))))
+
+(deftest get-session-id-returns-nil-for-nil-watchdog
+  (testing "get-session-id is safe to call with nil"
+    (is (nil? (sut/get-session-id nil)))))
+
+;; ---------------------------------------------------------------------------
+;; capture-session-id! — Claude Code handshake shape
+
+(deftest capture-session-id-claude-code-keyword-key
+  (testing "captures session_id from Claude Code :session_id keyword key"
+    (let [wd (sut/create-watchdog (make-test-watchdog {}))]
+      (try
+        (sut/capture-session-id! wd {:session_id "cc-session-abc123"
+                                     :type "system" :subtype "init"})
+        (is (= "cc-session-abc123" (sut/get-session-id wd)))
+        (finally
+          (sut/stop! wd))))))
+
+(deftest capture-session-id-claude-code-string-key
+  (testing "captures session_id from Claude Code \"session_id\" string key"
+    (let [wd (sut/create-watchdog (make-test-watchdog {}))]
+      (try
+        (sut/capture-session-id! wd {"session_id" "cc-session-def456"
+                                     "type" "system" "subtype" "init"})
+        (is (= "cc-session-def456" (sut/get-session-id wd)))
+        (finally
+          (sut/stop! wd))))))
+
+;; ---------------------------------------------------------------------------
+;; capture-session-id! — Codex handshake shape
+
+(deftest capture-session-id-codex-keyword-nested
+  (testing "captures session id from Codex [:session :id] nested shape"
+    (let [wd (sut/create-watchdog (make-test-watchdog {}))]
+      (try
+        (sut/capture-session-id! wd {:session {:id "sess_codex_xyz789"}
+                                     :type "session.created"})
+        (is (= "sess_codex_xyz789" (sut/get-session-id wd)))
+        (finally
+          (sut/stop! wd))))))
+
+(deftest capture-session-id-codex-string-nested
+  (testing "captures session id from Codex [\"session\" \"id\"] string-key nested shape"
+    (let [wd (sut/create-watchdog (make-test-watchdog {}))]
+      (try
+        (sut/capture-session-id! wd {"session" {"id" "sess_codex_str_999"}
+                                     "type" "session.created"})
+        (is (= "sess_codex_str_999" (sut/get-session-id wd)))
+        (finally
+          (sut/stop! wd))))))
+
+;; ---------------------------------------------------------------------------
+;; capture-session-id! — unknown / empty event
+
+(deftest capture-session-id-no-session-key-returns-watchdog
+  (testing "capture-session-id! returns watchdog unchanged when no session key found"
+    (let [wd (sut/create-watchdog (make-test-watchdog {}))]
+      (try
+        (let [result (sut/capture-session-id! wd {:type "chunk" :delta "hello"})]
+          (is (= wd result))
+          (is (nil? (sut/get-session-id wd))))
+        (finally
+          (sut/stop! wd))))))
+
+;; ---------------------------------------------------------------------------
+;; capture-session-id! — emits :agent/session-captured event
+
+(deftest capture-session-id-emits-event
+  (testing "capture-session-id! publishes :agent/session-captured to event-stream"
+    (let [published   (atom [])
+          mock-stream (atom {:seq 0 :events [] :sinks []
+                             :quiesced-workflows #{} :in-flight 0
+                             :snowflake-generator nil
+                             :subscribers {}})
+          ;; Intercept publish! by swapping a fake sink
+          _           (swap! mock-stream assoc :sinks
+                             [(fn [evt] (swap! published conj evt))])
+          wd          (sut/create-watchdog
+                       (make-test-watchdog
+                        {:event-stream mock-stream
+                         :phase-id     :implement
+                         :backend      :claude-code
+                         :workflow-id  "wf-session-test"}))]
+      (try
+        (sut/capture-session-id! wd {:session_id "cc-emit-test-session"})
+        ;; Allow a moment for synchronous publish
+        (is (= "cc-emit-test-session" (sut/get-session-id wd))
+            "session ID must be stored in atom")
+        (finally
+          (sut/stop! wd))))))
+
+;; ---------------------------------------------------------------------------
+;; capture-session-id! — returns watchdog for fluent chaining
+
+(deftest capture-session-id-returns-watchdog-map
+  (testing "capture-session-id! returns the watchdog map for chaining"
+    (let [wd (sut/create-watchdog (make-test-watchdog {}))]
+      (try
+        (is (= wd (sut/capture-session-id! wd {:session_id "wf-chain-test"})))
+        (finally
+          (sut/stop! wd))))))
+
+;; ---------------------------------------------------------------------------
 ;; Interface namespace re-export sanity
 
 (deftest interface-namespace-exports-same-vars
@@ -253,7 +385,9 @@
       (is (some? (ns-resolve iface 'stalled?)))
       (is (some? (ns-resolve iface 'resolve-gap-threshold)))
       (is (some? (ns-resolve iface 'default-gap-threshold-ms)))
-      (is (some? (ns-resolve iface 'default-check-interval-ms))))))
+      (is (some? (ns-resolve iface 'default-check-interval-ms)))
+      (is (some? (ns-resolve iface 'capture-session-id!)))
+      (is (some? (ns-resolve iface 'get-session-id))))))
 
 (deftest interface-watchdog-vars-point-to-same-fns
   (testing "re-exported vars are identical to source vars (not copies)"
@@ -264,4 +398,8 @@
       (is (= (var-get (ns-resolve iface 'stop!))
              sut/stop!))
       (is (= (var-get (ns-resolve iface 'stalled?))
-             sut/stalled?)))))
+             sut/stalled?))
+      (is (= (var-get (ns-resolve iface 'capture-session-id!))
+             sut/capture-session-id!))
+      (is (= (var-get (ns-resolve iface 'get-session-id))
+             sut/get-session-id)))))

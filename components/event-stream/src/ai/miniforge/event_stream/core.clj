@@ -1322,7 +1322,29 @@
              :meta-loop/error-class (.getName (class error)))))
 
 ;------------------------------------------------------------------------------ Layer 6.5
-;; Agent stream-stall events (GROUP 1+4)
+;; Agent stream-stall and session events (GROUP 1+4, GROUP 2)
+
+(defn agent-session-captured
+  "Build an :agent/session-captured event recording the backend session ID
+   captured from the initial agent handshake.
+
+   Must be emitted synchronously before the first tool call so that
+   resume-on-kill has a valid session ID to pass to the backend's
+   --resume flag.
+
+   Arguments:
+   - stream:      event-stream atom
+   - workflow-id: owning workflow UUID
+   - phase-id:    keyword identifying the current phase (e.g. :implement)
+   - session-id:  string session identifier returned by the backend handshake
+   - backend:     keyword identifying the backend (:codex, :claude-code, etc.)"
+  [stream workflow-id phase-id session-id backend]
+  (-> (create-envelope stream :agent/session-captured workflow-id
+                       (str "Session captured for " (name backend)
+                            " in phase " (name phase-id)))
+      (assoc :phase/id phase-id
+             :agent/backend backend
+             :agent/session-id session-id)))
 
 (defn agent-stream-stalled
   "Build an :agent/stream-stalled event indicating the agent output stream

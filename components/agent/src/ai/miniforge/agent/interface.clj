@@ -220,3 +220,5 @@
 (def ping-watchdog! watchdog/ping!)
 (def stop-watchdog! watchdog/stop!)
 (def watchdog-stalled? watchdog/stalled?)
+(def capture-watchdog-session-id! watchdog/capture-session-id!)
+(def get-watchdog-session-id watchdog/get-session-id)

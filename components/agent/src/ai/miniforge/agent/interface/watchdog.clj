@@ -80,3 +80,17 @@
   "Return true if the watchdog fired and killed the agent subprocess.
    See `ai.miniforge.agent.stream-watchdog/stalled?`."
   watchdog/stalled?)
+
+;; ---------------------------------------------------------------------------
+;; Session ID capture
+
+(def capture-session-id!
+  "Parse and persist the session ID from the initial agent handshake event.
+   Emits :agent/session-captured via event-stream.
+   See `ai.miniforge.agent.stream-watchdog/capture-session-id!`."
+  watchdog/capture-session-id!)
+
+(def get-session-id
+  "Return the captured session ID string, or nil if not yet captured.
+   See `ai.miniforge.agent.stream-watchdog/get-session-id`."
+  watchdog/get-session-id)

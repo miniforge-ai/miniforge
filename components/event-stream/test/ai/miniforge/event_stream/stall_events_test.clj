@@ -132,6 +132,55 @@
       (is (= 4200 (:phase/duration-ms event)))
       (is (= :normal (:phase/termination-reason event))))))
 
+;------------------------------------------------------------------------------ agent-session-captured (GROUP 2)
+
+(deftest agent-session-captured-type-test
+  (testing "event type is :agent/session-captured"
+    (let [stream (no-op-stream)
+          wf-id  (random-uuid)
+          event  (core/agent-session-captured stream wf-id :implement "cc-abc123" :claude-code)]
+      (is (= :agent/session-captured (:event/type event))))))
+
+(deftest agent-session-captured-fields-test
+  (testing "carries phase-id, session-id, and backend"
+    (let [stream (no-op-stream)
+          wf-id  (random-uuid)
+          event  (core/agent-session-captured stream wf-id :implement "cc-abc123" :claude-code)]
+      (is (= :implement (:phase/id event)))
+      (is (= "cc-abc123" (:agent/session-id event)))
+      (is (= :claude-code (:agent/backend event)))))
+
+  (testing "workflow-id is propagated"
+    (let [stream (no-op-stream)
+          wf-id  (random-uuid)
+          event  (core/agent-session-captured stream wf-id :verify "sess_xyz789" :codex)]
+      (is (= wf-id (:workflow/id event)))))
+
+  (testing "message includes backend and phase names"
+    (let [stream (no-op-stream)
+          wf-id  (random-uuid)
+          event  (core/agent-session-captured stream wf-id :plan "sess_plan_001" :claude-code)]
+      (is (string? (:message event)))
+      (is (re-find #"claude-code" (:message event)))
+      (is (re-find #"plan" (:message event)))))
+
+  (testing "envelope fields are present"
+    (let [stream (no-op-stream)
+          wf-id  (random-uuid)
+          event  (core/agent-session-captured stream wf-id :implement "sess_envelope_test" :codex)]
+      (is (uuid? (:event/id event)))
+      (is (inst? (:event/timestamp event)))
+      (is (= core/event-version (:event/version event)))
+      (is (number? (:event/sequence-number event))))))
+
+(deftest agent-session-captured-works-with-any-backend-test
+  (testing "backend keyword is preserved as-is"
+    (doseq [backend [:codex :claude-code :openai :local]]
+      (let [stream (no-op-stream)
+            event  (core/agent-session-captured
+                    stream (random-uuid) :implement "sess-123" backend)]
+        (is (= backend (:agent/backend event)))))))
+
 ;------------------------------------------------------------------------------ Re-export verification
 
 (deftest interface-events-re-export-test
@@ -150,4 +199,20 @@
       (is (= (:event/type direct) (:event/type via-if)))
       (is (= (:phase/id direct) (:phase/id via-if)))
       (is (= (:stream/gap-duration-ms direct) (:stream/gap-duration-ms via-if)))
+      (is (= (:agent/backend direct) (:agent/backend via-if)))))
+
+  (testing "agent-session-captured is exported through interface.events"
+    (is (fn? events/agent-session-captured)))
+
+  (testing "agent-session-captured is exported through interface"
+    (is (fn? events-iface/agent-session-captured)))
+
+  (testing "agent-session-captured re-export produces the same result as core"
+    (let [stream (no-op-stream)
+          wf-id  (random-uuid)
+          direct (core/agent-session-captured stream wf-id :implement "sess-re" :claude-code)
+          via-if (events/agent-session-captured stream wf-id :implement "sess-re" :claude-code)]
+      (is (= (:event/type direct) (:event/type via-if)))
+      (is (= (:phase/id direct) (:phase/id via-if)))
+      (is (= (:agent/session-id direct) (:agent/session-id via-if)))
       (is (= (:agent/backend direct) (:agent/backend via-if))))))
