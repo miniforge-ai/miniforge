@@ -787,4 +787,37 @@
 
   ;; ---------- `mf etl` (cli wrapper) ----------
   :etl/run-requires-checkout
-  "mf etl run/list/validate currently requires running from inside a miniforge checkout (walks up looking for workspace.edn + bases/etl/deps.edn). The etl base is dev-alias-only until we publish an installable artifact."}}
+  "mf etl run/list/validate currently requires running from inside a miniforge checkout (walks up looking for workspace.edn + bases/etl/deps.edn). The etl base is dev-alias-only until we publish an installable artifact."
+
+  ;; ---------- LLM backend discovery / status (`mf config backends`) ----------
+  :backends/current-suffix                  " (current)"
+  :backends/description-line                "   {description}"
+  :backends/docs-line                       "   Docs: {docs-url}"
+  :backends/error-not-available             "❌ Error: {backend} backend is not available"
+  :backends/install-line                    "   Install: {installation}"
+  :backends/list-header                     "Available LLM Backends:"
+  :backends/models-line                     "   Models: {models}"
+  :backends/name-line                       "{icon} {name} {provider}"
+  :backends/needs-key-howto-header          "To use this backend:"
+  :backends/needs-key-intro                 "The {backend} backend requires {api-key-var}"
+  :backends/needs-key-provider-fallback     "the provider"
+  :backends/needs-key-step-1                "  1. Get an API key from {docs-url}"
+  :backends/needs-key-step-2                "  2. Set the environment variable:"
+  :backends/needs-key-step-2-cmd            "     export {api-key-var}='your-key-here'"
+  :backends/needs-key-step-3                "  3. Or add to {config-path}:"
+  :backends/needs-key-step-3-cmd            "     {:llm {:backend {backend}}}"
+  :backends/needs-key-step-4                "  4. Try again: {command}"
+  :backends/not-installed-docs-line         "  Docs: {docs-url}"
+  :backends/not-installed-howto-header      "To install:"
+  :backends/not-installed-install-line      "  {installation}"
+  :backends/not-installed-intro             "The {backend} backend requires installation."
+  :backends/provider-suffix                 "({provider})"
+  :backends/status-api-key-set              "{api-key-var} is set"
+  :backends/status-builtin                  "Built-in (always available)"
+  :backends/status-cli-found                "{command} CLI found"
+  :backends/status-cli-missing              "{command} not found on PATH"
+  :backends/status-line                     "   Status: {message}"
+  :backends/status-needs-key                "Needs {api-key-var}"
+  :backends/status-unknown                  "Unknown backend type"
+  :backends/unknown-issue                   "Unknown issue with backend: {backend}"
+  :backends/validate-unknown                "Unknown backend: {backend}\nRun '{command}' to see available backends."}}
