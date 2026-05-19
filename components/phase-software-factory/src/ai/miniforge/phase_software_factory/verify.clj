@@ -53,6 +53,15 @@
    Override per spec via :spec/test-timeout-ms or per phase-config."
   (* 30 60 1000))
 
+(def post-destroy-drain-timeout-ms
+  "How long `run-tests!` waits for the reader-thread future to settle
+   after destroy-process-tree! before giving up and cancelling it.
+   Has to be long enough for the JVM's stream-drain thread to notice
+   the closed pipe (sub-second in practice), short enough that a stuck
+   reader can't keep verify wedged. Cancelling on overrun prevents a
+   future-thread leak across repeated verify timeouts."
+  5000)
+
 (def ^:private verify-rate-limit-pattern
   "Pattern for non-actionable verify failures caused by provider throttling."
   #"(?i)rate.?limit|429|you've hit your limit|quota.?exceeded")
@@ -203,7 +212,7 @@
             (destroy-process-tree! (:proc proc))
             ;; Bounded wait for the reader threads to drain; if they don't,
             ;; cancel the future so the thread doesn't leak across verify runs.
-            (when (= ::timeout (deref done-fut 5000 ::timeout))
+            (when (= ::timeout (deref done-fut post-destroy-drain-timeout-ms ::timeout))
               (future-cancel done-fut))
             (assoc (test-error-result
                      (messages/t :verify/timed-out

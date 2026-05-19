@@ -34,6 +34,13 @@
 (def phase-test-config-resource
   "config/phase/test-support-namespaces.edn")
 
+(def ^:private unix-timeout-exit-code
+  "Exit code POSIX `timeout(1)` (and conforming wrappers) emit when a
+   wrapped child is killed at the deadline. Capsule executors that wrap
+   commands in `timeout` surface this code on the result map alongside
+   `:timed-out? true`; the test fixture below mimics that shape."
+  124)
+
 (use-fixtures :each
   (fn [f]
     (phase/reset-phase-loader!)
@@ -277,7 +284,8 @@
 (deftest run-tests-in-capsule-surfaces-executor-timeout-as-timed-out-test
   (testing "an executor that returns :timed-out? gets routed as a timeout on the result"
     (let [execute-fn (fn [_ _ _ _]
-                       {:data {:stdout "" :stderr "" :exit-code 124}
+                       {:data {:stdout "" :stderr ""
+                               :exit-code unix-timeout-exit-code}
                         :timed-out? true})
           result     (verify/run-tests-in-capsule! execute-fn :exec :env "/tmp"
                                                    :test-cmd "bb test"
