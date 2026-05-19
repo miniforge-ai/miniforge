@@ -28,6 +28,7 @@
    [ai.miniforge.phase-software-factory.phase-config :as phase-config]
    [ai.miniforge.phase-software-factory.phase-handoff :as phase-handoff]
    [ai.miniforge.phase-software-factory.knowledge-helpers :as kb-helpers]
+   [ai.miniforge.phase-software-factory.phase-terminal :as phase-terminal]
    [ai.miniforge.agent.interface :as agent]
    [ai.miniforge.knowledge.interface :as knowledge]
    [ai.miniforge.response.interface :as response]
@@ -346,9 +347,10 @@
        (:knowledge-store ctx) :reviewer
        (get-in ctx [:execution/input :title]) feedback))
     (phase/emit-phase-completed! next-ctx :review
-      {:outcome     (if (= :completed phase-status) :success :failure)
-       :duration-ms duration-ms
-       :tokens      (:tokens metrics 0)})
+      (merge {:outcome     (if (= :completed phase-status) :success :failure)
+              :duration-ms duration-ms
+              :tokens      (:tokens metrics 0)}
+             (phase-terminal/derive-termination-reason result nil)))
     next-ctx))
 
 (defn error-review

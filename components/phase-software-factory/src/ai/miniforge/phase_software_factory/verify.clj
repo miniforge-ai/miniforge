@@ -23,10 +23,10 @@
    No tester agent: the implementer wrote both source and test files;
    this phase validates them by running the test suite.
    Default gates: [:tests-pass :coverage]"
-  (:require            [ai.miniforge.phase.interface :as phase]
+  (:require [ai.miniforge.phase.interface :as phase]
             [ai.miniforge.phase-software-factory.phase-config :as phase-config]
-            
             [ai.miniforge.phase-software-factory.messages :as messages]
+            [ai.miniforge.phase-software-factory.phase-terminal :as phase-terminal]
             [babashka.process :as process]
             [babashka.fs :as fs]
             [clojure.string :as str]))
@@ -391,9 +391,14 @@
                            :rate-limited? rate-limited?
                            :gate-failed?  gate-failed?})))
         (phase/emit-phase-completed! :verify
-          {:outcome     (if (= :completed phase-status) :success :failure)
-           :duration-ms duration-ms
-           :tokens      (get metrics :tokens 0)}))))
+          (merge {:outcome     (if (= :completed phase-status) :success :failure)
+                  :duration-ms duration-ms
+                  :tokens      (get metrics :tokens 0)}
+                 ;; :stalled? true when the test process timed out (hung BB/cargo)
+                 ;; :rate-limited? true when provider quota blocked the phase
+                 (phase-terminal/derive-termination-reason result
+                   {:stalled?      timeout?
+                    :rate-limited? rate-limited?}))))))
 
 (defn error-verify
   "Handle verification phase errors. Retries within budget; on
