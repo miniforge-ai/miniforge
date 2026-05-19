@@ -28,11 +28,11 @@
 ;; Helpers
 
 (defn- make-test-watchdog
-  "Merge caller opts over safe defaults. Uses a fast check interval so
-   fire-on-threshold tests complete quickly without sleep gymnastics."
+  "Merge caller opts over safe defaults. Uses fast check-interval-ms so
+   fire-on-threshold tests complete quickly."
   [opts]
   (merge {:threshold-ms      200
-          :check-interval-ms 50        ;; fast checks for test speed
+          :check-interval-ms 50         ;; fast checks for test speed
           :phase-id          :test-phase
           :backend           :mock
           :event-stream      nil
@@ -101,10 +101,19 @@
         (is (contains? wd :stalled-atom))
         (is (contains? wd :scheduler))
         (is (contains? wd :threshold-ms))
+        (is (contains? wd :check-interval-ms))
         (is (contains? wd :phase-id))
         (is (contains? wd :backend))
         (is (instance? AtomicLong (:last-event-ts wd)))
         (is (instance? clojure.lang.Atom (:stalled-atom wd)))
+        (finally
+          (sut/stop! wd))))))
+
+(deftest create-watchdog-stores-check-interval-ms
+  (testing ":check-interval-ms is stored in the returned watchdog map"
+    (let [wd (sut/create-watchdog (make-test-watchdog {:check-interval-ms 123}))]
+      (try
+        (is (= 123 (:check-interval-ms wd)))
         (finally
           (sut/stop! wd))))))
 
@@ -123,17 +132,6 @@
                                    :kill-fn (fn [])})]
       (try
         (is (= sut/default-gap-threshold-ms (:threshold-ms wd)))
-        (finally
-          (sut/stop! wd))))))
-
-(deftest create-watchdog-accepts-check-interval-ms
-  (testing ":check-interval-ms is stored in the watchdog map"
-    (let [wd (sut/create-watchdog (make-test-watchdog {:check-interval-ms 100}))]
-      (try
-        ;; The scheduler is started with the custom interval; we verify it by
-        ;; checking the ctx key is absent (not stored) but the scheduler is alive.
-        ;; Structural check: scheduler is running
-        (is (not (.isShutdown (:scheduler wd))))
         (finally
           (sut/stop! wd))))))
 
@@ -220,30 +218,27 @@
 ;; ping! actually prevents the kill from firing
 
 (deftest ping-prevents-kill-when-gap-was-backdated
-  "ping! resets the timestamp to now. Even if the timestamp was back-dated
-   to simulate a stale gap, calling ping! before the next check tick should
-   make the gap measurement fresh and suppress the kill.
-
-   This test is effective because we use a fast 50ms check-interval-ms and
-   call ping! immediately after backdating, then verify the kill never fires
-   over multiple check cycles."
-  (let [killed? (atom false)
-        wd      (sut/create-watchdog
-                 (make-test-watchdog
-                  {:threshold-ms      200
-                   :check-interval-ms 50
-                   :kill-fn           #(reset! killed? true)}))]
-    ;; Simulate a gap that would exceed threshold...
-    (backdate! wd 400)
-    ;; ...but immediately reset the timestamp via ping!
-    (sut/ping! wd)
-    ;; Let multiple check ticks run (300ms = ~6 ticks at 50ms interval)
-    (Thread/sleep 300)
-    (sut/stop! wd)
-    (is (not @killed?)
-        "kill-fn must NOT fire if ping! kept the timestamp current")
-    (is (not (sut/stalled? wd))
-        "watchdog must NOT be marked stalled when ping! suppressed the kill")))
+  (testing "ping! resets the timestamp; a stale backdated gap must not fire the kill"
+    ;; threshold-ms 1000 and sleep 300ms gives 700ms safety margin —
+    ;; the watchdog cannot accumulate a fresh 1000ms gap in only 300ms.
+    (let [killed? (atom false)
+          wd      (sut/create-watchdog
+                   (make-test-watchdog
+                    {:threshold-ms      1000
+                     :check-interval-ms 50
+                     :kill-fn           #(reset! killed? true)}))]
+      ;; Simulate a stale gap that would exceed a lower threshold...
+      (backdate! wd 800)
+      ;; ...but immediately reset the timestamp via ping!
+      (sut/ping! wd)
+      ;; Allow multiple check ticks (300ms ≪ threshold-ms 1000ms).
+      ;; The gap after ping! is ~0ms; even after 300ms it is ~300ms < 1000ms.
+      (Thread/sleep 300)
+      (sut/stop! wd)
+      (is (not @killed?)
+          "kill-fn must NOT fire if ping! kept the timestamp current")
+      (is (not (sut/stalled? wd))
+          "watchdog must NOT be marked stalled when ping! suppressed the kill"))))
 
 ;; ---------------------------------------------------------------------------
 ;; Interface namespace re-export sanity
