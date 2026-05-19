@@ -25,6 +25,7 @@
   :verify/output-unparseable  "Test output could not be parsed"
   :verify/gate-failed         "Gate validation failed"
   :verify/failed              "Verification failed"
+  :verify/timed-out           "Verify test runner timed out after {timeout-ms}ms (cmd: {test-cmd})"
 
   ;; Release phase
   :release/zero-files                   "Release phase received code artifact with zero files"
