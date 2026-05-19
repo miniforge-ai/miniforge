@@ -23,6 +23,7 @@
   (:require
    [clojure.string :as str]
    [ai.miniforge.cli.app-config :as app-config]
+   [ai.miniforge.cli.messages :as messages]
    [ai.miniforge.cli.resource-config :as resource-config]
    [babashka.process :as process]))
 
@@ -83,20 +84,24 @@
         {:keys [check-type command api-key-var]} spec]
     (case check-type
       :builtin
-      (availability-status true :available "Built-in (always available)")
+      (availability-status true :available (messages/t :backends/status-builtin))
 
       :cli
       (if (check-command-available? command)
-        (availability-status true :available (str command " CLI found"))
-        (availability-status false :not-installed (str command " not found on PATH")))
+        (availability-status true :available
+                             (messages/t :backends/status-cli-found {:command command}))
+        (availability-status false :not-installed
+                             (messages/t :backends/status-cli-missing {:command command})))
 
       :api-key
       (if (check-api-key-set? api-key-var)
-        (availability-status true :available (str api-key-var " is set"))
-        (availability-status false :needs-key (str "Needs " api-key-var)))
+        (availability-status true :available
+                             (messages/t :backends/status-api-key-set {:api-key-var api-key-var}))
+        (availability-status false :needs-key
+                             (messages/t :backends/status-needs-key {:api-key-var api-key-var})))
 
       ;; Unknown check type
-      (availability-status false :unknown "Unknown backend type"))))
+      (availability-status false :unknown (messages/t :backends/status-unknown)))))
 
 ;------------------------------------------------------------------------------ Layer 2
 ;; Backend information
@@ -143,21 +148,25 @@
         is-current? (= backend-id current-backend)
         icon (status-icon status)
         name-str (str (name backend-id)
-                     (when is-current? " (current)"))
-        provider-str (str "(" provider ")")]
+                     (when is-current? (messages/t :backends/current-suffix)))]
     (str/join "\n"
               (remove nil?
-                      [(str icon " " name-str " " provider-str)
-                       (str "   " description)
-                       (str "   Status: " message)
+                      [(messages/t :backends/name-line
+                                   {:icon icon
+                                    :name name-str
+                                    :provider (messages/t :backends/provider-suffix
+                                                          {:provider provider})})
+                       (messages/t :backends/description-line {:description description})
+                       (messages/t :backends/status-line {:message message})
                        (when models
-                         (str "   Models: " (str/join ", " models)))
+                         (messages/t :backends/models-line
+                                     {:models (str/join ", " models)}))
                        (when (and (not (:available backend-info))
                                  installation)
-                         (str "   Install: " installation))
+                         (messages/t :backends/install-line {:installation installation}))
                        (when (and (not (:available backend-info))
                                  docs-url)
-                         (str "   Docs: " docs-url))]))))
+                         (messages/t :backends/docs-line {:docs-url docs-url}))]))))
 
 (defn print-backends
   "Print all backends with their status."
@@ -165,7 +174,7 @@
   (let [backends (list-backends)
         current (get-current-backend config)]
     (println)
-    (println "Available LLM Backends:")
+    (println (messages/t :backends/list-header))
     (println)
     (doseq [backend backends]
       (println (format-backend-status backend current))
@@ -175,35 +184,40 @@
   "Print helpful error message when backend is not available."
   [backend-id]
   (let [info (get-backend-info backend-id)
-        {:keys [status api-key-var installation docs-url]} info]
+        {:keys [status api-key-var installation docs-url]} info
+        backend-name (name backend-id)]
     (println)
-    (println (str "❌ Error: " (name backend-id) " backend is not available"))
+    (println (messages/t :backends/error-not-available {:backend backend-name}))
     (println)
     (case status
       :needs-key
       (do
-        (println (str "The " (name backend-id) " backend requires " api-key-var))
+        (println (messages/t :backends/needs-key-intro
+                             {:backend backend-name :api-key-var api-key-var}))
         (println)
-        (println "To use this backend:")
-        (println (str "  1. Get an API key from " (or docs-url "the provider")))
-        (println "  2. Set the environment variable:")
-        (println (str "     export " api-key-var "='your-key-here'"))
-        (println (str "  3. Or add to " (app-config/config-path) ":"))
-        (println (str "     {:llm {:backend " backend-id "}}"))
-        (println (str "  4. Try again: "
-                      (app-config/command-string "config backend" (name backend-id)))))
+        (println (messages/t :backends/needs-key-howto-header))
+        (println (messages/t :backends/needs-key-step-1
+                             {:docs-url (or docs-url
+                                            (messages/t :backends/needs-key-provider-fallback))}))
+        (println (messages/t :backends/needs-key-step-2))
+        (println (messages/t :backends/needs-key-step-2-cmd {:api-key-var api-key-var}))
+        (println (messages/t :backends/needs-key-step-3 {:config-path (app-config/config-path)}))
+        (println (messages/t :backends/needs-key-step-3-cmd {:backend backend-id}))
+        (println (messages/t :backends/needs-key-step-4
+                             {:command (app-config/command-string "config backend"
+                                                                  backend-name)})))
 
       :not-installed
       (do
-        (println (str "The " (name backend-id) " backend requires installation."))
+        (println (messages/t :backends/not-installed-intro {:backend backend-name}))
         (println)
-        (println "To install:")
-        (println (str "  " installation))
+        (println (messages/t :backends/not-installed-howto-header))
+        (println (messages/t :backends/not-installed-install-line {:installation installation}))
         (when docs-url
-          (println (str "  Docs: " docs-url))))
+          (println (messages/t :backends/not-installed-docs-line {:docs-url docs-url}))))
 
       ;; Default
-      (println (str "Unknown issue with backend: " (name backend-id))))
+      (println (messages/t :backends/unknown-issue {:backend backend-name})))
     (println)))
 
 (defn validate-backend
@@ -212,9 +226,9 @@
   [backend-id]
   (if-not (contains? backend-specs backend-id)
     {:valid? false
-     :message (str "Unknown backend: " (name backend-id)
-                   "\nRun '" (app-config/command-string "config backends")
-                   "' to see available backends.")}
+     :message (messages/t :backends/validate-unknown
+                          {:backend (name backend-id)
+                           :command (app-config/command-string "config backends")})}
     (let [status (check-backend-status backend-id)]
       (if (:available status)
         {:valid? true
