@@ -152,6 +152,20 @@
     (fs/exists? (fs/path worktree-path "package.json")) "npm test"
     :else "bb test"))
 
+(defn- destroy-process-tree!
+  "Forcefully kill `proc` and all of its descendants.
+
+   `.destroyForcibly` on a parent `sh -c ...` does NOT propagate to children,
+   so the JVM running `bb test` is left orphaned after we time out. Walks the
+   descendant tree explicitly (children first, then the parent) so we don't
+   leak processes or hold file/port locks across verify runs."
+  [^Process proc]
+  (try
+    (doseq [^java.lang.ProcessHandle child (.. proc descendants (toArray))]
+      (try (.destroyForcibly child) (catch Throwable _)))
+    (catch Throwable _))
+  (try (.destroyForcibly proc) (catch Throwable _)))
+
 (defn run-tests!
   "Run tests in the worktree. Infers the test command from the repo structure
    unless test-cmd is supplied explicitly.
@@ -181,10 +195,16 @@
             (parse-test-output (str (:out result "") "\n" (:err result ""))
                                (:exit result 1)))
           (do
-            (.destroyForcibly ^Process (:proc proc))
-            ;; Let the destroyed process's reader threads finish so the
-            ;; future doesn't leak — bounded wait, ignore the result.
-            (try (deref done-fut 5000 nil) (catch Exception _))
+            ;; .destroyForcibly on the `sh` parent does NOT reliably kill the
+            ;; test runner child (the actual JVM running `bb test`). Walk the
+            ;; descendant tree first so children die before the shell does;
+            ;; this is what produced the orphan polylith poly-cli process
+            ;; observed on 2026-05-18.
+            (destroy-process-tree! (:proc proc))
+            ;; Bounded wait for the reader threads to drain; if they don't,
+            ;; cancel the future so the thread doesn't leak across verify runs.
+            (when (= ::timeout (deref done-fut 5000 ::timeout))
+              (future-cancel done-fut))
             (assoc (test-error-result
                      (messages/t :verify/timed-out
                                  {:timeout-ms timeout-ms :test-cmd cmd}))
@@ -195,14 +215,35 @@
 (defn run-tests-in-capsule!
   "Run tests inside a task capsule via execute-fn (N11 §6).
    Routes the test command through the executor instead of host process/shell.
-   execute-fn is dag-exec/execute! passed through context to avoid cross-component requires."
-  [execute-fn executor env-id worktree-path & {:keys [test-cmd]}]
-  (let [cmd (or test-cmd "bb test")]
+   execute-fn is dag-exec/execute! passed through context to avoid cross-component requires.
+
+   Bounded by :timeout-ms (default `default-test-timeout-ms`) — passed
+   through to the capsule executor's `execute!` protocol which honours
+   the option per `dag-executor.protocols.executor/TaskExecutor`. Without
+   this bound a stuck `bb test` inside the capsule produced the same
+   silent verify hang seen on the host path."
+  [execute-fn executor env-id worktree-path & {:keys [test-cmd timeout-ms]}]
+  (let [cmd        (or test-cmd "bb test")
+        timeout-ms (or timeout-ms default-test-timeout-ms)]
     (try
-      (let [result (execute-fn executor env-id cmd {:workdir worktree-path})
-            data   (:data result)]
-        (parse-test-output (str (get data :stdout "") "\n" (get data :stderr ""))
-                           (get data :exit-code 1)))
+      (let [result (execute-fn executor env-id cmd
+                               {:workdir worktree-path
+                                :timeout-ms timeout-ms})
+            data   (:data result)
+            exit   (get data :exit-code 1)
+            parsed (parse-test-output (str (get data :stdout "") "\n" (get data :stderr ""))
+                                      exit)]
+        ;; Executors signal timeout via :timed-out? (or a sentinel exit) on
+        ;; the result. Surface it on the parsed map so leave-verify routes
+        ;; through the non-actionable path and doesn't redirect to implement.
+        (if (or (:timed-out? result)
+                (:timed-out? data))
+          (assoc parsed
+                 :passed? false
+                 :timed-out? true
+                 :output (messages/t :verify/timed-out
+                                     {:timeout-ms timeout-ms :test-cmd cmd}))
+          parsed))
       (catch Exception e
         (test-error-result (.getMessage e))))))
 
@@ -256,7 +297,8 @@
                                               (get ctx :execution/executor)
                                               (get ctx :execution/environment-id)
                                               worktree-path
-                                              :test-cmd test-cmd)
+                                              :test-cmd test-cmd
+                                              :timeout-ms timeout-ms)
                        (run-tests! worktree-path
                                    :test-cmd test-cmd
                                    :timeout-ms timeout-ms))

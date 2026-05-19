@@ -233,6 +233,60 @@
             (is (= verify/default-test-timeout-ms (:timeout-ms @captured-opts))
                 "default deadline must be applied even when spec is silent")))))))
 
+(deftest run-tests-kills-child-process-not-just-shell-test
+  (testing "destroy-process-tree! kills `sh -c <cmd>` AND its descendant test runner"
+    ;; `sh -c "sleep 600"` forks sleep as a child; .destroyForcibly on the
+    ;; sh parent does not propagate to sleep, so the production code used
+    ;; to leak the actual test-runner process after a verify timeout.
+    ;; This is what we observed as PID 31181 still alive 30+ min after
+    ;; killing the parent. After the fix the descendant tree is walked
+    ;; first, so no PID survives.
+    (let [;; sleep 7200 in the shell so the test fails red if the tree
+          ;; isn't actually killed (CI noticing a 2h orphan process).
+          result (verify/run-tests! "/tmp" :test-cmd "sleep 7200" :timeout-ms 500)]
+      (is (true? (:timed-out? result)))
+      ;; Give the OS a beat to reap.
+      (Thread/sleep 250)
+      ;; Walk the JVM's current process descendants — no `sleep 7200` should remain.
+      (let [orphans (->> (.. (java.lang.ProcessHandle/current) descendants (toArray))
+                         (filter (fn [^java.lang.ProcessHandle ph]
+                                   (some-> ph .info .command .get
+                                           (clojure.string/includes? "sleep")))))]
+        (is (empty? orphans)
+            (str "destroy-process-tree! must reap every descendant sleep process; "
+                 "found " (count orphans) " orphan(s)"))))))
+
+(deftest run-tests-in-capsule-passes-timeout-to-execute-fn-test
+  (testing "run-tests-in-capsule! threads :timeout-ms into execute-fn opts so capsule executors honour it"
+    ;; Governed-mode parity: without this, a hung `bb test` inside a
+    ;; capsule produces the same silent verify hang we saw on the host
+    ;; path on 2026-05-18. The Copilot review on PR #915 flagged this
+    ;; explicitly.
+    (let [captured-opts (atom nil)
+          execute-fn    (fn [_executor _env-id _cmd opts]
+                          (reset! captured-opts opts)
+                          {:data {:stdout "Ran 1 tests containing 1 assertions.\n0 failures, 0 errors."
+                                  :stderr ""
+                                  :exit-code 0}})]
+      (verify/run-tests-in-capsule! execute-fn :exec :env "/tmp"
+                                    :test-cmd "bb test"
+                                    :timeout-ms 123456)
+      (is (= 123456 (:timeout-ms @captured-opts))
+          ":timeout-ms must reach the executor's execute! opts"))))
+
+(deftest run-tests-in-capsule-surfaces-executor-timeout-as-timed-out-test
+  (testing "an executor that returns :timed-out? gets routed as a timeout on the result"
+    (let [execute-fn (fn [_ _ _ _]
+                       {:data {:stdout "" :stderr "" :exit-code 124}
+                        :timed-out? true})
+          result     (verify/run-tests-in-capsule! execute-fn :exec :env "/tmp"
+                                                   :test-cmd "bb test"
+                                                   :timeout-ms 1000)]
+      (is (true? (:timed-out? result))
+          ":timed-out? from the executor must survive parsing")
+      (is (str/includes? (str (:output result)) "timed out")
+          ":output must carry the timeout fragment so leave-verify routes correctly"))))
+
 (deftest enter-verify-timed-out-result-includes-fragment-test
   (testing "a :timed-out? test result becomes a phase result whose summary contains `timed out`"
     ;; This is the wiring leave-verify depends on: it scans result :error :message
