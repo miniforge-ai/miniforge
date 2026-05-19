@@ -411,6 +411,19 @@
   "True when the current review fingerprint has made no actionable progress."
   repair-loop/stagnated?)
 
+(def review-fingerprint-fuzzy
+  "Coarser fingerprint: set of (severity, file) pairs across actionable
+   issues. Drops line numbers and description text. Catches temporal
+   loops where the implementer keeps making the same class of mistake
+   in the same files but the LLM reviewer rephrases the complaint."
+  repair-loop/review-fingerprint-fuzzy)
+
+(def fuzzy-stagnated?
+  "True when the current fuzzy fingerprint matches the prior and is
+   non-empty. Intended to drive meta-agent intervention rather than
+   direct termination."
+  repair-loop/fuzzy-stagnated?)
+
 ;------------------------------------------------------------------------------ Rich Comment
 
 (comment

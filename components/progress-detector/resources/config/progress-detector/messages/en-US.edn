@@ -29,6 +29,9 @@
   :repair-loop/stagnation
   "Review fingerprint repeated — {count} actionable items unchanged across repair iterations"
 
+  :repair-loop/fuzzy-stagnation
+  "Review (file × severity) set repeated — {count} file/severity pairs persisted across iterations even though descriptions drifted; implementer is stuck in the same area"
+
   ;; Supervisor (supervisor.clj)
   :supervisor/terminate-reason
   "Terminating run: {summary}"

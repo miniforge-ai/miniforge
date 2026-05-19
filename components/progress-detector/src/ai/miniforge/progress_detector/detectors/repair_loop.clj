@@ -49,11 +49,20 @@
 (def ^:private detector-version
   "Version stamp on emitted anomalies. Bump when fingerprint
    composition or termination semantics change."
-  "stage-2.0")
+  "stage-2.1")
 
 (def ^:private detector-kind :detector/repair-loop)
 
 (def ^:private anomaly-category :anomalies.review/stagnation)
+
+(def ^:private fuzzy-anomaly-category
+  "Emitted alongside the strict anomaly when consecutive reviews share
+   the same (file × severity) set but drift on line/description text.
+   The strict signal terminates; the fuzzy signal is for meta-agents
+   that want to intervene before termination by analyzing the recurring
+   bug class and synthesizing an instruction addendum. See spec
+   work/meta-agent-repair-loop-intervention.spec.edn for context."
+  :anomalies.review/fuzzy-stagnation)
 
 (def ^:private stagnation-match-count
   "Number of consecutive identical fingerprints required to declare
@@ -151,6 +160,46 @@
        (seq current)
        (= prior current)))
 
+(defn review-fingerprint-fuzzy
+  "Coarser sibling of `review-fingerprint`. Reduces a review to the
+   set of `[severity file]` pairs across actionable issues + failed
+   gates — drops line numbers and description text.
+
+   Rationale: the strict fingerprint catches verbatim repeats, but LLM
+   reviewers rephrase the same complaint between iterations (different
+   word choice, line numbers shift after edits, suggestions reorder),
+   so strict equality misses real temporal loops where the implementer
+   keeps making the same class of mistake in the same files. The
+   fuzzy fingerprint matches on `(file × severity)` set equality —
+   coarse enough to absorb LLM-text drift, specific enough that a real
+   implementer move (deleting a flagged file, dropping a severity)
+   changes it.
+
+   The fuzzy fingerprint is meant for meta-agent consumption: when it
+   repeats, an intervention agent should analyze WHY the same set of
+   problems persists. The strict signal still drives termination."
+  [review]
+  (let [llm-pairs   (->> (get review :review/issues [])
+                          (filter (comp actionable-severities :severity))
+                          (map (fn [{:keys [severity file]}]
+                                 [severity (or file "")])))
+        gate-pairs  (->> (get review :review/gate-results [])
+                          (remove :passed?)
+                          (map (fn [{:keys [gate-id]}]
+                                 [:blocking (str ":gate/" (name (or gate-id :unknown)))])))]
+    (->> (concat llm-pairs gate-pairs)
+         set)))
+
+(defn fuzzy-stagnated?
+  "True when a review's fuzzy fingerprint matches the prior review's
+   fuzzy fingerprint AND is non-empty. Same nil/empty semantics as
+   `stagnated?` — first review never short-circuits, empty fingerprint
+   never counts (no flagged files = no recurring problem)."
+  [prior current]
+  (and (some? prior)
+       (seq current)
+       (= prior current)))
+
 ;------------------------------------------------------------------------------ Layer 2
 ;; Anomaly construction
 
@@ -178,23 +227,58 @@
                      :anomaly/evidence  evidence}]
     (anomaly/anomaly :fault summary data)))
 
+(defn- build-fuzzy-anomaly
+  "Construct a canonical anomaly map for a fuzzy-stagnation event.
+
+   Severity is :warning (not :error) — the fuzzy match is a softer
+   signal than strict equality and is intended to drive meta-agent
+   intervention rather than direct termination. Carries the
+   (file × severity) pair set as :fingerprint so the meta-agent can
+   inspect which files keep getting flagged."
+  [fuzzy-fingerprint event]
+  (let [match-count (count fuzzy-fingerprint)
+        summary     (msg/t :repair-loop/fuzzy-stagnation {:count match-count})
+        evidence    {:summary     summary
+                     :event-ids   (filterv some? [(:seq event)])
+                     :fingerprint (pr-str fuzzy-fingerprint)
+                     :threshold   {:n      stagnation-match-count
+                                   :window stagnation-window-size}
+                     :redacted?   true}
+        data        {:detector/kind     detector-kind
+                     :detector/version  detector-version
+                     :anomaly/class     :semantic
+                     :anomaly/severity  :warning
+                     :anomaly/category  fuzzy-anomaly-category
+                     :anomaly/evidence  evidence}]
+    (anomaly/anomaly :fault summary data)))
+
 ;------------------------------------------------------------------------------ Layer 3
 ;; Detector record
 
 (defrecord RepairLoopDetector []
   proto/Detector
   (init [_ _config]
-    {:anomalies         []
-     :prior-fingerprint nil})
+    {:anomalies               []
+     :prior-fingerprint       nil
+     :prior-fuzzy-fingerprint nil})
 
   (observe [_ state event]
     (if-let [review (:review/artifact event)]
-      (let [fp           (review-fingerprint review)
-            now-stagnated? (stagnated? (:prior-fingerprint state) fp)
-            anomaly-map  (when now-stagnated? (build-anomaly fp event))]
+      (let [fp                (review-fingerprint review)
+            fuzzy-fp          (review-fingerprint-fuzzy review)
+            now-stagnated?    (stagnated? (:prior-fingerprint state) fp)
+            ;; Suppress the fuzzy anomaly when strict already fired —
+            ;; both signals point at the same problem, no need to double-emit.
+            now-fuzzy?        (and (not now-stagnated?)
+                                   (fuzzy-stagnated? (:prior-fuzzy-fingerprint state)
+                                                     fuzzy-fp))
+            strict-anomaly    (when now-stagnated? (build-anomaly fp event))
+            fuzzy-anomaly     (when now-fuzzy? (build-fuzzy-anomaly fuzzy-fp event))]
         (cond-> state
-          true        (assoc :prior-fingerprint fp)
-          anomaly-map (update :anomalies conj anomaly-map)))
+          true           (assoc :prior-fingerprint fp
+                                :prior-fuzzy-fingerprint fuzzy-fp)
+          strict-anomaly (update :anomalies conj strict-anomaly)
+          fuzzy-anomaly  (update :anomalies conj fuzzy-anomaly)))
       state)))
 
 (defn make-repair-loop-detector
