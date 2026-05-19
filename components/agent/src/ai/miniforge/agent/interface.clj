@@ -210,13 +210,12 @@
   "CLI entry point for tool-use evaluation from stdin."
   tool-supervisor/hook-eval-stdin!)
 
-;------------------------------------------------------------------------------ Layer 5
+;------------------------------------------------------------------------------ Layer 4
 ;; Stream-gap watchdog
 
 (def resolve-gap-threshold watchdog/resolve-gap-threshold)
 (def default-gap-threshold-ms watchdog/default-gap-threshold-ms)
-(def default-check-interval-ms watchdog/default-check-interval-ms)
 (def create-watchdog watchdog/create-watchdog)
-(def ping-watchdog! watchdog/ping!)
+(def reset-watchdog! watchdog/reset!)
 (def stop-watchdog! watchdog/stop!)
 (def watchdog-stalled? watchdog/stalled?)
