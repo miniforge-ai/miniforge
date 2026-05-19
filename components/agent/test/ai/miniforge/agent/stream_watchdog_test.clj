@@ -380,7 +380,7 @@
         (let [evt (first @published)]
           (is (= :agent/session-captured (:event/type evt)))
           (is (= "cc-emit-test-session" (:agent/session-id evt)))
-          (is (= :implement (:workflow/phase evt)))
+          (is (= :implement (:phase/id evt)))
           (is (= :claude-code (:agent/backend evt))))
         (finally
           (sut/stop! wd))))))
@@ -395,7 +395,7 @@
                         {:event-stream mock-stream
                          :phase-id     :implement
                          :backend      :claude-code
-                         :workflow-id  (random-uuid)}))]
+                         :workflow-id  "wf-idempotent-test"}))]
       (try
         (sut/capture-session-id! wd {:session_id "once-only-session"})
         (sut/capture-session-id! wd {:session_id "second-call-ignored"})

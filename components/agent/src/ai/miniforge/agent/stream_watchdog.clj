@@ -91,21 +91,16 @@
    persisted in the atom so a delivery failure must not lose the session ID."
   [{:keys [event-stream workflow-id phase-id backend logger]} session-id]
   (if-not event-stream
-    (log/debug logger :stream-watchdog :session-captured/suppressed
-               {:reason :no-event-stream
-                :session/id session-id
-                :workflow/phase phase-id
-                :agent/backend backend})
+    (log/warn logger "stream-watchdog: no event-stream; session-captured suppressed"
+              {:session-id session-id :phase-id phase-id :backend backend})
     (try
       (let [envelope (event-stream/agent-session-captured
                       event-stream workflow-id phase-id session-id backend)]
         (event-stream/publish! event-stream envelope))
       (catch Exception ex
-        (log/warn logger :stream-watchdog :session-captured/emit-failed
-                  {:session/id session-id
-                   :workflow/phase phase-id
-                   :agent/backend backend
-                   :error (ex-message ex)})))))
+        (log/warn logger "stream-watchdog: failed to emit :agent/session-captured"
+                  {:session-id session-id :phase-id phase-id
+                   :backend backend :error (ex-message ex)})))))
 
 (defn- emit-stall-event!
   "Publish an :agent/stream-stalled event to event-stream.
@@ -118,19 +113,15 @@
    is caught and logged so the watchdog thread cannot crash."
   [event-stream workflow-id phase-id backend gap-ms logger]
   (if-not event-stream
-    (log/debug logger :stream-watchdog :stall-event/suppressed
-               {:reason :no-event-stream
-                :workflow/phase phase-id
-                :agent/backend backend})
+    (log/warn logger "stream-watchdog: no event-stream configured; stall event suppressed"
+              {:phase-id phase-id :backend backend})
     (try
       (let [envelope (event-stream/agent-stream-stalled
                       event-stream workflow-id phase-id gap-ms backend)]
         (event-stream/publish! event-stream envelope))
       (catch Exception ex
-        (log/warn logger :stream-watchdog :stall-event/emit-failed
-                  {:workflow/phase phase-id
-                   :agent/backend backend
-                   :error (ex-message ex)})))))
+        (log/warn logger "stream-watchdog: failed to emit :agent/stream-stalled"
+                  {:phase-id phase-id :backend backend :error (ex-message ex)})))))
 
 ;; ---------------------------------------------------------------------------
 ;; Layer 1 — watchdog lifecycle
@@ -168,10 +159,8 @@
             ;; a. kill the subprocess
             (try (kill-fn)
                  (catch Exception ex
-                   (log/warn logger :stream-watchdog :stream/kill-fn-failed
-                             {:workflow/phase phase-id
-                              :agent/backend backend
-                              :error (ex-message ex)})))
+                   (log/warn logger "stream-watchdog: kill-fn threw"
+                             {:error (ex-message ex)})))
             ;; b. emit stall event with measured gap (nil-safe)
             (emit-stall-event! event-stream workflow-id phase-id backend gap logger)
             ;; c. mark stalled
@@ -280,8 +269,7 @@
    - Codex:       nested `[:session :id]` path
 
    When a session ID is found for the first time:
-     1. Stores it in the `:session-id-atom` on the watchdog state (atomic via
-        `compare-and-set!`).
+     1. Stores it in the `:session-id-atom` on the watchdog state (atomic).
      2. Emits :agent/session-captured via event-stream (nil stream is a no-op).
 
    When the session ID has already been captured, returns the watchdog unchanged.
@@ -295,25 +283,21 @@
    so concurrent callers cannot both observe a nil session-id and both emit
    :agent/session-captured."
   [watchdog event-map]
-  (if-let [sid-atom (and watchdog (:session-id-atom watchdog))]
+  (if @(:session-id-atom watchdog)
+    ;; Already captured — idempotent no-op.
+    watchdog
     (if-let [sid (extract-session-id event-map)]
-      ;; compare-and-set! is the atomic check-then-act primitive — only the
-      ;; first thread that observes nil flips the atom and emits the event;
-      ;; concurrent callers see the post-set value and become no-ops, so we
-      ;; never publish duplicate :agent/session-captured events.
-      (if (compare-and-set! sid-atom nil sid)
-        (do
-          (emit-session-captured! watchdog sid)
-          watchdog)
+      (do
+        (reset! (:session-id-atom watchdog) sid)
+        (emit-session-captured! watchdog sid)
         watchdog)
       (do
-        (log/warn (:logger watchdog) :stream-watchdog :session/handshake-missing-id
+        (log/warn (:logger watchdog)
+                  "stream-watchdog: no session ID found in handshake event"
                   {:event-keys (keys event-map)
-                   :workflow/phase (:phase-id watchdog)
-                   :agent/backend (:backend watchdog)})
-        watchdog))
-    ;; nil watchdog or missing :session-id-atom — safe no-op, do not throw.
-    watchdog))
+                   :phase-id   (:phase-id watchdog)
+                   :backend    (:backend watchdog)})
+        watchdog))))
 
 (defn get-session-id
   "Return the captured session ID string, or nil if not yet captured.
