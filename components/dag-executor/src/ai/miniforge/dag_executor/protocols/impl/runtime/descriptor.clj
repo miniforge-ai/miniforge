@@ -31,11 +31,11 @@
       :runtime/capabilities #{keyword}}"
   (:require
    [ai.miniforge.dag-executor.protocols.impl.runtime.messages :as messages]
+   [ai.miniforge.dag-executor.protocols.impl.runtime.process :as runtime-process]
    [ai.miniforge.dag-executor.protocols.impl.runtime.registry :as registry]
    [clojure.string :as str]
    [malli.core :as m])
   (:import
-   [java.lang ProcessHandle]
    [java.util.concurrent TimeUnit]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -169,37 +169,20 @@
 
 (def ^:private probe-timeout-ms 5000)
 
-(defn- destroy-process-tree!
-  [^Process process]
-  (let [handle (.toHandle process)
-        descendants (reverse (iterator-seq (.iterator (.descendants handle))))]
-    (doseq [^ProcessHandle child descendants]
-      (.destroy child))
-    (.destroy process)
-    (when-not (.waitFor process 1 TimeUnit/SECONDS)
-      (doseq [^ProcessHandle child descendants]
-        (when (.isAlive child)
-          (.destroyForcibly child)))
-      (.destroyForcibly process))))
-
-(defn- read-stream-future
-  [stream]
-  (future (.readAllBytes stream)))
-
 (defn- run-probe
   "Invoke `<exe> info --format <template>` and return the shell result.
    Wrapped so the executor can mock this in tests."
   [exe template]
   (try
     (let [process (.start (ProcessBuilder. (into-array String [exe "info" "--format" template])))
-          stdout-fut (read-stream-future (.getInputStream process))
-          stderr-fut (read-stream-future (.getErrorStream process))]
+          stdout-fut (runtime-process/read-stream-future (.getInputStream process))
+          stderr-fut (runtime-process/read-stream-future (.getErrorStream process))]
       (if (.waitFor process probe-timeout-ms TimeUnit/MILLISECONDS)
         {:exit (.exitValue process)
          :out  (String. ^bytes @stdout-fut "UTF-8")
          :err  (String. ^bytes @stderr-fut "UTF-8")}
         (do
-          (destroy-process-tree! process)
+          (runtime-process/destroy-process-tree! process)
           (future-cancel stdout-fut)
           (future-cancel stderr-fut)
           {:exit 124

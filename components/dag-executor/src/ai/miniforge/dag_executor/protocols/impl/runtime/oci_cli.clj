@@ -38,13 +38,11 @@
    [ai.miniforge.dag-executor.protocols.executor :as proto]
    [ai.miniforge.dag-executor.protocols.impl.runtime.descriptor :as descriptor]
    [ai.miniforge.dag-executor.protocols.impl.runtime.images :as images]
+   [ai.miniforge.dag-executor.protocols.impl.runtime.process :as runtime-process]
    [ai.miniforge.dag-executor.protocols.impl.runtime.registry :as registry]
    [ai.miniforge.response.interface :as response]
    [clojure.java.io]
-   [clojure.string :as str])
-  (:import
-   [java.lang ProcessHandle]
-   [java.util.concurrent TimeUnit]))
+   [clojure.string :as str]))
 
 ;; ============================================================================
 ;; Configuration
@@ -148,31 +146,14 @@
   [descriptor & args]
   (apply vector (descriptor/executable descriptor) args))
 
-(defn- destroy-process-tree!
-  [^Process process]
-  (let [handle (.toHandle process)
-        descendants (reverse (iterator-seq (.iterator (.descendants handle))))]
-    (doseq [^ProcessHandle child descendants]
-      (.destroy child))
-    (.destroy process)
-    (when-not (.waitFor process 1 TimeUnit/SECONDS)
-      (doseq [^ProcessHandle child descendants]
-        (when (.isAlive child)
-          (.destroyForcibly child)))
-      (.destroyForcibly process))))
-
-(defn- read-stream-future
-  [stream]
-  (future (.readAllBytes stream)))
-
 (defn run-runtime
   "Execute a runtime CLI command and return the result."
   [descriptor & args]
   (try
     (let [pb (ProcessBuilder. (into-array String (apply runtime-cmd descriptor args)))
           process (.start pb)
-          stdout-fut (read-stream-future (.getInputStream process))
-          stderr-fut (read-stream-future (.getErrorStream process))]
+          stdout-fut (runtime-process/read-stream-future (.getInputStream process))
+          stderr-fut (runtime-process/read-stream-future (.getErrorStream process))]
       (try
         (let [exit-code (.waitFor process)
               stdout-bytes @stdout-fut
@@ -181,7 +162,7 @@
            :out (String. ^bytes stdout-bytes "UTF-8")
            :err (String. ^bytes stderr-bytes "UTF-8")})
         (catch InterruptedException e
-          (destroy-process-tree! process)
+          (runtime-process/destroy-process-tree! process)
           (future-cancel stdout-fut)
           (future-cancel stderr-fut)
           (.interrupt (Thread/currentThread))
@@ -195,8 +176,8 @@
   (try
     (let [pb (ProcessBuilder. (into-array String (apply runtime-cmd descriptor args)))
           process (.start pb)
-          stdout-fut (read-stream-future (.getInputStream process))
-          stderr-fut (read-stream-future (.getErrorStream process))]
+          stdout-fut (runtime-process/read-stream-future (.getInputStream process))
+          stderr-fut (runtime-process/read-stream-future (.getErrorStream process))]
       (when stdin-bytes
         (with-open [stdin (.getOutputStream process)]
           (.write stdin ^bytes stdin-bytes)))
@@ -210,7 +191,7 @@
            :out (String. ^bytes stdout-bytes "UTF-8")
            :err (String. ^bytes stderr-bytes "UTF-8")})
         (catch InterruptedException e
-          (destroy-process-tree! process)
+          (runtime-process/destroy-process-tree! process)
           (future-cancel stdout-fut)
           (future-cancel stderr-fut)
           (.interrupt (Thread/currentThread))
