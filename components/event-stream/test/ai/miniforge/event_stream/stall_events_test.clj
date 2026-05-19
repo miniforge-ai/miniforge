@@ -42,11 +42,11 @@
       (is (= :agent/stream-stalled (:event/type event))))))
 
 (deftest agent-stream-stalled-fields-test
-  (testing "carries workflow-phase, gap-duration-ms, and backend"
+  (testing "carries phase-id, gap-duration-ms, and backend"
     (let [stream (no-op-stream)
           wf-id  (random-uuid)
           event  (core/agent-stream-stalled stream wf-id :implement 95000 :codex)]
-      (is (= :implement (:workflow/phase event)))
+      (is (= :implement (:phase/id event)))
       (is (= 95000 (:stream/gap-duration-ms event)))
       (is (= :codex (:agent/backend event)))))
 
@@ -148,6 +148,6 @@
           via-if (events/agent-stream-stalled stream wf-id :implement 90000 :codex)]
       ;; Type, phase, gap, and backend must match; ids and timestamps differ
       (is (= (:event/type direct) (:event/type via-if)))
-      (is (= (:workflow/phase direct) (:workflow/phase via-if)))
+      (is (= (:phase/id direct) (:phase/id via-if)))
       (is (= (:stream/gap-duration-ms direct) (:stream/gap-duration-ms via-if)))
       (is (= (:agent/backend direct) (:agent/backend via-if))))))

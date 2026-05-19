@@ -1345,7 +1345,7 @@
                        (str "Agent stream stalled in " (name phase-id)
                             " after " gap-duration-ms "ms"
                             " (backend: " (name backend) ")"))
-      (assoc :workflow/phase phase-id
+      (assoc :phase/id phase-id
              :stream/gap-duration-ms gap-duration-ms
              :agent/backend backend)))
 
