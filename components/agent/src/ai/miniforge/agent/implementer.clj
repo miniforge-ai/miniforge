@@ -240,15 +240,31 @@
        (format-phase-handoff-findings (phase-handoff-findings phase-handoff))))
 
 (defn- format-verify-section
-  "Format verify failures as a markdown section."
+  "Format verify failures as a markdown section.
+
+   When the verify phase reports :timed-out? we emit a louder header and
+   a hang-specific instruction: the test suite did not fail because of
+   wrong assertions — it hung. The implementer must identify the test
+   that introduced the hang and fix it (mock the blocking I/O, add a
+   deadline, etc.). Without this branch the prompt looks identical to
+   an ordinary test failure and the agent fixes nothing."
   [verify-failures]
-  (str "\n\n## " (messages/t :prompt/test-failures-header) "\n\n"
-       (messages/t :prompt/test-failures-intro) "\n\n"
-       (if-let [test-results (:test-results verify-failures)]
-         (str (messages/t :prompt/test-results-label) "\n" (pr-str test-results))
-         (str (messages/t :prompt/verify-details-label) "\n" (pr-str verify-failures)))
-       (when-let [test-output (:test-output verify-failures)]
-         (str "\n\n" (messages/t :prompt/test-output-label) "\n" test-output))))
+  (let [timed-out? (:timed-out? verify-failures)
+        header     (if timed-out?
+                     (str "\n\n## ⚠️ TEST RUNNER HUNG\n\n"
+                          "Your previous implementation produced a test that "
+                          "hangs the test runner. The runner was killed at the "
+                          "verify deadline. Identify the hanging test, then "
+                          "fix it (mock blocking I/O, add a per-test timeout, "
+                          "or remove the test).\n\n")
+                     (str "\n\n## " (messages/t :prompt/test-failures-header) "\n\n"
+                          (messages/t :prompt/test-failures-intro) "\n\n"))]
+    (str header
+         (if-let [test-results (:test-results verify-failures)]
+           (str (messages/t :prompt/test-results-label) "\n" (pr-str test-results))
+           (str (messages/t :prompt/verify-details-label) "\n" (pr-str verify-failures)))
+         (when-let [test-output (:test-output verify-failures)]
+           (str "\n\n" (messages/t :prompt/test-output-label) "\n" test-output)))))
 
 (defn- format-prior-attempts-section
   "Format prior attempt context as a prominent warning section."

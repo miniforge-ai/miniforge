@@ -650,7 +650,24 @@
 
   (testing "no verify section when verify-failures is nil"
     (let [text (implementer/task->text {:task/description "Normal task"})]
-      (is (not (str/includes? text "Test Failures"))))))
+      (is (not (str/includes? text "Test Failures")))))
+
+  (testing "loud HUNG header when verify timed out"
+    ;; Verify-phase timeouts now route through the same redirect path as
+    ;; ordinary test failures, but with :timed-out? set. The implementer
+    ;; prompt MUST surface the hang explicitly so the agent fixes the
+    ;; hanging test instead of treating it as an assertion failure.
+    (let [text (implementer/task->text
+                 {:task/description "fix it"
+                  :task/verify-failures
+                  {:timed-out? true
+                   :test-results {:pass-count 0 :fail-count 0
+                                  :summary "Verify test runner timed out after 1000ms"}
+                   :test-output "(no progress for 1000ms)"}})]
+      (is (str/includes? text "TEST RUNNER HUNG")
+          "loud HUNG header MUST appear so the agent doesn't conflate the hang with a failure")
+      (is (str/includes? text "Identify the hanging test")
+          "explicit instruction must guide the agent to find + fix the offending test"))))
 
 ;------------------------------------------------------------------------------ Layer 6
 ;; Repair tests

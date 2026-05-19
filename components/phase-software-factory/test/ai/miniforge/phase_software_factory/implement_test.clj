@@ -569,6 +569,34 @@
                :error {:message "x" :data {:code :curator/no-files-written}}
                :metrics {:duration-ms 0}})))))
 
+;------------------------------------------------------------------------------ build-verify-failures hang-signal propagation
+
+(deftest build-verify-failures-surfaces-timed-out-flag-test
+  (testing "build-verify-failures flags :timed-out? when the verify error carried :timeout?"
+    ;; The handback path: leave-verify sets :error :timeout? true on a
+    ;; timeout-induced failure, build-verify-failures must surface that
+    ;; into :task/verify-failures so format-verify-section in implementer
+    ;; switches to the loud `TEST RUNNER HUNG` header. Without this, the
+    ;; implementer prompt is indistinguishable from an ordinary fail and
+    ;; the agent fixes the wrong thing (or fixes nothing).
+    (let [build-fn (resolve 'ai.miniforge.phase-software-factory.implement/build-verify-failures)
+          out     (build-fn {:result {:summary "Verify test runner timed out after 1000ms"
+                                      :metrics {:pass-count 0 :fail-count 0
+                                                :test-output "…"}}
+                             :error  {:timeout? true}})]
+      (is (true? (:timed-out? out))
+          ":timed-out? must propagate when :error :timeout? is set"))))
+
+(deftest build-verify-failures-omits-timed-out-when-not-set-test
+  (testing "build-verify-failures does NOT set :timed-out? for ordinary failures"
+    (let [build-fn (resolve 'ai.miniforge.phase-software-factory.implement/build-verify-failures)
+          out     (build-fn {:result {:summary "Tests failed: 3 failures, 0 errors"
+                                      :metrics {:pass-count 7 :fail-count 3
+                                                :test-output "…"}}
+                             :error  {:message "Tests failed"}})]
+      (is (not (contains? out :timed-out?))
+          "ordinary failures must NOT carry the hang flag — different framing"))))
+
 ;------------------------------------------------------------------------------ Rich Comment
 
 (comment

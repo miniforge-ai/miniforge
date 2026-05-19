@@ -93,13 +93,21 @@
 
 (defn- build-verify-failures
   "Extract lean verify-failure data from phase results.
-   In the environment model, test metrics are in :result :metrics."
+   In the environment model, test metrics are in :result :metrics.
+
+   When verify timed out (rather than reporting test failures), the
+   :timed-out? flag is surfaced so the implementer prompt can frame the
+   work as `your tests hung — find and fix` instead of `your tests
+   failed`. The two failure modes need very different responses."
   [verify-result]
-  {:test-results {:pass-count (get-in verify-result [:result :metrics :pass-count] 0)
-                  :fail-count (get-in verify-result [:result :metrics :fail-count] 0)
-                  :summary    (get-in verify-result [:result :summary])}
-   :test-output (truncate-test-output
-                 (get-in verify-result [:result :metrics :test-output]))})
+  (cond-> {:test-results {:pass-count (get-in verify-result [:result :metrics :pass-count] 0)
+                          :fail-count (get-in verify-result [:result :metrics :fail-count] 0)
+                          :summary    (get-in verify-result [:result :summary])}
+           :test-output (truncate-test-output
+                         (get-in verify-result [:result :metrics :test-output]))}
+    (or (get-in verify-result [:error :timeout?])
+        (:phase/timeout? verify-result))
+    (assoc :timed-out? true)))
 
 (defn- resolve-worktree-path
   "Resolve the worktree path from execution context.

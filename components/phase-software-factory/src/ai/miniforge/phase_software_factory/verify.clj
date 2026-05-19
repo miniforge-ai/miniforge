@@ -369,15 +369,22 @@
                           (when gate-failed? (messages/t :verify/gate-failed))
                           (messages/t :verify/failed))]
     ;; When verify failed and on-fail is configured, redirect to target phase.
-    ;; Timeout and rate-limit failures are not code quality issues — retrying
-    ;; implement won't help, so we do not redirect in those cases.
-    (doto (if (and (= :failed phase-status) on-fail
-                     (not timeout?) (not rate-limited?))
+    ;; Rate-limit is an external provider issue — retrying implement won't
+    ;; help, so we skip the redirect. A timeout, by contrast, almost always
+    ;; means the implementer wrote a test that hangs (Docker acquire, stdin
+    ;; read, infinite loop, real network call without a mock) and the only
+    ;; way to fix it is to send implementer back with the explicit signal.
+    ;; The :phase/timeout? flag survives into :task/verify-failures so the
+    ;; implementer prompt can highlight "your tests hung — find and fix".
+    (doto (if (and (= :failed phase-status) on-fail (not rate-limited?))
               (let [phase-result (-> (:phase updated-ctx)
                                      (assoc :error
                                             {:message      error-message
                                              :agent-status agent-status
-                                             :gate-failed? gate-failed?})
+                                             :gate-failed? gate-failed?
+                                             :timeout?     timeout?})
+                                     (cond-> timeout?
+                                       (assoc :phase/timeout? true))
                                      (phase/request-redirect on-fail))]
                 (assoc updated-ctx :phase phase-result))
               (cond-> updated-ctx
@@ -393,7 +400,8 @@
         (phase/emit-phase-completed! :verify
           {:outcome     (if (= :completed phase-status) :success :failure)
            :duration-ms duration-ms
-           :tokens      (get metrics :tokens 0)}))))
+           :tokens      (get metrics :tokens 0)
+           :timeout?    timeout?}))))
 
 (defn error-verify
   "Handle verification phase errors. Retries within budget; on

@@ -219,15 +219,25 @@
       (is (= :implement (phase/transition-target (get result :phase))))
       (is (phase/failed? (get result :phase))))))
 
-(deftest leave-verify-no-redirect-on-timeout-test
-  (testing "timeout error does NOT redirect even with :on-fail configured"
+(deftest leave-verify-redirects-on-timeout-with-flag-test
+  (testing "timeout error redirects to :implement and carries :phase/timeout? so the implementer prompt can frame it as a hang"
+    ;; Inverts the prior policy. Old code skipped redirect on timeout
+    ;; because `retrying implement won't fix a stalled test process` —
+    ;; but the actual fix IS in implement: identify and repair the test
+    ;; that hangs. The :phase/timeout? flag rides into :task/verify-failures
+    ;; so the implementer's verify-section header switches to the loud
+    ;; `TEST RUNNER HUNG` framing.
     (let [ctx (make-leave-ctx {:status :error
-                               :error {:message "Agent timed out after 600000ms"}}
+                               :error {:message "Verify test runner timed out after 600000ms (cmd: bb test)"}}
                               :implement)
           result (verify/leave-verify ctx)]
-      (is (not (phase/redirect-requested? (get result :phase))))
+      (is (= :implement (phase/transition-target (get result :phase)))
+          "timeout MUST now redirect to the on-fail target (was skipped pre-PR #915 follow-up)")
       (is (phase/failed? (get result :phase)))
-      (is (true? (get-in result [:phase :error :timeout?]))))))
+      (is (true? (get-in result [:phase :error :timeout?]))
+          ":error :timeout? must still be set so downstream consumers can branch")
+      (is (true? (get-in result [:phase :phase/timeout?]))
+          ":phase/timeout? must ride on the redirected phase so build-verify-failures can pick it up"))))
 
 (deftest leave-verify-no-redirect-on-rate-limit-test
   (testing "rate-limit error does NOT redirect even with :on-fail configured"
