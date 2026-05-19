@@ -31,6 +31,7 @@
    [ai.miniforge.agent.interface.runtime :as runtime]
    [ai.miniforge.agent.interface.specialized :as specialized]
    [ai.miniforge.agent.interface.supervision :as supervision]
+   [ai.miniforge.agent.interface.watchdog :as watchdog]
    [ai.miniforge.agent.tool-supervisor :as tool-supervisor]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -208,3 +209,13 @@
 (def hook-eval-stdin!
   "CLI entry point for tool-use evaluation from stdin."
   tool-supervisor/hook-eval-stdin!)
+
+;------------------------------------------------------------------------------ Layer 4
+;; Stream-gap watchdog
+
+(def resolve-gap-threshold watchdog/resolve-gap-threshold)
+(def default-gap-threshold-ms watchdog/default-gap-threshold-ms)
+(def create-watchdog watchdog/create-watchdog)
+(def reset-watchdog! watchdog/reset!)
+(def stop-watchdog! watchdog/stop!)
+(def watchdog-stalled? watchdog/stalled?)
