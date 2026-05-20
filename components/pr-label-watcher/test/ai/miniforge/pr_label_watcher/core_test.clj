@@ -208,6 +208,20 @@
     (let [pred (sut/make-ancestor?-fn {:shell-fn (fn [& _] {:exit 128})})]
       (is (false? (pred "unknown-base" "unknown-merge"))))))
 
+(deftest make-ancestor?-fn-throws-when-shell-fn-missing-test
+  (testing "misconfigured opts (no :shell-fn) fail loudly at build time, not opaquely on first call"
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                          #":shell-fn"
+                          (sut/make-ancestor?-fn {})))
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                          #":shell-fn"
+                          (sut/make-ancestor?-fn {:shell-fn nil}))
+        "explicit nil is rejected — caller probably forgot to wire the dep")
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                          #":shell-fn"
+                          (sut/make-ancestor?-fn {:shell-fn "not-a-fn"}))
+        "non-fn value rejected — fail fast at predicate-build time")))
+
 ;------------------------------------------------------------------------------ Rich Comment
 
 (comment

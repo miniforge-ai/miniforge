@@ -52,14 +52,23 @@
 
 (defn load-registry
   "Read the label-actions registry from the M1 resource. Returns the
-   string-keyed map under `:pr-label-actions/registry`. Throws if the
-   resource is missing — that's a deploy bug, not a runtime condition."
+   string-keyed map under `:pr-label-actions/registry`.
+
+   Throws an `ex-info` (not an opaque NPE) when the resource is missing
+   on the classpath — that's a deploy bug, not a runtime condition,
+   and the explicit error message carries the lookup path so an
+   operator can see exactly what's missing without reading a stack
+   trace."
   []
-  (-> registry-resource-path
-      io/resource
-      slurp
-      edn/read-string
-      :pr-label-actions/registry))
+  (let [resource (io/resource registry-resource-path)]
+    (when-not resource
+      (throw (ex-info "pr-label-watcher: label-actions registry resource not found on classpath"
+                      {:resource-path registry-resource-path
+                       :hint "the pr-lifecycle brick owns this resource (M1, PR #906); confirm components/pr-lifecycle/resources is on the classpath"})))
+    (-> resource
+        slurp
+        edn/read-string
+        :pr-label-actions/registry)))
 
 (defn matching-labels
   "Set of registry-keys (label strings) that are present on the merged
@@ -88,10 +97,18 @@
 (defn make-ancestor?-fn
   "Build the ancestor predicate `(fn [base-sha merge-sha] -> bool)`.
 
-   `:shell-fn` is injectable — production passes
+   `:shell-fn` is REQUIRED and injectable — production passes
    `(partial babashka.process/shell {:out :string :err :string :continue true})`
-   or equivalent; tests pass a stub that maps SHA pairs to exit codes."
-  [{:keys [shell-fn] :as _opts}]
+   or equivalent; tests pass a stub that maps SHA pairs to exit codes.
+
+   Throws an `ex-info` immediately when `:shell-fn` is missing or
+   non-fn, so misconfiguration surfaces at predicate-build time
+   instead of as an opaque NPE on first call."
+  [{:keys [shell-fn] :as opts}]
+  (when-not (fn? shell-fn)
+    (throw (ex-info "pr-label-watcher: make-ancestor?-fn requires :shell-fn"
+                    {:provided (set (keys opts))
+                     :hint "pass `:shell-fn (partial babashka.process/shell {:out :string :err :string :continue true})` or an equivalent stub in tests"})))
   (fn [base-sha merge-sha]
     (cond
       (or (nil? base-sha) (nil? merge-sha)) false

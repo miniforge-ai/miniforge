@@ -1,6 +1,5 @@
 {:paths ["src" "resources"]
- :deps  {ai.miniforge/messages       {:local/root "../messages"}
-         ai.miniforge/pr-lifecycle   {:local/root "../pr-lifecycle"}}
+ :deps  {ai.miniforge/pr-lifecycle {:local/root "../pr-lifecycle"}}
  :aliases
  {:test {:extra-paths ["test"]
          :extra-deps {babashka/process {:mvn/version "0.5.22"}}}}}
