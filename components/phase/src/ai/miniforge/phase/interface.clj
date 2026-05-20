@@ -33,6 +33,11 @@
       :error   (fn [ctx ex] -> ctx) ; Error handling/repair}"
   (:require
    [ai.miniforge.phase.agent-behavior :as agent-behavior]
+   ;; Load core terminal phase so `{:phase :done}` works in every runtime
+   ;; that depends on the phase registry. The require is for side effects
+   ;; (defmethod + register-phase-defaults!) — no symbols are referenced
+   ;; from this namespace.
+   [ai.miniforge.phase.done]
    [ai.miniforge.phase.file-context :as file-context]
    [ai.miniforge.phase.loader :as loader]
    [ai.miniforge.phase.phase-result :as phase-result]

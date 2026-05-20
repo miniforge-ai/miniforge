@@ -47,12 +47,6 @@
 ;; Register defaults on load
 (phase/register-phase-defaults! :release default-config)
 
-;; Also register :done as a terminal phase
-(phase/register-phase-defaults! :done
-                                   {:agent nil
-                                    :gates []
-                                    :budget {:tokens 0 :iterations 1 :time-seconds 1}})
-
 ;------------------------------------------------------------------------------ Layer 1
 ;; Interceptor implementation
 
@@ -491,24 +485,9 @@
      :leave leave-release
      :error error-release}))
 
-(defmethod phase/get-phase-interceptor-method :done
-  [config]
-  (let [merged (phase/merge-with-defaults config)]
-    {:name ::done
-     :config merged
-     :enter (fn [ctx]
-              (-> ctx
-                  (assoc-in [:phase :name] :done)
-                  (assoc-in [:phase :status] :completed)
-                  (assoc-in [:execution :status] :completed)))
-     :leave identity
-     :error (fn [ctx _ex] ctx)}))
-
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
   (phase/get-phase-interceptor {:phase :release})
-  (phase/get-phase-interceptor {:phase :done})
   (phase/phase-defaults :release)
-  (phase/phase-defaults :done)
   (phase/list-phases)
   :leave-this-here)
