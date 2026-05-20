@@ -84,6 +84,14 @@
       (is (not (contains? ev :tool/call-id)))
       (is (not (contains? ev :tool/args-digest))))))
 
+(deftest agent-tool-call-started-carries-batched-tool-names
+  (testing "multi-tool provider blocks retain the vector of tool names"
+    (let [ev (es/agent-tool-call-started
+              (stream) (random-uuid) :implementer
+              {:tool/names ["Read" "Write"]})]
+      (is (= ["Read" "Write"] (:tool/names ev)))
+      (is (m/validate schema/AgentToolCallStarted ev)))))
+
 (deftest agent-tool-call-started-envelope-fields
   (testing "envelope fields are present and typed correctly"
     (let [ev (es/agent-tool-call-started

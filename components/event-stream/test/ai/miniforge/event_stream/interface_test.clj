@@ -320,7 +320,28 @@
                               :content ""}))]
       (is (= "\n[tool] context_read\n" output))
       (is (= 1 (count (es/get-events stream {:event-type :agent/tool-call}))))
-      (is (= 1 (count (es/get-events stream {:event-type :agent/status})))))))
+      ;; :agent/status :tool-calling removed — :agent/tool-call-started replaces it
+      (is (= 0 (count (es/get-events stream {:event-type :agent/status}))))
+      (is (= 1 (count (es/get-events stream {:event-type :agent/tool-call-started}))))))
+
+  (testing "tool-result callback publishes a completed event with correlated duration"
+    (let [stream (es/create-event-stream)
+          wf-id (random-uuid)
+          callback (es/create-streaming-callback stream wf-id :planner)]
+      (callback {:tool-use true
+                 :tool-name "context_read"
+                 :tool-call-id "call-1"
+                 :tool-args-preview "{:path \"deps.edn\"}"})
+      (callback {:tool-result true
+                 :tool-result-call-id "call-1"
+                 :tool-result-content "ok"
+                 :tool-result-is-error false})
+      (let [completed (first (es/get-events stream {:event-type :tool/call-completed}))]
+        (is (= "call-1" (:tool/call-id completed)))
+        (is (true? (:tool/success? completed)))
+        (is (nat-int? (:tool/duration-ms completed)))
+        (is (contains? completed :tool/result-digest))))))
+
 
 ;; --------------------------------------------------------------------------- New N3 event constructors
 
