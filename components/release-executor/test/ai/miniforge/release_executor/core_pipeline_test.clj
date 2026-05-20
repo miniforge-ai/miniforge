@@ -678,3 +678,127 @@
     (let [state {:create-pr? false}
           result (sut/step-generate-pr-doc state)]
       (is (not (sut/failed? result))))))
+
+;; ============================================================================
+;; render-pr-body-fallback — GitHub PR body, NOT the docs-file
+;;
+;; The 2026-05-19 dogfood produced PRs whose GitHub body was the docs-file
+;; content (HTML copyright header, `_No test artifacts available._` placeholder
+;; strings, summary that just repeated the title). Two surfaces had been
+;; conflated. These tests pin them apart: the fallback renderer produces a
+;; reviewer-facing body, omits empty sections instead of padding them, and
+;; never includes the HTML copyright header.
+
+(deftest render-pr-body-fallback-omits-html-copyright-header-test
+  (testing "the body fallback must not start with HTML comments — those belong in the docs file, not in the GitHub PR description"
+    (let [body (#'sut/render-pr-body-fallback
+                {:release/pr-title "fix: X" :release/pr-description "Fixed X."}
+                [{:code/files [{:path "src/a.clj" :action :modify}]}]
+                {})]
+      ;; Two structural markers uniquely identify the docs-file preamble.
+      ;; Don't pin on author-name strings — those rot if the header changes.
+      (is (not (str/includes? body "<!--"))
+          "no HTML copyright preamble in PR body — that template is the docs/pull-requests/ file")
+      (is (not (str/includes? body "Copyright 2025-2026"))
+          "no copyright line in PR body — it's a docs-file marker"))))
+
+(deftest render-pr-body-fallback-omits-placeholder-sections-test
+  (testing "no `_No X available._` strings in the PR body when the source data is absent"
+    ;; Reviewers reading the GitHub PR shouldn't see "No test artifacts available."
+    ;; — that placeholder pads the docs file (committed to repo for browsing)
+    ;; but is noise in a PR description. Better to drop the section entirely.
+    (let [body (#'sut/render-pr-body-fallback
+                {:release/pr-title "fix: X" :release/pr-description "Fixed X."}
+                [{:code/files [{:path "src/a.clj" :action :modify}]}]
+                {})]
+      (is (not (str/includes? body "No test artifacts available")))
+      (is (not (str/includes? body "No review artifacts available")))
+      (is (not (str/includes? body "## Test Results"))
+          "Test Results section must be omitted entirely when there are no test artifacts")
+      (is (not (str/includes? body "## Review"))
+          "Review section must be omitted entirely when there are no review artifacts")
+      (is (str/includes? body "## Summary"))
+      (is (str/includes? body "## Files Changed")))))
+
+(deftest render-pr-body-fallback-includes-sections-when-data-present-test
+  (testing "Test Results and Review sections render when their data is present"
+    (let [body (#'sut/render-pr-body-fallback
+                {:release/pr-title "feat: Y" :release/pr-description "Added Y."}
+                [{:code/files [{:path "src/y.clj" :action :create}]}]
+                {:review-artifacts [{:review/decision :approved :review/summary "LGTM"}]
+                 :test-artifacts   [{:test/results :passed :test/total 3 :test/passed 3}]})]
+      (is (str/includes? body "## Test Results"))
+      (is (str/includes? body "## Review"))
+      (is (str/includes? body "LGTM")))))
+
+(deftest render-pr-body-fallback-does-not-duplicate-summary-when-pr-description-already-structured-test
+  (testing "when :release/pr-description already starts with ## Summary, fallback must not wrap it under another ## Summary"
+    ;; The updated releaser prompt requires structured pr-description
+    ;; with `## Summary / ## Why / ...`. The fallback must detect this
+    ;; shape and use the description directly; wrapping under a second
+    ;; `## Summary` would double-nest the heading and render badly on
+    ;; GitHub. Without this guard the prompt fix and the renderer fix
+    ;; interact pathologically.
+    (let [structured "## Summary\n\n- Adds Y\n- Adds Z\n\n## Why\n\nBecause X.\n\n## Test plan\n\n- [x] ran tests"
+          body       (#'sut/render-pr-body-fallback
+                      {:release/pr-title "feat: Y" :release/pr-description structured}
+                      [{:code/files [{:path "src/y.clj" :action :create}]}]
+                      {})
+          summary-count (count (re-seq #"(?m)^##\s+Summary\b" body))]
+      (is (= 1 summary-count)
+          "Exactly one `## Summary` heading — no double-nesting when pr-description is already structured")
+      (is (str/includes? body "## Why")
+          "The structured pr-description's own sections (e.g. `## Why`) must survive into the body verbatim"))))
+
+(deftest render-pr-body-fallback-treats-blank-pr-description-as-absent-test
+  (testing "an empty-string :release/pr-description falls back to pr-title for the Summary, not a blank Summary"
+    (let [body (#'sut/render-pr-body-fallback
+                {:release/pr-title "fix: only" :release/pr-description ""}
+                [{:code/files [{:path "x" :action :modify}]}]
+                {})]
+      (is (str/includes? body "fix: only")
+          "blank pr-description must be treated as absent — Summary falls back to pr-title"))))
+
+(deftest render-pr-body-fallback-omits-section-when-formatter-returns-blank-test
+  (testing "section is omitted when its formatted markdown is blank, even though artifacts exist"
+    ;; format-review-decision / format-test-results return \"\" when artifacts
+    ;; exist but lack their canonical fields. The empty string is truthy,
+    ;; so a `(when (seq artifacts) ...)` guard alone would render an empty
+    ;; `## Review` header. The non-blank-section helper guards against this.
+    (let [body (#'sut/render-pr-body-fallback
+                {:release/pr-title "x" :release/pr-description "x"}
+                [{:code/files [{:path "p" :action :modify}]}]
+                ;; Review/test artifacts present but with no usable fields:
+                {:review-artifacts [{}]
+                 :test-artifacts   [{}]})]
+      (is (not (str/includes? body "## Test Results"))
+          "Test Results omitted when the formatter has nothing to render")
+      (is (not (str/includes? body "## Review"))
+          "Review omitted when the formatter has nothing to render"))))
+
+;; ============================================================================
+;; pr-body-needs-update? — the policy guarding step-update-pr-body
+;;
+;; The 2026-05-19 regression overwrote good agent bodies with the docs file.
+;; This predicate must say "needs update" only for genuinely degraded bodies.
+
+(deftest pr-body-needs-update?-true-when-body-missing-test
+  (is (true? (#'sut/pr-body-needs-update?
+              {:release/pr-title "feat: X" :release/pr-body nil}))))
+
+(deftest pr-body-needs-update?-true-when-body-blank-test
+  (is (true? (#'sut/pr-body-needs-update?
+              {:release/pr-title "feat: X" :release/pr-body "   \n  "}))))
+
+(deftest pr-body-needs-update?-true-when-body-equals-title-test
+  (testing "PR body that's just the title is degraded agent output — replace with structured fallback"
+    (is (true? (#'sut/pr-body-needs-update?
+                {:release/pr-title "feat: X" :release/pr-body "feat: X"})))))
+
+(deftest pr-body-needs-update?-false-when-body-has-real-content-test
+  (testing "a real PR body MUST NOT be overwritten — this is the regression pin"
+    ;; The 2026-05-19 step-update-pr-body clobbered good agent bodies with
+    ;; the docs-file content. The new policy: leave any non-degraded body alone.
+    (is (false? (#'sut/pr-body-needs-update?
+                 {:release/pr-title "feat: X"
+                  :release/pr-body  "## Summary\n\n- did the thing\n- and the other thing\n\n## Why\n\nBecause Y."})))))
