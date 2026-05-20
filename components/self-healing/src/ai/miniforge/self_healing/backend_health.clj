@@ -24,6 +24,33 @@
    [clojure.java.io :as io]))
 
 ;;------------------------------------------------------------------------------ Layer 0
+;; Tuning constants + file paths
+
+(def ^:private default-success-rate-threshold
+  "Minimum cumulative success rate (`:successful-calls / :total-calls`)
+   before a backend is considered degraded and a failover is triggered.
+   0.90 = at most 1 failure per 10 cumulative calls tolerated; below
+   that the backend is skipped in favor of a healthier one. Picked to
+   absorb transient single failures without flapping. (Note: the rate
+   is cumulative since last decay, not a sliding window — `maybe-decay-health`
+   resets the counters wholesale after 24h of stale data.)"
+  0.90)
+
+(def ^:private default-switch-cooldown-ms
+  "Minimum interval between automatic backend switches (30 min). After
+   a switch fires, the FROM backend is parked for this long even if its
+   success rate recovers — prevents two flaky backends from oscillating
+   between healthy and degraded."
+  (* 30 60 1000))
+
+(def ^:private default-failure-recency-window-ms
+  "Window during which a recent failure is considered fresh enough to
+   trigger a switch decision (5 min). The stored `:last-failure`
+   timestamp is compared against this window; older failures stay in
+   the cumulative counter for accounting but do not by themselves
+   cause a switch — stale failure data shouldn't trigger live failover."
+  (* 5 60 1000))
+
 ;; File paths and utilities
 
 (defn backend-health-path
@@ -208,11 +235,11 @@
 
    Arguments:
      backend - Keyword backend name
-     recency-ms - Recency window in milliseconds (default 300000 = 5 min)
+     recency-ms - Recency window in milliseconds (default `default-failure-recency-window-ms`)
 
    Returns: Boolean true if last failure is recent (or nil if no failure recorded)"
   ([backend]
-   (recent-failure? backend 300000))
+   (recent-failure? backend default-failure-recency-window-ms))
   ([backend recency-ms]
    (let [health (load-health)
          backend-key (keyword backend)
@@ -230,11 +257,11 @@
 
    Arguments:
      backend - Keyword backend name
-     threshold - Double threshold (default 0.90)
+     threshold - Double threshold (default `default-success-rate-threshold`)
 
    Returns: Boolean true if should switch"
   ([backend]
-   (should-switch-backend? backend 0.90))
+   (should-switch-backend? backend default-success-rate-threshold))
   ([backend threshold]
    (if-let [success-rate (get-backend-success-rate backend)]
      (and (recent-failure? backend)
@@ -246,11 +273,11 @@
 
    Arguments:
      backend - Keyword backend name
-     cooldown-ms - Cooldown period in milliseconds (default 1800000 = 30 min)
+     cooldown-ms - Cooldown period in milliseconds (default `default-switch-cooldown-ms`)
 
    Returns: Boolean true if in cooldown"
   ([backend]
-   (in-cooldown? backend 1800000))
+   (in-cooldown? backend default-switch-cooldown-ms))
   ([backend cooldown-ms]
    (let [health (load-health)
          backend-key (keyword backend)
@@ -268,8 +295,8 @@
 
    Arguments:
      current-backend - Keyword current backend
-     threshold       - Success rate threshold (default 0.90)
-     cooldown-ms     - Cooldown period in milliseconds (default 1800000)
+     threshold       - Success rate threshold (default `default-success-rate-threshold`)
+     cooldown-ms     - Cooldown period in milliseconds (default `default-switch-cooldown-ms`)
      allowed-set     - Optional set of keyword backends to restrict selection.
                        When `nil` (not supplied), all backends in the stored
                        fallback-order are considered. When a non-nil empty
@@ -282,7 +309,10 @@
 
    Returns: Keyword backend name or nil if none available"
   ([current-backend]
-   (select-best-backend current-backend 0.90 1800000 nil))
+   (select-best-backend current-backend
+                        default-success-rate-threshold
+                        default-switch-cooldown-ms
+                        nil))
   ([current-backend threshold cooldown-ms]
    (select-best-backend current-backend threshold cooldown-ms nil))
   ([current-backend threshold cooldown-ms allowed-set]
@@ -310,11 +340,11 @@
    Arguments:
      from-backend - Keyword current backend
      to-backend - Keyword new backend
-     cooldown-ms - Cooldown period in milliseconds (default 1800000)
+     cooldown-ms - Cooldown period in milliseconds (default `default-switch-cooldown-ms`)
 
    Returns: Map with :from, :to, :cooldown-until"
   ([from-backend to-backend]
-   (trigger-backend-switch! from-backend to-backend 1800000))
+   (trigger-backend-switch! from-backend to-backend default-switch-cooldown-ms))
   ([from-backend to-backend cooldown-ms]
    (let [health (load-health)
          now (java.time.Instant/now)
@@ -338,12 +368,14 @@
 
    Arguments:
      current-backend - Keyword current backend
-     threshold - Success rate threshold (default 0.90)
-     cooldown-ms - Cooldown period in milliseconds (default 1800000)
+     threshold - Success rate threshold (default `default-success-rate-threshold`)
+     cooldown-ms - Cooldown period in milliseconds (default `default-switch-cooldown-ms`)
 
    Returns: Map with :should-switch?, :from, :to, or nil if no switch"
   ([current-backend]
-   (check-and-switch-if-needed current-backend 0.90 1800000))
+   (check-and-switch-if-needed current-backend
+                                default-success-rate-threshold
+                                default-switch-cooldown-ms))
   ([current-backend threshold cooldown-ms]
    (when (and (should-switch-backend? current-backend threshold)
               (not (in-cooldown? current-backend cooldown-ms)))
