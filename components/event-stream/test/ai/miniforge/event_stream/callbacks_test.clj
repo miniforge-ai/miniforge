@@ -348,9 +348,9 @@
           types  (mapv :event/type events)]
       (is (= [:agent/chunk :agent/chunk] types)
           "two :agent/chunk events must be emitted")
-      (is (= "hello " (:agent/delta (first events)))
+      (is (= "hello " (:chunk/delta (first events)))
           "first chunk must carry the first delta string")
-      (is (= "world" (:agent/delta (second events)))
+      (is (= "world" (:chunk/delta (second events)))
           "second chunk must carry the second delta string"))))
 
 (deftest heartbeat-produces-no-events
