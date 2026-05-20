@@ -592,6 +592,7 @@
                  "components/event-stream/src"
                  "components/event-stream/resources"
                  "components/supervisory-state/src"
+                 "components/automation-edge-correlator/src"
                  "components/workflow-resume/src"
                  "components/workflow-resume/resources"
                  "components/dag-primitives/src"
