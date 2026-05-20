@@ -294,45 +294,28 @@
   "Wrap caller callbacks with event publishing and heartbeat scheduling.
 
    Heartbeat handles are tracked in a per-invocation atom keyed by phase
-   name. Workflow phases are SEQUENTIAL — at most one heartbeat is
-   active in this atom at any time. If a future change introduces
-   concurrent phases the key needs to widen (e.g. interceptor identity)
-   so a re-entrant start doesn't overwrite a still-running handle.
-
+   name so overlapping phases (if any) each carry their own scheduler.
    Stop is called unconditionally on phase complete to guard against
-   executor leaks when a phase errors out. Additionally, the caller's
-   `:on-phase-start` callback is wrapped: if it throws BEFORE
-   `on-phase-complete` would normally fire, the just-started heartbeat
-   is stopped before rethrowing so the executor never outlives the
-   failure."
+   executor leaks when a phase errors out."
   [event-stream opts]
   (let [heartbeat-handles (atom {})]
     (letfn [(phase-name [interceptor]
               (get interceptor :phase
                    (get-in interceptor [:config :phase])))
-            (stop-and-clear! [phase-name']
-              (when-let [handle (get @heartbeat-handles phase-name')]
-                (events/stop-phase-heartbeat! handle)
-                (swap! heartbeat-handles dissoc phase-name')))
             (on-phase-start [ctx interceptor]
               (when-let [phase-name' (phase-name interceptor)]
                 (events/publish-phase-started! event-stream ctx phase-name')
                 (let [hb-opts (select-keys opts [:interval-ms])
                       handle  (events/start-phase-heartbeat! event-stream ctx phase-name' hb-opts)]
                   (when handle
-                    (swap! heartbeat-handles assoc phase-name' handle)))
-                (when-let [callback (:on-phase-start opts)]
-                  ;; Wrap the caller callback so a throw cleans up the
-                  ;; heartbeat that on-phase-complete would otherwise
-                  ;; never reach.
-                  (try
-                    (callback ctx interceptor)
-                    (catch Throwable t
-                      (stop-and-clear! phase-name')
-                      (throw t))))))
+                    (swap! heartbeat-handles assoc phase-name' handle))))
+              (when-let [callback (:on-phase-start opts)]
+                (callback ctx interceptor)))
             (on-phase-complete [ctx interceptor result]
               (when-let [phase-name' (phase-name interceptor)]
-                (stop-and-clear! phase-name')
+                (when-let [handle (get @heartbeat-handles phase-name')]
+                  (events/stop-phase-heartbeat! handle)
+                  (swap! heartbeat-handles dissoc phase-name'))
                 (events/publish-phase-completed! event-stream ctx phase-name' result))
               (when-let [callback (:on-phase-complete opts)]
                 (callback ctx interceptor result)))]
