@@ -68,6 +68,8 @@
    [ai.miniforge.cli.main.commands.evidence :as cmd-evidence]
    [ai.miniforge.cli.main.commands.artifact-cmds :as cmd-artifact]
    [ai.miniforge.cli.main.commands.etl :as cmd-etl]
+   ;; GROUP 3b: timeline-based events show
+   [ai.miniforge.cli.main.commands.events :as cmd-events]
    [ai.miniforge.agent.interface :as agent]
    [ai.miniforge.event-stream.interface :as es]
    [ai.miniforge.mcp-context-server.interface :as mcp-context-server]
@@ -324,7 +326,11 @@
 (defn logs-list-cmd [_m] (observability/handle-logs {:subcommand "list"}))
 (defn events-tail-cmd [m] (observability/handle-events (assoc (get-opts m) :subcommand "tail")))
 (defn events-list-cmd [_m] (observability/handle-events {:subcommand "list"}))
-(defn events-show-cmd [m] (observability/handle-events (assoc (get-opts m) :subcommand "show")))
+(defn events-show-cmd
+  "Render a human-readable timeline for a workflow from the local event log.
+   Delegates to the GROUP 3b events command module."
+  [m]
+  (cmd-events/events-show-cmd (get-opts m)))
 
 ;; Delegated commands
 (defn run-cmd [m] (cmd-run/run-cmd (get-opts m)))
@@ -623,9 +629,8 @@
    {:cmds ["events" "show"]
     :fn events-show-cmd
     :args->opts [:workflow-id]
-    :spec {:filter {:coerce :keyword}
-           :no-chunks {:coerce :boolean :default true}
-           :no-status {:coerce :boolean :default false}}}
+    :spec {:gap-threshold {:coerce :int    :alias :g :default 60}
+           :raw           {:coerce :boolean :alias :r :default false}}}
 
    ;; Fleet subcommands (daemon management + watch/prs — N5)
    {:cmds ["fleet" "start"]  :fn fleet-start-cmd}
