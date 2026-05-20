@@ -19,7 +19,11 @@
 (ns ai.miniforge.agent.interface.watchdog
   "Public boundary for the per-phase stream-gap watchdog.
 
-   Re-exports the five primary operations and the config helper from
+   Re-exports the watchdog lifecycle operations (create-watchdog, ping!,
+   stop!, stalled?), the session-id capture/read operations
+   (capture-session-id!, get-session-id), the config helper
+   (resolve-gap-threshold), and the default constants
+   (default-gap-threshold-ms, default-check-interval-ms) from
    ai.miniforge.agent.stream-watchdog.
 
    Usage:
@@ -80,3 +84,17 @@
   "Return true if the watchdog fired and killed the agent subprocess.
    See `ai.miniforge.agent.stream-watchdog/stalled?`."
   watchdog/stalled?)
+
+;; ---------------------------------------------------------------------------
+;; Session ID capture
+
+(def capture-session-id!
+  "Parse and persist the session ID from the initial agent handshake event.
+   Emits :agent/session-captured via event-stream.
+   See `ai.miniforge.agent.stream-watchdog/capture-session-id!`."
+  watchdog/capture-session-id!)
+
+(def get-session-id
+  "Return the captured session ID string, or nil if not yet captured.
+   See `ai.miniforge.agent.stream-watchdog/get-session-id`."
+  watchdog/get-session-id)

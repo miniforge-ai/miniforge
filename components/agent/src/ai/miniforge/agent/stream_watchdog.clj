@@ -17,15 +17,21 @@
 ;; limitations under the License.
 
 (ns ai.miniforge.agent.stream-watchdog
-  "Per-phase event-gap watchdog timer.
+  "Per-phase event-gap watchdog timer with session ID capture.
 
    Detects agent stream stalls by tracking the timestamp of the most recent
    event emission and firing a kill signal when the gap exceeds a configurable
    threshold. Runs on a dedicated ScheduledExecutorService daemon thread — never
    blocks event emission on the hot path.
 
-   Layer 0: Config helpers (resolve-gap-threshold)
-   Layer 1: Watchdog lifecycle (create-watchdog, ping!, stop!, stalled?)"
+   Also captures and persists the backend session ID from the initial agent
+   handshake so that resume-on-kill can restart the agent at the correct
+   session checkpoint.
+
+   Layer 0: Config helpers (resolve-gap-threshold, extract-session-id,
+            emit-session-captured!, emit-stall-event!)
+   Layer 1: Watchdog lifecycle (create-watchdog, ping!, stop!, stalled?,
+            capture-session-id!, get-session-id)"
   (:require
    [ai.miniforge.event-stream.interface :as event-stream]
    [ai.miniforge.logging.interface :as log])
@@ -34,7 +40,7 @@
    (java.util.concurrent.atomic AtomicLong)))
 
 ;; ---------------------------------------------------------------------------
-;; Layer 0 — module-level logger and configuration helpers
+;; Layer 0 — module-level logger, configuration helpers, and session helpers
 
 (defonce ^:private module-logger
   (log/create-logger {:min-level :info :output :edn}))
@@ -63,6 +69,69 @@
         overrides (get config :agent/per-backend-gap-thresholds {})]
     (get overrides backend base)))
 
+(defn- extract-session-id
+  "Extract session ID from a handshake event map.
+
+   Handles two common backend shapes:
+   - Claude Code: top-level `:session_id` or `\"session_id\"` key
+   - Codex:       nested `[:session :id]` or `[\"session\" \"id\"]`
+
+   Returns nil when no recognizable session key is present."
+  [event-map]
+  (or (get event-map :session_id)
+      (get event-map "session_id")
+      (get-in event-map [:session :id])
+      (get-in event-map ["session" "id"])))
+
+(defn- emit-session-captured!
+  "Publish :agent/session-captured via event-stream.
+
+   nil event-stream is a legal no-op, consistent with emit-stall-event!.
+   Any emission error is caught and logged — the capture has already been
+   persisted in the atom so a delivery failure must not lose the session ID."
+  [{:keys [event-stream workflow-id phase-id backend logger]} session-id]
+  (if-not event-stream
+    (log/debug logger :stream-watchdog :session-captured/suppressed
+               {:reason :no-event-stream
+                :session/id session-id
+                :workflow/phase phase-id
+                :agent/backend backend})
+    (try
+      (let [envelope (event-stream/agent-session-captured
+                      event-stream workflow-id phase-id session-id backend)]
+        (event-stream/publish! event-stream envelope))
+      (catch Exception ex
+        (log/warn logger :stream-watchdog :session-captured/emit-failed
+                  {:session/id session-id
+                   :workflow/phase phase-id
+                   :agent/backend backend
+                   :error (ex-message ex)})))))
+
+(defn- emit-stall-event!
+  "Publish an :agent/stream-stalled event to event-stream.
+
+   Uses the canonical agent-stream-stalled constructor so that :workflow/id
+   is a proper UUID/string and :stream/gap-duration-ms is populated.
+
+   nil event-stream is treated as a legal no-op (useful in tests and in early
+   pipeline stages that have not yet wired an event-stream). Any emission error
+   is caught and logged so the watchdog thread cannot crash."
+  [event-stream workflow-id phase-id backend gap-ms logger]
+  (if-not event-stream
+    (log/debug logger :stream-watchdog :stall-event/suppressed
+               {:reason :no-event-stream
+                :workflow/phase phase-id
+                :agent/backend backend})
+    (try
+      (let [envelope (event-stream/agent-stream-stalled
+                      event-stream workflow-id phase-id gap-ms backend)]
+        (event-stream/publish! event-stream envelope))
+      (catch Exception ex
+        (log/warn logger :stream-watchdog :stall-event/emit-failed
+                  {:workflow/phase phase-id
+                   :agent/backend backend
+                   :error (ex-message ex)})))))
+
 ;; ---------------------------------------------------------------------------
 ;; Layer 1 — watchdog lifecycle
 
@@ -75,39 +144,12 @@
         (.setName (str name-prefix "-" (System/nanoTime)))
         (.setDaemon true)))))
 
-(defn- emit-stall-event!
-  "Publish a :agent/stream-stalled event to event-stream.
-
-   nil event-stream is treated as a legal no-op (useful in tests and in early
-   pipeline stages that have not yet wired an event-stream). Any emission error
-   is caught and logged so the watchdog thread cannot crash.
-
-   Uses the `agent-stream-stalled` constructor from `event-stream.interface`
-   (added in PR #917 / GROUP 1+4 foundation) so the envelope, sequence
-   numbering, and `:workflow/phase` correlation key stay consistent with the
-   rest of the event-stream component."
-  [event-stream workflow-id phase-id gap-duration-ms backend logger]
-  (if-not event-stream
-    (log/debug logger :stream-watchdog :stall-event/suppressed
-               {:reason :no-event-stream
-                :workflow/phase phase-id
-                :agent/backend backend})
-    (try
-      (let [envelope (event-stream/agent-stream-stalled
-                      event-stream workflow-id phase-id gap-duration-ms backend)]
-        (event-stream/publish! event-stream envelope))
-      (catch Exception ex
-        (log/warn logger :stream-watchdog :stall-event/emit-failed
-                  {:workflow/phase phase-id
-                   :agent/backend backend
-                   :error (ex-message ex)})))))
-
 (defn- build-check-task
   "Build the Runnable that the scheduler fires every check interval.
 
    When (now − last-event-timestamp) exceeds threshold-ms the task:
      a. Calls kill-fn (kills the agent subprocess).
-     b. Emits :agent/stream-stalled via event-stream.
+     b. Emits :agent/stream-stalled via event-stream with the measured gap.
      c. Sets the stalled? atom to true.
      d. Shuts down the scheduler (one-shot; non-blocking from own thread)."
   [{:keys [^AtomicLong last-event-ts stalled-atom
@@ -130,8 +172,8 @@
                              {:workflow/phase phase-id
                               :agent/backend backend
                               :error (ex-message ex)})))
-            ;; b. emit stall event (nil-safe)
-            (emit-stall-event! event-stream workflow-id phase-id gap backend logger)
+            ;; b. emit stall event with measured gap (nil-safe)
+            (emit-stall-event! event-stream workflow-id phase-id backend gap logger)
             ;; c. mark stalled
             (clojure.core/reset! stalled-atom true)
             ;; d. shut down scheduler — non-blocking, safe from own thread
@@ -148,13 +190,14 @@
      :check-interval-ms — how often to check for a stall (default 5 000)
      :phase-id          — keyword or string identifying the current phase
      :backend           — keyword identifying the agent backend (e.g. :claude-code)
-     :event-stream      — event-stream instance to publish the stall event;
+     :event-stream      — event-stream instance to publish stall/session events;
                           nil is accepted and suppresses event emission
-     :workflow-id       — UUID or string; embedded in the stall event
+     :workflow-id       — UUID or string; embedded in emitted events
      :kill-fn           — zero-arity fn that terminates the agent subprocess
      :logger            — optional logger; defaults to the module-level logger
 
-   Returns a watchdog state map. Pass it to `ping!`, `stop!`, and `stalled?`.
+   Returns a watchdog state map. Pass it to `ping!`, `stop!`, `stalled?`,
+   `capture-session-id!`, and `get-session-id`.
 
    The internal scheduler starts immediately on a daemon thread. Report every
    agent event via `ping!` to keep the watchdog from firing."
@@ -163,22 +206,24 @@
     :or   {threshold-ms      default-gap-threshold-ms
            check-interval-ms default-check-interval-ms
            logger            module-logger}}]
-  (let [last-event-ts (AtomicLong. (System/currentTimeMillis))
-        stalled-atom  (atom false)
-        scheduler     (Executors/newSingleThreadScheduledExecutor
-                       (daemon-thread-factory "stream-watchdog"))
-        ctx           {:last-event-ts     last-event-ts
-                       :stalled-atom      stalled-atom
-                       :threshold-ms      threshold-ms
-                       :check-interval-ms check-interval-ms
-                       :phase-id          phase-id
-                       :backend           backend
-                       :event-stream      event-stream
-                       :workflow-id       workflow-id
-                       :kill-fn           (or kill-fn (fn []))
-                       :scheduler         scheduler
-                       :logger            logger}
-        check-task    (build-check-task ctx)]
+  (let [last-event-ts   (AtomicLong. (System/currentTimeMillis))
+        stalled-atom    (atom false)
+        session-id-atom (atom nil)
+        scheduler       (Executors/newSingleThreadScheduledExecutor
+                         (daemon-thread-factory "stream-watchdog"))
+        ctx             {:last-event-ts     last-event-ts
+                         :stalled-atom      stalled-atom
+                         :session-id-atom   session-id-atom
+                         :threshold-ms      threshold-ms
+                         :check-interval-ms check-interval-ms
+                         :phase-id          phase-id
+                         :backend           backend
+                         :event-stream      event-stream
+                         :workflow-id       workflow-id
+                         :kill-fn           (or kill-fn (fn []))
+                         :scheduler         scheduler
+                         :logger            logger}
+        check-task      (build-check-task ctx)]
     (.scheduleAtFixedRate
      scheduler
      check-task
@@ -219,6 +264,66 @@
   [watchdog]
   (boolean (and watchdog @(:stalled-atom watchdog))))
 
+(defn capture-session-id!
+  "Parse and persist the session ID from the initial agent handshake event.
+
+   MUST be called synchronously before the first tool call so that
+   resume-on-kill has a valid session ID available.
+
+   Idempotent — once a session ID has been captured further calls are
+   no-ops. This prevents a second :agent/session-captured event if the
+   consumer mistakenly passes multiple early events.
+
+   Accepts the first parsed JSON event from the agent subprocess as a
+   Clojure map. Supports two common backend handshake shapes:
+   - Claude Code: top-level `:session_id` key
+   - Codex:       nested `[:session :id]` path
+
+   When a session ID is found for the first time:
+     1. Stores it in the `:session-id-atom` on the watchdog state (atomic via
+        `compare-and-set!`).
+     2. Emits :agent/session-captured via event-stream (nil stream is a no-op).
+
+   When the session ID has already been captured, returns the watchdog unchanged.
+   When no recognizable session key is present, logs a warning and returns
+   the watchdog unchanged; this is not a fatal condition.
+
+   nil watchdog (or one missing :session-id-atom) is a legal no-op — useful
+   for early-pipeline call sites that have not constructed a watchdog yet.
+
+   Thread-safe — uses `compare-and-set!` to make the check-then-act atomic,
+   so concurrent callers cannot both observe a nil session-id and both emit
+   :agent/session-captured."
+  [watchdog event-map]
+  (if-let [sid-atom (and watchdog (:session-id-atom watchdog))]
+    (if-let [sid (extract-session-id event-map)]
+      ;; compare-and-set! is the atomic check-then-act primitive — only the
+      ;; first thread that observes nil flips the atom and emits the event;
+      ;; concurrent callers see the post-set value and become no-ops, so we
+      ;; never publish duplicate :agent/session-captured events.
+      (if (compare-and-set! sid-atom nil sid)
+        (do
+          (emit-session-captured! watchdog sid)
+          watchdog)
+        watchdog)
+      (do
+        (log/warn (:logger watchdog) :stream-watchdog :session/handshake-missing-id
+                  {:event-keys (keys event-map)
+                   :workflow/phase (:phase-id watchdog)
+                   :agent/backend (:backend watchdog)})
+        watchdog))
+    ;; nil watchdog or missing :session-id-atom — safe no-op, do not throw.
+    watchdog))
+
+(defn get-session-id
+  "Return the captured session ID string, or nil if not yet captured.
+
+   Resume-on-kill reads this to pass the correct --resume flag to the backend.
+   Safe to call from any thread."
+  [watchdog]
+  (when watchdog
+    @(:session-id-atom watchdog)))
+
 ;; ---------------------------------------------------------------------------
 ;; Rich comment — development examples
 
@@ -237,7 +342,13 @@
   ;; Simulate an event ping
   (ping! wd)
 
-  ;; Check status
+  ;; Capture session ID from the first handshake event (Claude Code shape)
+  (capture-session-id! wd {:session_id "cc-abc123" :type "system" :subtype "init"})
+
+  ;; Read back the captured ID
+  (get-session-id wd)
+
+  ;; Check stall status
   (stalled? wd)
 
   ;; Graceful shutdown on normal completion

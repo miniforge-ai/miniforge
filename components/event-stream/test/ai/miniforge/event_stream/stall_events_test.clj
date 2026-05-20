@@ -18,12 +18,15 @@
 
 (ns ai.miniforge.event-stream.stall-events-test
   "Tests for GROUP 1+4 foundation: agent-stream-stalled constructor and
-   phase-completed :phase/termination-reason extension."
+   phase-completed :phase/termination-reason extension, plus GROUP 2
+   agent-session-captured constructor."
   (:require
    [clojure.test :refer [deftest testing is]]
+   [malli.core :as m]
    [ai.miniforge.event-stream.core :as core]
    [ai.miniforge.event-stream.interface :as events-iface]
-   [ai.miniforge.event-stream.interface.events :as events]))
+   [ai.miniforge.event-stream.interface.events :as events]
+   [ai.miniforge.event-stream.schema :as schema]))
 
 ;------------------------------------------------------------------------------ Helpers
 
@@ -42,7 +45,7 @@
       (is (= :agent/stream-stalled (:event/type event))))))
 
 (deftest agent-stream-stalled-fields-test
-  (testing "carries workflow-phase, gap-duration-ms, and backend"
+  (testing "carries phase-id, gap-duration-ms, and backend"
     (let [stream (no-op-stream)
           wf-id  (random-uuid)
           event  (core/agent-stream-stalled stream wf-id :implement 95000 :codex)]
@@ -132,6 +135,55 @@
       (is (= 4200 (:phase/duration-ms event)))
       (is (= :normal (:phase/termination-reason event))))))
 
+;------------------------------------------------------------------------------ agent-session-captured (GROUP 2)
+
+(deftest agent-session-captured-type-test
+  (testing "event type is :agent/session-captured"
+    (let [stream (no-op-stream)
+          wf-id  (random-uuid)
+          event  (core/agent-session-captured stream wf-id :implement "cc-abc123" :claude-code)]
+      (is (= :agent/session-captured (:event/type event))))))
+
+(deftest agent-session-captured-fields-test
+  (testing "carries phase-id, session-id, and backend"
+    (let [stream (no-op-stream)
+          wf-id  (random-uuid)
+          event  (core/agent-session-captured stream wf-id :implement "cc-abc123" :claude-code)]
+      (is (= :implement (:workflow/phase event)))
+      (is (= "cc-abc123" (:agent/session-id event)))
+      (is (= :claude-code (:agent/backend event)))))
+
+  (testing "workflow-id is propagated"
+    (let [stream (no-op-stream)
+          wf-id  (random-uuid)
+          event  (core/agent-session-captured stream wf-id :verify "sess_xyz789" :codex)]
+      (is (= wf-id (:workflow/id event)))))
+
+  (testing "message includes backend and phase names"
+    (let [stream (no-op-stream)
+          wf-id  (random-uuid)
+          event  (core/agent-session-captured stream wf-id :plan "sess_plan_001" :claude-code)]
+      (is (string? (:message event)))
+      (is (re-find #"claude-code" (:message event)))
+      (is (re-find #"plan" (:message event)))))
+
+  (testing "envelope fields are present"
+    (let [stream (no-op-stream)
+          wf-id  (random-uuid)
+          event  (core/agent-session-captured stream wf-id :implement "sess_envelope_test" :codex)]
+      (is (uuid? (:event/id event)))
+      (is (inst? (:event/timestamp event)))
+      (is (= core/event-version (:event/version event)))
+      (is (number? (:event/sequence-number event))))))
+
+(deftest agent-session-captured-works-with-any-backend-test
+  (testing "backend keyword is preserved as-is"
+    (doseq [backend [:codex :claude-code :openai :local]]
+      (let [stream (no-op-stream)
+            event  (core/agent-session-captured
+                    stream (random-uuid) :implement "sess-123" backend)]
+        (is (= backend (:agent/backend event)))))))
+
 ;------------------------------------------------------------------------------ Re-export verification
 
 (deftest interface-events-re-export-test
@@ -150,4 +202,39 @@
       (is (= (:event/type direct) (:event/type via-if)))
       (is (= (:workflow/phase direct) (:workflow/phase via-if)))
       (is (= (:stream/gap-duration-ms direct) (:stream/gap-duration-ms via-if)))
+      (is (= (:agent/backend direct) (:agent/backend via-if)))))
+
+  (testing "agent-session-captured is exported through interface.events"
+    (is (fn? events/agent-session-captured)))
+
+  (testing "agent-session-captured is exported through interface"
+    (is (fn? events-iface/agent-session-captured)))
+
+  (testing "agent-session-captured re-export produces the same result as core"
+    (let [stream (no-op-stream)
+          wf-id  (random-uuid)
+          direct (core/agent-session-captured stream wf-id :implement "sess-re" :claude-code)
+          via-if (events/agent-session-captured stream wf-id :implement "sess-re" :claude-code)]
+      (is (= (:event/type direct) (:event/type via-if)))
+      (is (= (:workflow/phase direct) (:workflow/phase via-if)))
+      (is (= (:agent/session-id direct) (:agent/session-id via-if)))
       (is (= (:agent/backend direct) (:agent/backend via-if))))))
+
+;------------------------------------------------------------------------------ Malli schema validation
+
+(deftest agent-stream-stalled-validates-against-schema-test
+  (testing "constructed event satisfies schema/AgentStreamStalled"
+    (let [stream (no-op-stream)
+          event  (core/agent-stream-stalled stream (random-uuid) :implement 95000 :codex)]
+      (is (m/validate schema/AgentStreamStalled event)
+          (str "validation errors: "
+               (pr-str (m/explain schema/AgentStreamStalled event)))))))
+
+(deftest agent-session-captured-validates-against-schema-test
+  (testing "constructed event satisfies schema/AgentSessionCaptured"
+    (let [stream (no-op-stream)
+          event  (core/agent-session-captured stream (random-uuid) :implement
+                                              "cc-abc123" :claude-code)]
+      (is (m/validate schema/AgentSessionCaptured event)
+          (str "validation errors: "
+               (pr-str (m/explain schema/AgentSessionCaptured event)))))))

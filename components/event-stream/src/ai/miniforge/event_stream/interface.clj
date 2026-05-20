@@ -183,8 +183,9 @@
 (def knowledge-synthesis-failed events/knowledge-synthesis-failed)
 (def knowledge-promotion-failed events/knowledge-promotion-failed)
 
-;; Agent stream-stall events (GROUP 1+4)
+;; Agent stream-stall and session events (GROUP 1+4, GROUP 2)
 (def agent-stream-stalled events/agent-stream-stalled)
+(def agent-session-captured events/agent-session-captured)
 
 ;------------------------------------------------------------------------------ Layer 4
 ;; Event-stream reader — replay events from the file-sink layout

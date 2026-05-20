@@ -126,6 +126,7 @@
 (def knowledge-promotion-failed core/knowledge-promotion-failed)
 
 ;------------------------------------------------------------------------------ Layer 3.5
-;; Agent stream-stall event constructors (GROUP 1+4)
+;; Agent stream-stall and session event constructors (GROUP 1+4, GROUP 2)
 
 (def agent-stream-stalled core/agent-stream-stalled)
+(def agent-session-captured core/agent-session-captured)

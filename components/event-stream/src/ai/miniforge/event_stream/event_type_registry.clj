@@ -355,10 +355,15 @@
     :json-string "workflow/phase-heartbeat"
     :browser?    false}
 
-   ;; GROUP 1+4 agent stream-stall events
+   ;; GROUP 1+4 / GROUP 2 agent stream-stall + session events
    {:constructor "agent-stream-stalled"
     :event-type  :agent/stream-stalled
     :json-string "agent/stream-stalled"
+    :browser?    false}
+
+   {:constructor "agent-session-captured"
+    :event-type  :agent/session-captured
+    :json-string "agent/session-captured"
     :browser?    false}])
 
 ;------------------------------------------------------------------------------ Layer 0

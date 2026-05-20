@@ -212,6 +212,16 @@
 
 ;------------------------------------------------------------------------------ Layer 5
 ;; Stream-gap watchdog
+;;
+;; Note on naming: functions exported from the watchdog sub-interface
+;; (ai.miniforge.agent.interface.watchdog) keep their natural short names
+;; (ping!, stop!, stalled?, capture-session-id!, get-session-id). At this
+;; top-level interface the verb-style names ping!/stop!/stalled? would
+;; collide with unrelated lifecycle verbs in this namespace, so we apply a
+;; watchdog- prefix (ping-watchdog!, stop-watchdog!, watchdog-stalled?,
+;; capture-watchdog-session-id!, get-watchdog-session-id). Callers that
+;; need only watchdog functionality should depend on
+;; ai.miniforge.agent.interface.watchdog directly to avoid the prefix.
 
 (def resolve-gap-threshold watchdog/resolve-gap-threshold)
 (def default-gap-threshold-ms watchdog/default-gap-threshold-ms)
@@ -220,3 +230,5 @@
 (def ping-watchdog! watchdog/ping!)
 (def stop-watchdog! watchdog/stop!)
 (def watchdog-stalled? watchdog/stalled?)
+(def capture-watchdog-session-id! watchdog/capture-session-id!)
+(def get-watchdog-session-id watchdog/get-session-id)
