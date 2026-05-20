@@ -178,6 +178,17 @@
   [agent-id message addendum
    & {:keys [scope n data]
       :or   {scope :next-implement}}]
+  ;; Fail loud when :next-N-phases is requested without a positive :n.
+  ;; The previous shape silently assoc'd :intervention/n nil, producing
+  ;; an intervention that immediately failed valid-intervention? at
+  ;; the runner — confusing because it looked syntactically fine but
+  ;; was semantically malformed. Surface the misconfiguration here.
+  (when (and (= :next-N-phases scope)
+             (not (and (integer? n) (pos? n))))
+    (throw (ex-info "create-intervention: :next-N-phases scope requires positive integer :n"
+                    {:scope     scope
+                     :n         n
+                     :hint      "either pass :n <pos-int>, or pick a scope that doesn't need it (:next-implement or :workflow)"})))
   (let [base (response/status-check :intervene
                                     (cond-> {:agent/id agent-id
                                              :message message}

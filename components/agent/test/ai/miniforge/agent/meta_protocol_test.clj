@@ -130,6 +130,28 @@
       (is (not (contains? one-shot :intervention/n))
           ":n is omitted when the scope doesn't need it — keeps the map shape minimal"))))
 
+(deftest create-intervention-throws-when-next-N-phases-without-n-test
+  (testing ":next-N-phases scope without :n throws ex-info at construction — fail loud, not silently"
+    ;; The old shape silently assoc'd :intervention/n nil, producing a
+    ;; map that LOOKED ok but failed valid-intervention? at the runner.
+    ;; Surfacing the misconfiguration at create-intervention time
+    ;; matches the rest of the protocol's fail-fast posture.
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                          #":next-N-phases"
+                          (sut/create-intervention :rl "msg" "fix"
+                                                   :scope :next-N-phases)))
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                          #":next-N-phases"
+                          (sut/create-intervention :rl "msg" "fix"
+                                                   :scope :next-N-phases
+                                                   :n nil)))
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                          #":next-N-phases"
+                          (sut/create-intervention :rl "msg" "fix"
+                                                   :scope :next-N-phases
+                                                   :n 0))
+        "0 is not a positive integer — must reject")))
+
 (deftest create-intervention-carries-data-test
   (testing "diagnostic data flows through via :data, not flattened into top-level"
     (let [fingerprints [#{[:blocking "src/foo.clj"]}
