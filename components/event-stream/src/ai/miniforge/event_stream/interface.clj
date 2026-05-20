@@ -31,7 +31,8 @@
    [ai.miniforge.event-stream.digest :as digest]
    [ai.miniforge.event-stream.heartbeat :as heartbeat]
    [ai.miniforge.event-stream.reader :as reader]
-   [ai.miniforge.event-stream.sinks :as sinks]))
+   [ai.miniforge.event-stream.sinks :as sinks]
+   [ai.miniforge.event-stream.timeline :as timeline]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Stream lifecycle and control state
@@ -198,3 +199,8 @@
 (def strip-transit-prefix reader/strip-transit-prefix)
 (def read-workflow-events reader/read-workflow-events)
 (def read-workflow-events-by-id reader/read-workflow-events-by-id)
+
+;------------------------------------------------------------------------------ Layer 5
+;; Event timeline renderer
+
+(def render-timeline timeline/render-timeline)
