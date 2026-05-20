@@ -44,10 +44,10 @@
 ;------------------------------------------------------------------------------ tests
 
 (deftest empty-events-returns-empty-string
-  (testing "empty seq returns nil (no output)"
-    (is (nil? (sut/render-timeline [])))
-    (is (nil? (sut/render-timeline nil)))
-    (is (nil? (sut/render-timeline [] {})))))
+  (testing "empty / nil input yields empty string — consistent return type so callers don't have to nil-check"
+    (is (= "" (sut/render-timeline [])))
+    (is (= "" (sut/render-timeline nil)))
+    (is (= "" (sut/render-timeline [] {})))))
 
 (deftest tool-call-started-renders-correctly
   (testing "agent/tool-call-started shows tool name and args digest preview"
@@ -60,36 +60,71 @@
       (is (str/includes? result "Writing src/foo.clj"))
       (is (str/includes? result "implement")))))
 
-(deftest tool-call-completed-renders-correctly
-  (testing "tool/call-completed shows tool name, duration, and success status"
-    (let [event  (mk-event :tool/call-completed 1000
+(deftest tool-call-completed-uses-tool-success-flag-not-error-presence
+  (testing "tool/call-completed shows success status from :tool/success? per ToolCallCompleted schema"
+    ;; ToolCallCompleted in schema.clj does NOT carry :tool/name; the
+    ;; name is correlated via :tool/call-id back to the started event
+    ;; (see render-timeline/index-tool-names). Status comes from
+    ;; :tool/success? (boolean), with :tool/error presence as a
+    ;; secondary signal — fixtures here match the real emitted shape.
+    (let [events [(mk-event :agent/tool-call-started 0
                             :tool/name "Write"
-                            :tool/duration-ms 423)
-          result (sut/render-timeline [event])]
-      (is (str/includes? result "Write"))
+                            :tool/call-id "tc-1"
+                            :tool/args-digest {:digest/preview "Writing src/foo.clj"})
+                  (mk-event :tool/call-completed 1000
+                            :tool/call-id   "tc-1"
+                            :tool/duration-ms 423
+                            :tool/success?  true)]
+          result (sut/render-timeline events)]
+      (is (str/includes? result "Write")
+          "tool name resolved via :tool/call-id correlation, not from a non-existent :tool/name on the completed event")
       (is (str/includes? result "success"))
       (is (str/includes? result "0s"))))
 
-  (testing "tool/call-completed shows error status when :tool/error is present"
-    (let [event  (mk-event :tool/call-completed 2000
+  (testing "tool/call-completed shows error status when :tool/success? is false"
+    (let [events [(mk-event :agent/tool-call-started 0
                             :tool/name "Read"
+                            :tool/call-id "tc-2")
+                  (mk-event :tool/call-completed 2000
+                            :tool/call-id   "tc-2"
                             :tool/duration-ms 100
-                            :tool/error "file not found")
+                            :tool/success?  false
+                            :tool/error     {:type :not-found :path "/missing.clj"})]
+          result (sut/render-timeline events)]
+      (is (str/includes? result "error")
+          "status is sourced from :tool/success? false, not from :tool/error string presence")
+      (is (str/includes? result "Read")
+          "tool name still resolves via correlation in the error path"))))
+
+(deftest tool-call-completed-falls-back-to-call-id-when-no-started-event
+  (testing "if the started event is missing, the completed event renders with :tool/call-id as the tool label"
+    ;; Defensive: prevents <unknown> from showing up when there's a
+    ;; correlatable id but no preceding started event (e.g. truncated
+    ;; event log, replay starting mid-call).
+    (let [event  (mk-event :tool/call-completed 0
+                            :tool/call-id  "tc-orphan"
+                            :tool/success? true)
           result (sut/render-timeline [event])]
-      (is (str/includes? result "error")))))
+      (is (str/includes? result "tc-orphan")
+          "call-id substitutes for tool name when correlation is impossible")
+      (is (not (str/includes? result "<unknown>"))))))
 
 (deftest tool-call-pair-renders-both-lines
-  (testing "started + completed pair produces two lines"
+  (testing "started + completed pair produces two lines, name correlated via :tool/call-id"
     (let [events [(mk-event :agent/tool-call-started 0
                             :tool/name "Bash"
+                            :tool/call-id "tc-3"
                             :tool/args-digest {:digest/preview "ls -la"})
                   (mk-event :tool/call-completed 500
-                            :tool/name "Bash"
-                            :tool/duration-ms 500)]
+                            :tool/call-id   "tc-3"
+                            :tool/duration-ms 500
+                            :tool/success?  true)]
           result (sut/render-timeline events)
           lines  (str/split-lines result)]
       (is (= 2 (count lines)))
       (is (str/includes? (first lines) "Bash"))
+      (is (str/includes? (second lines) "Bash")
+          "completed line carries the same tool name as started, via correlation")
       (is (str/includes? (second lines) "success")))))
 
 (deftest gap-detection-inserts-stall-line
