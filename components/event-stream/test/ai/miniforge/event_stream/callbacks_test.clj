@@ -44,7 +44,7 @@
                     opts     {}}}]
   (let [stream (make-stream)
         collected (atom [])
-        _ (es/subscribe! stream (fn [ev] (swap! collected conj ev)))
+        _ (es/subscribe! stream ::test-collector (fn [ev] (swap! collected conj ev)))
         cb (es/create-streaming-callback stream workflow agent opts)]
     (doseq [ev events]
       (cb ev))

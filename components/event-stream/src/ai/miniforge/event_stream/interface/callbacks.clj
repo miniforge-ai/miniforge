@@ -89,6 +89,11 @@
   (let [{:keys [print? quiet?]} opts
         ;; Local start-time registry keyed by tool-call-id.
         ;; Populated on tool-use; consumed and cleared on tool-result.
+        ;; Accepted trade-off: entries for tool-calls whose result never
+        ;; arrives (timeout, cancellation, stream cut) accumulate for the
+        ;; lifetime of this callback instance.  Callbacks are short-lived
+        ;; per agent turn, so the practical leak bound is O(concurrent
+        ;; outstanding tool calls) — negligible in normal operation.
         tool-start-times (atom {})]
     (fn [{:keys [delta done? tool-use tool-result heartbeat
                  tool-name tool-names tool-call-id tool-args-preview
@@ -123,8 +128,11 @@
                 stream-atom workflow-id agent-id
                 ;; cond-> keeps nil keys out of the map explicitly,
                 ;; independent of constructor nil-stripping behaviour.
+                ;; :tool/names mirrors the legacy :agent/tool-call field so
+                ;; consumers can handle multi-tool provider blocks correctly.
                 (cond-> {:tool/name    tool-name
                          :tool/call-id tool-call-id}
+                  (seq tool-names) (assoc :tool/names (vec tool-names))
                   tool-args-preview
                   (assoc :tool/args-digest
                          (digest/digest-content tool-args-preview)))))))
@@ -157,7 +165,7 @@
 
         :else
         (do
-          (when (and print? (not quiet?) delta (not (empty? delta)))
+          (when (and print? (not quiet?) (seq delta))
             (print delta)
             (flush))
           (when stream-atom
