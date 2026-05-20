@@ -96,3 +96,32 @@
                           #"positive integer"
                           (heartbeat/start-heartbeat! stream (random-uuid) :plan
                                                       {:interval-ms 0})))))
+
+(deftest start-heartbeat!-rejects-non-IDeref-stream
+  (testing "WebSocket-backed (non-IDeref) stream is rejected at the call site, not inside the scheduler thread"
+    ;; The scheduled task uses swap!/swap-vals! on the event stream
+    ;; via core/publish!. Passing a plain map (WebSocket dispatch
+    ;; shape from the dashboard layer) would only crash inside the
+    ;; scheduler thread, after the executor was already alive.
+    ;; Fail loud at start time instead — caller sees the
+    ;; misconfiguration before any resource is allocated.
+    (let [ws-stream {:websocket :dummy-conn}]
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                            #"IDeref"
+                            (heartbeat/start-heartbeat! ws-stream (random-uuid) :plan))))))
+
+(deftest stop-heartbeat!-cancels-scheduled-future
+  (testing "the retained ScheduledFuture is cancelled (not just executor-shut-down)"
+    ;; Lifecycle hygiene: cancelling the future explicitly is what
+    ;; stops the periodic task, independent of the executor's
+    ;; continue-existing-tasks policy. Prior shape relied on
+    ;; executor.shutdown() alone; now stop-heartbeat! cancels the
+    ;; future directly so the contract doesn't drift if the
+    ;; executor policy changes.
+    (let [{:keys [stream]} (collecting-stream)
+          handle (heartbeat/start-heartbeat! stream (random-uuid) :plan
+                                             {:interval-ms 5000})
+          ^java.util.concurrent.ScheduledFuture fut (:heartbeat/future handle)]
+      (is (some? fut) ":heartbeat/future is retained on the handle so stop can cancel it")
+      (heartbeat/stop-heartbeat! handle)
+      (is (.isCancelled fut) "ScheduledFuture is cancelled after stop-heartbeat!"))))
