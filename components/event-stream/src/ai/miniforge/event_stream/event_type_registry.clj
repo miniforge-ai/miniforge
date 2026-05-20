@@ -353,6 +353,12 @@
    {:constructor "phase-heartbeat"
     :event-type  :workflow/phase-heartbeat
     :json-string "workflow/phase-heartbeat"
+    :browser?    false}
+
+   ;; GROUP 1+4 agent stream-stall events
+   {:constructor "agent-stream-stalled"
+    :event-type  :agent/stream-stalled
+    :json-string "agent/stream-stalled"
     :browser?    false}])
 
 ;------------------------------------------------------------------------------ Layer 0

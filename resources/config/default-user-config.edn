@@ -47,8 +47,8 @@
                  :agent/stream-gap-threshold-ms 90000
                  ;; Per-backend overrides for the gap threshold. Keys are backend
                  ;; keywords; values are millisecond integers. Empty by default.
-                 ;; Example: {:codex 120000} gives Codex 2 extra minutes before
-                 ;; stall detection fires.
+                 ;; Example: {:codex 210000} gives Codex 2 extra minutes
+                 ;; (210s total) before stall detection fires.
                  :agent/per-backend-gap-thresholds {}}
   :governance {:readiness {}
                :risk {}

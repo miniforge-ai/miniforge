@@ -80,23 +80,27 @@
 
    nil event-stream is treated as a legal no-op (useful in tests and in early
    pipeline stages that have not yet wired an event-stream). Any emission error
-   is caught and logged so the watchdog thread cannot crash."
-  [event-stream workflow-id phase-id backend logger]
+   is caught and logged so the watchdog thread cannot crash.
+
+   Uses the `agent-stream-stalled` constructor from `event-stream.interface`
+   (added in PR #917 / GROUP 1+4 foundation) so the envelope, sequence
+   numbering, and `:workflow/phase` correlation key stay consistent with the
+   rest of the event-stream component."
+  [event-stream workflow-id phase-id gap-duration-ms backend logger]
   (if-not event-stream
-    (log/warn logger "stream-watchdog: no event-stream configured; stall event suppressed"
-              {:phase-id phase-id :backend backend})
+    (log/debug logger :stream-watchdog :stall-event/suppressed
+               {:reason :no-event-stream
+                :workflow/phase phase-id
+                :agent/backend backend})
     (try
-      (let [envelope (event-stream/create-envelope
-                      event-stream
-                      :agent/stream-stalled
-                      {:phase/id          phase-id
-                       :agent/backend     backend
-                       :event/workflow-id workflow-id}
-                      {})]
+      (let [envelope (event-stream/agent-stream-stalled
+                      event-stream workflow-id phase-id gap-duration-ms backend)]
         (event-stream/publish! event-stream envelope))
       (catch Exception ex
-        (log/warn logger "stream-watchdog: failed to emit :agent/stream-stalled"
-                  {:phase-id phase-id :backend backend :error (ex-message ex)})))))
+        (log/warn logger :stream-watchdog :stall-event/emit-failed
+                  {:workflow/phase phase-id
+                   :agent/backend backend
+                   :error (ex-message ex)})))))
 
 (defn- build-check-task
   "Build the Runnable that the scheduler fires every check interval.
@@ -114,22 +118,26 @@
       (when-not (.isShutdown scheduler)
         (let [gap (- (System/currentTimeMillis) (.get last-event-ts))]
           (when (> gap threshold-ms)
-            (log/warn logger "stream-watchdog: gap exceeded threshold — killing agent"
-                      {:gap-ms gap :threshold-ms threshold-ms
-                       :phase-id phase-id :backend backend})
+            (log/warn logger :stream-watchdog :stream/gap-exceeded
+                      {:stream/gap-duration-ms gap
+                       :stream/gap-threshold-ms threshold-ms
+                       :workflow/phase phase-id
+                       :agent/backend backend})
             ;; a. kill the subprocess
             (try (kill-fn)
                  (catch Exception ex
-                   (log/warn logger "stream-watchdog: kill-fn threw"
-                             {:error (ex-message ex)})))
+                   (log/warn logger :stream-watchdog :stream/kill-fn-failed
+                             {:workflow/phase phase-id
+                              :agent/backend backend
+                              :error (ex-message ex)})))
             ;; b. emit stall event (nil-safe)
-            (emit-stall-event! event-stream workflow-id phase-id backend logger)
+            (emit-stall-event! event-stream workflow-id phase-id gap backend logger)
             ;; c. mark stalled
             (clojure.core/reset! stalled-atom true)
             ;; d. shut down scheduler — non-blocking, safe from own thread
             (.shutdown scheduler))))
       (catch Exception ex
-        (log/error logger "stream-watchdog: unhandled error in check task"
+        (log/error logger :stream-watchdog :check-task/unhandled-error
                    {:error (ex-message ex)})))))
 
 (defn create-watchdog
