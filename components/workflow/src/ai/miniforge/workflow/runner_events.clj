@@ -323,6 +323,28 @@
         (println (messages/t :warn/publish-phase-completed {:error (ex-message e)}))))))
 
 ;------------------------------------------------------------------------------ Layer 2
+;; Phase heartbeat lifecycle
+
+(defn start-phase-heartbeat!
+  ([event-stream context phase-name]
+   (start-phase-heartbeat! event-stream context phase-name {}))
+  ([event-stream context phase-name opts]
+   (when (durable-event-stream? event-stream)
+     (try
+       (es/start-heartbeat! event-stream (:execution/id context) phase-name opts)
+       (catch Exception e
+         (println (messages/t :warn/heartbeat-start {:error (ex-message e)}))
+         nil)))))
+
+(defn stop-phase-heartbeat!
+  "Stop a phase heartbeat handle. Nil-safe."
+  [handle]
+  (try
+    (es/stop-heartbeat! handle)
+    (catch Exception e
+      (println (messages/t :warn/heartbeat-stop {:error (ex-message e)})))))
+
+;------------------------------------------------------------------------------ Layer 2
 ;; Health check at phase boundary
 
 (defn check-backend-health-at-boundary!

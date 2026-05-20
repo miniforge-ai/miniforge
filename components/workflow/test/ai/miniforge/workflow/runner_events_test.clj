@@ -137,6 +137,11 @@
   (testing "nil event-stream does not throw"
     (is (nil? (events/publish-phase-started! nil (test-context) :plan)))))
 
+(deftest start-phase-heartbeat-websocket-stream-is-noop-test
+  (testing "heartbeats require a durable stream because the scheduler derefs it"
+    (is (nil? (events/start-phase-heartbeat! {:websocket :fake} (test-context) :plan
+                                             {:interval-ms 10})))))
+
 ;------------------------------------------------------------------------------ publish-phase-completed!
 
 (deftest publish-phase-completed-includes-transition-request-test
