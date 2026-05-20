@@ -353,6 +353,12 @@
    {:constructor "phase-heartbeat"
     :event-type  :workflow/phase-heartbeat
     :json-string "workflow/phase-heartbeat"
+    :browser?    false}
+
+   ;; GROUP 1+4 agent stream-stall events
+   {:constructor "agent-stream-stalled"
+    :event-type  :agent/stream-stalled
+    :json-string "agent/stream-stalled"
     :browser?    false}])
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -404,7 +410,7 @@
 ;; Audit summary (machine-readable)
 
 (def audit-summary
-  {:audit/date          "2026-03-28"
+  {:audit/date          "2026-05-19"
    :audit/source-server "components/event-stream/src/ai/miniforge/event_stream/interface/events.clj"
    :audit/source-browser "components/web-dashboard/resources/public/js/app.js"
    :audit/browser-switch "handleWorkflowEvent"

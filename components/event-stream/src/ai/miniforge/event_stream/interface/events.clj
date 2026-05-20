@@ -124,3 +124,8 @@
 (def observer-signal-failed core/observer-signal-failed)
 (def knowledge-synthesis-failed core/knowledge-synthesis-failed)
 (def knowledge-promotion-failed core/knowledge-promotion-failed)
+
+;------------------------------------------------------------------------------ Layer 3.5
+;; Agent stream-stall event constructors (GROUP 1+4)
+
+(def agent-stream-stalled core/agent-stream-stalled)
