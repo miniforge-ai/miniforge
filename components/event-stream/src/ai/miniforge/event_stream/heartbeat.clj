@@ -41,8 +41,12 @@
 ;; Constants
 
 (def ^:const default-interval-ms
-  "Default interval between heartbeat events: 30 seconds."
-  30000)
+  "Default interval between heartbeat events. Expressed as
+   `seconds × ms-per-second` so a reader recovers the human unit
+   without reading the docstring — per .standards/foundations/
+   named-constants.mdc, composed math is preferred when the unit
+   composition is part of the intent."
+  (* 30 1000))
 
 (def ^:private heartbeat-thread-counter
   "Monotonic counter for naming heartbeat threads. Each scheduler gets
