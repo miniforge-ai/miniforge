@@ -403,41 +403,74 @@
         ;; Non-fatal: continue pipeline even if doc write fails
         state)))))
 
+(defn- render-pr-body-fallback
+  "Render a structured GitHub PR body when the releaser agent didn't
+   produce one. Distinct from `render-pr-doc-full` (which targets the
+   committed docs/pull-requests/*.md file): no HTML copyright header,
+   no `_No X available._` placeholder strings — those belong in the
+   docs file for repo browsers, not in the PR description GitHub
+   reviewers see first."
+  [release-meta code-artifacts workflow-data]
+  (let [{:keys [release/pr-title release/pr-description]} release-meta
+        review-artifacts (:review-artifacts workflow-data)
+        test-artifacts   (:test-artifacts workflow-data)
+        files-md         (format-files-changed code-artifacts)
+        ;; Each section is omitted entirely when its source is absent —
+        ;; better to ship a short focused body than padded placeholders.
+        review-md        (when (seq review-artifacts) (format-review-decision review-artifacts))
+        tests-md         (when (seq test-artifacts)   (format-test-results test-artifacts))]
+    (str "## Summary\n\n"
+         (or pr-description pr-title) "\n\n"
+         "## Files Changed\n\n"
+         files-md "\n\n"
+         (when tests-md  (str "## Test Results\n\n" tests-md "\n\n"))
+         (when review-md (str "## Review\n\n"       review-md "\n\n"))
+         "🤖 Generated autonomously by [miniforge](https://github.com/miniforge-ai/miniforge).\n")))
+
+(defn- pr-body-needs-update?
+  "True when the post-create PR body should be overwritten. Only fires
+   when the agent failed to produce a useful body — never clobbers a
+   real :release/pr-body from the releaser agent."
+  [release-meta]
+  (let [body (:release/pr-body release-meta)]
+    (or (nil? body)
+        (str/blank? body)
+        ;; Treat a body that's just the title as a degraded agent
+        ;; output worth replacing with the structured fallback.
+        (= (str/trim body) (str/trim (str (:release/pr-title release-meta)))))))
+
 (defn step-update-pr-body
-  "Update the GitHub PR body with the full PR doc content.
-   The initial PR body from step-create-pr may be minimal (agent-generated
-   or fallback). The PR doc has the canonical, standards-compliant content.
-   Runs after step-write-pr-doc so the doc is available."
+  "Update the GitHub PR body ONLY when the initial body was missing or
+   degraded (just the title, blank). When the releaser agent produced
+   a real :release/pr-body, step-create-pr already posted it — do not
+   overwrite. Crucially, the GitHub PR body is NOT the same surface as
+   the committed docs/pull-requests/*.md file; use a body-specific
+   renderer (`render-pr-body-fallback`), not the docs-file renderer."
   [state]
   (cond
     (failed? state) state
     (not (:create-pr? state)) state
     (not (:pr-number state)) state
+    (not (pr-body-needs-update? (:release-meta state))) state
     :else
-    (let [{:keys [release-meta pr-number pr-url branch
-                  executor environment-id logger code-artifacts workflow-data
-                  pr-doc-content]} state
-          doc-content (or pr-doc-content
-                          (:release/pr-body release-meta)
-                          (render-pr-doc-full release-meta
-                                              {:pr-number pr-number
-                                               :pr-url pr-url
-                                               :branch branch}
-                                              code-artifacts
-                                              workflow-data))]
+    (let [{:keys [release-meta pr-number executor environment-id logger
+                  code-artifacts workflow-data]} state
+          body (render-pr-body-fallback release-meta code-artifacts workflow-data)]
       (try
         (sandbox/edit-pr-body! executor environment-id
-                               pr-number doc-content
+                               pr-number body
                                (gh-exec-opts state))
         (when logger
           (log/info logger :release-executor :pr-body-updated
-                    {:data {:pr-number pr-number}}))
+                    {:data {:pr-number pr-number
+                            :reason :degraded-agent-body
+                            :source :fallback-renderer}}))
         state
         (catch Exception e
           (when logger
             (log/warn logger :release-executor :pr-body-update-failed
                       {:message (.getMessage e)}))
-          ;; Non-fatal: PR exists, just has the original body
+          ;; Non-fatal: PR exists, just has the original (degraded) body.
           state)))))
 
 (defn step-generate-pr-doc

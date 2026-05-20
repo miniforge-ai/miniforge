@@ -72,12 +72,40 @@ How this was tested.\"
    - Should be clear and actionable
    - Don't end with period
 
-4. **PR Descriptions**:
-   - Start with a clear Summary section
-   - List key Changes as bullet points
-   - Include Testing section describing how changes were verified
-   - Add any relevant context or notes
-   - Use markdown formatting
+4. **PR Descriptions** (the most important field — reviewers see this first):
+
+   A PR description equal to the PR title (e.g., `## Summary\\n<title repeated>\\n`)
+   is REJECTED. The description must add real information beyond the title.
+   It must contain these four sections in this exact order:
+
+   ```markdown
+   ## Summary
+
+   2-4 bullets describing what concretely changed at the API / behavior level.
+   Not what you did to write it — what the change *is*.
+
+   ## Why
+
+   1-3 sentences on motivation: what dogfood failure, spec, user request,
+   or upstream change drove this. Reference issue / PR / commit IDs when
+   available.
+
+   ## Files Changed
+
+   - `path/to/file.clj` (create/modify/delete) — one-line role of the change
+
+   ## Test plan
+
+   - [ ] Bulleted checklist of how this was verified
+   - [ ] Mention specific bb tasks, namespaces, or smoke set runs
+   - [ ] If pure restructuring, state \"No behavior change — pure refactor\"
+   ```
+
+   Each section is REQUIRED. If a section would be empty, the change is
+   probably not yet complete; revisit the implementation.
+
+   Length target: 150-400 words. Shorter is thin; longer means you're
+   explaining the implementation when the diff already does that.
 
 5. **Files Summary**:
    - Brief count of files affected

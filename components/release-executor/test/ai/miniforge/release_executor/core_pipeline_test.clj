@@ -678,3 +678,80 @@
     (let [state {:create-pr? false}
           result (sut/step-generate-pr-doc state)]
       (is (not (sut/failed? result))))))
+
+;; ============================================================================
+;; render-pr-body-fallback — GitHub PR body, NOT the docs-file
+;;
+;; The 2026-05-19 dogfood produced PRs whose GitHub body was the docs-file
+;; content (HTML copyright header, `_No test artifacts available._` placeholder
+;; strings, summary that just repeated the title). Two surfaces had been
+;; conflated. These tests pin them apart: the fallback renderer produces a
+;; reviewer-facing body, omits empty sections instead of padding them, and
+;; never includes the HTML copyright header.
+
+(deftest render-pr-body-fallback-omits-html-copyright-header-test
+  (testing "the body fallback must not start with HTML comments — those belong in the docs file, not in the GitHub PR description"
+    (let [body (#'sut/render-pr-body-fallback
+                {:release/pr-title "fix: X" :release/pr-description "Fixed X."}
+                [{:code/files [{:path "src/a.clj" :action :modify}]}]
+                {})]
+      (is (not (str/includes? body "<!--"))
+          "no HTML copyright preamble in PR body — that template is the docs/pull-requests/ file")
+      (is (not (str/includes? body "Christopher Lester"))
+          "PR body must not carry the doc-file author header"))))
+
+(deftest render-pr-body-fallback-omits-placeholder-sections-test
+  (testing "no `_No X available._` strings in the PR body when the source data is absent"
+    ;; Reviewers reading the GitHub PR shouldn't see "No test artifacts available."
+    ;; — that placeholder pads the docs file (committed to repo for browsing)
+    ;; but is noise in a PR description. Better to drop the section entirely.
+    (let [body (#'sut/render-pr-body-fallback
+                {:release/pr-title "fix: X" :release/pr-description "Fixed X."}
+                [{:code/files [{:path "src/a.clj" :action :modify}]}]
+                {})]
+      (is (not (str/includes? body "No test artifacts available")))
+      (is (not (str/includes? body "No review artifacts available")))
+      (is (not (str/includes? body "## Test Results"))
+          "Test Results section must be omitted entirely when there are no test artifacts")
+      (is (not (str/includes? body "## Review"))
+          "Review section must be omitted entirely when there are no review artifacts")
+      (is (str/includes? body "## Summary"))
+      (is (str/includes? body "## Files Changed")))))
+
+(deftest render-pr-body-fallback-includes-sections-when-data-present-test
+  (testing "Test Results and Review sections render when their data is present"
+    (let [body (#'sut/render-pr-body-fallback
+                {:release/pr-title "feat: Y" :release/pr-description "Added Y."}
+                [{:code/files [{:path "src/y.clj" :action :create}]}]
+                {:review-artifacts [{:review/decision :approved :review/summary "LGTM"}]
+                 :test-artifacts   [{:test/results :passed :test/total 3 :test/passed 3}]})]
+      (is (str/includes? body "## Test Results"))
+      (is (str/includes? body "## Review"))
+      (is (str/includes? body "LGTM")))))
+
+;; ============================================================================
+;; pr-body-needs-update? — the policy guarding step-update-pr-body
+;;
+;; The 2026-05-19 regression overwrote good agent bodies with the docs file.
+;; This predicate must say "needs update" only for genuinely degraded bodies.
+
+(deftest pr-body-needs-update?-true-when-body-missing-test
+  (is (true? (#'sut/pr-body-needs-update?
+              {:release/pr-title "feat: X" :release/pr-body nil}))))
+
+(deftest pr-body-needs-update?-true-when-body-blank-test
+  (is (true? (#'sut/pr-body-needs-update?
+              {:release/pr-title "feat: X" :release/pr-body "   \n  "}))))
+
+(deftest pr-body-needs-update?-true-when-body-equals-title-test
+  (testing "PR body that's just the title is degraded agent output — replace with structured fallback"
+    (is (true? (#'sut/pr-body-needs-update?
+                {:release/pr-title "feat: X" :release/pr-body "feat: X"})))))
+
+(deftest pr-body-needs-update?-false-when-body-has-real-content-test
+  (testing "a real PR body MUST NOT be overwritten — this is the regression pin"
+    ;; The 2026-05-19 step-update-pr-body clobbered good agent bodies with
+    ;; the docs-file content. The new policy: leave any non-degraded body alone.
+    (is (false? (#'sut/pr-body-needs-update?
+                 {:release/pr-title "feat: X"
+                  :release/pr-body  "## Summary\n\n- did the thing\n- and the other thing\n\n## Why\n\nBecause Y."})))))
