@@ -567,23 +567,25 @@
 
 (defn agent-tool-call-started
   "Build an :agent/tool-call-started event marking the moment an agent
-   begins executing a single named tool call.
+   begins executing a named tool call or tool-use block.
 
    Arguments:
    - stream:      event stream
    - workflow-id: owning workflow UUID
    - agent-id:    keyword identifying the agent (e.g. :implementer)
    - opts:        {:tool/name     string  — tool being called when known
+                   :tool/names    vector  — tool names for provider blocks
                    :tool/args-digest map   — bounded digest of tool args
                    :tool/call-id  string  — provider-supplied call id}"
   [stream workflow-id agent-id
-   {:keys [:tool/name :tool/args-digest :tool/call-id]}]
+   {:keys [:tool/name :tool/names :tool/args-digest :tool/call-id]}]
   (cond-> (create-envelope stream :agent/tool-call-started workflow-id
                            (messages/t :tool-call/started
                                        {:tool-name-suffix
                                         (if name (str ": " name) "")}))
     true            (assoc :agent/id agent-id)
     name            (assoc :tool/name name)
+    (seq names)     (assoc :tool/names (vec names))
     args-digest     (assoc :tool/args-digest args-digest)
     call-id         (assoc :tool/call-id call-id)))
 

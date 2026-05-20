@@ -408,6 +408,7 @@
     [:event/sequence-number int?]
     [:workflow/id uuid?]
     [:tool/name {:optional true} string?]
+    [:tool/names {:optional true} [:vector string?]]
     [:tool/args-digest {:optional true} DigestSummary]
     [:tool/call-id {:optional true} string?]
     [:agent/id keyword?]
