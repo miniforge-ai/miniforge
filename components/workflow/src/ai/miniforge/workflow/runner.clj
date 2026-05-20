@@ -291,23 +291,36 @@
                   opts)])))
 
 (defn- wrap-phase-callbacks
-  "Wrap caller callbacks with event publishing."
+  "Wrap caller callbacks with event publishing and heartbeat scheduling.
+
+   Heartbeat handles are tracked in a per-invocation atom keyed by phase
+   name so overlapping phases (if any) each carry their own scheduler.
+   Stop is called unconditionally on phase complete to guard against
+   executor leaks when a phase errors out."
   [event-stream opts]
-  (letfn [(phase-name [interceptor]
-            (get interceptor :phase
-                 (get-in interceptor [:config :phase])))
-          (on-phase-start [ctx interceptor]
-            (when-let [phase-name' (phase-name interceptor)]
-              (events/publish-phase-started! event-stream ctx phase-name'))
-            (when-let [callback (:on-phase-start opts)]
-              (callback ctx interceptor)))
-          (on-phase-complete [ctx interceptor result]
-            (when-let [phase-name' (phase-name interceptor)]
-              (events/publish-phase-completed! event-stream ctx phase-name' result))
-            (when-let [callback (:on-phase-complete opts)]
-              (callback ctx interceptor result)))]
-    {:on-phase-start on-phase-start
-     :on-phase-complete on-phase-complete}))
+  (let [heartbeat-handles (atom {})]
+    (letfn [(phase-name [interceptor]
+              (get interceptor :phase
+                   (get-in interceptor [:config :phase])))
+            (on-phase-start [ctx interceptor]
+              (when-let [phase-name' (phase-name interceptor)]
+                (events/publish-phase-started! event-stream ctx phase-name')
+                (let [hb-opts (select-keys opts [:interval-ms])
+                      handle  (events/start-phase-heartbeat! event-stream ctx phase-name' hb-opts)]
+                  (when handle
+                    (swap! heartbeat-handles assoc phase-name' handle))))
+              (when-let [callback (:on-phase-start opts)]
+                (callback ctx interceptor)))
+            (on-phase-complete [ctx interceptor result]
+              (when-let [phase-name' (phase-name interceptor)]
+                (when-let [handle (get @heartbeat-handles phase-name')]
+                  (events/stop-phase-heartbeat! handle)
+                  (swap! heartbeat-handles dissoc phase-name'))
+                (events/publish-phase-completed! event-stream ctx phase-name' result))
+              (when-let [callback (:on-phase-complete opts)]
+                (callback ctx interceptor result)))]
+      {:on-phase-start on-phase-start
+       :on-phase-complete on-phase-complete})))
 
 (defn- governed-capsule-missing-anomaly
   "Return an `:invalid-input` anomaly when `:governed` mode is requested

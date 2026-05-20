@@ -322,6 +322,35 @@
       (catch Exception e
         (println (messages/t :warn/publish-phase-completed {:error (ex-message e)}))))))
 
+;------------------------------------------------------------------------------ Layer 1.5
+;; Phase heartbeat lifecycle
+
+(defn start-phase-heartbeat!
+  "Start a heartbeat scheduler for the given phase.
+
+   Delegates to es/start-heartbeat! with the workflow id extracted from
+   context. Returns the opaque handle map (to pass to stop-phase-heartbeat!)
+   or nil when the event stream is not dispatchable or start fails.
+
+   opts keys: {:interval-ms long}"
+  [event-stream context phase-name & [opts]]
+  (when (dispatchable-event-stream? event-stream)
+    (try
+      (es/start-heartbeat! event-stream (:execution/id context) phase-name
+                           (or opts {}))
+      (catch Exception e
+        (println (messages/t :warn/heartbeat-start {:error (ex-message e)}))
+        nil))))
+
+(defn stop-phase-heartbeat!
+  "Stop a heartbeat handle returned by start-phase-heartbeat!.
+   Safe to call with nil — no-op."
+  [handle]
+  (try
+    (es/stop-heartbeat! handle)
+    (catch Exception e
+      (println (messages/t :warn/heartbeat-stop {:error (ex-message e)})))))
+
 ;------------------------------------------------------------------------------ Layer 2
 ;; Health check at phase boundary
 
