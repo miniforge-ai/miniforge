@@ -27,8 +27,16 @@
      • digest-content is applied to args-preview and result-content
      • nil args/results do not produce a digest key
      • digest boundary: <1 KB → full preview; >1 KB → capped preview + sha256
+       (tested with both single-byte ASCII and multi-byte UTF-8 code points)
      • error case: tool-result with :error flag still emits :tool/call-completed
-       with :tool/success? false and :tool/result-digest when content present"
+       with :tool/success? false and :tool/result-digest when content present
+
+   Key convention:
+     Tool-use events carry :tool-call-id for the provider-assigned id.
+     Tool-result events carry :tool-result-call-id for the correlating id —
+     this is the key the callback uses for duration look-up. Using :tool-call-id
+     on a tool-result event is silently ignored by the callback; all tests use
+     the correct :tool-result-call-id consistently."
   (:require
    [clojure.test :refer [deftest is testing]]
    [ai.miniforge.event-stream.interface :as es]))
@@ -72,9 +80,9 @@
 
 (deftest tool-use-does-not-emit-agent-status-tool-calling
   (testing ":agent/status :tool-calling is NOT emitted — replaced by :agent/tool-call-started"
-    (let [events              (run-callback [{:tool-use true
-                                              :tool-name "Grep"
-                                              :tool-call-id "tc-002"}])
+    (let [events               (run-callback [{:tool-use true
+                                               :tool-name "Grep"
+                                               :tool-call-id "tc-002"}])
           status-tool-calling? (fn [ev]
                                  (and (= :agent/status (:event/type ev))
                                       (= :tool-calling (:agent/status ev))))]
@@ -118,11 +126,15 @@
           ":tool/args-digest must not appear when no args-preview"))))
 
 ;------------------------------------------------------------------------------ tool-result tests
+;; NOTE: tool-result events use :tool-result-call-id (not :tool-call-id) for
+;; the correlating id.  The callback dispatches on the :tool-result key and
+;; reads the correlation via (or tool-result-call-id tool-call-id).  Using the
+;; canonical :tool-result-call-id keeps tests honest and future-rename-safe.
 
 (deftest tool-result-emits-call-completed
   (testing "A tool-result event publishes :tool/call-completed"
     (let [events (run-callback [{:tool-result true
-                                 :tool-call-id "tc-006"
+                                 :tool-result-call-id "tc-006"
                                  :tool-result-content "file contents here"
                                  :tool-result-is-error false}])
           types  (mapv :event/type events)]
@@ -132,14 +144,14 @@
 (deftest tool-result-carries-success-flag
   (testing ":tool/call-completed carries :tool/success? true on non-error results"
     (let [events    (run-callback [{:tool-result true
-                                    :tool-call-id "tc-007"
+                                    :tool-result-call-id "tc-007"
                                     :tool-result-is-error false}])
           completed (first (filter #(= :tool/call-completed (:event/type %)) events))]
       (is (true? (:tool/success? completed)))))
 
   (testing ":tool/call-completed carries :tool/success? false on error results"
     (let [events    (run-callback [{:tool-result true
-                                    :tool-call-id "tc-008"
+                                    :tool-result-call-id "tc-008"
                                     :tool-result-is-error true}])
           completed (first (filter #(= :tool/call-completed (:event/type %)) events))]
       (is (false? (:tool/success? completed))))))
@@ -147,7 +159,7 @@
 (deftest tool-result-has-result-digest-when-content-present
   (testing ":tool/call-completed includes :tool/result-digest when result-content provided"
     (let [events    (run-callback [{:tool-result true
-                                    :tool-call-id "tc-009"
+                                    :tool-result-call-id "tc-009"
                                     :tool-result-content "some tool output"}])
           completed (first (filter #(= :tool/call-completed (:event/type %)) events))]
       (is (contains? completed :tool/result-digest)
@@ -157,7 +169,7 @@
 (deftest tool-result-no-digest-when-no-content
   (testing ":tool/call-completed omits :tool/result-digest when result-content is nil"
     (let [events    (run-callback [{:tool-result true
-                                    :tool-call-id "tc-010"}])
+                                    :tool-result-call-id "tc-010"}])
           completed (first (filter #(= :tool/call-completed (:event/type %)) events))]
       (is (not (contains? completed :tool/result-digest))))))
 
@@ -180,10 +192,20 @@
   (testing ":tool/duration-ms is absent when there is no tracked tool-use start"
     (let [events    (run-callback [{:tool-result true}])
           completed (first (filter #(= :tool/call-completed (:event/type %)) events))]
+      ;; Guard: the event must be emitted even without a start timestamp.
+      ;; Without this assertion the key-presence check below is vacuously true
+      ;; if no event was emitted at all (nil does not contain any key).
+      (is (some? completed)
+          ":tool/call-completed must still be emitted even without a tracked start")
       (is (not (contains? completed :tool/duration-ms))
           ":tool/duration-ms must be absent when no tracked start"))))
 
 ;------------------------------------------------------------------------------ digest boundary tests
+;; NOTE: Single-byte (ASCII) content is used in most variants because the
+;; UTF-8 byte length equals the character count, making assertions simple.
+;; The multibyte variant below (digest-boundary-multibyte-utf8-cap) specifically
+;; exercises cap semantics on 3-byte code points to confirm the limit is applied
+;; to byte length, not character count.
 
 (deftest digest-boundary-under-1kb-preview-is-full-content
   (testing "Args under 1 KB (1024 bytes) produce a preview equal to the full content"
@@ -226,11 +248,38 @@
       (is (= 64 (count (:digest/sha256 digest)))
           "sha256 must be 64 lower-case hex chars covering the FULL content"))))
 
+(deftest digest-boundary-multibyte-utf8-cap
+  (testing "Preview cap is applied to UTF-8 byte length, not character count"
+    ;; Each Chinese character (e.g. 中) encodes to exactly 3 UTF-8 bytes.
+    ;; 342 × 3 = 1026 bytes — slightly over the 1024-byte cap.
+    ;; The preview must be ≤ 1024 bytes, which means fewer than 342 chars,
+    ;; confirming the implementation caps bytes, not characters.
+    (let [multibyte-char "中"              ; 中 — 3 UTF-8 bytes
+          over-cap-str   (apply str (repeat 342 multibyte-char))
+          events         (run-callback [{:tool-use true
+                                         :tool-name "Read"
+                                         :tool-call-id "tc-digest-multibyte"
+                                         :tool-args-preview over-cap-str}])
+          started        (first (filter #(= :agent/tool-call-started (:event/type %)) events))
+          digest         (:tool/args-digest started)
+          preview        (:digest/preview digest)
+          preview-bytes  (alength (.getBytes ^String preview "UTF-8"))]
+      (is (some? digest)
+          "digest must be present")
+      (is (<= preview-bytes preview-cap-bytes)
+          "preview UTF-8 byte count must not exceed 1024 even for multi-byte code points")
+      (is (< (count preview) (count over-cap-str))
+          "preview char count must be less than full content char count when over cap")
+      (is (= (* 342 3) (:digest/original-size digest))
+          "original-size must reflect the full UTF-8 byte count of the input")
+      (is (= 64 (count (:digest/sha256 digest)))
+          "sha256 must be 64 hex chars"))))
+
 (deftest digest-boundary-result-over-1kb-preview-is-capped
   (testing "Tool-result content over 1 KB produces a capped result digest preview"
     (let [large-result (apply str (repeat 2000 "r"))
           events       (run-callback [{:tool-result true
-                                       :tool-call-id "tc-result-large"
+                                       :tool-result-call-id "tc-result-large"
                                        :tool-result-content large-result}])
           completed    (first (filter #(= :tool/call-completed (:event/type %)) events))
           digest       (:tool/result-digest completed)
@@ -266,7 +315,7 @@
 (deftest error-result-no-content-still-emits-call-completed
   (testing "A tool-result with error flag but no content still emits :tool/call-completed"
     (let [events    (run-callback [{:tool-result true
-                                    :tool-call-id "tc-err-2"
+                                    :tool-result-call-id "tc-err-2"
                                     :tool-result-is-error true}])
           completed (first (filter #(= :tool/call-completed (:event/type %)) events))]
       (is (some? completed)
@@ -280,7 +329,7 @@
   (testing "Error result digest captures the error message content verbatim (up to cap)"
     (let [error-msg "Error: permission denied on /etc/shadow"
           events    (run-callback [{:tool-result true
-                                    :tool-call-id "tc-err-3"
+                                    :tool-result-call-id "tc-err-3"
                                     :tool-result-content error-msg
                                     :tool-result-is-error true}])
           completed (first (filter #(= :tool/call-completed (:event/type %)) events))
@@ -293,11 +342,16 @@
 ;------------------------------------------------------------------------------ passthrough tests
 
 (deftest non-tool-events-still-emit-agent-chunk
-  (testing "Plain delta events still produce :agent/chunk events"
+  (testing "Plain delta events still produce :agent/chunk events with correct delta content"
     (let [events (run-callback [{:delta "hello " :done? false}
-                                {:delta "world" :done? true}])
+                                {:delta "world"  :done? true}])
           types  (mapv :event/type events)]
-      (is (= [:agent/chunk :agent/chunk] types)))))
+      (is (= [:agent/chunk :agent/chunk] types)
+          "two :agent/chunk events must be emitted")
+      (is (= "hello " (:agent/delta (first events)))
+          "first chunk must carry the first delta string")
+      (is (= "world" (:agent/delta (second events)))
+          "second chunk must carry the second delta string"))))
 
 (deftest heartbeat-produces-no-events
   (testing "Heartbeat events are silently ignored"
@@ -307,6 +361,9 @@
 (deftest nil-stream-atom-does-not-throw
   (testing "Passing nil as stream-atom is safe — no publishes attempted"
     (let [cb (es/create-streaming-callback nil (random-uuid) :implementer {})]
-      (is (nil? (cb {:tool-use true :tool-name "Read" :tool-call-id "x"})))
-      (is (nil? (cb {:tool-result true :tool-call-id "x"})))
-      (is (nil? (cb {:delta "text" :done? false}))))))
+      (is (do (cb {:tool-use true :tool-name "Read" :tool-call-id "x"}) true)
+          "tool-use with nil stream must not throw")
+      (is (do (cb {:tool-result true :tool-result-call-id "x"}) true)
+          "tool-result with nil stream must not throw")
+      (is (do (cb {:delta "text" :done? false}) true)
+          "delta with nil stream must not throw"))))
