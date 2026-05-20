@@ -37,7 +37,10 @@
       (messages/t :stream/tool-use-line {:names (str/join ", " names)}))))
 
 (defn- maybe-digest
-  "Apply digest-content to `content` only when content is non-nil."
+  "Apply digest-content to `content` only when content is non-nil.
+   digest-content handles the 1KB threshold internally (preview is always
+   capped; SHA-256 is always computed). We guard only against nil so the
+   event constructors receive a clean, fully-formed digest map or nothing."
   [content]
   (when (some? content)
     (digest/digest-content content)))
@@ -118,9 +121,13 @@
               stream-atom
               (events/agent-tool-call-started
                 stream-atom workflow-id agent-id
-                {:tool/name        tool-name
-                 :tool/call-id     tool-call-id
-                 :tool/args-digest (maybe-digest tool-args-preview)}))))
+                ;; cond-> keeps nil keys out of the map explicitly,
+                ;; independent of constructor nil-stripping behaviour.
+                (cond-> {:tool/name    tool-name
+                         :tool/call-id tool-call-id}
+                  tool-args-preview
+                  (assoc :tool/args-digest
+                         (digest/digest-content tool-args-preview)))))))
 
         ;; Tool-result closes the latency span opened by tool-use.
         ;; Emit :tool/call-completed with duration and digested result.
@@ -138,10 +145,12 @@
               stream-atom
               (events/tool-call-completed
                 stream-atom workflow-id
-                {:tool/call-id       correlated-id
-                 :tool/result-digest result-digest
-                 :tool/duration-ms   duration-ms
-                 :tool/success?      (not (true? tool-result-is-error))}))))
+                ;; cond-> excludes optional keys explicitly when nil,
+                ;; decoupled from constructor nil-filtering behaviour.
+                (cond-> {:tool/call-id  correlated-id
+                         :tool/success? (not (true? tool-result-is-error))}
+                  result-digest (assoc :tool/result-digest result-digest)
+                  duration-ms   (assoc :tool/duration-ms duration-ms))))))
 
         heartbeat
         nil

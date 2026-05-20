@@ -320,7 +320,10 @@
                               :content ""}))]
       (is (= "\n[tool] context_read\n" output))
       (is (= 1 (count (es/get-events stream {:event-type :agent/tool-call}))))
-      (is (= 1 (count (es/get-events stream {:event-type :agent/status})))))))
+      ;; :agent/status :tool-calling removed — :agent/tool-call-started replaces it
+      (is (= 0 (count (es/get-events stream {:event-type :agent/status}))))
+      (is (= 1 (count (es/get-events stream {:event-type :agent/tool-call-started})))))))
+
 
 ;; --------------------------------------------------------------------------- New N3 event constructors
 

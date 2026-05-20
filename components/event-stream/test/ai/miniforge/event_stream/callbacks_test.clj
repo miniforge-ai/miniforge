@@ -35,17 +35,10 @@
 (defn- make-stream []
   (es/create-event-stream))
 
-(defn- invoke!
-  "Drive `cb` with `event-map` and return the published events."
-  [cb event-map]
-  (cb event-map)
-  ;; give publish a tick (it is synchronous, so this is just defensive)
-  nil)
-
 (defn- run-callback
   "Creates a stream, attaches a subscriber, fires `events` through the
    callback, and returns the collected published events (in order)."
-  [events & {:keys [call-id agent workflow opts]
+  [events & {:keys [agent workflow opts]
              :or   {agent    :implementer
                     workflow (random-uuid)
                     opts     {}}}]
