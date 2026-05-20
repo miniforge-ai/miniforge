@@ -237,3 +237,130 @@
       (is (vector? (:event-ids ev)))
       (is (string? (:fingerprint ev)))
       (is (true? (:redacted? ev))))))
+
+;------------------------------------------------------------------------------ Layer 4
+;; Fuzzy stagnation — the real-world loop catcher
+;;
+;; The 2026-05-19 dogfood (workflow 55eb2c77) burned 3 hours in a
+;; review→implement loop where every iteration's strict fingerprint
+;; was different (the LLM rephrased issue descriptions and line numbers
+;; shifted after edits) but the SAME files kept getting flagged at
+;; :blocking severity. The strict signal correctly stayed quiet; the
+;; fuzzy signal exists to catch exactly this case.
+
+(def ^:private blocking-issue-a-rephrased
+  {:severity :blocking :file "src/foo.clj" :line 14
+   :description "Null pointer dereference on input arg"})
+
+(def ^:private blocking-issue-a-moved-line
+  {:severity :blocking :file "src/foo.clj" :line 42
+   :description "Null pointer access"})
+
+(deftest review-fingerprint-fuzzy-returns-file-severity-set-test
+  (testing "fuzzy fingerprint reduces to a set of [severity file] pairs"
+    (let [fp (sut/review-fingerprint-fuzzy
+              {:review/issues [blocking-issue-a warning-issue]})]
+      (is (set? fp))
+      (is (= #{[:blocking "src/foo.clj"]
+               [:warning  "src/foo.clj"]}
+             fp)))))
+
+(deftest review-fingerprint-fuzzy-deduplicates-same-pair-test
+  (testing "two issues at the same severity in the same file collapse to one pair"
+    ;; Mock-shape bugs from the 55eb2c77 loop produced multiple
+    ;; :blocking-severity issues in the same test file each iteration —
+    ;; the fuzzy fingerprint must collapse them so the SIGNAL is
+    ;; \"this file keeps producing blocking issues\" not
+    ;; \"there are exactly N issues this round.\"
+    (let [fp (sut/review-fingerprint-fuzzy
+              {:review/issues [blocking-issue-a blocking-issue-a-rephrased
+                               blocking-issue-a-moved-line]})]
+      (is (= #{[:blocking "src/foo.clj"]} fp)))))
+
+(deftest review-fingerprint-fuzzy-excludes-nits-test
+  (testing "nits are still excluded from the fuzzy fingerprint"
+    (is (= #{} (sut/review-fingerprint-fuzzy
+                {:review/issues [nit-issue]})))))
+
+(deftest review-fingerprint-fuzzy-includes-failed-gates-test
+  (testing "failed gate-results contribute virtual [:blocking :gate/X] pairs"
+    (let [fp (sut/review-fingerprint-fuzzy
+              {:review/issues       []
+               :review/gate-results [{:gate-id :format :passed? false
+                                      :errors [{:message "fmt"}]}]})]
+      (is (= #{[:blocking ":gate/format"]} fp)))))
+
+(deftest fuzzy-stagnated?-true-when-pair-sets-match-test
+  (testing "fuzzy stagnation fires when (file × severity) sets repeat"
+    ;; Same pair set, different lines, different descriptions — the
+    ;; strict detector would NOT fire here, the fuzzy detector MUST.
+    (let [prior   #{[:blocking "src/foo.clj"]}
+          current #{[:blocking "src/foo.clj"]}]
+      (is (true? (sut/fuzzy-stagnated? prior current))))))
+
+(deftest fuzzy-stagnated?-false-on-first-iteration-test
+  (is (false? (boolean (sut/fuzzy-stagnated? nil #{[:blocking "src/foo.clj"]})))))
+
+(deftest fuzzy-stagnated?-false-on-empty-current-test
+  (is (false? (boolean (sut/fuzzy-stagnated? #{[:blocking "src/foo.clj"]} #{})))))
+
+(deftest fuzzy-stagnated?-false-when-pair-sets-differ-test
+  (testing "swapping in a different file or severity counts as progress"
+    (is (false? (boolean (sut/fuzzy-stagnated?
+                          #{[:blocking "src/foo.clj"]}
+                          #{[:blocking "src/bar.clj"]}))))
+    (is (false? (boolean (sut/fuzzy-stagnated?
+                          #{[:blocking "src/foo.clj"]}
+                          #{[:warning  "src/foo.clj"]}))))))
+
+;------------------------------------------------------------------------------ Layer 5
+;; Detector wiring — fuzzy anomaly emission
+
+(deftest detector-emits-fuzzy-anomaly-when-strict-misses-test
+  (testing "two reviews with same (file × severity) but drifting descriptions fire a fuzzy anomaly, NOT a strict one"
+    ;; This is the regression pin for the 55eb2c77 loop pattern.
+    (let [det    (sut/make-repair-loop-detector)
+          review-1 {:review/issues [blocking-issue-a]}
+          review-2 {:review/issues [blocking-issue-a-moved-line]}
+          state  (-> (proto/init det {})
+                     (#(proto/observe det % (review-event review-1 1)))
+                     (#(proto/observe det % (review-event review-2 2))))
+          anoms  (:anomalies state)]
+      (is (= 1 (count anoms))
+          "exactly one anomaly — strict-stagnation must NOT fire on drift")
+      (is (= :anomalies.review/fuzzy-stagnation
+             (get-in (first anoms) [:anomaly/data :anomaly/category]))
+          "the emitted anomaly must be the fuzzy category")
+      (is (= :heuristic
+             (get-in (first anoms) [:anomaly/data :anomaly/class]))
+          "fuzzy is a heuristic detector signal")
+      (is (= :warn
+             (get-in (first anoms) [:anomaly/data :anomaly/severity]))
+          "fuzzy fires at :warn severity (meta-agent intervention signal, not terminator)")
+      (is (= "[[:blocking \"src/foo.clj\"]]"
+             (get-in (first anoms) [:anomaly/data :anomaly/evidence :fingerprint]))
+          "fingerprint evidence is serialized in deterministic order"))))
+
+(deftest detector-emits-only-strict-when-both-would-match-test
+  (testing "verbatim repeat fires strict ONLY — no double-emission to confuse downstream consumers"
+    (let [det    (sut/make-repair-loop-detector)
+          review {:review/issues [blocking-issue-a]}
+          state  (-> (proto/init det {})
+                     (#(proto/observe det % (review-event review 1)))
+                     (#(proto/observe det % (review-event review 2))))
+          anoms  (:anomalies state)]
+      (is (= 1 (count anoms)))
+      (is (= :anomalies.review/stagnation
+             (get-in (first anoms) [:anomaly/data :anomaly/category]))
+          "strict wins; fuzzy is suppressed to avoid double-signalling"))))
+
+(deftest detector-progress-clears-both-signals-test
+  (testing "implementer changing the set of flagged files clears both strict and fuzzy"
+    (let [det    (sut/make-repair-loop-detector)
+          review-1 {:review/issues [blocking-issue-a]}
+          review-2 {:review/issues [blocking-issue-b]}  ; different file
+          state  (-> (proto/init det {})
+                     (#(proto/observe det % (review-event review-1 1)))
+                     (#(proto/observe det % (review-event review-2 2))))]
+      (is (zero? (count-anomalies state))
+          "real progress (file set changed) must not fire either signal"))))
