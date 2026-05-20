@@ -24,30 +24,33 @@
    [clojure.java.io :as io]))
 
 ;;------------------------------------------------------------------------------ Layer 0
-;; Tuning constants
+;; Tuning constants + file paths
 
-(def default-success-rate-threshold
-  "Minimum rolling success rate before a backend is considered degraded
-   and a failover is triggered. 0.90 = at most 1 failure per 10 calls
-   tolerated; below that the backend is skipped in favor of a healthier
-   one. Picked to absorb transient single failures without flapping."
+(def ^:private default-success-rate-threshold
+  "Minimum cumulative success rate (`:successful-calls / :total-calls`)
+   before a backend is considered degraded and a failover is triggered.
+   0.90 = at most 1 failure per 10 cumulative calls tolerated; below
+   that the backend is skipped in favor of a healthier one. Picked to
+   absorb transient single failures without flapping. (Note: the rate
+   is cumulative since last decay, not a sliding window — `maybe-decay-health`
+   resets the counters wholesale after 24h of stale data.)"
   0.90)
 
-(def default-switch-cooldown-ms
+(def ^:private default-switch-cooldown-ms
   "Minimum interval between automatic backend switches (30 min). After
    a switch fires, the FROM backend is parked for this long even if its
    success rate recovers — prevents two flaky backends from oscillating
    between healthy and degraded."
   (* 30 60 1000))
 
-(def default-failure-recency-window-ms
+(def ^:private default-failure-recency-window-ms
   "Window during which a recent failure is considered fresh enough to
-   trigger a switch decision (5 min). Older failures sit in the rolling
-   counter for accounting but do not by themselves cause a switch —
-   stale failure data shouldn't trigger live failover."
+   trigger a switch decision (5 min). The stored `:last-failure`
+   timestamp is compared against this window; older failures stay in
+   the cumulative counter for accounting but do not by themselves
+   cause a switch — stale failure data shouldn't trigger live failover."
   (* 5 60 1000))
 
-;;------------------------------------------------------------------------------ Layer 0
 ;; File paths and utilities
 
 (defn backend-health-path
