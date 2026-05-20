@@ -74,6 +74,8 @@
                        "components/dag-executor/resources"
                        "components/pr-lifecycle/src"
                        "components/pr-lifecycle/resources"
+                       "components/pr-label-watcher/src"
+                       "components/pr-label-watcher/resources"
                        "components/evidence-bundle/src"
                        "components/evidence-bundle/resources"
                        "components/policy-pack/src"
@@ -232,6 +234,7 @@
                       ai.miniforge/tool-registry {:local/root "components/tool-registry"}
                      ai.miniforge/dag-executor {:local/root "components/dag-executor"}
                      ai.miniforge/pr-lifecycle {:local/root "components/pr-lifecycle"}
+                     ai.miniforge/pr-label-watcher {:local/root "components/pr-label-watcher"}
                      ai.miniforge/evidence-bundle {:local/root "components/evidence-bundle"}
                      ai.miniforge/policy-pack {:local/root "components/policy-pack"}
                      ai.miniforge/pr-train {:local/root "components/pr-train"}
@@ -350,6 +353,7 @@
                        "components/dag-primitives/test"
                        "components/dag-executor/test"
                        "components/pr-lifecycle/test"
+                       "components/pr-label-watcher/test"
                        "components/release-executor/test"
                        "components/evidence-bundle/test"
                        "components/policy-pack/test"
@@ -474,6 +478,7 @@
                       ai.miniforge/tool-registry {:local/root "components/tool-registry"}
                       ai.miniforge/dag-executor {:local/root "components/dag-executor"}
                       ai.miniforge/pr-lifecycle {:local/root "components/pr-lifecycle"}
+                      ai.miniforge/pr-label-watcher {:local/root "components/pr-label-watcher"}
                       ai.miniforge/evidence-bundle {:local/root "components/evidence-bundle"}
                       ai.miniforge/policy-pack {:local/root "components/policy-pack"}
                       ai.miniforge/pr-train {:local/root "components/pr-train"}
