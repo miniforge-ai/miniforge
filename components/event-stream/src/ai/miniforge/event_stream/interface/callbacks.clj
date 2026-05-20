@@ -94,6 +94,11 @@
         ;; lifetime of this callback instance.  Callbacks are short-lived
         ;; per agent turn, so the practical leak bound is O(concurrent
         ;; outstanding tool calls) — negligible in normal operation.
+        ;; Monotonic — `nanoTime` is immune to wall-clock adjustments
+        ;; (NTP step, manual sysclock changes) that can make a paired
+        ;; `currentTimeMillis` delta negative or implausibly large.
+        ;; Durations published downstream stay non-negative without a
+        ;; clamp/abs guard at the read site.
         tool-start-times (atom {})]
     (fn [{:keys [delta done? tool-use tool-result heartbeat
                  tool-name tool-names tool-call-id tool-args-preview
@@ -101,9 +106,9 @@
       (cond
         tool-use
         (do
-          ;; Record wall-clock start for subsequent duration computation.
+          ;; Record monotonic start for subsequent duration computation.
           (when tool-call-id
-            (swap! tool-start-times assoc tool-call-id (System/currentTimeMillis)))
+            (swap! tool-start-times assoc tool-call-id (System/nanoTime)))
 
           (when-let [line (and print? (not quiet?)
                                (tool-use-line {:tool-name tool-name
@@ -130,10 +135,15 @@
                 ;; independent of constructor nil-stripping behaviour.
                 ;; :tool/names mirrors the legacy :agent/tool-call field so
                 ;; consumers can handle multi-tool provider blocks correctly.
+                ;; `some?` mirrors `maybe-digest`'s contract — guard on
+                ;; nil only, not truthiness, so an empty-string preview
+                ;; (e.g. a tool invoked with no args) still produces a
+                ;; consistent digest map rather than silently dropping
+                ;; the field.
                 (cond-> {:tool/name    tool-name
                          :tool/call-id tool-call-id}
                   (seq tool-names) (assoc :tool/names (vec tool-names))
-                  tool-args-preview
+                  (some? tool-args-preview)
                   (assoc :tool/args-digest
                          (digest/digest-content tool-args-preview)))))))
 
@@ -142,12 +152,16 @@
         tool-result
         (when stream-atom
           (let [correlated-id (or tool-result-call-id tool-call-id)
-                start-ms      (when correlated-id
+                start-ns      (when correlated-id
                                 (let [t (get @tool-start-times correlated-id)]
                                   (swap! tool-start-times dissoc correlated-id)
                                   t))
-                duration-ms   (when start-ms
-                                (- (System/currentTimeMillis) start-ms))
+                duration-ms   (when start-ns
+                                ;; Convert monotonic nanos → ms. nanoTime
+                                ;; never decreases on the same JVM, so the
+                                ;; delta is always non-negative; no clamp
+                                ;; needed.
+                                (quot (- (System/nanoTime) start-ns) 1000000))
                 result-digest (maybe-digest tool-result-content)]
             (stream/publish!
               stream-atom

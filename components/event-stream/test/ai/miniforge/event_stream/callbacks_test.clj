@@ -71,7 +71,14 @@
                                  :tool-call-id "tc-002"}])
           status-tool-calling? (fn [ev]
                                  (and (= :agent/status (:event/type ev))
-                                      (= :tool-calling (:agent/status ev))))]
+                                      ;; :agent/status events carry the
+                                      ;; status keyword under :status/type
+                                      ;; (see event-stream.core/agent-status
+                                      ;; — `:status/type status-type`), NOT
+                                      ;; :agent/status. The old predicate
+                                      ;; pass-by-default'd because no event
+                                      ;; ever has :agent/status as a field.
+                                      (= :tool-calling (:status/type ev))))]
       (is (not (some status-tool-calling? events))
           "bare :agent/status :tool-calling must not be emitted"))))
 
