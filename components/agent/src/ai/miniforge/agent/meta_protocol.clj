@@ -29,7 +29,8 @@
    - Decisions are observable and logged
    - Lightweight coordinator routes information, doesn't control"
   (:require [ai.miniforge.anomaly.interface :as anomaly]
-            [ai.miniforge.response.interface :as response]))
+            [ai.miniforge.response.interface :as response]
+            [clojure.string :as str]))
 
 (defprotocol MetaAgent
   "Protocol for meta-agents that monitor workflow execution.
@@ -51,16 +52,27 @@
         :workflow/files-written [...]}
 
      Returns:
-     {:status :healthy|:warning|:halt
+     {:status :healthy|:warning|:halt|:intervene
       :agent/id keyword (e.g., :progress-monitor)
       :message string (human-readable explanation)
       :data {} (diagnostic data)
-      :checked-at inst}
+      :checked-at inst
+      ;; Only when :status is :intervene:
+      :intervention/addendum string  ; text appended to next agent invocation
+      :intervention/scope    keyword ; :next-implement | :next-N-phases | :workflow
+      :intervention/n        int     ; for :next-N-phases scope}
 
      Status meanings:
-     - :healthy - Workflow is progressing normally
-     - :warning - Issue detected but not critical yet
-     - :halt - Workflow must stop immediately")
+     - :healthy   - Workflow is progressing normally
+     - :warning   - Issue detected but not critical yet
+     - :halt      - Workflow must stop immediately
+     - :intervene - Workflow may continue but must apply the supplied
+                    instruction addendum to the next agent invocation
+                    in scope. This is the soft-fix path: an alternative
+                    to :halt when the meta-agent has a specific fix in
+                    mind (e.g. \"implementer keeps using reify on
+                    abstract class — tell it to use proxy instead\").
+                    See work/meta-agent-repair-loop-intervention.spec.edn.")
 
   (get-meta-config [this]
     "Get meta-agent configuration.
@@ -90,6 +102,42 @@
   [health-check]
   (= :warning (:status health-check)))
 
+(def ^:private intervention-scopes
+  "Valid scopes for an :intervene decision. The runner consults the
+   scope to decide how many agent invocations the addendum applies to:
+     - :next-implement → exactly the next implement call, one-shot
+     - :next-N-phases  → next N phase invocations, regardless of phase id
+     - :workflow       → every remaining agent call in this workflow run"
+  #{:next-implement :next-N-phases :workflow})
+
+(defn intervene?
+  "Check if health status indicates the workflow should continue with
+   an injected instruction addendum applied to the next in-scope agent
+   invocation."
+  [health-check]
+  (= :intervene (:status health-check)))
+
+(defn valid-intervention?
+  "True when a health-check carrying `:status :intervene` has the
+   companion intervention keys populated to a usable shape:
+
+   - `:intervention/addendum` is a non-blank string.
+   - `:intervention/scope` is one of `intervention-scopes`.
+   - For `:next-N-phases` scope, `:intervention/n` is a positive int.
+
+   Workflow runners MUST validate before applying — an :intervene
+   decision with a missing or malformed addendum is treated as a
+   :warning, not an unhandled exception."
+  [health-check]
+  (let [{:intervention/keys [addendum scope n]} health-check]
+    (and (intervene? health-check)
+         (string? addendum)
+         (not (str/blank? addendum))
+         (contains? intervention-scopes scope)
+         (if (= :next-N-phases scope)
+           (and (integer? n) (pos? n))
+           true))))
+
 (defn create-health-check
   "Helper to create a health check result.
 
@@ -105,6 +153,39 @@
                           (cond-> {:agent/id agent-id
                                    :message message}
                             data (assoc :data data)))))
+
+(defn create-intervention
+  "Helper to create an `:intervene` health-check result.
+
+   Returns a health-check map with `:status :intervene` plus the
+   companion `:intervention/*` keys. Use this in preference to
+   hand-building the map — keeps the shape canonical and the validation
+   contract (`valid-intervention?`) in sync.
+
+   Required:
+   - `agent-id` — the meta-agent's `:agent/id` keyword.
+   - `message`  — short human-readable why (shown in observability).
+   - `addendum` — non-blank string appended to the next in-scope
+                  agent invocation's task description.
+
+   Optional (defaults):
+   - `:scope`   — `:next-implement` (default) | `:next-N-phases` | `:workflow`.
+   - `:n`       — required when `scope` is `:next-N-phases`; ignored
+                  otherwise.
+   - `:data`    — additional diagnostic data the meta-agent wants to
+                  surface alongside the intervention (e.g. the
+                  fingerprint history that triggered it)."
+  [agent-id message addendum
+   & {:keys [scope n data]
+      :or   {scope :next-implement}}]
+  (let [base (response/status-check :intervene
+                                    (cond-> {:agent/id agent-id
+                                             :message message}
+                                      data (assoc :data data)))]
+    (cond-> (assoc base
+                   :intervention/addendum addendum
+                   :intervention/scope    scope)
+      (= :next-N-phases scope) (assoc :intervention/n n))))
 
 (defrecord MetaAgentConfig
   [id                    ; Keyword ID (:progress-monitor, :test-quality, etc.)
