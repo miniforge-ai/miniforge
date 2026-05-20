@@ -29,6 +29,7 @@
    [ai.miniforge.event-stream.interface.listeners :as listeners]
    [ai.miniforge.event-stream.interface.stream :as stream]
    [ai.miniforge.event-stream.digest :as digest]
+   [ai.miniforge.event-stream.heartbeat :as heartbeat]
    [ai.miniforge.event-stream.reader :as reader]
    [ai.miniforge.event-stream.sinks :as sinks]))
 
@@ -60,6 +61,10 @@
 ;; BD-2a shutdown-ordering primitives.
 (def quiesce! stream/quiesce!)
 (def drain! stream/drain!)
+
+;; Phase heartbeat scheduler — start/stop liveness signalling for long-running phases.
+(def start-heartbeat! heartbeat/start-heartbeat!)
+(def stop-heartbeat!  heartbeat/stop-heartbeat!)
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Event constructors
