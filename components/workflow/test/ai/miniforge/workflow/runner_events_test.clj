@@ -235,3 +235,41 @@
         (is (nil? (:final-message-preview meta)))
         (is (nil? (:turn-count meta)))
         (is (nil? (:tool-call-count meta)))))))
+
+;; ---------------------------------------------------------------------------
+;; Phase heartbeat lifecycle — start/stop semantics
+;;
+;; Covers the gap Copilot flagged on PR #932: the new start-phase-heartbeat!
+;; / stop-phase-heartbeat! functions had zero test coverage. The
+;; durable-vs-WebSocket distinction is the most important pin — gating on
+;; the wrong predicate would silently swallow the heartbeat on the
+;; dashboard path.
+
+(deftest start-phase-heartbeat!-noop-on-nil-stream
+  (testing "nil event-stream → start-phase-heartbeat! returns nil (no executor created)"
+    (is (nil? (events/start-phase-heartbeat! nil (test-context) :implement)))))
+
+(deftest start-phase-heartbeat!-noop-on-websocket-stream
+  (testing "WebSocket-backed (non-durable) stream returns nil — heartbeat scheduler needs IDeref"
+    ;; WebSocket streams are plain maps with a :websocket key, NOT IDeref
+    ;; atoms. The scheduler uses swap!/swap-vals! internally; gating on
+    ;; durable-event-stream? makes this a clean no-op rather than a
+    ;; swallowed exception inside the scheduler thread.
+    (let [ws-stream {:websocket :dummy-conn}]
+      (is (nil? (events/start-phase-heartbeat! ws-stream (test-context) :implement))))))
+
+(deftest start-phase-heartbeat!-creates-handle-on-durable-stream
+  (testing "durable (IDeref) stream yields a handle; stop-phase-heartbeat! reaps it cleanly"
+    (let [stream (create-stream)
+          handle (events/start-phase-heartbeat! stream (test-context) :implement
+                                                {:interval-ms 30000})]
+      (is (some? handle))
+      (is (some? (:heartbeat/executor handle)))
+      (is (= :implement (:heartbeat/phase-id handle)))
+      ;; stop must succeed without throwing — idempotent on second call.
+      (events/stop-phase-heartbeat! handle)
+      (events/stop-phase-heartbeat! handle))))
+
+(deftest stop-phase-heartbeat!-safe-on-nil
+  (testing "stop-phase-heartbeat! tolerates nil handle — phase that never started a heartbeat must not break stop"
+    (is (nil? (events/stop-phase-heartbeat! nil)))))

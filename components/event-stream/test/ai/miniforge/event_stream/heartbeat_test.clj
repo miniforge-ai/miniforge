@@ -53,17 +53,6 @@
           (do (Thread/sleep 10)
               (recur)))))))
 
-(defn- active-thread-count
-  "Count JVM threads whose name matches `pattern`."
-  [^String pattern]
-  (let [group    (.. Thread currentThread getThreadGroup)
-        threads  (make-array Thread (* 4 (.activeCount group)))]
-    (.enumerate group threads)
-    (->> (seq threads)
-         (filter some?)
-         (filter #(re-find (re-pattern pattern) (.getName ^Thread %)))
-         count)))
-
 ;; ---------------------------------------------------------------------------
 ;; Handle shape
 

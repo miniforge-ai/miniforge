@@ -322,35 +322,6 @@
       (catch Exception e
         (println (messages/t :warn/publish-phase-completed {:error (ex-message e)}))))))
 
-;------------------------------------------------------------------------------ Layer 1.5
-;; Phase heartbeat lifecycle
-
-(defn start-phase-heartbeat!
-  "Start a heartbeat scheduler for the given phase.
-
-   Delegates to es/start-heartbeat! with the workflow id extracted from
-   context. Returns the opaque handle map (to pass to stop-phase-heartbeat!)
-   or nil when the event stream is not dispatchable or start fails.
-
-   opts keys: {:interval-ms long}"
-  [event-stream context phase-name & [opts]]
-  (when (dispatchable-event-stream? event-stream)
-    (try
-      (es/start-heartbeat! event-stream (:execution/id context) phase-name
-                           (or opts {}))
-      (catch Exception e
-        (println (messages/t :warn/heartbeat-start {:error (ex-message e)}))
-        nil))))
-
-(defn stop-phase-heartbeat!
-  "Stop a heartbeat handle returned by start-phase-heartbeat!.
-   Safe to call with nil — no-op."
-  [handle]
-  (try
-    (es/stop-heartbeat! handle)
-    (catch Exception e
-      (println (messages/t :warn/heartbeat-stop {:error (ex-message e)})))))
-
 ;------------------------------------------------------------------------------ Layer 2
 ;; Phase heartbeat lifecycle
 
@@ -359,11 +330,19 @@
 
    Delegates to es/start-heartbeat! with the workflow id extracted from
    context. Returns the opaque handle map (to pass to stop-phase-heartbeat!)
-   or nil when the event stream is not dispatchable or start fails.
+   or nil when the event stream is not a DURABLE stream (the scheduler
+   needs an IDeref atom — see es/start-heartbeat! for the contract) or
+   when start fails.
+
+   Note: this used to gate on `dispatchable-event-stream?`, which also
+   matches WebSocket-backed maps. WebSocket streams aren't IDeref and
+   so would crash inside the scheduler thread; gate on the narrower
+   `durable-event-stream?` so non-durable callers (dashboard) are a
+   clean no-op rather than a silent disable-after-throw.
 
    opts keys: {:interval-ms long}"
   [event-stream context phase-name & [opts]]
-  (when (dispatchable-event-stream? event-stream)
+  (when (durable-event-stream? event-stream)
     (try
       (es/start-heartbeat! event-stream (:execution/id context) phase-name
                            (or opts {}))
