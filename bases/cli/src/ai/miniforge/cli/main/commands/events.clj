@@ -23,20 +23,22 @@
    human-readable timeline.  Works entirely offline — no network calls.
 
    Key behaviours:
-   - Probes archived → live → legacy directory layouts via reader.
-   - Renders via timeline/render-timeline (GROUP 3a).
+   - Resolves events directory via app-config/events-dir (same root as main.clj).
+   - Probes archived → live → legacy directory layouts via the event-stream
+     interface (read-workflow-events-by-id).
+   - Renders via event-stream interface (render-timeline).
    - Optional --raw flag dumps parsed events as EDN (debug aid).
    - Optional --gap-threshold <seconds> (default 60) tunes gap detection.
    - Exits 0 on success, 1 when the workflow-id is unknown or the
      events directory is absent."
   (:require
+   [babashka.fs :as fs]
    [clojure.pprint :as pprint]
    [clojure.string :as str]
+   [ai.miniforge.cli.app-config :as app-config]
    [ai.miniforge.cli.main.commands.shared :as shared]
    [ai.miniforge.cli.main.display :as display]
-   [ai.miniforge.event-stream.sinks :as sinks]
-   [ai.miniforge.event-stream.reader :as reader]
-   [ai.miniforge.event-stream.timeline :as timeline]))
+   [ai.miniforge.event-stream.interface :as es]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Constants
@@ -53,54 +55,52 @@
   [threshold-secs]
   (* (or threshold-secs default-gap-threshold-secs) 1000))
 
-(defn- render-events
-  "Render `events` to a human-readable timeline string.
-   `opts` may contain `:gap-threshold-ms` (long)."
-  [events opts]
-  (timeline/render-timeline events opts))
-
 ;------------------------------------------------------------------------------ Layer 2
 ;; Core (testable) implementation
 
 (defn events-show
   "Read and render the event log for `workflow-id` under `base-dir`.
 
+   Arguments:
+   - `base-dir`    — base events directory (string or java.io.File);
+                     matches what app-config/events-dir returns.
+   - `workflow-id` — workflow UUID string.
+   - `opts`        — map of {:gap-threshold <secs> :raw <boolean>}.
+
    Returns one of:
-     {:status :ok     :output <string>}
-     {:status :error  :message <string>  :exit-code 1}
+     {:status :ok    :output <string>}
+     {:status :error :message <string> :exit-code 1}
 
-   Pure in structure — all IO is isolated to `reader/read-workflow-events-by-id`
+   Pure in structure — all IO is isolated to es/read-workflow-events-by-id
    which is easy to stub in tests."
-  [base-dir workflow-id {:keys [gap-threshold raw] :as _opts}]
-  (let [base-file (if (instance? java.io.File base-dir)
-                    base-dir
-                    (java.io.File. (str base-dir)))]
-    (cond
-      (not (.exists base-file))
-      {:status    :error
-       :message   (str "Events directory not found: " base-dir
-                       "\nRun at least one workflow first to create it.")
-       :exit-code 1}
+  [base-dir workflow-id {:keys [gap-threshold raw]}]
+  (cond
+    (not (fs/exists? base-dir))
+    {:status    :error
+     :message   (str "Events directory not found: " base-dir
+                     "\nRun at least one workflow first to create it.")
+     :exit-code 1}
 
-      :else
-      (let [wf-id-str (str workflow-id)
-            events    (reader/read-workflow-events-by-id base-dir wf-id-str)]
-        (cond
-          (nil? events)
-          {:status    :error
-           :message   (str "No events found for workflow: " wf-id-str
-                           "\nChecked layouts: archived/, live/, and flat under " base-dir)
-           :exit-code 1}
+    :else
+    (let [wf-id-str (str workflow-id)
+          events    (es/read-workflow-events-by-id base-dir wf-id-str)]
+      (cond
+        (nil? events)
+        {:status    :error
+         :message   (str "No events found for workflow: " wf-id-str
+                         "\nChecked layouts: archived/, live/, and flat under " base-dir)
+         :exit-code 1}
 
-          raw
+        raw
+        {:status :ok
+         :output (with-out-str (pprint/pprint events))}
+
+        :else
+        (let [rendered (es/render-timeline events {:gap-threshold-ms (gap-threshold-ms gap-threshold)})]
           {:status :ok
-           :output (with-out-str (pprint/pprint events))}
-
-          :else
-          (let [rendered (render-events events {:gap-threshold-ms (gap-threshold-ms gap-threshold)})]
-            (if (str/blank? rendered)
-              {:status :ok :output (str "(no renderable events for workflow " wf-id-str ")")}
-              {:status :ok :output rendered})))))))
+           :output (if (str/blank? rendered)
+                     (str "(no renderable events for workflow " wf-id-str ")")
+                     rendered)})))))
 
 ;------------------------------------------------------------------------------ Layer 3
 ;; CLI command entry point
@@ -123,9 +123,10 @@
               "  --gap-threshold <seconds>   Gap detection threshold (default: 60)\n"
               "  --raw                       Dump parsed events as EDN (debug)"))
         (shared/exit! 1))
-      (let [base-dir (sinks/default-events-dir)
-            result   (events-show base-dir workflow-id {:gap-threshold gap-threshold
-                                                        :raw           (boolean raw)})]
+      (let [events-dir (app-config/events-dir)
+            result     (events-show events-dir workflow-id
+                                    {:gap-threshold gap-threshold
+                                     :raw           (boolean raw)})]
         (case (:status result)
           :ok
           (println (:output result))

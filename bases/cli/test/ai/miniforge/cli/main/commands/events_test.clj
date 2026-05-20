@@ -20,18 +20,21 @@
   "Unit / integration tests for the `events show` CLI command.
 
    Strategy:
-   - events-show (pure core) tested with synthetic event vectors.
-   - events-show-cmd (CLI handler) tested via with-redefs on reader/sinks so
-     no real filesystem or transit-JSON encoding is required.
-   - exit! is always stubbed to prevent JVM termination during tests."
+   - events-show (pure core) tested with synthetic event vectors via
+     with-redefs on es/read-workflow-events-by-id.  The base-dir is passed
+     as a real temp directory so the fs/exists? check passes without further
+     stubbing.
+   - events-show-cmd (CLI handler) tested via with-redefs on app-config/events-dir
+     and es/read-workflow-events-by-id.
+   - shared/exit! is always stubbed to prevent JVM termination during tests."
   (:require
    [clojure.test :refer [deftest testing is use-fixtures]]
    [clojure.string :as str]
    [babashka.fs :as fs]
+   [ai.miniforge.cli.app-config :as app-config]
    [ai.miniforge.cli.main.commands.events :as sut]
    [ai.miniforge.cli.main.commands.shared :as shared]
-   [ai.miniforge.event-stream.sinks :as sinks]
-   [ai.miniforge.event-stream.reader :as reader]))
+   [ai.miniforge.event-stream.interface :as es]))
 
 ;------------------------------------------------------------------------------ Fixtures & factories
 
@@ -78,64 +81,59 @@
 
 (deftest events-show-returns-ok-for-valid-events
   (testing "returns :ok status with non-blank output for a normal event sequence"
-    (let [base-dir (java.io.File. *tmp-dir*)
-          result   (with-redefs [reader/read-workflow-events-by-id
-                                 (fn [_ _] synthetic-events)]
-                     (sut/events-show base-dir "test-wf-abc123" {}))]
+    (let [result (with-redefs [es/read-workflow-events-by-id
+                               (fn [_ _] synthetic-events)]
+                   (sut/events-show *tmp-dir* "test-wf-abc123" {}))]
       (is (= :ok (:status result)))
       (is (string? (:output result)))
       (is (not (str/blank? (:output result)))))))
 
 (deftest events-show-errors-when-base-dir-missing
   (testing "returns :error when the events base directory does not exist"
-    (let [base-dir (java.io.File. nonexistent-base-dir)
-          result   (sut/events-show base-dir "any-wf-id" {})]
+    (let [result (sut/events-show nonexistent-base-dir "any-wf-id" {})]
       (is (= :error (:status result)))
       (is (pos-int? (:exit-code result)))
       (is (str/includes? (:message result) "not found")))))
 
 (deftest events-show-errors-when-workflow-not-found
   (testing "returns :error when reader returns nil (workflow-id unknown)"
-    (let [base-dir (java.io.File. *tmp-dir*)
-          result   (with-redefs [reader/read-workflow-events-by-id (fn [_ _] nil)]
-                     (sut/events-show base-dir "ghost-wf-id" {}))]
+    (let [result (with-redefs [es/read-workflow-events-by-id (fn [_ _] nil)]
+                   (sut/events-show *tmp-dir* "ghost-wf-id" {}))]
       (is (= :error (:status result)))
       (is (pos-int? (:exit-code result)))
       (is (str/includes? (:message result) "ghost-wf-id")))))
 
 (deftest events-show-raw-mode-dumps-edn
   (testing ":raw true produces EDN output containing the event type keyword"
-    (let [base-dir (java.io.File. *tmp-dir*)
-          result   (with-redefs [reader/read-workflow-events-by-id
-                                 (fn [_ _] synthetic-events)]
-                     (sut/events-show base-dir "test-wf-abc123" {:raw true}))]
+    (let [result (with-redefs [es/read-workflow-events-by-id
+                               (fn [_ _] synthetic-events)]
+                   (sut/events-show *tmp-dir* "test-wf-abc123" {:raw true}))]
       (is (= :ok (:status result)))
       (is (str/includes? (:output result) "workflow/started"))
       (is (str/includes? (:output result) "workflow/completed")))))
 
 (deftest events-show-custom-gap-threshold
-  (testing "custom gap-threshold-secs is passed through without error"
-    (let [base-dir (java.io.File. *tmp-dir*)
-          result   (with-redefs [reader/read-workflow-events-by-id
-                                 (fn [_ _] synthetic-events)]
-                     (sut/events-show base-dir "test-wf-abc123" {:gap-threshold 5}))]
+  (testing "custom gap-threshold-secs is accepted without error"
+    (let [result (with-redefs [es/read-workflow-events-by-id
+                               (fn [_ _] synthetic-events)]
+                   (sut/events-show *tmp-dir* "test-wf-abc123" {:gap-threshold 5}))]
       (is (= :ok (:status result))))))
 
 ;------------------------------------------------------------------------------ Layer 1: events-show-cmd CLI handler
 
 (deftest events-show-cmd-happy-path-prints-timeline
   (testing "prints rendered timeline to stdout when events exist"
-    (let [exit-code  (atom nil)
-          output     (with-redefs [sinks/default-events-dir
-                                   (fn [] (java.io.File. *tmp-dir*))
-                                   reader/read-workflow-events-by-id
-                                   (fn [_ _] synthetic-events)
-                                   shared/exit!
-                                   (fn [code] (reset! exit-code code))]
-                       (with-out-str
-                         (sut/events-show-cmd {:workflow-id   "test-wf-abc123"
-                                               :gap-threshold 60
-                                               :raw           false})))]
+    (let [exit-code (atom nil)
+          output    (with-redefs [app-config/events-dir
+                                  (fn [] *tmp-dir*)
+                                  es/read-workflow-events-by-id
+                                  (fn [_ _] synthetic-events)
+                                  shared/exit!
+                                  (fn [code] (reset! exit-code code))]
+                      (with-out-str
+                        (sut/events-show-cmd {:workflow-id   "test-wf-abc123"
+                                              :gap-threshold 60
+                                              :raw           false})))]
       (is (nil? @exit-code) "exit! must not be called on success")
       (is (not (str/blank? output))))))
 
@@ -158,9 +156,9 @@
 (deftest events-show-cmd-workflow-not-found-exits-1
   (testing "exits 1 when reader returns nil (workflow-id not in any layout)"
     (let [exit-code (atom nil)]
-      (with-redefs [sinks/default-events-dir
-                    (fn [] (java.io.File. *tmp-dir*))
-                    reader/read-workflow-events-by-id
+      (with-redefs [app-config/events-dir
+                    (fn [] *tmp-dir*)
+                    es/read-workflow-events-by-id
                     (fn [_ _] nil)
                     shared/exit!
                     (fn [code] (reset! exit-code code))]
@@ -171,8 +169,8 @@
 (deftest events-show-cmd-events-dir-missing-exits-1
   (testing "exits 1 when the events directory itself does not exist"
     (let [exit-code (atom nil)]
-      (with-redefs [sinks/default-events-dir
-                    (fn [] (java.io.File. nonexistent-base-dir))
+      (with-redefs [app-config/events-dir
+                    (fn [] nonexistent-base-dir)
                     shared/exit!
                     (fn [code] (reset! exit-code code))]
         (with-out-str
@@ -182,15 +180,15 @@
 (deftest events-show-cmd-raw-flag-dumps-edn
   (testing "--raw dumps parsed events as EDN including keyword names"
     (let [exit-code (atom nil)
-          output    (with-redefs [sinks/default-events-dir
-                                  (fn [] (java.io.File. *tmp-dir*))
-                                  reader/read-workflow-events-by-id
+          output    (with-redefs [app-config/events-dir
+                                  (fn [] *tmp-dir*)
+                                  es/read-workflow-events-by-id
                                   (fn [_ _] synthetic-events)
                                   shared/exit!
                                   (fn [code] (reset! exit-code code))]
                       (with-out-str
-                        (sut/events-show-cmd {:workflow-id   "test-wf-abc123"
-                                              :raw           true})))]
+                        (sut/events-show-cmd {:workflow-id "test-wf-abc123"
+                                              :raw         true})))]
       (is (nil? @exit-code) "exit! must not be called on success")
       (is (str/includes? output "workflow/started"))
       (is (str/includes? output "workflow/completed")))))
