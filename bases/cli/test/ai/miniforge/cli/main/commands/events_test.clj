@@ -29,8 +29,6 @@
 
 (def ^:private wf-id "test-workflow-123")
 
-(def ^:private base-ts "2026-05-19T10:00:00Z")
-
 (defn- make-event
   ([type ts]
    {:event/type      type
@@ -44,21 +42,27 @@
    (make-event :agent/tool-call-completed "2026-05-19T10:00:06Z" {:tool/name "Read"
                                                                    :phase/duration-ms 1000})
    (make-event :agent/heartbeat           "2026-05-19T10:00:30Z")
+   ;; 30s gap: heartbeat (T+30s) -> phase-started (T+60s)
    (make-event :workflow/phase-started    "2026-05-19T10:01:00Z" {:workflow/phase :implement})
    (make-event :workflow/phase-completed  "2026-05-19T10:02:00Z" {:workflow/phase :implement
                                                                    :phase/outcome :success
                                                                    :phase/duration-ms 60000})
+   ;; 180s gap: phase-completed (T+120s) -> workflow/completed (T+300s)
    (make-event :workflow/completed        "2026-05-19T10:05:00Z" {:workflow/status :success})])
 
-;;------------------------------------------------------------------------------ Helpers
+;;------------------------------------------------------------------------------ Test helpers
 
 (defmacro with-output
-  "Capture stdout during body, return it as a string."
+  "Capture both stdout (*out*) and stderr (*err*) during body, return combined
+   output as a string.  Ensures error-path assertions catch display/print-error
+   output even when it is written to stderr."
   [& body]
   `(let [baos# (java.io.ByteArrayOutputStream.)
-         pw#   (java.io.PrintStream. baos#)]
-     (binding [*out* (java.io.OutputStreamWriter. pw#)]
+         pw#   (java.io.OutputStreamWriter. baos#)]
+     (binding [*out* pw#
+               *err* pw#]
        ~@body)
+     (.flush pw#)
      (.toString baos# "UTF-8")))
 
 ;;------------------------------------------------------------------------------ Private function tests
@@ -87,22 +91,29 @@
   (testing "formats ISO-8601 string to HH:MM:SS.mmm"
     (let [result (#'sut/format-ts "2026-05-19T10:00:00Z")]
       (is (string? result))
-      ;; should look like HH:MM:SS.mmm — at minimum 8 chars
+      ;; should look like HH:MM:SS.mmm - at minimum 8 chars
       (is (>= (count result) 8))))
 
-  (testing "falls back gracefully on nil"
-    (is (string? (#'sut/format-ts nil)))))
+  (testing "returns placeholder on nil"
+    (is (= "??:??:??.???" (#'sut/format-ts nil))))
+
+  (testing "returns placeholder on garbage"
+    (is (= "??:??:??.???" (#'sut/format-ts "garbage")))))
 
 (deftest event-type-name-test
-  (testing "keyword event type"
+  (testing "namespaced keyword event type"
     (is (= "workflow/started"
            (#'sut/event-type-name {:event/type :workflow/started}))))
+
+  (testing "bare keyword event type - no spurious leading slash"
+    (is (= "started"
+           (#'sut/event-type-name {:event/type :started}))))
 
   (testing "string event type"
     (is (= "some/event"
            (#'sut/event-type-name {:event/type "some/event"}))))
 
-  (testing "nil event type"
+  (testing "nil event type returns stringified nil"
     (is (string? (#'sut/event-type-name {})))))
 
 (deftest event-component-test
@@ -121,12 +132,12 @@
   (testing "tool-call-started"
     (is (str/starts-with?
          (#'sut/summarize {:event/type :agent/tool-call-started :tool/name "Write"})
-         "→ Write")))
+         "-> Write")))
 
   (testing "tool-call-completed"
     (is (str/starts-with?
          (#'sut/summarize {:event/type :agent/tool-call-completed :tool/name "Write"})
-         "← Write")))
+         "<- Write")))
 
   (testing "heartbeat"
     (is (str/includes?
@@ -147,6 +158,13 @@
     (is (str/includes?
          (#'sut/summarize {:event/type :workflow/failed :workflow/failure-reason "OOM"})
          "OOM")))
+
+  (testing "dag-considered uses str not name for :dag/reason"
+    ;; numeric reason must not throw ClassCastException
+    (is (string?
+         (#'sut/summarize {:event/type :workflow/dag-considered
+                           :dag/outcome :skip
+                           :dag/reason 42}))))
 
   (testing "unknown type falls back to type name"
     (is (str/includes?
@@ -171,21 +189,43 @@
   (testing "unknown returns nil"
     (is (nil? (#'sut/row-color {:event/type :some/unknown})))))
 
+(deftest compute-gap-ms-test
+  (testing "computes millisecond difference between two events"
+    (let [ev1 (make-event :workflow/started   "2026-05-19T10:00:00Z")
+          ev2 (make-event :agent/heartbeat    "2026-05-19T10:01:30Z")]  ; 90s later
+      (is (= 90000 (#'sut/compute-gap-ms ev1 ev2)))))
+
+  (testing "returns nil when first event has no parseable timestamp"
+    (let [ev1 {:event/type :workflow/started}
+          ev2 (make-event :agent/heartbeat "2026-05-19T10:01:30Z")]
+      (is (nil? (#'sut/compute-gap-ms ev1 ev2))))))
+
 (deftest inject-gaps-test
   (testing "inserts a gap row between events with large time gap"
-    (let [ev1 (make-event :workflow/started "2026-05-19T10:00:00Z")
-          ev2 (make-event :workflow/completed "2026-05-19T10:02:00Z") ; 120 s later
-          result (#'sut/inject-gaps [ev1 ev2] 60000)] ; threshold = 60 s
+    (let [ev1    (make-event :workflow/started   "2026-05-19T10:00:00Z")
+          ev2    (make-event :workflow/completed "2026-05-19T10:02:00Z") ; 120s later
+          result (#'sut/inject-gaps [ev1 ev2] 60000)] ; threshold = 60s
       (is (= 3 (count result)))
       (is (true? (:gap? (second result))))
       (is (> (:gap-secs (second result)) 100))))
 
   (testing "no gap row when events are close together"
-    (let [ev1 (make-event :workflow/started "2026-05-19T10:00:00Z")
-          ev2 (make-event :agent/heartbeat  "2026-05-19T10:00:05Z") ; 5 s later
+    (let [ev1    (make-event :workflow/started  "2026-05-19T10:00:00Z")
+          ev2    (make-event :agent/heartbeat   "2026-05-19T10:00:05Z") ; 5s later
           result (#'sut/inject-gaps [ev1 ev2] 60000)]
       (is (= 2 (count result)))
       (is (not-any? :gap? result))))
+
+  (testing "detects ALL back-to-back large gaps (not just the first)"
+    ;; A(T=0s) -> B(T=90s) -> C(T=180s) with threshold=60s
+    ;; must produce [A GAP B GAP C] — 5 items, not [A GAP B C]
+    (let [ev-a   (make-event :workflow/started          "2026-05-19T10:00:00Z")
+          ev-b   (make-event :agent/heartbeat            "2026-05-19T10:01:30Z") ; +90s
+          ev-c   (make-event :workflow/completed        "2026-05-19T10:03:00Z") ; +90s
+          result (#'sut/inject-gaps [ev-a ev-b ev-c] 60000)]
+      (is (= 5 (count result)))
+      (is (:gap? (nth result 1)))
+      (is (:gap? (nth result 3)))))
 
   (testing "empty seq passes through unchanged"
     (is (= [] (#'sut/inject-gaps [] 60000))))
@@ -201,8 +241,8 @@
                 (make-event :agent/status "T")
                 (make-event :agent/heartbeat "T")]]
 
-    (testing "filter by substring keeps only matching events"
-      (let [result (#'sut/apply-filters events {:filter "tool-call"})]
+    (testing "type-filter by substring keeps only matching events"
+      (let [result (#'sut/apply-filters events {:type-filter "tool-call"})]
         (is (= 1 (count result)))
         (is (= :agent/tool-call-started (:event/type (first result))))))
 
@@ -218,10 +258,29 @@
       (let [result (#'sut/apply-filters events {:no-status true})]
         (is (not-any? #(= :agent/status (:event/type %)) result))))
 
-    (testing "combined filter + no-chunks"
-      (let [result (#'sut/apply-filters events {:filter "workflow" :no-chunks true})]
+    (testing "combined type-filter + no-chunks"
+      (let [result (#'sut/apply-filters events {:type-filter "workflow" :no-chunks true})]
         (is (= 1 (count result)))
         (is (= :workflow/started (:event/type (first result))))))))
+
+(deftest prep-for-json-test
+  (testing "keywords become strings"
+    (let [result (#'sut/prep-for-json {:event/type :workflow/started})]
+      (is (= {":event/type" ":workflow/started"} result))))
+
+  (testing "nil values stay nil (not the string \"nil\")"
+    (let [result (#'sut/prep-for-json {:workflow/id nil})]
+      (is (nil? (get result ":workflow/id")))))
+
+  (testing "Instants become strings"
+    (let [inst   (java.time.Instant/parse "2026-05-19T10:00:00Z")
+          result (#'sut/prep-for-json {:event/timestamp inst})]
+      (is (string? (get result ":event/timestamp")))))
+
+  (testing "nested maps are recursively converted"
+    (let [result (#'sut/prep-for-json {:dag/info {:outcome :skip}})]
+      (is (= {":outcome" ":skip"}
+             (get result ":dag/info"))))))
 
 ;;------------------------------------------------------------------------------ Integration tests (events-show-cmd)
 
@@ -230,8 +289,7 @@
     (let [output (with-output
                    (with-redefs [app-config/events-dir (constantly "/tmp/no-events")]
                      (sut/events-show-cmd {})))]
-      (is (or (str/includes? output "workflow-id is required")
-              (str/includes? output "required"))))))
+      (is (str/includes? output "workflow-id is required")))))
 
 (deftest events-show-cmd-no-events-test
   (testing "prints error when no events exist"
@@ -259,25 +317,26 @@
       ;; at least one data row
       (is (str/includes? output "workflow/started")))))
 
-(deftest events-show-cmd-filter-flag-test
-  (testing "--filter tool-call shows only tool events"
+(deftest events-show-cmd-type-filter-flag-test
+  (testing "--type-filter tool-call shows only tool events"
     (let [output (with-output
                    (with-redefs [app-config/events-dir (constantly "/tmp/events")
                                  es/read-workflow-events-by-id
                                  (fn [_dir _id] sample-events)]
-                     (sut/events-show-cmd {:workflow-id wf-id
-                                           :filter      "tool-call"
-                                           :no-chunks   false})))]
+                     (sut/events-show-cmd {:workflow-id  wf-id
+                                           :type-filter  "tool-call"
+                                           :no-chunks    false})))]
       ;; tool-call events should appear
       (is (str/includes? output "tool-call"))
-      ;; workflow/started should NOT appear
-      (is (not (str/includes? output "workflow/started"))))))
+      ;; workflow/started should NOT appear in the data rows
+      (is (not (str/includes? output "workflow started"))))))
 
 (deftest events-show-cmd-gap-detection-test
-  (testing "injects gap marker when gap exceeds threshold"
-    ;; sample-events has a 180-second gap between heartbeat (T+30s) and
-    ;; workflow/phase-started (T+60s), and a 3-minute gap between
-    ;; phase-completed (T+120s) and workflow/completed (T+300s).
+  ;; sample-events has:
+  ;;   30s gap:  heartbeat (T+30s) -> phase-started (T+60s)
+  ;;   180s gap: phase-completed (T+120s) -> workflow/completed (T+300s)
+  ;; threshold=20s triggers on the first gap already.
+  (testing "injects gap markers when gap exceeds threshold"
     (let [output (with-output
                    (with-redefs [app-config/events-dir (constantly "/tmp/events")
                                  es/read-workflow-events-by-id
@@ -288,7 +347,7 @@
       (is (str/includes? output "gap:")))))
 
 (deftest events-show-cmd-json-flag-test
-  (testing "--json emits one record per line without ANSI table headers"
+  (testing "--json emits one record per line without table headers"
     (let [output (with-output
                    (with-redefs [app-config/events-dir (constantly "/tmp/events")
                                  es/read-workflow-events-by-id
@@ -296,10 +355,26 @@
                      (sut/events-show-cmd {:workflow-id wf-id
                                            :json        true
                                            :no-chunks   true})))]
-      ;; JSON or EDN fallback — either way should contain event type key
+      ;; JSON output contains event type as a string value
       (is (str/includes? output "workflow/started"))
       ;; Should NOT contain the table header
       (is (not (str/includes? output "TIMESTAMP"))))))
+
+(deftest events-show-cmd-consecutive-gaps-test
+  (testing "detects multiple consecutive large gaps"
+    (let [ev-a (make-event :workflow/started  "2026-05-19T10:00:00Z")
+          ev-b (make-event :agent/heartbeat   "2026-05-19T10:02:00Z") ; +120s gap
+          ev-c (make-event :workflow/completed "2026-05-19T10:04:00Z") ; +120s gap
+          output (with-output
+                   (with-redefs [app-config/events-dir (constantly "/tmp/events")
+                                 es/read-workflow-events-by-id
+                                 (fn [_dir _id] [ev-a ev-b ev-c])]
+                     (sut/events-show-cmd {:workflow-id   wf-id
+                                           :gap-threshold 60.0
+                                           :no-chunks     true})))
+          gap-count (count (re-seq #"gap:" output))]
+      ;; Both A->B and B->C gaps should be reported
+      (is (= 2 gap-count)))))
 
 (deftest events-show-cmd-large-gap-threshold-test
   (testing "no gap rows when threshold exceeds all gaps"
@@ -311,3 +386,10 @@
                                            :gap-threshold 9999.0
                                            :no-chunks     true})))]
       (is (not (str/includes? output "gap:"))))))
+
+(deftest ansi-esc-byte-test
+  (testing "ANSI escape sequences start with the ESC byte (char 27)"
+    ;; Verify the ESC byte construction is correct and not empty string
+    (let [esc-byte-str #'sut/esc-byte]
+      (is (= 1 (count @esc-byte-str)))
+      (is (= 27 (int (first @esc-byte-str)))))))

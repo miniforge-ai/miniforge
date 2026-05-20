@@ -625,7 +625,7 @@
     :fn events-show-cmd
     :args->opts [:workflow-id]
     :spec {:json          {:coerce :boolean :default false}
-           :filter        {:coerce :string}
+           :type-filter   {:coerce :string}
            :gap-threshold {:coerce :double :default 60.0}
            :no-chunks     {:coerce :boolean :default true}
            :no-status     {:coerce :boolean :default false}}}
