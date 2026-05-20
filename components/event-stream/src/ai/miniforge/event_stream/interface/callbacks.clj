@@ -23,7 +23,9 @@
    [ai.miniforge.event-stream.digest :as digest]
    [ai.miniforge.event-stream.interface.events :as events]
    [ai.miniforge.event-stream.interface.stream :as stream]
-   [ai.miniforge.event-stream.messages :as messages]))
+   [ai.miniforge.event-stream.messages :as messages])
+  (:import
+   [java.util.concurrent TimeUnit]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Convenience callbacks
@@ -101,9 +103,13 @@
       (cond
         tool-use
         (do
-          ;; Record wall-clock start for subsequent duration computation.
+          ;; Monotonic — System/nanoTime is immune to wall-clock
+          ;; adjustments (NTP step, manual sysclock change) that can
+          ;; make a paired currentTimeMillis delta negative or
+          ;; implausibly large. Durations published downstream stay
+          ;; non-negative without a clamp guard.
           (when tool-call-id
-            (swap! tool-start-times assoc tool-call-id (System/currentTimeMillis)))
+            (swap! tool-start-times assoc tool-call-id (System/nanoTime)))
 
           (when-let [line (and print? (not quiet?)
                                (tool-use-line {:tool-name tool-name
@@ -130,10 +136,15 @@
                 ;; independent of constructor nil-stripping behaviour.
                 ;; :tool/names mirrors the legacy :agent/tool-call field so
                 ;; consumers can handle multi-tool provider blocks correctly.
+                ;; `some?` mirrors `maybe-digest`'s contract — guard
+                ;; on nil only, not truthiness, so an empty-string
+                ;; preview (tool invoked with no args) still produces a
+                ;; consistent digest map rather than silently dropping
+                ;; the field.
                 (cond-> {:tool/name    tool-name
                          :tool/call-id tool-call-id}
                   (seq tool-names) (assoc :tool/names (vec tool-names))
-                  tool-args-preview
+                  (some? tool-args-preview)
                   (assoc :tool/args-digest
                          (digest/digest-content tool-args-preview)))))))
 
@@ -142,12 +153,16 @@
         tool-result
         (when stream-atom
           (let [correlated-id (or tool-result-call-id tool-call-id)
-                start-ms      (when correlated-id
+                start-ns      (when correlated-id
                                 (let [t (get @tool-start-times correlated-id)]
                                   (swap! tool-start-times dissoc correlated-id)
                                   t))
-                duration-ms   (when start-ms
-                                (- (System/currentTimeMillis) start-ms))
+                ;; Convert monotonic nanos → ms via TimeUnit rather
+                ;; than a bare 1000000 divisor (per
+                ;; .standards/foundations/named-constants.mdc).
+                duration-ms   (when start-ns
+                                (.toMillis TimeUnit/NANOSECONDS
+                                           (- (System/nanoTime) start-ns)))
                 result-digest (maybe-digest tool-result-content)]
             (stream/publish!
               stream-atom
