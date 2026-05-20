@@ -41,6 +41,7 @@
    cross-component coupling not yet approved).  Follow-up: wire into the
    logging infrastructure once the dependency is reviewed."
   (:require
+   [clojure.string :as str]
    [ai.miniforge.self-healing.backend-health :as backend-health]))
 
 ;;------------------------------------------------------------------------------ Layer 0
@@ -78,10 +79,19 @@
   "Return the CLI binary name for a backend.
 
    Arguments:
-     backend - Keyword backend name
+     backend - Keyword (or anything `clojure.lang.Named`) backend identifier.
+               Must be non-nil; nil/non-Named values throw `ex-info` rather
+               than producing a downstream NPE inside execute-resume!'s
+               ProcessBuilder.
 
    Returns: String binary name (defaults to (name backend))"
   [backend]
+  (when (nil? backend)
+    (throw (ex-info "binary-for: backend must not be nil"
+                    {:backend backend})))
+  (when-not (instance? clojure.lang.Named backend)
+    (throw (ex-info "binary-for: backend must be a keyword or symbol"
+                    {:backend backend :type (type backend)})))
   (get backend-binaries (keyword backend) (name backend)))
 
 (defn build-resume-command
@@ -198,16 +208,19 @@
   (when (nil? backend)
     (throw (ex-info ":backend is required and must not be nil"
                     {:ctx ctx})))
-  (let [count       @hang-count
-        backend-kw  (keyword backend)
-        cooldown-ms (get config :backend-switch-cooldown-ms 1800000)
-        threshold   (get config :backend-health-threshold 0.90)]
+  (let [count            @hang-count
+        backend-kw       (keyword backend)
+        cooldown-ms      (get config :backend-switch-cooldown-ms 1800000)
+        threshold        (get config :backend-health-threshold 0.90)
+        resumable?       (and (string? session-id)
+                              (not (str/blank? session-id)))]
     (cond
       ;; First stall — check backend health before committing to a resume attempt
       (= count 1)
       (let [rate (backend-health/get-backend-success-rate backend-kw)]
-        (if (and rate (< rate threshold))
+        (cond
           ;; Backend already known-unhealthy; skip the wasted retry
+          (and rate (< rate threshold))
           (do
             (binding [*out* *err*]
               (println (pr-str {:event      :stream-recovery/early-failover
@@ -217,7 +230,22 @@
                                 :rate       rate
                                 :threshold  threshold})))
             (perform-failover backend-kw allowed-failover-backends threshold cooldown-ms))
-          ;; Backend healthy or no data yet — attempt transparent resume
+
+          ;; No captured session — resume is impossible; treat first stall as
+          ;; a backend failure and failover instead of feeding nil/blank to
+          ;; execute-resume! (which would coerce nil to the string "nil" and
+          ;; fail the relaunch).
+          (not resumable?)
+          (do
+            (binding [*out* *err*]
+              (println (pr-str {:event      :stream-recovery/failover-no-session
+                                :phase-id   phase-id
+                                :backend    backend-kw
+                                :hang-count count})))
+            (perform-failover backend-kw allowed-failover-backends threshold cooldown-ms))
+
+          ;; Backend healthy and we have a session — attempt transparent resume
+          :else
           (do
             (binding [*out* *err*]
               (println (pr-str {:event      :stream-recovery/resume
@@ -247,10 +275,14 @@
                             :backend    backend-kw
                             :hang-count count
                             :anomaly?   true})))
-        {:action     :resume
-         :session-id session-id
-         :backend    backend-kw
-         :anomaly?   true}))))
+        (if resumable?
+          {:action     :resume
+           :session-id session-id
+           :backend    backend-kw
+           :anomaly?   true}
+          {:action   :abort
+           :reason   "degenerate hang-count and no resumable session"
+           :anomaly? true})))))
 
 ;;------------------------------------------------------------------------------ Layer 4
 ;; Public subprocess restart

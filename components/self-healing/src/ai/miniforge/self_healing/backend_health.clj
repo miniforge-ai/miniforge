@@ -271,10 +271,14 @@
      threshold       - Success rate threshold (default 0.90)
      cooldown-ms     - Cooldown period in milliseconds (default 1800000)
      allowed-set     - Optional set of keyword backends to restrict selection.
-                       When nil, all backends in the stored fallback-order are
-                       considered.  When provided, only those backends present
-                       in allowed-set (and also in fallback-order) are eligible,
-                       preserving the global priority ordering.
+                       When `nil` (not supplied), all backends in the stored
+                       fallback-order are considered. When a non-nil empty set
+                       is supplied, the caller has explicitly restricted to
+                       *no* allowed backends — returns nil immediately rather
+                       than silently expanding to the full fallback-order.
+                       When non-empty, only backends in the intersection of
+                       allowed-set and fallback-order are eligible, preserving
+                       the global priority ordering.
 
    Returns: Keyword backend name or nil if none available"
   ([current-backend]
@@ -282,23 +286,29 @@
   ([current-backend threshold cooldown-ms]
    (select-best-backend current-backend threshold cooldown-ms nil))
   ([current-backend threshold cooldown-ms allowed-set]
-   (let [health        (load-health)
-         fallback-order (:fallback-order health)
-         current-key   (keyword current-backend)
-         ;; When an allowed-set is provided, filter the global fallback-order so
-         ;; we preserve priority ordering while restricting the candidate pool.
-         candidates    (if (seq allowed-set)
-                         (filter allowed-set fallback-order)
-                         fallback-order)]
-     (first
-      (filter
-       (fn [backend]
-         (and (not= backend current-key)
-              (not (in-cooldown? backend cooldown-ms))
-              (if-let [rate (get-backend-success-rate backend)]
-                (>= rate threshold)
-                true))) ;; No data = eligible
-       candidates)))))
+   ;; An explicitly empty allowed-set means "no failover targets are
+   ;; permitted" — treating it as nil (and silently expanding to the full
+   ;; fallback-order) would defeat the purpose of the restriction.
+   (if (and (some? allowed-set) (empty? allowed-set))
+     nil
+     (let [health         (load-health)
+           fallback-order (:fallback-order health)
+           current-key    (keyword current-backend)
+           ;; When an allowed-set is provided and non-empty, filter the
+           ;; global fallback-order so we preserve priority ordering while
+           ;; restricting the candidate pool.
+           candidates     (if (seq allowed-set)
+                            (filter allowed-set fallback-order)
+                            fallback-order)]
+       (first
+        (filter
+         (fn [backend]
+           (and (not= backend current-key)
+                (not (in-cooldown? backend cooldown-ms))
+                (if-let [rate (get-backend-success-rate backend)]
+                  (>= rate threshold)
+                  true))) ;; No data = eligible
+         candidates))))))
 
 (defn trigger-backend-switch!
   "Trigger a backend switch and record cooldown.
