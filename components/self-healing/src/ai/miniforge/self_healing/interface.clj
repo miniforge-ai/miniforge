@@ -18,12 +18,14 @@
 
 (ns ai.miniforge.self-healing.interface
   "Public interface for self-healing system.
-   Exports functions from workaround-registry, workaround-detector, backend-health, and integration."
+   Exports functions from workaround-registry, workaround-detector, backend-health,
+   integration, and stream-recovery."
   (:require
    [ai.miniforge.self-healing.workaround-registry :as registry]
    [ai.miniforge.self-healing.workaround-detector :as detector]
    [ai.miniforge.self-healing.backend-health :as health]
-   [ai.miniforge.self-healing.integration :as integration]))
+   [ai.miniforge.self-healing.integration :as integration]
+   [ai.miniforge.self-healing.stream-recovery :as stream-recovery]))
 
 ;;------------------------------------------------------------------------------ Workaround Registry
 
@@ -114,6 +116,41 @@
 (def reset-backend-health!
   "Reset all backend health data to defaults, clearing stale metrics."
   health/reset-backend-health!)
+
+;;------------------------------------------------------------------------------ Stream Recovery
+
+(def evaluate-stall-recovery
+  "Decide whether to resume, failover, or abort after a watchdog kill.
+
+   Takes a context map with :phase-id, :backend, :session-id, :hang-count (atom),
+   :config (self-healing config section), and :allowed-failover-backends.
+
+   Decision rules:
+     hang-count = 1, backend healthy   → {:action :resume,   :session-id sid, :backend kw}
+     hang-count = 1, backend unhealthy → {:action :failover, :new-backend kw}
+     hang-count >= 2                   → {:action :failover, :new-backend kw}
+     no candidate                      → {:action :abort,    :reason \"no healthy backends\"}
+
+   Side effects on :failover path:
+     - record-backend-call! marks current backend unhealthy
+     - trigger-backend-switch! records cooldown and updates default-backend
+
+   See ai.miniforge.self-healing.stream-recovery/evaluate-stall-recovery."
+  stream-recovery/evaluate-stall-recovery)
+
+(def execute-resume!
+  "Restart an agent subprocess using the backend-specific resume flag.
+
+   Arguments: backend, session-id, optional extra-args.
+
+   Constructs: <backend-binary> <resume-flag> <session-id> [extra-args...]
+   and launches it with inherited stdio.
+
+   Returns a process map {:process, :backend, :session-id, :command} on success,
+   or an anomaly map {:anomaly/category, :anomaly/message, :cmd} on IOException.
+
+   See ai.miniforge.self-healing.stream-recovery/execute-resume!"
+  stream-recovery/execute-resume!)
 
 ;;------------------------------------------------------------------------------ Integration
 

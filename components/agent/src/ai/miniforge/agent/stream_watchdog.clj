@@ -280,8 +280,7 @@
    - Codex:       nested `[:session :id]` path
 
    When a session ID is found for the first time:
-     1. Stores it in the `:session-id-atom` on the watchdog state (atomic via
-        `compare-and-set!`).
+     1. Stores it in the `:session-id-atom` on the watchdog state (atomic).
      2. Emits :agent/session-captured via event-stream (nil stream is a no-op).
 
    When the session ID has already been captured, returns the watchdog unchanged.
@@ -291,16 +290,11 @@
    nil watchdog (or one missing :session-id-atom) is a legal no-op — useful
    for early-pipeline call sites that have not constructed a watchdog yet.
 
-   Thread-safe — uses `compare-and-set!` to make the check-then-act atomic,
-   so concurrent callers cannot both observe a nil session-id and both emit
-   :agent/session-captured."
+   Thread-safe — uses compare-and-set! so concurrent callers cannot both
+   observe a nil session-id and both emit :agent/session-captured."
   [watchdog event-map]
   (if-let [sid-atom (and watchdog (:session-id-atom watchdog))]
     (if-let [sid (extract-session-id event-map)]
-      ;; compare-and-set! is the atomic check-then-act primitive — only the
-      ;; first thread that observes nil flips the atom and emits the event;
-      ;; concurrent callers see the post-set value and become no-ops, so we
-      ;; never publish duplicate :agent/session-captured events.
       (if (compare-and-set! sid-atom nil sid)
         (do
           (emit-session-captured! watchdog sid)
@@ -312,7 +306,6 @@
                    :workflow/phase (:phase-id watchdog)
                    :agent/backend (:backend watchdog)})
         watchdog))
-    ;; nil watchdog or missing :session-id-atom — safe no-op, do not throw.
     watchdog))
 
 (defn get-session-id

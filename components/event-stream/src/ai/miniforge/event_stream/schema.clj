@@ -455,11 +455,7 @@
     [:message string?]]))
 
 (def AgentStreamStalled
-  "Schema for agent/stream-stalled event.
-
-   Emitted by the per-phase stream-gap watchdog when no agent output line
-   has been observed for longer than the configured threshold. Consumed by
-   the self-healing supervisor (resume-on-kill / failover)."
+  "Schema for agent/stream-stalled event."
   (with-identity
    [:map
       [:event/type [:= :agent/stream-stalled]]
@@ -474,11 +470,7 @@
     [:message string?]]))
 
 (def AgentSessionCaptured
-  "Schema for agent/session-captured event.
-
-   Emitted once per phase as soon as the backend handshake yields a
-   session ID. Consumed by resume-on-kill to pass the correct --resume
-   token to the relaunched backend process."
+  "Schema for agent/session-captured event."
   (with-identity
    [:map
       [:event/type [:= :agent/session-captured]]
