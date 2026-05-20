@@ -23,7 +23,9 @@
    [ai.miniforge.event-stream.digest :as digest]
    [ai.miniforge.event-stream.interface.events :as events]
    [ai.miniforge.event-stream.interface.stream :as stream]
-   [ai.miniforge.event-stream.messages :as messages]))
+   [ai.miniforge.event-stream.messages :as messages])
+  (:import
+   [java.util.concurrent TimeUnit]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Convenience callbacks
@@ -157,11 +159,16 @@
                                   (swap! tool-start-times dissoc correlated-id)
                                   t))
                 duration-ms   (when start-ns
-                                ;; Convert monotonic nanos → ms. nanoTime
-                                ;; never decreases on the same JVM, so the
-                                ;; delta is always non-negative; no clamp
-                                ;; needed.
-                                (quot (- (System/nanoTime) start-ns) 1000000))
+                                ;; Convert monotonic nanos → ms via TimeUnit
+                                ;; rather than a bare 1000000 divisor — the
+                                ;; named conversion documents the intent and
+                                ;; matches the named-constants rule
+                                ;; (.standards/foundations/named-constants.mdc).
+                                ;; nanoTime never decreases on the same JVM,
+                                ;; so the delta is always non-negative; no
+                                ;; clamp needed.
+                                (.toMillis TimeUnit/NANOSECONDS
+                                           (- (System/nanoTime) start-ns)))
                 result-digest (maybe-digest tool-result-content)]
             (stream/publish!
               stream-atom
