@@ -403,28 +403,57 @@
         ;; Non-fatal: continue pipeline even if doc write fails
         state)))))
 
+(defn- looks-like-structured-pr-body?
+  "True when a string already starts with the canonical PR-body shape
+   (a `## Summary` header at top, possibly after a blank line). When
+   the releaser agent obeyed the updated prompt it produces this shape
+   directly; in that case the fallback must NOT wrap it under another
+   `## Summary` (which would double-nest the headings)."
+  [s]
+  (and (string? s)
+       (boolean (re-find #"(?m)\A\s*##\s+Summary\b" s))))
+
+(defn- non-blank-section
+  "Render `(str header body \"\\n\\n\")` only when `body` is a non-blank
+   string. Guards the section against rendering an empty `## Header`
+   when the formatter returned `\"\"` for an artifact with no data."
+  [header body]
+  (when (and body (not (str/blank? body)))
+    (str header body "\n\n")))
+
 (defn- render-pr-body-fallback
   "Render a structured GitHub PR body when the releaser agent didn't
    produce one. Distinct from `render-pr-doc-full` (which targets the
    committed docs/pull-requests/*.md file): no HTML copyright header,
    no `_No X available._` placeholder strings — those belong in the
    docs file for repo browsers, not in the PR description GitHub
-   reviewers see first."
+   reviewers see first.
+
+   When `:release/pr-description` already looks like a full PR body
+   (starts with `## Summary`), use it as the body verbatim and append
+   only the structured sections (Files Changed / Test Results /
+   Review) — wrapping a structured pr-description under another
+   `## Summary` would double-nest the heading."
   [release-meta code-artifacts workflow-data]
   (let [{:keys [release/pr-title release/pr-description]} release-meta
         review-artifacts (:review-artifacts workflow-data)
         test-artifacts   (:test-artifacts workflow-data)
         files-md         (format-files-changed code-artifacts)
-        ;; Each section is omitted entirely when its source is absent —
-        ;; better to ship a short focused body than padded placeholders.
+        ;; Sections are omitted entirely when their formatted markdown is
+        ;; blank — `format-test-results` etc. can return "" when artifacts
+        ;; exist but lack the expected fields, so `(seq artifacts)` alone
+        ;; isn't enough to gate the section.
         review-md        (when (seq review-artifacts) (format-review-decision review-artifacts))
-        tests-md         (when (seq test-artifacts)   (format-test-results test-artifacts))]
-    (str "## Summary\n\n"
-         (or pr-description pr-title) "\n\n"
-         "## Files Changed\n\n"
-         files-md "\n\n"
-         (when tests-md  (str "## Test Results\n\n" tests-md "\n\n"))
-         (when review-md (str "## Review\n\n"       review-md "\n\n"))
+        tests-md         (when (seq test-artifacts)   (format-test-results test-artifacts))
+        structured?      (looks-like-structured-pr-body? pr-description)
+        summary-body     (if-not (str/blank? pr-description) pr-description pr-title)
+        summary-block    (if structured?
+                           (str summary-body "\n\n")
+                           (str "## Summary\n\n" summary-body "\n\n"))]
+    (str summary-block
+         (non-blank-section "## Files Changed\n\n" files-md)
+         (non-blank-section "## Test Results\n\n"  tests-md)
+         (non-blank-section "## Review\n\n"        review-md)
          "🤖 Generated autonomously by [miniforge](https://github.com/miniforge-ai/miniforge).\n")))
 
 (defn- pr-body-needs-update?

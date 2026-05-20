@@ -695,10 +695,12 @@
                 {:release/pr-title "fix: X" :release/pr-description "Fixed X."}
                 [{:code/files [{:path "src/a.clj" :action :modify}]}]
                 {})]
+      ;; Two structural markers uniquely identify the docs-file preamble.
+      ;; Don't pin on author-name strings — those rot if the header changes.
       (is (not (str/includes? body "<!--"))
           "no HTML copyright preamble in PR body — that template is the docs/pull-requests/ file")
-      (is (not (str/includes? body "Christopher Lester"))
-          "PR body must not carry the doc-file author header"))))
+      (is (not (str/includes? body "Copyright 2025-2026"))
+          "no copyright line in PR body — it's a docs-file marker"))))
 
 (deftest render-pr-body-fallback-omits-placeholder-sections-test
   (testing "no `_No X available._` strings in the PR body when the source data is absent"
@@ -728,6 +730,51 @@
       (is (str/includes? body "## Test Results"))
       (is (str/includes? body "## Review"))
       (is (str/includes? body "LGTM")))))
+
+(deftest render-pr-body-fallback-does-not-duplicate-summary-when-pr-description-already-structured-test
+  (testing "when :release/pr-description already starts with ## Summary, fallback must not wrap it under another ## Summary"
+    ;; The updated releaser prompt requires structured pr-description
+    ;; with `## Summary / ## Why / ...`. The fallback must detect this
+    ;; shape and use the description directly; wrapping under a second
+    ;; `## Summary` would double-nest the heading and render badly on
+    ;; GitHub. Without this guard the prompt fix and the renderer fix
+    ;; interact pathologically.
+    (let [structured "## Summary\n\n- Adds Y\n- Adds Z\n\n## Why\n\nBecause X.\n\n## Test plan\n\n- [x] ran tests"
+          body       (#'sut/render-pr-body-fallback
+                      {:release/pr-title "feat: Y" :release/pr-description structured}
+                      [{:code/files [{:path "src/y.clj" :action :create}]}]
+                      {})
+          summary-count (count (re-seq #"(?m)^##\s+Summary\b" body))]
+      (is (= 1 summary-count)
+          "Exactly one `## Summary` heading — no double-nesting when pr-description is already structured")
+      (is (str/includes? body "## Why")
+          "The structured pr-description's own sections (e.g. `## Why`) must survive into the body verbatim"))))
+
+(deftest render-pr-body-fallback-treats-blank-pr-description-as-absent-test
+  (testing "an empty-string :release/pr-description falls back to pr-title for the Summary, not a blank Summary"
+    (let [body (#'sut/render-pr-body-fallback
+                {:release/pr-title "fix: only" :release/pr-description ""}
+                [{:code/files [{:path "x" :action :modify}]}]
+                {})]
+      (is (str/includes? body "fix: only")
+          "blank pr-description must be treated as absent — Summary falls back to pr-title"))))
+
+(deftest render-pr-body-fallback-omits-section-when-formatter-returns-blank-test
+  (testing "section is omitted when its formatted markdown is blank, even though artifacts exist"
+    ;; format-review-decision / format-test-results return \"\" when artifacts
+    ;; exist but lack their canonical fields. The empty string is truthy,
+    ;; so a `(when (seq artifacts) ...)` guard alone would render an empty
+    ;; `## Review` header. The non-blank-section helper guards against this.
+    (let [body (#'sut/render-pr-body-fallback
+                {:release/pr-title "x" :release/pr-description "x"}
+                [{:code/files [{:path "p" :action :modify}]}]
+                ;; Review/test artifacts present but with no usable fields:
+                {:review-artifacts [{}]
+                 :test-artifacts   [{}]})]
+      (is (not (str/includes? body "## Test Results"))
+          "Test Results omitted when the formatter has nothing to render")
+      (is (not (str/includes? body "## Review"))
+          "Review omitted when the formatter has nothing to render"))))
 
 ;; ============================================================================
 ;; pr-body-needs-update? — the policy guarding step-update-pr-body
