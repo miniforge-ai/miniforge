@@ -322,7 +322,7 @@
       (catch Exception e
         (println (messages/t :warn/publish-phase-completed {:error (ex-message e)}))))))
 
-;------------------------------------------------------------------------------ Layer 1.5
+;------------------------------------------------------------------------------ Layer 2
 ;; Phase heartbeat lifecycle
 
 (defn start-phase-heartbeat!
