@@ -822,4 +822,10 @@
   :backends/status-needs-key                "Needs {api-key-var}"
   :backends/status-unknown                  "Unknown backend type"
   :backends/unknown-issue                   "Unknown issue with backend: {backend}"
-  :backends/validate-unknown                "Unknown backend: {backend}\nRun '{command}' to see available backends."}}
+  :backends/validate-unknown                "Unknown backend: {backend}\nRun '{command}' to see available backends."
+
+  ;; ---------- `mf events show` ----------
+  :events/missing-workflow-id  "workflow-id is required"
+  :events/usage                "usage: miniforge events show <workflow-id> [--json] [--type-filter <str>] [--gap-threshold <secs>]"
+  :events/no-events-found      "No events found for workflow {workflow-id} (events-dir: {events-dir})"
+  :events/timeline-header      "Timeline for workflow {workflow-id} - {count} event(s){filter-note}"}}
