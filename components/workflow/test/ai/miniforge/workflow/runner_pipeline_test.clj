@@ -26,6 +26,7 @@
   (:require
    [clojure.test :refer [deftest is testing]]
    [ai.miniforge.workflow.runner :as runner]
+   [ai.miniforge.workflow.runner-events :as events]
    [ai.miniforge.workflow.runner-cleanup :as cleanup]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -76,7 +77,31 @@
   (testing "wraps both on-phase-start and on-phase-complete"
     (let [callbacks (wrap-phase-callbacks nil {})]
       (is (fn? (:on-phase-start callbacks)))
-      (is (fn? (:on-phase-complete callbacks))))))
+      (is (fn? (:on-phase-complete callbacks)))
+      (is (fn? (:stop-phase-heartbeats! callbacks))))))
+
+(deftest wrap-phase-callbacks-stops-heartbeat-on-complete-test
+  (let [stopped (atom [])
+        callbacks (wrap-phase-callbacks nil {})
+        ctx {:execution/id (random-uuid)}
+        interceptor {:phase :implement}]
+    (with-redefs [events/publish-phase-started! (constantly nil)
+                  events/publish-phase-completed! (constantly nil)
+                  events/start-phase-heartbeat! (fn [& _] :handle)
+                  events/stop-phase-heartbeat! #(swap! stopped conj %)]
+      ((:on-phase-start callbacks) ctx interceptor)
+      ((:on-phase-complete callbacks) ctx interceptor {:status :success}))
+    (is (= [:handle] @stopped))))
+
+(deftest wrap-phase-callbacks-stop-all-cleans-active-heartbeats-test
+  (let [stopped (atom [])
+        callbacks (wrap-phase-callbacks nil {})]
+    (with-redefs [events/publish-phase-started! (constantly nil)
+                  events/start-phase-heartbeat! (fn [& _] :handle)
+                  events/stop-phase-heartbeat! #(swap! stopped conj %)]
+      ((:on-phase-start callbacks) {:execution/id (random-uuid)} {:phase :verify})
+      ((:stop-phase-heartbeats! callbacks)))
+    (is (= [:handle] @stopped))))
 
 (deftest post-workflow-cleanup-survives-nil-test
   (testing "cleanup handles all-nil args without throwing"

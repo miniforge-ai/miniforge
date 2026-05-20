@@ -6,6 +6,8 @@
   :warn/publish-completed    "Warning: Failed to publish workflow-completed event: {error}"
   :warn/publish-phase-started   "Warning: Failed to publish phase-started event: {error}"
   :warn/publish-phase-completed "Warning: Failed to publish phase-completed event: {error}"
+  :warn/heartbeat-start      "Warning: Failed to start phase heartbeat: {error}"
+  :warn/heartbeat-stop       "Warning: Failed to stop phase heartbeat: {error}"
   :warn/health-check         "Warning: Self-healing health check failed: {error}"
 
   ;; Workflow status messages
