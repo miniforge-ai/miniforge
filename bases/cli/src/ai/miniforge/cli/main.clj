@@ -68,6 +68,7 @@
    [ai.miniforge.cli.main.commands.evidence :as cmd-evidence]
    [ai.miniforge.cli.main.commands.artifact-cmds :as cmd-artifact]
    [ai.miniforge.cli.main.commands.etl :as cmd-etl]
+   [ai.miniforge.cli.main.commands.events :as cmd-events]
    [ai.miniforge.agent.interface :as agent]
    [ai.miniforge.event-stream.interface :as es]
    [ai.miniforge.mcp-context-server.interface :as mcp-context-server]
@@ -324,7 +325,7 @@
 (defn logs-list-cmd [_m] (observability/handle-logs {:subcommand "list"}))
 (defn events-tail-cmd [m] (observability/handle-events (assoc (get-opts m) :subcommand "tail")))
 (defn events-list-cmd [_m] (observability/handle-events {:subcommand "list"}))
-(defn events-show-cmd [m] (observability/handle-events (assoc (get-opts m) :subcommand "show")))
+(defn events-show-cmd [m] (cmd-events/events-show-cmd (get-opts m)))
 
 ;; Delegated commands
 (defn run-cmd [m] (cmd-run/run-cmd (get-opts m)))
@@ -623,9 +624,11 @@
    {:cmds ["events" "show"]
     :fn events-show-cmd
     :args->opts [:workflow-id]
-    :spec {:filter {:coerce :keyword}
-           :no-chunks {:coerce :boolean :default true}
-           :no-status {:coerce :boolean :default false}}}
+    :spec {:json          {:coerce :boolean :default false}
+           :filter        {:coerce :string}
+           :gap-threshold {:coerce :double :default 60.0}
+           :no-chunks     {:coerce :boolean :default true}
+           :no-status     {:coerce :boolean :default false}}}
 
    ;; Fleet subcommands (daemon management + watch/prs — N5)
    {:cmds ["fleet" "start"]  :fn fleet-start-cmd}
