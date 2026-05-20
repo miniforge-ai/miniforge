@@ -19,6 +19,7 @@
 (ns ai.miniforge.cli.main.commands.events-test
   "Unit tests for the `events show` CLI command."
   (:require
+   [cheshire.core :as json]
    [clojure.string :as str]
    [clojure.test :refer [deftest is testing]]
    [ai.miniforge.cli.app-config :as app-config]
@@ -358,7 +359,47 @@
       ;; JSON output contains event type as a string value
       (is (str/includes? output "workflow/started"))
       ;; Should NOT contain the table header
-      (is (not (str/includes? output "TIMESTAMP"))))))
+      (is (not (str/includes? output "TIMESTAMP")))))
+
+  (testing "--json output is valid parseable JSON on every non-empty line"
+    (let [output (with-output
+                   (with-redefs [app-config/events-dir (constantly "/tmp/events")
+                                 es/read-workflow-events-by-id
+                                 (fn [_dir _id] sample-events)]
+                     (sut/events-show-cmd {:workflow-id wf-id
+                                           :json        true
+                                           :no-chunks   true})))
+          lines  (->> (str/split-lines output)
+                      (remove str/blank?))]
+      ;; At least one line must be emitted
+      (is (pos? (count lines)))
+      ;; Every non-empty line must parse as a JSON object
+      (doseq [line lines]
+        (let [parsed (try (json/parse-string line true) (catch Exception _ ::parse-error))]
+          (is (not= ::parse-error parsed)
+              (str "Line is not valid JSON: " line))
+          (is (map? parsed)
+              (str "JSON line is not an object: " line))))
+      ;; N events must produce N JSON lines (no extra blank lines counted)
+      ;; sample-events has 7 events; with no-chunks there are no :agent/chunk types
+      (is (= (count sample-events) (count lines)))))
+
+  (testing "--json multiple events each produce exactly one line"
+    (let [two-events [(make-event :workflow/started   "2026-05-19T10:00:00Z")
+                      (make-event :workflow/completed "2026-05-19T10:05:00Z"
+                                  {:workflow/status :success})]
+          output     (with-output
+                       (with-redefs [app-config/events-dir (constantly "/tmp/events")
+                                     es/read-workflow-events-by-id
+                                     (fn [_dir _id] two-events)]
+                         (sut/events-show-cmd {:workflow-id wf-id
+                                               :json        true
+                                               :no-chunks   true})))
+          lines      (->> (str/split-lines output) (remove str/blank?))]
+      (is (= 2 (count lines)))
+      ;; Both lines must be parseable JSON maps
+      (doseq [line lines]
+        (is (map? (json/parse-string line true)))))))
 
 (deftest events-show-cmd-consecutive-gaps-test
   (testing "detects multiple consecutive large gaps"
