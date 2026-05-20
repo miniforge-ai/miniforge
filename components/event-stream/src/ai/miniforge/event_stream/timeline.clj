@@ -161,15 +161,31 @@
     (format "%s  %s  %s  %s" ts phase tool args-sum)))
 
 (defn- render-tool-call-completed
-  "`:tool/call-completed` — show tool name + duration + success/error."
-  [event]
+  "`:tool/call-completed` — show tool name + duration + success/error.
+
+   Per `schema/ToolCallCompleted` the event does NOT carry `:tool/name`;
+   the name lives on the paired `:agent/tool-call-started` event,
+   correlated via `:tool/call-id`. `tool-names-by-call-id` is the
+   correlation map built by `render-timeline` as it walks the stream.
+   Fallbacks (in order): correlated name → `:tool/call-id` →
+   `<unknown>`.
+
+   Status is sourced from `:tool/success?` (per the schema), with
+   `:tool/error` presence as the secondary signal for legacy events
+   that omitted the boolean."
+  [event tool-names-by-call-id]
   (let [ts       (format-hms (event-timestamp event))
         phase    (event-phase event)
-        tool     (or (:tool/name event) "<unknown>")
+        call-id  (:tool/call-id event)
+        tool     (or (get tool-names-by-call-id call-id)
+                     call-id
+                     "<unknown>")
         dur-ms   (:tool/duration-ms event)
-        status   (if (get event :tool/error)
-                   "error"
-                   "success")
+        status   (cond
+                   (false? (:tool/success? event)) "error"
+                   (true?  (:tool/success? event)) "success"
+                   (some? (:tool/error event))     "error"
+                   :else                           "success")
         dur-str  (if dur-ms
                    (str "  " (format-duration-ms dur-ms) "  " status)
                    (str "  " status))]
@@ -219,15 +235,20 @@
     (format "%s  %s  %s  %s" ts phase (str ev-type) (truncate msg args-preview-length))))
 
 (defn- render-event
-  "Dispatch to the appropriate per-event-type renderer."
-  [event]
+  "Dispatch to the appropriate per-event-type renderer.
+
+   `tool-names-by-call-id` is the correlation map render-timeline
+   builds as it walks the event stream — only consulted by the
+   completed-event renderer, but threaded through every dispatch so
+   the signature stays uniform."
+  [event tool-names-by-call-id]
   (let [et (event-type event)]
     (cond
       (contains? terminal-event-types et)   (render-terminal event)
       (contains? stall-event-types et)      (render-stall event)
       (contains? phase-lifecycle-types et)  (render-phase-lifecycle event)
       (= et :agent/tool-call-started)       (render-tool-call-started event)
-      (= et :tool/call-completed)           (render-tool-call-completed event)
+      (= et :tool/call-completed)           (render-tool-call-completed event tool-names-by-call-id)
       :else                                 (render-generic event))))
 
 ;------------------------------------------------------------------------------ Layer 2
@@ -245,6 +266,21 @@
 ;------------------------------------------------------------------------------ Layer 3
 ;; Public API
 
+(defn- index-tool-names
+  "Build a `{tool-call-id → tool-name}` lookup map from the event stream.
+
+   `:tool/call-completed` events don't carry the tool name (per the
+   `ToolCallCompleted` schema) — the name lives on the paired
+   `:agent/tool-call-started` event. Pre-walk the stream once so the
+   completed-event renderer can look the name up without re-scanning."
+  [events]
+  (->> events
+       (filter #(and (= :agent/tool-call-started (event-type %))
+                     (:tool/call-id %)
+                     (:tool/name %)))
+       (reduce (fn [m e] (assoc m (:tool/call-id e) (:tool/name e)))
+               {})))
+
 (defn render-timeline
   "Transform a seq of parsed event maps into a human-readable timeline string.
 
@@ -261,20 +297,30 @@
      (render-timeline events)        — default 60s gap threshold
      (render-timeline events opts)   — opts: {:gap-threshold-ms long}
 
-   Returns a string. Pure function — no IO."
+   Returns a string (empty string for empty / nil input — consistent
+   return type so callers don't have to nil-check before
+   `println`/`spit`). Pure function — no IO."
   ([events]
    (render-timeline events {}))
   ([events opts]
-   (when (seq events)
+   (if (empty? events)
+     ""
      (let [gap-threshold (get opts :gap-threshold-ms default-gap-threshold-ms)
+           name-by-id    (index-tool-names events)
            lines         (reduce
                           (fn [{:keys [prev-ts lines]} event]
-                            (let [cur-ts (ts->epoch-ms (event-timestamp event))
-                                  gap-line (when (and prev-ts cur-ts
-                                                      (> (- cur-ts prev-ts) gap-threshold))
-                                             (render-gap-line prev-ts cur-ts (- cur-ts prev-ts)))
-                                  event-line (render-event event)]
-                              {:prev-ts (or cur-ts prev-ts)
+                            (let [cur-ts     (ts->epoch-ms (event-timestamp event))
+                                  gap-line   (when (and prev-ts cur-ts
+                                                        (> (- cur-ts prev-ts) gap-threshold))
+                                               (render-gap-line prev-ts cur-ts (- cur-ts prev-ts)))
+                                  event-line (render-event event name-by-id)]
+                              ;; Update `:prev-ts` to `cur-ts` (allowing
+                              ;; nil) rather than clinging to the last
+                              ;; non-nil value — otherwise an event with
+                              ;; no timestamp injected between two
+                              ;; timestamped events fires a phantom gap
+                              ;; line spanning across it.
+                              {:prev-ts cur-ts
                                :lines   (cond-> lines
                                           gap-line   (conj gap-line)
                                           event-line (conj event-line))}))
@@ -290,7 +336,7 @@
     (println (render-timeline events)))
 
   (render-timeline [] {})
-  ;; => nil
+  ;; => ""
 
   (render-timeline
    [{:event/type      :agent/tool-call-started
