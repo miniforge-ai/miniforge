@@ -31,6 +31,7 @@
    [ai.miniforge.agent.interface.runtime :as runtime]
    [ai.miniforge.agent.interface.specialized :as specialized]
    [ai.miniforge.agent.interface.supervision :as supervision]
+   [ai.miniforge.agent.interface.watchdog :as watchdog]
    [ai.miniforge.agent.tool-supervisor :as tool-supervisor]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -197,7 +198,7 @@
    paths-as-metadata and the worktree has since been committed clean."
   file-artifacts/rehydrate-files)
 
-;------------------------------------------------------------------------------ Layer 3
+;------------------------------------------------------------------------------ Layer 4
 ;; Tool supervision
 
 (def evaluate-tool-use
@@ -208,3 +209,14 @@
 (def hook-eval-stdin!
   "CLI entry point for tool-use evaluation from stdin."
   tool-supervisor/hook-eval-stdin!)
+
+;------------------------------------------------------------------------------ Layer 5
+;; Stream-gap watchdog
+
+(def resolve-gap-threshold watchdog/resolve-gap-threshold)
+(def default-gap-threshold-ms watchdog/default-gap-threshold-ms)
+(def default-check-interval-ms watchdog/default-check-interval-ms)
+(def create-watchdog watchdog/create-watchdog)
+(def ping-watchdog! watchdog/ping!)
+(def stop-watchdog! watchdog/stop!)
+(def watchdog-stalled? watchdog/stalled?)
