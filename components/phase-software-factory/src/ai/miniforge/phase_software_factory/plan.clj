@@ -22,10 +22,10 @@
    Creates implementation plans from specifications.
    Agent: :planner
    Default gates: [:plan-complete]"
-  (:require            [ai.miniforge.phase.interface :as phase]
+  (:require [ai.miniforge.phase.interface :as phase]
             [ai.miniforge.phase-software-factory.phase-config :as phase-config]
-            
             [ai.miniforge.phase-software-factory.knowledge-helpers :as kb-helpers]
+            [ai.miniforge.phase-software-factory.phase-terminal :as phase-terminal]
             [ai.miniforge.agent.interface :as agent]
             [ai.miniforge.response.interface :as response]))
 
@@ -143,9 +143,16 @@
                         (update-in [:execution/metrics :tokens] (fnil + 0) (:tokens metrics 0))
                         (update-in [:execution/metrics :duration-ms] (fnil + 0) (:duration-ms metrics 0)))]
     ;; Handle :already-satisfied — signal pipeline to skip to :done
-    (if (= :already-satisfied (:status result))
-      (assoc-in updated-ctx [:phase :status] :already-satisfied)
-      updated-ctx)))
+    (let [final-ctx (if (= :already-satisfied (:status result))
+                      (assoc-in updated-ctx [:phase :status] :already-satisfied)
+                      updated-ctx)]
+      ;; Emit phase-completed telemetry with termination reason
+      (phase/emit-phase-completed! final-ctx :plan
+        (merge {:outcome     :success
+                :duration-ms duration-ms
+                :tokens      (get metrics :tokens 0)}
+               (phase-terminal/derive-termination-reason result nil)))
+      final-ctx)))
 
 (defn error-plan
   "Handle planning phase errors. Retry within budget, then fail in

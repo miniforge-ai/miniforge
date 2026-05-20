@@ -33,6 +33,7 @@
    [ai.miniforge.repo-index.interface :as repo-index]
    [ai.miniforge.logging.interface :as log]
    [ai.miniforge.response.interface :as response]
+   [ai.miniforge.phase-software-factory.phase-terminal :as phase-terminal]
    [clojure.string :as str]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -565,33 +566,43 @@
        (:knowledge-store ctx) :implementer
        (get-in ctx [:execution/input :title]) iterations))
     ;; Handle retrying, failure, completed, or already-implemented outcomes
-    (cond-> updated-ctx
-      (contains? #{:completed :already-implemented} phase-status)
-      (update-in [:execution :phases-completed] (fnil conj []) :implement)
+    (let [final-ctx
+          (cond-> updated-ctx
+            (contains? #{:completed :already-implemented} phase-status)
+            (update-in [:execution :phases-completed] (fnil conj []) :implement)
 
-      ;; On success: store lightweight result — code is in the environment, not here
-      (= :completed phase-status)
-      (-> (assoc-in [:phase :result] (phase/success env-id summary))
-          (assoc-in [:phase :artifact]
-                    (cond-> (lightweight-curated-artifact curated-artifact)
-                      degraded-handoff?
-                      (assoc :code/degraded-handoff? true
-                             :code/raw-agent-status raw-agent-status
-                             :code/raw-error (:raw-error result)))))
-      (phase/retrying? (:phase updated-ctx))
-      (-> (update-in [:phase :iterations] (fnil inc 1))
-          (assoc-in [:phase :last-error]
-                    (extract-error-message result (messages/t :implement/agent-error))))
+            ;; On success: store lightweight result — code is in the environment, not here
+            (= :completed phase-status)
+            (-> (assoc-in [:phase :result] (phase/success env-id summary))
+                (assoc-in [:phase :artifact]
+                          (cond-> (lightweight-curated-artifact curated-artifact)
+                            degraded-handoff?
+                            (assoc :code/degraded-handoff? true
+                                   :code/raw-agent-status raw-agent-status
+                                   :code/raw-error (:raw-error result)))))
+            (phase/retrying? (:phase updated-ctx))
+            (-> (update-in [:phase :iterations] (fnil inc 1))
+                (assoc-in [:phase :last-error]
+                          (extract-error-message result (messages/t :implement/agent-error))))
 
-      (= :failed phase-status)
-      (assoc-in [:phase :error]
-                (if invalid-already-implemented?
-                  (build-unverified-already-implemented-error ctx result iterations)
-                  (build-phase-error result agent-status rate-limited? iterations)))
+            (= :failed phase-status)
+            (assoc-in [:phase :error]
+                      (if invalid-already-implemented?
+                        (build-unverified-already-implemented-error ctx result iterations)
+                        (build-phase-error result agent-status rate-limited? iterations)))
 
-      (and (= :already-implemented agent-status)
-           (not invalid-already-implemented?))
-      (assoc-in [:phase :skipped-reason] :already-implemented))))
+            (and (= :already-implemented agent-status)
+                 (not invalid-already-implemented?))
+            (assoc-in [:phase :skipped-reason] :already-implemented))]
+      ;; Emit phase-completed telemetry with termination reason
+      (phase/emit-phase-completed! final-ctx :implement
+        (merge {:outcome     (if (contains? #{:completed :already-implemented} phase-status)
+                               :success
+                               :failure)
+                :duration-ms duration-ms
+                :tokens      (get metrics :tokens 0)}
+               (phase-terminal/derive-termination-reason result {:rate-limited? rate-limited?})))
+      final-ctx)))
 
 (defn error-implement
   "Handle implementation phase errors. Attempts repair via inner loop

@@ -32,8 +32,8 @@
             [ai.miniforge.logging.interface :as log]
             [ai.miniforge.phase.interface :as phase]
             [ai.miniforge.phase-software-factory.messages :as messages]
-
             [ai.miniforge.phase-software-factory.phase-config :as phase-config]
+            [ai.miniforge.phase-software-factory.phase-terminal :as phase-terminal]
             [ai.miniforge.release-executor.interface :as release-executor]
             [ai.miniforge.response.interface :as response]))
 
@@ -444,9 +444,11 @@
                 (assoc-in [:phase :last-error]
                           (get-in result [:error :message] (messages/t :release/phase-failed)))))
       (phase/emit-phase-completed! :release
-        {:outcome     (if (= :completed phase-status) :success :failure)
-         :duration-ms duration-ms
-         :tokens      (:tokens metrics 0)}))))
+        (merge {:outcome     (if (= :completed phase-status) :success :failure)
+                :duration-ms duration-ms
+                :tokens      (:tokens metrics 0)}
+               ;; :release/zero-files is treated as curator-rejected (nothing to ship)
+               (phase-terminal/derive-termination-reason result nil))))))
 
 (defn error-release
   "Handle release phase errors."

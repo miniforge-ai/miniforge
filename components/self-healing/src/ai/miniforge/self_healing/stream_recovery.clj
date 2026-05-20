@@ -208,18 +208,17 @@
   (when (nil? backend)
     (throw (ex-info ":backend is required and must not be nil"
                     {:ctx ctx})))
-  (let [count            @hang-count
-        backend-kw       (keyword backend)
-        cooldown-ms      (get config :backend-switch-cooldown-ms 1800000)
-        threshold        (get config :backend-health-threshold 0.90)
-        resumable?       (and (string? session-id)
-                              (not (str/blank? session-id)))]
+  (let [count       @hang-count
+        backend-kw  (keyword backend)
+        cooldown-ms (get config :backend-switch-cooldown-ms 1800000)
+        threshold   (get config :backend-health-threshold 0.90)
+        resumable?  (and (string? session-id)
+                         (not (str/blank? session-id)))]
     (cond
       ;; First stall — check backend health before committing to a resume attempt
       (= count 1)
       (let [rate (backend-health/get-backend-success-rate backend-kw)]
         (cond
-          ;; Backend already known-unhealthy; skip the wasted retry
           (and rate (< rate threshold))
           (do
             (binding [*out* *err*]
@@ -231,10 +230,7 @@
                                 :threshold  threshold})))
             (perform-failover backend-kw allowed-failover-backends threshold cooldown-ms))
 
-          ;; No captured session — resume is impossible; treat first stall as
-          ;; a backend failure and failover instead of feeding nil/blank to
-          ;; execute-resume! (which would coerce nil to the string "nil" and
-          ;; fail the relaunch).
+          ;; No captured session — resume is impossible; failover.
           (not resumable?)
           (do
             (binding [*out* *err*]
@@ -244,7 +240,6 @@
                                 :hang-count count})))
             (perform-failover backend-kw allowed-failover-backends threshold cooldown-ms))
 
-          ;; Backend healthy and we have a session — attempt transparent resume
           :else
           (do
             (binding [*out* *err*]
