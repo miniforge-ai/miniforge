@@ -20,6 +20,7 @@
   "Streaming callback helpers for the event-stream public API."
   (:require
    [clojure.string :as str]
+   [ai.miniforge.event-stream.digest :as digest]
    [ai.miniforge.event-stream.interface.events :as events]
    [ai.miniforge.event-stream.interface.stream :as stream]
    [ai.miniforge.event-stream.messages :as messages]))
@@ -35,6 +36,12 @@
     (when (seq names)
       (messages/t :stream/tool-use-line {:names (str/join ", " names)}))))
 
+(defn- maybe-digest
+  "Apply digest-content to `content` only when content is non-nil."
+  [content]
+  (when (some? content)
+    (digest/digest-content content)))
+
 (defn create-streaming-callback
   "Callback invoked by the LLM client for each parsed stream event.
 
@@ -45,36 +52,59 @@
      :tool-name   — single tool name when available (Claude / codex)
      :tool-names  — vector of tool names (Claude multi-tool blocks)
      :tool-call-id — provider-supplied id when available
-     :tool-args-preview — bounded args digest when the parser can safely
-                          expose it
+     :tool-args-preview — bounded args preview when the parser can safely
+                          expose it; will be digested via digest-content
      :tool-result — boolean, true when the LLM streamed a tool-result
-                    block (outcome of a prior tool-use). Treated as a
-                    pure liveness signal here — supervisors/detectors
-                    consume it via the stream accumulator, not via this
-                    streaming callback. Suppressed so it doesn't publish
-                    an empty :agent/chunk.
+                    block (outcome of a prior tool-use)
+     :tool-result-call-id — provider id correlating this result to its
+                            originating tool-use; may be nil
+     :tool-result-content — raw result payload (string or map) when the
+                            parser surfaces it; may be nil
+     :tool-result-is-error — boolean, true when the result is an error
      :heartbeat   — keepalive, ignored for diagnostic emission
 
-   For tool-use events emits BOTH:
-     :agent/tool-call  — structured, carries :tool/name / :tool/names /
-                          :tool/call-id / :tool/args-preview
-     :agent/status     — legacy generic 'Agent calling tool' status-type
-                          :tool-calling, preserved so existing consumers
-                          (dashboard, TUI, tests) keep working during the
-                          migration."
+   For tool-use events emits BOTH (in order):
+     :agent/tool-call          — legacy event; carries :tool/name /
+                                 :tool/names / :tool/call-id /
+                                 :tool/args-preview.  Preserved for
+                                 backward compatibility with existing
+                                 consumers (dashboard, TUI, tests).
+     :agent/tool-call-started  — new paired start event; carries
+                                 :tool/name / :tool/call-id /
+                                 :tool/args-digest (digest-content of
+                                 tool-args-preview when present).
+
+   NOTE: The bare :agent/status :tool-calling emission has been removed.
+         :agent/tool-call-started replaces it with richer structured data.
+
+   For tool-result events emits:
+     :tool/call-completed — closing event for the latency span opened by
+                            :agent/tool-call-started.  Carries
+                            :tool/call-id / :tool/result-digest /
+                            :tool/duration-ms / :tool/success?."
   [stream-atom workflow-id agent-id & [opts]]
-  (let [{:keys [print? quiet?]} opts]
+  (let [{:keys [print? quiet?]} opts
+        ;; Local start-time registry keyed by tool-call-id.
+        ;; Populated on tool-use; consumed and cleared on tool-result.
+        tool-start-times (atom {})]
     (fn [{:keys [delta done? tool-use tool-result heartbeat
-                 tool-name tool-names tool-call-id tool-args-preview]}]
+                 tool-name tool-names tool-call-id tool-args-preview
+                 tool-result-call-id tool-result-content tool-result-is-error]}]
       (cond
         tool-use
         (do
+          ;; Record wall-clock start for subsequent duration computation.
+          (when tool-call-id
+            (swap! tool-start-times assoc tool-call-id (System/currentTimeMillis)))
+
           (when-let [line (and print? (not quiet?)
                                (tool-use-line {:tool-name tool-name
                                                :tool-names tool-names}))]
             (print line)
             (flush))
+
           (when stream-atom
+            ;; ── Legacy event — keeps existing consumers working ──────────
             (stream/publish!
               stream-atom
               (events/agent-tool-call stream-atom workflow-id agent-id
@@ -82,17 +112,36 @@
                                        :tool-names tool-names
                                        :tool-call-id tool-call-id
                                        :tool-args-preview tool-args-preview}))
+
+            ;; ── New paired started event — replaces :agent/status :tool-calling
             (stream/publish!
               stream-atom
-              (events/agent-status stream-atom workflow-id agent-id
-                                   :tool-calling
-                                   (messages/t :stream/agent-calling-tool)))))
+              (events/agent-tool-call-started
+                stream-atom workflow-id agent-id
+                {:tool/name        tool-name
+                 :tool/call-id     tool-call-id
+                 :tool/args-digest (maybe-digest tool-args-preview)}))))
 
-        ;; Tool-result chunks are liveness signals (no delta payload).
-        ;; Suppressed here — without this branch the :else clause would
-        ;; publish an empty :agent/chunk for every tool round-trip.
+        ;; Tool-result closes the latency span opened by tool-use.
+        ;; Emit :tool/call-completed with duration and digested result.
         tool-result
-        nil
+        (when stream-atom
+          (let [correlated-id (or tool-result-call-id tool-call-id)
+                start-ms      (when correlated-id
+                                (let [t (get @tool-start-times correlated-id)]
+                                  (swap! tool-start-times dissoc correlated-id)
+                                  t))
+                duration-ms   (when start-ms
+                                (- (System/currentTimeMillis) start-ms))
+                result-digest (maybe-digest tool-result-content)]
+            (stream/publish!
+              stream-atom
+              (events/tool-call-completed
+                stream-atom workflow-id
+                {:tool/call-id       correlated-id
+                 :tool/result-digest result-digest
+                 :tool/duration-ms   duration-ms
+                 :tool/success?      (not (true? tool-result-is-error))}))))
 
         heartbeat
         nil
