@@ -1342,7 +1342,7 @@
   (-> (create-envelope stream :agent/session-captured workflow-id
                        (str "Session captured for " (name backend)
                             " in phase " (name phase-id)))
-      (assoc :phase/id phase-id
+      (assoc :workflow/phase phase-id
              :agent/backend backend
              :agent/session-id session-id)))
 
@@ -1367,7 +1367,7 @@
                        (str "Agent stream stalled in " (name phase-id)
                             " after " gap-duration-ms "ms"
                             " (backend: " (name backend) ")"))
-      (assoc :phase/id phase-id
+      (assoc :workflow/phase phase-id
              :stream/gap-duration-ms gap-duration-ms
              :agent/backend backend)))
 

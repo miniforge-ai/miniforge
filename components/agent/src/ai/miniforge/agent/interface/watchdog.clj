@@ -19,7 +19,11 @@
 (ns ai.miniforge.agent.interface.watchdog
   "Public boundary for the per-phase stream-gap watchdog.
 
-   Re-exports the five primary operations and the config helper from
+   Re-exports the watchdog lifecycle operations (create-watchdog, ping!,
+   stop!, stalled?), the session-id capture/read operations
+   (capture-session-id!, get-session-id), the config helper
+   (resolve-gap-threshold), and the default constants
+   (default-gap-threshold-ms, default-check-interval-ms) from
    ai.miniforge.agent.stream-watchdog.
 
    Usage:

@@ -454,6 +454,44 @@
     [:phase/gap-since-last-event-ms int?]
     [:message string?]]))
 
+(def AgentStreamStalled
+  "Schema for agent/stream-stalled event.
+
+   Emitted by the per-phase stream-gap watchdog when no agent output line
+   has been observed for longer than the configured threshold. Consumed by
+   the self-healing supervisor (resume-on-kill / failover)."
+  (with-identity
+   [:map
+      [:event/type [:= :agent/stream-stalled]]
+    [:event/id uuid?]
+    [:event/timestamp inst?]
+    [:event/version string?]
+    [:event/sequence-number int?]
+    [:workflow/id uuid?]
+    [:workflow/phase keyword?]
+    [:stream/gap-duration-ms int?]
+    [:agent/backend keyword?]
+    [:message string?]]))
+
+(def AgentSessionCaptured
+  "Schema for agent/session-captured event.
+
+   Emitted once per phase as soon as the backend handshake yields a
+   session ID. Consumed by resume-on-kill to pass the correct --resume
+   token to the relaunched backend process."
+  (with-identity
+   [:map
+      [:event/type [:= :agent/session-captured]]
+    [:event/id uuid?]
+    [:event/timestamp inst?]
+    [:event/version string?]
+    [:event/sequence-number int?]
+    [:workflow/id uuid?]
+    [:workflow/phase keyword?]
+    [:agent/backend keyword?]
+    [:agent/session-id string?]
+    [:message string?]]))
+
 ;------------------------------------------------------------------------------ Layer 3
 ;; Self-healing event schemas
 

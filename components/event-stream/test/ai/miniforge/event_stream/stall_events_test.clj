@@ -18,12 +18,15 @@
 
 (ns ai.miniforge.event-stream.stall-events-test
   "Tests for GROUP 1+4 foundation: agent-stream-stalled constructor and
-   phase-completed :phase/termination-reason extension."
+   phase-completed :phase/termination-reason extension, plus GROUP 2
+   agent-session-captured constructor."
   (:require
    [clojure.test :refer [deftest testing is]]
+   [malli.core :as m]
    [ai.miniforge.event-stream.core :as core]
    [ai.miniforge.event-stream.interface :as events-iface]
-   [ai.miniforge.event-stream.interface.events :as events]))
+   [ai.miniforge.event-stream.interface.events :as events]
+   [ai.miniforge.event-stream.schema :as schema]))
 
 ;------------------------------------------------------------------------------ Helpers
 
@@ -46,7 +49,7 @@
     (let [stream (no-op-stream)
           wf-id  (random-uuid)
           event  (core/agent-stream-stalled stream wf-id :implement 95000 :codex)]
-      (is (= :implement (:phase/id event)))
+      (is (= :implement (:workflow/phase event)))
       (is (= 95000 (:stream/gap-duration-ms event)))
       (is (= :codex (:agent/backend event)))))
 
@@ -146,7 +149,7 @@
     (let [stream (no-op-stream)
           wf-id  (random-uuid)
           event  (core/agent-session-captured stream wf-id :implement "cc-abc123" :claude-code)]
-      (is (= :implement (:phase/id event)))
+      (is (= :implement (:workflow/phase event)))
       (is (= "cc-abc123" (:agent/session-id event)))
       (is (= :claude-code (:agent/backend event)))))
 
@@ -197,7 +200,7 @@
           via-if (events/agent-stream-stalled stream wf-id :implement 90000 :codex)]
       ;; Type, phase, gap, and backend must match; ids and timestamps differ
       (is (= (:event/type direct) (:event/type via-if)))
-      (is (= (:phase/id direct) (:phase/id via-if)))
+      (is (= (:workflow/phase direct) (:workflow/phase via-if)))
       (is (= (:stream/gap-duration-ms direct) (:stream/gap-duration-ms via-if)))
       (is (= (:agent/backend direct) (:agent/backend via-if)))))
 
@@ -213,6 +216,25 @@
           direct (core/agent-session-captured stream wf-id :implement "sess-re" :claude-code)
           via-if (events/agent-session-captured stream wf-id :implement "sess-re" :claude-code)]
       (is (= (:event/type direct) (:event/type via-if)))
-      (is (= (:phase/id direct) (:phase/id via-if)))
+      (is (= (:workflow/phase direct) (:workflow/phase via-if)))
       (is (= (:agent/session-id direct) (:agent/session-id via-if)))
       (is (= (:agent/backend direct) (:agent/backend via-if))))))
+
+;------------------------------------------------------------------------------ Malli schema validation
+
+(deftest agent-stream-stalled-validates-against-schema-test
+  (testing "constructed event satisfies schema/AgentStreamStalled"
+    (let [stream (no-op-stream)
+          event  (core/agent-stream-stalled stream (random-uuid) :implement 95000 :codex)]
+      (is (m/validate schema/AgentStreamStalled event)
+          (str "validation errors: "
+               (pr-str (m/explain schema/AgentStreamStalled event)))))))
+
+(deftest agent-session-captured-validates-against-schema-test
+  (testing "constructed event satisfies schema/AgentSessionCaptured"
+    (let [stream (no-op-stream)
+          event  (core/agent-session-captured stream (random-uuid) :implement
+                                              "cc-abc123" :claude-code)]
+      (is (m/validate schema/AgentSessionCaptured event)
+          (str "validation errors: "
+               (pr-str (m/explain schema/AgentSessionCaptured event)))))))

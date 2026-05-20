@@ -30,14 +30,17 @@
 
 (defn- make-test-watchdog
   "Merge caller opts over safe defaults. Uses fast check-interval-ms so
-   fire-on-threshold tests complete quickly."
+   fire-on-threshold tests complete quickly.
+
+   `:workflow-id` defaults to a random UUID (matches production usage and
+   the `:workflow/id uuid?` constraint in the event-stream schemas)."
   [opts]
   (merge {:threshold-ms      200
           :check-interval-ms 50         ;; fast checks for test speed
           :phase-id          :test-phase
           :backend           :mock
           :event-stream      nil
-          :workflow-id       "wf-test"
+          :workflow-id       (random-uuid)
           :kill-fn           (fn [])}
          opts))
 
@@ -129,7 +132,7 @@
 (deftest create-watchdog-uses-default-threshold-when-omitted
   (testing "omitting :threshold-ms falls back to default-gap-threshold-ms"
     (let [wd (sut/create-watchdog {:phase-id :x :backend :y
-                                   :event-stream nil :workflow-id "w"
+                                   :event-stream nil :workflow-id (random-uuid)
                                    :kill-fn (fn [])})]
       (try
         (is (= sut/default-gap-threshold-ms (:threshold-ms wd)))
@@ -366,7 +369,7 @@
                         {:event-stream mock-stream
                          :phase-id     :implement
                          :backend      :claude-code
-                         :workflow-id  "wf-session-test"}))]
+                         :workflow-id  (random-uuid)}))]
       (try
         (sut/capture-session-id! wd {:session_id "cc-emit-test-session"})
         ;; Atom store is synchronous; event emission is also synchronous.
@@ -377,7 +380,7 @@
         (let [evt (first @published)]
           (is (= :agent/session-captured (:event/type evt)))
           (is (= "cc-emit-test-session" (:agent/session-id evt)))
-          (is (= :implement (:phase/id evt)))
+          (is (= :implement (:workflow/phase evt)))
           (is (= :claude-code (:agent/backend evt))))
         (finally
           (sut/stop! wd))))))
@@ -392,7 +395,7 @@
                         {:event-stream mock-stream
                          :phase-id     :implement
                          :backend      :claude-code
-                         :workflow-id  "wf-idempotent-test"}))]
+                         :workflow-id  (random-uuid)}))]
       (try
         (sut/capture-session-id! wd {:session_id "once-only-session"})
         (sut/capture-session-id! wd {:session_id "second-call-ignored"})
