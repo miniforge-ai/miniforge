@@ -394,7 +394,7 @@
         #:rule{:title
                "Localization — every emitted string flows through a catalog; user-facing strings into a user locale (en-US, etc.), developer-facing strings into the system locale",
                :agent-behavior
-               "1. Every string literal in code that gets emitted is a violation —\n2. When adding a new emitted string, decide audience first:\n   - Will any user (operator dashboard counts) see it? → user locale",
+               "1. Every emitted string must flow through a catalog; do not introduce raw emitted string literals in code.\n2. When adding a new emitted string, decide audience first:\n   - Will any user (for example, operator dashboard counts) see it? -> user locale.\n   - Is it only for developers/operators in logs, diagnostics, or internal tooling? -> system locale.\n3. Add the string to the appropriate catalog and emit it by key/lookup rather than inline text.\n4. Keep user-facing and developer-facing messages separate; do not reuse one message across both audiences if the locale target differs.\n5. Treat missing catalog entries or bypassing localization for emitted text as a violation.",
                :enforcement
                {:action :warn,
                 :message
