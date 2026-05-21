@@ -472,9 +472,26 @@
 ;------------------------------------------------------------------------------ Layer 3
 ;; Event constructors (N3 compliant)
 
-(defn workflow-started [stream workflow-id & [spec]]
-  (-> (create-envelope stream :workflow/started workflow-id "Workflow started")
-      (cond-> spec (assoc :workflow/spec spec))))
+(defn workflow-started
+  "Build a :workflow/started envelope. Variadic to preserve the legacy
+   2/3-arg call shape used across the workspace.
+
+   Options (4-arg / opts-map form):
+
+   - `:routing/trigger-event-id` — N5-delta-4 §4.3 envelope addition. When
+     present, the automation-edge-correlator maps the handler workflow
+     back to its originating routing trigger via this id (explicit-id
+     path, §3.5 case 1). Absent on operator-initiated workflows; the
+     correlator's heuristic-fallback (§3.5 case 2) covers absence."
+  ([stream workflow-id]
+   (workflow-started stream workflow-id nil nil))
+  ([stream workflow-id spec]
+   (workflow-started stream workflow-id spec nil))
+  ([stream workflow-id spec opts]
+   (let [trigger-event-id (:routing/trigger-event-id opts)]
+     (cond-> (create-envelope stream :workflow/started workflow-id "Workflow started")
+       spec             (assoc :workflow/spec spec)
+       trigger-event-id (assoc :routing/trigger-event-id trigger-event-id)))))
 
 (defn phase-started [stream workflow-id phase & [context]]
   (-> (create-envelope stream :workflow/phase-started workflow-id

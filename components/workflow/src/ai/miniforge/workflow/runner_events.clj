@@ -261,7 +261,12 @@
 ;; Lifecycle event publishers
 
 (defn publish-workflow-started!
-  "Publish workflow started event."
+  "Publish workflow started event.
+
+   When `context` carries `:routing/trigger-event-id` (set by callers that
+   know which routing trigger fired this workflow — N5-delta-4 §4.3), the
+   field is threaded onto the emitted envelope so the
+   automation-edge-correlator can correlate via the explicit-id path."
   [event-stream context]
   (when (dispatchable-event-stream? event-stream)
     (try
@@ -269,7 +274,9 @@
                       (merge (es/workflow-started event-stream
                                                   (:execution/id context)
                                                   (select-keys (:execution/workflow context)
-                                                               [:workflow/id :workflow/version]))
+                                                               [:workflow/id :workflow/version])
+                                                  {:routing/trigger-event-id
+                                                   (:routing/trigger-event-id context)})
                              (workflow-run-fields context :running initial-phase)))
       (catch Exception e
         (println (messages/t :warn/publish-started {:error (ex-message e)}))))))

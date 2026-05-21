@@ -196,7 +196,8 @@
 (defn create-workflow-context [{:keys [callbacks artifact-store event-stream workflow-id
                                        workflow-type workflow-version llm-client quiet
                                        spec-title control-state skip-lifecycle-events
-                                       execution-opts source-dir]}]
+                                       execution-opts source-dir
+                                       routing-trigger-event-id]}]
   (let [on-chunk (es/create-streaming-callback event-stream workflow-id :agent
                                                {:print? (not quiet) :quiet? quiet})
         source-root (source-root-path source-dir)
@@ -207,7 +208,12 @@
     (es/publish! event-stream
                  (es/workflow-started event-stream workflow-id
                                       {:name (or spec-title (name workflow-type))
-                                       :version workflow-version}))
+                                       :version workflow-version}
+                                      ;; N15-4: thread the routing-trigger-event-id when the
+                                      ;; caller (an external listener invoking the CLI, a
+                                      ;; primer-driven resume, an in-process dispatcher) named
+                                      ;; the routing trigger that fired this workflow.
+                                      {:routing/trigger-event-id routing-trigger-event-id}))
     (cond-> callbacks
       llm-client (assoc :llm-backend llm-client)
       artifact-store (assoc :artifact-store artifact-store)
