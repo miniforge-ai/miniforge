@@ -1397,6 +1397,70 @@
                        (str "Knowledge promotion failed: " (ex-message error)))
       (assoc :knowledge/error (ex-message error))))
 
+;------------------------------------------------------------------------------ Layer 9
+;; Routing trigger events (N5-delta-4 §4.2)
+;;
+;; The automation-edge-correlator classifies these via
+;; `triggers/classify-trigger` and opens `:observed` AutomationEdge entries.
+;; `:workflow/id` is intentionally nil on these envelopes — routing
+;; triggers are PR-scoped, not workflow-scoped; the handler workflow's
+;; `:workflow/started` (with `:routing/trigger-event-id` per N15-4) is
+;; what brings the workflow id into scope on the correlator side.
+
+(defn pr-monitor-review-comments-arrived
+  "Emit when the GitHub webhook (or polling fallback) reports new review
+   comments on a PR Miniforge owns (N5-delta-4 §4.2.1).
+
+   `:comments/agent-session-id`, when supplied, names the agent owning
+   the PR per the PR↔agent index (AA-2). Omit when no session is
+   known — the correlator's affected-agent-session-ids vector goes
+   empty and surfaces a warn log on the consumer side."
+  ([stream repo number comments-count]
+   (pr-monitor-review-comments-arrived stream repo number comments-count nil))
+  ([stream repo number comments-count agent-session-id]
+   (cond-> (-> (create-envelope stream :pr-monitor/review-comments-arrived nil
+                                (str "Review comments on " repo "#" number
+                                     " (" comments-count ")"))
+               (assoc :pr/repo repo
+                      :pr/number number
+                      :comments/count comments-count))
+     agent-session-id (assoc :comments/agent-session-id agent-session-id))))
+
+(defn pr-monitor-ci-failed
+  "Emit when a CI status transitions to a non-success terminal state on a
+   PR Miniforge owns (N5-delta-4 §4.2.2).
+
+   `conclusion` is an open keyword — known values: `:failure`,
+   `:timed-out`, `:cancelled`. Producers MAY emit additional keywords;
+   downstream consumers MUST tolerate them for forward compatibility."
+  [stream repo number check-name conclusion]
+  (-> (create-envelope stream :pr-monitor/ci-failed nil
+                       (str "CI " (name conclusion) " on "
+                            repo "#" number " — " check-name))
+      (assoc :pr/repo repo
+             :pr/number number
+             :ci/check-name check-name
+             :ci/conclusion conclusion)))
+
+(defn standards-review-posted
+  "Emit when a standards-review comment lands on a PR (N5-delta-4 §4.2.3).
+
+   `severity` is an open keyword — known values: `:advisory`, `:blocking`.
+   `affected-workflow-run-id`, when supplied, names the workflow the
+   reviewer's comment scopes; the correlator maps this through a
+   workflow→agent index when one is available (§3.4)."
+  ([stream repo number severity]
+   (standards-review-posted stream repo number severity nil))
+  ([stream repo number severity affected-workflow-run-id]
+   (cond-> (-> (create-envelope stream :standards-review/posted nil
+                                (str "Standards review " (name severity)
+                                     " on " repo "#" number))
+               (assoc :pr/repo repo
+                      :pr/number number
+                      :review/severity severity))
+     affected-workflow-run-id (assoc :affected/workflow-run-id
+                                     affected-workflow-run-id))))
+
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
   ;; Create event stream

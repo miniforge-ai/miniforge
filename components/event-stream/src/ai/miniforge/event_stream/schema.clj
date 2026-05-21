@@ -771,6 +771,84 @@
     [:intervention/updated-at {:optional true} inst?]
     [:message string?]]))
 
+;; Routing trigger event schemas (N5-delta-4 §4.2)
+;;
+;; Three new first-class trigger event types the automation-edge-correlator
+;; classifies into RoutingTriggerKind values. Producer mapping per N5-δ4
+;; §4.2:
+;;
+;;   :pr-monitor/review-comments-arrived  ← components/pr-lifecycle (PR webhook)
+;;   :pr-monitor/ci-failed                ← components/pr-lifecycle (CI watcher)
+;;   :standards-review/posted             ← components/standards-reviewer
+;;                                          (deferred; emission site lands when
+;;                                          the component exists)
+;;
+;; Schemas are added here so producers anywhere in the workspace can emit
+;; well-formed events the correlator picks up via
+;; `triggers/classify-trigger`. The correlator's heuristic-fallback path
+;; (§3.5 case 2) covers absence at the producer side; the explicit-id path
+;; (§3.5 case 1) needs N15-4's `:routing/trigger-event-id` on the handler
+;; workflow's `:workflow/started`.
+
+(def PrMonitorReviewCommentsArrived
+  "Schema for `:pr-monitor/review-comments-arrived` event (N5-delta-4 §4.2.1).
+
+   Emitted by `components/pr-monitor` (sub-modules in `pr-lifecycle`) when
+   the GitHub webhook (or polling fallback) reports new review comments on
+   a PR Miniforge owns. `:comments/agent-session-id`, when present, names
+   the agent owning the PR per the PR↔agent index (AA-2)."
+  (with-identity
+   [:map
+    [:event/type [:= :pr-monitor/review-comments-arrived]]
+    [:event/id uuid?]
+    [:event/timestamp inst?]
+    [:event/version string?]
+    [:event/sequence-number int?]
+    [:pr/repo string?]
+    [:pr/number int?]
+    [:comments/count int?]
+    [:comments/agent-session-id {:optional true} [:maybe uuid?]]
+    [:message string?]]))
+
+(def PrMonitorCiFailed
+  "Schema for `:pr-monitor/ci-failed` event (N5-delta-4 §4.2.2).
+
+   Emitted by `components/pr-monitor` (sub-modules in `pr-lifecycle`) when
+   a CI status transitions to a non-success terminal state. `:ci/conclusion`
+   is an open keyword — known values: `:failure`, `:timed-out`, `:cancelled`.
+   Consumers MUST tolerate additional values for forward compatibility."
+  (with-identity
+   [:map
+    [:event/type [:= :pr-monitor/ci-failed]]
+    [:event/id uuid?]
+    [:event/timestamp inst?]
+    [:event/version string?]
+    [:event/sequence-number int?]
+    [:pr/repo string?]
+    [:pr/number int?]
+    [:ci/check-name string?]
+    [:ci/conclusion keyword?]
+    [:message string?]]))
+
+(def StandardsReviewPosted
+  "Schema for `:standards-review/posted` event (N5-delta-4 §4.2.3).
+
+   Emitted by `components/standards-reviewer` when a standards-review
+   comment lands on a PR. `:review/severity` is an open keyword — known
+   values: `:advisory`, `:blocking`."
+  (with-identity
+   [:map
+    [:event/type [:= :standards-review/posted]]
+    [:event/id uuid?]
+    [:event/timestamp inst?]
+    [:event/version string?]
+    [:event/sequence-number int?]
+    [:pr/repo string?]
+    [:pr/number int?]
+    [:affected/workflow-run-id {:optional true} [:maybe uuid?]]
+    [:review/severity keyword?]
+    [:message string?]]))
+
 ;; Automation-edge correlator emission (N5-delta-4 §4.1)
 ;;
 ;; The correlator is the sole producer of this event per N5-delta-1 §3.4
