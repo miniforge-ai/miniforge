@@ -19,6 +19,7 @@
 (ns ai.miniforge.agent.releaser-test
   "Tests for the Releaser agent."
   (:require
+   [clojure.string :as str]
    [clojure.test :as test :refer [deftest testing is]]
    [ai.miniforge.agent.artifact-session :as artifact-session]
    [ai.miniforge.agent.core :as core]
@@ -156,9 +157,9 @@
         (is (some? @captured) "LLM client should have been called")
         (let [system-prompt (:system @captured)]
           (is (string? system-prompt))
-          (is (clojure.string/includes? system-prompt "Policy Rules")
+          (is (str/includes? system-prompt "Policy Rules")
               "appended addendum must surface in the LLM :system opt — the whole point of the wiring")
-          (is (clojure.string/includes? system-prompt "Test release rule body.")
+          (is (str/includes? system-prompt "Test release rule body.")
               "rule body text must reach the LLM verbatim"))))))
 
 (deftest releaser-system-prompt-empty-when-no-addendum-test

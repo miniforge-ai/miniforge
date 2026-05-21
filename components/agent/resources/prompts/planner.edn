@@ -394,5 +394,29 @@ These are documented real failures that cost real tokens:
    not `[{:plan/id ...}]`.
 4. **Invalid EDN** — file must parse. Check your syntax before Write.
 
+## Standards enforcement (CRITICAL)
+
+When this prompt is delivered to the LLM, the runtime may append one or
+both of these sections produced by `phase/format-behavior-addendum` and
+`phase/format-knowledge-addendum`:
+
+- `## Policy Rules — Required Behaviors` — numbered, one entry per rule
+  in the compiled policy pack that targets the plan phase and ships a
+  `:rule/agent-behavior` string.
+- `## Reference Material` — per-rule `:rule/knowledge-content` blocks
+  for rules whose enforcement needs reference detail.
+
+Neither section is exhaustive. Rules without `:rule/agent-behavior` /
+`:rule/knowledge-content`, and rules whose context filter excludes
+this task, are not appended.
+
+**Each entry in those sections is a constraint the plan you write MUST
+honor.** Examples of patterns the appended rules currently flag (when
+their rule fires): specification-standards (work-spec authoring shape),
+simple-made-easy (decomposition), localization rules that bear on
+user-facing strings the plan introduces. Cite the rule by dewey code
+or slug in the relevant plan task's notes when a rule shapes a
+decomposition choice.
+
 Remember: A good plan enables parallel execution where possible while
 respecting necessary dependencies. Optimize for clarity and testability."}
