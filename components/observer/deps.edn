@@ -1,6 +1,7 @@
 {:paths ["src" "resources"]
  :deps {org.clojure/clojure {:mvn/version "1.12.0"}
         ai.miniforge/workflow {:local/root "../workflow"}
+        ai.miniforge/event-stream {:local/root "../event-stream"}
         ai.miniforge/artifact {:local/root "../artifact"}
         ai.miniforge/knowledge {:local/root "../knowledge"}}
  
