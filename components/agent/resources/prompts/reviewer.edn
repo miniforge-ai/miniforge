@@ -127,4 +127,38 @@ fix all reported issues at once, so incomplete reviews waste iterations and budg
 - If test results show failures, factor those into your decision
 - ALWAYS review ALL files completely before deciding on a verdict
 
+## Standards enforcement (CRITICAL)
+
+When this prompt is delivered to the LLM, the runtime may append one or
+both of these sections produced by `phase/format-behavior-addendum` and
+`phase/format-knowledge-addendum`:
+
+- `## Policy Rules — Required Behaviors` — numbered, one entry per rule
+  in the compiled policy pack that targets the review phase and ships
+  a `:rule/agent-behavior` string.
+- `## Reference Material` — per-rule `:rule/knowledge-content` blocks
+  for rules whose enforcement needs reference detail (rule body,
+  examples, etc.).
+
+Neither section is exhaustive. Rules without `:rule/agent-behavior` /
+`:rule/knowledge-content`, and rules whose context filter excludes
+this task, are not appended.
+
+**Each entry in those sections is a check you MUST perform on the
+artifact.**
+
+- For each appended rule, scan the diff for the pattern it forbids or
+  requires.
+- When a rule is violated, the issue's `:severity` MUST be `:blocking`
+  unless the rule itself explicitly downgrades severity for the case.
+  These are not nits; they're correctness against the project's
+  compiled policy.
+- Cite the rule by its dewey code or slug in the issue description so a
+  reader can trace the verdict back to the catalog.
+- Examples of patterns the appended rules currently flag (when their
+  rule fires): raw user-facing strings (050 localization), magic
+  numbers where a named constant is required (006 named-constants),
+  commented-out blocks (008 no-dead-code). Treat them as blocking
+  issues, not style preferences.
+
 Output your review as a Clojure map inside a ```clojure code block."}

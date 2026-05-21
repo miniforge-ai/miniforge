@@ -132,6 +132,16 @@
 
 (defn- build-review-task
   "Build the task map for the reviewer agent from execution context.
+
+   The reviewer now receives the same `:task/behavior-addendum` that
+   implement does — produced by `phase/load-and-filter-behaviors`
+   from rules that target `:review` AND carry `:rule/agent-behavior`
+   or `:rule/knowledge-content` (rules with neither field, or whose
+   context filter excludes the current task, are not appended). This
+   closes the gap where reviewer was applying generic 'is this good?'
+   judgment instead of checking against the rules the standards pack
+   surfaces for review-phase consumers.
+
    Returns {:task task-map :rules-manifest manifest-or-nil}."
   [ctx]
   (let [input (get-in ctx [:execution/input])
@@ -140,6 +150,8 @@
         {:keys [formatted manifest]} (kb-helpers/inject-with-manifest
                                        (:knowledge-store ctx) :reviewer (get input :tags []))
         artifact (resolve-implement-artifact implement-phase-result ctx)
+        behavior-addendum (phase/load-and-filter-behaviors
+                            :review {:task {:task/intent (:intent input)}})
         task (cond-> {:task/id (random-uuid)
                       :task/type :review
                       :task/description (:description input)
@@ -149,7 +161,9 @@
                       :task/artifact artifact
                       :task/tests (build-verify-review-input verify-phase-result)}
                formatted
-               (assoc :task/knowledge-context formatted))]
+               (assoc :task/knowledge-context formatted)
+               behavior-addendum
+               (assoc :task/behavior-addendum behavior-addendum))]
     {:task task
      :rules-manifest manifest}))
 

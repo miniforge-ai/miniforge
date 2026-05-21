@@ -859,3 +859,69 @@
                   "Stagnation threshold must be ≥ min-stagnation-threshold-ms — Opus needs room for the pre-first-chunk think on heavy review prompts (8+ files, 50–100k tokens)")
               (is (>= (:max-total-ms state) min-total-budget-ms)
                   "Total budget must be ≥ min-total-budget-ms — covers heavy reviews"))))))))
+
+(deftest reviewer-system-prompt-includes-behavior-addendum-test
+  ;; Pins the wiring added so the reviewer agent actually sees the
+  ;; standards rules that `phase/load-and-filter-behaviors` produces
+  ;; for the :review phase. Without this, every rule violation we've
+  ;; added (localization 050, named-constants 006, no-dead-code 008,
+  ;; result-handling 003, …) stays invisible to the reviewer and
+  ;; slips past review the same way the 2026-05-20 #940 / #941
+  ;; localization gaps did.
+  (testing ":task/behavior-addendum on the input is appended to the LLM :system opt"
+    (let [captured (atom nil)
+          parseable-review (str "```clojure\n"
+                                "{:review/decision :approved\n"
+                                " :review/summary \"ok\"}\n"
+                                "```")
+          addendum "\n\n## Policy Rules — Required Behaviors\n\n1. Test rule body."]
+      (with-redefs [model/resolve-llm-client-for-role
+                    (fn [_role provided] provided)
+                    llm/chat (fn [_client _prompt opts]
+                               (reset! captured opts)
+                               {:success? true
+                                :content parseable-review
+                                :tokens 1})
+                    llm/success? :success?
+                    llm/get-content :content]
+        (let [reviewer (reviewer/create-reviewer
+                        {:llm-backend ::mock-backend
+                         :gates       []})
+              input    (assoc sample-artifact
+                              :task/behavior-addendum addendum)]
+          (core/invoke reviewer {} input)
+          (is (some? @captured) "LLM client should have been called")
+          (let [system-prompt (:system @captured)]
+            (is (string? system-prompt))
+            (is (clojure.string/includes? system-prompt "Policy Rules")
+                "appended addendum must surface in the LLM :system opt — the whole point of the wiring")
+            (is (clojure.string/includes? system-prompt "Test rule body.")
+                "rule body text must reach the LLM verbatim")))))))
+
+(deftest reviewer-system-prompt-empty-when-no-addendum-test
+  (testing "absent :task/behavior-addendum is treated as empty — no nil concat"
+    (let [captured (atom nil)
+          parseable-review (str "```clojure\n"
+                                "{:review/decision :approved\n"
+                                " :review/summary \"ok\"}\n"
+                                "```")]
+      (with-redefs [model/resolve-llm-client-for-role
+                    (fn [_role provided] provided)
+                    llm/chat (fn [_client _prompt opts]
+                               (reset! captured opts)
+                               {:success? true
+                                :content parseable-review
+                                :tokens 1})
+                    llm/success? :success?
+                    llm/get-content :content]
+        (let [reviewer (reviewer/create-reviewer
+                        {:llm-backend ::mock-backend
+                         :gates       []})]
+          (core/invoke reviewer {} sample-artifact)
+          (is (some? @captured))
+          (let [system-prompt (:system @captured)]
+            (is (string? system-prompt)
+                ":system must always be a string (default \"\" when no addendum)")
+            ;; The base prompt is unchanged when no addendum is appended;
+            ;; assertion is just that we didn't NPE or get nil.
+            (is (pos? (count system-prompt)))))))))
