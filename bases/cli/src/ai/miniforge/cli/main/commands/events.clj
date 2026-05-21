@@ -38,6 +38,7 @@
    [ai.miniforge.cli.app-config :as app-config]
    [ai.miniforge.cli.main.commands.shared :as shared]
    [ai.miniforge.cli.main.display :as display]
+   [ai.miniforge.cli.messages :as messages]
    [ai.miniforge.event-stream.interface :as es]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -78,13 +79,12 @@
     (cond
       (str/blank? workflow-id)
       {:status :error
-       :message "Workflow id is required."
+       :message (messages/t :events/workflow-id-required)
        :exit-code 1}
 
       (not (fs/exists? base-dir))
       {:status    :error
-       :message   (str "Events directory not found: " base-dir
-                       "\nRun at least one workflow first to create it.")
+       :message   (messages/t :events/dir-not-found {:base-dir (str base-dir)})
        :exit-code 1}
 
       :else
@@ -93,8 +93,9 @@
         (cond
           (nil? events)
           {:status    :error
-           :message   (str "No events found for workflow: " wf-id-str
-                           "\nChecked layouts: archived/, live/, and flat under " base-dir)
+           :message   (messages/t :events/no-events
+                                  {:workflow-id wf-id-str
+                                   :base-dir    (str base-dir)})
            :exit-code 1}
 
           raw
@@ -105,11 +106,11 @@
           (let [rendered (es/render-timeline events {:gap-threshold-ms (gap-threshold-ms gap-threshold)})]
             {:status :ok
              :output (if (str/blank? rendered)
-                       (str "(no renderable events for workflow " wf-id-str ")")
+                       (messages/t :events/no-renderable-events {:workflow-id wf-id-str})
                        rendered)}))))
     (catch Exception e
       {:status :error
-       :message (str "Unable to read workflow events: " (.getMessage e))
+       :message (messages/t :events/read-failed {:error (.getMessage e)})
        :exit-code 1})))
 
 ;------------------------------------------------------------------------------ Layer 3
@@ -128,10 +129,7 @@
   (let [{:keys [workflow-id gap-threshold raw]} opts]
     (if (str/blank? workflow-id)
       (do
-        (display/print-error
-         (str "Usage: miniforge events show <workflow-id>\n"
-              "  --gap-threshold <seconds>   Gap detection threshold (default: 60)\n"
-              "  --raw                       Dump parsed events as EDN (debug)"))
+        (display/print-error (messages/t :events/usage))
         (shared/exit! 1))
       (let [events-dir (app-config/events-dir)
             result     (events-show events-dir workflow-id
