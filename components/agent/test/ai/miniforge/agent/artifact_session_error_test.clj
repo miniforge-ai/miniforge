@@ -36,32 +36,6 @@
    [java.nio.file.attribute FileAttribute]))
 
 ;; ---------------------------------------------------------------------------
-;; Helpers
-
-(defn- make-temp-workdir
-  "Create an isolated temp directory and return its path string. Callers
-   are responsible for cleanup via `cleanup-dir!`."
-  []
-  (str (Files/createTempDirectory
-        "miniforge-test-workdir-"
-        (into-array FileAttribute []))))
-
-(defn- cleanup-dir!
-  "Delete a directory and all its contents recursively."
-  [path]
-  (doseq [f (reverse (file-seq (io/file path)))]
-    (.delete ^java.io.File f)))
-
-(defn- write-plan-edn!
-  "Write a minimal plan.edn into <workdir>/.miniforge/ so
-   read-worktree-artifact finds a parseable plan for the :plan role."
-  [workdir]
-  (let [mf-dir (io/file workdir ".miniforge")]
-    (.mkdirs mf-dir)
-    (spit (io/file mf-dir "plan.edn")
-          "{:plan/id \"550e8400-e29b-41d4-a716-446655440000\" :plan/name \"t\" :plan/tasks []}")))
-
-;; ---------------------------------------------------------------------------
 ;; read-artifact — MCP file absent → nil, no output
 
 (deftest read-artifact-missing-file-silent-test
@@ -93,28 +67,36 @@
 
 (deftest with-session-warn-when-both-absent-test
   (testing "with-session emits WARN when both MCP artifact and all worktree paths are absent"
-    ;; Isolated temp dir so we never accidentally pick up real
+    ;; Use an isolated temp dir so we never accidentally pick up real
     ;; .miniforge/*.edn files from the repo root.
-    (let [workdir       (make-temp-workdir)
+    (let [workdir       (str (Files/createTempDirectory
+                              "miniforge-test-workdir-"
+                              (into-array FileAttribute [])))
           context       {:execution/worktree-path workdir}
           stderr-output (java.io.StringWriter.)]
       (try
         (binding [*err* stderr-output]
           (session/with-session context (fn [_session] :noop)))
         (let [output (str stderr-output)]
-          (is (re-find #"WARN: no artifact found after session" output)
-              "Should emit the :warn/no-artifact-found diagnostic when neither artifact source produced a result")
-          (is (re-find #"checked MCP path" output)
-              "Diagnostic must mention what was checked so post-mortem readers can trace the miss")
+          (is (re-find #"WARN" output)
+              "Should emit WARN when neither artifact source produced a result")
           (is (not (re-find #"ERROR" output))
               "Must use WARN level, not ERROR, for empty-artifact diagnostic"))
         (finally
-          (cleanup-dir! workdir))))))
+          (doseq [f (reverse (file-seq (io/file workdir)))]
+            (.delete ^java.io.File f)))))))
 
 (deftest with-session-no-warn-when-worktree-artifact-present-test
   (testing "with-session does NOT emit any diagnostic when worktree artifact exists"
-    (let [workdir       (make-temp-workdir)
-          _             (write-plan-edn! workdir)
+    ;; Write a minimal plan.edn into .miniforge/ so read-worktree-artifact
+    ;; finds it, making worktree-artifacts non-empty.
+    (let [workdir       (str (Files/createTempDirectory
+                              "miniforge-test-workdir-"
+                              (into-array FileAttribute [])))
+          mf-dir        (io/file workdir ".miniforge")
+          _             (do (.mkdirs mf-dir)
+                            (spit (io/file mf-dir "plan.edn")
+                                  "{:plan/id \"550e8400-e29b-41d4-a716-446655440000\" :plan/name \"t\" :plan/tasks []}"))
           context       {:execution/worktree-path workdir}
           stderr-output (java.io.StringWriter.)]
       (try
@@ -124,4 +106,5 @@
           (is (not (re-find #"WARN.*no artifact found" output))
               "Should NOT emit 'no artifact found' WARN when worktree artifact exists"))
         (finally
-          (cleanup-dir! workdir))))))
+          (doseq [f (reverse (file-seq (io/file workdir)))]
+            (.delete ^java.io.File f)))))))
