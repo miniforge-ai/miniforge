@@ -3,7 +3,7 @@
  :spec/description
  "Successful dogfood runs can still print `ERROR: artifact file not found ... artifact.edn -- MCP tool was likely not called by the LLM` after the planner writes `.miniforge/plan.edn` and the runtime accepts it. The warning is misleading: the expected worktree-promoted plan artifact exists, the plan phase succeeds, and the workflow can complete. Fix the artifact retrieval/reporting path so missing optional MCP artifact files do not render as terminal errors when a valid phase artifact was found."
 
- :spec/intent {:type :fix
+ :spec/intent {:type :bugfix
                :scope ["components/agent/src"
                        "components/workflow/src"
                        "bases/cli/src"
