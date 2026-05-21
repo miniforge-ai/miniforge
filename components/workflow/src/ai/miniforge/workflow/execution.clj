@@ -36,33 +36,48 @@
 
 ;------------------------------------------------------------------------------ Layer 0: Atomic operations
 
+(defn- enter-error-record
+  "Build the canonical entry recorded against `:execution/errors` for a
+   phase-enter exception. Used uniformly whether or not the interceptor
+   defines its own `:error` handler, so the `workflow/failed` event
+   always carries the underlying exception message + ex-data."
+  [phase-name ex anom]
+  {:type :phase-error
+   :phase phase-name
+   :message (ex-message ex)
+   :data (ex-data ex)
+   :anomaly anom})
+
 (defn execute-enter
   "Execute the :enter function of an interceptor.
 
-   Returns updated context."
+   Returns updated context. When the enter function throws, the
+   exception's message + ex-data are appended to `:execution/errors`
+   so the eventual `workflow/failed` event surfaces the failure. This
+   accumulator is populated even when the interceptor defines its own
+   `:error` handler (the handler still runs to set `[:phase :error]`,
+   but the workflow-level error list is the authoritative source for
+   downstream consumers such as the CLI and bridge surfaces)."
   [interceptor ctx]
   (let [phase-name (get-in interceptor [:config :phase])]
     (if-let [enter-fn (:enter interceptor)]
       (try
         (enter-fn ctx)
         (catch Exception ex
-          (if-let [error-fn (:error interceptor)]
-            (error-fn ctx ex)
-            (let [anom (response/from-exception ex)]
-              (-> ctx
-                  (context/transition-to-failed)
-                  (update :execution/errors conj
-                          {:type :phase-error
-                           :phase phase-name
-                           :message (ex-message ex)
-                           :data (ex-data ex)
-                           :anomaly anom})
-                  (update :execution/response-chain
-                          response/add-failure phase-name
-                          (assoc anom :anomaly/category :anomalies.phase/enter-failed
-                                      :anomaly/phase phase-name)
-                          {:error (ex-message ex)
-                           :data (ex-data ex)}))))))
+          (let [anom (response/from-exception ex)
+                error-record (enter-error-record phase-name ex anom)
+                ctx-with-error (-> ctx
+                                   (update :execution/errors conj error-record)
+                                   (update :execution/response-chain
+                                           response/add-failure phase-name
+                                           (assoc anom
+                                                  :anomaly/category :anomalies.phase/enter-failed
+                                                  :anomaly/phase phase-name)
+                                           {:error (ex-message ex)
+                                            :data (ex-data ex)}))]
+            (if-let [error-fn (:error interceptor)]
+              (error-fn ctx-with-error ex)
+              (context/transition-to-failed ctx-with-error)))))
       ctx)))
 
 (defn execute-leave
