@@ -131,7 +131,11 @@
   (when (string? s)
     (if (<= (count s) n)
       s
-      (str (subs s 0 (dec n)) (messages/t :timeline/truncation-suffix)))))
+      (let [suffix        (str (messages/t :timeline/truncation-suffix))
+            suffix-length (min (count suffix) (max 0 n))
+            prefix-length (max 0 (- n suffix-length))]
+        (str (subs s 0 prefix-length)
+             (subs suffix 0 suffix-length))))))
 
 (defn- args-summary
   "Extract the args preview from an event, truncated to `args-preview-length` chars.
