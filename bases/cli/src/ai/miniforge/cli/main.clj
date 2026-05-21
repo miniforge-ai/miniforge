@@ -46,6 +46,8 @@
    [ai.miniforge.cli.app-config :as app-config]
    [ai.miniforge.cli.messages :as messages]
    [ai.miniforge.cli.workflow-runner :as workflow-runner]
+   [ai.miniforge.cli.workflow-runner.help :as wr-help]
+   [ai.miniforge.cli.workflow-runner.help.registry :as wr-help-registry]
    [ai.miniforge.cli.config :as config]
    [ai.miniforge.cli.observability :as observability]
    [ai.miniforge.cli.main.display :as display]
@@ -547,48 +549,54 @@
     :fn tui-cmd
     :spec {:debug {:coerce :boolean :alias :d :default false}}}
 
-   ;; Workflow commands
+   ;; Workflow parent — `mf workflow --help` / `mf workflow` lists the
+   ;; group's subcommands with their one-line summaries.
+   {:cmds ["workflow"]
+    :fn (wr-help/group-handler wr-help-registry/workflow-group-help)}
+
+   ;; Workflow commands (each subcommand carries a `--help` / `-h`
+   ;; flag wired through `wr-help/handler-with-help`; the spec from
+   ;; `wr-help-registry/subcommands` is the single source of truth for
+   ;; the auto-generated flag table).
    {:cmds ["workflow" "run"]
-    :fn workflow-run-cmd
+    :fn (wr-help/handler-with-help :workflow-run workflow-run-cmd)
     :args->opts [:workflow-id]
-    :spec {:version {:coerce :string :alias :v :default "latest"}
-           :input {:alias :i}
-           :input-json {}
-           :output {:coerce :keyword :alias :o :default :pretty}
-           :quiet {:coerce :boolean :alias :q}
-           :dashboard-url {:coerce :string :alias :d}}}
+    :spec (wr-help-registry/spec-for :workflow-run)}
 
    {:cmds ["workflow" "list"]
-    :fn workflow-list-cmd}
+    :fn (wr-help/handler-with-help :workflow-list workflow-list-cmd)
+    :spec (wr-help-registry/spec-for :workflow-list)}
 
    ;; Workflow subcommands — spec-driven execution and lifecycle (N5)
    {:cmds ["workflow" "execute"]
-    :fn workflow-execute-cmd
+    :fn (wr-help/handler-with-help :workflow-execute workflow-execute-cmd)
     :args->opts [:spec]
-    :spec {:worktree       {:alias :w}
-           :backend        {:coerce :keyword :alias :b}
-           :execution-mode {:coerce :keyword :alias :m}
-           :quiet          {:coerce :boolean :alias :q}}}
+    :spec (wr-help-registry/spec-for :workflow-execute)}
 
    {:cmds ["workflow" "status"]
-    :fn workflow-status-cmd
-    :args->opts [:id]}
+    :fn (wr-help/handler-with-help :workflow-status workflow-status-cmd)
+    :args->opts [:id]
+    :spec (wr-help-registry/spec-for :workflow-status)}
 
    {:cmds ["workflow" "cancel"]
-    :fn workflow-cancel-cmd
-    :args->opts [:id]}
+    :fn (wr-help/handler-with-help :workflow-cancel workflow-cancel-cmd)
+    :args->opts [:id]
+    :spec (wr-help-registry/spec-for :workflow-cancel)}
+
+   ;; Chain parent — `mf chain --help` / `mf chain` lists the group's
+   ;; subcommands with their one-line summaries.
+   {:cmds ["chain"]
+    :fn (wr-help/group-handler wr-help-registry/chain-group-help)}
 
    ;; Chain commands
    {:cmds ["chain" "run"]
-    :fn chain-run-cmd
+    :fn (wr-help/handler-with-help :chain-run chain-run-cmd)
     :args->opts [:chain-id]
-    :spec {:version {:coerce :string :alias :v :default "latest"}
-           :spec {:alias :s}
-           :input-json {}
-           :quiet {:coerce :boolean :alias :q}}}
+    :spec (wr-help-registry/spec-for :chain-run)}
 
    {:cmds ["chain" "list"]
-    :fn chain-list-cmd}
+    :fn (wr-help/handler-with-help :chain-list chain-list-cmd)
+    :spec (wr-help-registry/spec-for :chain-list)}
 
    ;; Config subcommands
    {:cmds ["config"] :fn help-cmd}
