@@ -730,7 +730,14 @@
                   max-turns (get @reviewer-prompt-data
                                  :prompt/max-turns
                                  default-reviewer-max-turns)
-                  base-opts (cond-> {:system @reviewer-system-prompt
+                  ;; Mirror implementer's build-effective-system-prompt:
+                  ;; append the phase-filtered standards addendum so the
+                  ;; reviewer sees the rules it should be checking
+                  ;; against. Empty string when no addendum is present
+                  ;; (legacy callers / no rules apply to :review).
+                  effective-system (str @reviewer-system-prompt
+                                        (get input :task/behavior-addendum ""))
+                  base-opts (cond-> {:system effective-system
                                      :max-turns max-turns}
                               monitor (assoc :progress-monitor monitor))
                   response (if on-chunk

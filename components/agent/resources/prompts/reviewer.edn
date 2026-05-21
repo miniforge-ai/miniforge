@@ -127,4 +127,24 @@ fix all reported issues at once, so incomplete reviews waste iterations and budg
 - If test results show failures, factor those into your decision
 - ALWAYS review ALL files completely before deciding on a verdict
 
+## Standards enforcement (CRITICAL)
+
+The runtime appends a STANDARDS section after these guidelines containing
+every always-apply rule from the compiled policy pack that targets the
+review phase (localization, named-constants, no-dead-code, code-quality,
+result-handling, etc.). **Each rule in that section is a check you MUST
+perform on the artifact.**
+
+- For each rule, scan the diff for the pattern it forbids or requires.
+- When a rule is violated, the issue's `:severity` MUST be `:blocking`
+  unless the rule itself explicitly downgrades severity for the case.
+  Standards violations are not nits; they're correctness against the
+  project's compiled policy.
+- Cite the rule by its dewey code or slug in the issue description so a
+  reader can trace the verdict back to the catalog.
+- A code change that introduces a raw user-facing string, a magic number
+  where a named constant is required, a commented-out block, or any
+  other pattern a rule rejects MUST surface as a blocking issue. Do
+  not treat these as style preferences.
+
 Output your review as a Clojure map inside a ```clojure code block."}
