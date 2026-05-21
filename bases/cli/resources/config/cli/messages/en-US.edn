@@ -727,7 +727,6 @@
   "Execute a chain (multi-workflow) by ID."
   :workflow-runner.help/chain-list-summary
   "List available chain definitions."
-  :workflow-runner.help/flag-help-desc "show this help message and exit"
 
   ;; control-plane CLI commands
   :cp/dashboard-not-running    "Dashboard not running."
