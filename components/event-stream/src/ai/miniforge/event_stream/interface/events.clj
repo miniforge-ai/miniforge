@@ -95,6 +95,11 @@
 (def pr-created core/pr-created)
 (def pr-scored core/pr-scored)
 
+;; Routing trigger event constructors (N5-delta-4 §4.2)
+(def pr-monitor-review-comments-arrived core/pr-monitor-review-comments-arrived)
+(def pr-monitor-ci-failed core/pr-monitor-ci-failed)
+(def standards-review-posted core/standards-review-posted)
+
 ;; Zettelkasten lifecycle event constructors (miniforge-fleet
 ;; Phase E.3 outbox path).
 

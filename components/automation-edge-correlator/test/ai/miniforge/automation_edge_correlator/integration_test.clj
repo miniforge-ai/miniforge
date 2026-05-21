@@ -282,3 +282,29 @@
               "Handler workflow already started — edge stays pending
                regardless of age."))
         (finally (iface/stop! handle))))))
+
+(deftest new-trigger-event-types-emit-observed-edges
+  (testing "N15-5 trigger constructors flow through the correlator and open
+            edges with the right :edge/trigger-kind."
+    (let [stream (in-memory-stream)
+          t-atom (atom (at-ms 1000))
+          handle (start-with-clock stream t-atom)]
+      (try
+        (es/publish! stream (es/pr-monitor-review-comments-arrived
+                             stream "miniforge-ai/miniforge" 999 3))
+        (es/publish! stream (es/pr-monitor-ci-failed
+                             stream "miniforge-ai/miniforge" 999 "tests" :failure))
+        (es/publish! stream (es/standards-review-posted
+                             stream "miniforge-ai/miniforge" 999 :advisory))
+        (is (await-upsert-count stream 3 500))
+        (let [edges (->> (upserts stream)
+                         (map :supervisory/entity)
+                         (sort-by :edge/trigger-kind))]
+          (is (= [:ci-failed :review-comments-arrived :standards-review-arrived]
+                 (mapv :edge/trigger-kind edges))
+              "Each new trigger event type MUST classify to its matching RoutingTriggerKind and surface as an :observed upsert. Three events in, three edges out.")
+          (is (every? #(= :observed %) (map :edge/status edges))
+              "All three open as :observed — handler signals come later.")
+          (is (every? #(seq (:edge/affected-pr-ids %)) edges)
+              "Each constructor carries :pr/repo + :pr/number; the correlator's §3.4 payload-derivation lifts a single [repo number] tuple onto :edge/affected-pr-ids."))
+        (finally (iface/stop! handle))))))

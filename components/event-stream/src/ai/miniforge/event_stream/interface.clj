@@ -133,6 +133,11 @@
 (def pr-created events/pr-created)
 (def pr-scored events/pr-scored)
 
+;; Routing trigger events (N5-delta-4 §4.2)
+(def pr-monitor-review-comments-arrived events/pr-monitor-review-comments-arrived)
+(def pr-monitor-ci-failed events/pr-monitor-ci-failed)
+(def standards-review-posted events/standards-review-posted)
+
 ;; Zettelkasten lifecycle (miniforge-fleet Phase E.3)
 (def zettel-promoted events/zettel-promoted)
 

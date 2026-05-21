@@ -556,3 +556,54 @@
                          {:dependency-id "anthropic"
                           :status "healthy"})
              (:message event))))))
+
+;------------------------------------------------------------------------------ Layer 9
+;; Routing trigger events (N5-delta-4 §4.2)
+
+(deftest pr-monitor-review-comments-arrived-test
+  (testing "without :comments/agent-session-id (shorter overload)"
+    (let [stream (no-op-stream)
+          event  (core/pr-monitor-review-comments-arrived
+                   stream "miniforge-ai/miniforge" 999 3)]
+      (is (= :pr-monitor/review-comments-arrived (:event/type event)))
+      (is (= "miniforge-ai/miniforge" (:pr/repo event)))
+      (is (= 999 (:pr/number event)))
+      (is (= 3 (:comments/count event)))
+      (is (not (contains? event :comments/agent-session-id)))))
+
+  (testing "with :comments/agent-session-id threaded onto the envelope"
+    (let [stream     (no-op-stream)
+          session-id (random-uuid)
+          event      (core/pr-monitor-review-comments-arrived
+                       stream "miniforge-ai/miniforge" 999 3 session-id)]
+      (is (= session-id (:comments/agent-session-id event))))))
+
+(deftest pr-monitor-ci-failed-test
+  (testing "carries pr/repo, pr/number, ci/check-name, ci/conclusion"
+    (let [stream (no-op-stream)
+          event  (core/pr-monitor-ci-failed stream "miniforge-ai/miniforge"
+                                            999 "tests" :failure)]
+      (is (= :pr-monitor/ci-failed (:event/type event)))
+      (is (= "miniforge-ai/miniforge" (:pr/repo event)))
+      (is (= 999 (:pr/number event)))
+      (is (= "tests" (:ci/check-name event)))
+      (is (= :failure (:ci/conclusion event))))))
+
+(deftest standards-review-posted-test
+  (testing "without :affected/workflow-run-id (shorter overload)"
+    (let [stream (no-op-stream)
+          event  (core/standards-review-posted
+                   stream "miniforge-ai/miniforge" 999 :advisory)]
+      (is (= :standards-review/posted (:event/type event)))
+      (is (= "miniforge-ai/miniforge" (:pr/repo event)))
+      (is (= 999 (:pr/number event)))
+      (is (= :advisory (:review/severity event)))
+      (is (not (contains? event :affected/workflow-run-id)))))
+
+  (testing "with :affected/workflow-run-id threaded onto the envelope"
+    (let [stream  (no-op-stream)
+          wf-id   (random-uuid)
+          event   (core/standards-review-posted
+                    stream "miniforge-ai/miniforge" 999 :blocking wf-id)]
+      (is (= wf-id (:affected/workflow-run-id event)))
+      (is (= :blocking (:review/severity event))))))
