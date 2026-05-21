@@ -117,7 +117,12 @@
     [:workflow/id uuid?]
     [:workflow/spec {:optional true} map?]
     [:workflow/intent {:optional true} map?]
-    [:routing/trigger-event-id {:optional true} [:maybe uuid?]]
+    ;; Plain `uuid?`, not `[:maybe uuid?]`: the producer-side contract
+    ;; (`core/workflow-started`) explicitly omits this key when the value
+    ;; is nil rather than emitting `{:routing/trigger-event-id nil}`. The
+    ;; envelope is therefore EITHER a real uuid or the key is absent —
+    ;; never a nil payload. Schema enforces that invariant.
+    [:routing/trigger-event-id {:optional true} uuid?]
     [:message string?]]))
 
 (def PhaseStarted
