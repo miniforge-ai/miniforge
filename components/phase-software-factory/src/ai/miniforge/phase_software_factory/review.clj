@@ -134,12 +134,13 @@
   "Build the task map for the reviewer agent from execution context.
 
    The reviewer now receives the same `:task/behavior-addendum` that
-   implement does — every `:alwaysApply: true` rule whose
-   `:rule/applies-to :phases` contains `:review` is injected into the
-   reviewer's task as a structured addendum the prompt consumes. This
+   implement does — produced by `phase/load-and-filter-behaviors`
+   from rules that target `:review` AND carry `:rule/agent-behavior`
+   or `:rule/knowledge-content` (rules with neither field, or whose
+   context filter excludes the current task, are not appended). This
    closes the gap where reviewer was applying generic 'is this good?'
-   judgment instead of checking against the compiled standards pack
-   (see `memory/project_reviewer_does_not_see_rules.md`).
+   judgment instead of checking against the rules the standards pack
+   surfaces for review-phase consumers.
 
    Returns {:task task-map :rules-manifest manifest-or-nil}."
   [ctx]
