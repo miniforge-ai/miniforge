@@ -171,6 +171,38 @@
 ;------------------------------------------------------------------------------ Layer 3
 ;; Chain event constructors
 
+(deftest workflow-started-routing-trigger-event-id-test
+  (testing "2-arg and 3-arg call shapes preserved (backward compat)"
+    (let [stream (no-op-stream)
+          wf-id  (random-uuid)
+          e2     (core/workflow-started stream wf-id)
+          e3     (core/workflow-started stream wf-id {:name "demo"})]
+      (is (= :workflow/started (:event/type e2)))
+      (is (= :workflow/started (:event/type e3)))
+      (is (= {:name "demo"} (:workflow/spec e3)))
+      (is (not (contains? e2 :routing/trigger-event-id))
+          ":routing/trigger-event-id MUST be absent on the legacy call shapes")
+      (is (not (contains? e3 :routing/trigger-event-id)))))
+
+  (testing "4-arg call shape with :routing/trigger-event-id emits the field"
+    (let [stream   (no-op-stream)
+          wf-id    (random-uuid)
+          trigger  (random-uuid)
+          event    (core/workflow-started stream wf-id nil
+                                          {:routing/trigger-event-id trigger})]
+      (is (= :workflow/started (:event/type event)))
+      (is (= trigger (:routing/trigger-event-id event))
+          "explicit routing-trigger-event-id MUST land on the envelope")))
+
+  (testing "nil :routing/trigger-event-id is treated as absent (no envelope key)"
+    (let [stream (no-op-stream)
+          wf-id  (random-uuid)
+          event  (core/workflow-started stream wf-id nil
+                                        {:routing/trigger-event-id nil})]
+      (is (not (contains? event :routing/trigger-event-id))
+          (str "nil opts value must not pollute the envelope — N5-delta-4 §4.3 "
+               "leaves the field optional/absent on operator-initiated workflows")))))
+
 (deftest chain-envelope-test
   (testing "chain-envelope uses nil workflow-id and event-type as message"
     (let [stream (no-op-stream)

@@ -80,6 +80,26 @@
   (testing "nil event-stream does not throw"
     (is (nil? (events/publish-workflow-started! nil (test-context))))))
 
+(deftest publish-workflow-started-threads-routing-trigger-event-id-test
+  (testing "context carrying :routing/trigger-event-id emits it onto the envelope"
+    (let [stream  (create-stream)
+          trigger (random-uuid)
+          ctx     (assoc (test-context) :routing/trigger-event-id trigger)]
+      (events/publish-workflow-started! stream ctx)
+      (let [ev (first-event stream)]
+        (is (= trigger (:routing/trigger-event-id ev))
+            (str "the explicit routing-trigger-event-id is the correlator's "
+                 "preferred correlation path (§3.5 case 1)")))))
+
+  (testing "context without :routing/trigger-event-id leaves the envelope key absent"
+    (let [stream (create-stream)
+          ctx    (test-context)]
+      (events/publish-workflow-started! stream ctx)
+      (let [ev (first-event stream)]
+        (is (not (contains? ev :routing/trigger-event-id))
+            (str "operator-initiated workflows omit the field; correlator falls "
+                 "back to the heuristic-correlation path (§3.5 case 2)"))))))
+
 ;------------------------------------------------------------------------------ publish-workflow-completed!
 
 (deftest publish-workflow-completed-success-entity-fields-test

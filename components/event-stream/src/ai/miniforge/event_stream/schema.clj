@@ -100,7 +100,13 @@
 ;; Workflow lifecycle event schemas
 
 (def WorkflowStarted
-  "Schema for workflow/started event."
+  "Schema for workflow/started event.
+
+   `:routing/trigger-event-id` (N5-delta-4 §4.3) is the bridge the
+   automation-edge-correlator uses to map a handler workflow back to its
+   originating routing trigger. Optional — workflows started outside the
+   routing path (operator-initiated runs, etc.) omit the field, and the
+   correlator's heuristic-fallback path (§3.5 case 2) covers the absence."
   (with-identity
    [:map
       [:event/type [:= :workflow/started]]
@@ -111,6 +117,12 @@
     [:workflow/id uuid?]
     [:workflow/spec {:optional true} map?]
     [:workflow/intent {:optional true} map?]
+    ;; Plain `uuid?`, not `[:maybe uuid?]`: the producer-side contract
+    ;; (`core/workflow-started`) explicitly omits this key when the value
+    ;; is nil rather than emitting `{:routing/trigger-event-id nil}`. The
+    ;; envelope is therefore EITHER a real uuid or the key is absent —
+    ;; never a nil payload. Schema enforces that invariant.
+    [:routing/trigger-event-id {:optional true} uuid?]
     [:message string?]]))
 
 (def PhaseStarted
