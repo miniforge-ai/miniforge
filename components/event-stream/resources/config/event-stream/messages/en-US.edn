@@ -25,6 +25,10 @@
   :timeline/no-phase            "-"
   :timeline/truncation-suffix   "…"
   :timeline/unknown-tool        "<unknown>"
+  ;; Separate key for the catch-all render path so translators don't
+  ;; have to reason about a tool-shaped label appearing in an
+  ;; event-type-shaped slot. Same visible English; distinct context.
+  :timeline/unknown-event-type  "<unknown>"
   :timeline/status-success      "success"
   :timeline/status-error        "error"
   :timeline/terminated-marker   "TERMINATED"

@@ -245,7 +245,7 @@
   [event]
   (let [ts       (format-hms (event-timestamp event))
         phase    (event-phase event)
-        ev-type  (or (event-type event) (messages/t :timeline/unknown-tool))
+        ev-type  (or (event-type event) (messages/t :timeline/unknown-event-type))
         msg      (or (:message event) "")]
     (format "%s  %s  %s  %s" ts phase (str ev-type) (truncate msg args-preview-length))))
 
