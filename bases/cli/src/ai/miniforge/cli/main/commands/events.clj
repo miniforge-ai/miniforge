@@ -71,36 +71,46 @@
      {:status :ok    :output <string>}
      {:status :error :message <string> :exit-code 1}
 
-   Pure in structure — all IO is isolated to es/read-workflow-events-by-id
+  Pure in structure — all IO is isolated to es/read-workflow-events-by-id
    which is easy to stub in tests."
   [base-dir workflow-id {:keys [gap-threshold raw]}]
-  (cond
-    (not (fs/exists? base-dir))
-    {:status    :error
-     :message   (str "Events directory not found: " base-dir
-                     "\nRun at least one workflow first to create it.")
-     :exit-code 1}
+  (try
+    (cond
+      (str/blank? workflow-id)
+      {:status :error
+       :message "Workflow id is required."
+       :exit-code 1}
 
-    :else
-    (let [wf-id-str (str workflow-id)
-          events    (es/read-workflow-events-by-id base-dir wf-id-str)]
-      (cond
-        (nil? events)
-        {:status    :error
-         :message   (str "No events found for workflow: " wf-id-str
-                         "\nChecked layouts: archived/, live/, and flat under " base-dir)
-         :exit-code 1}
+      (not (fs/exists? base-dir))
+      {:status    :error
+       :message   (str "Events directory not found: " base-dir
+                       "\nRun at least one workflow first to create it.")
+       :exit-code 1}
 
-        raw
-        {:status :ok
-         :output (with-out-str (pprint/pprint events))}
+      :else
+      (let [wf-id-str (str workflow-id)
+            events    (es/read-workflow-events-by-id base-dir wf-id-str)]
+        (cond
+          (nil? events)
+          {:status    :error
+           :message   (str "No events found for workflow: " wf-id-str
+                           "\nChecked layouts: archived/, live/, and flat under " base-dir)
+           :exit-code 1}
 
-        :else
-        (let [rendered (es/render-timeline events {:gap-threshold-ms (gap-threshold-ms gap-threshold)})]
+          raw
           {:status :ok
-           :output (if (str/blank? rendered)
-                     (str "(no renderable events for workflow " wf-id-str ")")
-                     rendered)})))))
+           :output (with-out-str (pprint/pprint events))}
+
+          :else
+          (let [rendered (es/render-timeline events {:gap-threshold-ms (gap-threshold-ms gap-threshold)})]
+            {:status :ok
+             :output (if (str/blank? rendered)
+                       (str "(no renderable events for workflow " wf-id-str ")")
+                       rendered)}))))
+    (catch Exception e
+      {:status :error
+       :message (str "Unable to read workflow events: " (.getMessage e))
+       :exit-code 1})))
 
 ;------------------------------------------------------------------------------ Layer 3
 ;; CLI command entry point

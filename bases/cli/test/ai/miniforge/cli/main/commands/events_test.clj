@@ -82,11 +82,18 @@
 (deftest events-show-returns-ok-for-valid-events
   (testing "returns :ok status with non-blank output for a normal event sequence"
     (let [result (with-redefs [es/read-workflow-events-by-id
-                               (fn [_ _] synthetic-events)]
+                               (fn [_ _] synthetic-events)
+                               es/render-timeline
+                               (fn [_ _] "rendered timeline")]
                    (sut/events-show *tmp-dir* "test-wf-abc123" {}))]
       (is (= :ok (:status result)))
-      (is (string? (:output result)))
-      (is (not (str/blank? (:output result)))))))
+      (is (= "rendered timeline" (:output result))))))
+
+(deftest events-show-errors-when-workflow-id-blank
+  (testing "pure command returns :error when workflow-id is blank"
+    (let [result (sut/events-show *tmp-dir* " " {})]
+      (is (= :error (:status result)))
+      (is (= 1 (:exit-code result))))))
 
 (deftest events-show-errors-when-base-dir-missing
   (testing "returns :error when the events base directory does not exist"
@@ -115,9 +122,28 @@
 (deftest events-show-custom-gap-threshold
   (testing "custom gap-threshold-secs is accepted without error"
     (let [result (with-redefs [es/read-workflow-events-by-id
-                               (fn [_ _] synthetic-events)]
+                               (fn [_ _] synthetic-events)
+                               es/render-timeline
+                               (fn [_ opts]
+                                 (str "gap=" (:gap-threshold-ms opts)))]
                    (sut/events-show *tmp-dir* "test-wf-abc123" {:gap-threshold 5}))]
-      (is (= :ok (:status result))))))
+      (is (= :ok (:status result)))
+      (is (= "gap=5000" (:output result))))))
+
+(deftest events-show-empty-rendered-timeline-has-fallback
+  (let [result (with-redefs [es/read-workflow-events-by-id (fn [_ _] [])
+                             es/render-timeline (fn [_ _] "")]
+                 (sut/events-show *tmp-dir* "test-wf-abc123" {}))]
+    (is (= :ok (:status result)))
+    (is (str/includes? (:output result) "no renderable events"))))
+
+(deftest events-show-reader-exception-is-error
+  (let [result (with-redefs [es/read-workflow-events-by-id
+                             (fn [_ _] (throw (ex-info "broken reader" {})))]
+                 (sut/events-show *tmp-dir* "test-wf-abc123" {}))]
+    (is (= :error (:status result)))
+    (is (= 1 (:exit-code result)))
+    (is (str/includes? (:message result) "broken reader"))))
 
 ;------------------------------------------------------------------------------ Layer 1: events-show-cmd CLI handler
 
