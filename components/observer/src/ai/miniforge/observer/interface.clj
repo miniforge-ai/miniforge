@@ -47,6 +47,7 @@
      ;; Create telemetry artifact
      (observer/create-telemetry-artifact obs artifact-store)"
   (:require
+   [ai.miniforge.observer.alert-subscriber :as alert-subscriber]
    [ai.miniforge.observer.alerts :as alerts]
    [ai.miniforge.observer.core :as core]
    [ai.miniforge.observer.protocol :as proto]))
@@ -301,3 +302,15 @@
 (def alert-fired
   "Build an :observer/alert-fired event from workflow id and fired alert map."
   alerts/alert-fired)
+
+(def start-alert-subscriber!
+  "Subscribe to workflow heartbeat/tool events and publish fired alert events."
+  alert-subscriber/start-alert-subscriber!)
+
+(def stop-alert-subscriber!
+  "Stop a handle returned by start-alert-subscriber!; nil/no-op safe."
+  alert-subscriber/stop-alert-subscriber!)
+
+(def rules-from-config
+  "Return alert rule maps from [:observability :alerts] config."
+  alert-subscriber/rules-from-config)
