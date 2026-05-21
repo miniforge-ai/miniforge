@@ -58,7 +58,7 @@
    "WARN: failed to parse capsule worktree artifact at %s — %s"
 
    :warn/no-artifact-found
-   "WARN: no artifact found at %s — mcp__context__submit was not called and no .miniforge/<role>.edn was written by the agent"
+   "WARN: no artifact found after session — checked MCP path %s and worktree path %s"
 
    :warn/artifact-parse
    "WARN: failed to parse artifact at %s — %s"
@@ -551,14 +551,18 @@
 (defn read-artifact
   "Read the artifact EDN file from a session directory.
 
+   The MCP artifact is now an optional submission channel. A missing file
+   is not an error on its own — the worktree-promoted path
+   (.miniforge/<role>.edn) is the primary channel and is checked separately
+   by run-session. Returns nil silently when the file is absent so callers
+   (result-boundary/normalize-llm-result) can handle nil gracefully.
+
    Arguments:
    - session - Session map from create-session!
 
-  Returns:
-  - Parsed artifact map with proper UUID types, or nil if not found.
-    Returns nil silently when the MCP artifact file is absent — the caller
-    (`run-session`) decides whether to emit a WARN after consulting all
-    artifact sources (MCP file and worktree promotions)."
+   Returns:
+   - Parsed artifact map with proper UUID types, or nil if not found.
+     Parse failures (malformed EDN) are still logged via :warn/artifact-parse."
   [session]
   (let [f (io/file (:artifact-path session))]
     (when (.exists f)
@@ -797,52 +801,41 @@
    `:worktree-artifacts` is a map from role keyword to parsed artifact,
    read from <workdir>/.miniforge/<role>.edn. Container-promotion pattern —
    agents write their artifact into the worktree and the runtime picks it
-   up here. Empty when no explicit worktree is available or no files were
-   written.
+   up here. Empty when no worktree is available (e.g. capsule mode) or no
+   files were written.
 
-   Scans all 5 phase roles (:plan :implement :verify :review :release)
-   regardless of the current phase — stale artifacts from previous phases
-   will appear in :worktree-artifacts but are ignored by callers that key
-   on a specific role.
-
-   The worktree scan is gated on `:explicit-workdir?` to prevent the JVM
-   CWD fallback (which may contain stale .miniforge/ artifacts from prior
-   runs) from suppressing the WARN when no real worktree was provided.
-
-   Return map includes `:artifact` (the MCP-submitted artifact EDN, or nil)
-   and `:worktree-artifacts` (map of role → artifact for worktree-promoted
-   files). A nil `:artifact` combined with an empty `:worktree-artifacts`
-   is the machine-readable signal that no artifact was produced. Callers
-   that key on phase output MUST treat this combination as a workflow fault
-   — no artifact means the implementing agent did not deliver work product."
+   Emits a WARN (not ERROR) only when BOTH the MCP artifact path and all
+   worktree role paths are empty — genuine 'nothing found' case. When the
+   worktree-promoted artifact was written successfully, this check passes
+   silently."
   [session body-fn read-artifact-fn cleanup-fn mode]
   (try
-    (let [result (body-fn session)
-          workdir (:workdir session)
-          read-role-artifact (case mode
-                               :capsule #(read-capsule-worktree-artifact session %)
-                               :host    #(read-worktree-artifact workdir %)
-                               (constantly nil))
-          worktree-artifacts (if (and workdir (:explicit-workdir? session))
-                               (into {}
-                                     (keep (fn [role]
-                                             (when-let [a (read-role-artifact role)]
-                                               [role a])))
-                                     [:plan :implement :verify :review :release])
-                               {})
-          mcp-artifact (read-artifact-fn session)]
-      ;; Emit WARN only when BOTH the MCP artifact file and all worktree
-      ;; promotions are absent — worktree-path is the primary submission
-      ;; channel, so a missing MCP file alone is not an error.
-      (when (and (nil? mcp-artifact) (empty? worktree-artifacts))
+    (let [result              (body-fn session)
+          workdir             (:workdir session)
+          read-role-artifact  (case mode
+                                :capsule #(read-capsule-worktree-artifact session %)
+                                :host    #(read-worktree-artifact workdir %)
+                                (constantly nil))
+          worktree-artifacts  (when workdir
+                                (into {}
+                                      (keep (fn [role]
+                                              (when-let [a (read-role-artifact role)]
+                                                [role a])))
+                                      [:plan :implement :verify :review :release]))
+          artifact            (read-artifact-fn session)]
+      ;; Emit a diagnostic WARN only when neither channel produced an artifact.
+      ;; The hard failure is handled downstream by result-boundary returning
+      ;; {:usable? false}; this message aids post-mortem visibility.
+      (when (and (nil? artifact) (empty? worktree-artifacts))
         (emit-system-message! :warn/no-artifact-found
-                              (:artifact-path session)))
-      {:llm-result result
-       :artifact mcp-artifact
-       :worktree-artifacts worktree-artifacts
-       :context-misses (when (= :host mode) (read-context-misses session))
+                              (:artifact-path session)
+                              (str (or workdir "<no-workdir>") "/.miniforge/<role>.edn")))
+      {:llm-result           result
+       :artifact             artifact
+       :worktree-artifacts   worktree-artifacts
+       :context-misses       (when (= :host mode) (read-context-misses session))
        :pre-session-snapshot (:pre-session-snapshot session)
-       :session-mode mode})
+       :session-mode         mode})
     (finally
       (cleanup-fn session))))
 
