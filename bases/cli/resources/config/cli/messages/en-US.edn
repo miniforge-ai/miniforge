@@ -701,6 +701,34 @@
   :workflow-runner/list-chains-failed "Failed to list chains: {error}"
   :workflow-runner/chain-step-completed "chain {chain-id} completed"
 
+  ;; workflow-runner subcommand --help support (per-subcommand usage)
+  :workflow-runner.help/subcommand-heading "{subcommand}"
+  :workflow-runner.help/usage-prefix       "Usage: {line}"
+  :workflow-runner.help/options-heading    "Options:"
+  :workflow-runner.help/group-heading      "{group}"
+  :workflow-runner.help/group-usage-prefix "Usage: {line}"
+  :workflow-runner.help/group-subcommands-heading "Subcommands:"
+  :workflow-runner.help/group-subcommand-row "  {name}  {summary}"
+  :workflow-runner.help/workflow-summary
+  "Workflow lifecycle commands (run, list, execute, status, cancel)."
+  :workflow-runner.help/chain-summary
+  "Chain execution commands (run, list)."
+  :workflow-runner.help/workflow-run-summary
+  "Execute a registered workflow by ID."
+  :workflow-runner.help/workflow-list-summary
+  "List available workflows discoverable on the classpath."
+  :workflow-runner.help/workflow-execute-summary
+  "Execute a workflow from a spec file path (alias for `run <spec>`)."
+  :workflow-runner.help/workflow-status-summary
+  "Show the status of a workflow by ID."
+  :workflow-runner.help/workflow-cancel-summary
+  "Cancel a running workflow by ID."
+  :workflow-runner.help/chain-run-summary
+  "Execute a chain (multi-workflow) by ID."
+  :workflow-runner.help/chain-list-summary
+  "List available chain definitions."
+  :workflow-runner.help/flag-help-desc "show this help message and exit"
+
   ;; control-plane CLI commands
   :cp/dashboard-not-running    "Dashboard not running."
   :cp/dashboard-start-hint     "Start it with: miniforge web"
