@@ -849,4 +849,18 @@
   :backends/status-needs-key                "Needs {api-key-var}"
   :backends/status-unknown                  "Unknown backend type"
   :backends/unknown-issue                   "Unknown issue with backend: {backend}"
-  :backends/validate-unknown                "Unknown backend: {backend}\nRun '{command}' to see available backends."}}
+  :backends/validate-unknown                "Unknown backend: {backend}\nRun '{command}' to see available backends."
+
+  ;; events show <workflow-id> — operator-facing CLI surface
+  :events/dir-not-found
+  "Events directory not found: {base-dir}\nRun at least one workflow first to create it."
+  :events/no-events
+  "No events found for workflow: {workflow-id}\nChecked layouts: archived/, live/, and flat under {base-dir}"
+  :events/no-renderable-events
+  "(no renderable events for workflow {workflow-id})"
+  :events/usage
+  "Usage: miniforge events show <workflow-id>\n  --gap-threshold <seconds>   Gap detection threshold (default: 60)\n  --raw                       Dump parsed events as EDN (debug)"
+  :events/workflow-id-required
+  "Workflow id is required."
+  :events/read-failed
+  "Unable to read workflow events: {error}"}}

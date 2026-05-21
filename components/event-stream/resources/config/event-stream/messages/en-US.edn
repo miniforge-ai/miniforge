@@ -16,6 +16,31 @@
   ;; tool-heavy phases don't look dead. Format: "\n[tool] <names>\n".
   :stream/tool-use-line       "\n[tool] {names}\n"
 
+  ;; ── Timeline renderer (event-stream.timeline) ─────────────────
+  ;; Every label/format string the user sees in `miniforge events
+  ;; show` flows through these keys (per
+  ;; .standards/foundations/localization.mdc — user-facing CLI
+  ;; output is user-locale, not system-locale).
+  :timeline/unknown-time        "??:??:??"
+  :timeline/no-phase            "-"
+  :timeline/truncation-suffix   "…"
+  :timeline/unknown-tool        "<unknown>"
+  ;; Separate key for the catch-all render path so translators don't
+  ;; have to reason about a tool-shaped label appearing in an
+  ;; event-type-shaped slot. Same visible English; distinct context.
+  :timeline/unknown-event-type  "<unknown>"
+  :timeline/status-success      "success"
+  :timeline/status-error        "error"
+  :timeline/terminated-marker   "TERMINATED"
+  :timeline/stall-marker        "[stall]"
+  :timeline/stall-default-msg   "stream stalled"
+  :timeline/phase-marker        "[phase {suffix}]"
+  :timeline/phase-suffix-started   "started"
+  :timeline/phase-suffix-completed "completed"
+  :timeline/duration-mins-secs  "{mins}m {secs}s"
+  :timeline/duration-secs       "{secs}s"
+  :timeline/gap-line            "{ts-a}→{ts-b} — {gap} event-stream gap (stalled)"
+
   ;; Status payload published when the agent calls one or more tools.
   :stream/agent-calling-tool  "Agent calling tool"
 

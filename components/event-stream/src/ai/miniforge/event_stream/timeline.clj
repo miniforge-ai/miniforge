@@ -27,11 +27,15 @@
      HH:mm:ss  <phase>  <tool-name>  <args-summary>
 
    Gap detection: consecutive events whose timestamp gap exceeds
-   `gap-threshold-ms` (default 60 000 ms) produce an inserted gap line:
-     HH:mm:ss→HH:mm:ss — Xm Ys event-stream gap (stalled)
+   `gap-threshold-ms` (default 60 000 ms) produce an inserted gap line.
 
-   Terminal events (:workflow/completed, :workflow/failed) produce:
-     HH:mm:ss  <phase>  TERMINATED  <reason>"
+   Every user-facing label/marker (status words, missing-value
+   sentinels, format templates) flows through `messages/t` per
+   .standards/foundations/localization.mdc — the catalog lives at
+   `resources/config/event-stream/messages/en-US.edn` under the
+   `:timeline/*` namespace."
+  (:require
+   [ai.miniforge.event-stream.messages :as messages])
   (:import
    [java.text SimpleDateFormat]
    [java.util Date TimeZone]))
@@ -75,7 +79,8 @@
 
 (defn- format-hms
   "Format `ts` (a Date, long epoch-ms, or ISO-8601 string) as HH:mm:ss.
-   Returns \"??:??:??\" when `ts` is nil or unparseable."
+   Returns the localized `:timeline/unknown-time` sentinel when `ts` is
+   nil or unparseable."
   [ts]
   (try
     (let [^SimpleDateFormat fmt (.get hms-formatter-local)
@@ -89,9 +94,9 @@
                     :else        nil)]
       (if d
         (.format fmt d)
-        "??:??:??"))
+        (messages/t :timeline/unknown-time)))
     (catch Exception _
-      "??:??:??")))
+      (messages/t :timeline/unknown-time))))
 
 (defn- ts->epoch-ms
   "Coerce `ts` to epoch-ms long. Returns nil on failure."
@@ -114,18 +119,23 @@
   (:event/timestamp event))
 
 (defn- event-phase [event]
-  (or (:workflow/phase event) "-"))
+  (or (:workflow/phase event) (messages/t :timeline/no-phase)))
 
 (defn- event-type [event]
   (:event/type event))
 
 (defn- truncate
-  "Truncate string `s` to at most `n` characters, appending \"…\" if cut."
+  "Truncate string `s` to at most `n` characters, appending the
+   localized `:timeline/truncation-suffix` if cut."
   [s n]
   (when (string? s)
     (if (<= (count s) n)
       s
-      (str (subs s 0 (dec n)) "…"))))
+      (let [suffix        (str (messages/t :timeline/truncation-suffix))
+            suffix-length (min (count suffix) (max 0 n))
+            prefix-length (max 0 (- n suffix-length))]
+        (str (subs s 0 prefix-length)
+             (subs suffix 0 suffix-length))))))
 
 (defn- args-summary
   "Extract the args preview from an event, truncated to `args-preview-length` chars.
@@ -139,14 +149,15 @@
 ;; Duration helpers
 
 (defn- format-duration-ms
-  "Format `ms` as a human-readable \"Xm Ys\" string (omits minutes if 0)."
+  "Format `ms` as a human-readable duration string. Both shapes
+   (mins+secs, secs-only) flow through the user catalog."
   [ms]
   (let [total-s (long (/ ms 1000))
         m       (long (/ total-s 60))
         s       (long (rem total-s 60))]
     (if (pos? m)
-      (format "%dm %ds" m s)
-      (format "%ds" s))))
+      (messages/t :timeline/duration-mins-secs {:mins m :secs s})
+      (messages/t :timeline/duration-secs      {:secs s}))))
 
 ;------------------------------------------------------------------------------ Layer 2
 ;; Per-event-type render dispatch
@@ -156,7 +167,7 @@
   [event]
   (let [ts       (format-hms (event-timestamp event))
         phase    (event-phase event)
-        tool     (or (:tool/name event) "<unknown>")
+        tool     (or (:tool/name event) (messages/t :timeline/unknown-tool))
         args-sum (args-summary event)]
     (format "%s  %s  %s  %s" ts phase tool args-sum)))
 
@@ -168,7 +179,7 @@
    correlated via `:tool/call-id`. `tool-names-by-call-id` is the
    correlation map built by `render-timeline` as it walks the stream.
    Fallbacks (in order): correlated name → `:tool/call-id` →
-   `<unknown>`.
+   localized `:timeline/unknown-tool` sentinel.
 
    Status is sourced from `:tool/success?` (per the schema), with
    `:tool/error` presence as the secondary signal for legacy events
@@ -179,13 +190,13 @@
         call-id  (:tool/call-id event)
         tool     (or (get tool-names-by-call-id call-id)
                      call-id
-                     "<unknown>")
+                     (messages/t :timeline/unknown-tool))
         dur-ms   (:tool/duration-ms event)
         status   (cond
-                   (false? (:tool/success? event)) "error"
-                   (true?  (:tool/success? event)) "success"
-                   (some? (:tool/error event))     "error"
-                   :else                           "success")
+                   (false? (:tool/success? event)) (messages/t :timeline/status-error)
+                   (true?  (:tool/success? event)) (messages/t :timeline/status-success)
+                   (some? (:tool/error event))     (messages/t :timeline/status-error)
+                   :else                           (messages/t :timeline/status-success))
         dur-str  (if dur-ms
                    (str "  " (format-duration-ms dur-ms) "  " status)
                    (str "  " status))]
@@ -198,39 +209,43 @@
         phase    (event-phase event)
         ev-type  (event-type event)
         suffix   (case ev-type
-                   :workflow/phase-started   "started"
-                   :workflow/phase-completed "completed"
+                   :workflow/phase-started   (messages/t :timeline/phase-suffix-started)
+                   :workflow/phase-completed (messages/t :timeline/phase-suffix-completed)
                    (name ev-type))
+        marker   (messages/t :timeline/phase-marker {:suffix suffix})
         msg      (or (:message event) "")]
     (if (seq msg)
-      (format "%s  %s  [phase %s]  %s" ts phase suffix msg)
-      (format "%s  %s  [phase %s]" ts phase suffix))))
+      (format "%s  %s  %s  %s" ts phase marker msg)
+      (format "%s  %s  %s" ts phase marker))))
 
 (defn- render-terminal
-  "`:workflow/completed` / `:workflow/failed` — terminal status with TERMINATED marker."
+  "`:workflow/completed` / `:workflow/failed` — terminal status with the
+   localized terminated marker."
   [event]
   (let [ts     (format-hms (event-timestamp event))
         phase  (event-phase event)
+        marker (messages/t :timeline/terminated-marker)
         reason (or (:message event)
                    (when-let [r (:workflow/result event)]
                      (str r))
                    "")]
-    (format "%s  %s  TERMINATED  %s" ts phase reason)))
+    (format "%s  %s  %s  %s" ts phase marker reason)))
 
 (defn- render-stall
   "`:agent/stream-stalled` — stall marker."
   [event]
-  (let [ts  (format-hms (event-timestamp event))
-        phase (event-phase event)
-        msg (or (:message event) "stream stalled")]
-    (format "%s  %s  [stall]  %s" ts phase msg)))
+  (let [ts     (format-hms (event-timestamp event))
+        phase  (event-phase event)
+        marker (messages/t :timeline/stall-marker)
+        msg    (or (:message event) (messages/t :timeline/stall-default-msg))]
+    (format "%s  %s  %s  %s" ts phase marker msg)))
 
 (defn- render-generic
   "Catch-all for event types without a specific renderer."
   [event]
   (let [ts       (format-hms (event-timestamp event))
         phase    (event-phase event)
-        ev-type  (or (event-type event) "<unknown>")
+        ev-type  (or (event-type event) (messages/t :timeline/unknown-event-type))
         msg      (or (:message event) "")]
     (format "%s  %s  %s  %s" ts phase (str ev-type) (truncate msg args-preview-length))))
 
@@ -258,10 +273,10 @@
   "Format a gap line between two events with timestamps `ts-a` and `ts-b`
    and a computed gap of `gap-ms` milliseconds."
   [ts-a ts-b gap-ms]
-  (format "%s→%s — %s event-stream gap (stalled)"
-          (format-hms ts-a)
-          (format-hms ts-b)
-          (format-duration-ms gap-ms)))
+  (messages/t :timeline/gap-line
+              {:ts-a (format-hms ts-a)
+               :ts-b (format-hms ts-b)
+               :gap  (format-duration-ms gap-ms)}))
 
 ;------------------------------------------------------------------------------ Layer 3
 ;; Public API
