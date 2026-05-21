@@ -529,7 +529,7 @@
 ;; Routing trigger events (N5-delta-4 §4.2)
 
 (deftest pr-monitor-review-comments-arrived-test
-  (testing "3-arg form: no agent-session-id field"
+  (testing "without :comments/agent-session-id (shorter overload)"
     (let [stream (no-op-stream)
           event  (core/pr-monitor-review-comments-arrived
                    stream "miniforge-ai/miniforge" 999 3)]
@@ -539,7 +539,7 @@
       (is (= 3 (:comments/count event)))
       (is (not (contains? event :comments/agent-session-id)))))
 
-  (testing "4-arg form: agent-session-id threads onto the envelope"
+  (testing "with :comments/agent-session-id threaded onto the envelope"
     (let [stream     (no-op-stream)
           session-id (random-uuid)
           event      (core/pr-monitor-review-comments-arrived
@@ -558,7 +558,7 @@
       (is (= :failure (:ci/conclusion event))))))
 
 (deftest standards-review-posted-test
-  (testing "3-arg form: no affected-workflow-run-id"
+  (testing "without :affected/workflow-run-id (shorter overload)"
     (let [stream (no-op-stream)
           event  (core/standards-review-posted
                    stream "miniforge-ai/miniforge" 999 :advisory)]
@@ -568,7 +568,7 @@
       (is (= :advisory (:review/severity event)))
       (is (not (contains? event :affected/workflow-run-id)))))
 
-  (testing "4-arg form: affected-workflow-run-id threads onto the envelope"
+  (testing "with :affected/workflow-run-id threaded onto the envelope"
     (let [stream  (no-op-stream)
           wf-id   (random-uuid)
           event   (core/standards-review-posted
