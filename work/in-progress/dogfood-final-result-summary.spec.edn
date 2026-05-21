@@ -1,0 +1,26 @@
+{:spec/title "Dogfood: summarize final workflow result output"
+
+ :spec/description
+ "Dogfood runs currently print the entire workflow result map under `Full result:` by default. The event-log-visibility rerun completed successfully but still dumped thousands of lines of event, artifact, and exploration content to the terminal. Replace the default full EDN dump with a compact operator summary and a pointer to the full persisted result for debugging."
+
+ :spec/intent {:type :fix
+               :scope ["bases/cli/src"
+                       "components/workflow/src"
+                       "components/event-stream/src"]}
+
+ :spec/constraints
+ ["Do not change persisted event/result payload shapes"
+  "Do not remove access to the full result; gate it behind a debug flag or print a file/checkpoint path"
+  "Default success and failure output should remain human-readable in a terminal"
+  "Summary must include workflow status, phase statuses/durations, failed task ids when present, PRs created/merged when present, and a pointer to full logs/result"
+  "Keep existing machine-readable/debug output paths available"]
+
+ :spec/acceptance-criteria
+ ["Successful workflow completion no longer prints a multi-thousand-line `Full result:` EDN map by default"
+  "Failed workflow completion prints a compact failure summary with failed task ids and short error text"
+  "Default output includes a path or id that lets an operator inspect the full persisted result"
+  "A debug flag or equivalent opt-in still prints or retrieves the full result"
+  "Tests cover success and failure terminal rendering paths"
+  "Dogfood rerun output ends with the compact summary instead of a full result dump"]
+
+ :spec/workflow-type :canonical-sdlc}

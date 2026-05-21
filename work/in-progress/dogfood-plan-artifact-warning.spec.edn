@@ -1,0 +1,27 @@
+{:spec/title "Dogfood: suppress false plan artifact missing warning"
+
+ :spec/description
+ "Successful dogfood runs can still print `ERROR: artifact file not found ... artifact.edn -- MCP tool was likely not called by the LLM` after the planner writes `.miniforge/plan.edn` and the runtime accepts it. The warning is misleading: the expected worktree-promoted plan artifact exists, the plan phase succeeds, and the workflow can complete. Fix the artifact retrieval/reporting path so missing optional MCP artifact files do not render as terminal errors when a valid phase artifact was found."
+
+ :spec/intent {:type :fix
+               :scope ["components/agent/src"
+                       "components/workflow/src"
+                       "bases/cli/src"
+                       "components/phase-software-factory/src"]}
+
+ :spec/constraints
+ ["Do not reintroduce a submit_artifact MCP requirement"
+  "The worktree-promoted `.miniforge/plan.edn` path remains the planner submission source of truth"
+  "Keep a hard failure when neither the MCP artifact nor the expected on-disk phase artifact exists"
+  "Do not suppress genuine parse/validation errors for malformed plan files"
+  "Default terminal output must not include a false `ERROR:` line on successful already-satisfied or plan-file runs"]
+
+ :spec/acceptance-criteria
+ ["A planner run that writes a valid `.miniforge/plan.edn` completes without printing `artifact.edn` missing as an ERROR"
+  "A planner run that writes no plan file and provides no valid fallback still fails with a clear missing-artifact diagnostic"
+  "Malformed `.miniforge/plan.edn` still fails with parse/validation context"
+  "Regression test covers the successful plan-file path without a submitted MCP artifact"
+  "Regression test covers the real missing-artifact failure path"
+  "Dogfood rerun of an already-satisfied spec produces no false artifact warning"]
+
+ :spec/workflow-type :canonical-sdlc}
