@@ -47,8 +47,9 @@
      ;; Create telemetry artifact
      (observer/create-telemetry-artifact obs artifact-store)"
   (:require
-   [ai.miniforge.observer.protocol :as proto]
-   [ai.miniforge.observer.core :as core]))
+   [ai.miniforge.observer.alerts :as alerts]
+   [ai.miniforge.observer.core :as core]
+   [ai.miniforge.observer.protocol :as proto]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Observer creation
@@ -288,3 +289,15 @@
         :data {:count 100 :avg 5000 ...}
         :summary \"Analyzed 100 workflows...\"})"
   proto/analysis-result)
+
+(def create-alert-state
+  "Create alert evaluator state: outstanding tool calls and known tool outcomes."
+  alerts/create-alert-state)
+
+(def evaluate-rules
+  "Evaluate alert rule maps against an event; returns fired alert maps."
+  alerts/evaluate-rules)
+
+(def alert-fired
+  "Build an :observer/alert-fired event from workflow id and fired alert map."
+  alerts/alert-fired)
