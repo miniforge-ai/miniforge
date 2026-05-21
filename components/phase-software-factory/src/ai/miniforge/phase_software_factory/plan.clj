@@ -59,11 +59,21 @@
 
 (defn build-planner-task
   "Build the task map to pass to the planner agent.
+
+   The planner now receives a `:task/behavior-addendum` produced by
+   `phase/load-and-filter-behaviors` for rules that target `:plan`
+   (specification-standards, work-spec-authoring, simple-made-easy,
+   etc.) — same mechanism implement and review use. Closes the gap
+   where the planner generated plans without consulting the
+   compiled standards pack.
+
    Returns {:task task-map :rules-manifest manifest-or-nil}."
   [input explore-result knowledge-store]
   (let [existing-files (:exploration/files explore-result)
         {:keys [formatted manifest]} (kb-helpers/inject-with-manifest
                                        knowledge-store :planner (get input :tags []))
+        behavior-addendum (phase/load-and-filter-behaviors
+                            :plan {:task {:task/intent (:intent input)}})
         task (cond-> {:task/id (random-uuid)
                       :task/type :plan
                       :task/description (:description input)
@@ -73,7 +83,9 @@
                (seq existing-files)
                (assoc :task/existing-files existing-files)
                formatted
-               (assoc :task/knowledge-context formatted))]
+               (assoc :task/knowledge-context formatted)
+               behavior-addendum
+               (assoc :task/behavior-addendum behavior-addendum))]
     {:task task
      :rules-manifest manifest}))
 

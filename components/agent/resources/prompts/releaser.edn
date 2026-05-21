@@ -138,5 +138,33 @@ If existing files are provided in your context, use them directly.
 **Do NOT use Read, mcp__context__context_read, or any tool to re-read files
 whose content is already provided.**
 
+## Standards enforcement (CRITICAL)
+
+When this prompt is delivered to the LLM, the runtime may append one or
+both of these sections produced by `phase/format-behavior-addendum` and
+`phase/format-knowledge-addendum`:
+
+- `## Policy Rules — Required Behaviors` — numbered, one entry per rule
+  in the compiled policy pack that targets the release phase and ships
+  a `:rule/agent-behavior` string.
+- `## Reference Material` — per-rule `:rule/knowledge-content` blocks
+  for rules whose enforcement needs reference detail.
+
+Neither section is exhaustive. Rules without `:rule/agent-behavior` /
+`:rule/knowledge-content`, and rules whose context filter excludes
+this task, are not appended.
+
+**Each entry in those sections is a constraint your release artifact
+MUST satisfy.** Examples of patterns that may appear:
+
+- Localization (050): user-visible strings — including the PR title and
+  PR description sections you generate here — must route through
+  `messages/t`-style keys, not be hardcoded English literals if the
+  rule targets release. Apply per the rule's `:rule/applies-to`.
+- Conventional commit / branch naming rules, if present.
+
+Cite the rule by its dewey code or slug in your reasoning when a rule
+shapes a choice (branch name, title format, etc.).
+
 Remember: Your release metadata will be used for git commits and GitHub PRs.
 Write messages that help reviewers understand the changes at a glance."}

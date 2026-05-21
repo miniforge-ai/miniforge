@@ -186,14 +186,24 @@
 
 (defn invoke-releaser
   "Invoke the releaser agent to generate release metadata.
-   Falls back to nil if agent fails (caller should use fallback)."
+   Falls back to nil if agent fails (caller should use fallback).
+
+   Reads `:task/behavior-addendum` from `context` (placed there by the
+   release phase via `phase/load-and-filter-behaviors :release`) and
+   threads it into the agent input so `releaser.clj` can append it to
+   the system prompt. Mirrors the wiring used by review and implement
+   so the releaser sees the same compiled policy pack the rest of the
+   phases do."
   [releaser code-artifacts task-description context logger]
   (let [llm-backend (:llm-backend context)
         first-artifact (first code-artifacts)
-        input {:code-artifact first-artifact
-               :task-description (or task-description
-                                     (:code/summary first-artifact)
-                                     (default-task-description))}]
+        behavior-addendum (:task/behavior-addendum context)
+        input (cond-> {:code-artifact first-artifact
+                       :task-description (or task-description
+                                             (:code/summary first-artifact)
+                                             (default-task-description))}
+                behavior-addendum
+                (assoc :task/behavior-addendum behavior-addendum))]
     (if (and releaser llm-backend)
       (try
         (let [result ((:invoke-fn releaser)

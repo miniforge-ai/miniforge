@@ -115,6 +115,87 @@
           (is (= "feature/already-ready"
                  (get-in result [:output :release/branch-name]))))))))
 
+(deftest releaser-system-prompt-includes-behavior-addendum-test
+  ;; Pins the wiring that lets the releaser agent see the standards
+  ;; rules `phase/load-and-filter-behaviors` produces for the :release
+  ;; phase. Without this, conventional-commit / branch-naming /
+  ;; localization rules that target the release phase stay invisible
+  ;; to the releaser, the same way the reviewer was blind to them
+  ;; before #945.
+  (testing ":task/behavior-addendum on the input is appended to the LLM :system opt"
+    (let [captured (atom nil)
+          fake-llm-client {:type :fake}
+          parsed-release {:release/id (random-uuid)
+                          :release/branch-name "feature/x"
+                          :release/commit-message "feat: x"
+                          :release/pr-title "feat: x"
+                          :release/pr-description "## Summary\nx"}
+          addendum "\n\n## Policy Rules — Required Behaviors\n\n1. Test release rule body."
+          agent (releaser/create-releaser {:llm-backend fake-llm-client})]
+      (with-redefs [model/resolve-llm-client-for-role (fn [_role provided] provided)
+                    artifact-session/with-session
+                    (fn [_context body-fn]
+                      (let [session {:mcp-config-path nil
+                                     :mcp-allowed-tools []
+                                     :supervision nil}
+                            llm-result (body-fn session)]
+                        {:llm-result llm-result
+                         :artifact nil
+                         :worktree-artifacts {}
+                         :session-mode :host}))
+                    llm/chat (fn [_client _prompt opts]
+                               (reset! captured opts)
+                               {:success? true
+                                :content (pr-str parsed-release)
+                                :tokens 1})
+                    llm/success? :success?
+                    llm/get-content :content]
+        (core/invoke agent {:llm-backend fake-llm-client}
+                     (assoc code-artifact-input
+                            :task/behavior-addendum addendum))
+        (is (some? @captured) "LLM client should have been called")
+        (let [system-prompt (:system @captured)]
+          (is (string? system-prompt))
+          (is (clojure.string/includes? system-prompt "Policy Rules")
+              "appended addendum must surface in the LLM :system opt — the whole point of the wiring")
+          (is (clojure.string/includes? system-prompt "Test release rule body.")
+              "rule body text must reach the LLM verbatim"))))))
+
+(deftest releaser-system-prompt-empty-when-no-addendum-test
+  (testing "absent :task/behavior-addendum is treated as empty — no nil concat"
+    (let [captured (atom nil)
+          fake-llm-client {:type :fake}
+          parsed-release {:release/id (random-uuid)
+                          :release/branch-name "feature/x"
+                          :release/commit-message "feat: x"
+                          :release/pr-title "feat: x"
+                          :release/pr-description "## Summary\nx"}
+          agent (releaser/create-releaser {:llm-backend fake-llm-client})]
+      (with-redefs [model/resolve-llm-client-for-role (fn [_role provided] provided)
+                    artifact-session/with-session
+                    (fn [_context body-fn]
+                      (let [session {:mcp-config-path nil
+                                     :mcp-allowed-tools []
+                                     :supervision nil}
+                            llm-result (body-fn session)]
+                        {:llm-result llm-result
+                         :artifact nil
+                         :worktree-artifacts {}
+                         :session-mode :host}))
+                    llm/chat (fn [_client _prompt opts]
+                               (reset! captured opts)
+                               {:success? true
+                                :content (pr-str parsed-release)
+                                :tokens 1})
+                    llm/success? :success?
+                    llm/get-content :content]
+        (core/invoke agent {:llm-backend fake-llm-client} code-artifact-input)
+        (is (some? @captured))
+        (let [system-prompt (:system @captured)]
+          (is (string? system-prompt)
+              ":system must always be a string (default \"\" when no addendum)")
+          (is (pos? (count system-prompt))))))))
+
 ;------------------------------------------------------------------------------ Layer 3
 ;; Validation tests
 
