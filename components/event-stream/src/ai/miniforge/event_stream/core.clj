@@ -473,7 +473,7 @@
 ;; Event constructors (N3 compliant)
 
 (defn workflow-started
-  "Build a :workflow/started envelope. Variadic to preserve the legacy
+  "Build a :workflow/started envelope. Multi-arity to preserve the legacy
    2/3-arg call shape used across the workspace.
 
    Options (4-arg / opts-map form):
