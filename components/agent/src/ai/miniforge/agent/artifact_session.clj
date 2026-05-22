@@ -794,6 +794,47 @@
        (some? (:execution/executor context))
        (some? (:execution/environment-id context))))
 
+(def ^:private worktree-roles
+  "Roles whose `.miniforge/<role>.edn` files `run-session` probes for
+   worktree-promoted artifacts."
+  [:plan :implement :verify :review :release])
+
+(defn- role-reader-for-mode
+  "Return a 1-arg fn from role keyword to parsed worktree artifact, picked
+   by execution mode. Capsule mode reads through the executor; host mode
+   reads directly from `workdir`; an unknown mode yields a no-op reader."
+  [mode session workdir]
+  (case mode
+    :capsule #(read-capsule-worktree-artifact session %)
+    :host    #(read-worktree-artifact workdir %)
+    (constantly nil)))
+
+(defn- read-role-entry
+  "Read the worktree artifact for `role` via `read-role-artifact` and
+   return a `[role artifact]` map entry, or nil if the role file was
+   absent (so callers can use `keep` to drop misses)."
+  [read-role-artifact role]
+  (when-let [a (read-role-artifact role)]
+    [role a]))
+
+(defn- collect-worktree-artifacts
+  "Build the `:worktree-artifacts` map by probing every role file under
+   `workdir`/.miniforge/. Returns nil when `workdir` is absent so callers
+   can distinguish 'no worktree was threaded through' from 'worktree had
+   no role files'."
+  [read-role-artifact workdir]
+  (when workdir
+    (into {} (keep #(read-role-entry read-role-artifact %)) worktree-roles)))
+
+(defn- emit-no-artifact-warning!
+  "Emit `:warn/no-artifact-found` when BOTH the MCP path and the worktree
+   role files came up empty. Separate fn so `run-session` reads as a
+   sequence of named steps and the diagnostic stays testable."
+  [session workdir]
+  (emit-system-message! :warn/no-artifact-found
+                        (:artifact-path session)
+                        (str (or workdir "<no-workdir>") "/.miniforge/<role>.edn")))
+
 (defn- run-session
   "Execute body-fn with session, read artifacts, and clean up.
    Shared lifecycle for both host and capsule sessions.
@@ -814,24 +855,13 @@
   (try
     (let [result              (body-fn session)
           workdir             (:workdir session)
-          read-role-artifact  (case mode
-                                :capsule #(read-capsule-worktree-artifact session %)
-                                :host    #(read-worktree-artifact workdir %)
-                                (constantly nil))
-          worktree-artifacts  (when workdir
-                                (into {}
-                                      (keep (fn [role]
-                                              (when-let [a (read-role-artifact role)]
-                                                [role a])))
-                                      [:plan :implement :verify :review :release]))
+          read-role-artifact  (role-reader-for-mode mode session workdir)
+          worktree-artifacts  (collect-worktree-artifacts read-role-artifact workdir)
           artifact            (read-artifact-fn session)]
-      ;; Emit a diagnostic WARN only when neither channel produced an artifact.
-      ;; The hard failure is handled downstream by result-boundary returning
-      ;; {:usable? false}; this message aids post-mortem visibility.
+      ;; The hard failure is handled downstream by result-boundary
+      ;; returning {:usable? false}; this WARN only aids post-mortem.
       (when (and (nil? artifact) (empty? worktree-artifacts))
-        (emit-system-message! :warn/no-artifact-found
-                              (:artifact-path session)
-                              (str (or workdir "<no-workdir>") "/.miniforge/<role>.edn")))
+        (emit-no-artifact-warning! session workdir))
       {:llm-result           result
        :artifact             artifact
        :worktree-artifacts   worktree-artifacts
