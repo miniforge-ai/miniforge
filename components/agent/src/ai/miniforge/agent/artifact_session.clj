@@ -801,8 +801,10 @@
    `:worktree-artifacts` is a map from role keyword to parsed artifact,
    read from <workdir>/.miniforge/<role>.edn. Container-promotion pattern —
    agents write their artifact into the worktree and the runtime picks it
-   up here. Empty when no worktree is available (e.g. capsule mode) or no
-   files were written.
+   up here. Empty when the session has no `:workdir` (e.g. when the caller
+   did not thread one through) or when no role files were written; both
+   host and capsule modes do read worktree-promoted artifacts when
+   `:workdir` is present (capsule defaults `:workdir` to `/workspace`).
 
    Emits a WARN (not ERROR) only when BOTH the MCP artifact path and all
    worktree role paths are empty — genuine 'nothing found' case. When the
