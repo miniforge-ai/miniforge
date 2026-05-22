@@ -70,11 +70,26 @@
 (defn- write-plan-edn!
   "Write a minimal plan.edn into <workdir>/.miniforge/ and return the file."
   [workdir]
-  (let [mf-dir (io/file workdir ".miniforge")]
-    (.mkdirs mf-dir)
-    (let [f (io/file mf-dir "plan.edn")]
-      (spit f "{:plan/id \"550e8400-e29b-41d4-a716-446655440000\" :plan/name \"t\" :plan/tasks []}")
-      f)))
+  (let [mf-dir (io/file workdir ".miniforge")
+        _      (.mkdirs mf-dir)
+        f      (io/file mf-dir "plan.edn")]
+    (spit f "{:plan/id \"550e8400-e29b-41d4-a716-446655440000\" :plan/name \"t\" :plan/tasks []}")
+    f))
+
+(defn- make-simulated-planner-body
+  "Return a body-fn (suitable for `with-session`) that mimics what the
+   real planner does inside its session: write `plan.edn` into the
+   worktree's `.miniforge/` directory via the Write tool. Tests use
+   this in place of an inline multi-line anon fn so the shape of the
+   simulated work is named once and reused."
+  [workdir plan-name]
+  (fn [_session]
+    (let [mf-dir (io/file workdir ".miniforge")]
+      (.mkdirs mf-dir)
+      (spit (io/file mf-dir "plan.edn")
+            (str "{:plan/id \"550e8400-e29b-41d4-a716-446655440000\""
+                 " :plan/name \"" plan-name "\" :plan/tasks []}"))
+      :planner-done)))
 
 ;; ---------------------------------------------------------------------------
 ;; Case 1 — read-artifact: absent MCP file → nil, no stderr
@@ -218,20 +233,13 @@
     ;; returns. The runtime's run-session picks up the worktree artifact via
     ;; read-worktree-artifact and must not emit any ERROR line to stderr.
     (let [workdir       (make-temp-workdir)
-          mf-dir        (io/file workdir ".miniforge")
           context       {:execution/worktree-path workdir}
           stderr-output (java.io.StringWriter.)
           result        (atom nil)]
       (try
-        (.mkdirs mf-dir)
         (binding [*err* stderr-output]
-          (reset! result
-                  (session/with-session context
-                    (fn [_session]
-                      ;; Simulate planner writing plan.edn via Write tool
-                      (spit (io/file mf-dir "plan.edn")
-                            "{:plan/id \"550e8400-e29b-41d4-a716-446655440000\" :plan/name \"sim-plan\" :plan/tasks []}")
-                      :planner-done))))
+          (reset! result (session/with-session context
+                                               (make-simulated-planner-body workdir "sim-plan"))))
         (let [output (str stderr-output)]
           (is (not (re-find #"ERROR" output))
               "Planner writing plan.edn via worktree must not produce any ERROR output")
@@ -247,17 +255,11 @@
 (deftest simulated-planner-no-warn-when-plan-written-test
   (testing "no 'no artifact found' WARN when planner writes plan.edn during session"
     (let [workdir       (make-temp-workdir)
-          mf-dir        (io/file workdir ".miniforge")
           context       {:execution/worktree-path workdir}
           stderr-output (java.io.StringWriter.)]
       (try
-        (.mkdirs mf-dir)
         (binding [*err* stderr-output]
-          (session/with-session context
-            (fn [_session]
-              (spit (io/file mf-dir "plan.edn")
-                    "{:plan/id \"550e8400-e29b-41d4-a716-446655440000\" :plan/name \"p\" :plan/tasks []}")
-              :done)))
+          (session/with-session context (make-simulated-planner-body workdir "p")))
         (let [output (str stderr-output)]
           (is (not (re-find #"no artifact found" output))
               "No 'no artifact found' message when plan.edn was written during session"))

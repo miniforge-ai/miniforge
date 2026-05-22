@@ -796,7 +796,8 @@
 
 (def ^:private worktree-roles
   "Roles whose `.miniforge/<role>.edn` files `run-session` probes for
-   worktree-promoted artifacts."
+   worktree-promoted artifacts. Single source of truth for both the
+   scan and the no-artifact-found diagnostic."
   [:plan :implement :verify :review :release])
 
 (defn- role-reader-for-mode
@@ -828,25 +829,28 @@
 
 (defn- emit-no-artifact-warning!
   "Emit `:warn/no-artifact-found` when BOTH the MCP path and the worktree
-   role files came up empty. Separate fn so `run-session` reads as a
-   sequence of named steps and the diagnostic stays testable."
+   role files came up empty. Passes the role list explicitly so the
+   warning makes clear several role files were probed (not a single
+   path). Separate fn so `run-session` reads as a sequence of named
+   steps and the diagnostic stays testable."
   [session workdir]
   (emit-system-message! :warn/no-artifact-found
                         (:artifact-path session)
-                        (str (or workdir "<no-workdir>") "/.miniforge/<role>.edn")))
+                        (str (or workdir "<no-workdir>") "/.miniforge/")
+                        (str/join ", " (map name worktree-roles))))
 
 (defn- run-session
   "Execute body-fn with session, read artifacts, and clean up.
    Shared lifecycle for both host and capsule sessions.
 
    `:worktree-artifacts` is a map from role keyword to parsed artifact,
-   read from <workdir>/.miniforge/<role>.edn for each of plan / implement /
-   verify / review / release. Container-promotion pattern — agents write
-   their artifact into the worktree and the runtime picks it up here.
-   Empty when the session has no `:workdir` (caller did not thread one
-   through) or when none of the role files were written; both host and
-   capsule modes read promoted artifacts when `:workdir` is present
-   (capsule defaults `:workdir` to `/workspace`).
+   read from <workdir>/.miniforge/<role>.edn for each role in
+   `worktree-roles`. Container-promotion pattern — agents write their
+   artifact into the worktree and the runtime picks it up here. Empty
+   when the session has no `:workdir` (caller did not thread one through)
+   or when none of the role files were written; both host and capsule
+   modes read promoted artifacts when `:workdir` is present (capsule
+   defaults `:workdir` to `/workspace`).
 
    Emits a WARN (not ERROR) only when BOTH the MCP artifact path and all
    worktree role files are empty — genuine 'nothing found' case. The
@@ -856,30 +860,15 @@
    was written successfully, this check passes silently."
   [session body-fn read-artifact-fn cleanup-fn mode]
   (try
-    (let [worktree-roles      [:plan :implement :verify :review :release]
-          result              (body-fn session)
+    (let [result              (body-fn session)
           workdir             (:workdir session)
-          read-role-artifact  (case mode
-                                :capsule #(read-capsule-worktree-artifact session %)
-                                :host    #(read-worktree-artifact workdir %)
-                                (constantly nil))
-          worktree-artifacts  (when workdir
-                                (into {}
-                                      (keep (fn [role]
-                                              (when-let [a (read-role-artifact role)]
-                                                [role a])))
-                                      worktree-roles))
+          read-role-artifact  (role-reader-for-mode mode session workdir)
+          worktree-artifacts  (collect-worktree-artifacts read-role-artifact workdir)
           artifact            (read-artifact-fn session)]
-      ;; Emit a diagnostic WARN only when neither channel produced an artifact.
-      ;; The hard failure is handled downstream by result-boundary returning
-      ;; {:usable? false}; this message aids post-mortem visibility. Pass the
-      ;; role list explicitly so the warning makes clear that several role
-      ;; files were probed (not a single path).
+      ;; The hard failure is handled downstream by result-boundary
+      ;; returning {:usable? false}; this WARN only aids post-mortem.
       (when (and (nil? artifact) (empty? worktree-artifacts))
-        (emit-system-message! :warn/no-artifact-found
-                              (:artifact-path session)
-                              (str (or workdir "<no-workdir>") "/.miniforge/")
-                              (str/join ", " (map name worktree-roles))))
+        (emit-no-artifact-warning! session workdir))
       {:llm-result           result
        :artifact             artifact
        :worktree-artifacts   worktree-artifacts
