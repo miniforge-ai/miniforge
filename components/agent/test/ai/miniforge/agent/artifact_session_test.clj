@@ -562,6 +562,46 @@
       (is (not (str/includes? (str err) "WARN"))
           "no WARN when MCP artifact is present and worktree is absent"))))
 
+(deftest with-session-no-artifact-warn-suppressed-when-parse-failed-test
+  (testing "no-artifact WARN is suppressed when worktree file exists but fails to parse"
+    ;; If the agent wrote plan.edn but it contains malformed EDN, the parse
+    ;; warning (:warn/worktree-artifact-parse) is the correct diagnostic.
+    ;; :warn/no-artifact-found must NOT also fire — the file DID exist.
+    (let [wt  (make-worktree-with-plan "{{{invalid edn not parseable")
+          err (java.io.StringWriter.)
+          ctx {:execution/worktree-path wt}]
+      (try
+        (binding [*err* err]
+          (session/with-session ctx (constantly :bad-edn)))
+        (let [stderr (str err)]
+          (is (str/includes? stderr "failed to parse worktree artifact")
+              "parse WARN must still fire to alert on the malformed file")
+          (is (not (str/includes? stderr "no artifact found after session"))
+              "no-artifact WARN must be suppressed when the file existed — parse WARN covers it"))
+        (finally
+          (doseq [^java.io.File f (reverse (file-seq (io/file wt)))]
+            (.delete f)))))))
+
+(deftest with-session-emits-mcp-skipped-info-when-worktree-only-test
+  (testing "INFO message emitted when worktree artifact found but MCP not submitted"
+    ;; Normal Write-based submission: agent wrote .miniforge/plan.edn, skipped
+    ;; MCP submit_artifact. Should surface a diagnostic INFO (not a WARN) so
+    ;; operators can confirm the worktree-promotion path was used.
+    (let [wt  (make-worktree-with-plan (pr-str (plan-artifact)))
+          err (java.io.StringWriter.)
+          ctx {:execution/worktree-path wt}]
+      (try
+        (binding [*err* err]
+          (session/with-session ctx (constantly :worktree-only)))
+        (let [stderr (str err)]
+          (is (str/includes? stderr "MCP artifact not submitted")
+              "INFO must note that MCP was skipped and worktree-promotion succeeded")
+          (is (not (str/includes? stderr "WARN"))
+              "INFO message must not be prefixed WARN — it is not a failure"))
+        (finally
+          (doseq [^java.io.File f (reverse (file-seq (io/file wt)))]
+            (.delete f)))))))
+
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
   (test/run-tests 'ai.miniforge.agent.artifact-session-test)
