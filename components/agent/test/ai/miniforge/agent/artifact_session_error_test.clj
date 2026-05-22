@@ -17,35 +17,27 @@
 ;; limitations under the License.
 
 (ns ai.miniforge.agent.artifact-session-error-test
-  "Regression test for Run 7: artifact file not found logs ERROR not WARN.
-   The previous WARN level was misleading — a missing artifact is fatal
-   (the implement phase fails with 0ms duration)."
+  "Contract tests for read-artifact silent-nil behavior.
+
+   `read-artifact` returns nil without logging anything when the MCP artifact
+   file is absent. Noise-free callers (e.g. `run-session`) decide whether
+   to escalate after consulting all artifact sources (MCP file + worktree
+   promotions). An ERROR at the `read-artifact` layer was removed because
+   it fired even when a valid worktree artifact covered the missing MCP file."
   (:require
+   [clojure.string :as str]
    [clojure.test :refer [deftest testing is]]
    [ai.miniforge.agent.artifact-session :as session]))
 
-(deftest read-artifact-missing-file-logs-error-test
-  (testing "missing artifact file prints ERROR (not WARN) to stderr"
-    (let [s (session/create-session!)
-          stderr-output (java.io.StringWriter.)]
+(deftest read-artifact-missing-file-is-silent-test
+  (testing "read-artifact emits nothing when MCP artifact file is absent"
+    (let [s   (session/create-session!)
+          err (java.io.StringWriter.)]
       (try
-        ;; Capture stderr output
-        (binding [*err* stderr-output]
-          (session/read-artifact s))
-        (let [output (str stderr-output)]
-          (is (re-find #"ERROR" output)
-              "Should log ERROR level, not WARN")
-          (is (re-find #"artifact file not found" output)
-              "Should mention artifact file not found")
-          (is (re-find #"MCP tool" output)
-              "Should hint at root cause (MCP tool not called)"))
-        (finally
-          (session/cleanup-session! s))))))
-
-(deftest read-artifact-missing-returns-nil-test
-  (testing "returns nil when artifact file doesn't exist"
-    (let [s (session/create-session!)]
-      (try
-        (is (nil? (session/read-artifact s)))
+        (binding [*err* err]
+          (is (nil? (session/read-artifact s))
+              "missing MCP file must return nil"))
+        (is (str/blank? (str err))
+            "read-artifact must not log anything when the artifact file is missing")
         (finally
           (session/cleanup-session! s))))))

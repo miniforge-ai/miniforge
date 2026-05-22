@@ -57,8 +57,8 @@
    :warn/capsule-worktree-artifact-parse
    "WARN: failed to parse capsule worktree artifact at %s — %s"
 
-   :error/artifact-file-missing
-   "ERROR: artifact file not found at %s — MCP tool was likely not called by the LLM"
+   :warn/no-artifact-found
+   "WARN: no artifact found at %s — mcp__context__submit was not called and no .miniforge/<role>.edn was written by the agent"
 
    :warn/artifact-parse
    "WARN: failed to parse artifact at %s — %s"
@@ -196,31 +196,36 @@
    - {:dir <path>, :mcp-config-path <path>, :artifact-path <path>}"
   ([] (create-session! nil))
   ([{:keys [workdir source-root]}]
-  (let [dir (str (Files/createTempDirectory
-                  "miniforge-artifact-"
-                  (into-array FileAttribute [])))
-        working-dir (or workdir (System/getProperty "user.dir"))
-        config-path (str dir "/mcp-config.json")
-        artifact-path (str dir "/artifact.edn")]
-    {:dir dir
-     :workdir working-dir
-     :config-root (or workdir dir)
-     :source-root source-root
-     :mcp-config-path config-path
-     :artifact-path artifact-path
-     ;; `snapshot-working-dir` is anomaly-returning post-W7.2 cleanup —
-     ;; a git failure now yields an `:anomaly/category :anomalies/fault`
-     ;; map rather than throwing. The legacy try/catch only handled
-     ;; thrown exceptions (e.g. `Process` invocation faults that escape
-     ;; the wrapper); add an explicit anomaly check so a return-as-data
-     ;; fault doesn't flow into `:pre-session-snapshot` and break
-     ;; downstream diffing / changed-paths logic.
-     :pre-session-snapshot (let [snap (try
-                                        (file-artifacts/snapshot-working-dir working-dir)
-                                        (catch Exception _ nil))]
-                             (if (or (nil? snap) (anomaly/anomaly? snap))
-                               (file-artifacts/empty-snapshot)
-                               snap))})))
+   (let [dir (str (Files/createTempDirectory
+                   "miniforge-artifact-"
+                   (into-array FileAttribute [])))
+         working-dir (or workdir (System/getProperty "user.dir"))
+         config-path (str dir "/mcp-config.json")
+         artifact-path (str dir "/artifact.edn")]
+     {:dir dir
+      :workdir working-dir
+      ;; Tracks whether the caller explicitly provided a worktree path.
+      ;; `run-session` gates the worktree-artifacts scan on this flag to
+      ;; prevent the JVM CWD fallback (which may contain stale .miniforge/
+      ;; artifacts from prior dogfood runs) from polluting the WARN signal.
+      :explicit-workdir? (some? workdir)
+      :config-root (or workdir dir)
+      :source-root source-root
+      :mcp-config-path config-path
+      :artifact-path artifact-path
+      ;; `snapshot-working-dir` is anomaly-returning post-W7.2 cleanup —
+      ;; a git failure now yields an `:anomaly/category :anomalies/fault`
+      ;; map rather than throwing. The legacy try/catch only handled
+      ;; thrown exceptions (e.g. `Process` invocation faults that escape
+      ;; the wrapper); add an explicit anomaly check so a return-as-data
+      ;; fault doesn't flow into `:pre-session-snapshot` and break
+      ;; downstream diffing / changed-paths logic.
+      :pre-session-snapshot (let [snap (try
+                                         (file-artifacts/snapshot-working-dir working-dir)
+                                         (catch Exception _ nil))]
+                              (if (or (nil? snap) (anomaly/anomaly? snap))
+                                (file-artifacts/empty-snapshot)
+                                snap))})))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; MCP server command
@@ -551,14 +556,12 @@
 
   Returns:
   - Parsed artifact map with proper UUID types, or nil if not found.
-     Logs warnings on missing file or parse failure instead of silently returning nil."
+    Returns nil silently when the MCP artifact file is absent — the caller
+    (`run-session`) decides whether to emit a WARN after consulting all
+    artifact sources (MCP file and worktree promotions)."
   [session]
   (let [f (io/file (:artifact-path session))]
-    (if-not (.exists f)
-      (do
-        (emit-system-message! :error/artifact-file-missing
-                              (:artifact-path session))
-        nil)
+    (when (.exists f)
       (parse-edn-file f
                       (comp parse-uuid-strings edn/read-string)
                       :warn/artifact-parse))))
@@ -619,24 +622,31 @@
 (defn create-capsule-session!
   "Create an artifact session inside a task capsule.
    Session directory is created inside the capsule's workspace via executor.
-   Returns session map with capsule-relative paths and resolved exec! fn."
-  [executor env-id workdir]
-  (let [exec!       (resolve-exec!)
-        session-dir (str workdir "/.miniforge-session")
-        _           (exec! executor env-id (str "mkdir -p " session-dir) {:workdir workdir})]
-    {:dir             session-dir
-     :mcp-config-path (str session-dir "/mcp-config.json")
-     :artifact-path   (str session-dir "/artifact.edn")
-     :capsule?        true
-     :exec!           exec!
-     :executor        executor
-     :environment-id  env-id
-     :workdir         workdir
-     :pre-session-snapshot (try
-                             (file-artifacts/snapshot-via-executor
-                              exec! executor env-id workdir)
-                             (catch Exception _
-                               (file-artifacts/empty-snapshot)))}))
+   Returns session map with capsule-relative paths and resolved exec! fn.
+
+   Three-arity form resolves execute! from the dag-executor component at runtime.
+   Four-arity form accepts an explicit execute-fn to avoid requiring-resolve
+   at call time (useful in tests and dependency-injection contexts)."
+  ([executor env-id workdir]
+   (create-capsule-session! executor env-id workdir (resolve-exec!)))
+  ([executor env-id workdir execute-fn]
+   (let [exec!       execute-fn
+         session-dir (str workdir "/.miniforge-session")
+         _           (exec! executor env-id (str "mkdir -p " session-dir) {:workdir workdir})]
+     {:dir               session-dir
+      :mcp-config-path   (str session-dir "/mcp-config.json")
+      :artifact-path     (str session-dir "/artifact.edn")
+      :capsule?          true
+      :explicit-workdir? true
+      :exec!             exec!
+      :executor          executor
+      :environment-id    env-id
+      :workdir           workdir
+      :pre-session-snapshot (try
+                              (file-artifacts/snapshot-via-executor
+                               exec! executor env-id workdir)
+                              (catch Exception _
+                                (file-artifacts/empty-snapshot)))})))
 
 (defn write-capsule-mcp-config!
   "Write MCP config and Claude settings inside the capsule.
@@ -696,7 +706,7 @@
    Like with-artifact-session but session files live inside the task capsule."
   [[session-sym executor env-id workdir] & body]
   `(let [session# (-> (create-capsule-session! ~executor ~env-id ~workdir)
-                       write-capsule-mcp-config!)
+                      write-capsule-mcp-config!)
          ~session-sym session#]
      (try
        (let [result# (do ~@body)]
@@ -732,6 +742,13 @@
 
    Binds `session` in the body. After body completes, reads the artifact
    file and any context cache misses. Cleans up the temp directory regardless.
+
+   DEPRECATED: prefer `with-session` for new call-sites. `with-session`
+   supports both host and governed (capsule) modes, emits a WARN when
+   neither MCP nor worktree artifacts are found, and correctly gates the
+   worktree scan on an explicitly-provided worktree path. This macro
+   bypasses that logic and does not emit WARN — retained only for existing
+   call-sites that have not yet migrated.
 
    Usage:
      (with-artifact-session [session]
@@ -780,8 +797,24 @@
    `:worktree-artifacts` is a map from role keyword to parsed artifact,
    read from <workdir>/.miniforge/<role>.edn. Container-promotion pattern —
    agents write their artifact into the worktree and the runtime picks it
-   up here. Empty when no worktree is available (e.g. capsule mode) or no
-   files were written."
+   up here. Empty when no explicit worktree is available or no files were
+   written.
+
+   Scans all 5 phase roles (:plan :implement :verify :review :release)
+   regardless of the current phase — stale artifacts from previous phases
+   will appear in :worktree-artifacts but are ignored by callers that key
+   on a specific role.
+
+   The worktree scan is gated on `:explicit-workdir?` to prevent the JVM
+   CWD fallback (which may contain stale .miniforge/ artifacts from prior
+   runs) from suppressing the WARN when no real worktree was provided.
+
+   Return map includes `:artifact` (the MCP-submitted artifact EDN, or nil)
+   and `:worktree-artifacts` (map of role → artifact for worktree-promoted
+   files). A nil `:artifact` combined with an empty `:worktree-artifacts`
+   is the machine-readable signal that no artifact was produced. Callers
+   that key on phase output MUST treat this combination as a workflow fault
+   — no artifact means the implementing agent did not deliver work product."
   [session body-fn read-artifact-fn cleanup-fn mode]
   (try
     (let [result (body-fn session)
@@ -790,14 +823,22 @@
                                :capsule #(read-capsule-worktree-artifact session %)
                                :host    #(read-worktree-artifact workdir %)
                                (constantly nil))
-          worktree-artifacts (when workdir
+          worktree-artifacts (if (and workdir (:explicit-workdir? session))
                                (into {}
                                      (keep (fn [role]
                                              (when-let [a (read-role-artifact role)]
                                                [role a])))
-                                     [:plan :implement :verify :review :release]))]
+                                     [:plan :implement :verify :review :release])
+                               {})
+          mcp-artifact (read-artifact-fn session)]
+      ;; Emit WARN only when BOTH the MCP artifact file and all worktree
+      ;; promotions are absent — worktree-path is the primary submission
+      ;; channel, so a missing MCP file alone is not an error.
+      (when (and (nil? mcp-artifact) (empty? worktree-artifacts))
+        (emit-system-message! :warn/no-artifact-found
+                              (:artifact-path session)))
       {:llm-result result
-       :artifact (read-artifact-fn session)
+       :artifact mcp-artifact
        :worktree-artifacts worktree-artifacts
        :context-misses (when (= :host mode) (read-context-misses session))
        :pre-session-snapshot (:pre-session-snapshot session)
