@@ -851,7 +851,25 @@
   "Emit `:warn/no-artifact-found` after an explicit worktree scan confirms
    both the MCP path and the worktree role files came up empty. Separate fn
    so `run-session` reads as a sequence of named steps and the diagnostic
-   stays testable."
+   stays testable.
+
+   AUDIT NOTE (2026-05-21): An audit of bases/cli/src, components/workflow/src,
+   and components/phase-software-factory/src confirmed that no code re-renders
+   this WARN at ERROR level in terminal output. The message is emitted to stderr
+   via `emit-system-message!` at WARN severity and is passed through as-is by
+   the CLI rendering pipeline (workflow_runner/display.clj applies no
+   artifact-specific coloring or severity amplification). The plan phase
+   delegates artifact handling entirely to `agent/invoke` → `with-session` →
+   `run-session`; there is no redundant artifact-presence check at the phase
+   layer.
+
+   However, because this message goes to stderr it may be perceived as a
+   terminal-level error by users even though it is diagnostic WARN output.
+   If the cause is not actionable by the user (e.g. the agent simply used the
+   Write-based worktree submission path instead of the MCP submit_artifact
+   tool), callers SHOULD suppress this warning — see the `any-file-existed?`
+   and `(seq worktree-artifacts)` guards in `run-session` for the suppression
+   logic already in place."
   [session workdir]
   (emit-system-message! :warn/no-artifact-found
                         (:artifact-path session)
