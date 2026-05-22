@@ -828,11 +828,11 @@
     (into {} (keep #(read-role-entry read-role-artifact %)) worktree-roles)))
 
 (defn- emit-no-artifact-warning!
-  "Emit `:warn/no-artifact-found` when BOTH the MCP path and the worktree
-   role files came up empty. Passes the role list explicitly so the
-   warning makes clear several role files were probed (not a single
-   path). Separate fn so `run-session` reads as a sequence of named
-   steps and the diagnostic stays testable."
+  "Emit `:warn/no-artifact-found` after an explicit worktree scan confirms
+   both the MCP path and the worktree role files came up empty. Passes the
+   role list explicitly so the warning makes clear several role files were
+   probed (not a single path). Separate fn so `run-session` reads as a
+   sequence of named steps and the diagnostic stays testable."
   [session workdir]
   (emit-system-message! :warn/no-artifact-found
                         (:artifact-path session)
@@ -844,30 +844,48 @@
    Shared lifecycle for both host and capsule sessions.
 
    `:worktree-artifacts` is a map from role keyword to parsed artifact,
-   read from <workdir>/.miniforge/<role>.edn for each role in
-   `worktree-roles`. Container-promotion pattern — agents write their
-   artifact into the worktree and the runtime picks it up here. Empty
-   when the session has no `:workdir` (caller did not thread one through)
-   or when none of the role files were written; both host and capsule
-   modes read promoted artifacts when `:workdir` is present (capsule
-   defaults `:workdir` to `/workspace`).
+   read from <workdir>/.miniforge/<role>.edn. Container-promotion pattern —
+   agents write their artifact into the worktree and the runtime picks it
+   up here. Empty when no explicit worktree is available or no files were
+   written.
+
+   Scans all 5 phase roles (:plan :implement :verify :review :release)
+   regardless of the current phase - stale artifacts from previous phases
+   will appear in :worktree-artifacts but are ignored by callers that key
+   on a specific role.
+
+   The worktree scan and WARN are gated on `:explicit-workdir?` to prevent
+   the JVM CWD fallback (which may contain stale .miniforge/ artifacts from
+   prior runs) from suppressing or emitting diagnostics when no real
+   worktree was provided.
 
    Emits a WARN (not ERROR) only when BOTH the MCP artifact path and all
    worktree role files are empty — genuine 'nothing found' case. The
    warning names the scanned `.miniforge/` directory and the full list of
    role files probed so post-mortem readers can tell that several roles
    were attempted, not a single path. When the worktree-promoted artifact
-   was written successfully, this check passes silently."
+   was written successfully, this check passes silently.
+
+   Return map includes `:artifact` (the MCP-submitted artifact EDN, or nil)
+   and `:worktree-artifacts` (map of role -> artifact for worktree-promoted
+   files). A nil `:artifact` combined with an empty `:worktree-artifacts`
+   is the machine-readable signal that no artifact was produced. Callers
+   that key on phase output MUST treat this combination as a workflow fault
+   - no artifact means the implementing agent did not deliver work product."
   [session body-fn read-artifact-fn cleanup-fn mode]
   (try
     (let [result              (body-fn session)
           workdir             (:workdir session)
           read-role-artifact  (role-reader-for-mode mode session workdir)
-          worktree-artifacts  (collect-worktree-artifacts read-role-artifact workdir)
+          worktree-artifacts  (if (:explicit-workdir? session)
+                                (collect-worktree-artifacts read-role-artifact workdir)
+                                {})
           artifact            (read-artifact-fn session)]
       ;; The hard failure is handled downstream by result-boundary
       ;; returning {:usable? false}; this WARN only aids post-mortem.
-      (when (and (nil? artifact) (empty? worktree-artifacts))
+      (when (and (:explicit-workdir? session)
+                 (nil? artifact)
+                 (empty? worktree-artifacts))
         (emit-no-artifact-warning! session workdir))
       {:llm-result           result
        :artifact             artifact
