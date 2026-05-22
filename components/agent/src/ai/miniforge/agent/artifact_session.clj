@@ -64,7 +64,10 @@
    "WARN: failed to parse artifact at %s — %s"
 
    :warn/context-misses-parse
-   "WARN: failed to parse context misses at %s — %s"})
+   "WARN: failed to parse context misses at %s — %s"
+
+   :info/mcp-artifact-skipped
+   "INFO: MCP artifact not submitted — worktree-promotion succeeded (workdir: %s)"})
 
 (defn validate-session
   "Validate a session map against the Session schema.
@@ -826,6 +829,24 @@
   (when workdir
     (into {} (keep #(read-role-entry read-role-artifact %)) worktree-roles)))
 
+(defn- any-worktree-files-exist?
+  "Check if any .miniforge/<role>.edn file exists under workdir without parsing.
+
+   Used in host-mode sessions to distinguish 'truly no files' from 'files existed
+   but all failed to parse'. A parse failure emits :warn/worktree-artifact-parse and
+   returns nil from read-role-artifact, which causes collect-worktree-artifacts to
+   yield an empty map indistinguishable from the no-files case. This function
+   inspects the filesystem directly so run-session can suppress the redundant
+   :warn/no-artifact-found message when files were present but malformed.
+
+   Not used in capsule mode — the executor would require an additional exec call
+   per role to check existence, which is deferred to a future iteration."
+  [workdir]
+  (boolean
+   (when workdir
+     (some #(.exists (worktree-artifact-file workdir %))
+           worktree-roles))))
+
 (defn- emit-no-artifact-warning!
   "Emit `:warn/no-artifact-found` after an explicit worktree scan confirms
    both the MCP path and the worktree role files came up empty. Separate fn
@@ -870,12 +891,35 @@
           worktree-artifacts  (if (:explicit-workdir? session)
                                 (collect-worktree-artifacts read-role-artifact workdir)
                                 {})
-          artifact            (read-artifact-fn session)]
-      ;; The hard failure is handled downstream by result-boundary
-      ;; returning {:usable? false}; this WARN only aids post-mortem.
+          artifact            (read-artifact-fn session)
+          ;; Track whether any .miniforge/<role>.edn files existed on disk,
+          ;; independent of parse success. A file that exists but contains
+          ;; malformed EDN returns nil from read-role-artifact (and emits
+          ;; :warn/worktree-artifact-parse) — that nil is dropped by
+          ;; collect-worktree-artifacts, making worktree-artifacts appear
+          ;; empty even though the agent DID write a file. Without this flag,
+          ;; :warn/no-artifact-found fires on top of the parse WARN.
+          ;; Host-mode only: capsule mode defers existence probing to a future
+          ;; iteration to avoid extra executor round-trips per role.
+          any-file-existed?   (and (:explicit-workdir? session)
+                                   (= mode :host)
+                                   (any-worktree-files-exist? workdir))]
+      ;; Diagnostic INFO: MCP submission channel was skipped but the
+      ;; worktree-promotion channel succeeded. Suppresses alarm for the normal
+      ;; Write-based submission pattern while still being visible for diagnostics.
       (when (and (:explicit-workdir? session)
                  (nil? artifact)
-                 (empty? worktree-artifacts))
+                 (seq worktree-artifacts))
+        (emit-system-message! :info/mcp-artifact-skipped
+                              (or workdir "<no-workdir>")))
+      ;; Hard-failure WARN: neither submission channel produced an artifact AND
+      ;; no worktree role files were present on disk. Parse-failed files are
+      ;; deliberately excluded — :warn/worktree-artifact-parse already covers
+      ;; that failure mode and firing both warnings would be misleading.
+      (when (and (:explicit-workdir? session)
+                 (nil? artifact)
+                 (empty? worktree-artifacts)
+                 (not any-file-existed?))
         (emit-no-artifact-warning! session workdir))
       {:llm-result           result
        :artifact             artifact
