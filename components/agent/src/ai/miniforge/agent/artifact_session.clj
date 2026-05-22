@@ -931,9 +931,20 @@
         (emit-system-message! :info/mcp-artifact-skipped
                               (or workdir "<no-workdir>")))
       ;; Hard-failure WARN: neither submission channel produced an artifact AND
-      ;; no worktree role files were present on disk. Parse-failed files are
-      ;; deliberately excluded — :warn/worktree-artifact-parse already covers
-      ;; that failure mode and firing both warnings would be misleading.
+      ;; no worktree role files were present on disk.
+      ;;
+      ;; Host mode: `any-file-existed?` suppresses the warn when a file was
+      ;; present on disk but failed to parse — :warn/worktree-artifact-parse
+      ;; already covers that failure mode and firing both warnings would be
+      ;; misleading.
+      ;;
+      ;; Capsule mode: `any-file-existed?` is always false here (existence
+      ;; probing is skipped to avoid an extra executor round-trip per role —
+      ;; see the comment above), so a parse-failed worktree file CAN trigger
+      ;; both :warn/capsule-worktree-artifact-parse and :warn/no-artifact-found.
+      ;; Accepted trade-off for now; future work can either lift existence
+      ;; probing into capsule mode or thread parse-failure signals back out
+      ;; of `read-capsule-worktree-artifact`.
       (when (and (:explicit-workdir? session)
                  (nil? artifact)
                  (empty? worktree-artifacts)
