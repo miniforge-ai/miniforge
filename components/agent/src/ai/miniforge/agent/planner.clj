@@ -427,8 +427,13 @@
                                  :prompt/progress-monitor))
 
 (defn- invoke-planner-session
-  "Session body for the planner: build mcp-opts with model hint, call LLM."
-  [session llm-client user-prompt config context on-chunk existing-files]
+  "Session body for the planner: build mcp-opts with model hint, call LLM.
+
+   `effective-system` is the base planner prompt with the phase-filtered
+   policy addendum appended by the caller (mirrors reviewer / releaser /
+   implementer wiring so the planner sees the same compiled standards
+   pack)."
+  [session llm-client user-prompt effective-system config context on-chunk existing-files]
   (when (seq existing-files)
     (artifact-session/write-context-cache-for-session!
      session
@@ -455,9 +460,9 @@
                    (:workdir session) (assoc :workdir (:workdir session)))]
     (if on-chunk
       (llm/chat-stream llm-client user-prompt on-chunk
-                       (merge {:system @planner-system-prompt} mcp-opts))
+                       (merge {:system effective-system} mcp-opts))
       (llm/chat llm-client user-prompt
-                (merge {:system @planner-system-prompt} mcp-opts)))))
+                (merge {:system effective-system} mcp-opts)))))
 
 (defn- normalize-planner-result
   [response worktree-artifacts artifact]
@@ -490,8 +495,12 @@
   "Run one short follow-up turn that only submits the final plan.
    Turn cap and progress-monitor thresholds come from
    resources/prompts/planner.edn (:prompt/submission-retry-max-turns,
-   :prompt/submission-retry-monitor)."
-  [session llm-client retry-prompt config context on-chunk]
+   :prompt/submission-retry-monitor).
+
+   `effective-system` is the same base-plus-addendum string used by the
+   main session, so the retry turn enforces the same compiled policy
+   pack the planner saw on the first call."
+  [session llm-client retry-prompt effective-system config context on-chunk]
   (let [prompt-data    @planner-prompt-data
         budget-usd     (budget/resolve-cost-budget-usd :planner config context)
         retry-max-turns (get prompt-data :prompt/submission-retry-max-turns)
@@ -504,17 +513,17 @@
                          (:workdir session) (assoc :workdir (:workdir session)))]
     (if on-chunk
       (llm/chat-stream llm-client retry-prompt on-chunk
-                       (merge {:system @planner-system-prompt} mcp-opts))
+                       (merge {:system effective-system} mcp-opts))
       (llm/chat llm-client retry-prompt
-                (merge {:system @planner-system-prompt} mcp-opts)))))
+                (merge {:system effective-system} mcp-opts)))))
 
 (defn- recover-submitted-plan
   "Retry planner submission once when analysis exists but the final submission
    did not land. Returns {:llm-response ... :submitted-plan ... :parsed-plan ...}."
-  [llm-client spec-text config context on-chunk prior-content]
+  [llm-client spec-text effective-system config context on-chunk prior-content]
   (let [retry-prompt   (submission-retry-prompt spec-text prior-content)
         run-retry      #(invoke-planner-submission-retry-session
-                          % llm-client retry-prompt config context on-chunk)
+                          % llm-client retry-prompt effective-system config context on-chunk)
         {:keys [llm-result artifact worktree-artifacts]}
         (artifact-session/with-session context run-retry)
         normalized     (normalize-planner-result llm-result worktree-artifacts artifact)
@@ -609,13 +618,16 @@
               on-chunk (:on-chunk context)
               spec-text (spec->text input)
               existing-files (:task/existing-files input)
-              user-prompt    (build-user-prompt spec-text existing-files)]
+              user-prompt    (build-user-prompt spec-text existing-files)
+              effective-system (str @planner-system-prompt
+                                    (get input :task/behavior-addendum ""))]
           ;; Past this point `llm-client` is non-nil — the
           ;; require-llm-client-or-anomaly boundary above already
           ;; escalated when the backend was missing.
           (let [{:keys [llm-result artifact worktree-artifacts context-misses]}
                   (artifact-session/with-session context
-                    #(invoke-planner-session % llm-client user-prompt config context
+                    #(invoke-planner-session % llm-client user-prompt
+                                             effective-system config context
                                              on-chunk existing-files))
                   llm-response llm-result
                   normalized (normalize-planner-result llm-response worktree-artifacts artifact)
@@ -630,6 +642,7 @@
                                            {:data {:reason :missing-plan-submission
                                                    :content-length (count response-content)}})
                                  (recover-submitted-plan llm-client spec-text
+                                                         effective-system
                                                          config context on-chunk
                                                          response-content))
                   final-llm-response   (or (:llm-response retry-result) llm-response)

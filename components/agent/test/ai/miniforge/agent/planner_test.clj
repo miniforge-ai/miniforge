@@ -243,6 +243,89 @@
           (is (str/includes? (second @prompts) "Do NOT explore further"))
           (is (str/includes? (second @prompts) "Write `.miniforge/plan.edn`"))))))))
 
+(deftest planner-system-prompt-includes-behavior-addendum-test
+  ;; Pins the wiring that lets the planner agent see the phase-filtered
+  ;; standards rules `phase/load-and-filter-behaviors :plan` produces.
+  ;; Without this, rules targeting :plan (specification-standards,
+  ;; simple-made-easy, …) stay invisible to the planner the same way
+  ;; the reviewer was blind to them before #945.
+  (testing ":task/behavior-addendum on the input is appended to the LLM :system opt"
+    (let [captured (atom nil)
+          fake-llm-client {:type :fake}
+          fake-plan {:plan/id (random-uuid)
+                     :plan/name "addendum-test"
+                     :plan/tasks []}
+          addendum "\n\n## Policy Rules — Required Behaviors\n\n1. Plan rule body."
+          agent (planner/create-planner {:llm-backend fake-llm-client})]
+      (with-redefs [model/resolve-llm-client-for-role
+                    (fn [_role provided] provided)
+                    artifact-session/with-session
+                    (fn [_context body-fn]
+                      (let [llm-result (body-fn {:dir "/tmp/fake-session"
+                                                 :workdir "/tmp/fake-workdir"
+                                                 :mcp-config-path "/tmp/fake-session/mcp-config.json"
+                                                 :mcp-allowed-tools []
+                                                 :supervision {}
+                                                 :pre-session-snapshot {}})]
+                        {:llm-result llm-result
+                         :artifact fake-plan
+                         :worktree-artifacts {}
+                         :context-misses nil
+                         :pre-session-snapshot {}
+                         :session-mode :host}))
+                    llm/chat (fn [_client _prompt opts]
+                               (reset! captured opts)
+                               {:status :success :content ""})
+                    llm/success? #(= :success (:status %))
+                    llm/get-content :content]
+        (core/invoke agent {:llm-backend fake-llm-client}
+                     {:description "Plan this"
+                      :task/behavior-addendum addendum})
+        (is (some? @captured) "LLM client should have been called")
+        (let [system-prompt (:system @captured)]
+          (is (string? system-prompt))
+          (is (str/includes? system-prompt "Policy Rules")
+              "appended addendum must surface in the LLM :system opt — the whole point of the wiring")
+          (is (str/includes? system-prompt "Plan rule body.")
+              "rule body text must reach the LLM verbatim"))))))
+
+(deftest planner-system-prompt-empty-when-no-addendum-test
+  (testing "absent :task/behavior-addendum is treated as empty — no nil concat"
+    (let [captured (atom nil)
+          fake-llm-client {:type :fake}
+          fake-plan {:plan/id (random-uuid)
+                     :plan/name "no-addendum"
+                     :plan/tasks []}
+          agent (planner/create-planner {:llm-backend fake-llm-client})]
+      (with-redefs [model/resolve-llm-client-for-role
+                    (fn [_role provided] provided)
+                    artifact-session/with-session
+                    (fn [_context body-fn]
+                      (let [llm-result (body-fn {:dir "/tmp/fake-session"
+                                                 :workdir "/tmp/fake-workdir"
+                                                 :mcp-config-path "/tmp/fake-session/mcp-config.json"
+                                                 :mcp-allowed-tools []
+                                                 :supervision {}
+                                                 :pre-session-snapshot {}})]
+                        {:llm-result llm-result
+                         :artifact fake-plan
+                         :worktree-artifacts {}
+                         :context-misses nil
+                         :pre-session-snapshot {}
+                         :session-mode :host}))
+                    llm/chat (fn [_client _prompt opts]
+                               (reset! captured opts)
+                               {:status :success :content ""})
+                    llm/success? #(= :success (:status %))
+                    llm/get-content :content]
+        (core/invoke agent {:llm-backend fake-llm-client}
+                     {:description "Plan this"})
+        (is (some? @captured))
+        (let [system-prompt (:system @captured)]
+          (is (string? system-prompt)
+              ":system must always be a string (default \"\" when no addendum)")
+          (is (pos? (count system-prompt))))))))
+
 ;------------------------------------------------------------------------------ Layer 3
 ;; Validation tests
 

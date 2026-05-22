@@ -268,9 +268,19 @@
    log calls (phase-started / fail / phase-completed) are emitted
    even when the workflow ctx lacks :execution/logger — observed in
    the 2026-05-03 dogfood, where release failed in 0ms with zero
-   visible log lines because the executor's logger was nil."
+   visible log lines because the executor's logger was nil.
+
+   Also computes the phase-filtered policy-pack behavior addendum via
+   `phase/load-and-filter-behaviors :release` and threads it as
+   `:task/behavior-addendum` so `release-executor/invoke-releaser` can
+   forward it into the agent input. Mirrors the wiring review (#945)
+   and plan use; closes the gap where the releaser ran without the
+   compiled standards pack."
   [ctx config logger]
-  (let [on-chunk (phase/create-streaming-callback ctx :release)]
+  (let [on-chunk (phase/create-streaming-callback ctx :release)
+        input (get-in ctx [:execution/input])
+        behavior-addendum (phase/load-and-filter-behaviors
+                            :release {:task {:task/intent (:intent input)}})]
     (cond-> {:worktree-path (or (get-in ctx [:execution/worktree-path])
                                 (get-in ctx [:worktree-path])
                                 (get-in config [:worktree-path])
@@ -287,7 +297,8 @@
                              (get config :create-pr? true))
              ;; Resolve and inject GitHub token for capsule gh CLI auth
              :github-token (resolve-github-token ctx)}
-      on-chunk (assoc :on-chunk on-chunk))))
+      on-chunk (assoc :on-chunk on-chunk)
+      behavior-addendum (assoc :task/behavior-addendum behavior-addendum))))
 
 (defn enter-release
   "Execute release phase.

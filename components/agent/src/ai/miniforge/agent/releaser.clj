@@ -199,15 +199,20 @@
 ;; Public API
 
 (defn- invoke-releaser-session
-  "Session body for the releaser: build mcp-opts, call LLM."
-  [session llm-client user-prompt config context on-chunk]
+  "Session body for the releaser: build mcp-opts, call LLM.
+
+   `effective-system` is the base releaser prompt with the
+   phase-filtered policy addendum appended by the caller (mirrors
+   reviewer/implementer wiring so the releaser sees the same compiled
+   standards pack)."
+  [session llm-client user-prompt effective-system config context on-chunk]
   (let [budget-usd (budget/resolve-cost-budget-usd :releaser config context)
         mcp-opts (artifact-session/session->mcp-opts session budget-usd 15)]
     (if on-chunk
       (llm/chat-stream llm-client user-prompt on-chunk
-                       (merge {:system @releaser-system-prompt} mcp-opts))
+                       (merge {:system effective-system} mcp-opts))
       (llm/chat llm-client user-prompt
-                (merge {:system @releaser-system-prompt} mcp-opts)))))
+                (merge {:system effective-system} mcp-opts)))))
 
 (defn create-releaser
   "Create a Releaser agent with optional configuration overrides.
@@ -239,12 +244,15 @@
                           :releaser
                           (get opts :llm-backend (:llm-backend context)))
               on-chunk (:on-chunk context)
-              user-prompt (input->text input context)]
+              user-prompt (input->text input context)
+              effective-system (str @releaser-system-prompt
+                                    (get input :task/behavior-addendum ""))]
           (if llm-client
             ;; Use the real LLM with artifact session for MCP tool support
             (let [{:keys [llm-result artifact worktree-artifacts]}
                   (artifact-session/with-session context
-                    #(invoke-releaser-session % llm-client user-prompt config context on-chunk))
+                    #(invoke-releaser-session % llm-client user-prompt
+                                              effective-system config context on-chunk))
                   llm-response llm-result
                   normalized (result-boundary/normalize-llm-result
                               {:role :release

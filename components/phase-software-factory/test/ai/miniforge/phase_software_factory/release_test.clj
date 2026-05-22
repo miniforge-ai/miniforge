@@ -288,6 +288,59 @@
   [entries-atom]
   (into #{} (keep :log/event) @entries-atom))
 
+(deftest release-threads-behavior-addendum-onto-executor-context-test
+  (testing "build-executor-context computes :task/behavior-addendum and threads it to the release executor"
+    ;; Pins the wiring that lets the releaser agent see the
+    ;; phase-filtered policy pack. Mirrors PR #945 (reviewer):
+    ;; release.clj must call phase/load-and-filter-behaviors :release
+    ;; and forward the resulting addendum via the executor context so
+    ;; release-executor/invoke-releaser can put it on the agent input.
+    (with-test-worktree
+      (fn [worktree]
+        (let [captured-context (atom nil)
+              stub-addendum "\n\n## Policy Rules — Required Behaviors\n\n1. Release rule body."]
+          (with-redefs [phase/load-and-filter-behaviors
+                        (fn [phase-kw _ctx]
+                          (when (= :release phase-kw) stub-addendum))
+                        release-executor/execute-release-phase
+                        (fn [_ws ec _opts]
+                          (reset! captured-context ec)
+                          {:success? true
+                           :artifacts [{:artifact/id (random-uuid)
+                                        :artifact/type :release
+                                        :artifact/content {}}]
+                           :metrics {:files-written 0}})]
+            (let [ctx (create-base-context worktree)
+                  ctx-with-config (assoc ctx :phase-config {:phase :release})
+                  interceptor (phase/get-phase-interceptor {:phase :release})]
+              ((:enter interceptor) ctx-with-config)
+              (is (some? @captured-context)
+                  "executor must be invoked")
+              (is (= stub-addendum (:task/behavior-addendum @captured-context))
+                  ":task/behavior-addendum from phase/load-and-filter-behaviors must reach the executor context"))))))))
+
+(deftest release-omits-behavior-addendum-when-filter-returns-nil-test
+  (testing "no addendum key on executor context when phase/load-and-filter-behaviors returns nil"
+    (with-test-worktree
+      (fn [worktree]
+        (let [captured-context (atom nil)]
+          (with-redefs [phase/load-and-filter-behaviors (fn [_phase _ctx] nil)
+                        release-executor/execute-release-phase
+                        (fn [_ws ec _opts]
+                          (reset! captured-context ec)
+                          {:success? true
+                           :artifacts [{:artifact/id (random-uuid)
+                                        :artifact/type :release
+                                        :artifact/content {}}]
+                           :metrics {:files-written 0}})]
+            (let [ctx (create-base-context worktree)
+                  ctx-with-config (assoc ctx :phase-config {:phase :release})
+                  interceptor (phase/get-phase-interceptor {:phase :release})]
+              ((:enter interceptor) ctx-with-config)
+              (is (some? @captured-context))
+              (is (not (contains? @captured-context :task/behavior-addendum))
+                  "no addendum key when filter yields nothing — avoids nil-valued context entries"))))))))
+
 (deftest release-passes-non-nil-logger-to-executor-when-ctx-logger-absent-test
   (testing "build-executor-context falls back to the phase-local logger when :execution/logger is absent"
     ;; Pre-fix the release-executor ran with logger=nil whenever the

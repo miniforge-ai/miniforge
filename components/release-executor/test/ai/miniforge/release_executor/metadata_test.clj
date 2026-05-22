@@ -136,3 +136,44 @@
           result (metadata/extract-test-artifacts artifacts)]
       (is (= 1 (count result)))
       (is (= :passed (:test/results (first result)))))))
+
+(deftest invoke-releaser-threads-behavior-addendum-from-context
+  ;; Pins the wiring that lets the release phase forward the
+  ;; phase-filtered policy pack to the releaser agent. The release
+  ;; phase puts `:task/behavior-addendum` on the executor context
+  ;; (via `phase/load-and-filter-behaviors :release` in
+  ;; `build-executor-context`); `invoke-releaser` must lift that
+  ;; value off the context and assoc it onto the agent input so
+  ;; `releaser.clj` can append it to the system prompt.
+  (testing ":task/behavior-addendum on context flows into agent input"
+    (let [captured-input (atom nil)
+          fake-releaser {:invoke-fn (fn [_ctx input]
+                                      (reset! captured-input input)
+                                      {:status :success
+                                       :output {:release/branch-name "x"}})}
+          addendum "\n\n## Policy Rules\n1. test"
+          context {:llm-backend ::fake
+                   :task/behavior-addendum addendum}
+          code-artifacts [{:code/files [{:path "a.clj" :action :create}]
+                           :code/summary "x"}]]
+      (metadata/invoke-releaser fake-releaser code-artifacts
+                                "describe" context nil)
+      (is (some? @captured-input) "agent should be invoked")
+      (is (= addendum (:task/behavior-addendum @captured-input))
+          "addendum from context must be threaded onto agent input"))))
+
+(deftest invoke-releaser-omits-behavior-addendum-when-absent
+  (testing "no :task/behavior-addendum key when context lacks it"
+    (let [captured-input (atom nil)
+          fake-releaser {:invoke-fn (fn [_ctx input]
+                                      (reset! captured-input input)
+                                      {:status :success
+                                       :output {:release/branch-name "x"}})}
+          context {:llm-backend ::fake}
+          code-artifacts [{:code/files [{:path "a.clj" :action :create}]
+                           :code/summary "x"}]]
+      (metadata/invoke-releaser fake-releaser code-artifacts
+                                "describe" context nil)
+      (is (some? @captured-input))
+      (is (not (contains? @captured-input :task/behavior-addendum))
+          "absent context addendum must not produce a nil-valued input key"))))
