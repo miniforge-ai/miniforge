@@ -18,7 +18,12 @@
 
 (ns ai.miniforge.workflow.runner-environment-test
   "Tests for runner-environment — specifically the M1 base-sha
-   capture path that future label-action watchers consume."
+   capture path that future label-action watchers consume.
+
+   This file appears in the artifact-warning-suppression PR because
+   `build-env-record` was touched in surrounding context (`:base-sha`
+   capture pre-dates this PR). These are additive regression tests only;
+   no behavior changes were made to runner-environment.clj itself."
   (:require [clojure.java.io :as io]
             [clojure.java.shell :as shell]
             [clojure.string :as str]
@@ -26,17 +31,31 @@
             [ai.miniforge.dag-executor.result :as result]
             [ai.miniforge.workflow.runner-environment :as env]))
 
+(defn- sh!
+  "Run a shell command and throw ex-info when exit != 0."
+  [& args]
+  (let [r (apply shell/sh args)]
+    (when-not (zero? (:exit r))
+      (throw (ex-info (str "shell command failed: " (pr-str args))
+                      {:cmd args :exit (:exit r) :err (:err r) :out (:out r)})))
+    r))
+
 (defn- with-temp-git-repo
-  "Initialise a temp git repo with one commit and pass its path to f."
+  "Initialise a temp git repo with one commit and pass its path to f.
+   Every shell call is checked for a zero exit code — a silent failure
+   would leave an unborn branch and cause `git rev-parse HEAD` to return
+   the literal string 'HEAD' instead of a SHA, producing a misleading
+   test failure downstream."
   [f]
   (let [dir (str (System/getProperty "java.io.tmpdir") "/m1-base-sha-"
                  (random-uuid))]
     (.mkdirs (io/file dir))
     (try
-      (shell/sh "git" "init" "-q" :dir dir)
-      (shell/sh "git" "-C" dir "config" "user.email" "test@local")
-      (shell/sh "git" "-C" dir "config" "user.name" "Test")
-      (shell/sh "git" "-C" dir "commit" "--allow-empty" "-m" "seed")
+      (sh! "git" "init" "-q" "-b" "main" :dir dir)
+      (sh! "git" "-C" dir "config" "user.email" "test@local")
+      (sh! "git" "-C" dir "config" "user.name" "Test")
+      (sh! "git" "-C" dir "config" "commit.gpgsign" "false")
+      (sh! "git" "-C" dir "commit" "--allow-empty" "-m" "seed")
       (f dir)
       (finally
         (doseq [^java.io.File fp (reverse (file-seq (io/file dir)))]
@@ -50,7 +69,7 @@
   (testing "[:environment-metadata :base-sha] is populated from worktree HEAD"
     (with-temp-git-repo
       (fn [dir]
-        (let [expected-sha (-> (shell/sh "git" "-C" dir "rev-parse" "HEAD")
+        (let [expected-sha (-> (sh! "git" "-C" dir "rev-parse" "HEAD")
                                :out
                                str/trim)
               fns {:create-registry (constantly {})
@@ -70,7 +89,7 @@
           (is (some? record))
           (is (= dir (:worktree-path record)))
           (is (= expected-sha (get-in record [:environment-metadata :base-sha]))
-              "base-sha must match the worktree's HEAD at acquire time")
+              "build-env-record sets :base-sha to resolved worktree HEAD SHA")
           (is (= "main" (get-in record [:environment-metadata :base-branch]))
               "pre-existing metadata fields must survive the merge"))))))
 

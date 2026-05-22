@@ -20,11 +20,38 @@
   "Tests for capsule-aware artifact sessions (N11 §6.3-6.4).
    Verifies with-session dispatches correctly between host and capsule modes."
   (:require
+   [clojure.java.io :as io]
    [clojure.test :refer [deftest testing is]]
    [clojure.string :as str]
    [ai.miniforge.agent.artifact-session :as session]
    [ai.miniforge.dag-executor.executor :as executor]
    [ai.miniforge.dag-executor.result :as result]))
+
+;------------------------------------------------------------------------------ helpers
+
+(defn- delete-dir!
+  "Recursively delete a directory tree."
+  [path]
+  (doseq [^java.io.File f (reverse (file-seq (io/file path)))]
+    (.delete f)))
+
+(defn- local-cat-exec!
+  "Stub exec! that reads 'cat <path>' from the local filesystem.
+   All other commands (mkdir, rm, git status, etc.) succeed with empty output.
+   Used for tests that need a real workdir on disk without a live executor."
+  [_executor _env-id cmd _opts]
+  (if (str/starts-with? cmd "cat ")
+    (let [path (subs cmd 4)
+          f    (io/file path)]
+      {:ok?  true
+       :data {:exit-code (if (.exists f) 0 1)
+              :stdout    (if (.exists f) (slurp f) "")
+              :stderr    ""}})
+    {:ok? true :data {:exit-code 0 :stdout "" :stderr ""}}))
+
+;; run-session is private; accessed via ns-resolve for white-box testing.
+(def ^:private run-session*
+  @(ns-resolve 'ai.miniforge.agent.artifact-session 'run-session))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Mock executor infrastructure
@@ -187,6 +214,79 @@
           artifact (session/read-capsule-worktree-artifact s :implement)]
       (is (= :already-implemented (:status artifact)))
       (is (= "already there" (:summary artifact))))))
+
+;------------------------------------------------------------------------------ Layer 4
+;; :explicit-workdir? flag and WARN suppression (artifact-warning-suppression PR)
+
+(deftest create-capsule-session-sets-explicit-workdir-test
+  (testing "create-capsule-session! always sets :explicit-workdir? true"
+    ;; The 4-arity form accepts an inject execute-fn, so the test never
+    ;; touches requiring-resolve or a live Docker executor.
+    (let [dir (str (System/getProperty "java.io.tmpdir") "/caps-test-" (random-uuid))]
+      (.mkdirs (io/file dir))
+      (try
+        (let [s (session/create-capsule-session! ::stub "env-1" dir local-cat-exec!)]
+          (is (true? (:explicit-workdir? s))
+              ":explicit-workdir? must be true so run-session scans worktree artifacts")
+          (is (= dir (:workdir s)))
+          (is (true? (:capsule? s))))
+        (finally
+          (delete-dir! dir))))))
+
+(deftest capsule-worktree-artifact-suppresses-warn-test
+  (testing "no WARN when .miniforge/plan.edn exists in capsule workdir (no MCP artifact)"
+    (let [dir       (str (System/getProperty "java.io.tmpdir") "/caps-warn-" (random-uuid))
+          plan-file (io/file dir ".miniforge" "plan.edn")]
+      (.mkdirs (.getParentFile plan-file))
+      ;; Write a minimal parseable plan artifact to the capsule workdir
+      (spit plan-file "{:plan/summary \"stub\" :plan/tasks []}")
+      (try
+        (let [session {:workdir           dir
+                       :explicit-workdir? true
+                       :capsule?          true
+                       ;; artifact-path does NOT exist → read-capsule-artifact returns nil
+                       :artifact-path     (str dir "/.miniforge-session/artifact.edn")
+                       :exec!             local-cat-exec!
+                       :executor          ::stub
+                       :environment-id    "env-1"}
+              err    (java.io.StringWriter.)
+              result (binding [*err* err]
+                       (run-session* session
+                                     (constantly :ok)
+                                     session/read-capsule-artifact
+                                     (constantly nil)   ; cleanup noop
+                                     :capsule))]
+          (is (not (str/includes? (str err) "WARN: no artifact found"))
+              "WARN must be suppressed when worktree artifact covers the missing MCP file")
+          (is (contains? (:worktree-artifacts result) :plan)
+              "worktree-artifacts must include :plan from .miniforge/plan.edn"))
+        (finally
+          (delete-dir! dir))))))
+
+(deftest capsule-warn-fires-when-both-sources-absent-test
+  (testing "WARN fires when both MCP artifact and all worktree artifacts are absent"
+    (let [dir     (str (System/getProperty "java.io.tmpdir") "/caps-nowarn-" (random-uuid))]
+      (.mkdirs (io/file dir))
+      (try
+        (let [session {:workdir           dir
+                       :explicit-workdir? true
+                       :capsule?          true
+                       :artifact-path     (str dir "/.miniforge-session/artifact.edn")
+                       :exec!             local-cat-exec!
+                       :executor          ::stub
+                       :environment-id    "env-2"}
+              err    (java.io.StringWriter.)]
+          (binding [*err* err]
+            (run-session* session
+                          (constantly :ok)
+                          session/read-capsule-artifact
+                          (constantly nil)
+                          :capsule))
+          ;; Both sources absent → WARN must have been written
+          (is (str/includes? (str err) "WARN: no artifact found")
+              "WARN must fire when both MCP and worktree artifacts are absent"))
+        (finally
+          (delete-dir! dir))))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
