@@ -197,8 +197,12 @@
         (binding [*err* stderr-output]
           (session/with-session context (fn [_session] :noop)))
         (let [output (str stderr-output)]
-          (is (re-find #"WARN" output)
-              "Should emit WARN when neither artifact source produced a result")
+          (is (re-find #"WARN: no artifact found after session" output)
+              "Should emit the :warn/no-artifact-found diagnostic when neither artifact source produced a result")
+          (is (re-find #"checked MCP path" output)
+              "Diagnostic must mention what was checked so post-mortem readers can trace the miss")
+          (is (re-find #"roles: plan, implement, verify, review, release" output)
+              "Diagnostic must enumerate the worktree role files probed, not imply a single path")
           (is (not (re-find #"ERROR" output))
               "Must use WARN level, not ERROR, for empty-artifact diagnostic"))
         (finally
