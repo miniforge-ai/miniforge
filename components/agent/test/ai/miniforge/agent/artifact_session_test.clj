@@ -485,18 +485,37 @@
 ;; is the public, production-path entry that selects host vs. capsule mode.
 
 (deftest with-session-warn-when-both-sources-absent-test
-  (testing "emits WARN to stderr when neither MCP artifact nor worktree artifacts are written"
-    ;; Both submission channels are empty — this is the one case that should
-    ;; surface a WARN so operators know the agent did not submit an artifact.
+  (testing "suppresses WARN when no explicit workdir was provided"
+    ;; Without an explicit workdir, the worktree-artifact scan is intentionally
+    ;; skipped. Its empty result should not be diagnosed as a failed artifact
+    ;; submission.
     (let [err    (java.io.StringWriter.)
           result (binding [*err* err]
                    (session/with-session {} (constantly :no-submit)))]
       (is (= :no-submit (:llm-result result)))
       (is (nil? (:artifact result)))
-      (is (str/includes? (str err) "WARN")
-          "run-session must emit WARN when neither MCP file nor worktree artifacts exist")
+      (is (not (str/includes? (str err) "WARN"))
+          "run-session must not warn when the worktree scan was not engaged")
       (is (not (str/includes? (str err) "ERROR"))
           "ERROR must never be emitted from the artifact-session layer")))
+
+  (testing "emits WARN when explicit workdir has neither MCP nor worktree artifact"
+    ;; Both submission channels are empty after an explicit worktree scan -
+    ;; this is the one case that should surface a WARN.
+    (let [wt     (make-worktree-with-plan nil)
+          err    (java.io.StringWriter.)
+          ctx    {:execution/worktree-path wt}
+          result (binding [*err* err]
+                   (session/with-session ctx (constantly :no-submit)))]
+      (try
+        (is (= :no-submit (:llm-result result)))
+        (is (nil? (:artifact result)))
+        (is (empty? (:worktree-artifacts result)))
+        (is (str/includes? (str err) "WARN")
+            "run-session must warn when explicit workdir scan finds no artifact")
+        (finally
+          (doseq [^java.io.File f (reverse (file-seq (io/file wt)))]
+            (io/delete-file f true))))))
 
   (testing "suppresses WARN when worktree artifact exists but MCP file is absent"
     ;; Container-promotion path: agent wrote .miniforge/plan.edn into the
