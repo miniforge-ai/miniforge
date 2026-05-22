@@ -67,6 +67,25 @@
         (is (.endsWith (:mcp-config-path s) "/mcp-config.json"))
         (is (.endsWith (:artifact-path s) "/artifact.edn"))
         (finally
+          (session/cleanup-session! s)))))
+
+  (testing ":explicit-workdir? is false when no workdir provided"
+    ;; The JVM CWD fallback must not be treated as an explicit workdir —
+    ;; otherwise stale .miniforge/ artifacts in the dev workspace pollute
+    ;; the worktree-artifacts scan and suppress the WARN signal.
+    (let [s (session/create-session!)]
+      (try
+        (is (false? (:explicit-workdir? s))
+            "no-arg create-session! must set :explicit-workdir? false")
+        (finally
+          (session/cleanup-session! s)))))
+
+  (testing ":explicit-workdir? is true when workdir explicitly provided"
+    (let [s (session/create-session! {:workdir "/tmp"})]
+      (try
+        (is (true? (:explicit-workdir? s))
+            "create-session! with explicit :workdir must set :explicit-workdir? true")
+        (finally
           (session/cleanup-session! s))))))
 
 (deftest validate-session-test
@@ -146,6 +165,20 @@
     (let [s (session/create-session!)]
       (try
         (is (nil? (session/read-artifact s)))
+        (finally
+          (session/cleanup-session! s)))))
+
+  (testing "does NOT emit ERROR to stderr when MCP file is absent"
+    ;; Worktree-promotion is the primary submission channel; a missing MCP
+    ;; artifact file is not an error on its own. run-session emits WARN only
+    ;; when BOTH sources are empty.
+    (let [s   (session/create-session!)
+          err (java.io.StringWriter.)]
+      (try
+        (binding [*err* err]
+          (session/read-artifact s))
+        (is (not (str/includes? (str err) "ERROR"))
+            "read-artifact must not emit ERROR when artifact file is missing")
         (finally
           (session/cleanup-session! s))))))
 
@@ -431,7 +464,84 @@
     (let [result (session/with-artifact-session [_sess]
                    :no-artifact)]
       (is (= :no-artifact (:llm-result result)))
-      (is (nil? (:artifact result))))))
+      (is (nil? (:artifact result)))))
+
+  (testing "deprecated macro: does not emit WARN when no artifact is written"
+    ;; `with-artifact-session` is a simplified legacy surface that bypasses
+    ;; `run-session` and its WARN logic entirely. Document this explicitly so
+    ;; callers know to migrate to `with-session` for the full WARN semantics.
+    (let [err    (java.io.StringWriter.)
+          result (binding [*err* err]
+                   (session/with-artifact-session [_sess] :no-artifact))]
+      (is (= :no-artifact (:llm-result result)))
+      (is (nil? (:artifact result)))
+      (is (not (str/includes? (str err) "WARN"))
+          "with-artifact-session intentionally omits WARN — migrate to with-session"))))
+
+;------------------------------------------------------------------------------ Layer 3.5
+;; run-session WARN graduation tests (via with-session public surface)
+;;
+;; run-session is private; these tests drive it through with-session, which
+;; is the public, production-path entry that selects host vs. capsule mode.
+
+(deftest with-session-warn-when-both-sources-absent-test
+  (testing "emits WARN to stderr when neither MCP artifact nor worktree artifacts are written"
+    ;; Both submission channels are empty — this is the one case that should
+    ;; surface a WARN so operators know the agent did not submit an artifact.
+    (let [err    (java.io.StringWriter.)
+          result (binding [*err* err]
+                   (session/with-session {} (constantly :no-submit)))]
+      (is (= :no-submit (:llm-result result)))
+      (is (nil? (:artifact result)))
+      (is (str/includes? (str err) "WARN")
+          "run-session must emit WARN when neither MCP file nor worktree artifacts exist")
+      (is (not (str/includes? (str err) "ERROR"))
+          "ERROR must never be emitted from the artifact-session layer")))
+
+  (testing "suppresses WARN when worktree artifact exists but MCP file is absent"
+    ;; Container-promotion path: agent wrote .miniforge/plan.edn into the
+    ;; worktree but did not call MCP submit_artifact. WARN must be suppressed
+    ;; because the primary submission channel was satisfied.
+    (let [wt     (make-worktree-with-plan (pr-str (plan-artifact)))
+          err    (java.io.StringWriter.)
+          ctx    {:execution/worktree-path wt}
+          result (binding [*err* err]
+                   (session/with-session ctx (constantly :worktree-only)))]
+      (try
+        (is (= :worktree-only (:llm-result result)))
+        (is (map? (get (:worktree-artifacts result) :plan))
+            "worktree-artifacts must contain :plan when .miniforge/plan.edn exists")
+        (is (not (str/includes? (str err) "WARN"))
+            "WARN must be suppressed when a worktree artifact covers the missing MCP file")
+        (finally
+          (doseq [^java.io.File f (reverse (file-seq (io/file wt)))]
+            (.delete f))))))
+
+  (testing "suppresses WARN when MCP artifact is written (no worktree)"
+    ;; Third combination: MCP submit_artifact was called → file present,
+    ;; but no worktree-promotion path exists. WARN must NOT fire because the
+    ;; primary submission channel (MCP) was satisfied.
+    (let [err (java.io.StringWriter.)]
+      (binding [*err* err]
+        (session/with-session {}
+          (fn [sess]
+            (spit (:artifact-path sess) (pr-str (code-artifact)))
+            :mcp-submitted)))
+      (is (not (str/includes? (str err) "WARN"))
+          "WARN must be suppressed when MCP artifact is present"))))
+
+(deftest with-session-no-warn-when-mcp-artifact-present-test
+  (testing "no WARN emitted when MCP artifact file is written"
+    ;; Explicit cross-check: MCP artifact present, worktree absent.
+    ;; Verifies the WARN gate checks mcp-artifact before firing.
+    (let [err (java.io.StringWriter.)]
+      (binding [*err* err]
+        (session/with-session {}
+          (fn [sess]
+            (spit (:artifact-path sess) (pr-str (code-artifact)))
+            :done)))
+      (is (not (str/includes? (str err) "WARN"))
+          "no WARN when MCP artifact is present and worktree is absent"))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
