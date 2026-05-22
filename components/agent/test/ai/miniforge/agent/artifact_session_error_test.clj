@@ -17,27 +17,111 @@
 ;; limitations under the License.
 
 (ns ai.miniforge.agent.artifact-session-error-test
-  "Contract tests for read-artifact silent-nil behavior.
+  "Regression tests for artifact-session diagnostic message behaviour.
 
-   `read-artifact` returns nil without logging anything when the MCP artifact
-   file is absent. Noise-free callers (e.g. `run-session`) decide whether
-   to escalate after consulting all artifact sources (MCP file + worktree
-   promotions). An ERROR at the `read-artifact` layer was removed because
-   it fired even when a valid worktree artifact covered the missing MCP file."
+   Covers two invariants:
+   1. `read-artifact` — absent MCP file returns nil silently (no ERROR).
+      The MCP artifact is an optional submission channel; a missing file
+      must not pollute the terminal with a false ERROR on successful plan-file runs.
+   2. `with-session` — emits WARN (not ERROR) only when BOTH the MCP artifact
+      path and all worktree role paths are empty, so genuine 'nothing found'
+      cases remain visible during post-mortem."
   (:require
+   [clojure.java.io :as io]
    [clojure.string :as str]
    [clojure.test :refer [deftest testing is]]
-   [ai.miniforge.agent.artifact-session :as session]))
+   [ai.miniforge.agent.artifact-session :as session])
+  (:import
+   [java.nio.file Files]
+   [java.nio.file.attribute FileAttribute]))
 
-(deftest read-artifact-missing-file-is-silent-test
-  (testing "read-artifact emits nothing when MCP artifact file is absent"
-    (let [s   (session/create-session!)
-          err (java.io.StringWriter.)]
+;; ---------------------------------------------------------------------------
+;; Helpers
+
+(defn- make-temp-workdir
+  "Create an isolated temp directory and return its path string. Callers
+   are responsible for cleanup via `cleanup-dir!`."
+  []
+  (str (Files/createTempDirectory
+        "miniforge-test-workdir-"
+        (into-array FileAttribute []))))
+
+(defn- cleanup-dir!
+  "Delete a directory and all its contents recursively."
+  [path]
+  (doseq [f (reverse (file-seq (io/file path)))]
+    (.delete ^java.io.File f)))
+
+(defn- write-plan-edn!
+  "Write a minimal plan.edn into <workdir>/.miniforge/ so
+   read-worktree-artifact finds a parseable plan for the :plan role."
+  [workdir]
+  (let [mf-dir (io/file workdir ".miniforge")]
+    (.mkdirs mf-dir)
+    (spit (io/file mf-dir "plan.edn")
+          "{:plan/id \"550e8400-e29b-41d4-a716-446655440000\" :plan/name \"t\" :plan/tasks []}")))
+
+;; ---------------------------------------------------------------------------
+;; read-artifact — MCP file absent → nil, no output
+
+(deftest read-artifact-missing-file-silent-test
+  (testing "absent MCP artifact file returns nil without emitting anything to stderr"
+    (let [s              (session/create-session!)
+          stderr-output  (java.io.StringWriter.)]
       (try
-        (binding [*err* err]
-          (is (nil? (session/read-artifact s))
-              "missing MCP file must return nil"))
-        (is (str/blank? (str err))
-            "read-artifact must not log anything when the artifact file is missing")
+        (binding [*err* stderr-output]
+          (let [result (session/read-artifact s)]
+            (is (nil? result)
+                "Should return nil when MCP artifact file is absent")
+            (is (str/blank? (str stderr-output))
+                "Should emit nothing to stderr — MCP artifact is optional")
+            (is (not (re-find #"ERROR" (str stderr-output)))
+                "Must NOT emit ERROR for a missing MCP artifact file")))
         (finally
           (session/cleanup-session! s))))))
+
+(deftest read-artifact-missing-returns-nil-test
+  (testing "returns nil when artifact file doesn't exist"
+    (let [s (session/create-session!)]
+      (try
+        (is (nil? (session/read-artifact s)))
+        (finally
+          (session/cleanup-session! s))))))
+
+;; ---------------------------------------------------------------------------
+;; with-session — WARN only when both channels empty
+
+(deftest with-session-warn-when-both-absent-test
+  (testing "with-session emits WARN when both MCP artifact and all worktree paths are absent"
+    ;; Isolated temp dir so we never accidentally pick up real
+    ;; .miniforge/*.edn files from the repo root.
+    (let [workdir       (make-temp-workdir)
+          context       {:execution/worktree-path workdir}
+          stderr-output (java.io.StringWriter.)]
+      (try
+        (binding [*err* stderr-output]
+          (session/with-session context (fn [_session] :noop)))
+        (let [output (str stderr-output)]
+          (is (re-find #"WARN: no artifact found after session" output)
+              "Should emit the :warn/no-artifact-found diagnostic when neither artifact source produced a result")
+          (is (re-find #"checked MCP path" output)
+              "Diagnostic must mention what was checked so post-mortem readers can trace the miss")
+          (is (not (re-find #"ERROR" output))
+              "Must use WARN level, not ERROR, for empty-artifact diagnostic"))
+        (finally
+          (cleanup-dir! workdir))))))
+
+(deftest with-session-no-warn-when-worktree-artifact-present-test
+  (testing "with-session does NOT emit any diagnostic when worktree artifact exists"
+    (let [workdir       (make-temp-workdir)
+          _             (write-plan-edn! workdir)
+          context       {:execution/worktree-path workdir}
+          stderr-output (java.io.StringWriter.)]
+      (try
+        (binding [*err* stderr-output]
+          (session/with-session context (fn [_session] :noop)))
+        (let [output (str stderr-output)]
+          (is (not (re-find #"WARN.*no artifact found" output))
+              "Should NOT emit 'no artifact found' WARN when worktree artifact exists"))
+        (finally
+          (cleanup-dir! workdir))))))
