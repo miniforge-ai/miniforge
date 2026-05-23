@@ -452,6 +452,9 @@
         on-fail (get-in ctx [:phase-config :on-fail])
         error-map (phase/exception-error ex)]
     (cond
+      (= :release/zero-files (get (ex-data ex) :type))
+      (assoc ctx :phase (phase/fail-phase (:phase ctx) error-map))
+
       ;; Within budget - retry
       (< iterations max-iterations)
       (-> ctx
