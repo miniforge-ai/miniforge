@@ -215,46 +215,74 @@
 
 (defn persist-linked-artifacts
   "Persist both linked artifacts to disk."
-  [record artifacts-dir parent-id child-id]
+  [record artifacts-dir parent-id child-id logger]
   (future
-    (when-let [parent (p/load-artifact record parent-id)]
-      (persist-artifact! artifacts-dir parent))
-    (when-let [child (p/load-artifact record child-id)]
-      (persist-artifact! artifacts-dir child))))
+    (try
+      (when-let [parent (p/load-artifact record parent-id)]
+        (persist-artifact! artifacts-dir parent))
+      (when-let [child (p/load-artifact record child-id)]
+        (persist-artifact! artifacts-dir child))
+      (catch Exception e
+        (when logger
+          (log/error logger :system :artifact/link-persist-failed
+                     {:message (.getMessage e)
+                      :data {:parent-id parent-id
+                             :child-id child-id}}))))))
+
+;------------------------------------------------------------------------------ Layer 5
+;; Anomaly-returning helpers
+
+(defn- anomaly?
+  [x]
+  (and (map? x) (contains? x :anomaly/category)))
+
+(defn find-link-target
+  "Load an artifact for linking, or return a typed not-found anomaly."
+  [record artifact-id role]
+  (if-let [artifact (load-artifact-impl record artifact-id)]
+    artifact
+     {:anomaly/category :anomalies/not-found
+      :anomaly/message  (case role
+                           :parent "Parent artifact not found"
+                           :child  "Child artifact not found"
+                           "Artifact not found")
+      :artifact-id      artifact-id
+      :role             role}))
 
 (defn link-artifacts
-  "Link artifacts implementation."
+  "Link artifacts, preserving the ArtifactStore boolean facade.
+   Missing link targets are represented as anomalies internally and logged."
   [{:keys [artifacts-dir cache index logger] :as record} parent-id child-id]
-  (try
-    ;; Load both artifacts to ensure they exist
-    (when-not (p/load-artifact record parent-id)
-      (throw (ex-info "Parent artifact not found" {:parent-id parent-id})))
-    (when-not (p/load-artifact record child-id)
-      (throw (ex-info "Child artifact not found" {:child-id child-id})))
+  (let [parent-result (find-link-target record parent-id :parent)
+        child-result  (find-link-target record child-id  :child)]
+    (if (or (anomaly? parent-result) (anomaly? child-result))
+      (do
+        (doseq [result [parent-result child-result]
+                :when  (anomaly? result)]
+          (when logger
+            (log/error logger :system :artifact/link-failed
+                       {:message (:anomaly/message result)
+                        :data    {:parent-id parent-id
+                                  :child-id  child-id
+                                  :role      (:role result)}})))
+        false)
+      (do
+        ;; Update index with links
+        (let [new-index (update-index-links @index parent-id child-id)]
+          (reset! index new-index)
+          (future (save-index! artifacts-dir new-index)))
 
-    ;; Update index with links
-    (let [new-index (update-index-links @index parent-id child-id)]
-      (reset! index new-index)
-      (future (save-index! artifacts-dir new-index)))
+        ;; Update cached artifacts if present
+        (update-cache-links cache parent-id child-id)
 
-    ;; Update cached artifacts if present
-    (update-cache-links cache parent-id child-id)
+        ;; Re-persist both artifacts to disk
+        (persist-linked-artifacts record artifacts-dir parent-id child-id logger)
 
-    ;; Re-persist both artifacts to disk
-    (persist-linked-artifacts record artifacts-dir parent-id child-id)
-
-    (when logger
-      (log/debug logger :system :artifact/linked
-                 {:data {:parent-id parent-id
-                         :child-id child-id}}))
-    true
-    (catch Exception e
-      (when logger
-        (log/error logger :system :artifact/link-failed
-                   {:message (.getMessage e)
-                    :data {:parent-id parent-id
-                           :child-id child-id}}))
-      false)))
+        (when logger
+          (log/debug logger :system :artifact/linked
+                     {:data {:parent-id parent-id
+                             :child-id  child-id}}))
+        true))))
 
 (defn close-store
   "Close store implementation."
