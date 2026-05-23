@@ -248,22 +248,40 @@
   (testing "machine snapshot identity is consulted when :name is rejected and present"
     (is (= {:workflow-type :canonical-sdlc :workflow-version "2.0.0"}
            (core/resolve-workflow-identity
-             {:workflow-spec    {:name "Some Human Title" :version "2.0.0"}
-              :machine-snapshot {:execution/workflow-id      :canonical-sdlc
-                                 :execution/workflow-version "2.0.0"}}
-             (fn [] (throw (ex-info "fallback should not be called" {}))))))))
+            {:workflow-spec    {:name "Some Human Title" :version "2.0.0"}
+             :machine-snapshot {:execution/workflow-id      :canonical-sdlc
+                                :execution/workflow-version "2.0.0"}}
+            (fn [] (throw (ex-info "fallback should not be called" {})))))))
 
-  (testing "qualified string values are rejected before keywordization"
+  (testing "spec :name keyword with an invalid workflow-type name falls through to fallback"
     (is (= {:workflow-type :canonical-sdlc :workflow-version "latest"}
            (core/resolve-workflow-identity
-            {:workflow-spec {:name "foo/bar"}}
-            (constantly :canonical-sdlc)))))
+            {:workflow-spec {:name (keyword "Some Human Title")
+                             :version "latest"}}
+            (fn [] :canonical-sdlc)))))))
 
-  (testing "qualified keyword values are rejected before loader lookup"
+(deftest resolve-workflow-identity-rejects-qualified-workflow-types-test
+  (testing "slash-containing string identifiers are rejected before keywordization"
     (is (= {:workflow-type :canonical-sdlc :workflow-version "latest"}
            (core/resolve-workflow-identity
-            {:workflow-spec {:workflow-type :foo/bar}}
-            (constantly :canonical-sdlc)))))
+            {:workflow-spec {:workflow-type "foo/bar"
+                             :name "canonical-sdlc"
+                             :version "latest"}}
+            (fn [] :fallback-sdlc)))))
+
+  (testing "qualified keyword identifiers are rejected"
+    (is (= {:workflow-type :canonical-sdlc :workflow-version "latest"}
+           (core/resolve-workflow-identity
+            {:workflow-spec {:workflow-type :foo/bar
+                             :workflow/id :canonical-sdlc
+                             :version "latest"}}
+            (constantly nil)))))
+
+  (testing "qualified :name keyword falls through to fallback"
+    (is (= {:workflow-type :fallback-sdlc :workflow-version "latest"}
+           (core/resolve-workflow-identity
+            {:workflow-spec {:name :foo/bar}}
+            (fn [] :fallback-sdlc))))))
 
 ;------------------------------------------------------------------------------ Layer 2
 ;; reconstruct-context — integration with the event-stream reader

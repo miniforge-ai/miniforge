@@ -390,18 +390,19 @@
        (str/starts-with? (name workflow-id) "dag-task-")))
 
 (def ^:private workflow-type-identifier-re
-  "Regex for a valid Clojure keyword name. Workflow types are loader keys
+  "Regex for an unqualified workflow-type keyword name. Workflow types are loader keys
    like :canonical-sdlc / :quick-fix — strict identifier characters only.
    This rejects values like \"In-flight PR / branch / task-claim registry\"
    (a human title that the producer side accidentally records under
    `:name`) before they get keywordized into an unloadable lookup key."
   #"^[A-Za-z][A-Za-z0-9._+!?*<>=-]*$")
 
-(defn- unqualified-keyword?
-  "True when `v` is a keyword whose namespace cannot be discarded by loaders."
+(defn- valid-workflow-type-keyword?
+  "True when `v` is an unqualified workflow-type keyword name."
   [v]
   (and (keyword? v)
-       (nil? (namespace v))))
+       (nil? (namespace v))
+       (re-matches workflow-type-identifier-re (name v))))
 
 (defn- candidate-workflow-type
   "Pull a candidate workflow-type keyword out of the recorded workflow
@@ -410,7 +411,8 @@
    1. `:workflow-type` — canonical key when callers thread it through
    2. `:workflow/id`    — same shape as a workflow-config map
    3. `:name`           — legacy / TUI shape; ONLY accepted when the
-      value matches a strict keyword-name regex, because some producers
+      value is an unqualified workflow-type keyword/name matching a
+      strict keyword-name regex, because some producers
       (notably the cli + TUI persistence path) record the human spec
       title under `:name` and a title with spaces / slashes would
       keywordize into an unloadable key.
@@ -419,7 +421,7 @@
   [workflow-spec]
   (let [keyword-if-valid (fn [v]
                            (cond
-                             (unqualified-keyword? v) v
+                             (valid-workflow-type-keyword? v) v
                              (and (string? v)
                                   (re-matches workflow-type-identifier-re v))
                              (keyword v)
