@@ -161,6 +161,71 @@
       (is (not (str/blank? out))
           "Pretty mode without quiet should produce output"))))
 
+(deftest print-result-edn-preserves-full-result-test
+  (testing "print-result with :edn preserves access to the full result"
+    (let [result {:execution/status :completed
+                  :large-payload {:nested [:kept]}}
+          out (capture-stdout #(display/print-result result {:output :edn}))]
+      (is (str/includes? out ":large-payload"))
+      (is (str/includes? out ":nested")))))
+
+(deftest print-result-quiet-suppresses-machine-output-test
+  (testing "quiet mode suppresses all output branches"
+    (doseq [output [:json :edn nil]]
+      (let [out (capture-stdout #(display/print-result {:execution/status :completed}
+                                                       {:output output :quiet true}))]
+        (is (str/blank? out)
+            (str "Expected no output for " output))))))
+
+;------------------------------------------------------------------------------ Layer 2.5
+;; compact-result-summary helpers
+
+(deftest phase-summaries-known-shapes-test
+  (testing "phase-summaries reads known result shapes"
+    (is (= [{:phase :plan}] (display/phase-summaries {:phases [{:phase :plan}]})))
+    (is (= [{:phase :test}] (display/phase-summaries {:phase-results [{:phase :test}]})))
+    (is (= [{:phase :done}] (display/phase-summaries {:workflow/phases [{:phase :done}]})))
+    (is (nil? (display/phase-summaries {:metrics {:outcome :ok}})))))
+
+(deftest failed-task-ids-known-shapes-test
+  (testing "failed-task-ids reads direct and DAG task shapes"
+    (is (= [:a] (display/failed-task-ids {:failed-task-ids [:a]})))
+    (is (= [:b] (display/failed-task-ids {:dag/failed-tasks [:b]})))
+    (is (= [:c] (display/failed-task-ids {:dag/tasks {:c {:status :failed}
+                                                       :d {:status :completed}}})))))
+
+(deftest pr-urls-known-shapes-test
+  (testing "pr-urls reads direct URL shapes"
+    (is (= ["https://github.com/miniforge-ai/miniforge/pull/1"]
+           (display/pr-urls {:pr/url "https://github.com/miniforge-ai/miniforge/pull/1"})))
+    (is (= ["https://github.com/miniforge-ai/miniforge/pull/2"]
+           (display/pr-urls {:pull-request-url "https://github.com/miniforge-ai/miniforge/pull/2"})))
+    (is (= ["https://github.com/miniforge-ai/miniforge/pull/3"]
+           (display/pr-urls {:prs ["https://github.com/miniforge-ai/miniforge/pull/3"]})))))
+
+(deftest compact-result-summary-renders-operator-view-test
+  (testing "compact-result-summary renders status, phases, tasks, PRs, metrics, errors, and hint"
+    (let [out (display/compact-result-summary
+               {:execution/status :success
+                :execution/metrics {:tokens 12 :cost-usd 0.25 :duration-ms 1500}
+                :execution/errors ["compile failed"]
+                :phases [{:phase :plan :outcome :completed :duration-ms 1000}
+                         {:phase :skip-me :outcome :skipped}
+                         {:phase :failed-phase :outcome :failed}
+                         {:phase :unknown :outcome :unknown}]
+                :failed-task-ids [:task-a]
+                :prs ["https://github.com/miniforge-ai/miniforge/pull/4"]})]
+      (is (str/includes? out "Workflow completed"))
+      (is (str/includes? out "plan completed (1.0s)"))
+      (is (str/includes? out "skip-me skipped"))
+      (is (str/includes? out "failed-phase failed"))
+      (is (str/includes? out "unknown unknown"))
+      (is (str/includes? out "Failed tasks: task-a"))
+      (is (str/includes? out "pull/4"))
+      (is (str/includes? out "Tokens: 12"))
+      (is (str/includes? out "compile failed"))
+      (is (str/includes? out "--output edn")))))
+
 ;------------------------------------------------------------------------------ Layer 3
 ;; print-pretty-result
 
@@ -172,7 +237,10 @@
       (is (not (str/blank? out)))
       ;; Should contain cyan separator lines (━ repeated)
       (is (str/includes? out "━")
-          "Should contain box-drawing separator"))))
+          "Should contain box-drawing separator")
+      (is (str/includes? out "--output edn"))
+      (is (not (str/includes? out ":execution/status"))
+          "Pretty mode should not pprint the full EDN result"))))
 
 (deftest print-pretty-result-failed-test
   (testing "print-pretty-result renders failure with errors"
