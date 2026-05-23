@@ -1,0 +1,268 @@
+;; =============================================================================
+;; Spec: In-flight PR / branch / task-claim registry
+;; =============================================================================
+;;
+;; Observed failure mode (2026-05-22, PRs #953-#962):
+;;   Across 10 PRs in one day, the planner / DAG decomposer kept fanning the
+;;   same root cause ("artifact-session false ERROR / WARN") into sibling
+;;   PRs that produced near-identical diffs. Concrete evidence on #961
+;;   vs #962: shared base commit 8d8b2589, byte-identical 105-line
+;;   `artifact_session.clj` diffs vs main, distinguished only by leaf
+;;   commits + PR doc. Same pattern on 954/956 and 955/957/958.
+;;
+;; Root cause (mapped during design 2026-05-22):
+;;   Producers of branches and PRs (release-executor inside DAG tasks) have
+;;   no shared, durable, write-as-you-go registry that other producers can
+;;   read or be notified by. Closest existing primitive is the per-workflow
+;;   `dag-executor/branch_registry.clj`, which is pull-based and populated
+;;   only POST-task-completion — sibling tasks running in parallel cannot
+;;   see each other's claims while they run, and concurrent workflow
+;;   invocations cannot see each other at all. "Active context of what's
+;;   in PR" doesn't exist as a primitive. GitHub is the only durable
+;;   surface, but no in-process component queries it at runtime, and it
+;;   doesn't carry our intent metadata.
+;;
+;; This is not just a duplication problem — it's also a work-recovery
+;; problem. Today, when a workflow dies mid-task, the task is orphaned;
+;; with a claim FSM that times out, another workflow can re-acquire from
+;; the existing `:workspace/persisted` checkpoint. Crash-resilient
+;; distributed task execution falls out as a side-effect.
+;;
+;; Related memory:
+;;   project_in_flight_blind_spot.md
+;;   project_autonomous_pr_shepherd_gap.md
+;;   project_autonomous_pr_stack_drift.md
+
+{:spec/title "In-flight PR / branch / task-claim registry"
+
+ :spec/description
+ "Build a read-through / write-through registry that mediates all PR and
+  branch state between miniforge agents and the upstream Git host
+  (GitHub / GitLab). The registry is the single seam between local agent
+  activity and external state, and doubles as a distributed claim system
+  that prevents duplicate sibling PRs AND enables work recovery when a
+  workflow dies mid-task.
+
+  Architecture (layered cache):
+
+    L1: orchestrator-local ref / atom (per-workflow, in-process)
+        ─ fast intra-DAG visibility; siblings see each other's claims
+          and facts immediately without IO
+
+    L2: Datalevin transactions (per-repo, cross-process)
+        ─ durable across workflow invocations on the same machine
+        ─ Datalevin's ACID transactions ARE the STM substrate; first
+          write to commit wins, later writer yields cleanly
+
+    L3: GitHub / GitLab (authoritative for landed PRs)
+        ─ read-through on L2 miss or staleness; truth when the cache
+          and the host disagree
+
+  Identity: a task-level snowflake (own generator, NOT Fleet's spec-level
+  one) encoding spec-id, intent-hash, and a monotonic counter. Time-
+  sortable, collision-safe, decodable.
+
+  Claim FSM:
+      nil ──claim──▶ :claimed ──start──▶ :working ──complete──▶ :finished
+                       │                    │
+                     TTL│                   ├──abort──▶ :failed
+                       ▼                    │              │
+                  (cleared,                 └──liveness────┴──▶ (cleared,
+                   re-acquirable                signal lost      checkpoint
+                   from checkpoint)             via heuristics    recoverable)
+
+  Claims are issued by the planner at fan-out (one per task in the DAG).
+  TTL on :claimed is short — only the gap between 'claimed' and 'started
+  working.' Once :working, the claim is held until :finished, :failed,
+  or a liveness signal clears it. For V1, liveness piggybacks on existing
+  stall-detection heuristics (orchestrator stagnation timeouts, kill-
+  workflow signals). A future real liveness protocol plugs into the same
+  surface via `:claim/heartbeat-source`.
+
+  Write-through happens via the existing artifact-session promotion
+  channel (container / worktree / MCP) — release becomes 'submit a
+  release-claim artifact', the registry observes the artifact and writes
+  branch + PR via the existing release-executor `gh` shell-out, records
+  the fact, invalidates the claim. Same shape as `.miniforge/plan.edn`
+  and `.miniforge/release.edn` promotion.
+
+  Conflict resolution at claim time: first Datalevin transaction commits
+  wins; loser yields and its task either converts to a 'wait for PR #X'
+  task (downstream of the winner) or is dropped if redundant. Snowflake
+  order is informational metadata, not the arbiter.
+
+  Coalescent workflow (M4): when two facts converge on the same intent —
+  e.g., two open PRs whose intent-hash matches and whose diffs overlap
+  significantly — run an LLM-driven coalescer that selects the best
+  ideas from each and produces a single consolidated PR.
+
+  Cross-process notify: leverage the existing transit-on-disk evidence
+  bundle channel (already used to surface workflow state to TUI/consoles)
+  + optional websocket. Local-first, no GitHub pub-sub / webhook setup.
+
+  MILESTONES
+
+  GROUP 1 — Snowflake generator + Datalevin schema + read-through (M1)
+  New component `pr-registry`. Implements:
+    - `ai.miniforge.pr-registry.snowflake/gen-id` — task-level snowflake.
+      Bit layout TBD-in-impl; carries spec-id, intent-hash, counter.
+    - `ai.miniforge.pr-registry.schema` — Datalevin schema for registry
+      entries. Schema is mutable for V1; freeze after first dogfood use.
+    - `ai.miniforge.pr-registry.interface/lookup-by-intent` and
+      `/lookup-by-branch` — read-only, read-through to GitHub via
+      existing `pr-sync/core.clj:220-245` functions on L2 miss.
+    - Adopt knowledge-store's Datalevin instance as the L2 backing store
+      (already part of every miniforge invocation; no new dependency).
+  No writes yet — V1 is observation-only so we can dogfood it without
+  affecting PR creation.
+
+  GROUP 2 — Claim FSM + write-through via artifact-session (M2)
+  - Add `:claim` artifact type to `components/agent/src/.../artifact-
+    session.clj` system-message-templates / role list. Promoted the same
+    way `:plan`, `:implement`, etc. are.
+  - `ai.miniforge.pr-registry.claim` implements the FSM:
+    {:claim/id snowflake-id
+     :claim/spec-id … :claim/intent-hash …
+     :claim/state #{:claimed :working :finished :failed}
+     :claim/workflow-id … :claim/task-id …
+     :claim/claimed-at … :claim/started-at … :claim/finished-at …
+     :claim/expires-at …
+     :claim/heartbeat-source :heuristic/stall-detector  ; pluggable
+     :claim/branch (when present) :claim/pr-number (when present)
+     :claim/last-seen-github …}
+  - Write path: `release-executor/sandbox.clj:205` `create-pr!` calls
+    `pr-registry/record-pr!` before / after the shell-out so the fact
+    lands in L2 transactionally.
+  - L1 ref in `dag-executor` orchestrator mirrors L2 for the current
+    workflow run.
+  - Liveness: wire claim expiry to existing stall-detector signals
+    (workflow-runner kill-workflow, progress-monitor timeouts). No new
+    heartbeat protocol.
+
+  GROUP 3 — Planner + release dedup consumers (M3)
+  - Planner (`components/agent/src/.../planner.clj`): after `parse-plan-
+    response` but before plan emission, consult `pr-registry/lookup-by-
+    intent` for each candidate task's intent-hash. If a winning claim
+    exists, replace the task with either a 'wait for PR #X' marker or
+    drop it (if the existing PR is already open and the planner verifies
+    it covers the intent).
+  - Release-executor (`release-executor/core.clj` `step-create-branch`):
+    consult `pr-registry/lookup-by-intent` and `lookup-by-branch` before
+    pushing. On match, yield with a structured anomaly so the orchestrator
+    can re-target the task downstream of the winning PR.
+  - Workflow-resume (`workflow-resume/core.clj:302`): consult registry
+    on resume to learn what landed during the pause; mark affected tasks
+    as already-implemented / superseded.
+
+  GROUP 4 — Coalescent workflow (M4)
+  Triggered when PR-shepherd (or any background sweep) observes two
+  open PRs whose claims share intent-hash AND whose diffs overlap by
+  more than a configurable threshold. New workflow type `:coalesce-prs`
+  that:
+    - Loads both PR diffs + review threads.
+    - Invokes a coalescer LLM (Sonnet, reviewer-shaped) that selects
+      the better implementation per area and produces a unified diff
+      + rationale.
+    - Opens a new PR for the unified diff, closes the two source PRs
+      with a 'superseded by #N' comment, transfers any unresolved review
+      threads.
+  V1 is opt-in — PR-shepherd flags candidates but a human triggers
+  coalescence until we trust the selector.
+
+  GROUP 5 — Cross-process notify via evidence bundle + websocket (M5)
+  - Every registry transition (claim → working → finished, PR opened,
+    PR closed) emits a transit event onto the existing evidence bundle
+    channel under `.miniforge/registry/<snowflake>.transit`.
+  - TUI / dashboard subscribers (already polling evidence bundles) pick
+    these up automatically; no new wire-up.
+  - Optional: websocket emit for low-latency dashboard updates, reusing
+    the existing dashboard websocket surface.
+  - Off-box (Fleet): the transit-on-disk channel is already the surface
+    Fleet observes, so cross-machine visibility comes along for free."
+
+ :spec/intent {:type :feature
+               :scope ["components/pr-registry/src"
+                       "components/pr-registry/test"
+                       "components/agent/src/ai/miniforge/agent/artifact_session.clj"
+                       "components/agent/src/ai/miniforge/agent/planner.clj"
+                       "components/release-executor/src/ai/miniforge/release_executor"
+                       "components/dag-executor/src/ai/miniforge/dag_executor/orchestrator.clj"
+                       "components/workflow-resume/src"
+                       "components/pr-sync/src"]}
+
+ :spec/constraints
+ ["L1 (orchestrator ref) is workflow-scoped and never durable; every claim
+   write goes through L2 (Datalevin) transactionally before L1 mirrors it"
+  "L2 (Datalevin) is the cross-process source of truth for in-flight claims;
+   GitHub is the cross-process source of truth for landed PRs"
+  "Datalevin transactions are the conflict resolver — never implement a
+   separate first-write-wins shim; rely on the underlying ACID semantics"
+  "Snowflake generator is our own (task-level granularity), borrowing
+   Fleet's shape but not its bit layout"
+  "Claim TTL on :claimed is short (default 5min) — long enough to start
+   working, short enough that abandoned claims free up quickly"
+  "Liveness signal for :working is pluggable via :claim/heartbeat-source;
+   V1 wires to existing stall-detection heuristics, do not invent a new
+   heartbeat protocol in this spec"
+  "Write-through must reuse the artifact-session promotion channel —
+   container / worktree / MCP; do not introduce a parallel pipeline"
+  "No GitHub pub-sub / webhook in V1; cross-process notify uses the
+   existing transit-on-disk evidence bundle channel"
+  "Read-through to GitHub must be TTL-bounded so we don't hammer the
+   host on every consult; default 30s for hot intents, 5min for cold"
+  "M1 is observation-only — no consumer can yield on the registry until
+   M2 + M3 land; this lets us dogfood the read path before risking
+   behaviour change"
+  "Schema mutability: explicit V1 freedom to evolve the Datalevin schema
+   in-place; freeze after first full dogfood run validates the shape"
+  "Tests must include simulated concurrent-workflow scenarios that prove
+   first-Datalevin-transaction wins and the loser yields cleanly"]
+
+ :spec/acceptance-criteria
+ ["M1: `pr-registry/lookup-by-intent` returns the correct entry for an
+   open PR on GitHub via read-through; misses populate L2 transactionally"
+  "M1: Snowflake IDs are time-sortable, decodable into spec-id +
+   intent-hash + counter, and unique across 10⁴ concurrent generations"
+  "M2: Claim FSM transitions are atomic via Datalevin transactions;
+   simultaneous claim attempts on the same intent — exactly one commits,
+   the other yields without retry-storm"
+  "M2: release-executor's `create-pr!` records the fact in L2 within
+   the same transaction boundary; no PR exists on GitHub without a
+   corresponding L2 fact entry"
+  "M3: Planner consults the registry at fan-out; a duplicate-intent task
+   is replaced with a marker referencing the existing PR (visible in
+   the plan artifact)"
+  "M3: Release-executor consults the registry before push; a duplicate
+   branch / intent yields with a structured anomaly the orchestrator can
+   handle"
+  "M3: Workflow-resume consults the registry on resume; tasks whose
+   intent landed during the pause are marked already-implemented"
+  "M4: Two open PRs with overlapping diffs + matching intent-hash are
+   flagged by PR-shepherd; the coalescent workflow produces a unified
+   PR and closes the two sources (opt-in trigger)"
+  "M5: Registry transitions emit transit-on-disk events under
+   `.miniforge/registry/`; TUI and dashboard subscribers see them
+   without code changes"
+  "Crash-recovery: a workflow killed during :working leaves a claim that
+   times out (via liveness signal) and is re-acquired by a fresh
+   workflow from the last `:workspace/persisted` checkpoint"
+  "Existing dogfood workflows do not regress with M1 installed (read-only)"
+  "Two concurrent dogfood invocations targeting the same intent — exactly
+   one ships a PR, the other yields with telemetry"]
+
+ :spec/priority
+ {:tier :high
+  :axes #{:dogfood-enabler :token-conservation :resilience}
+  :theme :orchestration
+  :rationale
+  "Closes the in-flight blind spot that produced the 953-962 duplicate-PR
+   cluster (10 PRs in one day, several pairs byte-identical on the source
+   diff). Also unlocks crash-resilient task execution as a side-effect —
+   workflows that die mid-task become recoverable from checkpoint instead
+   of orphaned. The L1/L2/L3 cache architecture composes with existing
+   primitives (artifact-session promotion, Datalevin knowledge store,
+   evidence-bundle transit channel) — no new infrastructure introduced."
+  :blocks ["autonomous-pr-shepherd.spec.edn"]
+  :blocked-by []}
+
+ :spec/workflow-type :canonical-sdlc}
