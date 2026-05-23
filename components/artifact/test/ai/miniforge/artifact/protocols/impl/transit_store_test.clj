@@ -17,26 +17,32 @@
 ;; limitations under the License.
 
 (ns ai.miniforge.artifact.protocols.impl.transit-store-test
-  (:require [ai.miniforge.artifact.interface.protocols.artifact-store :as p]
+  (:require [ai.miniforge.anomaly.interface :as anomaly]
+            [ai.miniforge.artifact.interface.protocols.artifact-store :as p]
             [ai.miniforge.artifact.protocols.impl.transit-store :as impl]
             [ai.miniforge.artifact.protocols.records.transit-store :as store]
             [clojure.java.io :as io]
-            [clojure.test :refer [deftest is]])
+            [clojure.test :refer [deftest is testing]])
   (:import [java.nio.file Files]))
 
-(def parent
-  {:artifact/id "parent-id"
-   :artifact/type :plan
+(def ^:private parent-id "parent-id")
+(def ^:private child-id "child-id")
+(def ^:private missing-parent-id "missing-parent")
+(def ^:private missing-child-id "missing-child")
+
+(defn- artifact
+  [id type]
+  {:artifact/id id
+   :artifact/type type
    :artifact/version "1.0.0"
    :artifact/parents []
    :artifact/children []})
 
-(def child
-  {:artifact/id "child-id"
-   :artifact/type :code
-   :artifact/version "1.0.0"
-   :artifact/parents []
-   :artifact/children []})
+(defn- parent-artifact []
+  (artifact parent-id :plan))
+
+(defn- child-artifact []
+  (artifact child-id :code))
 
 (defn- delete-dir! [file]
   (when (.exists (io/file file))
@@ -53,41 +59,53 @@
   (p/save store artifact)
   artifact)
 
-(deftest find-link-target-test
+(deftest test-find-link-target
   (let [[artifact-store dir] (temp-store)]
     (try
-      (is (= parent (impl/find-link-target
-                     artifact-store (:artifact/id (save! artifact-store parent)) :parent)))
-      (let [result (impl/find-link-target artifact-store "missing-parent" :parent)]
-        (is (= :anomalies/not-found (:anomaly/category result)))
-        (is (= "missing-parent" (:artifact-id result)))
-        (is (= :parent (:role result))))
-      (is (= :unknown (:role (impl/find-link-target artifact-store "missing" :unknown))))
+      (testing "given existing target -> returns artifact"
+        (let [parent (parent-artifact)]
+          (is (= parent (impl/find-link-target
+                         artifact-store (:artifact/id (save! artifact-store parent)) :parent)))))
+      (testing "given missing target -> returns canonical anomaly"
+        (let [result (impl/find-link-target artifact-store missing-parent-id :parent)]
+          (is (anomaly/anomaly? result))
+          (is (= :not-found (:anomaly/type result)))
+          (is (= {:artifact/id missing-parent-id
+                  :artifact/role :parent}
+                 (:anomaly/data result)))))
+      (testing "given unknown role -> returns anomaly data instead of throwing"
+        (is (= :unknown (get-in (impl/find-link-target artifact-store "missing" :unknown)
+                                [:anomaly/data :artifact/role]))))
       (finally
         (delete-dir! dir)))))
 
-(deftest link-artifacts-success-test
+(deftest test-link-artifacts-success
   (let [[artifact-store dir] (temp-store)]
     (try
-      (save! artifact-store parent)
-      (save! artifact-store child)
-      (is (true? (impl/link-artifacts artifact-store "parent-id" "child-id")))
-      (is (contains? (set (:artifact/children (p/load-artifact artifact-store "parent-id")))
-                     "child-id"))
-      (is (contains? (set (:artifact/parents (p/load-artifact artifact-store "child-id")))
-                     "parent-id"))
+      (save! artifact-store (parent-artifact))
+      (save! artifact-store (child-artifact))
+      (testing "given existing parent and child -> links artifacts"
+        (is (true? (impl/link-artifacts artifact-store parent-id child-id)))
+        (is (contains? (set (:artifact/children (p/load-artifact artifact-store parent-id)))
+                       child-id))
+        (is (contains? (set (:artifact/parents (p/load-artifact artifact-store child-id)))
+                       parent-id)))
       (finally
         (delete-dir! dir)))))
 
-(deftest link-artifacts-missing-targets-test
+(defn- missing-target-cases []
+  [["missing parent" [(child-artifact)] missing-parent-id child-id]
+   ["missing child" [(parent-artifact)] parent-id missing-child-id]
+   ["missing both" [] missing-parent-id missing-child-id]])
+
+(deftest test-link-artifacts-missing-targets
   (doseq [[label artifacts parent-id child-id]
-          [["missing parent" [child] "missing-parent" "child-id"]
-           ["missing child" [parent] "parent-id" "missing-child"]
-           ["missing both" [] "missing-parent" "missing-child"]]]
+          (missing-target-cases)]
     (let [[artifact-store dir] (temp-store)]
       (try
         (doseq [artifact artifacts]
           (save! artifact-store artifact))
-        (is (false? (impl/link-artifacts artifact-store parent-id child-id)) label)
+        (testing (str "given " label " -> returns false")
+          (is (false? (impl/link-artifacts artifact-store parent-id child-id))))
         (finally
           (delete-dir! dir))))))

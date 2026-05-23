@@ -1,0 +1,4 @@
+{:artifact/messages
+ {:link/parent-not-found "Parent artifact not found"
+  :link/child-not-found "Child artifact not found"
+  :link/artifact-not-found "Artifact not found"}}

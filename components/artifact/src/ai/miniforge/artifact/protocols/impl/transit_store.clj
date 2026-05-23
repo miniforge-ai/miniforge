@@ -22,6 +22,8 @@
    These functions implement the ArtifactStore protocol for the Transit-based store.
    They are used by the TransitArtifactStore record."
   (:require
+   [ai.miniforge.anomaly.interface :as anomaly]
+   [ai.miniforge.artifact.messages :as messages]
    [ai.miniforge.config.interface :as config]
    [clojure.java.io :as io]
    [cognitect.transit :as transit]
@@ -183,15 +185,27 @@
                              :source :disk}}))
         artifact)))
 
+(defn- criterion-match?
+  [metadata [k v]]
+  (= (get metadata k) v))
+
+(defn- metadata-match?
+  [criteria metadata]
+  (every? (partial criterion-match? metadata) criteria))
+
+(defn- matching-index-id
+  [criteria [id metadata]]
+  (when (metadata-match? criteria metadata)
+    id))
+
 (defn filter-by-criteria
   "Filter artifacts by criteria."
   [index criteria]
-  (keep (fn [[id metadata]]
-          (when (every? (fn [[k v]]
-                          (= (get metadata k) v))
-                        criteria)
-            id))
-        index))
+  (keep (partial matching-index-id criteria) index))
+
+(defn- load-indexed-artifact
+  [record id]
+  (p/load-artifact record id))
 
 (defn query-artifacts
   "Query artifacts implementation."
@@ -199,10 +213,10 @@
   (if (empty? criteria)
     ;; Return all artifacts
     (let [all-ids (keys @index)]
-      (keep #(p/load-artifact record %) all-ids))
+      (keep (partial load-indexed-artifact record) all-ids))
     ;; Filter by criteria using index first for efficiency
     (let [matching-ids (filter-by-criteria @index criteria)
-          artifacts (keep #(p/load-artifact record %) matching-ids)]
+          artifacts (keep (partial load-indexed-artifact record) matching-ids)]
       (vec artifacts))))
 
 (defn update-cache-links
@@ -234,20 +248,32 @@
 
 (defn- anomaly?
   [x]
-  (and (map? x) (contains? x :anomaly/category)))
+  (anomaly/anomaly? x))
+
+(defn- link-target-message
+  [role]
+  (case role
+    :parent (messages/t :link/parent-not-found)
+    :child  (messages/t :link/child-not-found)
+    (messages/t :link/artifact-not-found)))
+
+(defn- link-target-anomaly
+  [artifact-id role]
+  (anomaly/anomaly :not-found
+                   (link-target-message role)
+                   {:artifact/id artifact-id
+                    :artifact/role role}))
+
+(defn- link-target-role
+  [result]
+  (get-in result [:anomaly/data :artifact/role]))
 
 (defn find-link-target
   "Load an artifact for linking, or return a typed not-found anomaly."
   [record artifact-id role]
   (if-let [artifact (load-artifact-impl record artifact-id)]
     artifact
-     {:anomaly/category :anomalies/not-found
-      :anomaly/message  (case role
-                           :parent "Parent artifact not found"
-                           :child  "Child artifact not found"
-                           "Artifact not found")
-      :artifact-id      artifact-id
-      :role             role}))
+    (link-target-anomaly artifact-id role)))
 
 (defn link-artifacts
   "Link artifacts, preserving the ArtifactStore boolean facade.
@@ -264,7 +290,7 @@
                        {:message (:anomaly/message result)
                         :data    {:parent-id parent-id
                                   :child-id  child-id
-                                  :role      (:role result)}})))
+                                  :role      (link-target-role result)}})))
         false)
       (do
         ;; Update index with links
