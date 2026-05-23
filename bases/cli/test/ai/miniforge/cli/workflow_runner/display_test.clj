@@ -82,29 +82,19 @@
 
 ;------------------------------------------------------------------------------ extract-phase-summaries
 
-(deftest extract-phase-summaries-from-phases-key-test
-  (testing "extracts from :phases vec"
-    (let [result {:phases [{:phase :build :outcome :completed :duration-ms 1200}
-                            {:phase :test  :outcome :failure  :duration-ms 300}]}]
+(deftest extract-phase-summaries-from-execution-phase-results-test
+  (testing "extracts from canonical :execution/phase-results"
+    (let [result {:execution/phase-results
+                  {:build {:status :success :metrics {:duration-ms 1200}}
+                   :test  {:status :error   :metrics {:duration-ms 300}}}}]
       (is (= [{:phase :build :outcome :completed :duration-ms 1200}
               {:phase :test  :outcome :failure   :duration-ms 300}]
-             (sut/extract-phase-summaries result))))))
-
-(deftest extract-phase-summaries-from-phase-results-key-test
-  (testing "extracts from :phase-results vec"
-    (let [result {:phase-results [{:phase :deploy :outcome :skipped :duration-ms nil}]}]
-      (is (= [{:phase :deploy :outcome :skipped :duration-ms nil}]
-             (sut/extract-phase-summaries result))))))
-
-(deftest extract-phase-summaries-from-workflow-phases-key-test
-  (testing "extracts from :workflow/phases vec"
-    (let [result {:workflow/phases [{:phase :scan :outcome :completed :duration-ms 500}]}]
-      (is (= [{:phase :scan :outcome :completed :duration-ms 500}]
              (sut/extract-phase-summaries result))))))
 
 (deftest extract-phase-summaries-nil-when-no-phases-test
   (testing "returns nil when no phase data present"
     (is (nil? (sut/extract-phase-summaries {:execution/status :completed})))
+    (is (nil? (sut/extract-phase-summaries {:phases [{:phase :legacy}]})))
     (is (nil? (sut/extract-phase-summaries {})))))
 
 (deftest extract-phase-summaries-nil-on-non-map-test
@@ -114,59 +104,36 @@
 
 ;------------------------------------------------------------------------------ extract-failed-tasks
 
-(deftest extract-failed-tasks-from-failed-task-ids-test
-  (testing "extracts from :failed-task-ids key"
+(deftest extract-failed-tasks-from-canonical-dag-result-test
+  (testing "extracts from canonical :execution/dag-result"
     (is (= ["task-a" "task-b"]
-           (sut/extract-failed-tasks {:failed-task-ids ["task-a" "task-b"]})))))
-
-(deftest extract-failed-tasks-from-dag-failed-tasks-test
-  (testing "extracts from :dag/failed-tasks key"
-    (is (= ["t1"]
-           (sut/extract-failed-tasks {:dag/failed-tasks ["t1"]})))))
-
-(deftest extract-failed-tasks-from-dag-tasks-map-test
-  (testing "extracts failed tasks from :dag/tasks map by status"
-    (let [result {:dag/tasks {:task-a {:status :failed}
-                               :task-b {:status :completed}
-                               :task-c {:task/status :failure}}}]
-      (let [ids (set (sut/extract-failed-tasks result))]
-        (is (contains? ids "task-a"))
-        (is (contains? ids "task-c"))
-        (is (not (contains? ids "task-b")))))))
+           (sut/extract-failed-tasks
+            {:execution/dag-result {:failed-task-ids [:task-a "task-b"]}})))))
 
 (deftest extract-failed-tasks-nil-when-none-test
   (testing "returns nil when no failed tasks"
-    (is (nil? (sut/extract-failed-tasks {:dag/tasks {:t {:status :completed}}})))
+    (is (nil? (sut/extract-failed-tasks {:failed-task-ids ["legacy"]})))
     (is (nil? (sut/extract-failed-tasks {})))))
 
 ;------------------------------------------------------------------------------ extract-pr-urls
 
-(deftest extract-pr-urls-from-pr-url-key-test
-  (testing "extracts from :pr/url"
+(deftest extract-pr-urls-from-workflow-pr-info-test
+  (testing "extracts from the release phase PR info"
     (is (= ["https://github.com/org/repo/pull/42"]
-           (sut/extract-pr-urls {:pr/url "https://github.com/org/repo/pull/42"})))))
+           (sut/extract-pr-urls
+            {:workflow/pr-info {:pr-url "https://github.com/org/repo/pull/42"}})))))
 
-(deftest extract-pr-urls-from-pull-request-url-key-test
-  (testing "extracts from :pull-request-url"
-    (is (= ["https://github.com/org/repo/pull/7"]
-           (sut/extract-pr-urls {:pull-request-url "https://github.com/org/repo/pull/7"})))))
-
-(deftest extract-pr-urls-from-prs-seq-test
-  (testing "extracts url values from :prs sequence of maps"
-    (let [result {:prs [{:url "https://github.com/org/repo/pull/1"}
-                        {:url "https://github.com/org/repo/pull/2"}]}]
+(deftest extract-pr-urls-from-dag-pr-infos-test
+  (testing "extracts URL values from DAG PR info"
+    (let [result {:execution/dag-pr-infos [{:pr-url "https://github.com/org/repo/pull/1"}
+                                           {:pr/url "https://github.com/org/repo/pull/2"}]}]
       (is (= ["https://github.com/org/repo/pull/1"
               "https://github.com/org/repo/pull/2"]
              (sut/extract-pr-urls result))))))
 
-(deftest extract-pr-urls-walks-top-level-values-test
-  (testing "picks up GitHub PR URL from any top-level string value"
-    (let [result {:some/key "https://github.com/myorg/myrepo/pull/99"}]
-      (is (= ["https://github.com/myorg/myrepo/pull/99"]
-             (sut/extract-pr-urls result))))))
-
 (deftest extract-pr-urls-nil-when-none-test
   (testing "returns nil when no PR URLs present"
+    (is (nil? (sut/extract-pr-urls {:pr/url "https://github.com/org/repo/pull/42"})))
     (is (nil? (sut/extract-pr-urls {:execution/status :completed})))
     (is (nil? (sut/extract-pr-urls {})))))
 
@@ -193,8 +160,9 @@
   (testing "compact summary includes one line per phase when phases present"
     (with-redefs [app-config/events-dir (constantly "/tmp/events")]
       (let [result {:execution/status :completed
-                    :phases [{:phase :build :outcome :completed :duration-ms 2000}
-                              {:phase :test  :outcome :failure   :duration-ms 500}]}
+                    :execution/phase-results
+                    {:build {:status :success :metrics {:duration-ms 2000}}
+                     :test  {:status :error   :metrics {:duration-ms 500}}}}
             s (sut/format-compact-summary result)]
         (is (str/includes? s "build"))
         (is (str/includes? s "test"))))))
@@ -203,7 +171,7 @@
   (testing "compact summary includes failed task IDs when present"
     (with-redefs [app-config/events-dir (constantly "/tmp/events")]
       (let [result {:execution/status :failed
-                    :failed-task-ids ["task-x" "task-y"]}
+                    :execution/dag-result {:failed-task-ids ["task-x" "task-y"]}}
             s (sut/format-compact-summary result)]
         (is (str/includes? s "task-x"))
         (is (str/includes? s "task-y"))))))
@@ -212,7 +180,7 @@
   (testing "compact summary includes PR URLs when present"
     (with-redefs [app-config/events-dir (constantly "/tmp/events")]
       (let [result {:execution/status :completed
-                    :pr/url "https://github.com/org/repo/pull/10"}
+                    :workflow/pr-info {:pr-url "https://github.com/org/repo/pull/10"}}
             s (sut/format-compact-summary result)]
         (is (str/includes? s "https://github.com/org/repo/pull/10"))))))
 
