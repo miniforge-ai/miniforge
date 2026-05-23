@@ -30,12 +30,12 @@
 ;; ANSI color primitives
 
 (def ansi-codes
-  {:reset "[0m"
-   :bold "[1m"
-   :cyan "[36m"
-   :green "[32m"
-   :yellow "[33m"
-   :red "[31m"})
+  {:reset "\u001b[0m"
+   :bold "\u001b[1m"
+   :cyan "\u001b[36m"
+   :green "\u001b[32m"
+   :yellow "\u001b[33m"
+   :red "\u001b[31m"})
 
 (defn colorize [color text]
   (str (get ansi-codes color "") text (:reset ansi-codes)))
@@ -175,7 +175,7 @@
 (defn- strip-ansi
   "Remove ANSI escape codes from a string."
   [s]
-  (str/replace s #"\[[0-9;]*m" ""))
+  (str/replace s #"\u001b\[[0-9;]*m" ""))
 
 (defn- demo-defaults
   "Fill in '?' defaults for nil event params so format-event-line produces
@@ -314,8 +314,12 @@
 (defn extract-failed-tasks
   "Look for DAG task failure data in the result.
 
-  Checks :dag/tasks, :dag/failed-tasks, :failed-task-ids, and walks nested
-  maps one level deep.  Returns a vec of task-id strings, or nil."
+  Checks top-level `:failed-task-ids` (direct collection),
+  `:dag/failed-tasks` (direct collection), and `:dag/tasks` (a map of
+  task-id → task entry, scanned for entries whose `:status` /
+  `:task/status` is `:failed` or `:failure`). Returns a vec of task-id
+  strings, or nil. Does NOT walk further-nested maps — the prior
+  docstring claim of a one-level walk never matched the implementation."
   [result]
   (when (map? result)
     (let [;; Direct failed-task-ids collection
