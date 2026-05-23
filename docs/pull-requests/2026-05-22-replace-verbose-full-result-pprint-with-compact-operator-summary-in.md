@@ -23,12 +23,15 @@ Replace verbose full-result pprint with compact operator summary in display.clj.
   against the canonical workflow result shape.
 - `bases/cli/test/ai/miniforge/cli/workflow_runner/display_test.clj` (modify) — coverage for the new summary path and
   canonical extractors.
+- `.standards` (modify) — advances the standards submodule to require one producer-owned canonical data authority for
+  internal data contracts.
+- `components/phase/resources/packs/miniforge-standards.pack.edn` (modify) — recompiles the bundled dogfood policy pack.
 - `docs/pull-requests/2026-05-22-replace-verbose-full-result-pprint-with-compact-operator-summary-in.md` (create) — this
   PR doc.
 
 ## Test Results
 
-_No test artifacts available._
+- `bb pre-commit` — passed (314 smoke tests / 1142 assertions; GraalVM compatibility 6 tests / 510 assertions).
 
 ## Review Decision
 
