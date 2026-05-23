@@ -262,101 +262,196 @@
       (doseq [err errors]
         (println (str "  • " err))))))
 
-(defn- phase-outcome-style
+;------------------------------------------------------------------------------ Layer 1b
+;; Compact summary helpers (pure)
+
+(defn- phase-outcome-symbol
+  "Return a display symbol for a phase outcome keyword."
   [outcome]
-  (cond
-    (contains? #{:failure :failed :error} outcome) [:red "✗"]
-    (= :skipped outcome) [:yellow "○"]
-    (= :unknown outcome) [:yellow "?"]
-    :else [:green "✓"]))
+  (case outcome
+    :failure "✗"
+    :failed  "✗"
+    :error   "✗"
+    :skipped "○"
+    "✓"))
 
-(defn phase-summaries
-  "Extract phase summaries from known workflow result shapes."
+(defn- phase-summary-outcome
+  [phase-result]
+  (let [status (get phase-result :status :unknown)]
+    (case status
+      :success :completed
+      :completed :completed
+      :already-implemented :completed
+      :done :completed
+      :error :failure
+      :failed :failure
+      :failure :failure
+      status)))
+
+(defn- phase-summary-duration-ms
+  [phase-result]
+  (or (:duration-ms phase-result)
+      (get-in phase-result [:metrics :duration-ms])
+      (get-in phase-result [:phase/metrics :duration-ms])))
+
+(defn- phase-result-summary-entry
+  [[phase-id phase-result]]
+  (when (map? phase-result)
+    {:phase       phase-id
+     :outcome     (phase-summary-outcome phase-result)
+     :duration-ms (phase-summary-duration-ms phase-result)}))
+
+(defn- workflow-phase-result-entries
   [result]
   (when (map? result)
-    (seq (or (:phases result)
-             (:phase-results result)
-             (:workflow/phases result)))))
+    (seq (:execution/phase-results result))))
 
-(defn failed-task-ids
-  "Extract failed task identifiers from known DAG result shapes."
+(defn extract-phase-summaries
+  "Extract phase summaries from canonical workflow execution results.
+
+  Reads only `:execution/phase-results`, the workflow context's documented
+  phase-result authority. Returns a vec of
+  {:phase :outcome :duration-ms} maps, or nil when no phase breakdown is found."
+  [result]
+  (when-let [entries (workflow-phase-result-entries result)]
+    (not-empty (vec (keep phase-result-summary-entry entries)))))
+
+(defn extract-failed-tasks
+  "Read failed DAG task ids from the canonical workflow DAG result.
+
+  Returns a vec of task-id strings, or nil when the workflow result does not
+  carry `[:execution/dag-result :failed-task-ids]`."
+  [result]
+  (when-let [ids (seq (get-in result [:execution/dag-result :failed-task-ids]))]
+    (not-empty (vec (map #(if (keyword? %) (name %) (str %)) ids)))))
+
+(defn- pr-info-url
+  [pr-info]
+  (or (:pr-url pr-info)
+      (:pr/url pr-info)))
+
+(defn- workflow-pr-infos
+  [result]
+  (concat (get result :execution/dag-pr-infos [])
+          (when-let [pr-info (:workflow/pr-info result)]
+            [pr-info])))
+
+(defn extract-pr-urls
+  "Extract PR URLs from workflow-owned PR info.
+
+  Reads the canonical workflow context producers for PR info:
+  `:execution/dag-pr-infos` for DAG runs and `:workflow/pr-info` for the
+  release phase's single-PR path. Returns a vec of URL strings, or nil."
   [result]
   (when (map? result)
-    (seq (or (:failed-task-ids result)
-             (:dag/failed-tasks result)
-             (keep (fn [[task-id task]]
-                     (when (contains? #{:failed :failure :error} (:status task))
-                       task-id))
-                   (:dag/tasks result))))))
+    (let [all (distinct (keep pr-info-url (workflow-pr-infos result)))]
+      (not-empty (vec all)))))
 
-(defn pr-urls
-  "Extract PR URLs from known workflow result shapes."
+(defn- format-phase-line
+  "Format a single phase summary line using message catalog."
+  [{:keys [phase outcome duration-ms]}]
+  (let [symbol (phase-outcome-symbol outcome)
+        phase-str (cond
+                    (nil? phase)     "?"
+                    (keyword? phase) (name phase)
+                    :else            (str phase))]
+    (if duration-ms
+      (messages/t :workflow-runner/compact-phase-line
+                  {:symbol   symbol
+                   :phase    phase-str
+                   :duration (format-duration duration-ms)})
+      (messages/t :workflow-runner/compact-phase-no-dur
+                  {:symbol symbol
+                   :phase  phase-str}))))
+
+(defn- compact-status-line
+  [success?]
+  (if success?
+    (colorize :green (messages/t :workflow-runner/summary-success))
+    (colorize :red   (messages/t :workflow-runner/summary-failure))))
+
+(defn- compact-phase-lines
   [result]
-  (when (map? result)
-    (seq (distinct (concat (keep result [:pr/url :pull-request-url])
-                           (:prs result))))))
+  (map format-phase-line (or (extract-phase-summaries result) [])))
 
-(defn- display-token
-  [x]
-  (if (keyword? x) (name x) (str x)))
-
-(defn- format-phase-summary
-  [phase]
-  (let [phase-name (or (:phase phase) (:phase/id phase) (:name phase) (:id phase) "?")
-        outcome (or (:phase/outcome phase) (:outcome phase) :unknown)
-        duration (or (:phase/duration-ms phase) (:duration-ms phase))
-        [color symbol] (phase-outcome-style outcome)]
-    (colorize color
-              (messages/t (if duration
-                            :workflow-runner/compact-phase-line-duration
-                            :workflow-runner/compact-phase-line)
-                          (cond-> {:symbol symbol
-                                   :phase (display-token phase-name)
-                                   :outcome (name outcome)}
-                            duration (assoc :duration (format-duration duration)))))))
-
-(defn compact-result-summary
-  "Format a compact operator summary. Full EDN remains available via :edn output."
+(defn- compact-failed-task-lines
   [result]
-  (when (map? result)
-    (let [{:execution/keys [status metrics errors]} result
-          status (or status (:status result) :unknown)
-          success? (contains? #{:completed :success :done} status)
-          phases (phase-summaries result)
-          failed-tasks (failed-task-ids result)
-          prs (pr-urls result)
-          lines (cond-> [(colorize (if success? :green :red)
-                                   (messages/t (if success?
-                                                 :workflow-runner/summary-success
-                                                 :workflow-runner/summary-failure)))]
-                  phases (into (map format-phase-summary phases))
-                  failed-tasks (conj (messages/t :workflow-runner/compact-failed-tasks
-                                                 {:tasks (str/join ", " (map display-token failed-tasks))}))
-                  prs (into (map #(messages/t :workflow-runner/compact-pr-url {:url %}) prs))
-                  metrics (conj (messages/t :workflow-runner/metrics
-                                            {:tokens (:tokens metrics 0)
-                                             :cost (format "%.4f" (:cost-usd metrics 0.0))
-                                             :duration (format-duration (:duration-ms metrics 0))}))
-                  (seq errors) (conj (colorize :red (messages/t :workflow-runner/errors)))
-                  (seq errors) (into (map #(messages/t :workflow-runner/compact-error-item
-                                                       {:message %})
-                                          errors))
-                  true (conj (messages/t :workflow-runner/compact-events-pointer
-                                         {:path (app-config/events-dir)}))
-                  true (conj (messages/t :workflow-runner/compact-edn-hint)))]
-      (str/join "\n" lines))))
+  (when-let [task-ids (extract-failed-tasks result)]
+    [(messages/t :workflow-runner/compact-failed-tasks
+                 {:task-ids (str/join ", " task-ids)})]))
 
-(defn print-pretty-result [result]
-  (println (colorize :cyan (str "\n" (apply str (repeat 65 "━")))))
-  (println (or (compact-result-summary result) ""))
-  (println (colorize :cyan (str (apply str (repeat 65 "━")) "\n"))))
+(defn- compact-pr-lines
+  [result]
+  (when-let [urls (extract-pr-urls result)]
+    [(messages/t :workflow-runner/compact-prs-created
+                 {:urls (str/join "  " urls)})]))
+
+(defn- compact-metrics-lines
+  [metrics]
+  (when metrics
+    [(messages/t :workflow-runner/metrics
+                 {:tokens   (get metrics :tokens 0)
+                  :cost     (format "%.4f" (get metrics :cost-usd 0.0))
+                  :duration (format-duration (get metrics :duration-ms 0))})]))
+
+(defn- compact-error-lines
+  [success? errors]
+  (when (and (not success?) (seq errors))
+    (into [(colorize :red (str "\n" (messages/t :workflow-runner/errors)))]
+          (map #(str "  • " %) errors))))
+
+(defn- compact-footer-lines
+  [hr]
+  [(colorize :cyan (str hr "\n"))
+   (messages/t :workflow-runner/compact-events-pointer
+               {:events-dir (app-config/events-dir)})
+   (messages/t :workflow-runner/compact-full-hint)])
+
+(defn- compact-summary-lines
+  [result]
+  (let [{:execution/keys [status metrics errors]} result
+        success? (= status :completed)
+        hr       (apply str (repeat 65 "━"))]
+    (concat [(colorize :cyan (str "\n" hr))
+             (compact-status-line success?)]
+            (compact-phase-lines result)
+            (compact-failed-task-lines result)
+            (compact-pr-lines result)
+            (compact-metrics-lines metrics)
+            (compact-error-lines success? errors)
+            (compact-footer-lines hr))))
+
+(defn format-compact-summary
+  "Build a compact multi-line string summarising a workflow result.
+
+  Lines included:
+  - Status (success/failure, colorized)
+  - Phase table (when phase data present)
+  - Failed task IDs (when present)
+  - PR URLs (when present)
+  - Metrics line (when metrics present)
+  - Error list (on failure only)
+  - Events directory pointer
+  - '--output edn' hint
+
+  All user-facing strings go through messages/t."
+  ([result] (format-compact-summary result nil))
+  ([result _workflow-id]
+   (str/join "\n" (compact-summary-lines result))))
+
+(defn print-pretty-result
+  "Print a compact human-readable summary of the workflow result.
+   Full EDN dump is available via --output edn."
+  [result]
+  (println (format-compact-summary result)))
 
 (defn print-result [result {:keys [output quiet]}]
-  (case output
-    :json (when-not quiet (println (json/generate-string result {:pretty true})))
-    :edn (when-not quiet (clojure.pprint/pprint result))
-    :pretty (when-not quiet (print-pretty-result result))
-    (when-not quiet (clojure.pprint/pprint result)))
+  (when-not quiet
+    (case output
+      :json   (println (json/generate-string result {:pretty true}))
+      :pretty (print-pretty-result result)
+      :edn    (clojure.pprint/pprint result)
+      (clojure.pprint/pprint result)))
   (flush))
 
 ;------------------------------------------------------------------------------ Layer 2

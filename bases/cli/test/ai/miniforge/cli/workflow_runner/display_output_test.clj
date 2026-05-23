@@ -181,45 +181,47 @@
 ;; compact-result-summary helpers
 
 (deftest phase-summaries-known-shapes-test
-  (testing "phase-summaries reads known result shapes"
-    (is (= [{:phase :plan}] (display/phase-summaries {:phases [{:phase :plan}]})))
-    (is (= [{:phase :test}] (display/phase-summaries {:phase-results [{:phase :test}]})))
-    (is (= [{:phase :done}] (display/phase-summaries {:workflow/phases [{:phase :done}]})))
-    (is (nil? (display/phase-summaries {:metrics {:outcome :ok}})))))
+  (testing "extract-phase-summaries reads the canonical execution phase results"
+    (is (= [{:phase :plan :outcome :completed :duration-ms 1000}]
+           (display/extract-phase-summaries
+            {:execution/phase-results {:plan {:status :success
+                                              :metrics {:duration-ms 1000}}}})))
+    (is (nil? (display/extract-phase-summaries {:phases [{:phase :plan}]})))))
 
 (deftest failed-task-ids-known-shapes-test
-  (testing "failed-task-ids reads direct and DAG task shapes"
-    (is (= [:a] (display/failed-task-ids {:failed-task-ids [:a]})))
-    (is (= [:b] (display/failed-task-ids {:dag/failed-tasks [:b]})))
-    (is (= [:c] (display/failed-task-ids {:dag/tasks {:c {:status :failed}
-                                                       :d {:status :completed}}})))))
+  (testing "extract-failed-tasks reads the canonical execution DAG result"
+    (is (= ["a"]
+           (display/extract-failed-tasks
+            {:execution/dag-result {:failed-task-ids [:a]}})))
+    (is (nil? (display/extract-failed-tasks {:failed-task-ids [:a]})))))
 
 (deftest pr-urls-known-shapes-test
-  (testing "pr-urls reads direct URL shapes"
+  (testing "extract-pr-urls reads workflow-owned PR info"
     (is (= ["https://github.com/miniforge-ai/miniforge/pull/1"]
-           (display/pr-urls {:pr/url "https://github.com/miniforge-ai/miniforge/pull/1"})))
+           (display/extract-pr-urls
+            {:workflow/pr-info
+             {:pr-url "https://github.com/miniforge-ai/miniforge/pull/1"}})))
     (is (= ["https://github.com/miniforge-ai/miniforge/pull/2"]
-           (display/pr-urls {:pull-request-url "https://github.com/miniforge-ai/miniforge/pull/2"})))
-    (is (= ["https://github.com/miniforge-ai/miniforge/pull/3"]
-           (display/pr-urls {:prs ["https://github.com/miniforge-ai/miniforge/pull/3"]})))))
+           (display/extract-pr-urls
+            {:execution/dag-pr-infos
+             [{:pr/url "https://github.com/miniforge-ai/miniforge/pull/2"}]})))
+    (is (nil? (display/extract-pr-urls
+               {:pr/url "https://github.com/miniforge-ai/miniforge/pull/3"})))))
 
 (deftest compact-result-summary-renders-operator-view-test
-  (testing "compact-result-summary renders status, phases, tasks, PRs, metrics, errors, and hint"
-    (let [out (display/compact-result-summary
-               {:execution/status :success
+  (testing "format-compact-summary renders status, phases, tasks, PRs, metrics, errors, and hint"
+    (let [out (display/format-compact-summary
+               {:execution/status :failed
                 :execution/metrics {:tokens 12 :cost-usd 0.25 :duration-ms 1500}
                 :execution/errors ["compile failed"]
-                :phases [{:phase :plan :outcome :completed :duration-ms 1000}
-                         {:phase :skip-me :outcome :skipped}
-                         {:phase :failed-phase :outcome :failed}
-                         {:phase :unknown :outcome :unknown}]
-                :failed-task-ids [:task-a]
-                :prs ["https://github.com/miniforge-ai/miniforge/pull/4"]})]
-      (is (str/includes? out "Workflow completed"))
-      (is (str/includes? out "plan completed (1.0s)"))
-      (is (str/includes? out "skip-me skipped"))
-      (is (str/includes? out "failed-phase failed"))
-      (is (str/includes? out "unknown unknown"))
+                :execution/phase-results
+                {:plan {:status :success :metrics {:duration-ms 1000}}
+                 :failed-phase {:status :error}}
+                :execution/dag-result {:failed-task-ids [:task-a]}
+                :workflow/pr-info {:pr-url "https://github.com/miniforge-ai/miniforge/pull/4"}})]
+      (is (str/includes? out "Workflow failed"))
+      (is (str/includes? out "plan"))
+      (is (str/includes? out "failed-phase"))
       (is (str/includes? out "Failed tasks: task-a"))
       (is (str/includes? out "pull/4"))
       (is (str/includes? out "Tokens: 12"))
