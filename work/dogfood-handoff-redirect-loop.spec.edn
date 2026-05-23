@@ -1,0 +1,35 @@
+{:spec/title "Dogfood: stop degraded handoff redirect loops"
+
+ :spec/description
+ "A dogfood run of `dogfood-plan-artifact-warning.spec.edn` on 2026-05-21 passed plan, implement, verify, review, release, and done for multiple DAG tasks, but the outer workflow failed with `:anomalies.workflow/max-redirects-exceeded` after five redirects. Reviewer output showed the implementation handoff was treated as degraded because the artifact was recovered after an implementer-side failure, then rejected for out-of-scope writes. The workflow should converge to a clear failed state with actionable diagnostics instead of cycling through redirects after task-level phases have already completed."
+
+ :spec/intent {:type :bugfix
+               :scope ["components/workflow/src"
+                       "components/agent/src"
+                       "components/phase/src"
+                       "components/dag-executor/src"]}
+
+ :spec/constraints
+ ["Do not accept out-of-scope artifacts silently"
+  "Do not treat a recovered artifact as clean success without preserving the degraded handoff signal"
+  "Keep task-level phase checkpoints and persisted bundles available for debugging"
+  "Keep redirect/repair behavior for genuinely repairable review failures"
+  "Do not increase the default redirect limit to hide the loop"]
+
+ :spec/acceptance-criteria
+ ["A degraded implement handoff that is rejected for scope drift terminates with one clear workflow failure instead of redirecting until `max-redirects-exceeded`"
+  "The failure summary includes the rejected task id, rejected file paths, and the recovered artifact or bundle path"
+  "Completed task phases are not rerun indefinitely after the review gate has already rejected the handoff"
+  "Repair redirects still occur for review failures that provide an in-scope repair path"
+ "Tests cover rejected degraded handoff, accepted clean handoff, and repairable review redirect paths"
+ "A dogfood rerun of the same scenario exits with the direct degraded-handoff failure, not a redirect-cycle anomaly"]
+
+ :spec/priority
+ {:tier :blocker
+  :axes #{:dogfood-enabler :correctness :token-conservation}
+  :theme :dogfood-resilience
+  :rationale "Observed dogfood failure on 2026-05-21: task phases completed but the outer workflow redirected until `max-redirects-exceeded`. This burns tokens and hides the actionable degraded-handoff rejection."
+  :blocks []
+  :blocked-by []}
+
+ :spec/workflow-type :canonical-sdlc}
