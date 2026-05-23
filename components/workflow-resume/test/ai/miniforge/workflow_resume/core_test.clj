@@ -216,6 +216,43 @@
            {}
            (constantly nil))))))
 
+(deftest resolve-workflow-identity-prefers-workflow-type-key-test
+  (testing ":workflow-type wins over :name when both are present"
+    (is (= {:workflow-type :canonical-sdlc :workflow-version "latest"}
+           (core/resolve-workflow-identity
+             {:workflow-spec {:workflow-type :canonical-sdlc
+                              :name "human-readable-title"
+                              :version "latest"}}
+             (fn [] (throw (ex-info "fallback should not be called" {})))))))
+
+  (testing ":workflow/id (config-key shape) is accepted"
+    (is (= {:workflow-type :canonical-sdlc :workflow-version "2.0.0"}
+           (core/resolve-workflow-identity
+             {:workflow-spec {:workflow/id :canonical-sdlc :version "2.0.0"}}
+             (constantly nil))))))
+
+(deftest resolve-workflow-identity-rejects-non-identifier-name-test
+  ;; Regression for the 2026-05-22 dogfood of
+  ;; work/in-flight-pr-registry.spec.edn (workflow a92b2c97), where the
+  ;; recorded spec was {:name "In-flight PR / branch / task-claim
+  ;; registry" :version "latest"} and the prior unconditional
+  ;; `(some-> workflow-spec :name keyword)` produced an unloadable
+  ;; lookup key with spaces and slashes.
+  (testing "spec :name that is not a valid keyword name falls through to fallback"
+    (is (= {:workflow-type :canonical-sdlc :workflow-version "latest"}
+           (core/resolve-workflow-identity
+             {:workflow-spec {:name "In-flight PR / branch / task-claim registry"
+                              :version "latest"}}
+             (fn [] :canonical-sdlc)))))
+
+  (testing "machine snapshot identity is consulted when :name is rejected and present"
+    (is (= {:workflow-type :canonical-sdlc :workflow-version "2.0.0"}
+           (core/resolve-workflow-identity
+             {:workflow-spec    {:name "Some Human Title" :version "2.0.0"}
+              :machine-snapshot {:execution/workflow-id      :canonical-sdlc
+                                 :execution/workflow-version "2.0.0"}}
+             (fn [] (throw (ex-info "fallback should not be called" {}))))))))
+
 ;------------------------------------------------------------------------------ Layer 2
 ;; reconstruct-context — integration with the event-stream reader
 
