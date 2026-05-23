@@ -271,92 +271,80 @@
   (case outcome
     :failure "✗"
     :failed  "✗"
+    :error   "✗"
     :skipped "○"
     "✓"))
 
-(defn extract-phase-summaries
-  "Walk the result map for phase outcome/duration data.
+(defn- phase-summary-outcome
+  [phase-result]
+  (let [status (get phase-result :status :unknown)]
+    (case status
+      :success :completed
+      :completed :completed
+      :already-implemented :completed
+      :done :completed
+      :error :failure
+      :failed :failure
+      :failure :failure
+      status)))
 
-  Checks keys :phases, :phase-results, :workflow/phases, and top-level map
-  entries that look like phase-shaped data.  Returns a vec of
+(defn- phase-summary-duration-ms
+  [phase-result]
+  (or (:duration-ms phase-result)
+      (get-in phase-result [:metrics :duration-ms])
+      (get-in phase-result [:phase/metrics :duration-ms])))
+
+(defn- phase-result-summary-entry
+  [[phase-id phase-result]]
+  (when (map? phase-result)
+    {:phase       phase-id
+     :outcome     (phase-summary-outcome phase-result)
+     :duration-ms (phase-summary-duration-ms phase-result)}))
+
+(defn- workflow-phase-result-entries
+  [result]
+  (when (map? result)
+    (seq (:execution/phase-results result))))
+
+(defn extract-phase-summaries
+  "Extract phase summaries from canonical workflow execution results.
+
+  Reads only `:execution/phase-results`, the workflow context's documented
+  phase-result authority. Returns a vec of
   {:phase :outcome :duration-ms} maps, or nil when no phase breakdown is found."
   [result]
-  (when (map? result)
-    (let [;; Try the most common phase-collection keys first
-          candidates (or (seq (:phases result))
-                         (seq (:phase-results result))
-                         (seq (:workflow/phases result))
-                         ;; Fall back: top-level values that are phase-shaped maps
-                         (seq (filter (fn [[_k v]]
-                                        (and (map? v)
-                                             (or (contains? v :outcome)
-                                                 (contains? v :phase/outcome))))
-                                      result)))]
-      (when candidates
-        (let [entries (if (map? (first candidates))
-                        ;; :phases / :phase-results is a seq of maps
-                        candidates
-                        ;; top-level k/v pairs — use the value maps
-                        (map second candidates))]
-          (not-empty
-           (vec
-            (keep (fn [entry]
-                    (when (map? entry)
-                      (let [phase     (or (:phase entry) (:phase/id entry) (:id entry) (:name entry))
-                            outcome   (or (:outcome entry) (:phase/outcome entry))
-                            duration  (or (:duration-ms entry) (:phase/duration-ms entry))]
-                        (when (or phase outcome)
-                          {:phase       phase
-                           :outcome     outcome
-                           :duration-ms duration}))))
-                  entries))))))))
+  (when-let [entries (workflow-phase-result-entries result)]
+    (not-empty (vec (keep phase-result-summary-entry entries)))))
 
 (defn extract-failed-tasks
-  "Look for DAG task failure data in the result.
+  "Read failed DAG task ids from the canonical workflow DAG result.
 
-  Checks top-level `:failed-task-ids` (direct collection),
-  `:dag/failed-tasks` (direct collection), and `:dag/tasks` (a map of
-  task-id → task entry, scanned for entries whose `:status` /
-  `:task/status` is `:failed` or `:failure`). Returns a vec of task-id
-  strings, or nil. Does NOT walk further-nested maps — the prior
-  docstring claim of a one-level walk never matched the implementation."
+  Returns a vec of task-id strings, or nil when the workflow result does not
+  carry `[:execution/dag-result :failed-task-ids]`."
   [result]
-  (when (map? result)
-    (let [;; Direct failed-task-ids collection
-          direct (or (seq (:failed-task-ids result))
-                     (seq (:dag/failed-tasks result)))
-          ;; From :dag/tasks — collect tasks with failed/failure status
-          from-dag (when-let [tasks (:dag/tasks result)]
-                     (when (map? tasks)
-                       (seq (keep (fn [[k v]]
-                                    (when (and (map? v)
-                                               (#{:failed :failure} (or (:status v) (:task/status v))))
-                                      (if (keyword? k) (name k) (str k))))
-                                  tasks))))
-          ids (or direct from-dag)]
-      (when ids
-        (not-empty (vec (map str ids)))))))
+  (when-let [ids (seq (get-in result [:execution/dag-result :failed-task-ids]))]
+    (not-empty (vec (map #(if (keyword? %) (name %) (str %)) ids)))))
+
+(defn- pr-info-url
+  [pr-info]
+  (or (:pr-url pr-info)
+      (:pr/url pr-info)))
+
+(defn- workflow-pr-infos
+  [result]
+  (concat (get result :execution/dag-pr-infos [])
+          (when-let [pr-info (:workflow/pr-info result)]
+            [pr-info])))
 
 (defn extract-pr-urls
-  "Look for PR/pull-request URLs in the result.
+  "Extract PR URLs from workflow-owned PR info.
 
-  Checks :pr/url, :pull-request-url, :prs, and walks the top-level map for
-  GitHub PR URL patterns.  Returns a vec of URL strings, or nil."
+  Reads the canonical workflow context producers for PR info:
+  `:execution/dag-pr-infos` for DAG runs and `:workflow/pr-info` for the
+  release phase's single-PR path. Returns a vec of URL strings, or nil."
   [result]
   (when (map? result)
-    (let [single      (or (:pr/url result) (:pull-request-url result))
-          from-prs    (when-let [prs (:prs result)]
-                        (cond
-                          (sequential? prs) (keep #(or (when (map? %) (:url %)) (when (string? %) %)) prs)
-                          (map? prs)        (keep :url (vals prs))
-                          :else             nil))
-          ;; Walk top-level string values for GitHub PR URL patterns
-          walked      (keep (fn [[_k v]]
-                              (when (and (string? v)
-                                         (re-find #"https?://github\.com/[^/]+/[^/]+/pull/\d+" v))
-                                v))
-                            result)
-          all         (distinct (concat (when single [single]) from-prs walked))]
+    (let [all (distinct (keep pr-info-url (workflow-pr-infos result)))]
       (not-empty (vec all)))))
 
 (defn- format-phase-line
@@ -395,55 +383,36 @@
    (let [{:execution/keys [status metrics errors]} result
          success? (= status :completed)
          hr       (apply str (repeat 65 "━"))
-         lines    (transient [])]
-
-     ;; Top rule
-     (conj! lines (colorize :cyan (str "\n" hr)))
-
-     ;; Status line
-     (conj! lines (if success?
-                    (colorize :green (messages/t :workflow-runner/summary-success))
-                    (colorize :red   (messages/t :workflow-runner/summary-failure))))
-
-     ;; Phase table
-     (when-let [phases (extract-phase-summaries result)]
-       (doseq [p phases]
-         (conj! lines (format-phase-line p))))
-
-     ;; Failed tasks
-     (when-let [task-ids (extract-failed-tasks result)]
-       (conj! lines (messages/t :workflow-runner/compact-failed-tasks
-                                {:task-ids (str/join ", " task-ids)})))
-
-     ;; PR URLs
-     (when-let [urls (extract-pr-urls result)]
-       (conj! lines (messages/t :workflow-runner/compact-prs-created
-                                {:urls (str/join "  " urls)})))
-
-     ;; Metrics
-     (when metrics
-       (conj! lines (messages/t :workflow-runner/metrics
-                                {:tokens   (get metrics :tokens 0)
-                                 :cost     (format "%.4f" (get metrics :cost-usd 0.0))
-                                 :duration (format-duration (get metrics :duration-ms 0))})))
-
-     ;; Errors (failure only)
-     (when (and (not success?) (seq errors))
-       (conj! lines (colorize :red (str "\n" (messages/t :workflow-runner/errors))))
-       (doseq [err errors]
-         (conj! lines (str "  • " err))))
-
-     ;; Bottom rule
-     (conj! lines (colorize :cyan (str hr "\n")))
-
-     ;; Pointer: events dir
-     (conj! lines (messages/t :workflow-runner/compact-events-pointer
-                              {:events-dir (app-config/events-dir)}))
-
-     ;; Pointer: full-result hint
-     (conj! lines (messages/t :workflow-runner/compact-full-hint))
-
-     (str/join "\n" (persistent! lines)))))
+         status-line (if success?
+                       (colorize :green (messages/t :workflow-runner/summary-success))
+                       (colorize :red   (messages/t :workflow-runner/summary-failure)))
+         phase-lines (map format-phase-line (or (extract-phase-summaries result) []))
+         failed-lines (when-let [task-ids (extract-failed-tasks result)]
+                        [(messages/t :workflow-runner/compact-failed-tasks
+                                     {:task-ids (str/join ", " task-ids)})])
+         pr-lines (when-let [urls (extract-pr-urls result)]
+                    [(messages/t :workflow-runner/compact-prs-created
+                                 {:urls (str/join "  " urls)})])
+         metrics-lines (when metrics
+                         [(messages/t :workflow-runner/metrics
+                                      {:tokens   (get metrics :tokens 0)
+                                       :cost     (format "%.4f" (get metrics :cost-usd 0.0))
+                                       :duration (format-duration (get metrics :duration-ms 0))})])
+         error-lines (when (and (not success?) (seq errors))
+                       (into [(colorize :red (str "\n" (messages/t :workflow-runner/errors)))]
+                             (map #(str "  • " %) errors)))
+         footer-lines [(colorize :cyan (str hr "\n"))
+                       (messages/t :workflow-runner/compact-events-pointer
+                                   {:events-dir (app-config/events-dir)})
+                       (messages/t :workflow-runner/compact-full-hint)]
+         lines (concat [(colorize :cyan (str "\n" hr)) status-line]
+                       phase-lines
+                       failed-lines
+                       pr-lines
+                       metrics-lines
+                       error-lines
+                       footer-lines)]
+     (str/join "\n" lines))))
 
 (defn print-pretty-result
   "Print a compact human-readable summary of the workflow result.
@@ -452,11 +421,12 @@
   (println (format-compact-summary result)))
 
 (defn print-result [result {:keys [output quiet]}]
-  (case output
-    :json   (println (json/generate-string result {:pretty true}))
-    :pretty (when-not quiet (print-pretty-result result))
-    :edn    (clojure.pprint/pprint result)
-    (clojure.pprint/pprint result))
+  (when-not quiet
+    (case output
+      :json   (println (json/generate-string result {:pretty true}))
+      :pretty (print-pretty-result result)
+      :edn    (clojure.pprint/pprint result)
+      (clojure.pprint/pprint result)))
   (flush))
 
 ;------------------------------------------------------------------------------ Layer 2
