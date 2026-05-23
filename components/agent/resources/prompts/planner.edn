@@ -33,12 +33,23 @@
 
  ;; Submission-retry runs after the main planner turn already produced
  ;; useful prose but failed to land the plan as `.miniforge/plan.edn`.
- ;; Caps and turn budget are tight on purpose: the only legitimate work
- ;; is one Write call.
- :prompt/submission-retry-max-turns 4
+ ;; Caps and turn budget were originally tight (120s / 4 turns) on the
+ ;; theory that "the only legitimate work is one Write call." In
+ ;; practice (2026-05-22 dogfood of work/in-flight-pr-registry.spec.edn,
+ ;; workflow a92b2c97-cf0b-4484-b671-523c1ecdaae5), the retry path does
+ ;; more than a single Write — the model re-orients on the spec, may
+ ;; consult files, then writes — and on a heavy 268-line spec it
+ ;; exceeded the 120s ceiling at 120255ms while making progress. That
+ ;; kill was the wrong lever: hard-timeout-on-active-progress is not the
+ ;; signal we want, but until we have a real liveness primitive (see
+ ;; work/in-flight-pr-registry.spec.edn §heartbeat plug-point) the
+ ;; pragmatic move is to lift the ceiling so the retry path doesn't
+ ;; cap out on big specs. 300s / 6 turns covers the observed failure
+ ;; mode without abandoning bounded execution.
+ :prompt/submission-retry-max-turns 6
  :prompt/submission-retry-monitor
- {:stagnation-threshold-ms     30000
-  :max-total-ms                120000
+ {:stagnation-threshold-ms     60000
+  :max-total-ms                300000
   :min-activity-interval-ms    2000}
 
  ;; User-turn template wrapped around every spec the planner sees.
