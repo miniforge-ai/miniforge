@@ -395,7 +395,13 @@
    This rejects values like \"In-flight PR / branch / task-claim registry\"
    (a human title that the producer side accidentally records under
    `:name`) before they get keywordized into an unloadable lookup key."
-  #"^[A-Za-z][A-Za-z0-9._/+!?*<>=-]*$")
+  #"^[A-Za-z][A-Za-z0-9._+!?*<>=-]*$")
+
+(defn- unqualified-keyword?
+  "True when `v` is a keyword whose namespace cannot be discarded by loaders."
+  [v]
+  (and (keyword? v)
+       (nil? (namespace v))))
 
 (defn- candidate-workflow-type
   "Pull a candidate workflow-type keyword out of the recorded workflow
@@ -413,7 +419,7 @@
   [workflow-spec]
   (let [keyword-if-valid (fn [v]
                            (cond
-                             (keyword? v) v
+                             (unqualified-keyword? v) v
                              (and (string? v)
                                   (re-matches workflow-type-identifier-re v))
                              (keyword v)

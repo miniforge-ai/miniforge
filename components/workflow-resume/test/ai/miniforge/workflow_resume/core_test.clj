@@ -253,6 +253,18 @@
                                  :execution/workflow-version "2.0.0"}}
              (fn [] (throw (ex-info "fallback should not be called" {}))))))))
 
+  (testing "qualified string values are rejected before keywordization"
+    (is (= {:workflow-type :canonical-sdlc :workflow-version "latest"}
+           (core/resolve-workflow-identity
+            {:workflow-spec {:name "foo/bar"}}
+            (constantly :canonical-sdlc)))))
+
+  (testing "qualified keyword values are rejected before loader lookup"
+    (is (= {:workflow-type :canonical-sdlc :workflow-version "latest"}
+           (core/resolve-workflow-identity
+            {:workflow-spec {:workflow-type :foo/bar}}
+            (constantly :canonical-sdlc)))))
+
 ;------------------------------------------------------------------------------ Layer 2
 ;; reconstruct-context — integration with the event-stream reader
 
