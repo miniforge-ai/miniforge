@@ -364,6 +364,63 @@
                   {:symbol symbol
                    :phase  phase-str}))))
 
+(defn- compact-status-line
+  [success?]
+  (if success?
+    (colorize :green (messages/t :workflow-runner/summary-success))
+    (colorize :red   (messages/t :workflow-runner/summary-failure))))
+
+(defn- compact-phase-lines
+  [result]
+  (map format-phase-line (or (extract-phase-summaries result) [])))
+
+(defn- compact-failed-task-lines
+  [result]
+  (when-let [task-ids (extract-failed-tasks result)]
+    [(messages/t :workflow-runner/compact-failed-tasks
+                 {:task-ids (str/join ", " task-ids)})]))
+
+(defn- compact-pr-lines
+  [result]
+  (when-let [urls (extract-pr-urls result)]
+    [(messages/t :workflow-runner/compact-prs-created
+                 {:urls (str/join "  " urls)})]))
+
+(defn- compact-metrics-lines
+  [metrics]
+  (when metrics
+    [(messages/t :workflow-runner/metrics
+                 {:tokens   (get metrics :tokens 0)
+                  :cost     (format "%.4f" (get metrics :cost-usd 0.0))
+                  :duration (format-duration (get metrics :duration-ms 0))})]))
+
+(defn- compact-error-lines
+  [success? errors]
+  (when (and (not success?) (seq errors))
+    (into [(colorize :red (str "\n" (messages/t :workflow-runner/errors)))]
+          (map #(str "  • " %) errors))))
+
+(defn- compact-footer-lines
+  [hr]
+  [(colorize :cyan (str hr "\n"))
+   (messages/t :workflow-runner/compact-events-pointer
+               {:events-dir (app-config/events-dir)})
+   (messages/t :workflow-runner/compact-full-hint)])
+
+(defn- compact-summary-lines
+  [result]
+  (let [{:execution/keys [status metrics errors]} result
+        success? (= status :completed)
+        hr       (apply str (repeat 65 "━"))]
+    (concat [(colorize :cyan (str "\n" hr))
+             (compact-status-line success?)]
+            (compact-phase-lines result)
+            (compact-failed-task-lines result)
+            (compact-pr-lines result)
+            (compact-metrics-lines metrics)
+            (compact-error-lines success? errors)
+            (compact-footer-lines hr))))
+
 (defn format-compact-summary
   "Build a compact multi-line string summarising a workflow result.
 
@@ -380,39 +437,7 @@
   All user-facing strings go through messages/t."
   ([result] (format-compact-summary result nil))
   ([result _workflow-id]
-   (let [{:execution/keys [status metrics errors]} result
-         success? (= status :completed)
-         hr       (apply str (repeat 65 "━"))
-         status-line (if success?
-                       (colorize :green (messages/t :workflow-runner/summary-success))
-                       (colorize :red   (messages/t :workflow-runner/summary-failure)))
-         phase-lines (map format-phase-line (or (extract-phase-summaries result) []))
-         failed-lines (when-let [task-ids (extract-failed-tasks result)]
-                        [(messages/t :workflow-runner/compact-failed-tasks
-                                     {:task-ids (str/join ", " task-ids)})])
-         pr-lines (when-let [urls (extract-pr-urls result)]
-                    [(messages/t :workflow-runner/compact-prs-created
-                                 {:urls (str/join "  " urls)})])
-         metrics-lines (when metrics
-                         [(messages/t :workflow-runner/metrics
-                                      {:tokens   (get metrics :tokens 0)
-                                       :cost     (format "%.4f" (get metrics :cost-usd 0.0))
-                                       :duration (format-duration (get metrics :duration-ms 0))})])
-         error-lines (when (and (not success?) (seq errors))
-                       (into [(colorize :red (str "\n" (messages/t :workflow-runner/errors)))]
-                             (map #(str "  • " %) errors)))
-         footer-lines [(colorize :cyan (str hr "\n"))
-                       (messages/t :workflow-runner/compact-events-pointer
-                                   {:events-dir (app-config/events-dir)})
-                       (messages/t :workflow-runner/compact-full-hint)]
-         lines (concat [(colorize :cyan (str "\n" hr)) status-line]
-                       phase-lines
-                       failed-lines
-                       pr-lines
-                       metrics-lines
-                       error-lines
-                       footer-lines)]
-     (str/join "\n" lines))))
+   (str/join "\n" (compact-summary-lines result))))
 
 (defn print-pretty-result
   "Print a compact human-readable summary of the workflow result.
