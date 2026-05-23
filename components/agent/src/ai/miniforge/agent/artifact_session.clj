@@ -850,10 +850,27 @@
 
 (defn- emit-no-artifact-warning!
   "Emit `:warn/no-artifact-found` after an explicit worktree scan confirms
-   both the MCP path and the worktree role files came up empty. Passes the
-   role list explicitly so the warning makes clear several role files were
-   probed (not a single path). Separate fn so `run-session` reads as a
-   sequence of named steps and the diagnostic stays testable."
+   both the MCP path and the worktree role files came up empty. Separate fn
+   so `run-session` reads as a sequence of named steps and the diagnostic
+   stays testable.
+
+   AUDIT NOTE (2026-05-21): An audit of bases/cli/src, components/workflow/src,
+   and components/phase-software-factory/src confirmed that no code re-renders
+   this WARN at ERROR level in terminal output. The message is emitted to stderr
+   via `emit-system-message!` at WARN severity and is passed through as-is by
+   the CLI rendering pipeline (workflow_runner/display.clj applies no
+   artifact-specific coloring or severity amplification). The plan phase
+   delegates artifact handling entirely to `agent/invoke` → `with-session` →
+   `run-session`; there is no redundant artifact-presence check at the phase
+   layer.
+
+   However, because this message goes to stderr it may be perceived as a
+   terminal-level error by users even though it is diagnostic WARN output.
+   If the cause is not actionable by the user (e.g. the agent simply used the
+   Write-based worktree submission path instead of the MCP submit_artifact
+   tool), callers SHOULD suppress this warning — see the `any-file-existed?`
+   and `(seq worktree-artifacts)` guards in `run-session` for the suppression
+   logic already in place."
   [session workdir]
   (emit-system-message! :warn/no-artifact-found
                         (:artifact-path session)
@@ -923,9 +940,20 @@
         (emit-system-message! :info/mcp-artifact-skipped
                               (or workdir "<no-workdir>")))
       ;; Hard-failure WARN: neither submission channel produced an artifact AND
-      ;; no worktree role files were present on disk. Parse-failed files are
-      ;; deliberately excluded — :warn/worktree-artifact-parse already covers
-      ;; that failure mode and firing both warnings would be misleading.
+      ;; no worktree role files were present on disk.
+      ;;
+      ;; Host mode: `any-file-existed?` suppresses the warn when a file was
+      ;; present on disk but failed to parse — :warn/worktree-artifact-parse
+      ;; already covers that failure mode and firing both warnings would be
+      ;; misleading.
+      ;;
+      ;; Capsule mode: `any-file-existed?` is always false here (existence
+      ;; probing is skipped to avoid an extra executor round-trip per role —
+      ;; see the comment above), so a parse-failed worktree file CAN trigger
+      ;; both :warn/capsule-worktree-artifact-parse and :warn/no-artifact-found.
+      ;; Accepted trade-off for now; future work can either lift existence
+      ;; probing into capsule mode or thread parse-failure signals back out
+      ;; of `read-capsule-worktree-artifact`.
       (when (and (:explicit-workdir? session)
                  (nil? artifact)
                  (empty? worktree-artifacts)
