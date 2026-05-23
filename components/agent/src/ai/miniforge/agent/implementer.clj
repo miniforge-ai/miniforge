@@ -344,22 +344,25 @@
 
 (defn extract-code-blocks
   "Extract code blocks from markdown response and convert to file list.
-   Tries to detect file paths from markdown headings before each block."
+   Tries to detect file paths from markdown headings before each block.
+
+   Pathless blocks are not repo artifacts. Treating them as generated
+   filenames lets narrative snippets pass implement, verify, and review
+   without producing a releasable diff."
   [response-content]
   (let [pattern patterns/md-code-block
         matcher (re-matcher pattern response-content)]
     (loop [results [] idx 0]
       (if (.find matcher)
-        (let [lang (.group matcher 1)
-              content (.group matcher 2)
+        (let [content (.group matcher 2)
               block-start (.start matcher)
-              path (or (extract-path-from-context response-content block-start)
-                       (str "generated/file" idx
-                            (get @ext->language lang ".clj")))]
-          (recur (conj results {:path path
-                                :content (str/trim content)
-                                :action :create})
-                 (inc idx)))
+              path (extract-path-from-context response-content block-start)]
+          (if path
+            (recur (conj results {:path path
+                                  :content (str/trim content)
+                                  :action :create})
+                   (inc idx))
+            nil))
         (when (seq results) results)))))
 
 ;------------------------------------------------------------------------------ Layer 1
@@ -487,6 +490,13 @@
   (and (map? artifact)
        (contains? artifact :code/files)))
 
+(defn- metadata-only-submit?
+  "True when MCP submit produced metadata but no file payload."
+  [artifact-source structured-artifact]
+  (and (= :mcp artifact-source)
+       (map? structured-artifact)
+       (not (code-artifact? structured-artifact))))
+
 (defn- code-from-blocks
   "Build a code artifact map from extracted markdown code blocks."
   [content]
@@ -535,7 +545,8 @@
            artifact-source tokens cost-usd tools-called]}
    context logger input]
   (let [parsed (or structured-artifact parsed-content)
-        tools tools-called]
+        tools tools-called
+        metadata-only? (metadata-only-submit? artifact-source structured-artifact)]
     (when (nil? artifact-source)
       (log/warn logger :implementer :implementer/mcp-tool-not-called
                 {:data {:content-length (count (or content ""))
@@ -552,6 +563,16 @@
              input artifact-source content tools)
             (unverified-already-implemented-response input tokens))
         (build-already-implemented-response parsed tokens cost-usd))
+
+      metadata-only?
+      (do
+        (log-implementer-rejection
+         logger :metadata-only-submit
+         input artifact-source content tools)
+        (response/error (messages/t :error/parse-failed)
+                        {:tokens tokens
+                         :data {:reject/reason :metadata-only-submit
+                                :artifact-source artifact-source}}))
 
       :else
       ;; Prefer derived-artifact (code blocks extracted from text) over a
@@ -671,7 +692,7 @@
       (file-artifacts/collect-worktree-files working-dir base-refs))))
 
 (defn- collect-session-artifact
-  "Collect a file artifact when the agent did not submit one explicitly."
+  "Collect a file artifact from the promoted or written working tree."
   [context session-mode working-dir pre-session-snapshot]
   (or (collect-promoted-artifact context session-mode working-dir)
       (if (= :capsule session-mode)
@@ -696,11 +717,10 @@
           #(invoke-implementer-session % llm-client user-prompt effective-system-prompt
                                        config context on-chunk existing-files working-dir))
         response llm-result
-        file-artifact (when-not artifact
-                        (collect-session-artifact context
-                                                  session-mode
-                                                  working-dir
-                                                  pre-session-snapshot))
+        file-artifact (collect-session-artifact context
+                                                session-mode
+                                                working-dir
+                                                pre-session-snapshot)
         normalized (result-boundary/normalize-llm-result
                     {:role :implement
                      :response response

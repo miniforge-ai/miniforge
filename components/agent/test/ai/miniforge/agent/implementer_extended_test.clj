@@ -20,6 +20,7 @@
   "Extended tests for implementer: response parsing, code block extraction,
    language detection, artifact repair edge cases, formatting, and prior-attempts."
   (:require
+   [ai.miniforge.agent.artifact-session :as artifact-session]
    [ai.miniforge.agent.implementer :as impl]
    [ai.miniforge.response.interface :as response]
    [clojure.string :as str]
@@ -127,13 +128,87 @@
     (is (nil? (impl/extract-code-blocks "Just plain text, no code blocks.")))
     (is (nil? (impl/extract-code-blocks "")))))
 
-(deftest extract-code-blocks-generated-path-test
-  (testing "generates fallback path when no heading found"
+(deftest extract-code-blocks-pathless-block-test
+  (testing "rejects pathless fenced code blocks"
     (let [text "Here's some code:\n\n```clojure\n(ns mystery)\n```"
           result (impl/extract-code-blocks text)]
-      (is (= 1 (count result)))
-      ;; Should have a generated path with index
-      (is (string? (:path (first result)))))))
+      (is (nil? result)))))
+
+(deftest invoke-with-llm-merges-submit-metadata-with-collected-files-test
+  (testing "summary-only MCP submit does not hide files written by the agent"
+    (let [submit-artifact {:code/summary "Updated transit store tests"
+                           :code/tests-needed? true}
+          collected-artifact {:code/files [{:path "test/transit_store_test.clj"
+                                            :content "(ns transit-store-test)"
+                                            :action :modify}]
+                              :code/summary "fallback summary"
+                              :code/language "clojure"
+                              :code/tests-needed? false}
+          response {:success true
+                    :content "Run:\n```\nclojure -M:test\n```"
+                    :tools-called ["Write" "mcp__context__submit"]
+                    :tokens 13
+                    :cost-usd 0.01}]
+      (with-redefs [artifact-session/with-session
+                    (fn [_context _session-fn]
+                      {:llm-result response
+                       :artifact submit-artifact
+                       :worktree-artifacts nil
+                       :context-misses nil
+                       :pre-session-snapshot {}
+                       :session-mode :worktree})
+                    impl/collect-session-artifact
+                    (fn [& _] collected-artifact)]
+        (let [result (#'impl/invoke-with-llm
+                      nil "" "" {} {:execution/worktree-path "/tmp/worktree"}
+                      nil nil [] {})
+              artifact (:output result)]
+          (is (response/success? result))
+          (is (= "Updated transit store tests" (:code/summary artifact)))
+          (is (true? (:code/tests-needed? artifact)))
+          (is (= [{:path "test/transit_store_test.clj"
+                   :content "(ns transit-store-test)"
+                   :action :modify}]
+                 (:code/files artifact))))))))
+
+(deftest process-llm-response-rejects-metadata-only-submit-test
+  (testing "MCP submit metadata cannot be replaced by final chat code blocks"
+    (let [result (#'impl/process-llm-response
+                  {:content "### src/incorrect.clj\n```clojure\n(ns incorrect)\n```"
+                   :structured-artifact {:code/summary "Only metadata"}
+                   :parsed-content nil
+                   :derived-artifact {:code/files [{:path "src/incorrect.clj"
+                                                    :content "(ns incorrect)"
+                                                    :action :create}]}
+                   :artifact-source :mcp
+                   :tokens 21
+                   :tools-called ["mcp__context__submit"]}
+                  {}
+                  nil
+                  {})]
+      (is (= :error (:status result)))
+      (is (= :metadata-only-submit
+             (get-in result [:error :data :reject/reason]))))))
+
+(deftest process-llm-response-rejects-incident-shaped-submit-test
+  (testing "summary-only submit plus a pathless final command block is rejected"
+    (let [result (#'impl/process-llm-response
+                  {:content "Run:\n```\nclojure -M:test -n ai.miniforge.artifact.protocols.impl.transit-store-test\n```"
+                   :structured-artifact {:code/summary "Updated tests"
+                                         :code/tests-needed? true}
+                   :parsed-content nil
+                   :derived-artifact nil
+                   :artifact-source :mcp
+                   :tokens 21
+                   :tools-called ["Write" "mcp__context__submit"]}
+                  {}
+                  nil
+                  {})]
+      (is (= :error (:status result)))
+      (is (= :metadata-only-submit
+             (get-in result [:error :data :reject/reason])))
+      (is (= :mcp
+             (get-in result [:error :data :artifact-source]))))))
 
 ;------------------------------------------------------------------------------ Layer 2
 ;; extract-language tests

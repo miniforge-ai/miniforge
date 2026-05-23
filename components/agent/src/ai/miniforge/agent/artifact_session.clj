@@ -58,7 +58,7 @@
    "WARN: failed to parse capsule worktree artifact at %s — %s"
 
    :warn/no-artifact-found
-   "WARN: no artifact found after session — checked MCP path %s and worktree path %s"
+   "WARN: no artifact found after session — checked MCP path %s and worktree role files under %s (roles: %s)"
 
    :warn/artifact-parse
    "WARN: failed to parse artifact at %s — %s"
@@ -799,7 +799,8 @@
 
 (def ^:private worktree-roles
   "Roles whose `.miniforge/<role>.edn` files `run-session` probes for
-   worktree-promoted artifacts."
+   worktree-promoted artifacts. Single source of truth for both the
+   scan and the no-artifact-found diagnostic."
   [:plan :implement :verify :review :release])
 
 (defn- role-reader-for-mode
@@ -873,7 +874,8 @@
   [session workdir]
   (emit-system-message! :warn/no-artifact-found
                         (:artifact-path session)
-                        (str (or workdir "<no-workdir>") "/.miniforge/<role>.edn")))
+                        (str (or workdir "<no-workdir>") "/.miniforge/")
+                        (str/join ", " (map name worktree-roles))))
 
 (defn- run-session
   "Execute body-fn with session, read artifacts, and clean up.
@@ -894,6 +896,13 @@
    the JVM CWD fallback (which may contain stale .miniforge/ artifacts from
    prior runs) from suppressing or emitting diagnostics when no real
    worktree was provided.
+
+   Emits a WARN (not ERROR) only when BOTH the MCP artifact path and all
+   worktree role files are empty — genuine 'nothing found' case. The
+   warning names the scanned `.miniforge/` directory and the full list of
+   role files probed so post-mortem readers can tell that several roles
+   were attempted, not a single path. When the worktree-promoted artifact
+   was written successfully, this check passes silently.
 
    Return map includes `:artifact` (the MCP-submitted artifact EDN, or nil)
    and `:worktree-artifacts` (map of role -> artifact for worktree-promoted

@@ -701,6 +701,25 @@
           result ((:leave interceptor) ctx)]
       (is (= :failed (get-in result [:phase :status]))))))
 
+(deftest error-release-treats-zero-files-as-terminal-test
+  (testing "zero-files exceptions fail instead of retrying the release phase"
+    (let [interceptor (phase/get-phase-interceptor {:phase :release})
+          exception (ex-info "Release phase received code artifact with zero files"
+                             {:type :release/zero-files
+                              :phase :release
+                              :environment-id "task-1"
+                              :worktree-path "/tmp/task-1"})
+          result ((:error interceptor)
+                  {:phase {:iterations 0
+                           :budget {:iterations 2}}
+                   :phase-config {:phase :release}
+                   :execution/metrics {:tokens 0 :duration-ms 0}}
+                  exception)]
+      (is (= :failed (get-in result [:phase :status])))
+      (is (not (phase/retrying? (:phase result))))
+      (is (= :release/zero-files
+             (get-in result [:phase :error :data :type]))))))
+
 ;------------------------------------------------------------------------------ Layer 2: Interceptor Leave Tests
 
 (deftest leave-release-records-metrics-test
