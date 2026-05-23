@@ -1,0 +1,35 @@
+{:spec/title "Fix miniforge-tui phase loader classpath drift"
+
+ :spec/description
+ "Dogfood verification repeatedly surfaced `ai.miniforge.phase.done-test` errors in the `miniforge-tui` project: `FileNotFoundException` for `ai/miniforge/workflow_compliance_scanner/phases`. The broader runner output could still report a green summary while raw test output contained these errors. Fix the TUI project classpath or phase loading boundary so missing optional phase namespaces do not create false failures or false-green summaries."
+
+ :spec/intent {:type :bugfix
+               :scope ["projects/miniforge-tui"
+                       "components/phase/src"
+                       "components/phase/test"
+                       "bases/tui/src"]}
+
+ :spec/constraints
+ ["Do not add broad project dependencies to miniforge-tui unless the TUI genuinely needs them"
+  "Prefer explicit optional phase loading or project deps over catching every load failure as success"
+  "Do not hide real phase implementation load errors"
+  "Keep the test runner summary consistent with raw clojure.test failures and errors"
+  "Keep the fix small enough for a sub-200-line PR"]
+
+ :spec/acceptance-criteria
+ ["`ai.miniforge.phase.done-test` passes when run under the `miniforge-tui` project classpath"
+  "Missing optional phase namespaces are reported as skipped or unavailable without failing unrelated TUI tests"
+  "Real load errors inside present phase namespaces still fail loudly"
+  "The project test summary reports failure when raw test output contains clojure.test failures or errors"
+ "Regression tests cover optional namespace absence and present-namespace load failure"
+ "Dogfood verification no longer reports the TUI classpath error as a pre-existing warning"]
+
+ :spec/priority
+ {:tier :high
+  :axes #{:correctness :dogfood-enabler}
+  :theme :polylith-compliance
+  :rationale "Dogfood verification repeatedly reports `miniforge-tui` classpath errors while some summaries still appear green. This undermines test signal quality and can mask TUI regressions."
+  :blocks []
+  :blocked-by []}
+
+ :spec/workflow-type :canonical-sdlc}
