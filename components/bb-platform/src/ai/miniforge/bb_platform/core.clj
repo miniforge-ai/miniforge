@@ -52,6 +52,7 @@
   {"clojure"      "https://clojure.org/guides/install_clojure"
    "clj-kondo"    "https://github.com/clj-kondo/clj-kondo/blob/master/doc/install.md"
    "markdownlint" "npm install -g markdownlint-cli"
+   "opencode"     "npm install -g opencode-ai"
    "poly"         "https://polylith.gitbook.io/polylith/install"
    "bb"           "curl -sLO https://raw.githubusercontent.com/babashka/babashka/master/install && chmod +x install && ./install --static"
    "java"         "Install Temurin 21 via your distro package manager (apt/dnf/pacman)"
@@ -149,6 +150,23 @@
     :else
     {:action :hint :package "markdownlint"
      :hint   "Install Node.js + npm, then: npm install -g markdownlint-cli"}))
+
+(defn install-plan-opencode
+  "OpenCode is npm-distributed. It is the default provider/auth wrapper for
+   miniforge agent runs, so bootstrap installs it when npm is available and
+   otherwise prints the exact manual command."
+  [{:keys [installed? npm-installed?]}]
+  (cond
+    installed?
+    {:action :skip :package "opencode" :reason :already-installed}
+
+    npm-installed?
+    {:action :run :package "opencode"
+     :command ["npm" "install" "-g" "opencode-ai"]}
+
+    :else
+    {:action :hint :package "opencode"
+     :hint "Install Node.js + npm, then: npm install -g opencode-ai"}))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Pure: check report assembly

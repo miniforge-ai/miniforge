@@ -36,8 +36,8 @@
   (app-config/config-path))
 
 (def default-config
-  {:llm {:backend :codex
-         :model "gpt-5.2-codex"
+  {:llm {:backend :opencode
+         :model "anthropic/claude-sonnet-4-5"
          :timeout-ms 300000
          :line-timeout-ms 60000
          :max-tokens 4000}
@@ -211,7 +211,7 @@
       (do
         (print-error (messages/t :config/set-missing-args))
         (println (messages/t :config/set-usage {:command (app-config/command-string "config set <key> <value>")}))
-        (println (messages/t :config/set-example {:command (app-config/command-string "config set llm.backend openai")})))
+        (println (messages/t :config/set-example {:command (app-config/command-string "config set llm.backend opencode")})))
       (let [user-config (or (read-config-file config-path) default-config)
             key-path (parse-config-key key-str)
             value (parse-config-value value-str)
@@ -362,7 +362,7 @@
   [config workflow-override]
   (or workflow-override
       (get-in config [:llm :backend])
-      :codex))
+      :opencode))
 
 (defn get-llm-timeout
   "Get LLM timeout from config."

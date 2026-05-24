@@ -47,6 +47,10 @@
   [opts]
   (core/install-plan-markdownlint opts))
 
+(defn install-plan-opencode
+  [opts]
+  (core/install-plan-opencode opts))
+
 (defn check
   "Assemble a platform check report from supplied facts."
   [opts]

@@ -166,6 +166,23 @@
     (is (= :hint (:action plan)))
     (is (re-find #"npm install" (:hint plan)))))
 
+(deftest test-install-plan-opencode-uses-npm-when-available
+  (testing "OpenCode is installed through its npm package"
+    (is (= {:action :run :package "opencode"
+            :command ["npm" "install" "-g" "opencode-ai"]}
+           (sut/install-plan-opencode
+            {:installed? false :npm-installed? true})))))
+
+(deftest test-install-plan-opencode-skips-when-installed
+  (is (= :skip (:action (sut/install-plan-opencode
+                         {:installed? true :npm-installed? true})))))
+
+(deftest test-install-plan-opencode-hints-without-npm
+  (let [plan (sut/install-plan-opencode
+              {:installed? false :npm-installed? false})]
+    (is (= :hint (:action plan)))
+    (is (re-find #"npm install -g opencode-ai" (:hint plan)))))
+
 ;------------------------------------------------------------------------------ Layer 0
 ;; Pure: check assembly
 
