@@ -10,7 +10,9 @@
 
 ## Overview
 
-Miniforge now has a comprehensive, user-friendly configuration system that makes it simple to discover, configure, and switch between LLM backends. Configuration is no longer a "rite of passage" - it's discoverable, helpful, and frictionless.
+Miniforge now has a comprehensive, user-friendly configuration system that makes it simple to discover, configure, and
+switch between LLM backends. Configuration is no longer a "rite of passage" - it's discoverable, helpful, and
+frictionless.
 
 ## Features Implemented
 
@@ -86,7 +88,7 @@ Available LLM Backends:
 
 ❌ cursor (Cursor)
    Cursor AI via CLI
-   Status: cursor-cli not found on PATH
+   Status: agent not found on PATH
    Install: Install from https://cursor.sh
 ```
 
@@ -229,7 +231,7 @@ Configuration is merged from three sources (in order of precedence):
 
 - **Provider**: Cursor
 - **Type**: CLI-based (non-streaming)
-- **Requires**: `cursor-cli` installed
+- **Requires**: `agent` installed
 - **Install**: https://cursor.sh
 - **Models**: cursor-default
 
@@ -244,13 +246,13 @@ Configuration is merged from three sources (in order of precedence):
 
 ### User Config
 
-```
+```text
 ~/.miniforge/config.edn
 ```
 
 ### Component Locations
 
-```
+```text
 components/config/              # Config management component
   src/ai/miniforge/config/
     user.clj                    # User config operations
@@ -337,7 +339,8 @@ The configuration system is complete and ready for use. Possible future enhancem
 
 ## Conclusion
 
-The frictionless configuration system transforms Miniforge's UX from "configuration as a rite of passage" to "configuration as a first-class feature." Users can now:
+The frictionless configuration system transforms Miniforge's UX from "configuration as a rite of passage" to
+"configuration as a first-class feature." Users can now:
 
 - Discover all available backends instantly
 - Understand requirements and installation steps
