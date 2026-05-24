@@ -64,6 +64,26 @@
     (.set ts (- (System/currentTimeMillis) offset-ms)))
   watchdog)
 
+;; Timing constants for the fire-on-threshold tests. Kept small so the
+;; scheduler trips within a single test tick; named so the intent is explicit.
+(def ^:private trip-threshold-ms
+  "Gap threshold low enough that the watchdog trips almost immediately."
+  50)
+
+(def ^:private fast-check-interval-ms
+  "Poll cadence — well below the threshold so a stall is caught on the first tick."
+  10)
+
+(def ^:private gap-accrual-sleep-ms
+  "How long to leave the watchdog un-pinged so a real gap accrues past the
+   threshold before we assert it fired."
+  200)
+
+(def ^:private fire-await-timeout-ms
+  "Upper bound on the spin-wait for the async watchdog fire, so the assertion
+   never outruns the scheduler thread."
+  2000)
+
 ;; ---------------------------------------------------------------------------
 ;; resolve-gap-threshold
 
@@ -219,6 +239,31 @@
         (sut/stop! wd)
         (is fired? "kill-fn fired and watchdog marked stalled")
         (is (sut/stalled? wd) "watchdog should be marked stalled")))))
+
+(deftest stall-gap-ms-exposes-measured-gap
+  (testing "stall-gap-ms returns nil before a stall and a positive number after"
+    (let [killed? (atom false)
+          wd      (sut/create-watchdog
+                   (make-test-watchdog
+                    {:threshold-ms      trip-threshold-ms
+                     :check-interval-ms fast-check-interval-ms
+                     :kill-fn           #(reset! killed? true)}))]
+      (is (nil? (sut/stall-gap-ms wd))
+          "no gap measured before the watchdog fires")
+      ;; Do not ping; let the timer accumulate a real gap past the threshold.
+      (Thread/sleep gap-accrual-sleep-ms)
+      (let [fired? (await-condition #(and @killed? (sut/stalled? wd)) fire-await-timeout-ms)]
+        (sut/stop! wd)
+        (is fired? "kill-fn fired and watchdog marked stalled")
+        (is (sut/stalled? wd) "watchdog should be marked stalled")
+        (is @killed? "kill-fn ran")
+        (let [gap (sut/stall-gap-ms wd)]
+          (is (number? gap) "stall-gap-ms returns a number after stalling")
+          (is (pos? gap) "measured gap is positive"))))))
+
+(deftest stall-gap-ms-nil-safe-for-nil-watchdog
+  (testing "stall-gap-ms tolerates a nil watchdog"
+    (is (nil? (sut/stall-gap-ms nil)))))
 
 ;; ---------------------------------------------------------------------------
 ;; ping! actually prevents the kill from firing

@@ -261,6 +261,21 @@
           {:peer-messages (vec msgs)}))
       (catch Exception _e nil))))
 
+(defn- resolve-backend-keyword
+  "Best-effort resolution of the configured LLM backend keyword from ctx.
+
+   The live llm-backend client carries the keyword on its config at
+   `[:llm-backend :config :backend]` — the canonical location elsewhere in
+   the codebase (see agent/core) — so that wins. Falls back to the various
+   user/self-healing config :llm maps, then :unknown."
+  [ctx]
+  (or (get-in ctx [:llm-backend :config :backend])
+      (get-in ctx [:execution/opts :llm-backend :config :backend])
+      (get-in ctx [:user-config :llm :backend])
+      (get-in ctx [:config :llm :backend])
+      (get-in ctx [:llm :backend])
+      :unknown))
+
 (defn enter-implement
   "Execute implementation phase.
 
@@ -284,14 +299,53 @@
                           (:task/repo-index task)
                           (:task/context-pack task))))
         on-chunk (create-streaming-callback ctx)
-        agent-ctx (cond-> ctx on-chunk (assoc :on-chunk on-chunk))
         peer-advice (collect-peer-advice ctx)
         task (cond-> task
                peer-advice (assoc :task/peer-advice peer-advice))
+        ;; Arm the stream watchdog around the synchronous agent invocation.
+        ;; Only when the run is actually streaming (on-chunk present): the
+        ;; watchdog resets its timer on each chunk, so a non-streaming run has
+        ;; no ping source and must not be armed (it would false-fire). On the
+        ;; streaming happy path it is observe-only — every chunk pings it and
+        ;; it is stopped in a finally. On a silent stall it interrupts the
+        ;; phase thread, unwinding the in-flight llm-stream-reader subprocess.
+        backend (resolve-backend-keyword ctx)
+        watchdog-config (or (get-in ctx [:execution/opts :self-healing])
+                            (get-in ctx [:user-config :self-healing])
+                            {})
+        event-stream (phase/resolve-event-stream ctx)
+        workflow-id (or (:execution/id ctx) (:workflow/id ctx))
+        phase-thread (Thread/currentThread)
+        wd (when on-chunk
+             (agent/create-watchdog
+              (cond-> {:threshold-ms (agent/resolve-gap-threshold watchdog-config backend)
+                       :phase-id :implement
+                       :backend backend
+                       :event-stream event-stream
+                       :workflow-id workflow-id
+                       :logger logger
+                       :kill-fn #(.interrupt phase-thread)}
+                ;; Optional override (mainly for tests/tuning); create-watchdog
+                ;; defaults this when absent — never pass nil.
+                (get watchdog-config :agent/stream-check-interval-ms)
+                (assoc :check-interval-ms
+                       (get watchdog-config :agent/stream-check-interval-ms)))))
+        agent-ctx (cond-> ctx
+                    on-chunk (assoc :on-chunk
+                                    (fn [chunk]
+                                      (agent/ping-watchdog! wd)
+                                      (on-chunk chunk))))
         impl-result (try
                       (agent/invoke implementer-agent task agent-ctx)
                       (catch Exception e
-                        (response/failure e)))
+                        (response/failure e))
+                      (finally
+                        (agent/stop-watchdog! wd)))
+        stalled? (agent/watchdog-stalled? wd)
+        gap-ms (agent/watchdog-stall-gap-ms wd)
+        ;; Clear any leftover interrupt flag set by the kill-fn so it does not
+        ;; poison the curator run or subsequent work on this thread.
+        _ (when stalled? (Thread/interrupted))
         ;; Curator post-processes the implementer's environment writes into a
         ;; structured :code artifact. The environment is the artifact, so we
         ;; invoke the curator regardless of the implementer's self-reported
@@ -350,6 +404,13 @@
              (= :mcp (get-in impl-result [:error :data :artifact-source])))
         degraded-handoff? (and impl-errored? (not metadata-only-submit?))
         result (cond
+                 ;; Stream watchdog fired: the agent stalled silently and was
+                 ;; killed mid-stream, so the empty diff is a stall symptom, not
+                 ;; a genuine no-files verdict. Re-code the implementer error as
+                 ;; :agent-stalled so downstream curator-terminal?/empty-diff?
+                 ;; gates treat it as RETRIABLE rather than terminal.
+                 stalled?
+                 (assoc-in impl-result [:error :data :code] :agent-stalled)
                  ;; Curator found files — use its artifact, even if the
                  ;; implementer reported error. Merge implementer metrics through.
                  (phase/result-succeeded? curator-result)
@@ -388,7 +449,9 @@
                  :else
                  curator-result)]
     (-> (phase/enter-context ctx :implement :implementer gates budget start-time result)
-        (assoc-in [:phase :rules-manifest] rules-manifest))))
+        (assoc-in [:phase :rules-manifest] rules-manifest)
+        (assoc-in [:phase :watchdog-state]
+                  {:stalled? stalled? :stall/gap-duration-ms gap-ms}))))
 
 (def ^:private rate-limit-pattern
   "Lightweight rate limit / infra-transient detection for the phase level.
@@ -519,6 +582,11 @@
         ;; are a first-class concept.
         curator-empty-diff? (= :curator/no-files-written
                                (get-in result [:error :data :code]))
+        ;; Stream watchdog outcome threaded from enter-implement. A stalled run
+        ;; is retriable, not terminal — the agent hung silently, so the next
+        ;; iteration may succeed.
+        watchdog-state (get-in ctx [:phase :watchdog-state])
+        stalled? (:stalled? watchdog-state)
         iterations (or (get-in ctx [:phase :iterations]) 1)
         max-iterations (get-in ctx [:phase :budget :iterations]
                                (get-in default-config [:budget :iterations]))
@@ -528,6 +596,11 @@
         effective-status agent-status
         invalid-already-implemented? (unverified-already-implemented? ctx result)
         phase-status (cond
+                       ;; Stream watchdog stall — retriable. Route through the
+                       ;; normal status determination so the phase retries on
+                       ;; the next iteration rather than terminating.
+                       stalled? (phase/determine-phase-status
+                                  effective-status iterations max-iterations)
                        gate-failed? :failed
                        invalid-already-implemented? :failed
                        (= :already-implemented agent-status) :already-implemented
@@ -601,7 +674,8 @@
                                :failure)
                 :duration-ms duration-ms
                 :tokens      (get metrics :tokens 0)}
-               (phase-terminal/derive-termination-reason result {:rate-limited? rate-limited?})))
+               (phase-terminal/derive-termination-reason
+                 result (merge watchdog-state {:rate-limited? rate-limited?}))))
       final-ctx)))
 
 (defn error-implement

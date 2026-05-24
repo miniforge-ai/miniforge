@@ -85,6 +85,11 @@
    See `ai.miniforge.agent.stream-watchdog/stalled?`."
   watchdog/stalled?)
 
+(def stall-gap-ms
+  "Return the measured stream gap (ms) at the moment the watchdog fired, or nil.
+   See `ai.miniforge.agent.stream-watchdog/stall-gap-ms`."
+  watchdog/stall-gap-ms)
+
 ;; ---------------------------------------------------------------------------
 ;; Session ID capture
 
