@@ -23,24 +23,21 @@ if ! command -v bb &>/dev/null; then
   MISSING="$MISSING\n  - Babashka (bb): brew install babashka/brew/babashka"
 fi
 
-# Check for an LLM backend: agent CLI or API key
+# Check for the LLM backend wrapper.
 HAS_BACKEND=false
-if command -v claude &>/dev/null; then
+if command -v opencode &>/dev/null; then
+  HAS_BACKEND=true
+  echo "  LLM backend: OpenCode CLI"
+elif command -v claude &>/dev/null; then
   HAS_BACKEND=true
   echo "  LLM backend: Claude Code CLI"
 elif command -v codex &>/dev/null; then
   HAS_BACKEND=true
   echo "  LLM backend: Codex CLI"
-elif [ -n "$ANTHROPIC_API_KEY" ]; then
-  HAS_BACKEND=true
-  echo "  LLM backend: Anthropic API"
-elif [ -n "$OPENAI_API_KEY" ]; then
-  HAS_BACKEND=true
-  echo "  LLM backend: OpenAI API"
 fi
 
 if [ "$HAS_BACKEND" = false ]; then
-  MISSING="$MISSING\n  - LLM backend: install Claude Code or Codex CLI, or set ANTHROPIC_API_KEY / OPENAI_API_KEY"
+  MISSING="$MISSING\n  - LLM backend: install OpenCode CLI and run opencode auth login"
 fi
 
 if [ -n "$MISSING" ]; then

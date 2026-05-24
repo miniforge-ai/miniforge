@@ -141,7 +141,7 @@ git clone https://github.com/miniforge-ai/miniforge.git
 cd miniforge
 bb bootstrap
 
-# If using provider API keys:
+# Configure provider auth for agent runs:
 # opencode auth login
 
 # Run your first workflow

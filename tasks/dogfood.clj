@@ -69,21 +69,15 @@
 (defn- prerequisite-status [args]
   (let [spec-path (resolve-spec-path args)
         github-auth (resolve-github-auth)
-        anthropic-key (System/getenv "ANTHROPIC_API_KEY")
-        openai-key (System/getenv "OPENAI_API_KEY")
-        codex-cli (command-available? "codex")
+        opencode-cli (command-available? "opencode")
         checks {:spec-exists (fs/exists? spec-path)
                 :github-auth (some? github-auth)
-                :llm-backend (or codex-cli (some? anthropic-key) (some? openai-key))
+                :llm-backend opencode-cli
                 :git-clean (git-clean?)}]
     {:spec-path spec-path
      :github-auth github-auth
      :checks checks
-     :backend-source (cond
-                       codex-cli :codex-cli
-                       anthropic-key :anthropic-api-key
-                       openai-key :openai-api-key
-                       :else :none)}))
+     :backend-source (if opencode-cli :opencode-cli :none)}))
 
 (defn check
   "Validate dogfooding prerequisites. Usage: bb dogfood:check [spec-path]"
@@ -98,9 +92,7 @@
                        (name check))))
     (println (format "  %s backend-source"
                      (case backend-source
-                       :codex-cli "✅ codex-cli"
-                       :anthropic-api-key "✅ anthropic-api-key"
-                       :openai-api-key "✅ openai-api-key"
+                       :opencode-cli "✅ opencode-cli"
                        "❌ none")))
     (println (format "  %s github-auth-source"
                      (case (:source github-auth)

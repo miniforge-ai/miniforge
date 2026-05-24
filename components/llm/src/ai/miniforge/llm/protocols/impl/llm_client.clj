@@ -41,7 +41,7 @@
 ;;   Failure: {:success false :error {:type string :message string} :anomaly anomaly-map}
 ;;
 ;; These builders ensure consistent construction across all backends
-;; (CLI, HTTP/OpenAI, HTTP/Ollama, streaming, non-streaming).
+;; (CLI, HTTP/Ollama, streaming, non-streaming).
 
 (defn- load-client-defaults
   []
@@ -928,7 +928,7 @@
      (try
        (reset! output (slurp input-stream))
        (catch Exception e
-         (reset! output (ex-message e)))))))
+         (reset! output (or (ex-message e) (str e))))))))
 
 (defn- read-process-stderr!
   [^Process process stderr]
@@ -996,15 +996,18 @@
 (defn- stop-capture-process!
   [{:keys [^Process process stdin-thread stdout-thread stderr-thread stdout stderr]}
    timeout-ms]
-  (let [result (wait-for-stream-process process timeout-ms)
-        timed-out? (= -1 (:exit result))]
-    (when timed-out?
-      (try (.destroyForcibly process) (catch Exception _ nil)))
+  (let [initial-result (wait-for-stream-process process timeout-ms)
+        timed-out? (= -1 (:exit initial-result))
+        result (if timed-out?
+                 (do
+                   (try (.destroyForcibly process) (catch Exception _ nil))
+                   (wait-for-stream-process process (post-kill-join-timeout-ms)))
+                 initial-result)]
     (doseq [thread [stdin-thread stdout-thread stderr-thread]
             :when thread]
       (.join ^Thread thread stream-reader-join-timeout-ms))
-    {:out @stdout
-     :err (if (seq (:err result)) (:err result) @stderr)
+    {:out (or @stdout "")
+     :err (or (not-empty (:err result)) @stderr "")
      :exit (:exit result)}))
 
 (def ^:private keepalive-min-interval-ms
