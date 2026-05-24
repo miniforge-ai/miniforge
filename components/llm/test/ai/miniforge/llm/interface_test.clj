@@ -904,9 +904,10 @@
         "claude must default to stdin to avoid POSIX ARG_MAX overflow")))
 
 (deftest non-claude-backends-default-to-argv-test
-  (testing "codex / cursor / echo backends keep :prompt-via :argv"
+  (testing "codex / cursor / opencode / echo backends keep :prompt-via :argv"
     (is (= :argv (:prompt-via (get impl/backends :codex))))
     (is (= :argv (:prompt-via (get impl/backends :cursor))))
+    (is (= :argv (:prompt-via (get impl/backends :opencode))))
     (is (= :argv (:prompt-via (get impl/backends :echo))))))
 
 ;------------------------------------------------------------------------------ Layer 5
@@ -935,6 +936,58 @@
           actual (.getCanonicalPath (java.io.File. (str/trim out)))]
       (is (zero? exit))
       (is (= workdir actual)))))
+
+(deftest read-process-stream-error-is-string-test
+  (testing "reader exceptions never publish nil output"
+    (let [stream (proxy [java.io.InputStream] []
+                   (read
+                     ([]
+                      (throw (Exception.)))
+                     ([buffer]
+                      (throw (Exception.)))
+                     ([buffer offset length]
+                      (throw (Exception.)))))
+          output (atom nil)
+          reader (#'impl/read-process-stream! "llm-test-reader" stream output)]
+      (.join ^Thread reader 1000)
+      (is (string? @output))
+      (is (seq @output)))))
+
+(deftest stop-capture-process-waits-after-destroy-test
+  (testing "capture timeout waits again after forcible destroy before returning"
+    (let [destroyed? (atom false)
+          wait-calls (atom [])
+          process (proxy [Process] []
+                    (destroy []
+                      (reset! destroyed? true))
+                    (exitValue []
+                      0)
+                    (getErrorStream []
+                      (java.io.ByteArrayInputStream. (byte-array 0)))
+                    (getInputStream []
+                      (java.io.ByteArrayInputStream. (byte-array 0)))
+                    (getOutputStream []
+                      (java.io.ByteArrayOutputStream.))
+                    (waitFor []
+                      0))]
+      (with-redefs-fn {#'impl/post-kill-join-timeout-ms (constantly 7)
+                       #'impl/wait-for-stream-process
+                       (fn [_ timeout-ms]
+                         (swap! wait-calls conj timeout-ms)
+                         (if (= 1 (count @wait-calls))
+                           {:exit -1 :err "Process timed out"}
+                           {:exit 0 :err ""}))}
+        (fn []
+          (let [result (#'impl/stop-capture-process!
+                        {:process process
+                         :stdout (atom nil)
+                         :stderr (atom nil)}
+                        5)]
+            (is @destroyed?)
+            (is (= [5 7] @wait-calls))
+            (is (= 0 (:exit result)))
+            (is (= "" (:out result)))
+            (is (= "" (:err result)))))))))
 
 (deftest complete-impl-passes-workdir-to-exec-fn-test
   (testing "non-streaming CLI completion runs in the requested workdir"

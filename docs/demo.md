@@ -22,7 +22,8 @@ All of this happens autonomously. You just watch.
 ## Prerequisites
 
 - Completed the [Quickstart](quickstart.md) (`bb bootstrap`)
-- An LLM backend: Claude Code CLI, Codex CLI, or an API key
+- An LLM backend: OpenCode CLI, Claude Code CLI, or Codex CLI. Provider
+  API keys for miniforge agent runs are configured through OpenCode.
 - A GitHub token (for PR creation): `export GITHUB_TOKEN="ghp_..."`
   - Or run without PR creation to see the pipeline without pushing
 

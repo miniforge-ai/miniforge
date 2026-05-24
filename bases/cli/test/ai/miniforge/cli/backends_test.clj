@@ -25,8 +25,8 @@
 ;; Resource-backed backend config
 
 (deftest backend-specs-loaded-from-resource-test
-  (testing "backend specs include codex from resource config"
-    (is (= "Codex" (get-in backends/backend-specs [:codex :provider]))))
+  (testing "backend specs include opencode from resource config"
+    (is (= "OpenCode" (get-in backends/backend-specs [:opencode :provider]))))
 
   (testing "current backend fallback comes from resource defaults"
-    (is (= :codex (backends/get-current-backend {})))))
+    (is (= :opencode (backends/get-current-backend {})))))

@@ -1,13 +1,21 @@
 {:backend/defaults
- {:current :codex}
+ {:current :opencode}
 
  :backend/specs
- {:claude
+ {:opencode
+  {:provider "OpenCode"
+   :description "OpenCode CLI provider/auth wrapper"
+   :command "opencode"
+   :installation "npm install -g opencode-ai"
+   :models ["anthropic/claude-sonnet-4-5" "anthropic/claude-sonnet-4-6" "openai/gpt-5.2"]
+   :check-type :cli
+   :docs-url "https://opencode.ai/docs"}
+
+  :claude
   {:provider "Anthropic"
    :description "Claude via Anthropic CLI"
    :command "claude"
    :installation "npm install -g @anthropic-ai/claude-cli"
-   :api-key-var "ANTHROPIC_API_KEY"
    :models ["claude-sonnet-4-6" "claude-opus-4-7" "claude-opus-4-6" "claude-sonnet-4-5-20250929" "claude-haiku-4-5-20251001"]
    :check-type :cli}
 
@@ -16,27 +24,15 @@
    :description "Codex via Codex CLI"
    :command "codex"
    :installation "Install from https://codex.dev"
-   :api-key-var nil
    :models ["gpt-5.3-codex" "gpt-5.2-codex" "gpt-5.2" "gpt-5.1-codex-max"]
    :check-type :cli
    :docs-url "https://codex.dev"}
-
-  :openai
-  {:provider "OpenAI"
-   :description "OpenAI GPT-4 via API"
-   :command nil
-   :installation "Set OPENAI_API_KEY environment variable"
-   :api-key-var "OPENAI_API_KEY"
-   :models ["gpt-4-turbo" "gpt-4" "gpt-3.5-turbo"]
-   :check-type :api-key
-   :docs-url "https://platform.openai.com/api-keys"}
 
   :cursor
   {:provider "Cursor"
    :description "Cursor AI via CLI"
    :command "cursor-cli"
    :installation "Install from https://cursor.sh"
-   :api-key-var nil
    :models ["cursor-default"]
    :check-type :cli
    :docs-url "https://cursor.sh"}
@@ -46,7 +42,6 @@
    :description "Local models via Ollama"
    :command "ollama"
    :installation "brew install ollama"
-   :api-key-var nil
    :models ["codellama" "llama2" "mistral"]
    :check-type :cli
    :docs-url "https://ollama.ai"}
@@ -56,6 +51,5 @@
    :description "Echo backend for testing (no actual LLM)"
    :command "echo"
    :installation "Built-in"
-   :api-key-var nil
    :models ["echo"]
    :check-type :builtin}}}

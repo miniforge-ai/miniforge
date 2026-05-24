@@ -26,22 +26,18 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Default config policy
 
-(deftest default-config-prefers-gpt-execution-test
+(deftest default-config-prefers-opencode-test
   (let [cfg config/default-config]
-    (testing "default llm backend prefers codex"
-      (is (= :codex (get-in cfg [:llm :backend])))
-      (is (= "gpt-5.2-codex" (get-in cfg [:llm :model]))))
+    (testing "default llm backend routes provider auth through OpenCode"
+      (is (= :opencode (get-in cfg [:llm :backend])))
+      (is (= "anthropic/claude-sonnet-4-5" (get-in cfg [:llm :model]))))
 
-    (testing "default agent models: Opus 4.6 for thinking, Sonnet for execution"
-      ;; Non-Claude CLI backends (codex, cursor-agent, gh-copilot) don't yet
-      ;; ship structured plans through their stream parsers (see
-      ;; work/multi-backend-cli-parity.spec.edn). Planner/architect default
-      ;; to claude-opus-4-6 until that lands.
-      (is (= "claude-opus-4-6" (get-in cfg [:agents :default-models :thinking])))
-      (is (= "claude-sonnet-4-6" (get-in cfg [:agents :default-models :execution]))))
+    (testing "default agent models are OpenCode provider/model selectors"
+      (is (= "anthropic/claude-opus-4-6" (get-in cfg [:agents :default-models :thinking])))
+      (is (= "anthropic/claude-sonnet-4-6" (get-in cfg [:agents :default-models :execution]))))
 
-    (testing "default self-healing enables claude and codex failover"
-      (is (= [:claude :codex] (get-in cfg [:self-healing :allowed-failover-backends]))))
+    (testing "default self-healing keeps failover inside OpenCode"
+      (is (= [:opencode] (get-in cfg [:self-healing :allowed-failover-backends]))))
 
     (testing "default workflow checkpoint root is configured as data"
       (is (= "~/.miniforge/checkpoints"
@@ -56,8 +52,8 @@
                                          (orig-resource "config/default-user-config-fallback.edn")
                                          nil))]
       (let [cfg (user/load-default-config)]
-        (is (= :codex (get-in cfg [:llm :backend])))
-        (is (= "claude-sonnet-4-6" (get-in cfg [:agents :default-models :execution])))
+        (is (= :opencode (get-in cfg [:llm :backend])))
+        (is (= "anthropic/claude-sonnet-4-6" (get-in cfg [:agents :default-models :execution])))
         (is (= "~/.miniforge/checkpoints"
                (get-in cfg [:workflow :checkpoint-root])))))))
 

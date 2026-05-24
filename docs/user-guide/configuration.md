@@ -7,23 +7,19 @@
 
 ## LLM Backend
 
-Miniforge auto-detects your LLM backend in this priority order:
+Miniforge uses OpenCode as the default provider/auth wrapper for LLM
+access. Configure provider keys in OpenCode, then let miniforge invoke
+`opencode run`.
 
-1. **Claude Code CLI** — if `claude` is on your PATH
-2. **Codex CLI** — if `codex` is on your PATH
-3. **Anthropic API** — if `ANTHROPIC_API_KEY` is set
-4. **OpenAI API** — if `OPENAI_API_KEY` is set
+Claude Code and Codex remain supported direct CLI backends for users who
+already have those tools configured, but miniforge no longer accepts
+provider API keys directly.
 
-No configuration is needed if you have Claude Code or Codex installed.
-
-### API Key Setup
+### Provider Key Setup
 
 ```bash
-# Anthropic (Claude)
-export ANTHROPIC_API_KEY="sk-ant-..."
-
-# OpenAI
-export OPENAI_API_KEY="sk-..."
+opencode auth login
+opencode models
 ```
 
 ### GitHub Token (for PR creation)
@@ -39,8 +35,6 @@ PR creation.
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `ANTHROPIC_API_KEY` | — | Anthropic API key |
-| `OPENAI_API_KEY` | — | OpenAI API key |
 | `GITHUB_TOKEN` | — | GitHub token for PR creation |
 | `MINIFORGE_MAX_TOKENS` | `150000` | Max tokens per workflow |
 | `MINIFORGE_MAX_ITERATIONS` | `50` | Max phase retries |
@@ -79,7 +73,8 @@ Individual phases can be tuned in the workflow definition:
 Persistent configuration lives in `~/.miniforge/config.edn`:
 
 ```clojure
-{:llm-backend :anthropic
+{:llm {:backend :opencode
+       :model "anthropic/claude-sonnet-4-5"}
  :max-parallel 2
  :default-workflow :canonical-sdlc}
 ```

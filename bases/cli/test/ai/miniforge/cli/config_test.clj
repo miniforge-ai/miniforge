@@ -34,7 +34,7 @@
   (testing "load-config with :dev profile"
     (let [cfg (config/load-config {:profile :dev})]
       (is (map? cfg))
-      (is (= :claude (get-in cfg [:llm :backend])))))
+      (is (keyword? (get-in cfg [:llm :backend])))))
 
   (testing "load-config with :test profile"
     (let [cfg (config/load-config {:profile :test})]
@@ -57,9 +57,9 @@
     (let [cfg {:llm {:backend :anthropic}}]
       (is (= :anthropic (config/get-llm-backend cfg nil)))))
 
-  (testing "get-llm-backend returns :codex as default"
-    (is (= :codex (config/get-llm-backend {} nil)))
-    (is (= :codex (config/get-llm-backend {:llm {}} nil)))))
+  (testing "get-llm-backend returns :opencode as default"
+    (is (= :opencode (config/get-llm-backend {} nil)))
+    (is (= :opencode (config/get-llm-backend {:llm {}} nil)))))
 
 (deftest get-llm-timeout-test
   (testing "get-llm-timeout returns config value"

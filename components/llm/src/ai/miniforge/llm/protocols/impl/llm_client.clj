@@ -23,7 +23,6 @@
    [clojure.java.io :as io]
    [clojure.string :as str]
    [cheshire.core :as json]
-   [babashka.process :as p]
    [org.httpkit.client :as http]
    [ai.miniforge.logging.interface :as log]
    [ai.miniforge.llm.cost :as cost]
@@ -42,7 +41,7 @@
 ;;   Failure: {:success false :error {:type string :message string} :anomaly anomaly-map}
 ;;
 ;; These builders ensure consistent construction across all backends
-;; (CLI, HTTP/OpenAI, HTTP/Ollama, streaming, non-streaming).
+;; (CLI, HTTP/Ollama, streaming, non-streaming).
 
 (defn- load-client-defaults
   []
@@ -497,6 +496,26 @@
     (seq mcp-allowed-tools) (conj "--approve-mcps")
     true (conj prompt)))
 
+(defn- opencode-args
+  "Build CLI arguments for the OpenCode backend.
+
+   OpenCode owns provider credentials, model aliases, project config,
+   agent profiles, MCP config, and permissions. Miniforge passes the
+   selected model/profile knobs through and treats OpenCode as the
+   common provider wrapper instead of handling API keys directly."
+  [{:keys [prompt model agent attach command session continue? fork? files format]}]
+  (cond-> ["run"]
+    attach    (into ["--attach" attach])
+    command   (into ["--command" command])
+    continue? (conj "--continue")
+    session   (into ["--session" session])
+    fork?     (conj "--fork")
+    model     (into ["--model" model])
+    agent     (into ["--agent" agent])
+    (seq files) (into (mapcat (fn [file] ["--file" file]) files))
+    format    (into ["--format" format])
+    true      (conj prompt)))
+
 (defn- echo-args
   "Build CLI arguments for the echo (test) backend."
   [{:keys [prompt]}]
@@ -508,7 +527,6 @@
             :description "Claude via Anthropic CLI"
             :provider "Anthropic"
             :requires-cli? true
-            :api-key-var "ANTHROPIC_API_KEY"
             :stream-parser parse-claude-stream-line
             :args-fn claude-args
             ;; Prompt delivery: stdin. The planner path's system-prompt +
@@ -522,29 +540,17 @@
            :description "Codex via Codex CLI"
            :provider "Codex"
            :requires-cli? true
-           :api-key-var nil
            :stream-parser parse-codex-stream-line
            :args-fn codex-args
            ;; Prompt delivery: argv. Codex CLI takes a positional prompt;
            ;; flip to :stdin if its prompt envelope grows past ARG_MAX.
            :prompt-via :argv}
 
-   :openai {:cmd "http"
-            :streaming? true
-            :description "OpenAI GPT-4 via API"
-            :provider "OpenAI"
-            :requires-cli? false
-            :api-key-var "OPENAI_API_KEY"
-            :api-endpoint "https://api.openai.com/v1/chat/completions"
-            :default-model "gpt-4"
-            :models ["gpt-4-turbo" "gpt-4" "gpt-3.5-turbo"]}
-
    :ollama {:cmd "http"
             :streaming? true
             :description "Local models via Ollama"
             :provider "Ollama"
             :requires-cli? false
-            :api-key-var nil
             :api-endpoint "http://localhost:11434/api/chat"
             :default-model "codellama"
             :models ["codellama" "llama2" "mistral"]}
@@ -554,16 +560,25 @@
             :description "Cursor AI via CLI"
             :provider "Cursor"
             :requires-cli? true
-            :api-key-var nil
             :args-fn cursor-args
             :prompt-via :argv}
+
+   :opencode {:cmd "opencode"
+              :streaming? false
+              :description "OpenCode CLI provider wrapper"
+              :provider "OpenCode"
+              :requires-cli? true
+              ;; OpenCode loads credentials from its auth store,
+              ;; environment, or project .env/config. Miniforge should not
+              ;; read provider-specific keys on this path.
+              :args-fn opencode-args
+              :prompt-via :argv}
 
    :echo {:cmd "echo"
           :streaming? false
           :description "Echo backend for testing"
           :provider "Test"
           :requires-cli? false
-          :api-key-var nil
           :args-fn echo-args
           :prompt-via :argv}})
 
@@ -578,17 +593,6 @@
        (str/join "\n\n")))
 
 ;------------------------------------------------------------------------------ HTTP Backend Support
-
-(defn openai-request-body
-  "Build OpenAI API request body."
-  [{:keys [prompt messages model max-tokens streaming?]}]
-  (let [model (or model "gpt-4-turbo")
-        msgs (or messages
-                 [{:role "user" :content prompt}])]
-    {:model model
-     :messages msgs
-     :stream (boolean streaming?)
-     :max_tokens (or max-tokens 4000)}))
 
 (defn ollama-request-body
   "Build Ollama API request body."
@@ -616,26 +620,6 @@
        {:anomaly/operation :http-request
         :anomaly.llm/url url}))))
 
-(defn parse-openai-response
-  "Parse OpenAI API response.
-
-   Handles anomaly maps from http-post-request or HTTP response maps."
-  [response]
-  ;; If response is already an anomaly map, pass it through
-  (if (response/anomaly-map? response)
-    (llm-error (:anomaly/category response) "http_error" (:anomaly/message response))
-    (try
-      (let [body (json/parse-string (:body response) true)]
-        (if (= 200 (:status response))
-          (llm-success (get-in body [:choices 0 :message :content] "")
-                       {:usage {:input-tokens (get-in body [:usage :prompt_tokens])
-                                :output-tokens (get-in body [:usage :completion_tokens])}})
-          (llm-error :anomalies/unavailable "api_error"
-                     (get-in body [:error :message] "Unknown API error"))))
-      (catch Exception e
-        (llm-error :anomalies/fault "parse_error"
-                   (str "Failed to parse response: " (.getMessage e)))))))
-
 (defn parse-ollama-response
   "Parse Ollama API response.
 
@@ -657,26 +641,19 @@
                    (str "Failed to parse response: " (.getMessage e)))))))
 
 (defn http-complete
-  "Complete request using HTTP API backend."
-  [backend-config request api-key]
+  "Complete request using an HTTP backend.
+
+   HTTP remains for local, credential-free backends such as Ollama. Provider
+   API-key routing for agent runs goes through OpenCode instead of direct HTTP
+   calls from miniforge."
+  [backend-config request]
   (let [{:keys [api-endpoint provider]} backend-config
-        headers (cond
-                  (= provider "OpenAI")
-                  {"Authorization" (str "Bearer " api-key)
-                   "Content-Type" "application/json"}
-
-                  (= provider "Ollama")
-                  {"Content-Type" "application/json"}
-
-                  :else
-                  {"Content-Type" "application/json"})
+        headers {"Content-Type" "application/json"}
         body (case provider
-               "OpenAI" (openai-request-body request)
                "Ollama" (ollama-request-body request)
                {})
         response (http-post-request api-endpoint headers body)]
     (case provider
-      "OpenAI" (parse-openai-response response)
       "Ollama" (parse-ollama-response response)
       (llm-error :anomalies/unsupported "unsupported_backend"
                  (str "HTTP backend not implemented for: " provider)))))
@@ -686,12 +663,12 @@
 
    Note: Currently falls back to non-streaming as babashka.http-client
    doesn't support streaming responses yet."
-  [backend-config request api-key on-chunk]
+  [backend-config request on-chunk]
   (let [accumulated (atom "")]
     (try
       ;; Note: babashka.http-client doesn't support streaming responses yet
       ;; For now, fall back to non-streaming for HTTP backends
-      (let [result (http-complete backend-config (assoc request :streaming? false) api-key)]
+      (let [result (http-complete backend-config (assoc request :streaming? false))]
         (when (:success result)
           (let [content (:content result)]
             (reset! accumulated content)
@@ -789,13 +766,33 @@
           (recur))
       (enqueue-stream-line! line-queue eof-sentinel))))
 
+(def ^:private stream-reader-join-timeout-ms
+  "How long process-stream-lines waits for its daemon reader thread to
+   exit after the stream reader is closed."
+  100)
+
+(defn- daemon-thread!
+  [thread-name f]
+  (let [thread (Thread. ^Runnable f thread-name)]
+    (.setDaemon thread true)
+    (.start thread)
+    thread))
+
 (defn- start-stream-reader!
   [out-reader line-queue]
-  (future
-    (try
-      (read-stream-loop! out-reader line-queue)
-      (catch Exception e
-        (enqueue-stream-line! line-queue (stream-read-failure e))))))
+  (daemon-thread!
+   "llm-stream-reader"
+   (fn []
+     (try
+       (read-stream-loop! out-reader line-queue)
+       (catch Exception e
+         (enqueue-stream-line! line-queue (stream-read-failure e)))))))
+
+(defn- stop-stream-reader!
+  [^Thread reader-thread out-reader]
+  (try (.close out-reader) (catch Exception _))
+  (.interrupt reader-thread)
+  (.join reader-thread stream-reader-join-timeout-ms))
 
 (defn- record-stream-line!
   [out-lines dump-writer on-line last-line-at now line]
@@ -864,7 +861,7 @@
         last-line-at (atom (System/currentTimeMillis))
         dump-writer (open-stream-dump-writer)
         line-queue (LinkedBlockingQueue.)
-        reader-future (start-stream-reader! out-reader line-queue)]
+        reader-thread (start-stream-reader! out-reader line-queue)]
     (try+
       (loop []
         (if-let [t (pm/check-timeout monitor)]
@@ -881,8 +878,7 @@
               timeout (reset! timeout-reason timeout)
               :else (recur)))))
       (finally
-        (future-cancel reader-future)
-        (try (.close out-reader) (catch Exception _))
+        (stop-stream-reader! reader-thread out-reader)
         (when dump-writer (.close dump-writer))))
     {:lines @out-lines
      :timeout @timeout-reason}))
@@ -903,6 +899,116 @@
   (if (and (string? stdin-str) (not (.isEmpty ^String stdin-str)))
     (ByteArrayInputStream. (.getBytes ^String stdin-str "UTF-8"))
     (ByteArrayInputStream. (byte-array 0))))
+
+(defn- apply-process-env!
+  [^ProcessBuilder builder env]
+  (when env
+    (let [target-env (.environment builder)]
+      (.clear target-env)
+      (doseq [[k v] env]
+        (.put target-env k v)))))
+
+(defn- write-process-stdin!
+  [^Process process stdin-str]
+  (daemon-thread!
+   "llm-stream-stdin-writer"
+   (fn []
+     (try
+       (with-open [out (.getOutputStream process)
+                   in (->stdin-stream stdin-str)]
+         (io/copy in out))
+       (catch Exception _
+         nil)))))
+
+(defn- read-process-stream!
+  [thread-name input-stream output]
+  (daemon-thread!
+   thread-name
+   (fn []
+     (try
+       (reset! output (slurp input-stream))
+       (catch Exception e
+         (reset! output (or (ex-message e) (str e))))))))
+
+(defn- read-process-stderr!
+  [^Process process stderr]
+  (read-process-stream! "llm-stream-stderr-reader"
+                        (.getErrorStream process)
+                        stderr))
+
+(defn- start-stream-process!
+  [cmd {:keys [workdir stdin]}]
+  (let [builder (ProcessBuilder. ^java.util.List cmd)]
+    (when-let [env (clean-env)]
+      (apply-process-env! builder env))
+    (when workdir
+      (.directory builder (io/file workdir)))
+    (let [process (.start builder)
+          stderr (atom "")
+          stdin-thread (write-process-stdin! process stdin)
+          stderr-thread (read-process-stderr! process stderr)]
+      {:process process
+       :stderr stderr
+       :stdin-thread stdin-thread
+       :stderr-thread stderr-thread})))
+
+(defn- start-capture-process!
+  [cmd {:keys [workdir stdin]}]
+  (let [builder (ProcessBuilder. ^java.util.List cmd)]
+    (when-let [env (clean-env)]
+      (apply-process-env! builder env))
+    (when workdir
+      (.directory builder (io/file workdir)))
+    (let [process (.start builder)
+          stdout (atom "")
+          stderr (atom "")
+          stdin-thread (write-process-stdin! process stdin)
+          stdout-thread (read-process-stream! "llm-stdout-reader"
+                                             (.getInputStream process)
+                                             stdout)
+          stderr-thread (read-process-stream! "llm-stderr-reader"
+                                             (.getErrorStream process)
+                                             stderr)]
+      {:process process
+       :stdout stdout
+       :stderr stderr
+       :stdin-thread stdin-thread
+       :stdout-thread stdout-thread
+       :stderr-thread stderr-thread})))
+
+(defn- wait-for-stream-process
+  [^Process process timeout-ms]
+  (if (.waitFor process (long timeout-ms) TimeUnit/MILLISECONDS)
+    {:exit (.exitValue process)}
+    {:exit -1 :err "Process timed out"}))
+
+(defn- stop-stream-process!
+  [{:keys [^Process process stdin-thread stderr-thread stderr]} timeout? join-timeout]
+  (when timeout?
+    (try (.destroyForcibly process) (catch Exception _ nil)))
+  (let [result (wait-for-stream-process process join-timeout)]
+    (when stdin-thread
+      (.join ^Thread stdin-thread stream-reader-join-timeout-ms))
+    (when stderr-thread
+      (.join ^Thread stderr-thread stream-reader-join-timeout-ms))
+    (assoc result :err @stderr)))
+
+(defn- stop-capture-process!
+  [{:keys [^Process process stdin-thread stdout-thread stderr-thread stdout stderr]}
+   timeout-ms]
+  (let [initial-result (wait-for-stream-process process timeout-ms)
+        timed-out? (= -1 (:exit initial-result))
+        result (if timed-out?
+                 (do
+                   (try (.destroyForcibly process) (catch Exception _ nil))
+                   (wait-for-stream-process process (post-kill-join-timeout-ms)))
+                 initial-result)]
+    (doseq [thread [stdin-thread stdout-thread stderr-thread]
+            :when thread]
+      (.join ^Thread thread stream-reader-join-timeout-ms))
+    {:out (or @stdout "")
+     :err (or (not-empty (:err result)) @stderr "")
+     :exit (:exit result)}))
 
 (def ^:private keepalive-min-interval-ms
   "Floor on the keepalive interval so the worker doesn't burn cycles
@@ -938,12 +1044,11 @@
    (stream-exec-fn cmd on-line {}))
   ([cmd on-line {:keys [progress-monitor workdir stdin]}]
    (let [monitor (or progress-monitor (default-progress-monitor))
-         in-stream (->stdin-stream stdin)
-         process (apply p/process (cond-> {:err :string :in in-stream}
-                                          (clean-env) (assoc :env (clean-env))
-                                          workdir     (assoc :dir workdir)) cmd)
+         stream-process (start-stream-process! cmd {:workdir workdir
+                                                    :stdin stdin})
+         process (:process stream-process)
          out-reader (java.io.BufferedReader.
-                     (java.io.InputStreamReader. (:out process)))
+                     (java.io.InputStreamReader. (.getInputStream process)))
          ;; Decouple stagnation from the CLI's emission cadence.
          ;; claude in --input-format text mode does not emit
          ;; rate_limit_event during the model's think phase, so the
@@ -964,14 +1069,10 @@
          ;; stagnation, or total-max) — the subprocess is hung or
          ;; silent. Kill it so `deref` returns immediately instead of
          ;; waiting 10 min for a process that will not exit.
-         _ (when timeout
-             (try
-               (when-let [^Process jp (:proc process)]
-                 (.destroyForcibly jp))
-               (catch Exception _ nil)))
          join-timeout (if timeout (post-kill-join-timeout-ms) (process-join-timeout-ms))
-         result (deref process join-timeout
-                       {:exit -1 :err "Process timed out"})]
+         result (stop-stream-process! stream-process
+                                      (boolean timeout)
+                                      join-timeout)]
      (if timeout
        (timeout-result lines timeout)
        (success-result lines result)))))
@@ -1066,18 +1167,14 @@
   (let [{:keys [config logger exec-fn]} client
         {:keys [backend model]} config
         backend-config (get backends backend)
-        {:keys [cmd args-fn api-key-var]} backend-config]
+        {:keys [cmd args-fn]} backend-config]
     (log-prompt-sent logger backend (build-request-prompt request))
 
     ;; Handle HTTP backends differently from CLI backends
     (if (= cmd "http")
-      (let [api-key (when api-key-var (System/getenv api-key-var))]
-        (if (and api-key-var (not api-key))
-          (llm-error :anomalies/incorrect "missing_api_key"
-                     (str "Missing API key: " api-key-var " not set"))
-          (let [response (http-complete backend-config request api-key)]
-            (log-response logger response)
-            response)))
+      (let [response (http-complete backend-config request)]
+        (log-response logger response)
+        response)
 
       ;; CLI backend
       (let [prompt     (build-request-prompt request)
@@ -1360,7 +1457,7 @@
   (let [{:keys [config]} client
         {:keys [backend]} config
         backend-config (get backends backend)
-        {:keys [streaming? cmd api-key-var]} backend-config
+        {:keys [streaming? cmd]} backend-config
         progress-monitor (or (:progress-monitor request)
                              (pm/create-progress-monitor
                               {:stagnation-threshold-ms (default-stagnation-threshold-ms)
@@ -1368,11 +1465,7 @@
 
     ;; Handle HTTP backends
     (if (= cmd "http")
-      (let [api-key (when api-key-var (System/getenv api-key-var))]
-        (if (and api-key-var (not api-key))
-          (llm-error :anomalies/incorrect "missing_api_key"
-                     (str "Missing API key: " api-key-var " not set"))
-          (http-stream-complete backend-config request api-key on-chunk)))
+      (http-stream-complete backend-config request on-chunk)
 
       ;; CLI backends
       (if-not streaming?
@@ -1385,7 +1478,7 @@
 ;------------------------------------------------------------------------------ Layer 3
 
 (defn default-exec-fn
-  "Run `cmd` with `p/shell`, capturing :out / :err / :exit.
+  "Run `cmd` with ProcessBuilder, capturing :out / :err / :exit.
 
    2-arity opts map supports:
    - `:stdin`  — string piped to the subprocess's stdin
@@ -1393,14 +1486,9 @@
   ([cmd] (default-exec-fn cmd {}))
   ([cmd {:keys [stdin workdir]}]
    (let [timeout-ms 600000
-         in-stream  (->stdin-stream stdin)
-         result (apply p/shell (cond-> {:out :string :err :string :continue true
-                                        :in in-stream :timeout timeout-ms}
-                                 (clean-env) (assoc :env (clean-env))
-                                 workdir     (assoc :dir workdir)) cmd)]
-     {:out (:out result)
-      :err (:err result)
-      :exit (:exit result)})))
+         process (start-capture-process! cmd {:stdin stdin
+                                              :workdir workdir})]
+     (stop-capture-process! process timeout-ms))))
 
 (defn capsule-exec-fn
   "Returns an exec-fn that routes CLI commands through a task capsule executor.

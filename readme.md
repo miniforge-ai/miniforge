@@ -127,8 +127,9 @@ enforce hard stops. All decisions produce evidence bundles for traceability.
   are first-class today.
 - [Babashka](https://github.com/babashka/babashka#installation) (Mac/Linux:
   Homebrew or `bash <(curl …) --static`; Windows: `scoop install babashka`)
-- An LLM backend: [Claude Code](https://claude.ai/claude-code) CLI,
-  [Codex](https://openai.com/codex) CLI, or an API key (Anthropic/OpenAI)
+- An LLM backend: [OpenCode](https://opencode.ai/docs) CLI, [Claude Code](https://claude.ai/claude-code)
+  CLI, or [Codex](https://openai.com/codex) CLI. Provider API keys for
+  miniforge agent runs are configured through OpenCode.
 - An OCI-compatible local container runtime (see below). [Podman](https://podman.io/)
   is the recommended default; [Docker](https://www.docker.com/) is supported.
   Other Docker-CLI hosts (Colima, OrbStack) work as `:runtime-kind :docker`.
@@ -140,8 +141,8 @@ git clone https://github.com/miniforge-ai/miniforge.git
 cd miniforge
 bb bootstrap
 
-# If using an API key (not needed if Claude Code or Codex CLI is installed)
-# export ANTHROPIC_API_KEY="sk-ant-..."
+# Configure provider auth for agent runs:
+# opencode auth login
 
 # Run your first workflow
 mf run examples/workflows/simple-refactor.edn
@@ -218,12 +219,8 @@ loop — the PR monitor will autonomously address reviewer feedback after releas
 ## Configuration
 
 ```bash
-# LLM backend: auto-detected from installed CLIs
-# Claude Code or Codex CLI are used automatically if installed.
-# Otherwise, set an API key:
-export ANTHROPIC_API_KEY="sk-ant-..."
-# Or:
-export OPENAI_API_KEY="sk-..."
+# LLM backend: OpenCode is the default provider/auth wrapper.
+opencode auth login
 
 # Tune execution
 export MINIFORGE_MAX_ITERATIONS=50     # max phase retries

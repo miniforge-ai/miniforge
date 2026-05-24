@@ -1,7 +1,7 @@
 {:description "Default user configuration for MiniForge Core"
  :config
- {:llm {:backend :codex
-        :model "gpt-5.2-codex"
+ {:llm {:backend :opencode
+        :model "anthropic/claude-sonnet-4-5"
         :timeout-ms 300000
         :line-timeout-ms 60000
         ;; Per-response output cap. 4000 truncated planner output to 0 chars on
@@ -17,16 +17,14 @@
   :meta-loop {:enabled true
               :max-convergence-iterations 10
               :convergence-threshold 0.95}
-  ;; Planner/architect default to Opus 4.6 (opusplan, 200K context). Codex
-  ;; and other non-Claude CLI backends don't yet ship structured plans back
-  ;; through their stream parsers (agentic-by-default; see
-  ;; work/multi-backend-cli-parity.spec.edn). Claude is the only backend
-  ;; whose :default-model-for-role :planner produces a plan artifact today.
-  ;; Override per-role in your user config if your chosen backend supports
-  ;; the same contract.
-  :agents {:default-models {:thinking   "claude-opus-4-6"
-                            :execution  "claude-sonnet-4-6"
-                            :escalation "claude-opus-4-7"}}
+  ;; OpenCode is the default provider/auth wrapper for agent runs. Provider
+  ;; credentials live in OpenCode auth/config, not in miniforge environment
+  ;; variables. These role defaults are passed through to OpenCode as model
+  ;; selections; override per-role in user config if your OpenCode setup uses
+  ;; different aliases.
+  :agents {:default-models {:thinking   "anthropic/claude-opus-4-6"
+                            :execution  "anthropic/claude-sonnet-4-6"
+                            :escalation "anthropic/claude-opus-4-7"}}
   :model-selection {:enabled true
                     :strategy :automatic
                     :cost-limit-per-task 0.10
@@ -38,7 +36,7 @@
                  :backend-auto-switch true
                  :backend-health-threshold 0.90
                  :backend-switch-cooldown-ms 1800000
-                 :allowed-failover-backends [:claude :codex]
+                 :allowed-failover-backends [:opencode]
                  :max-cost-per-workflow nil
                  ;; Agent output-stream gap threshold. If no output line is received
                  ;; from the backend process for this many milliseconds, a
@@ -47,7 +45,7 @@
                  :agent/stream-gap-threshold-ms 90000
                  ;; Per-backend overrides for the gap threshold. Keys are backend
                  ;; keywords; values are millisecond integers. Empty by default.
-                 ;; Example: {:codex 210000} gives Codex 2 extra minutes
+                 ;; Example: {:opencode 210000} gives OpenCode 2 extra minutes
                  ;; (210s total) before stall detection fires.
                  :agent/per-backend-gap-thresholds {}}
   :governance {:readiness {}

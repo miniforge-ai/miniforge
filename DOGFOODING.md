@@ -43,8 +43,8 @@ bb dogfood:check work/worktree-persistence-scratch-branch.spec.edn
 
 Required:
 
-- A supported LLM backend. The checker accepts an installed `codex` CLI,
-  `ANTHROPIC_API_KEY`, or `OPENAI_API_KEY`.
+- OpenCode CLI. Provider API keys for dogfood agent runs are configured
+  through OpenCode, not read directly by Miniforge.
 - GitHub auth. Either set `GITHUB_TOKEN` or authenticate `gh`.
 - A clean tracked working tree. Untracked local files are allowed, but staged
   or unstaged tracked changes must be handled before a dogfood run.

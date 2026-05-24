@@ -39,7 +39,7 @@
   (testing "all canonical dependency enums are valid"
     (doseq [source [:miniforge :user-env :external-provider :external-platform]]
       (is (fc/valid-failure-source? source)))
-    (doseq [vendor [:anthropic :openai :github :kubernetes]]
+    (doseq [vendor [:anthropic :openai :opencode :github :kubernetes]]
       (is (fc/valid-dependency-vendor? vendor)))
     (doseq [dependency-class [:outage :rate-limit :permission :unsupported-feature]]
       (is (fc/valid-dependency-class? dependency-class)))
@@ -335,11 +335,11 @@
                                 :failure/vendor :codex
                                 :dependency/class :permission
                                 :dependency/retryability :operator-action}}
-                    {:name "Missing Anthropic key"
-                     :input {:error/message "ANTHROPIC_API_KEY is not set"}
+                    {:name "Missing OpenCode auth"
+                     :input {:error/message "opencode provider not authenticated; run opencode auth login"}
                      :expected {:failure/class :failure.class/unknown
                                 :failure/source :user-env
-                                :failure/vendor :anthropic
+                                :failure/vendor :opencode
                                 :dependency/class :misconfiguration
                                 :dependency/retryability :operator-action}}
                     {:name "GitHub platform unavailable"

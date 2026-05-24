@@ -329,6 +329,13 @@
             :installed?     (platform/installed? "markdownlint")
             :npm-installed? (platform/installed? "npm")}))}
 
+  install:opencode
+  {:doc  "Install OpenCode CLI provider/auth wrapper"
+   :task (platform/execute-plan!
+          (platform/install-plan-opencode
+           {:installed?     (platform/installed? "opencode")
+            :npm-installed? (platform/installed? "npm")}))}
+
   install:poly
   {:doc  "Install Polylith CLI"
    :task (brew-install "polyfy/polylith/poly")}
@@ -345,14 +352,14 @@
 
   install:deps
   {:doc     "Install all required dependencies"
-   :depends [install:java install:clojure install:clj-kondo install:markdownlint install:poly install:podman]
+   :depends [install:java install:clojure install:clj-kondo install:markdownlint install:opencode install:poly install:podman]
    :task    (println "\n✅ All dependencies installed")}
 
   check:platform
   {:doc  "Report OS, shell, and required-tool status"
    :task (platform/print-check!
           (platform/check-current
-           ["java" "clojure" "clj-kondo" "poly" "git" "markdownlint"]))}
+           ["java" "clojure" "clj-kondo" "poly" "git" "markdownlint" "opencode"]))}
 
   ;; ──────────────────────────────────────────────────────────────────────────
   ;; Upgraders
