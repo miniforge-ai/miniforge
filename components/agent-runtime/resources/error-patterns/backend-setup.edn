@@ -31,6 +31,21 @@
                 :auto-apply false}
    :docs-url "https://ollama.ai/docs"}
 
+  {:id :opencode-auth-missing
+   :regex "opencode.*(auth|credential|provider|login)|No provider found|not authenticated|API key.*missing"
+   :vendor "OpenCode"
+   :description "OpenCode provider credentials missing or not configured"
+   :failure/source :user-env
+   :failure/vendor :opencode
+   :dependency/class :misconfiguration
+   :dependency/retryability :operator-action
+   :workaround {:type :shell-command
+                :command "opencode auth login"
+                :description "Configure provider credentials through OpenCode"
+                :requires-sudo false
+                :auto-apply false}
+   :docs-url "https://opencode.ai/docs/cli/#auth"}
+
   {:id :anthropic-key-missing
    :regex "ANTHROPIC_API_KEY.*not set|Invalid API key"
    :vendor "Anthropic"

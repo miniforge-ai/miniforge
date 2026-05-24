@@ -206,6 +206,53 @@
       (is (= "p" (last args))))))
 
 ;; ============================================================================
+;; opencode-args
+;; ============================================================================
+
+(deftest opencode-args-minimal-test
+  (testing "minimal prompt invokes non-interactive run"
+    (let [args ((private-fn 'opencode-args) {:prompt "explain"})]
+      (is (= ["run" "explain"] args)))))
+
+(deftest opencode-args-model-and-agent-test
+  (testing "model and agent pass through to OpenCode"
+    (let [args ((private-fn 'opencode-args)
+                {:prompt "fix it"
+                 :model "anthropic/claude-sonnet-4-5"
+                 :agent "miniforge-implementer"})]
+      (is (= "run" (first args)))
+      (is (some #(= "--model" %) args))
+      (is (some #(= "anthropic/claude-sonnet-4-5" %) args))
+      (is (some #(= "--agent" %) args))
+      (is (some #(= "miniforge-implementer" %) args))
+      (is (= "fix it" (last args))))))
+
+(deftest opencode-args-session-and-attach-test
+  (testing "session reuse and serve attachment flags are preserved"
+    (let [args ((private-fn 'opencode-args)
+                {:prompt "continue"
+                 :attach "http://localhost:4096"
+                 :session "sess_123"
+                 :fork? true})]
+      (is (= ["run"
+              "--attach" "http://localhost:4096"
+              "--session" "sess_123"
+              "--fork"
+              "continue"]
+             args)))))
+
+(deftest opencode-args-files-test
+  (testing "attached files expand into repeated --file flags"
+    (let [args ((private-fn 'opencode-args)
+                {:prompt "review"
+                 :files ["README.md" "src/core.clj"]})]
+      (is (= ["run"
+              "--file" "README.md"
+              "--file" "src/core.clj"
+              "review"]
+             args)))))
+
+;; ============================================================================
 ;; echo-args
 ;; ============================================================================
 
@@ -224,3 +271,11 @@
             :when (:args-fn backend)]
       (is (fn? (:args-fn backend))
           (str "Backend " k " should have a function :args-fn")))))
+
+(deftest opencode-backend-wiring-test
+  (testing "OpenCode backend delegates auth/provider handling to OpenCode"
+    (is (= "opencode" (get-in impl/backends [:opencode :cmd])))
+    (is (= "OpenCode" (get-in impl/backends [:opencode :provider])))
+    (is (false? (get-in impl/backends [:opencode :streaming?])))
+    (is (nil? (get-in impl/backends [:opencode :api-key-var])))
+    (is (= :argv (get-in impl/backends [:opencode :prompt-via])))))

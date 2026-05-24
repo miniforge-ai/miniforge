@@ -12,9 +12,10 @@ Get from zero to a miniforge-generated pull request in under 5 minutes.
 - macOS, Linux, or Windows — see [Platform Support](platform-support.md)
 - [Babashka](https://github.com/babashka/babashka#installation) (bb)
 - An LLM backend — one of:
-  - [Claude Code](https://claude.ai/claude-code) CLI (recommended)
+  - [OpenCode](https://opencode.ai/docs) CLI (recommended provider/auth wrapper)
+  - [Claude Code](https://claude.ai/claude-code) CLI
   - [Codex](https://openai.com/codex) CLI
-  - An API key (Anthropic or OpenAI)
+  - An API key configured through OpenCode, Claude Code, Codex, or environment
 - An OCI-compatible local container runtime — see "Container runtime" below.
   [Podman](https://podman.io/) is the recommended default; Docker is supported.
 
@@ -87,11 +88,27 @@ config block.
 
 ## 2. LLM Backend
 
-Miniforge auto-detects installed agent CLIs. If you have Claude Code or Codex
-installed, you're ready. Otherwise, set an API key:
+Miniforge can run through OpenCode as the common provider/auth wrapper.
+OpenCode stores provider credentials and loads keys from its auth store,
+environment, or project `.env` file. Configure it once:
 
 ```bash
-# Only needed if no agent CLI is installed
+opencode auth login
+opencode models
+```
+
+Then select the backend in your miniforge config:
+
+```edn
+{:llm {:backend :opencode
+       :model "anthropic/claude-sonnet-4-5"}}
+```
+
+Claude Code and Codex remain supported direct CLI backends. If you are
+not using OpenCode or an agent CLI, set provider keys explicitly:
+
+```bash
+# Only needed if no OpenCode/agent-CLI auth is configured
 export ANTHROPIC_API_KEY="sk-ant-..."
 # Or:
 # export OPENAI_API_KEY="sk-..."

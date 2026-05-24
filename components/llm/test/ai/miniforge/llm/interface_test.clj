@@ -904,9 +904,10 @@
         "claude must default to stdin to avoid POSIX ARG_MAX overflow")))
 
 (deftest non-claude-backends-default-to-argv-test
-  (testing "codex / cursor / echo backends keep :prompt-via :argv"
+  (testing "codex / cursor / opencode / echo backends keep :prompt-via :argv"
     (is (= :argv (:prompt-via (get impl/backends :codex))))
     (is (= :argv (:prompt-via (get impl/backends :cursor))))
+    (is (= :argv (:prompt-via (get impl/backends :opencode))))
     (is (= :argv (:prompt-via (get impl/backends :echo))))))
 
 ;------------------------------------------------------------------------------ Layer 5
