@@ -37,6 +37,12 @@
                    nil
                    (catch ExceptionInfo e e))]
       (is (some? thrown))
+      ;; Message text is i18n-keyed (:envelope/validation-failed); assert
+      ;; non-blank rather than a fixed substring so the test doesn't pin
+      ;; the en-US translation. Other tests in this file assert on the
+      ;; pre-existing English error strings, which are not message-catalog
+      ;; entries.
+      (is (seq (.getMessage thrown)))
       (is (= :anomalies/incorrect (:anomaly/category (ex-data thrown)))))))
 
 (deftest merge-config-empty-layers-throws-anomaly

@@ -66,18 +66,19 @@
 
 (deftest cost-add-phase-cost-iterations-on-non-iter-phase-throws-anomaly
   (testing "iterations > 0 on non-iteration phase raises :anomalies/incorrect"
-    ;; Pick a known phase that isn't in the iteration set. Most planning/release
-    ;; phases qualify; using :plan as a representative since it's authored once.
+    ;; :task/verify is a real phase-key but is NOT in iteration-phase-keys
+    ;; (that set is #{:task/implement :task/merge-resolution}). Using a valid
+    ;; non-iter phase exercises the "does not iterate" branch rather than
+    ;; the unknown-phase branch.
     (let [thrown (try
                    (cost/add-phase-cost {:cost/total 0 :cost/breakdown {}}
-                                        {:phase :plan
+                                        {:phase :task/verify
                                          :tokens 100
                                          :iterations 3})
                    nil
                    (catch ExceptionInfo e e))]
-      ;; This test passes only if :plan is not in iteration-phase-keys. If a
-      ;; future refactor adds :plan to that set, retarget at another non-iter
-      ;; phase.
-      (when (some? thrown)
-        (is (re-find #"does not iterate" (.getMessage thrown)))
-        (is (= :anomalies/incorrect (:anomaly/category (ex-data thrown))))))))
+      (is (some? thrown))
+      (is (re-find #"does not iterate" (.getMessage thrown)))
+      (is (= :anomalies/incorrect (:anomaly/category (ex-data thrown))))
+      (is (= :task/verify (:phase (ex-data thrown))))
+      (is (= 3 (:iterations (ex-data thrown)))))))

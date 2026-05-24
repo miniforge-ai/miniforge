@@ -10,8 +10,10 @@ Migrates 12 throw sites across three components to the canonical
 - `components/workflow/.../{agent_factory,cost_breakdown}.clj` — 4 sites
 
 Same mechanical shape as Wave 9 + connector cluster cleanups. Each site
-gains a typed `:anomaly/category` (`:incorrect`, `:unsupported`) in
-ex-data while preserving the existing `ExceptionInfo` throw contract.
+gains a typed `:anomaly/category` (`:anomalies/incorrect`,
+`:anomalies/unsupported` — the full keywords from the canonical taxonomy
+in `components/response/src/.../anomaly.clj`) in ex-data while preserving
+the existing `ExceptionInfo` throw contract.
 
 ## Motivation
 
