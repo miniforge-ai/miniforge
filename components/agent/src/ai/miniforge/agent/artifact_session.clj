@@ -324,6 +324,73 @@
     (spit config-file (json/generate-string config {:pretty true}))
     (str config-file)))
 
+(defn- mcp-tool->cursor-permission
+  "Translate one agent-agnostic `mcp-tools` entry into a Cursor permission
+   rule string (https://cursor.com/docs/cli/reference/permissions).
+
+     {:mcp/server S :mcp/tool T} -> \"Mcp(S:T)\"
+     :Write / :Edit / :MultiEdit -> \"Write(**)\"  (Cursor models all edits
+                                                    as writes; no Edit primitive)
+
+   Returns nil for entries with no Cursor analog."
+  [tool]
+  (cond
+    (map? tool)
+    (format "Mcp(%s:%s)" (name (:mcp/server tool)) (name (:mcp/tool tool)))
+
+    (#{:Write :Edit :MultiEdit} tool)
+    "Write(**)"
+
+    :else nil))
+
+(def cursor-permission-deny
+  "Hard denials applied regardless of the allowlist. Deny takes precedence
+   over allow in Cursor, so these block secret writes even when Write(**) is
+   allowed. Globs follow Cursor's documented Write(pathOrGlob) form."
+  ["Write(**/.env*)" "Write(**/*.key)" "Write(**/*.pem)"])
+
+(defn cursor-permission-allow
+  "Cursor `allow` rules for a session: the auto-approved `mcp-tools`, minus
+   any native tool the role disallows, translated to Cursor rule strings.
+
+   Default-deny: Cursor sees only this allowlist, so shell, arbitrary file
+   reads, and other MCP servers are denied by omission — no wildcard needed."
+  [allowed-tools disallowed-tools]
+  (let [disallowed (set (map name disallowed-tools))
+        keep?      (fn [tool] (or (map? tool)
+                                  (not (contains? disallowed (name tool)))))]
+    (->> allowed-tools
+         (filter keep?)
+         (keep mcp-tool->cursor-permission)
+         distinct
+         vec)))
+
+(defn write-cursor-permissions!
+  "Write or merge .cursor/cli.json with a default-deny permission allowlist.
+
+   `allowed-tools` is the agent-agnostic auto-approve set (`mcp-tools`);
+   `disallowed-tools` subtracts native tools the role must not call. Merges
+   into any existing permissions arrays so a project/user cli.json is
+   preserved. Returns the path to the config file."
+  [config-root allowed-tools disallowed-tools]
+  (let [root        (or config-root (System/getProperty "user.dir"))
+        dir         (io/file root ".cursor")
+        config-file (io/file dir "cli.json")
+        allow       (cursor-permission-allow allowed-tools disallowed-tools)
+        existing    (when (.exists config-file)
+                      (try (json/parse-string (slurp config-file))
+                           (catch Exception _ {})))
+        prior-allow (get-in existing ["permissions" "allow"] [])
+        prior-deny  (get-in existing ["permissions" "deny"] [])
+        config      (-> (or existing {})
+                        (assoc-in ["permissions" "allow"]
+                                  (vec (distinct (concat prior-allow allow))))
+                        (assoc-in ["permissions" "deny"]
+                                  (vec (distinct (concat prior-deny cursor-permission-deny)))))]
+    (.mkdirs dir)
+    (spit config-file (json/generate-string config {:pretty true}))
+    (str config-file)))
+
 (defn write-claude-settings!
   "Write Claude CLI settings JSON with PreToolUse hook for supervision.
 
@@ -409,11 +476,12 @@
         settings-path (write-claude-settings! (:dir session))
         codex-path    (write-codex-mcp-config! config-root srv-cmd)
         cursor-path   (write-cursor-mcp-config! config-root srv-cmd)
+        cursor-perms  (write-cursor-permissions! config-root mcp-tools nil)
         [hook-cmd & hook-args] (resolve-miniforge-command)
         hook-eval-cmd (str/join " " (concat [hook-cmd] hook-args ["hook-eval"]))]
     (assoc session
            :mcp-allowed-tools mcp-tools
-           :mcp-cleanup-files [codex-path cursor-path]
+           :mcp-cleanup-files [codex-path cursor-path cursor-perms]
            :supervision {:hook-eval-cmd hook-eval-cmd
                          :settings-path settings-path
                          :policy :workspace-write
@@ -617,6 +685,31 @@
             (spit f (json/generate-string config' {:pretty true}))))
         (catch Exception _ nil)))))
 
+(defn cleanup-cursor-permissions!
+  "Remove the permission rules we injected from .cursor/cli.json, deleting
+   the file if nothing else remains. Strips the full managed superset so a
+   role-specific allow subset is always cleaned, while preserving any
+   pre-existing user/project rules."
+  [path]
+  (let [f (io/file path)]
+    (when (.exists f)
+      (try
+        (let [config        (json/parse-string (slurp f))
+              managed-allow (set (keep mcp-tool->cursor-permission mcp-tools))
+              managed-deny  (set cursor-permission-deny)
+              allow'        (vec (remove managed-allow (get-in config ["permissions" "allow"] [])))
+              deny'         (vec (remove managed-deny (get-in config ["permissions" "deny"] [])))
+              perms'        (cond-> {}
+                              (seq allow') (assoc "allow" allow')
+                              (seq deny')  (assoc "deny" deny'))
+              config'       (if (empty? perms')
+                              (dissoc config "permissions")
+                              (assoc config "permissions" perms'))]
+          (if (empty? config')
+            (.delete f)
+            (spit f (json/generate-string config' {:pretty true}))))
+        (catch Exception _ nil)))))
+
 ;------------------------------------------------------------------------------ Layer 2.5
 ;; Capsule-aware session lifecycle (N11 §6.3-6.4)
 
@@ -736,7 +829,8 @@
   (doseq [path (:mcp-cleanup-files session)]
     (cond
       (str/ends-with? path "config.toml") (cleanup-codex-mcp-config! path)
-      (str/ends-with? path "mcp.json") (cleanup-cursor-mcp-config! path)))
+      (str/ends-with? path "mcp.json") (cleanup-cursor-mcp-config! path)
+      (str/ends-with? path "cli.json") (cleanup-cursor-permissions! path)))
   ;; Delete temp session directory
   (try
     (let [dir (io/file (:dir session))]
