@@ -15,7 +15,7 @@ Get from zero to a miniforge-generated pull request in under 5 minutes.
   - [OpenCode](https://opencode.ai/docs) CLI (recommended provider/auth wrapper)
   - [Claude Code](https://claude.ai/claude-code) CLI
   - [Codex](https://openai.com/codex) CLI
-  - An API key configured through OpenCode, Claude Code, Codex, or environment
+  - An API key configured through OpenCode
 - An OCI-compatible local container runtime — see "Container runtime" below.
   [Podman](https://podman.io/) is the recommended default; Docker is supported.
 
@@ -104,15 +104,9 @@ Then select the backend in your miniforge config:
        :model "anthropic/claude-sonnet-4-5"}}
 ```
 
-Claude Code and Codex remain supported direct CLI backends. If you are
-not using OpenCode or an agent CLI, set provider keys explicitly:
-
-```bash
-# Only needed if no OpenCode/agent-CLI auth is configured
-export ANTHROPIC_API_KEY="sk-ant-..."
-# Or:
-# export OPENAI_API_KEY="sk-..."
-```
+Claude Code and Codex remain supported direct CLI backends for users who
+already have those CLIs configured. Provider API keys for miniforge agent
+runs should go through OpenCode.
 
 ## 3. Run a Workflow
 

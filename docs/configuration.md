@@ -44,8 +44,8 @@ All configuration values can be overridden with environment variables using Aero
 
 ### LLM Configuration
 
-- `MINIFORGE_LLM_BACKEND` - LLM backend to use (default: `:claude`)
-  - Values: `:claude`, `:openai`, `:anthropic`, etc.
+- `MINIFORGE_LLM_BACKEND` - LLM backend to use (default: `:opencode`)
+  - Values: `:opencode`, `:claude`, `:codex`, `:cursor`, `:ollama`, etc.
 - `MINIFORGE_LLM_TIMEOUT` - Total timeout for LLM calls in milliseconds (default: `300000` = 5 minutes)
 - `MINIFORGE_LLM_LINE_TIMEOUT` - Per-line timeout for streaming in milliseconds (default: `60000` = 1 minute)
 - `MINIFORGE_LLM_MAX_TOKENS` - Maximum tokens per LLM request (default: `4000`)
@@ -144,8 +144,8 @@ mf run examples/workflows/implement-feature.edn
 ### Override LLM Backend
 
 ```bash
-# Use OpenAI instead of Claude
-MINIFORGE_LLM_BACKEND=openai mf run examples/workflows/implement-feature.edn
+# Use Codex CLI instead of OpenCode
+MINIFORGE_LLM_BACKEND=codex mf run examples/workflows/implement-feature.edn
 ```
 
 ### Increase Timeout for Long Operations
@@ -181,13 +181,13 @@ Configuration values are determined in this priority order:
 1. **Workflow override** - Specified in workflow spec (`:workflow/config` or `:spec/raw-data`)
 2. **Environment variable** - Set via shell environment
 3. **Config file** - Default value in `config.edn`
-4. **Hardcoded default** - Fallback in code (e.g., `:claude` for backend)
+4. **Hardcoded default** - Fallback in code (e.g., `:opencode` for backend)
 
 Example:
 
 ```clojure
 ;; In workflow spec file
-{:workflow/config {:llm-backend :openai}  ; Highest priority
+{:workflow/config {:llm-backend :codex}  ; Highest priority
  ...}
 ```
 
@@ -207,7 +207,7 @@ Configuration is loaded automatically by the workflow runner. To access config i
 (config/get-llm-line-timeout cfg)       ; Get line timeout
 
 ;; With workflow override
-(config/get-llm-backend cfg :openai)    ; Override with :openai
+(config/get-llm-backend cfg :codex)     ; Override with :codex
 ```
 
 ## Adding New Configuration

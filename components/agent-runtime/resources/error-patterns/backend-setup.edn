@@ -46,32 +46,4 @@
                 :auto-apply false}
    :docs-url "https://opencode.ai/docs/cli/#auth"}
 
-  {:id :anthropic-key-missing
-   :regex "ANTHROPIC_API_KEY.*not set|Invalid API key"
-   :vendor "Anthropic"
-   :description "Missing or invalid Anthropic API key"
-   :failure/source :user-env
-   :failure/vendor :anthropic
-   :dependency/class :misconfiguration
-   :dependency/retryability :operator-action
-   :workaround {:type :env-var
-                :env-var "ANTHROPIC_API_KEY"
-                :description "Set ANTHROPIC_API_KEY environment variable"
-                :requires-sudo false
-                :auto-apply false}
-   :docs-url "https://console.anthropic.com/settings/keys"}
-
-  {:id :openai-key-missing
-   :regex "OPENAI_API_KEY.*not set|Invalid API key"
-   :vendor "OpenAI"
-   :description "Missing or invalid OpenAI API key"
-   :failure/source :user-env
-   :failure/vendor :openai
-   :dependency/class :misconfiguration
-   :dependency/retryability :operator-action
-   :workaround {:type :env-var
-                :env-var "OPENAI_API_KEY"
-                :description "Set OPENAI_API_KEY environment variable"
-                :requires-sudo false
-                :auto-apply false}
-   :docs-url "https://platform.openai.com/api-keys"}]}
+  ]}
