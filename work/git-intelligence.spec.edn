@@ -1,0 +1,169 @@
+;; =============================================================================
+;; Spec: Git-derived code intelligence — hotspots, co-change, ownership
+;; =============================================================================
+;;
+;; The Repository Intelligence plan (N1 §2.27–§2.30,
+;; work/archive/done/repo-context-implementation-plan.md) covers the
+;; structural axis: file index, symbol tables (tree-sitter), precise
+;; navigation (SCIP/LSIF), semantic search. It does NOT cover the
+;; *historical* axis — what git history reveals about a codebase that no
+;; static snapshot can: which files churn, which files change together
+;; without importing each other, and where knowledge is concentrated.
+;;
+;; This is the one capability the repowise project
+;; (https://github.com/repowise-dev/repowise, AGPL-3.0) exposes that
+;; miniforge has neither shipped nor specced. We adopt the *concepts*, not
+;; the code — these are standard code-archaeology techniques (Adam Tornhill
+;; / "Your Code as a Crime Scene"), computed from `git log` and `git blame`
+;; alone. Apache-clean, language-independent, no AST dependency. repowise
+;; serves only as reference prior-art and an optional external MCP provider
+;; for users who already run it.
+;;
+;; Why this ships before the queued tree-sitter / SCIP work: it is pure git
+;; math, so it works uniformly across every language miniforge targets with
+;; zero grammar install, and it fills a genuine gap rather than deepening an
+;; axis we already have a plan for. The signals it produces are exactly the
+;; priors an agent lacks most when dropped into an unfamiliar repo.
+;;
+;; Relationship to other specs:
+;;   - work/tree-sitter-symbol-context.spec.edn — structural neighborhoods.
+;;     Once symbols exist, hotspot "complexity" can graduate from a size
+;;     proxy to a real complexity metric. v1 does NOT depend on it.
+;;   - work/clj-xref-context-neighborhoods.spec.edn — import-graph coupling.
+;;     Co-change is the COMPLEMENT: it surfaces *hidden* coupling (files
+;;     that change together with NO import edge between them), which the
+;;     structural graph by definition cannot see.
+
+{:spec/title "Git-derived code intelligence — hotspots, co-change, ownership"
+
+ :spec/description
+ "Add a components/git-intelligence brick that derives historical signals
+  from git history and exposes them as schema-validated data to the
+  context pipeline, the review/risk path, and the observe loop. Pure
+  `git log` / `git blame`; no language grammars; works on any repo.
+
+  GROUP 1: git-intelligence component + signals
+  Create components/git-intelligence with an interface exposing three
+  computed signals over a repo + commit window (default: last 90 days,
+  configurable):
+
+    1. HOTSPOTS — `hotspots [repo-root opts]`
+       For each file: churn (commit count touching it in the window) ×
+       size proxy (current line count). v1 uses size as the complexity
+       proxy; the schema reserves :hotspot/complexity for the tree-sitter
+       upgrade. Returns ranked
+         {:hotspot/path :hotspot/churn :hotspot/lines
+          :hotspot/score :hotspot/rank}.
+
+    2. CO-CHANGE PAIRS — `co-change-pairs [repo-root opts]`
+       Files committed together. For each pair: support (co-commit count)
+       and confidence (co-commits / commits-touching-A). Filter by
+       :min-support and :min-confidence. Returns
+         {:co-change/from :co-change/to :co-change/support
+          :co-change/confidence}.
+       This is the hidden-coupling signal — pairs need NOT share an import.
+
+    3. OWNERSHIP / BUS-FACTOR — `ownership [repo-root opts]`
+       Per file, author line-share from `git blame`; bus-factor = number
+       of authors holding the top 80% of lines. Returns
+         {:ownership/path
+          :ownership/authors [{:author :email :line-share}]
+          :ownership/bus-factor :ownership/primary-author}.
+
+  All three are computed by shelling to git (reuse repo-index's git helpers
+  where they exist) and are incremental-friendly: cache keyed by HEAD sha,
+  recompute only when HEAD advances.
+
+  GROUP 2: schemas + events
+  Add records to components/schema for hotspot, co-change pair, ownership.
+  Add a :git-intelligence/* event family to event-stream
+  (computed event carrying counts + window + duration-ms). Mirror the
+  RN-16 pattern — computation MUST NOT block the caller; emit and move on.
+
+  GROUP 3: co-change in context-pack (Explore)
+  When a task targets file(s), add an optional
+  :context-pack/co-change-neighborhood section listing the top-N files
+  that co-change with the target above the confidence threshold, each with
+  a one-line 'changed together N times in 90d' annotation. Budget it under
+  the phase token budget; trim lowest-confidence first and emit a trim
+  event. Default OFF behind a feature flag for the first release.
+
+  GROUP 4: hotspot signal on the review / risk path
+  Expose hotspot membership so the review phase / risk meta-agent can raise
+  the bar when a change touches a top-ranked hotspot (more scrutiny, e.g.
+  require tests for the touched file). v1 deliverable is the signal + an
+  advisory note in the review context; it MUST NOT auto-block. Wiring a
+  hard gate is a follow-up once we have dogfood evidence.
+
+  GROUP 5: ownership in the observe loop
+  When the observe loop / PR monitor needs a human, use ownership to
+  identify the primary author(s) of the changed files as suggested
+  reviewers / mentions. Advisory only — surfaced in the PR context, not an
+  automatic @-mention, to avoid noise. Gate behind the same feature flag.
+
+  GROUP 6: optional external repowise provider (stretch)
+  Allow mcp-context-server to delegate these signals to an external
+  repowise MCP endpoint when the user configures one, falling back to the
+  native git-intelligence component otherwise. No bundling, no AGPL code in
+  the tree — config-only integration. Stretch; cut if it complicates v1.
+
+  GROUP 7: dogfood A/B + measurement
+  Run a dozen dogfood specs with co-change neighborhoods on vs off; compare
+  plan/implement convergence and token usage, same protocol as the
+  tree-sitter and clj-xref specs. Enable any signal by default only after a
+  measurable win.
+
+  NON-GOALS
+  - AST / complexity metrics — v1 hotspot complexity is a line-count proxy.
+    Real complexity arrives with the tree-sitter symbol spec.
+  - Vendoring or depending on repowise — reference + optional external MCP
+    provider only.
+  - Persisted history DB — compute on demand, cache by HEAD sha.
+  - Transitive co-change / community detection (Leiden, PageRank) — defer;
+    direct pairs are the high-value, low-cost first cut.
+  - Auto-blocking gates or auto @-mentions — all signals advisory in v1.
+
+  RISKS
+  - Large/old repos: full-history blame is expensive. Bound by the time
+    window and cache by HEAD sha; expose :since override.
+  - Author identity: same person, multiple emails. v1 keys on email and
+    notes the limitation; .mailmap support is a follow-up.
+  - Co-change noise from sweeping commits (mass renames, formatting). Cap
+    per-commit file count (:max-files-per-commit, default 50) so a 400-file
+    reformat does not manufacture spurious coupling."
+
+ :spec/intent
+ {:type :new-component
+  :scope ["components/git-intelligence/"          ;; new
+          "components/schema/src"
+          "components/event-stream/src"
+          "components/context-pack/src"
+          "components/observer/src"
+          "bases/mcp-context-server/src"
+          "resources/config/default-user-config.edn"
+          "docs/development-guidelines.md"
+          "specs/normative/N1-architecture.md"]}
+
+ :spec/constraints
+ ["Signals MUST be derived from git alone — no language grammars, no AST, no network"
+  "Computation MUST NOT block the caller; emit events and cache by HEAD sha"
+  "All records MUST be schema-validated via components/schema"
+  "Co-change MUST cap files-per-commit to avoid spurious coupling from sweeping commits"
+  "All new context/review/observe signals MUST be feature-flagged and default OFF for the first release"
+  "Signals are ADVISORY in v1 — no auto-blocking gate, no automatic @-mention"
+  "Localize all user-facing strings (msg/t + en-US.edn)"
+  "Any repowise integration is config-only — NO repowise code vendored (AGPL incompatible with Apache-2.0)"]
+
+ :spec/acceptance-criteria
+ ["components/git-intelligence exposes hotspots, co-change-pairs, and ownership over a configurable commit window"
+  "Hotspot scores rank files by churn × size; co-change pairs carry support + confidence; ownership reports bus-factor + per-author line-share"
+  "Computing signals on a repo with a 400-file formatting commit does NOT produce co-change pairs spanning all 400 files (per-commit cap holds)"
+  "git-intelligence/* events emitted with counts + window + duration; computation is non-blocking"
+  "A task targeting a file with strong historical co-change produces a context pack whose :co-change-neighborhood names the co-changing files when the flag is ON, and omits the section when OFF"
+  "A change touching a top-ranked hotspot surfaces an advisory note on the review context (no auto-block)"
+  "The observe loop surfaces the primary author(s) of changed files as suggested reviewers when the flag is ON"
+  "Dogfood A/B: 12 runs co-change-on vs 12 off — token-delta and convergence-rate logged"
+  "`bb test` passes across affected bricks"
+  "Documented in docs/development-guidelines.md + N1 update noting the historical-signal axis alongside §2.27"]
+
+ :spec/workflow-type :canonical-sdlc}
