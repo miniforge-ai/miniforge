@@ -505,6 +505,9 @@
                       ;; non-streaming run has no chunk ping-source by design).
                       (assoc :event-stream (es/create-event-stream {:sinks []}))
                       (assoc-in [:user-config :self-healing :agent/stream-gap-threshold-ms] 1)
+                      ;; Tiny check interval so the watchdog fires near-instantly
+                      ;; instead of waiting the 5s default — keeps the suite fast.
+                      (assoc-in [:user-config :self-healing :agent/stream-check-interval-ms] 10)
                       (assoc-in [:user-config :llm :backend] :echo)
                       (assoc :phase-config {:phase :implement}))
               interceptor (phase/get-phase-interceptor {:phase :implement})

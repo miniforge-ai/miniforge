@@ -264,11 +264,13 @@
 (defn- resolve-backend-keyword
   "Best-effort resolution of the configured LLM backend keyword from ctx.
 
-   The backend keyword lives under the user/self-healing config's :llm map in
-   most call sites; the live llm-backend client also carries it on its config.
-   Falls back to :unknown when none is present."
+   The live llm-backend client carries the keyword on its config at
+   `[:llm-backend :config :backend]` — the canonical location elsewhere in
+   the codebase (see agent/core) — so that wins. Falls back to the various
+   user/self-healing config :llm maps, then :unknown."
   [ctx]
-  (or (get-in ctx [:execution/opts :llm-backend :config :backend])
+  (or (get-in ctx [:llm-backend :config :backend])
+      (get-in ctx [:execution/opts :llm-backend :config :backend])
       (get-in ctx [:user-config :llm :backend])
       (get-in ctx [:config :llm :backend])
       (get-in ctx [:llm :backend])
@@ -316,13 +318,18 @@
         phase-thread (Thread/currentThread)
         wd (when on-chunk
              (agent/create-watchdog
-              {:threshold-ms (agent/resolve-gap-threshold watchdog-config backend)
-               :phase-id :implement
-               :backend backend
-               :event-stream event-stream
-               :workflow-id workflow-id
-               :logger logger
-               :kill-fn #(.interrupt phase-thread)}))
+              (cond-> {:threshold-ms (agent/resolve-gap-threshold watchdog-config backend)
+                       :phase-id :implement
+                       :backend backend
+                       :event-stream event-stream
+                       :workflow-id workflow-id
+                       :logger logger
+                       :kill-fn #(.interrupt phase-thread)}
+                ;; Optional override (mainly for tests/tuning); create-watchdog
+                ;; defaults this when absent — never pass nil.
+                (get watchdog-config :agent/stream-check-interval-ms)
+                (assoc :check-interval-ms
+                       (get watchdog-config :agent/stream-check-interval-ms)))))
         agent-ctx (cond-> ctx
                     on-chunk (assoc :on-chunk
                                     (fn [chunk]
