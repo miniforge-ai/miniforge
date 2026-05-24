@@ -23,7 +23,6 @@
    [clojure.java.io :as io]
    [clojure.string :as str]
    [cheshire.core :as json]
-   [babashka.process :as p]
    [org.httpkit.client :as http]
    [ai.miniforge.logging.interface :as log]
    [ai.miniforge.llm.cost :as cost]
@@ -497,6 +496,26 @@
     (seq mcp-allowed-tools) (conj "--approve-mcps")
     true (conj prompt)))
 
+(defn- opencode-args
+  "Build CLI arguments for the OpenCode backend.
+
+   OpenCode owns provider credentials, model aliases, project config,
+   agent profiles, MCP config, and permissions. Miniforge passes the
+   selected model/profile knobs through and treats OpenCode as the
+   common provider wrapper instead of handling API keys directly."
+  [{:keys [prompt model agent attach command session continue? fork? files format]}]
+  (cond-> ["run"]
+    attach    (into ["--attach" attach])
+    command   (into ["--command" command])
+    continue? (conj "--continue")
+    session   (into ["--session" session])
+    fork?     (conj "--fork")
+    model     (into ["--model" model])
+    agent     (into ["--agent" agent])
+    (seq files) (into (mapcat (fn [file] ["--file" file]) files))
+    format    (into ["--format" format])
+    true      (conj prompt)))
+
 (defn- echo-args
   "Build CLI arguments for the echo (test) backend."
   [{:keys [prompt]}]
@@ -557,6 +576,18 @@
             :api-key-var nil
             :args-fn cursor-args
             :prompt-via :argv}
+
+   :opencode {:cmd "opencode"
+              :streaming? false
+              :description "OpenCode CLI provider wrapper"
+              :provider "OpenCode"
+              :requires-cli? true
+              ;; OpenCode loads credentials from its auth store,
+              ;; environment, or project .env/config. Miniforge should not
+              ;; read provider-specific keys on this path.
+              :api-key-var nil
+              :args-fn opencode-args
+              :prompt-via :argv}
 
    :echo {:cmd "echo"
           :streaming? false
@@ -789,13 +820,33 @@
           (recur))
       (enqueue-stream-line! line-queue eof-sentinel))))
 
+(def ^:private stream-reader-join-timeout-ms
+  "How long process-stream-lines waits for its daemon reader thread to
+   exit after the stream reader is closed."
+  100)
+
+(defn- daemon-thread!
+  [thread-name f]
+  (let [thread (Thread. ^Runnable f thread-name)]
+    (.setDaemon thread true)
+    (.start thread)
+    thread))
+
 (defn- start-stream-reader!
   [out-reader line-queue]
-  (future
-    (try
-      (read-stream-loop! out-reader line-queue)
-      (catch Exception e
-        (enqueue-stream-line! line-queue (stream-read-failure e))))))
+  (daemon-thread!
+   "llm-stream-reader"
+   (fn []
+     (try
+       (read-stream-loop! out-reader line-queue)
+       (catch Exception e
+         (enqueue-stream-line! line-queue (stream-read-failure e)))))))
+
+(defn- stop-stream-reader!
+  [^Thread reader-thread out-reader]
+  (try (.close out-reader) (catch Exception _))
+  (.interrupt reader-thread)
+  (.join reader-thread stream-reader-join-timeout-ms))
 
 (defn- record-stream-line!
   [out-lines dump-writer on-line last-line-at now line]
@@ -864,7 +915,7 @@
         last-line-at (atom (System/currentTimeMillis))
         dump-writer (open-stream-dump-writer)
         line-queue (LinkedBlockingQueue.)
-        reader-future (start-stream-reader! out-reader line-queue)]
+        reader-thread (start-stream-reader! out-reader line-queue)]
     (try+
       (loop []
         (if-let [t (pm/check-timeout monitor)]
@@ -881,8 +932,7 @@
               timeout (reset! timeout-reason timeout)
               :else (recur)))))
       (finally
-        (future-cancel reader-future)
-        (try (.close out-reader) (catch Exception _))
+        (stop-stream-reader! reader-thread out-reader)
         (when dump-writer (.close dump-writer))))
     {:lines @out-lines
      :timeout @timeout-reason}))
@@ -903,6 +953,113 @@
   (if (and (string? stdin-str) (not (.isEmpty ^String stdin-str)))
     (ByteArrayInputStream. (.getBytes ^String stdin-str "UTF-8"))
     (ByteArrayInputStream. (byte-array 0))))
+
+(defn- apply-process-env!
+  [^ProcessBuilder builder env]
+  (when env
+    (let [target-env (.environment builder)]
+      (.clear target-env)
+      (doseq [[k v] env]
+        (.put target-env k v)))))
+
+(defn- write-process-stdin!
+  [^Process process stdin-str]
+  (daemon-thread!
+   "llm-stream-stdin-writer"
+   (fn []
+     (try
+       (with-open [out (.getOutputStream process)
+                   in (->stdin-stream stdin-str)]
+         (io/copy in out))
+       (catch Exception _
+         nil)))))
+
+(defn- read-process-stream!
+  [thread-name input-stream output]
+  (daemon-thread!
+   thread-name
+   (fn []
+     (try
+       (reset! output (slurp input-stream))
+       (catch Exception e
+         (reset! output (ex-message e)))))))
+
+(defn- read-process-stderr!
+  [^Process process stderr]
+  (read-process-stream! "llm-stream-stderr-reader"
+                        (.getErrorStream process)
+                        stderr))
+
+(defn- start-stream-process!
+  [cmd {:keys [workdir stdin]}]
+  (let [builder (ProcessBuilder. ^java.util.List cmd)]
+    (when-let [env (clean-env)]
+      (apply-process-env! builder env))
+    (when workdir
+      (.directory builder (io/file workdir)))
+    (let [process (.start builder)
+          stderr (atom "")
+          stdin-thread (write-process-stdin! process stdin)
+          stderr-thread (read-process-stderr! process stderr)]
+      {:process process
+       :stderr stderr
+       :stdin-thread stdin-thread
+       :stderr-thread stderr-thread})))
+
+(defn- start-capture-process!
+  [cmd {:keys [workdir stdin]}]
+  (let [builder (ProcessBuilder. ^java.util.List cmd)]
+    (when-let [env (clean-env)]
+      (apply-process-env! builder env))
+    (when workdir
+      (.directory builder (io/file workdir)))
+    (let [process (.start builder)
+          stdout (atom "")
+          stderr (atom "")
+          stdin-thread (write-process-stdin! process stdin)
+          stdout-thread (read-process-stream! "llm-stdout-reader"
+                                             (.getInputStream process)
+                                             stdout)
+          stderr-thread (read-process-stream! "llm-stderr-reader"
+                                             (.getErrorStream process)
+                                             stderr)]
+      {:process process
+       :stdout stdout
+       :stderr stderr
+       :stdin-thread stdin-thread
+       :stdout-thread stdout-thread
+       :stderr-thread stderr-thread})))
+
+(defn- wait-for-stream-process
+  [^Process process timeout-ms]
+  (if (.waitFor process (long timeout-ms) TimeUnit/MILLISECONDS)
+    {:exit (.exitValue process)}
+    {:exit -1 :err "Process timed out"}))
+
+(defn- stop-stream-process!
+  [{:keys [^Process process stdin-thread stderr-thread stderr]} timeout? join-timeout]
+  (when timeout?
+    (try (.destroyForcibly process) (catch Exception _ nil)))
+  (let [result (wait-for-stream-process process join-timeout)]
+    (when stdin-thread
+      (.join ^Thread stdin-thread stream-reader-join-timeout-ms))
+    (when stderr-thread
+      (.join ^Thread stderr-thread stream-reader-join-timeout-ms))
+    (assoc result :err @stderr)))
+
+(defn- stop-capture-process!
+  [{:keys [^Process process stdin-thread stdout-thread stderr-thread stdout stderr]}
+   timeout-ms]
+  (let [result (wait-for-stream-process process timeout-ms)
+        timed-out? (= -1 (:exit result))]
+    (when timed-out?
+      (try (.destroyForcibly process) (catch Exception _ nil)))
+    (doseq [thread [stdin-thread stdout-thread stderr-thread]
+            :when thread]
+      (.join ^Thread thread stream-reader-join-timeout-ms))
+    {:out @stdout
+     :err (if (seq (:err result)) (:err result) @stderr)
+     :exit (:exit result)}))
 
 (def ^:private keepalive-min-interval-ms
   "Floor on the keepalive interval so the worker doesn't burn cycles
@@ -938,12 +1095,11 @@
    (stream-exec-fn cmd on-line {}))
   ([cmd on-line {:keys [progress-monitor workdir stdin]}]
    (let [monitor (or progress-monitor (default-progress-monitor))
-         in-stream (->stdin-stream stdin)
-         process (apply p/process (cond-> {:err :string :in in-stream}
-                                          (clean-env) (assoc :env (clean-env))
-                                          workdir     (assoc :dir workdir)) cmd)
+         stream-process (start-stream-process! cmd {:workdir workdir
+                                                    :stdin stdin})
+         process (:process stream-process)
          out-reader (java.io.BufferedReader.
-                     (java.io.InputStreamReader. (:out process)))
+                     (java.io.InputStreamReader. (.getInputStream process)))
          ;; Decouple stagnation from the CLI's emission cadence.
          ;; claude in --input-format text mode does not emit
          ;; rate_limit_event during the model's think phase, so the
@@ -964,14 +1120,10 @@
          ;; stagnation, or total-max) — the subprocess is hung or
          ;; silent. Kill it so `deref` returns immediately instead of
          ;; waiting 10 min for a process that will not exit.
-         _ (when timeout
-             (try
-               (when-let [^Process jp (:proc process)]
-                 (.destroyForcibly jp))
-               (catch Exception _ nil)))
          join-timeout (if timeout (post-kill-join-timeout-ms) (process-join-timeout-ms))
-         result (deref process join-timeout
-                       {:exit -1 :err "Process timed out"})]
+         result (stop-stream-process! stream-process
+                                      (boolean timeout)
+                                      join-timeout)]
      (if timeout
        (timeout-result lines timeout)
        (success-result lines result)))))
@@ -1385,7 +1537,7 @@
 ;------------------------------------------------------------------------------ Layer 3
 
 (defn default-exec-fn
-  "Run `cmd` with `p/shell`, capturing :out / :err / :exit.
+  "Run `cmd` with ProcessBuilder, capturing :out / :err / :exit.
 
    2-arity opts map supports:
    - `:stdin`  — string piped to the subprocess's stdin
@@ -1393,14 +1545,9 @@
   ([cmd] (default-exec-fn cmd {}))
   ([cmd {:keys [stdin workdir]}]
    (let [timeout-ms 600000
-         in-stream  (->stdin-stream stdin)
-         result (apply p/shell (cond-> {:out :string :err :string :continue true
-                                        :in in-stream :timeout timeout-ms}
-                                 (clean-env) (assoc :env (clean-env))
-                                 workdir     (assoc :dir workdir)) cmd)]
-     {:out (:out result)
-      :err (:err result)
-      :exit (:exit result)})))
+         process (start-capture-process! cmd {:stdin stdin
+                                              :workdir workdir})]
+     (stop-capture-process! process timeout-ms))))
 
 (defn capsule-exec-fn
   "Returns an exec-fn that routes CLI commands through a task capsule executor.
