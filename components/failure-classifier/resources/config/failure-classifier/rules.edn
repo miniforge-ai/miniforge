@@ -30,6 +30,7 @@
  :dependency-vendors
  #{:anthropic
    :openai
+   :opencode
    :codex
    :github
    :gitlab

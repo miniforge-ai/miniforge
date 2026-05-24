@@ -277,5 +277,5 @@
     (is (= "opencode" (get-in impl/backends [:opencode :cmd])))
     (is (= "OpenCode" (get-in impl/backends [:opencode :provider])))
     (is (false? (get-in impl/backends [:opencode :streaming?])))
-    (is (nil? (get-in impl/backends [:opencode :api-key-var])))
+    (is (not (contains? (get impl/backends :opencode) :api-key-var)))
     (is (= :argv (get-in impl/backends [:opencode :prompt-via])))))

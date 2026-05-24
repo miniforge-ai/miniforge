@@ -66,22 +66,16 @@
     (catch Exception _
       false)))
 
-(defn check-api-key-set?
-  "Check if an API key environment variable is set."
-  [var-name]
-  (and var-name
-       (not (str/blank? (System/getenv var-name)))))
-
 (defn check-backend-status
   "Check the status of a backend.
 
    Returns map with:
    - :available - boolean
-   - :status - :available, :needs-key, :not-installed
+   - :status - :available, :not-installed
    - :message - human-readable status message"
   [backend-id]
   (let [spec (get backend-specs backend-id)
-        {:keys [check-type command api-key-var]} spec]
+        {:keys [check-type command]} spec]
     (case check-type
       :builtin
       (availability-status true :available (messages/t :backends/status-builtin))
@@ -92,13 +86,6 @@
                              (messages/t :backends/status-cli-found {:command command}))
         (availability-status false :not-installed
                              (messages/t :backends/status-cli-missing {:command command})))
-
-      :api-key
-      (if (check-api-key-set? api-key-var)
-        (availability-status true :available
-                             (messages/t :backends/status-api-key-set {:api-key-var api-key-var}))
-        (availability-status false :needs-key
-                             (messages/t :backends/status-needs-key {:api-key-var api-key-var})))
 
       ;; Unknown check type
       (availability-status false :unknown (messages/t :backends/status-unknown)))))
@@ -137,7 +124,6 @@
   [status]
   (case status
     :available "✅"
-    :needs-key "⚠️ "
     :not-installed "❌"
     "❓"))
 
@@ -184,29 +170,12 @@
   "Print helpful error message when backend is not available."
   [backend-id]
   (let [info (get-backend-info backend-id)
-        {:keys [status api-key-var installation docs-url]} info
+        {:keys [status installation docs-url]} info
         backend-name (name backend-id)]
     (println)
     (println (messages/t :backends/error-not-available {:backend backend-name}))
     (println)
     (case status
-      :needs-key
-      (do
-        (println (messages/t :backends/needs-key-intro
-                             {:backend backend-name :api-key-var api-key-var}))
-        (println)
-        (println (messages/t :backends/needs-key-howto-header))
-        (println (messages/t :backends/needs-key-step-1
-                             {:docs-url (or docs-url
-                                            (messages/t :backends/needs-key-provider-fallback))}))
-        (println (messages/t :backends/needs-key-step-2))
-        (println (messages/t :backends/needs-key-step-2-cmd {:api-key-var api-key-var}))
-        (println (messages/t :backends/needs-key-step-3 {:config-path (app-config/config-path)}))
-        (println (messages/t :backends/needs-key-step-3-cmd {:backend backend-id}))
-        (println (messages/t :backends/needs-key-step-4
-                             {:command (app-config/command-string "config backend"
-                                                                  backend-name)})))
-
       :not-installed
       (do
         (println (messages/t :backends/not-installed-intro {:backend backend-name}))

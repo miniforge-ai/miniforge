@@ -527,7 +527,6 @@
             :description "Claude via Anthropic CLI"
             :provider "Anthropic"
             :requires-cli? true
-            :api-key-var "ANTHROPIC_API_KEY"
             :stream-parser parse-claude-stream-line
             :args-fn claude-args
             ;; Prompt delivery: stdin. The planner path's system-prompt +
@@ -541,29 +540,17 @@
            :description "Codex via Codex CLI"
            :provider "Codex"
            :requires-cli? true
-           :api-key-var nil
            :stream-parser parse-codex-stream-line
            :args-fn codex-args
            ;; Prompt delivery: argv. Codex CLI takes a positional prompt;
            ;; flip to :stdin if its prompt envelope grows past ARG_MAX.
            :prompt-via :argv}
 
-   :openai {:cmd "http"
-            :streaming? true
-            :description "OpenAI GPT-4 via API"
-            :provider "OpenAI"
-            :requires-cli? false
-            :api-key-var "OPENAI_API_KEY"
-            :api-endpoint "https://api.openai.com/v1/chat/completions"
-            :default-model "gpt-4"
-            :models ["gpt-4-turbo" "gpt-4" "gpt-3.5-turbo"]}
-
    :ollama {:cmd "http"
             :streaming? true
             :description "Local models via Ollama"
             :provider "Ollama"
             :requires-cli? false
-            :api-key-var nil
             :api-endpoint "http://localhost:11434/api/chat"
             :default-model "codellama"
             :models ["codellama" "llama2" "mistral"]}
@@ -573,7 +560,6 @@
             :description "Cursor AI via CLI"
             :provider "Cursor"
             :requires-cli? true
-            :api-key-var nil
             :args-fn cursor-args
             :prompt-via :argv}
 
@@ -585,7 +571,6 @@
               ;; OpenCode loads credentials from its auth store,
               ;; environment, or project .env/config. Miniforge should not
               ;; read provider-specific keys on this path.
-              :api-key-var nil
               :args-fn opencode-args
               :prompt-via :argv}
 
@@ -594,7 +579,6 @@
           :description "Echo backend for testing"
           :provider "Test"
           :requires-cli? false
-          :api-key-var nil
           :args-fn echo-args
           :prompt-via :argv}})
 
@@ -609,17 +593,6 @@
        (str/join "\n\n")))
 
 ;------------------------------------------------------------------------------ HTTP Backend Support
-
-(defn openai-request-body
-  "Build OpenAI API request body."
-  [{:keys [prompt messages model max-tokens streaming?]}]
-  (let [model (or model "gpt-4-turbo")
-        msgs (or messages
-                 [{:role "user" :content prompt}])]
-    {:model model
-     :messages msgs
-     :stream (boolean streaming?)
-     :max_tokens (or max-tokens 4000)}))
 
 (defn ollama-request-body
   "Build Ollama API request body."
@@ -647,26 +620,6 @@
        {:anomaly/operation :http-request
         :anomaly.llm/url url}))))
 
-(defn parse-openai-response
-  "Parse OpenAI API response.
-
-   Handles anomaly maps from http-post-request or HTTP response maps."
-  [response]
-  ;; If response is already an anomaly map, pass it through
-  (if (response/anomaly-map? response)
-    (llm-error (:anomaly/category response) "http_error" (:anomaly/message response))
-    (try
-      (let [body (json/parse-string (:body response) true)]
-        (if (= 200 (:status response))
-          (llm-success (get-in body [:choices 0 :message :content] "")
-                       {:usage {:input-tokens (get-in body [:usage :prompt_tokens])
-                                :output-tokens (get-in body [:usage :completion_tokens])}})
-          (llm-error :anomalies/unavailable "api_error"
-                     (get-in body [:error :message] "Unknown API error"))))
-      (catch Exception e
-        (llm-error :anomalies/fault "parse_error"
-                   (str "Failed to parse response: " (.getMessage e)))))))
-
 (defn parse-ollama-response
   "Parse Ollama API response.
 
@@ -688,26 +641,19 @@
                    (str "Failed to parse response: " (.getMessage e)))))))
 
 (defn http-complete
-  "Complete request using HTTP API backend."
-  [backend-config request api-key]
+  "Complete request using an HTTP backend.
+
+   HTTP remains for local, credential-free backends such as Ollama. Provider
+   API-key routing for agent runs goes through OpenCode instead of direct HTTP
+   calls from miniforge."
+  [backend-config request]
   (let [{:keys [api-endpoint provider]} backend-config
-        headers (cond
-                  (= provider "OpenAI")
-                  {"Authorization" (str "Bearer " api-key)
-                   "Content-Type" "application/json"}
-
-                  (= provider "Ollama")
-                  {"Content-Type" "application/json"}
-
-                  :else
-                  {"Content-Type" "application/json"})
+        headers {"Content-Type" "application/json"}
         body (case provider
-               "OpenAI" (openai-request-body request)
                "Ollama" (ollama-request-body request)
                {})
         response (http-post-request api-endpoint headers body)]
     (case provider
-      "OpenAI" (parse-openai-response response)
       "Ollama" (parse-ollama-response response)
       (llm-error :anomalies/unsupported "unsupported_backend"
                  (str "HTTP backend not implemented for: " provider)))))
@@ -717,12 +663,12 @@
 
    Note: Currently falls back to non-streaming as babashka.http-client
    doesn't support streaming responses yet."
-  [backend-config request api-key on-chunk]
+  [backend-config request on-chunk]
   (let [accumulated (atom "")]
     (try
       ;; Note: babashka.http-client doesn't support streaming responses yet
       ;; For now, fall back to non-streaming for HTTP backends
-      (let [result (http-complete backend-config (assoc request :streaming? false) api-key)]
+      (let [result (http-complete backend-config (assoc request :streaming? false))]
         (when (:success result)
           (let [content (:content result)]
             (reset! accumulated content)
@@ -1218,18 +1164,14 @@
   (let [{:keys [config logger exec-fn]} client
         {:keys [backend model]} config
         backend-config (get backends backend)
-        {:keys [cmd args-fn api-key-var]} backend-config]
+        {:keys [cmd args-fn]} backend-config]
     (log-prompt-sent logger backend (build-request-prompt request))
 
     ;; Handle HTTP backends differently from CLI backends
     (if (= cmd "http")
-      (let [api-key (when api-key-var (System/getenv api-key-var))]
-        (if (and api-key-var (not api-key))
-          (llm-error :anomalies/incorrect "missing_api_key"
-                     (str "Missing API key: " api-key-var " not set"))
-          (let [response (http-complete backend-config request api-key)]
-            (log-response logger response)
-            response)))
+      (let [response (http-complete backend-config request)]
+        (log-response logger response)
+        response)
 
       ;; CLI backend
       (let [prompt     (build-request-prompt request)
@@ -1512,7 +1454,7 @@
   (let [{:keys [config]} client
         {:keys [backend]} config
         backend-config (get backends backend)
-        {:keys [streaming? cmd api-key-var]} backend-config
+        {:keys [streaming? cmd]} backend-config
         progress-monitor (or (:progress-monitor request)
                              (pm/create-progress-monitor
                               {:stagnation-threshold-ms (default-stagnation-threshold-ms)
@@ -1520,11 +1462,7 @@
 
     ;; Handle HTTP backends
     (if (= cmd "http")
-      (let [api-key (when api-key-var (System/getenv api-key-var))]
-        (if (and api-key-var (not api-key))
-          (llm-error :anomalies/incorrect "missing_api_key"
-                     (str "Missing API key: " api-key-var " not set"))
-          (http-stream-complete backend-config request api-key on-chunk)))
+      (http-stream-complete backend-config request on-chunk)
 
       ;; CLI backends
       (if-not streaming?
