@@ -462,15 +462,60 @@
 
    Returns result/ok with {:restored? true :branch str} on success."
   [host-repo-path {:keys [bundle-path branch]}]
-  (try
-    (let [r (run-git "-C" host-repo-path "fetch"
-                     bundle-path (str branch ":" branch))]
-      (if (zero? (:exit r))
-        (result/ok {:restored? true :branch branch :bundle-path bundle-path})
-        (result/err :archive-restore-failed
-                    (get r :err "git fetch from bundle failed"))))
-    (catch Exception e
-      (result/err :archive-restore-failed (.getMessage e)))))
+  (letfn [(failure [fallback command]
+            (result/err :archive-restore-failed
+                        (or (not-empty (:err command)) fallback)))
+          (checked-out-branch []
+            (let [restore-ref (str "refs/miniforge/resume/" branch)
+                  cleanup     (atom nil)
+                  outcome
+                  (try
+                    (let [fetch-ref (run-git "-C" host-repo-path "fetch"
+                                             bundle-path (str branch ":" restore-ref))]
+                      (if-not (zero? (:exit fetch-ref))
+                        (failure "git fetch from bundle failed" fetch-ref)
+                        (let [branch-sha  (run-git "-C" host-repo-path "rev-parse" branch)
+                              restore-sha (run-git "-C" host-repo-path "rev-parse" restore-ref)
+                              ancestor    (run-git "-C" host-repo-path "merge-base" "--is-ancestor"
+                                                   (str/trim (:out restore-sha))
+                                                   (str/trim (:out branch-sha)))]
+                          (cond
+                            (not (zero? (:exit branch-sha)))
+                            (failure "git rev-parse branch failed" branch-sha)
+
+                            (not (zero? (:exit restore-sha)))
+                            (failure "git rev-parse resume ref failed" restore-sha)
+
+                            (zero? (:exit ancestor))
+                            (result/ok {:restored? true
+                                        :branch branch
+                                        :bundle-path bundle-path
+                                        :already-checked-out? true})
+
+                            (= 1 (:exit ancestor))
+                            (result/err :archive-restore-failed
+                                        "Checked-out branch does not contain bundled checkpoint commit")
+
+                            :else
+                            (failure "git merge-base failed" ancestor)))))
+                    (finally
+                      (reset! cleanup
+                              (run-git "-C" host-repo-path "update-ref" "-d" restore-ref))))]
+              (if (and (result/ok? outcome)
+                       (not (zero? (:exit @cleanup))))
+                (failure "git cleanup of resume ref failed" @cleanup)
+                outcome)))]
+    (try
+      (let [r (run-git "-C" host-repo-path "fetch"
+                       bundle-path (str branch ":" branch))]
+        (if (zero? (:exit r))
+          (result/ok {:restored? true :branch branch :bundle-path bundle-path})
+          (if (str/includes? (get r :err "")
+                             "refusing to fetch into branch")
+            (checked-out-branch)
+            (failure "git fetch from bundle failed" r))))
+      (catch Exception e
+        (result/err :archive-restore-failed (.getMessage e))))))
 
 ;; ============================================================================
 ;; Command Execution
