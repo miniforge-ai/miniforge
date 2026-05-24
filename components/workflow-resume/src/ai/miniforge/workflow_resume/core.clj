@@ -37,7 +37,7 @@
   (:require
    [ai.miniforge.event-stream.interface :as es]
    [ai.miniforge.response.interface :as response]
-   [ai.miniforge.workflow.interface :as workflow]
+   [ai.miniforge.workflow.interface.checkpoints :as workflow-checkpoints]
    [ai.miniforge.workflow-resume.schema :as schema]
    [clojure.edn :as edn]
    [clojure.java.io :as io]
@@ -327,7 +327,7 @@
   (schema/validate! schema/ReconstructContextInput
                     {:events-dir events-dir :workflow-id workflow-id}
                     {:message "Invalid reconstruct-context input"})
-  (let [checkpoint-data (workflow/load-checkpoint-data workflow-id)
+  (let [checkpoint-data (workflow-checkpoints/load-checkpoint-data workflow-id)
         raw-events (or (es/read-workflow-events-by-id events-dir workflow-id) [])
         events (vec (filter schema/valid-event? raw-events))
         _ (ensure-reconstruction-source! checkpoint-data events-dir workflow-id raw-events)
@@ -389,16 +389,72 @@
   (and (keyword? workflow-id)
        (str/starts-with? (name workflow-id) "dag-task-")))
 
+(def ^:private workflow-type-identifier-re
+  "Regex for an unqualified workflow-type keyword name. Workflow types are loader keys
+   like :canonical-sdlc / :quick-fix — strict identifier characters only.
+   This rejects values like \"In-flight PR / branch / task-claim registry\"
+   (a human title that the producer side accidentally records under
+   `:name`) before they get keywordized into an unloadable lookup key."
+  #"^[A-Za-z][A-Za-z0-9._+!?*<>=-]*$")
+
+(defn- valid-workflow-type-keyword?
+  "True when `v` is an unqualified workflow-type keyword name."
+  [v]
+  (and (keyword? v)
+       (nil? (namespace v))
+       (re-matches workflow-type-identifier-re (name v))))
+
+(defn- candidate-workflow-type
+  "Pull a candidate workflow-type keyword out of the recorded workflow
+   spec. Preference order:
+
+   1. `:workflow-type` — canonical key when callers thread it through
+   2. `:workflow/id`    — same shape as a workflow-config map
+   3. `:name`           — legacy / TUI shape; ONLY accepted when the
+      value is an unqualified workflow-type keyword/name matching a
+      strict keyword-name regex, because some producers
+      (notably the cli + TUI persistence path) record the human spec
+      title under `:name` and a title with spaces / slashes would
+      keywordize into an unloadable key.
+
+   Returns a keyword or nil."
+  [workflow-spec]
+  (let [keyword-if-valid (fn [v]
+                           (cond
+                             (valid-workflow-type-keyword? v) v
+                             (and (string? v)
+                                  (re-matches workflow-type-identifier-re v))
+                             (keyword v)
+                             :else nil))]
+    (or (keyword-if-valid (get workflow-spec :workflow-type))
+        (keyword-if-valid (get workflow-spec :workflow/id))
+        (keyword-if-valid (get workflow-spec :name)))))
+
 (defn resolve-workflow-identity
   "Resolve `{:workflow-type :workflow-version}` for a resume run.
 
-   Recorded workflow spec wins when present. Otherwise delegates to a
-   caller-supplied fallback-fn (typically reads a selection profile).
-   Throws `:anomalies/not-found` if neither source yields a type.
+   Preference order for `:workflow-type`:
+
+   1. A keyword-valid identifier extracted from the recorded
+      `:workflow/spec` via `candidate-workflow-type` (tries
+      `:workflow-type`, `:workflow/id`, then `:name`).
+   2. The `:execution/workflow-id` from the machine snapshot, unless
+      it's a synthetic DAG-task key.
+   3. The caller-supplied `fallback-fn` (typically a selection profile).
+
+   Throws `:anomalies/not-found` if no source yields a loadable type.
 
    Arguments:
    - `reconstructed` — context map from `reconstruct-context`
-   - `fallback-fn`   — 0-arity; returns a type keyword or nil"
+   - `fallback-fn`   — 0-arity; returns a type keyword or nil
+
+   Pre-2026-05-23: this fn did `(some-> workflow-spec :name keyword)`
+   unconditionally, which produced unloadable keywords like
+   `:In-flight PR / branch / task-claim registry` whenever a producer
+   recorded the spec title under `:name` (observed dogfooding
+   work/in-flight-pr-registry.spec.edn, workflow a92b2c97). The
+   identifier-regex gate above keeps the legacy path working for
+   well-formed names while rejecting human-title strings."
   [reconstructed fallback-fn]
   (schema/validate! schema/ResolveWorkflowIdentityInput
                     {:reconstructed reconstructed :fallback-fn fallback-fn}
@@ -406,7 +462,7 @@
   (let [workflow-spec (:workflow-spec reconstructed)
         machine-snapshot (:machine-snapshot reconstructed)
         workflow-id-from-snapshot (:execution/workflow-id machine-snapshot)
-        workflow-type (or (some-> workflow-spec :name keyword)
+        workflow-type (or (candidate-workflow-type workflow-spec)
                           (when-not (synthetic-dag-task-workflow-id? workflow-id-from-snapshot)
                             workflow-id-from-snapshot)
                           (fallback-fn))

@@ -22,7 +22,7 @@
    [clojure.java.io :as io]
    [cheshire.core :as json]
    [ai.miniforge.event-stream.interface :as es]
-   [ai.miniforge.workflow.interface :as workflow]
+   [ai.miniforge.workflow.interface.checkpoints :as workflow-checkpoints]
    [ai.miniforge.workflow-resume.core :as core]
    [ai.miniforge.workflow-resume.interface :as wr]))
 
@@ -216,6 +216,73 @@
            {}
            (constantly nil))))))
 
+(deftest resolve-workflow-identity-prefers-workflow-type-key-test
+  (testing ":workflow-type wins over :name when both are present"
+    (is (= {:workflow-type :canonical-sdlc :workflow-version "latest"}
+           (core/resolve-workflow-identity
+             {:workflow-spec {:workflow-type :canonical-sdlc
+                              :name "human-readable-title"
+                              :version "latest"}}
+             (fn [] (throw (ex-info "fallback should not be called" {})))))))
+
+  (testing ":workflow/id (config-key shape) is accepted"
+    (is (= {:workflow-type :canonical-sdlc :workflow-version "2.0.0"}
+           (core/resolve-workflow-identity
+             {:workflow-spec {:workflow/id :canonical-sdlc :version "2.0.0"}}
+             (constantly nil))))))
+
+(deftest resolve-workflow-identity-rejects-non-identifier-name-test
+  ;; Regression for the 2026-05-22 dogfood of
+  ;; work/in-flight-pr-registry.spec.edn (workflow a92b2c97), where the
+  ;; recorded spec was {:name "In-flight PR / branch / task-claim
+  ;; registry" :version "latest"} and the prior unconditional
+  ;; `(some-> workflow-spec :name keyword)` produced an unloadable
+  ;; lookup key with spaces and slashes.
+  (testing "spec :name that is not a valid keyword name falls through to fallback"
+    (is (= {:workflow-type :canonical-sdlc :workflow-version "latest"}
+           (core/resolve-workflow-identity
+             {:workflow-spec {:name "In-flight PR / branch / task-claim registry"
+                              :version "latest"}}
+             (fn [] :canonical-sdlc)))))
+
+  (testing "machine snapshot identity is consulted when :name is rejected and present"
+    (is (= {:workflow-type :canonical-sdlc :workflow-version "2.0.0"}
+           (core/resolve-workflow-identity
+            {:workflow-spec    {:name "Some Human Title" :version "2.0.0"}
+             :machine-snapshot {:execution/workflow-id      :canonical-sdlc
+                                :execution/workflow-version "2.0.0"}}
+            (fn [] (throw (ex-info "fallback should not be called" {})))))))
+
+  (testing "spec :name keyword with an invalid workflow-type name falls through to fallback"
+    (is (= {:workflow-type :canonical-sdlc :workflow-version "latest"}
+           (core/resolve-workflow-identity
+            {:workflow-spec {:name (keyword "Some Human Title")
+                             :version "latest"}}
+            (fn [] :canonical-sdlc))))))
+
+(deftest resolve-workflow-identity-rejects-qualified-workflow-types-test
+  (testing "slash-containing string identifiers are rejected before keywordization"
+    (is (= {:workflow-type :canonical-sdlc :workflow-version "latest"}
+           (core/resolve-workflow-identity
+            {:workflow-spec {:workflow-type "foo/bar"
+                             :name "canonical-sdlc"
+                             :version "latest"}}
+            (fn [] :fallback-sdlc)))))
+
+  (testing "qualified keyword identifiers are rejected"
+    (is (= {:workflow-type :canonical-sdlc :workflow-version "latest"}
+           (core/resolve-workflow-identity
+            {:workflow-spec {:workflow-type :foo/bar
+                             :workflow/id :canonical-sdlc
+                             :version "latest"}}
+            (constantly nil)))))
+
+  (testing "qualified :name keyword falls through to fallback"
+    (is (= {:workflow-type :fallback-sdlc :workflow-version "latest"}
+           (core/resolve-workflow-identity
+            {:workflow-spec {:name :foo/bar}}
+            (fn [] :fallback-sdlc))))))
+
 ;------------------------------------------------------------------------------ Layer 2
 ;; reconstruct-context — integration with the event-stream reader
 
@@ -335,7 +402,7 @@
                                                                     :pause-reason :rate-limit}}
                            :manifest {:workflow/phases-completed [:plan]}
                            :phase-results {:plan {:status :completed}}}]
-      (with-redefs [workflow/load-checkpoint-data (fn [_workflow-run-id] checkpoint-data)
+      (with-redefs [workflow-checkpoints/load-checkpoint-data (fn [_workflow-run-id] checkpoint-data)
                     es/read-workflow-events-by-id (fn [_events-dir _workflow-run-id] nil)]
         (let [ctx (core/reconstruct-context "/tmp/unused-events" workflow-id)]
           (is (= workflow-id (:workflow-id ctx)))
@@ -359,7 +426,7 @@
                            :manifest {:workflow/phases-completed [:plan]}
                            :phase-results {:plan {:status :completed}}}
           events [{:event/type :workflow/failed}]]
-      (with-redefs [workflow/load-checkpoint-data (fn [_workflow-run-id] checkpoint-data)
+      (with-redefs [workflow-checkpoints/load-checkpoint-data (fn [_workflow-run-id] checkpoint-data)
                     es/read-workflow-events-by-id (fn [_events-dir _workflow-run-id] events)]
         (let [ctx (core/reconstruct-context "/tmp/unused-events" workflow-id)]
           (is (false? (:failed? ctx)))
@@ -370,7 +437,7 @@
     (let [workflow-id (str (random-uuid))
           checkpoint-data (configured-checkpoint-data :blocked-review
                                                       workflow-id)]
-      (with-redefs [workflow/load-checkpoint-data (fn [_workflow-run-id] checkpoint-data)
+      (with-redefs [workflow-checkpoints/load-checkpoint-data (fn [_workflow-run-id] checkpoint-data)
                     es/read-workflow-events-by-id (fn [_events-dir _workflow-run-id] nil)]
         (let [ctx (core/reconstruct-context "/tmp/unused-events" workflow-id)]
           (is (= [:explore :plan :implement] (:completed-phases ctx))))))))
@@ -389,7 +456,7 @@
                   {:event/type :workflow/phase-completed
                    :workflow/phase :verify
                    :phase/outcome :success}]]
-      (with-redefs [workflow/load-checkpoint-data (fn [_workflow-run-id] checkpoint-data)
+      (with-redefs [workflow-checkpoints/load-checkpoint-data (fn [_workflow-run-id] checkpoint-data)
                     es/read-workflow-events-by-id (fn [_events-dir _workflow-run-id] events)]
         (let [ctx (core/reconstruct-context "/tmp/unused-events" workflow-id)]
           (is (= [:explore :verify :plan] (:completed-phases ctx))))))))
