@@ -7,8 +7,8 @@
 # Miniforge Agent Knowledge Base
 
 This document is the entry point for AI agents working in this repository.
-Shared engineering standards live in `.standards/` (git submodule →
-`miniforge-ai/miniforge-standards`). Consult `.standards/agents.md` for the
+Shared engineering standards live in `standards/miniforge/` (git submodule →
+`miniforge-ai/miniforge-standards`). Consult `standards/miniforge/agents.md` for the
 universal rule catalog; this file covers miniforge-specific product knowledge.
 
 ## Product Layers
@@ -21,23 +21,23 @@ This repo houses three product layers on one Polylith workspace:
 
 ## Standards Quick Reference
 
-See `.standards/agents.md` for the full catalog. Key rules:
+See `standards/miniforge/agents.md` for the full catalog. Key rules:
 
 | Need to... | Rule |
 |------------|------|
-| Understand architecture | `.standards/foundations/stratified-design` |
-| Write Clojure code | `.standards/languages/clojure` |
-| Work with Polylith | `.standards/frameworks/polylith` |
-| Create a branch | `.standards/workflows/git-branch-management` |
-| **Commit code** | **`.standards/workflows/pre-commit-discipline`** (CRITICAL) |
-| Plan a PR | `.standards/workflows/pr-layering` |
-| Document a PR | `.standards/workflows/pr-documentation` |
+| Understand architecture | `standards/miniforge/foundations/stratified-design` |
+| Write Clojure code | `standards/miniforge/languages/clojure` |
+| Work with Polylith | `standards/miniforge/frameworks/polylith` |
+| Create a branch | `standards/miniforge/workflows/git-branch-management` |
+| **Commit code** | **`standards/miniforge/workflows/pre-commit-discipline`** (CRITICAL) |
+| Plan a PR | `standards/miniforge/workflows/pr-layering` |
+| Document a PR | `standards/miniforge/workflows/pr-documentation` |
 
 ## Miniforge Project Structure
 
 ```text
 miniforge/
-├── .standards/            # git submodule — shared engineering standards
+├── standards/miniforge/   # git submodule — shared engineering standards
 ├── bases/                 # Polylith bases (entry points)
 ├── components/            # Polylith components (domain logic)
 │   ├── agent/             # Agent implementations (implementer, reviewer, etc.)
@@ -75,11 +75,11 @@ bb hooks:install      # Install pre-commit hook
 
 | Dewey | File | Description |
 |-------|------|-------------|
-| 810 | `.standards/project/header-copyright` | Apache 2.0 header on all Clojure sources |
+| 810 | `standards/miniforge/project/header-copyright` | Apache 2.0 header on all Clojure sources |
 
 ## Core Principles (Always Apply)
 
-See `.standards/CLAUDE.md` for authoritative descriptions. Summary:
+See `standards/miniforge/CLAUDE.md` for authoritative descriptions. Summary:
 
 - **Stratified Design** — dependencies flow downward only; no cycles; pure Domain layer
 - **Simple Made Easy** — values over state; data over syntax; no speculative complexity
