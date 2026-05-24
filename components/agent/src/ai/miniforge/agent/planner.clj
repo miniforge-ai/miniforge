@@ -458,6 +458,9 @@
                                :disallowed-tools planner-disallowed-tools
                                :progress-monitor (create-planner-progress-monitor))
                    (:workdir session) (assoc :workdir (:workdir session)))]
+    ;; Carry the role disallow-list into the Cursor backend's permission
+    ;; allowlist (Claude/Codex honor :disallowed-tools per-invocation).
+    (artifact-session/write-cursor-permissions-for-session! session planner-disallowed-tools)
     (if on-chunk
       (llm/chat-stream llm-client user-prompt on-chunk
                        (merge {:system effective-system} mcp-opts))

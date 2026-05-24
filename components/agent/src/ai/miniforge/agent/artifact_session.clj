@@ -366,30 +366,47 @@
          vec)))
 
 (defn write-cursor-permissions!
-  "Write or merge .cursor/cli.json with a default-deny permission allowlist.
+  "Write .cursor/cli.json with a default-deny permission allowlist.
 
    `allowed-tools` is the agent-agnostic auto-approve set (`mcp-tools`);
-   `disallowed-tools` subtracts native tools the role must not call. Merges
-   into any existing permissions arrays so a project/user cli.json is
-   preserved. Returns the path to the config file."
+   `disallowed-tools` subtracts native tools the role must not call.
+
+   Authoritative over the rules miniforge manages: any prior managed entry
+   is stripped before the role-scoped set is re-added, so rewriting with a
+   narrower `disallowed-tools` correctly shrinks the allowlist. Pre-existing
+   user/project rules are preserved. Returns the path to the config file."
   [config-root allowed-tools disallowed-tools]
-  (let [root        (or config-root (System/getProperty "user.dir"))
-        dir         (io/file root ".cursor")
-        config-file (io/file dir "cli.json")
-        allow       (cursor-permission-allow allowed-tools disallowed-tools)
-        existing    (when (.exists config-file)
-                      (try (json/parse-string (slurp config-file))
-                           (catch Exception _ {})))
-        prior-allow (get-in existing ["permissions" "allow"] [])
-        prior-deny  (get-in existing ["permissions" "deny"] [])
-        config      (-> (or existing {})
-                        (assoc-in ["permissions" "allow"]
-                                  (vec (distinct (concat prior-allow allow))))
-                        (assoc-in ["permissions" "deny"]
-                                  (vec (distinct (concat prior-deny cursor-permission-deny)))))]
+  (let [root          (or config-root (System/getProperty "user.dir"))
+        dir           (io/file root ".cursor")
+        config-file   (io/file dir "cli.json")
+        allow         (cursor-permission-allow allowed-tools disallowed-tools)
+        managed-allow (set (keep mcp-tool->cursor-permission allowed-tools))
+        managed-deny  (set cursor-permission-deny)
+        existing      (when (.exists config-file)
+                        (try (json/parse-string (slurp config-file))
+                             (catch Exception _ {})))
+        user-allow    (remove managed-allow (get-in existing ["permissions" "allow"] []))
+        user-deny     (remove managed-deny (get-in existing ["permissions" "deny"] []))
+        config        (-> (or existing {})
+                          (assoc-in ["permissions" "allow"]
+                                    (vec (distinct (concat user-allow allow))))
+                          (assoc-in ["permissions" "deny"]
+                                    (vec (distinct (concat user-deny cursor-permission-deny)))))]
     (.mkdirs dir)
     (spit config-file (json/generate-string config {:pretty true}))
     (str config-file)))
+
+(defn write-cursor-permissions-for-session!
+  "Rewrite the session's .cursor/cli.json allowlist with a role's
+   `disallowed-tools` applied (e.g. a reviewer that must not Write).
+
+   No-op for capsule sessions — Cursor configs are host-only. Returns the
+   path, or nil when skipped."
+  [session disallowed-tools]
+  (when-not (:capsule? session)
+    (write-cursor-permissions! (:config-root session)
+                               (:mcp-allowed-tools session)
+                               disallowed-tools)))
 
 (defn write-claude-settings!
   "Write Claude CLI settings JSON with PreToolUse hook for supervision.

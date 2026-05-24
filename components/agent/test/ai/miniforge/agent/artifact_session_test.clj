@@ -375,6 +375,43 @@
         (finally
           (doseq [f (reverse (file-seq tmp))] (.delete ^java.io.File f)))))))
 
+(deftest write-cursor-permissions-narrows-on-rewrite-test
+  (testing "rewriting with a narrower disallow set shrinks the allowlist"
+    (let [tmp (io/file (System/getProperty "java.io.tmpdir")
+                       (str "cursor-perms-narrow-" (random-uuid)))]
+      (try
+        (.mkdirs tmp)
+        ;; First write: full allow (no disallow) includes Write(**).
+        (session/write-cursor-permissions! (str tmp) session/mcp-tools nil)
+        (let [path (str (io/file tmp ".cursor" "cli.json"))]
+          (is (some #(= "Write(**)" %)
+                    (get-in (json/parse-string (slurp path)) ["permissions" "allow"])))
+          ;; Rewrite disallowing Write: managed Write(**) is stripped, MCP stays.
+          (session/write-cursor-permissions! (str tmp) session/mcp-tools ["Write" "Edit" "MultiEdit"])
+          (let [allow (get-in (json/parse-string (slurp path)) ["permissions" "allow"])]
+            (is (not (some #(= "Write(**)" %) allow)))
+            (is (some #(str/starts-with? % "Mcp(") allow))))
+        (finally
+          (doseq [f (reverse (file-seq tmp))] (.delete ^java.io.File f)))))))
+
+(deftest write-cursor-permissions-for-session-test
+  (testing "no-op for capsule sessions"
+    (is (nil? (session/write-cursor-permissions-for-session!
+               {:capsule? true :config-root "/tmp/should-not-write"} ["Write"]))))
+  (testing "host session writes to its config-root"
+    (let [tmp (io/file (System/getProperty "java.io.tmpdir")
+                       (str "cursor-perms-session-" (random-uuid)))]
+      (try
+        (.mkdirs tmp)
+        (let [path (session/write-cursor-permissions-for-session!
+                    {:config-root (str tmp) :mcp-allowed-tools session/mcp-tools}
+                    ["Write" "Edit" "MultiEdit"])
+              allow (get-in (json/parse-string (slurp path)) ["permissions" "allow"])]
+          (is (str/ends-with? path "cli.json"))
+          (is (not (some #(= "Write(**)" %) allow))))
+        (finally
+          (doseq [f (reverse (file-seq tmp))] (.delete ^java.io.File f)))))))
+
 (deftest cleanup-cursor-permissions-test
   (testing "cleanup strips our rules but preserves pre-existing user rules"
     (let [tmp (io/file (System/getProperty "java.io.tmpdir")
