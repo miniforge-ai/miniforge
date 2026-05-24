@@ -68,6 +68,7 @@
    aggregates loses the placement-of-attention signal that's the whole
    reason for collecting the data."
   (:require
+   [ai.miniforge.response.interface :as response]
    [malli.core :as m]
    [malli.error :as me]))
 
@@ -179,16 +180,18 @@
   [breakdown {:keys [phase tokens iterations duration-ms usd]
               :or   {tokens 0 iterations 0 duration-ms 0 usd 0.0}}]
   (when-not (contains? phase-keys phase)
-    (throw (ex-info (str "Unknown phase " (pr-str phase) " — must be one of "
-                         (pr-str phase-key-order))
-                    {:phase phase :known phase-key-order})))
+    (response/throw-anomaly! :anomalies/incorrect
+                             (str "Unknown phase " (pr-str phase) " — must be one of "
+                                  (pr-str phase-key-order))
+                             {:phase phase :known phase-key-order}))
   (when (and (pos? iterations)
              (not (contains? iteration-phase-keys phase)))
-    (throw (ex-info (str "Phase " (pr-str phase) " does not iterate; "
-                         ":iterations may only be set for "
-                         (pr-str (sort iteration-phase-keys)))
-                    {:phase phase :iterations iterations
-                     :allowed (sort iteration-phase-keys)})))
+    (response/throw-anomaly! :anomalies/incorrect
+                             (str "Phase " (pr-str phase) " does not iterate; "
+                                  ":iterations may only be set for "
+                                  (pr-str (sort iteration-phase-keys)))
+                             {:phase phase :iterations iterations
+                              :allowed (sort iteration-phase-keys)}))
   (-> breakdown
       (update :cost/total + tokens)
       (update-in [:cost/breakdown phase] (fnil + 0) tokens)

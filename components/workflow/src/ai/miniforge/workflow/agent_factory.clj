@@ -22,6 +22,7 @@
   (:require
    [ai.miniforge.agent.interface :as agent]
    [ai.miniforge.loop.interface :as loop]
+   [ai.miniforge.response.interface :as response]
    [ai.miniforge.task.interface :as task]
    [ai.miniforge.artifact.interface :as artifact]))
 
@@ -61,12 +62,13 @@
         llm-backend (:llm-backend context)]
 
     (when (contains? handler-only-agents agent-type)
-      (throw (ex-info (str "Agent type " agent-type " requires a :phase/handler or "
-                           "phase interceptor (see phase.registry). Configure the "
-                           "phase with :phase/handler or use the interceptor pipeline "
-                           "via runner/run-pipeline.")
-                      {:agent-type agent-type
-                       :phase-id (:phase/id phase)})))
+      (response/throw-anomaly! :anomalies/incorrect
+                               (str "Agent type " agent-type " requires a :phase/handler or "
+                                    "phase interceptor (see phase.registry). Configure the "
+                                    "phase with :phase/handler or use the interceptor pipeline "
+                                    "via runner/run-pipeline.")
+                               {:agent-type agent-type
+                                :phase-id (:phase/id phase)}))
 
     (case agent-type
       ;; Core agents
@@ -82,13 +84,14 @@
       :none nil
 
       ;; Unknown agent type — fail loud
-      (throw (ex-info (str "Unknown agent type: " agent-type
-                           ". Supported: :planner :implementer :tester "
-                           ":spec-analyzer :designer :none. "
-                           "Use :default only with a :phase/handler or "
-                           "phase interceptor.")
-                      {:agent-type agent-type
-                       :phase-id (:phase/id phase)})))))
+      (response/throw-anomaly! :anomalies/unsupported
+                               (str "Unknown agent type: " agent-type
+                                    ". Supported: :planner :implementer :tester "
+                                    ":spec-analyzer :designer :none. "
+                                    "Use :default only with a :phase/handler or "
+                                    "phase interceptor.")
+                               {:agent-type agent-type
+                                :phase-id (:phase/id phase)}))))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Gate mapping

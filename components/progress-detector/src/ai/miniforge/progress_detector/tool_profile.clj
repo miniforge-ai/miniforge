@@ -46,7 +46,8 @@
    should use `make-registry` and pass the result explicitly to the
    2-arity query functions to avoid global state."
   (:require
-   [ai.miniforge.progress-detector.schema :as schema]))
+   [ai.miniforge.progress-detector.schema :as schema]
+   [ai.miniforge.response.interface :as response]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Registry construction
@@ -79,12 +80,14 @@
   [registry-atom profile]
   (let [tool-id (:tool/id profile)]
     (when-not tool-id
-      (throw (ex-info "Tool profile must include :tool/id"
-                      {:profile profile})))
+      (response/throw-anomaly! :anomalies/incorrect
+                               "Tool profile must include :tool/id"
+                               {:profile profile}))
     (when-not (schema/valid-tool-profile? profile)
-      (throw (ex-info "Tool profile fails ToolProfile schema validation"
-                      {:profile profile
-                       :errors  (schema/explain-tool-profile profile)}))))
+      (response/throw-anomaly! :anomalies/incorrect
+                               "Tool profile fails ToolProfile schema validation"
+                               {:profile profile
+                                :errors  (schema/explain-tool-profile profile)})))
   (swap! registry-atom assoc (:tool/id profile) profile))
 
 (defn unregister!

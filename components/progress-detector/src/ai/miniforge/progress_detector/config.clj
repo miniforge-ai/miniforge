@@ -35,7 +35,8 @@
      apply-directive   - apply one overlay layer onto an accumulated config
      enabled?          - return true if resolved config enables the detector
      effective-params  - extract merged :config/params map from resolved config"
-  )
+  (:require
+   [ai.miniforge.response.interface :as response]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Directive resolution
@@ -141,8 +142,9 @@
      ;;     :config/directives [:inherit :tune :disable :enable]}"
   [layers]
   (when (empty? layers)
-    (throw (ex-info "merge-config requires at least one layer"
-                    {:layers layers})))
+    (response/throw-anomaly! :anomalies/incorrect
+                             "merge-config requires at least one layer"
+                             {:layers layers}))
   (let [;; The first layer is the base — its :config/params seed the
         ;; accumulator. Without this seeding the base's params get
         ;; dropped on its own implicit :inherit directive (see
