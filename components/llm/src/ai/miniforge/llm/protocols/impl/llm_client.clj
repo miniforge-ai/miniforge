@@ -490,11 +490,26 @@
     true   (conj prompt)))
 
 (defn- cursor-args
-  "Build CLI arguments for the Cursor backend."
-  [{:keys [prompt mcp-allowed-tools]}]
-  (cond-> ["-p"]
-    (seq mcp-allowed-tools) (conj "--approve-mcps")
-    true (conj prompt)))
+  "Build CLI arguments for the Cursor backend (binary `agent`).
+
+   Flags follow https://cursor.com/docs/cli/reference/parameters:
+
+     -p / --print  non-interactive run with tool access
+     --force       required for the agent to write files in print mode;
+                   this is the autonomous-execution switch (analogous to
+                   codex `approval_policy=never`)
+
+   Tool restriction is enforced out-of-band via the default-deny
+   .cursor/cli.json permissions allowlist written by the agent session
+   (see artifact-session/write-cursor-permissions!), not via CLI flags —
+   so we do not pass --approve-mcps (which would blanket-approve every MCP
+   server). Cursor exposes no system-prompt flag, so `system` is prepended
+   to the user prompt."
+  [{:keys [prompt system model]}]
+  (let [prompt (if system (str system "\n\n" prompt) prompt)]
+    (cond-> ["-p" "--force"]
+      model (into ["--model" model])
+      true  (conj prompt))))
 
 (defn- opencode-args
   "Build CLI arguments for the OpenCode backend.

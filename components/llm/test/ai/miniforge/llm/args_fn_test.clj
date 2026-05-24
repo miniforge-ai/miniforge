@@ -195,15 +195,25 @@
 ;; ============================================================================
 
 (deftest cursor-args-minimal-test
-  (testing "minimal prompt produces [-p <prompt>]"
+  (testing "minimal prompt produces [-p --force <prompt>] (autonomous writes)"
     (let [args ((private-fn 'cursor-args) {:prompt "fix it"})]
-      (is (= ["-p" "fix it"] args)))))
+      (is (= ["-p" "--force" "fix it"] args)))))
 
-(deftest cursor-args-approve-mcps-test
-  (testing "mcp-allowed-tools adds --approve-mcps"
+(deftest cursor-args-no-approve-mcps-test
+  (testing "MCP scoping is via the permissions allowlist, not --approve-mcps"
     (let [args ((private-fn 'cursor-args) {:prompt "p" :mcp-allowed-tools ["t1"]})]
-      (is (some #(= "--approve-mcps" %) args))
+      (is (not (some #(= "--approve-mcps" %) args)))
       (is (= "p" (last args))))))
+
+(deftest cursor-args-model-test
+  (testing "model adds --model <model> before the prompt"
+    (let [args ((private-fn 'cursor-args) {:prompt "p" :model "gpt-5.2"})]
+      (is (= ["-p" "--force" "--model" "gpt-5.2" "p"] args)))))
+
+(deftest cursor-args-system-test
+  (testing "system is prepended to the prompt (no system-prompt flag on cursor)"
+    (let [args ((private-fn 'cursor-args) {:prompt "do it" :system "be terse"})]
+      (is (= ["-p" "--force" "be terse\n\ndo it"] args)))))
 
 ;; ============================================================================
 ;; opencode-args

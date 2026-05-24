@@ -324,6 +324,126 @@
     (spit config-file (json/generate-string config {:pretty true}))
     (str config-file)))
 
+(defn- mcp-tool->cursor-permission
+  "Translate one agent-agnostic `mcp-tools` entry into a Cursor permission
+   rule string (https://cursor.com/docs/cli/reference/permissions).
+
+     {:mcp/server S :mcp/tool T} -> \"Mcp(S:T)\"
+     :Write / :Edit / :MultiEdit -> \"Write(**)\"  (Cursor models all edits
+                                                    as writes; no Edit primitive)
+
+   Returns nil for entries with no Cursor analog."
+  [tool]
+  (cond
+    (map? tool)
+    (format "Mcp(%s:%s)" (name (:mcp/server tool)) (name (:mcp/tool tool)))
+
+    (#{:Write :Edit :MultiEdit} tool)
+    "Write(**)"
+
+    :else nil))
+
+(def cursor-permission-deny
+  "Hard denials applied regardless of the allowlist. Deny takes precedence
+   over allow in Cursor, so these block secret writes even when Write(**) is
+   allowed. Globs follow Cursor's documented Write(pathOrGlob) form."
+  ["Write(**/.env*)" "Write(**/*.key)" "Write(**/*.pem)"])
+
+(def ^:private cursor-write-tools
+  "Native tools that Cursor collapses into the single Write(**) permission.
+   Cursor cannot express a partial write restriction, so disallowing any one
+   of these drops the whole write permission."
+  #{:Write :Edit :MultiEdit})
+
+(defn cursor-permission-allow
+  "Cursor `allow` rules for a session: the auto-approved `mcp-tools`, minus
+   any native tool the role disallows, translated to Cursor rule strings.
+
+   Default-deny: Cursor sees only this allowlist, so shell, arbitrary file
+   reads, and other MCP servers are denied by omission — no wildcard needed.
+
+   Cursor maps Write/Edit/MultiEdit onto one Write(**) rule, so disallowing
+   ANY of them drops Write(**) entirely (a finer-grained Claude distinction
+   like 'Edit-but-not-Write' cannot be represented here)."
+  [allowed-tools disallowed-tools]
+  (let [disallowed     (set (map name disallowed-tools))
+        write-blocked? (some #(contains? disallowed (name %)) cursor-write-tools)
+        keep?          (fn [tool]
+                         (cond
+                           (map? tool)               true
+                           (cursor-write-tools tool) (not write-blocked?)
+                           :else                     (not (contains? disallowed (name tool)))))]
+    (->> allowed-tools
+         (filter keep?)
+         (keep mcp-tool->cursor-permission)
+         distinct
+         vec)))
+
+(defn write-cursor-permissions!
+  "Write .cursor/cli.json with a default-deny permission allowlist.
+
+   `allowed-tools` is the agent-agnostic auto-approve set (`mcp-tools`);
+   `disallowed-tools` subtracts native tools the role must not call.
+
+   Authoritative over the rules miniforge manages: any prior managed entry
+   is stripped before the role-scoped set is re-added, so rewriting with a
+   narrower `disallowed-tools` correctly shrinks the allowlist. The exact
+   pre-session file is captured by `backup-cursor-permissions!` and restored
+   on cleanup, so user/project rules survive byte-for-byte even when they
+   overlap a managed rule. Returns the path to the config file."
+  [config-root allowed-tools disallowed-tools]
+  (let [root          (or config-root (System/getProperty "user.dir"))
+        dir           (io/file root ".cursor")
+        config-file   (io/file dir "cli.json")
+        allow         (cursor-permission-allow allowed-tools disallowed-tools)
+        managed-allow (set (keep mcp-tool->cursor-permission allowed-tools))
+        managed-deny  (set cursor-permission-deny)
+        existing      (when (.exists config-file)
+                        (try (json/parse-string (slurp config-file))
+                             (catch Exception _ {})))
+        user-allow    (remove managed-allow (get-in existing ["permissions" "allow"] []))
+        user-deny     (remove managed-deny (get-in existing ["permissions" "deny"] []))
+        config        (-> (or existing {})
+                          (assoc-in ["permissions" "allow"]
+                                    (vec (distinct (concat user-allow allow))))
+                          (assoc-in ["permissions" "deny"]
+                                    (vec (distinct (concat user-deny cursor-permission-deny)))))]
+    (.mkdirs dir)
+    (spit config-file (json/generate-string config {:pretty true}))
+    (str config-file)))
+
+(def ^:private cursor-permissions-backup-suffix
+  "Suffix for the pre-session .cursor/cli.json snapshot used to restore the
+   user's exact file on cleanup."
+  ".mf-bak")
+
+(defn backup-cursor-permissions!
+  "Snapshot a pre-existing .cursor/cli.json once, before miniforge mutates
+   it, so cleanup can restore it byte-for-byte.
+
+   No-op when the file is absent (cleanup then just deletes the file we
+   generate) or when a snapshot already exists (so mid-session rewrites never
+   clobber the original). Returns the backup path or nil."
+  [config-root]
+  (let [root        (or config-root (System/getProperty "user.dir"))
+        config-file (io/file root ".cursor" "cli.json")
+        backup-file (io/file root ".cursor" (str "cli.json" cursor-permissions-backup-suffix))]
+    (when (and (.exists config-file) (not (.exists backup-file)))
+      (io/copy config-file backup-file)
+      (str backup-file))))
+
+(defn write-cursor-permissions-for-session!
+  "Rewrite the session's .cursor/cli.json allowlist with a role's
+   `disallowed-tools` applied (e.g. a reviewer that must not Write).
+
+   No-op for capsule sessions — Cursor configs are host-only. Returns the
+   path, or nil when skipped."
+  [session disallowed-tools]
+  (when-not (:capsule? session)
+    (write-cursor-permissions! (:config-root session)
+                               (:mcp-allowed-tools session)
+                               disallowed-tools)))
+
 (defn write-claude-settings!
   "Write Claude CLI settings JSON with PreToolUse hook for supervision.
 
@@ -392,8 +512,12 @@
    - <session-dir>/claude-settings.json — Claude CLI hooks (passed via --settings)
    - .codex/config.toml — Codex MCP server config (cleaned up after session)
    - .cursor/mcp.json — Cursor MCP server config (cleaned up after session)
+   - .cursor/cli.json — Cursor default-deny permission allowlist
+     (cleaned up after session)
 
-   Also populates :mcp-allowed-tools and :supervision on the session.
+   Also populates :mcp-allowed-tools and :supervision on the session, and
+   tracks the project-scoped files (.codex/config.toml, .cursor/mcp.json,
+   .cursor/cli.json) in :mcp-cleanup-files for teardown.
 
    Arguments:
    - session - Session map from create-session!
@@ -409,11 +533,13 @@
         settings-path (write-claude-settings! (:dir session))
         codex-path    (write-codex-mcp-config! config-root srv-cmd)
         cursor-path   (write-cursor-mcp-config! config-root srv-cmd)
+        _             (backup-cursor-permissions! config-root)
+        cursor-perms  (write-cursor-permissions! config-root mcp-tools nil)
         [hook-cmd & hook-args] (resolve-miniforge-command)
         hook-eval-cmd (str/join " " (concat [hook-cmd] hook-args ["hook-eval"]))]
     (assoc session
            :mcp-allowed-tools mcp-tools
-           :mcp-cleanup-files [codex-path cursor-path]
+           :mcp-cleanup-files [codex-path cursor-path cursor-perms]
            :supervision {:hook-eval-cmd hook-eval-cmd
                          :settings-path settings-path
                          :policy :workspace-write
@@ -617,6 +743,26 @@
             (spit f (json/generate-string config' {:pretty true}))))
         (catch Exception _ nil)))))
 
+(defn cleanup-cursor-permissions!
+  "Restore .cursor/cli.json to its exact pre-session contents.
+
+   If `backup-cursor-permissions!` captured a snapshot (the file pre-existed),
+   move it back over our generated file; otherwise delete the file miniforge
+   created. Fully non-destructive — user/project rules are byte-preserved
+   regardless of any overlap with managed rules."
+  [path]
+  (try
+    (let [config-file (io/file path)
+          backup-file (io/file (str path cursor-permissions-backup-suffix))]
+      (cond
+        (.exists backup-file)
+        (do (io/copy backup-file config-file)
+            (.delete backup-file))
+
+        (.exists config-file)
+        (.delete config-file)))
+    (catch Exception _ nil)))
+
 ;------------------------------------------------------------------------------ Layer 2.5
 ;; Capsule-aware session lifecycle (N11 §6.3-6.4)
 
@@ -723,11 +869,12 @@
          (cleanup-capsule-session! session#)))))
 
 (defn cleanup-session!
-  "Delete the temporary session directory and clean up injected MCP configs.
+  "Delete the temporary session directory and clean up injected configs.
 
-   Removes the [mcp_servers.artifact] block from .codex/config.toml
-   and the artifact entry from .cursor/mcp.json, preserving any other
-   config in those files.
+   Removes the [mcp_servers.artifact] block from .codex/config.toml and the
+   artifact entry from .cursor/mcp.json (preserving any other config), and
+   restores .cursor/cli.json to its exact pre-session contents from the
+   backup snapshot (or deletes it if miniforge created it).
 
    Arguments:
    - session - Session map from create-session!"
@@ -736,7 +883,8 @@
   (doseq [path (:mcp-cleanup-files session)]
     (cond
       (str/ends-with? path "config.toml") (cleanup-codex-mcp-config! path)
-      (str/ends-with? path "mcp.json") (cleanup-cursor-mcp-config! path)))
+      (str/ends-with? path "mcp.json") (cleanup-cursor-mcp-config! path)
+      (str/ends-with? path "cli.json") (cleanup-cursor-permissions! path)))
   ;; Delete temp session directory
   (try
     (let [dir (io/file (:dir session))]

@@ -309,9 +309,10 @@
     (let [s (-> (session/create-session!) session/write-mcp-config!)]
       (try
         (is (vector? (:mcp-cleanup-files s)))
-        (is (= 2 (count (:mcp-cleanup-files s))))
+        (is (= 3 (count (:mcp-cleanup-files s))))
         (is (some #(str/ends-with? % "config.toml") (:mcp-cleanup-files s)))
         (is (some #(str/ends-with? % "mcp.json") (:mcp-cleanup-files s)))
+        (is (some #(str/ends-with? % "cli.json") (:mcp-cleanup-files s)))
         (finally
           (session/cleanup-session! s))))))
 
@@ -345,6 +346,115 @@
         (is (str/ends-with? cursor-file "mcp.json"))
         (finally
           (session/cleanup-session! s))))))
+
+(deftest cursor-permission-allow-test
+  (testing "mcp-tools translate to Mcp(...) + Write(**) rules"
+    (let [allow (session/cursor-permission-allow session/mcp-tools nil)]
+      (is (some #(= "Mcp(context:context_read)" %) allow))
+      (is (some #(= "Mcp(context:submit)" %) allow))
+      (is (some #(= "Write(**)" %) allow))
+      (testing "Write/Edit/MultiEdit collapse to a single Write(**) rule"
+        (is (= 1 (count (filter #(= "Write(**)" %) allow)))))))
+  (testing "default-deny: disallowing all write tools drops the write rule"
+    (let [allow (session/cursor-permission-allow session/mcp-tools ["Write" "Edit" "MultiEdit"])]
+      (is (not (some #(= "Write(**)" %) allow)))
+      (is (some #(str/starts-with? % "Mcp(") allow))))
+  (testing "disallowing ANY write tool drops Write(**) (Cursor can't distinguish)"
+    (doseq [blocked [["Write"] ["Edit"] ["MultiEdit"]]]
+      (let [allow (session/cursor-permission-allow session/mcp-tools blocked)]
+        (is (not (some #(= "Write(**)" %) allow))
+            (str "Write(**) should be dropped when disallowing " blocked))))))
+
+(deftest write-cursor-permissions-test
+  (testing "writes .cursor/cli.json with allow + secret-deny baseline"
+    (let [tmp (io/file (System/getProperty "java.io.tmpdir")
+                       (str "cursor-perms-" (random-uuid)))]
+      (try
+        (.mkdirs tmp)
+        (let [path   (session/write-cursor-permissions! (str tmp) session/mcp-tools nil)
+              config (json/parse-string (slurp path))]
+          (is (str/ends-with? path "cli.json"))
+          (is (contains? (set (get-in config ["permissions" "allow"])) "Write(**)"))
+          (is (= (set session/cursor-permission-deny)
+                 (set (get-in config ["permissions" "deny"])))))
+        (finally
+          (doseq [f (reverse (file-seq tmp))] (.delete ^java.io.File f)))))))
+
+(deftest write-cursor-permissions-narrows-on-rewrite-test
+  (testing "rewriting with a narrower disallow set shrinks the allowlist"
+    (let [tmp (io/file (System/getProperty "java.io.tmpdir")
+                       (str "cursor-perms-narrow-" (random-uuid)))]
+      (try
+        (.mkdirs tmp)
+        ;; First write: full allow (no disallow) includes Write(**).
+        (session/write-cursor-permissions! (str tmp) session/mcp-tools nil)
+        (let [path (str (io/file tmp ".cursor" "cli.json"))]
+          (is (some #(= "Write(**)" %)
+                    (get-in (json/parse-string (slurp path)) ["permissions" "allow"])))
+          ;; Rewrite disallowing Write: managed Write(**) is stripped, MCP stays.
+          (session/write-cursor-permissions! (str tmp) session/mcp-tools ["Write" "Edit" "MultiEdit"])
+          (let [allow (get-in (json/parse-string (slurp path)) ["permissions" "allow"])]
+            (is (not (some #(= "Write(**)" %) allow)))
+            (is (some #(str/starts-with? % "Mcp(") allow))))
+        (finally
+          (doseq [f (reverse (file-seq tmp))] (.delete ^java.io.File f)))))))
+
+(deftest write-cursor-permissions-for-session-test
+  (testing "no-op for capsule sessions"
+    (is (nil? (session/write-cursor-permissions-for-session!
+               {:capsule? true :config-root "/tmp/should-not-write"} ["Write"]))))
+  (testing "host session writes to its config-root"
+    (let [tmp (io/file (System/getProperty "java.io.tmpdir")
+                       (str "cursor-perms-session-" (random-uuid)))]
+      (try
+        (.mkdirs tmp)
+        (let [path (session/write-cursor-permissions-for-session!
+                    {:config-root (str tmp) :mcp-allowed-tools session/mcp-tools}
+                    ["Write" "Edit" "MultiEdit"])
+              allow (get-in (json/parse-string (slurp path)) ["permissions" "allow"])]
+          (is (str/ends-with? path "cli.json"))
+          (is (not (some #(= "Write(**)" %) allow))))
+        (finally
+          (doseq [f (reverse (file-seq tmp))] (.delete ^java.io.File f)))))))
+
+(deftest cleanup-cursor-permissions-restores-original-test
+  (testing "cleanup restores a pre-existing cli.json byte-for-byte"
+    (let [tmp (io/file (System/getProperty "java.io.tmpdir")
+                       (str "cursor-perms-restore-" (random-uuid)))
+          dir (io/file tmp ".cursor")
+          cli (io/file dir "cli.json")
+          cleanup-fn @#'session/cleanup-cursor-permissions!]
+      (try
+        (.mkdirs dir)
+        ;; A user rule that is byte-identical to a managed rule — the case the
+        ;; old string-stripping cleanup could not preserve.
+        (let [original (json/generate-string {"permissions" {"allow" ["Shell(git)" "Write(**)"]}})]
+          (spit cli original)
+          (session/backup-cursor-permissions! (str tmp))
+          (session/write-cursor-permissions! (str tmp) session/mcp-tools ["Write" "Edit" "MultiEdit"])
+          (is (not= original (slurp cli)) "writer mutates the live file")
+          (cleanup-fn (str cli))
+          (is (= original (slurp cli)) "cleanup restores the exact original")
+          (is (not (.exists (io/file dir (str "cli.json" @#'session/cursor-permissions-backup-suffix))))
+              "backup file is removed after restore"))
+        (finally
+          (doseq [f (reverse (file-seq tmp))] (.delete ^java.io.File f)))))))
+
+(deftest cleanup-cursor-permissions-deletes-generated-test
+  (testing "cleanup deletes the file when miniforge created it (no prior file)"
+    (let [tmp (io/file (System/getProperty "java.io.tmpdir")
+                       (str "cursor-perms-del-" (random-uuid)))
+          cli (io/file tmp ".cursor" "cli.json")
+          cleanup-fn @#'session/cleanup-cursor-permissions!]
+      (try
+        (.mkdirs tmp)
+        (session/backup-cursor-permissions! (str tmp)) ; no-op: nothing to back up
+        (session/write-cursor-permissions! (str tmp) session/mcp-tools nil)
+        (is (.exists cli))
+        (cleanup-fn (str cli))
+        (is (not (.exists cli)) "generated file is deleted, leaving no stray config")
+        (finally
+          (doseq [f (reverse (file-seq tmp))] (.delete ^java.io.File f)))))))
 
 (deftest cleanup-codex-config-test
   (testing "cleanup removes artifact block but preserves other config"

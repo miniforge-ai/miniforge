@@ -75,6 +75,11 @@
   "Full prompt data map for the tester agent."
   (delay (prompts/load-prompt-data :tester)))
 
+(def ^:private tester-disallowed-tools
+  "Native tools the tester must not call: it works from the MCP context
+   cache and writes test files, so unscoped file/web exploration is off."
+  ["Read" "Grep" "Glob" "WebSearch" "WebFetch" "LS"])
+
 ;------------------------------------------------------------------------------ Layer 1
 ;; Tester functions
 
@@ -336,7 +341,10 @@
   (let [budget-usd (budget/resolve-cost-budget-usd :tester config context)
         max-turns (get @tester-prompt-data :prompt/max-turns 10)
         mcp-opts (assoc (artifact-session/session->mcp-opts session budget-usd max-turns)
-                        :disallowed-tools ["Read" "Grep" "Glob" "WebSearch" "WebFetch" "LS"])]
+                        :disallowed-tools tester-disallowed-tools)]
+    ;; Carry the role disallow-list into the Cursor backend's permission
+    ;; allowlist (Claude/Codex honor :disallowed-tools per-invocation).
+    (artifact-session/write-cursor-permissions-for-session! session tester-disallowed-tools)
     (if on-chunk
       (llm/chat-stream llm-client user-prompt on-chunk
                        (merge {:system @tester-system-prompt} mcp-opts))
