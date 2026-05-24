@@ -50,7 +50,8 @@
   (:require
    [malli.core :as m]
    [ai.miniforge.progress-detector.messages :as msg]
-   [ai.miniforge.progress-detector.schema :as schema]))
+   [ai.miniforge.progress-detector.schema :as schema]
+   [ai.miniforge.response.interface :as response]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Constants
@@ -109,11 +110,12 @@
   [event obs]
   (if (m/validate schema/Observation obs)
     obs
-    (throw (ex-info (msg/t :envelope/validation-failed)
-                    {:type   ::validation-failed
-                     :event  event
-                     :obs    obs
-                     :errors (m/explain schema/Observation obs)}))))
+    (response/throw-anomaly! :anomalies/incorrect
+                             (msg/t :envelope/validation-failed)
+                             {:type   ::validation-failed
+                              :event  event
+                              :obs    obs
+                              :errors (m/explain schema/Observation obs)})))
 
 (defn make-normalizer
   "Return a per-run normalizer function. The returned fn closes over

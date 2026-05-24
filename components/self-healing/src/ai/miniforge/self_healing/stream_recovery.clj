@@ -42,6 +42,7 @@
    logging infrastructure once the dependency is reviewed."
   (:require
    [clojure.string :as str]
+   [ai.miniforge.response.interface :as response]
    [ai.miniforge.self-healing.backend-health :as backend-health]))
 
 ;;------------------------------------------------------------------------------ Layer 0
@@ -87,11 +88,13 @@
    Returns: String binary name (defaults to (name backend))"
   [backend]
   (when (nil? backend)
-    (throw (ex-info "binary-for: backend must not be nil"
-                    {:backend backend})))
+    (response/throw-anomaly! :anomalies/incorrect
+                             "binary-for: backend must not be nil"
+                             {:backend backend}))
   (when-not (instance? clojure.lang.Named backend)
-    (throw (ex-info "binary-for: backend must be a keyword or symbol"
-                    {:backend backend :type (type backend)})))
+    (response/throw-anomaly! :anomalies/incorrect
+                             "binary-for: backend must be a keyword or symbol"
+                             {:backend backend :type (type backend)}))
   (get backend-binaries (keyword backend) (name backend)))
 
 (defn build-resume-command
@@ -203,11 +206,13 @@
   ;; Guard against programmer errors: fail loudly on the watchdog hot-path
   ;; rather than producing an opaque NPE.
   (when-not (instance? clojure.lang.IAtom hang-count)
-    (throw (ex-info ":hang-count must be an IAtom (e.g. (atom 1))"
-                    {:ctx ctx :type (type hang-count)})))
+    (response/throw-anomaly! :anomalies/incorrect
+                             ":hang-count must be an IAtom (e.g. (atom 1))"
+                             {:ctx ctx :type (type hang-count)}))
   (when (nil? backend)
-    (throw (ex-info ":backend is required and must not be nil"
-                    {:ctx ctx})))
+    (response/throw-anomaly! :anomalies/incorrect
+                             ":backend is required and must not be nil"
+                             {:ctx ctx}))
   (let [count       @hang-count
         backend-kw  (keyword backend)
         cooldown-ms (get config :backend-switch-cooldown-ms 1800000)
