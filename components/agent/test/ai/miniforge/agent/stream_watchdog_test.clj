@@ -64,6 +64,26 @@
     (.set ts (- (System/currentTimeMillis) offset-ms)))
   watchdog)
 
+;; Timing constants for the fire-on-threshold tests. Kept small so the
+;; scheduler trips within a single test tick; named so the intent is explicit.
+(def ^:private trip-threshold-ms
+  "Gap threshold low enough that the watchdog trips almost immediately."
+  50)
+
+(def ^:private fast-check-interval-ms
+  "Poll cadence — well below the threshold so a stall is caught on the first tick."
+  10)
+
+(def ^:private gap-accrual-sleep-ms
+  "How long to leave the watchdog un-pinged so a real gap accrues past the
+   threshold before we assert it fired."
+  200)
+
+(def ^:private fire-await-timeout-ms
+  "Upper bound on the spin-wait for the async watchdog fire, so the assertion
+   never outruns the scheduler thread."
+  2000)
+
 ;; ---------------------------------------------------------------------------
 ;; resolve-gap-threshold
 
@@ -225,14 +245,14 @@
     (let [killed? (atom false)
           wd      (sut/create-watchdog
                    (make-test-watchdog
-                    {:threshold-ms      50
-                     :check-interval-ms 10
+                    {:threshold-ms      trip-threshold-ms
+                     :check-interval-ms fast-check-interval-ms
                      :kill-fn           #(reset! killed? true)}))]
       (is (nil? (sut/stall-gap-ms wd))
           "no gap measured before the watchdog fires")
       ;; Do not ping; let the timer accumulate a real gap past the threshold.
-      (Thread/sleep 200)
-      (let [fired? (await-condition #(and @killed? (sut/stalled? wd)) 2000)]
+      (Thread/sleep gap-accrual-sleep-ms)
+      (let [fired? (await-condition #(and @killed? (sut/stalled? wd)) fire-await-timeout-ms)]
         (sut/stop! wd)
         (is fired? "kill-fn fired and watchdog marked stalled")
         (is (sut/stalled? wd) "watchdog should be marked stalled")
