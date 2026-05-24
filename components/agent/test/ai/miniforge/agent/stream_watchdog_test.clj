@@ -220,6 +220,31 @@
         (is fired? "kill-fn fired and watchdog marked stalled")
         (is (sut/stalled? wd) "watchdog should be marked stalled")))))
 
+(deftest stall-gap-ms-exposes-measured-gap
+  (testing "stall-gap-ms returns nil before a stall and a positive number after"
+    (let [killed? (atom false)
+          wd      (sut/create-watchdog
+                   (make-test-watchdog
+                    {:threshold-ms      50
+                     :check-interval-ms 10
+                     :kill-fn           #(reset! killed? true)}))]
+      (is (nil? (sut/stall-gap-ms wd))
+          "no gap measured before the watchdog fires")
+      ;; Do not ping; let the timer accumulate a real gap past the threshold.
+      (Thread/sleep 200)
+      (let [fired? (await-condition #(and @killed? (sut/stalled? wd)) 2000)]
+        (sut/stop! wd)
+        (is fired? "kill-fn fired and watchdog marked stalled")
+        (is (sut/stalled? wd) "watchdog should be marked stalled")
+        (is @killed? "kill-fn ran")
+        (let [gap (sut/stall-gap-ms wd)]
+          (is (number? gap) "stall-gap-ms returns a number after stalling")
+          (is (pos? gap) "measured gap is positive"))))))
+
+(deftest stall-gap-ms-nil-safe-for-nil-watchdog
+  (testing "stall-gap-ms tolerates a nil watchdog"
+    (is (nil? (sut/stall-gap-ms nil)))))
+
 ;; ---------------------------------------------------------------------------
 ;; ping! actually prevents the kill from firing
 

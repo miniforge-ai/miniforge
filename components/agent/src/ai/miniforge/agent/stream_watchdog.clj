@@ -152,7 +152,7 @@
      b. Emits :agent/stream-stalled via event-stream with the measured gap.
      c. Sets the stalled? atom to true.
      d. Shuts down the scheduler (one-shot; non-blocking from own thread)."
-  [{:keys [^AtomicLong last-event-ts stalled-atom
+  [{:keys [^AtomicLong last-event-ts stalled-atom gap-atom
            threshold-ms phase-id backend event-stream workflow-id kill-fn
            ^ScheduledExecutorService scheduler logger]}]
   (fn []
@@ -174,7 +174,8 @@
                               :error (ex-message ex)})))
             ;; b. emit stall event with measured gap (nil-safe)
             (emit-stall-event! event-stream workflow-id phase-id backend gap logger)
-            ;; c. mark stalled
+            ;; c. mark stalled and record the measured gap for the caller
+            (clojure.core/reset! gap-atom gap)
             (clojure.core/reset! stalled-atom true)
             ;; d. shut down scheduler — non-blocking, safe from own thread
             (.shutdown scheduler))))
@@ -208,11 +209,13 @@
            logger            module-logger}}]
   (let [last-event-ts   (AtomicLong. (System/currentTimeMillis))
         stalled-atom    (atom false)
+        gap-atom        (atom nil)
         session-id-atom (atom nil)
         scheduler       (Executors/newSingleThreadScheduledExecutor
                          (daemon-thread-factory "stream-watchdog"))
         ctx             {:last-event-ts     last-event-ts
                          :stalled-atom      stalled-atom
+                         :gap-atom          gap-atom
                          :session-id-atom   session-id-atom
                          :threshold-ms      threshold-ms
                          :check-interval-ms check-interval-ms
@@ -263,6 +266,15 @@
    Safe to call from any thread; reads an atom."
   [watchdog]
   (boolean (and watchdog @(:stalled-atom watchdog))))
+
+(defn stall-gap-ms
+  "Return the measured stream gap (ms) at the moment the watchdog fired.
+
+   Returns a positive number when the watchdog stalled, nil otherwise.
+   Safe to call from any thread; reads an atom."
+  [watchdog]
+  (when watchdog
+    @(:gap-atom watchdog)))
 
 (defn capture-session-id!
   "Parse and persist the session ID from the initial agent handshake event.

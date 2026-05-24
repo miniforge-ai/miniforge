@@ -26,6 +26,8 @@
    [ai.miniforge.phase.interface :as phase]
    [ai.miniforge.phase.loader :as loader]
    [ai.miniforge.agent.interface :as agent]
+   [ai.miniforge.phase-software-factory.phase-terminal :as phase-terminal]
+   [ai.miniforge.event-stream.interface :as es]
    [ai.miniforge.response.interface :as response]))
 
 (def phase-test-config-resource
@@ -468,6 +470,83 @@
                (get-in final-result [:phase :result :summary])))
         (is (nil? (get-in final-result [:phase :error])))
         (is (= [:implement] (get-in final-result [:execution :phases-completed])))))))
+
+;------------------------------------------------------------------------------ Layer 2b: Stream watchdog stall classification
+
+(defn- mock-curator-no-files
+  "Mock curator returning the terminal :curator/no-files-written verdict —
+   the empty-diff outcome a killed/stalled agent leaves behind."
+  [_]
+  (response/error "No files written to environment"
+                  {:data {:code :curator/no-files-written}}))
+
+(deftest enter-implement-arms-watchdog-and-classifies-stall-test
+  (testing "a silently stalled agent stream is detected, killed, and re-coded as retriable"
+    (let [;; agent/invoke blocks (no chunks emitted) until the watchdog kill
+          ;; interrupts the phase thread; then it unwinds into the failure path.
+          invoked? (atom false)
+          interrupted? (atom false)]
+      (with-redefs [agent/create-implementer (fn [_] {:type :mock-implementer})
+                    agent/invoke (fn [_ _ _]
+                                   (reset! invoked? true)
+                                   (try
+                                     ;; Block far longer than the watchdog
+                                     ;; threshold + first check interval.
+                                     (Thread/sleep 15000)
+                                     (response/success nil {:tokens 0})
+                                     (catch InterruptedException _e
+                                       (reset! interrupted? true)
+                                       (throw (ex-info "stream killed"
+                                                       {:reason :interrupted})))))
+                    agent/curate-implement-output mock-curator-no-files]
+        (let [ctx (-> (create-base-context)
+                      ;; An event-stream makes create-streaming-callback return a
+                      ;; non-nil on-chunk, which is what arms the watchdog (a
+                      ;; non-streaming run has no chunk ping-source by design).
+                      (assoc :event-stream (es/create-event-stream {:sinks []}))
+                      (assoc-in [:user-config :self-healing :agent/stream-gap-threshold-ms] 1)
+                      (assoc-in [:user-config :llm :backend] :echo)
+                      (assoc :phase-config {:phase :implement}))
+              interceptor (phase/get-phase-interceptor {:phase :implement})
+              result ((:enter interceptor) ctx)]
+          (is @invoked? "agent/invoke ran")
+          (is @interrupted? "the watchdog interrupted the blocked stream")
+          (is (true? (get-in result [:phase :watchdog-state :stalled?]))
+              "ctx carries the stall outcome for leave-implement")
+          (is (pos? (get-in result [:phase :watchdog-state :stall/gap-duration-ms]))
+              "measured gap is recorded")
+          (is (not= :curator/no-files-written
+                    (get-in result [:phase :result :error :data :code]))
+              "stalled result must NOT be the terminal no-files verdict")
+          (is (= :agent-stalled
+                 (get-in result [:phase :result :error :data :code]))
+              "stalled result is re-coded as :agent-stalled"))))))
+
+(deftest leave-implement-stall-is-retriable-and-reports-reason-test
+  (testing "a stalled watchdog state yields a non-terminal status and :agent-stalled reason"
+    (let [result {:status :error
+                  :error {:message "stream killed"
+                          :data {:code :agent-stalled}}
+                  :metrics {:tokens 0 :duration-ms 0}}
+          ctx (-> (create-base-context)
+                  (assoc :phase {:name :implement
+                                 :agent :implementer
+                                 :status :running
+                                 :iterations 1
+                                 :budget {:iterations 8}
+                                 :started-at (System/currentTimeMillis)
+                                 :result result
+                                 :watchdog-state {:stalled? true
+                                                  :stall/gap-duration-ms 120000}}))
+          final-ctx (implement/leave-implement ctx)]
+      ;; Not the terminal :failed — the phase should retry.
+      (is (not= :failed (get-in final-ctx [:phase :status]))
+          "a stalled run must not terminate as :failed")
+      ;; derive-termination-reason resolves the stall to :agent-stalled.
+      (let [reason (phase-terminal/derive-termination-reason
+                     result {:stalled? true :stall/gap-duration-ms 120000})]
+        (is (= :agent-stalled (:phase/termination-reason reason)))
+        (is (= 120000 (:stall/gap-duration-ms reason)))))))
 
 ;------------------------------------------------------------------------------ Layer 3: Capsule File Loading
 
