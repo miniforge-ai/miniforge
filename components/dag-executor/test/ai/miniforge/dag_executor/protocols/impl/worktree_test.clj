@@ -316,6 +316,124 @@
                   "/tmp/checkpoints/env-1.bundle" "task-1:task-1"]
                  @fetch-args)))))))
 
+(deftest restore-workspace-accepts-already-checked-out-branch-test
+  (testing "restore succeeds when the checked-out branch already contains the bundled commit"
+    (let [executor (worktree/create-worktree-executor {})
+          calls (atom [])]
+      (with-redefs [worktree/run-git
+                    (fn [& args]
+                      (swap! calls conj (vec args))
+                      (let [tail (drop 2 args)]
+                        (cond
+                          (= ["fetch" "/tmp/checkpoints/env-1.bundle" "task-1:task-1"] tail)
+                          {:exit 128
+                           :out ""
+                           :err "fatal: refusing to fetch into branch 'refs/heads/task-1' checked out"}
+
+                          (= ["fetch" "/tmp/checkpoints/env-1.bundle"
+                              "task-1:refs/miniforge/resume/task-1"] tail)
+                          {:exit 0 :out "" :err ""}
+
+                          (= ["rev-parse" "task-1"] tail)
+                          {:exit 0 :out "abc123\n" :err ""}
+
+                          (= ["rev-parse" "refs/miniforge/resume/task-1"] tail)
+                          {:exit 0 :out "abc123\n" :err ""}
+
+                          (= ["merge-base" "--is-ancestor" "abc123" "abc123"] tail)
+                          {:exit 0 :out "" :err ""}
+
+                          (= ["update-ref" "-d" "refs/miniforge/resume/task-1"] tail)
+                          {:exit 0 :out "" :err ""}
+
+                          :else {:exit 1 :out "" :err (str "unexpected git call " tail)})))]
+        (let [r (proto/restore-workspace!
+                 executor "env-1"
+                 {:host-repo-path "/host/repo"
+                  :bundle-path    "/tmp/checkpoints/env-1.bundle"
+                  :branch         "task-1"})]
+          (is (result/ok? r))
+          (is (true? (get-in r [:data :already-checked-out?])))
+          (is (some #(= ["-C" "/host/repo" "update-ref" "-d"
+                         "refs/miniforge/resume/task-1"] %)
+                    @calls)))))))
+
+(deftest restore-workspace-surfaces-resume-fetch-failure-test
+  (testing "checked-out branch fallback reports resume-ref fetch failures and cleans up"
+    (let [executor (worktree/create-worktree-executor {})
+          calls (atom [])]
+      (with-redefs [worktree/run-git
+                    (fn [& args]
+                      (swap! calls conj (vec args))
+                      (let [tail (drop 2 args)]
+                        (cond
+                          (= ["fetch" "/tmp/checkpoints/env-1.bundle" "task-1:task-1"] tail)
+                          {:exit 128
+                           :out ""
+                           :err "fatal: refusing to fetch into branch 'refs/heads/task-1' checked out"}
+
+                          (= ["fetch" "/tmp/checkpoints/env-1.bundle"
+                              "task-1:refs/miniforge/resume/task-1"] tail)
+                          {:exit 128 :out "" :err "fatal: bad bundle"}
+
+                          (= ["update-ref" "-d" "refs/miniforge/resume/task-1"] tail)
+                          {:exit 0 :out "" :err ""}
+
+                          :else {:exit 1 :out "" :err (str "unexpected git call " tail)})))]
+        (let [r (proto/restore-workspace!
+                 executor "env-1"
+                 {:host-repo-path "/host/repo"
+                  :bundle-path    "/tmp/checkpoints/env-1.bundle"
+                  :branch         "task-1"})]
+          (is (result/err? r))
+          (is (= "fatal: bad bundle" (get-in r [:error :message])))
+          (is (some #(= ["-C" "/host/repo" "update-ref" "-d"
+                         "refs/miniforge/resume/task-1"] %)
+                    @calls)))))))
+
+(deftest restore-workspace-errors-when-checked-out-branch-lacks-bundle-tip-test
+  (testing "checked-out branch fallback rejects stale branches and cleans up"
+    (let [executor (worktree/create-worktree-executor {})
+          calls (atom [])]
+      (with-redefs [worktree/run-git
+                    (fn [& args]
+                      (swap! calls conj (vec args))
+                      (let [tail (drop 2 args)]
+                        (cond
+                          (= ["fetch" "/tmp/checkpoints/env-1.bundle" "task-1:task-1"] tail)
+                          {:exit 128
+                           :out ""
+                           :err "fatal: refusing to fetch into branch 'refs/heads/task-1' checked out"}
+
+                          (= ["fetch" "/tmp/checkpoints/env-1.bundle"
+                              "task-1:refs/miniforge/resume/task-1"] tail)
+                          {:exit 0 :out "" :err ""}
+
+                          (= ["rev-parse" "task-1"] tail)
+                          {:exit 0 :out "branch-sha\n" :err ""}
+
+                          (= ["rev-parse" "refs/miniforge/resume/task-1"] tail)
+                          {:exit 0 :out "bundle-sha\n" :err ""}
+
+                          (= ["merge-base" "--is-ancestor" "bundle-sha" "branch-sha"] tail)
+                          {:exit 1 :out "" :err ""}
+
+                          (= ["update-ref" "-d" "refs/miniforge/resume/task-1"] tail)
+                          {:exit 0 :out "" :err ""}
+
+                          :else {:exit 1 :out "" :err (str "unexpected git call " tail)})))]
+        (let [r (proto/restore-workspace!
+                 executor "env-1"
+                 {:host-repo-path "/host/repo"
+                  :bundle-path    "/tmp/checkpoints/env-1.bundle"
+                  :branch         "task-1"})]
+          (is (result/err? r))
+          (is (= "Checked-out branch does not contain bundled checkpoint commit"
+                 (get-in r [:error :message])))
+          (is (some #(= ["-C" "/host/repo" "update-ref" "-d"
+                         "refs/miniforge/resume/task-1"] %)
+                    @calls)))))))
+
 (deftest persist-workspace-base-ref-never-falls-back-to-task-branch-test
   (testing "persist-workspace! does NOT use the task branch as base-ref fallback"
     ;; Regression: the original fallback chain was
