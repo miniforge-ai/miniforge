@@ -75,7 +75,6 @@
                        "components/pr-lifecycle/src"
                        "components/pr-lifecycle/resources"
                        "components/pr-label-watcher/src"
-                       "components/pr-label-watcher/resources"
                        "components/evidence-bundle/src"
                        "components/evidence-bundle/resources"
                        "components/policy-pack/src"

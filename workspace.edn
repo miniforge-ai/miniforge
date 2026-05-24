@@ -14,7 +14,9 @@
                               ;; workflow chain registration, so static analysis doesn't see
                               ;; the dependency.
                               :necessary ["adapter-claude-code"
+                                          "boundary"
                                           "connector" "connector-auth" "connector-retry"
+                                          "context-pack"
                                           "evidence-bundle"
                                           "observer" "orchestrator"
                                           "policy"
@@ -29,13 +31,17 @@
                               ;; CLI has every phase/workflow interceptor on the classpath at
                               ;; runtime; the phase loader picks them up from resource config.
                               :necessary ["adapter-claude-code"
+                                          "boundary"
                                           "connector" "connector-auth" "connector-retry"
                                           "evaluation"
                                           "evidence-bundle"
                                           "failure-classifier"
+                                          "knowledge-pack"
                                           "observer" "orchestrator"
+                                          "phase-software-factory"
                                           "phase-deployment"
                                           "policy"
+                                          "pr-label-watcher"
                                           "repo-dag"
                                           "reporting"
                                           "task-executor"
@@ -53,9 +59,11 @@
                               ;; miniforge-tui is being replaced by miniforge-console; the
                               ;; bundled components below are still present so downstream
                               ;; users on the tui project build today keep working.
-                              :necessary ["evidence-bundle"
+                              :necessary ["boundary"
+                                          "evidence-bundle"
                                           "observer" "orchestrator"
                                           "phase"
+                                          "phase-software-factory"
                                           "policy"
                                           "repo-dag"
                                           "reporting"

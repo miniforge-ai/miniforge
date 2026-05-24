@@ -37,7 +37,7 @@
   (:require
    [ai.miniforge.event-stream.interface :as es]
    [ai.miniforge.response.interface :as response]
-   [ai.miniforge.workflow.interface :as workflow]
+   [ai.miniforge.workflow.interface.checkpoints :as workflow-checkpoints]
    [ai.miniforge.workflow-resume.schema :as schema]
    [clojure.edn :as edn]
    [clojure.java.io :as io]
@@ -327,7 +327,7 @@
   (schema/validate! schema/ReconstructContextInput
                     {:events-dir events-dir :workflow-id workflow-id}
                     {:message "Invalid reconstruct-context input"})
-  (let [checkpoint-data (workflow/load-checkpoint-data workflow-id)
+  (let [checkpoint-data (workflow-checkpoints/load-checkpoint-data workflow-id)
         raw-events (or (es/read-workflow-events-by-id events-dir workflow-id) [])
         events (vec (filter schema/valid-event? raw-events))
         _ (ensure-reconstruction-source! checkpoint-data events-dir workflow-id raw-events)

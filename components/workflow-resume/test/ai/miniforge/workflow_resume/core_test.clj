@@ -22,7 +22,7 @@
    [clojure.java.io :as io]
    [cheshire.core :as json]
    [ai.miniforge.event-stream.interface :as es]
-   [ai.miniforge.workflow.interface :as workflow]
+   [ai.miniforge.workflow.interface.checkpoints :as workflow-checkpoints]
    [ai.miniforge.workflow-resume.core :as core]
    [ai.miniforge.workflow-resume.interface :as wr]))
 
@@ -258,7 +258,7 @@
            (core/resolve-workflow-identity
             {:workflow-spec {:name (keyword "Some Human Title")
                              :version "latest"}}
-            (fn [] :canonical-sdlc)))))))
+            (fn [] :canonical-sdlc))))))
 
 (deftest resolve-workflow-identity-rejects-qualified-workflow-types-test
   (testing "slash-containing string identifiers are rejected before keywordization"
@@ -402,7 +402,7 @@
                                                                     :pause-reason :rate-limit}}
                            :manifest {:workflow/phases-completed [:plan]}
                            :phase-results {:plan {:status :completed}}}]
-      (with-redefs [workflow/load-checkpoint-data (fn [_workflow-run-id] checkpoint-data)
+      (with-redefs [workflow-checkpoints/load-checkpoint-data (fn [_workflow-run-id] checkpoint-data)
                     es/read-workflow-events-by-id (fn [_events-dir _workflow-run-id] nil)]
         (let [ctx (core/reconstruct-context "/tmp/unused-events" workflow-id)]
           (is (= workflow-id (:workflow-id ctx)))
@@ -426,7 +426,7 @@
                            :manifest {:workflow/phases-completed [:plan]}
                            :phase-results {:plan {:status :completed}}}
           events [{:event/type :workflow/failed}]]
-      (with-redefs [workflow/load-checkpoint-data (fn [_workflow-run-id] checkpoint-data)
+      (with-redefs [workflow-checkpoints/load-checkpoint-data (fn [_workflow-run-id] checkpoint-data)
                     es/read-workflow-events-by-id (fn [_events-dir _workflow-run-id] events)]
         (let [ctx (core/reconstruct-context "/tmp/unused-events" workflow-id)]
           (is (false? (:failed? ctx)))
@@ -437,7 +437,7 @@
     (let [workflow-id (str (random-uuid))
           checkpoint-data (configured-checkpoint-data :blocked-review
                                                       workflow-id)]
-      (with-redefs [workflow/load-checkpoint-data (fn [_workflow-run-id] checkpoint-data)
+      (with-redefs [workflow-checkpoints/load-checkpoint-data (fn [_workflow-run-id] checkpoint-data)
                     es/read-workflow-events-by-id (fn [_events-dir _workflow-run-id] nil)]
         (let [ctx (core/reconstruct-context "/tmp/unused-events" workflow-id)]
           (is (= [:explore :plan :implement] (:completed-phases ctx))))))))
@@ -456,7 +456,7 @@
                   {:event/type :workflow/phase-completed
                    :workflow/phase :verify
                    :phase/outcome :success}]]
-      (with-redefs [workflow/load-checkpoint-data (fn [_workflow-run-id] checkpoint-data)
+      (with-redefs [workflow-checkpoints/load-checkpoint-data (fn [_workflow-run-id] checkpoint-data)
                     es/read-workflow-events-by-id (fn [_events-dir _workflow-run-id] events)]
         (let [ctx (core/reconstruct-context "/tmp/unused-events" workflow-id)]
           (is (= [:explore :verify :plan] (:completed-phases ctx))))))))
