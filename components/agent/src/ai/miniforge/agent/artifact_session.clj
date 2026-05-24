@@ -374,7 +374,10 @@
    Authoritative over the rules miniforge manages: any prior managed entry
    is stripped before the role-scoped set is re-added, so rewriting with a
    narrower `disallowed-tools` correctly shrinks the allowlist. Pre-existing
-   user/project rules are preserved. Returns the path to the config file."
+   user/project rules are preserved, with one caveat — a user rule that is
+   byte-identical to a managed rule (e.g. \"Write(**)\") is indistinguishable
+   from ours and is treated as managed (stripped on cleanup). Returns the
+   path to the config file."
   [config-root allowed-tools disallowed-tools]
   (let [root          (or config-root (System/getProperty "user.dir"))
         dir           (io/file root ".cursor")
@@ -476,8 +479,12 @@
    - <session-dir>/claude-settings.json — Claude CLI hooks (passed via --settings)
    - .codex/config.toml — Codex MCP server config (cleaned up after session)
    - .cursor/mcp.json — Cursor MCP server config (cleaned up after session)
+   - .cursor/cli.json — Cursor default-deny permission allowlist
+     (cleaned up after session)
 
-   Also populates :mcp-allowed-tools and :supervision on the session.
+   Also populates :mcp-allowed-tools and :supervision on the session, and
+   tracks the project-scoped files (.codex/config.toml, .cursor/mcp.json,
+   .cursor/cli.json) in :mcp-cleanup-files for teardown.
 
    Arguments:
    - session - Session map from create-session!
@@ -705,8 +712,11 @@
 (defn cleanup-cursor-permissions!
   "Remove the permission rules we injected from .cursor/cli.json, deleting
    the file if nothing else remains. Strips the full managed superset so a
-   role-specific allow subset is always cleaned, while preserving any
-   pre-existing user/project rules."
+   role-specific allow subset is always cleaned, preserving pre-existing
+   user/project rules — except a user rule byte-identical to a managed rule
+   (e.g. \"Write(**)\"), which is indistinguishable from ours and is removed.
+   Rules are compared by exact string, so a differently-scoped user rule
+   such as \"Write(src/**)\" survives."
   [path]
   (let [f (io/file path)]
     (when (.exists f)
@@ -833,11 +843,13 @@
          (cleanup-capsule-session! session#)))))
 
 (defn cleanup-session!
-  "Delete the temporary session directory and clean up injected MCP configs.
+  "Delete the temporary session directory and clean up injected configs.
 
-   Removes the [mcp_servers.artifact] block from .codex/config.toml
-   and the artifact entry from .cursor/mcp.json, preserving any other
-   config in those files.
+   Removes the [mcp_servers.artifact] block from .codex/config.toml, the
+   artifact entry from .cursor/mcp.json, and miniforge's managed rules from
+   the .cursor/cli.json permission allowlist, preserving any other config in
+   those files. (See cleanup-cursor-permissions! for the one caveat: user
+   rules byte-identical to a managed rule are treated as managed.)
 
    Arguments:
    - session - Session map from create-session!"

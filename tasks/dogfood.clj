@@ -84,11 +84,13 @@
       (catch Exception _ nil))))
 
 (defn- configured-backend
-  "Resolve the active LLM backend the way the CLI does: user config, then
-   MINIFORGE_LLM_BACKEND, then the shipped default in backends.edn (OpenCode)."
+  "Resolve the active LLM backend the way a real run does: MINIFORGE_LLM_BACKEND
+   overrides everything (matches cli.config/load-merged-config, which applies
+   the env var as an override over the file), then the user config file, then
+   the shipped default in backends.edn (OpenCode)."
   [backend-config]
-  (or (get-in (read-edn-file user-config-path) [:llm :backend])
-      (some-> (System/getenv "MINIFORGE_LLM_BACKEND") keyword)
+  (or (some-> (System/getenv "MINIFORGE_LLM_BACKEND") keyword)
+      (get-in (read-edn-file user-config-path) [:llm :backend])
       (get-in backend-config [:backend/defaults :current])))
 
 (defn- backend-command
@@ -125,7 +127,7 @@
       (println (format "  %s %s"
                        (if passed? "✅" "❌")
                        (name check))))
-    (println (format "  %s backend-source"
+    (println (format "  %s backend"
                      (if backend-ok?
                        (format "✅ %s (%s)" (name backend) backend-command)
                        (format "❌ %s (%s missing)"
