@@ -28,7 +28,8 @@
             [ai.miniforge.response.interface :as response]
             [ai.miniforge.schema.interface :as schema]
             [clojure.edn :as edn]
-            [clojure.java.io :as io]))
+            [clojure.java.io :as io]
+            [clojure.string :as str]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Config loading + defaults
@@ -118,8 +119,9 @@
               :abandon-after-hours
               (get-in ctx [:config :pr-monitor/abandon-after-hours])})))))
 
-(defn resolve-pr-infos
-  "Resolve the PR(s) to observe from the execution context.
+(defn- resolve-pr-infos
+  "Resolve the PR(s) to observe from the execution context. Returns a vector
+   of pr-info maps, or nil when there is nothing to observe.
 
    DAG runs populate `[:execution/dag-pr-infos]`. For a single-PR run, the
    release phase stores PR info at `[:execution/phase-results :release :result
@@ -129,11 +131,13 @@
    too shallow, wrong key), so observe always saw nil and skipped — a
    single-PR dogfood opened its PR and exited without ever monitoring it."
   [ctx]
-  (or (seq (get-in ctx [:execution/dag-pr-infos]))
-      (when-let [pr-info (or (get-in ctx [:execution/phase-results :release
-                                          :result :output :workflow/pr-info])
-                             (get-in ctx [:metrics :release :pr-info]))]
-        [pr-info])))
+  (let [dag-prs (get-in ctx [:execution/dag-pr-infos])]
+    (cond
+      (seq dag-prs) (vec dag-prs)
+      :else (when-let [pr-info (or (get-in ctx [:execution/phase-results :release
+                                                :result :output :workflow/pr-info])
+                                   (get-in ctx [:metrics :release :pr-info]))]
+              [pr-info]))))
 
 (defn enter-observe
   "Execute the Observe phase.
@@ -163,12 +167,23 @@
             generate-fn (get-in ctx [:execution/generate-fn])
             event-bus (get-in ctx [:execution/event-bus])
             monitor-config (resolve-monitor-config ctx logger generate-fn event-bus)
-            self-author (:self-author monitor-config)
+            self-author (:self-author monitor-config)]
+       (if (str/blank? self-author)
+         ;; Without a self-author, poll-open-prs would shell `gh pr list
+         ;; --author <nil>` and the loop would retry forever. Skip with an
+         ;; explicit reason instead of spinning — surfaces as data, not a hang.
+         (-> ctx
+             (assoc-in [:phase :name] :observe)
+             (assoc-in [:phase :started-at] start-time)
+             (assoc-in [:phase :status] :completed)
+             (assoc-in [:phase :result]
+                       (response/success
+                        {:observe/status :skipped
+                         :observe/reason "No self-author resolved (gh unauthenticated?) — cannot poll PRs"})))
+         (let [monitor (pr-lifecycle/create-pr-monitor monitor-config)
+               evidence (pr-lifecycle/run-pr-monitor-loop monitor self-author)
 
-            monitor (pr-lifecycle/create-pr-monitor monitor-config)
-            evidence (pr-lifecycle/run-pr-monitor-loop monitor self-author)
-
-            result-data {:observe/status :completed
+               result-data {:observe/status :completed
                          :observe/evidence evidence
                          :observe/prs-monitored (count pr-infos)
                          :observe/duration-hours (:duration-hours evidence)
@@ -182,7 +197,7 @@
             (assoc-in [:phase :started-at] start-time)
             (assoc-in [:phase :status] :completed)
             (assoc-in [:phase :result] (response/success result-data))
-            (assoc :execution/pr-lifecycle-evidence evidence))))))
+            (assoc :execution/pr-lifecycle-evidence evidence))))))))
 
 (defn leave-observe
   "Post-processing for Observe phase. Records evidence and duration metrics."
