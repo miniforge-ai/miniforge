@@ -1,0 +1,88 @@
+;; =============================================================================
+;; Spec: Execute pack-derived policy gates in verify/review + per-run evidence
+;; =============================================================================
+;;
+;; Depends on policy-gate-compiler.spec.edn (which makes every enabled rule
+;; resolve to an N4 §3.1 check-fn). This spec makes those checks actually
+;; RUN and BLOCK at the right phases, and proves per run which policies were
+;; applied.
+;;
+;; Why this exists (dogfood evidence, 2026-05-25, PR #979):
+;;   The one pack-derived gate (gate/behavioral.clj) is wired only into the
+;;   :observe phase via workflow/behavioral_harness.clj, gated on a
+;;   :spec/behavioral-harness flag — so a normal canonical-sdlc run NEVER
+;;   evaluates the pack. verify runs tests only; review's gates are a
+;;   hardcoded [syntax, implementation-handoff, lint, no-secrets] set, none
+;;   pack-derived. And there is no per-run evidence of which rules were
+;;   applied (project_agent_rule_visibility). So even with enforceable
+;;   check-fns, nothing enforces them on the path a PR takes.
+
+{:spec/title "Execute pack-derived policy gates in verify/review + emit per-rule evidence"
+
+ :spec/description
+ "Wire the compiled, pack-derived gate set into the SDLC phases and make
+  enforcement observable per run.
+
+  GROUP 1: Phase-scoped pack-gate execution
+  Build a pack-gate evaluator that, for a given phase, selects the enabled
+  rules whose :applies-to {:phases} includes that phase, runs their
+  compiled check-fns over the phase artifact, and aggregates the resulting
+  violations by their originating rule's :rule/severity. Wire it into the
+  verify AND review phase gate sets (in addition to the existing
+  test/secrets gates), not only :observe. Enforcement keys off rule severity
+  per N4 §2.3.1 (distinct from the per-violation severity scale in N4 §3.3):
+  a violation from a rule with :rule/severity :error MUST block phase
+  completion (route to the existing repair/redirect path); :rule/severity
+  :warning SHOULD block unless auto-repaired; :info records only. When
+  evaluation yields zero violations, gating behavior MUST be identical to
+  today (no regression — existing workflows stay green).
+
+  GROUP 2: Per-run rule-application evidence
+  Every pack-gate evaluation emits per-rule-id telemetry through
+  event-stream: which rules were considered (matched :applies-to), which
+  passed, which failed (with violation detail + severity), for each phase
+  of each workflow run. Extend the existing gate event surface
+  (emit-gate-event!) rather than inventing a parallel channel. The result
+  is that a human (and automation) can answer 'which policies gated run X,
+  and what did each decide?' — closing the rule-visibility gap.
+
+  Non-goals: authoring new rules (theme owns the standards pack); the
+  rule->check-fn compiler (dependency spec); changing severities."
+
+ :spec/intent
+ {:type :feature
+  :scope ["components/phase-software-factory/src"
+          "components/gate/src"
+          "components/policy-pack/src"
+          "components/workflow/src"
+          "components/event-stream/src"
+          "components/phase/resources/config"]}
+
+ :spec/constraints
+ ["Phase rule selection MUST honor each rule's :applies-to {:phases}; a rule not targeting the phase is not evaluated there"
+  "Enforcement keys off the originating rule's :rule/severity per N4 §2.3.1 (not the per-violation severity scale of N4 §3.3): :rule/severity :error blocks phase completion; :warning blocks unless auto-repaired; :info is record-only"
+  "When evaluation yields zero violations, gating behavior is identical to today and existing green workflows stay green (no regression — N4 + the watchdog precedent)"
+  "Reuse the existing gate-execution path (gate/check-gate, apply-gate-validation) and event surface (emit-gate-event!) — no parallel enforcement channel"
+  "Per-rule evidence MUST include rule-id, phase, severity, passed?/failed, and violation detail; emitted for considered AND skipped-by-phase rules so 'applied set' is reconstructable"
+  "Heuristic (semantic-analyzer) rules default to :warning unless the pack marks them :error — do not hard-block a run on a non-deterministic judge by default"
+  "Exceptions are data at interfaces; a check-fn that throws is reported as a gate error, not a silent pass (fail-safe, mirroring the reviewer fix in #977)"]
+
+ :spec/acceptance-criteria
+ ["A dogfood/integration run whose artifact violates a pack rule with :rule/severity :error (e.g. an unused/duplicate namespace) fails the verify or review phase before release — regression guard for PR #979"
+  "A clean artifact passes the pack gate set in verify and review with zero violations and the workflow proceeds (no regression)"
+  "The pack gate in verify evaluates only rules whose :applies-to {:phases} includes :verify (and likewise for :review)"
+  "A violation from a :rule/severity :error rule routes to the repair/redirect path (back to implement) rather than opening a PR"
+  "A violation from a :rule/severity :warning rule does not block when auto-repair succeeds; blocks when it does not"
+  "After a run, the event log contains a per-rule-id record (passed/failed + severity) for each rule applied in each phase"
+  "A gate whose check-fn throws is recorded as a failed gate (fail-safe), not a pass"
+  "With the pack producing no violations, an existing passing fixture workflow still reaches :done unchanged"]
+
+ :spec/priority
+ {:tier :blocker
+  :axes #{:correctness :dogfood-enabler :observation :token-conservation}
+  :theme :policy-enforcement
+  :rationale "Turns enforceable rules into actual guarantees on the PR path; without it the compiler's check-fns never run where it matters."
+  :blocks []
+  :blocked-by ["policy-gate-compiler.spec.edn"]}
+
+ :spec/workflow-type :canonical-sdlc}
