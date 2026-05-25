@@ -24,6 +24,7 @@
    test isolation — the atom is module-level and shared across tests."
   (:require
    [clojure.test :refer [deftest is testing]]
+   [clojure.string :as str]
    [ai.miniforge.dag-executor.protocols.impl.worktree :as worktree]
    [ai.miniforge.dag-executor.protocols.executor :as proto]
    [ai.miniforge.dag-executor.scratch-commit :as scratch-commit]
@@ -32,14 +33,16 @@
 ;;------------------------------------------------------------------------------ Registry helpers
 
 (defn- reset-registry!
-  "Reset the lifecycle registry to empty. Called in finally blocks for isolation."
+  "Reset the lifecycle registry to empty. Called in finally blocks for isolation.
+   Uses @#'var to obtain the atom through its private Var, then reset! to empty it."
   []
   (reset! @#'worktree/worktree-lifecycle-registry {}))
 
 (defn- snapshot-registry
-  "Return a snapshot of the lifecycle registry for assertions."
+  "Return a snapshot of the lifecycle registry for assertions.
+   Delegates to the public get-worktree-registry accessor."
   []
-  @(#'worktree/worktree-lifecycle-registry))
+  (worktree/get-worktree-registry))
 
 ;;------------------------------------------------------------------------------ register-worktree-entry! tests
 
@@ -93,7 +96,7 @@
       (let [entry (get (snapshot-registry) "wf-rel-001")]
         (is (= :released (:status entry)))
         (is (pos? (:released-at entry)) ":released-at must be set to epoch ms")
-        ;; Critical: the scratch-ref and worktree-path are PRESERVED
+        ;; Critical: the scratch-ref and worktree-path are PRESERVED after release
         (is (= (scratch-commit/scratch-ref-name "wf-rel-001") (:scratch-ref entry))
             "scratch-ref must be preserved after release")
         (is (= "/tmp/worktrees/rel" (:worktree-path entry))
@@ -128,8 +131,9 @@
 
 (deftest get-worktree-registry-returns-empty-map-when-clean-test
   (testing "get-worktree-registry returns {} when nothing is registered"
-    ;; Assumes tests are isolated via reset-registry!
     (try
+      ;; Reset first to guarantee isolation
+      (reset-registry!)
       (is (= {} (worktree/get-worktree-registry)))
       (finally (reset-registry!)))))
 
@@ -147,12 +151,10 @@
                (:parent-repo-path (result/unwrap r))))))))
 
 (deftest derive-parent-repo-path-handles-relative-git-common-dir-test
-  (testing "resolves relative --git-common-dir paths against the worktree path"
-    ;; For a worktree under /base/task-abc, `git rev-parse --git-common-dir`
-    ;; might return a relative path like `../../main-repo/.git`
+  (testing "resolves relative --git-common-dir paths against the worktree directory"
+    ;; For a plain (non-linked) repo, git returns the relative path ".git"
     (with-redefs [worktree/run-git
                   (fn [& _]
-                    ;; Return a relative path from the worktree's CWD
                     {:exit 0 :out ".git\n" :err ""})]
       (let [r (worktree/derive-parent-repo-path "/tmp/my-repo")]
         (is (result/ok? r))
@@ -162,7 +164,7 @@
                (:parent-repo-path (result/unwrap r))))))))
 
 (deftest derive-parent-repo-path-returns-err-when-git-fails-test
-  (testing "returns result/err when git rev-parse --git-common-dir fails"
+  (testing "returns result/err when git rev-parse --git-common-dir exits non-zero"
     (with-redefs [worktree/run-git
                   (fn [& _]
                     {:exit 128 :out "" :err "fatal: not a git repository"})]
@@ -173,23 +175,22 @@
 ;;------------------------------------------------------------------------------ notify-file-written! tests
 
 (deftest notify-file-written!-calls-scratch-commit-with-parent-repo-test
-  (testing "notify-file-written! derives parent path and calls scratch-commit!"
+  (testing "notify-file-written! derives parent path and delegates to scratch-commit!"
     (let [scratch-args (atom nil)]
       (with-redefs [worktree/run-git
-                    (fn [& args]
-                      ;; Respond to rev-parse --git-common-dir
-                      (if (some #{"--git-common-dir"} args)
-                        {:exit 0 :out "/home/user/main-repo/.git\n" :err ""}
-                        {:exit 0 :out "" :err ""}))
+                    (fn [& _]
+                      {:exit 0 :out "/home/user/main-repo/.git\n" :err ""})
                     scratch-commit/scratch-commit!
                     (fn [parent-repo-path workflow-id phase file-path]
                       (reset! scratch-args {:parent-repo-path parent-repo-path
                                             :workflow-id      workflow-id
                                             :phase            phase
                                             :file-path        file-path})
-                      (result/ok {:commit-sha "deadbeef" :ref "refs/miniforge/scratch/wf-1"
-                                  :workflow-id workflow-id :phase phase
-                                  :file-path file-path}))]
+                      (result/ok {:commit-sha  "deadbeef"
+                                  :ref         (scratch-commit/scratch-ref-name workflow-id)
+                                  :workflow-id workflow-id
+                                  :phase       phase
+                                  :file-path   file-path}))]
         (let [r (worktree/notify-file-written!
                  "/tmp/worktrees/task-abc"
                  "wf-notify-001"
@@ -203,8 +204,8 @@
           (is (= "/tmp/worktrees/task-abc/components/foo/src/bar.clj"
                  (:file-path @scratch-args))))))))
 
-(deftest notify-file-written!-returns-err-when-derive-fails-test
-  (testing "notify-file-written! short-circuits on derive-parent-repo-path failure"
+(deftest notify-file-written!-short-circuits-when-derive-fails-test
+  (testing "notify-file-written! returns err without calling scratch-commit! on git failure"
     (let [scratch-called? (atom false)]
       (with-redefs [worktree/run-git
                     (fn [& _]
@@ -220,40 +221,53 @@
           (is (false? @scratch-called?)
               "scratch-commit! must NOT be called when parent-repo derivation fails"))))))
 
-;;------------------------------------------------------------------------------ acquire-environment! lifecycle hook tests
+(deftest notify-file-written!-returns-result-from-scratch-commit-test
+  (testing "notify-file-written! propagates the scratch-commit! result to caller"
+    (with-redefs [worktree/run-git
+                  (fn [& _]
+                    {:exit 0 :out "/repo/.git\n" :err ""})
+                  scratch-commit/scratch-commit!
+                  (fn [& _]
+                    (result/err :scratch-commit/hash-object-failed
+                                "hash-object failed" {:file-path "/bad/file"}))]
+      (let [r (worktree/notify-file-written!
+               "/tmp/wt" "wf-sc-fail" "verify" "/bad/file")]
+        (is (result/err? r))
+        (is (= :scratch-commit/hash-object-failed (get-in r [:error :code])))))))
+
+;;------------------------------------------------------------------------------ WorktreeExecutor lifecycle-hook integration tests
 
 (deftest acquire-environment-registers-workflow-when-id-provided-test
-  (testing "acquire-environment! registers the worktree when :workflow-id is in env-config"
+  (testing "acquire-environment! registers worktree in lifecycle registry when :workflow-id is in env-config"
     (try
-      (with-redefs [worktree/run-git     (fn [& _] {:exit 0 :out "" :err ""})
-                    worktree/run-shell   (fn [& _] {:exit 0 :out "" :err ""})
+      (with-redefs [worktree/run-git       (fn [& _] {:exit 0 :out "" :err ""})
+                    worktree/run-shell     (fn [& _] {:exit 0 :out "" :err ""})
                     worktree/ensure-directory (fn [_] nil)]
         (let [executor (worktree/create-worktree-executor {:base-path "/tmp/base"})
-              _        (proto/acquire-environment!
-                        executor
-                        "task-12345678"
-                        {:repo-path   "/tmp/repo"
-                         :branch      "main"
-                         :workflow-id "wf-lifecycle-acq"})]
+              ;; task-id must be at least 8 chars; executor takes (subs task-id 0 8)
+              task-id  "abcd1234efgh"]
+          (proto/acquire-environment! executor task-id
+                                      {:repo-path   "/tmp/repo"
+                                       :branch      "main"
+                                       :workflow-id "wf-lifecycle-acq"})
           (let [registry (snapshot-registry)
                 entry    (get registry "wf-lifecycle-acq")]
             (is (some? entry) "registry must contain the workflow entry")
             (is (= :active (:status entry)))
-            (is (str/includes? (:worktree-path entry) "task-12345")))))
-      (finally (reset-registry!))))
-  nil)
+            (is (str/ends-with? (:worktree-path entry) "task-abcd1234")
+                "worktree-path must include the truncated task-id prefix"))))
+      (finally (reset-registry!)))))
 
-(deftest acquire-environment-no-registry-entry-without-workflow-id-test
-  (testing "acquire-environment! skips registry when :workflow-id is absent"
+(deftest acquire-environment-skips-registry-without-workflow-id-test
+  (testing "acquire-environment! does not add a registry entry when :workflow-id is absent"
     (try
-      (with-redefs [worktree/run-git     (fn [& _] {:exit 0 :out "" :err ""})
-                    worktree/run-shell   (fn [& _] {:exit 0 :out "" :err ""})
+      (with-redefs [worktree/run-git       (fn [& _] {:exit 0 :out "" :err ""})
+                    worktree/run-shell     (fn [& _] {:exit 0 :out "" :err ""})
                     worktree/ensure-directory (fn [_] nil)]
         (let [executor (worktree/create-worktree-executor {:base-path "/tmp/base"})]
-          (proto/acquire-environment! executor "task-12345678"
-                                      {:repo-path "/tmp/repo"
-                                       :branch    "main"})
-          ;; No workflow-id → no registry entry
+          (proto/acquire-environment! executor "abcd1234efgh"
+                                      {:repo-path "/tmp/repo" :branch "main"})
+          ;; No :workflow-id → registry stays empty
           (is (empty? (snapshot-registry)))))
       (finally (reset-registry!)))))
 
@@ -262,7 +276,9 @@
     (try
       (with-redefs [worktree/run-git   (fn [& _] {:exit 0 :out "" :err ""})
                     worktree/run-shell (fn [& _] {:exit 0 :out "" :err ""})]
-        ;; Pre-seed the registry so we don't need to create a real worktree
+        ;; Pre-seed the registry matching the path the executor will derive.
+        ;; executor base-path=/tmp/base + environment-id=task-00000000
+        ;; → worktree-path = /tmp/base/task-00000000
         (worktree/register-worktree-entry! "wf-lifecycle-rel"
                                            "/tmp/base/task-00000000")
         (let [executor (worktree/create-worktree-executor {:base-path "/tmp/base"})]
@@ -270,10 +286,18 @@
           (let [entry (get (snapshot-registry) "wf-lifecycle-rel")]
             (is (some? entry))
             (is (= :released (:status entry)))
-            (is (pos? (:released-at entry))))))
+            (is (pos? (:released-at entry)))
+            ;; scratch-ref preserved after release
+            (is (= (scratch-commit/scratch-ref-name "wf-lifecycle-rel")
+                   (:scratch-ref entry))))))
       (finally (reset-registry!)))))
 
-;;------------------------------------------------------------------------------ require clojure.string
-
-;; clojure.string is used in acquire-environment test assertions via str/includes?
-(require '[clojure.string :as str])
+(deftest release-environment-without-matching-registry-entry-is-safe-test
+  (testing "release-environment! does not throw when no registry entry matches"
+    ;; This is the common case when :workflow-id was not in the original env-config
+    (with-redefs [worktree/run-git   (fn [& _] {:exit 0 :out "" :err ""})
+                  worktree/run-shell (fn [& _] {:exit 0 :out "" :err ""})]
+      (let [executor (worktree/create-worktree-executor {:base-path "/tmp/base"})]
+        ;; Should complete without throwing
+        (let [r (proto/release-environment! executor "no-registry-entry")]
+          (is (result/ok? r)))))))
