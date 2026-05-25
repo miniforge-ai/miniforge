@@ -13,6 +13,15 @@
              :max-tokens 150000
              :failure-strategy :retry
              :checkpoint-root "~/.miniforge/checkpoints"}
+  ;; Base directory under which git worktrees are created. Persists across
+  ;; reboots — the 2026-04-17 gates workflow lost 8+ min of working code when
+  ;; its /tmp worktree was wiped on macOS tmpfs cleanup.
+  ;;
+  ;; /tmp opt-in: override this key to "/tmp/miniforge-worktrees" for CI runs
+  ;; or sandbox tests that want ephemeral isolation. A warning is emitted at
+  ;; worktree-creation time if the legacy /tmp/miniforge-worktrees directory
+  ;; still has entries — safe to ignore if intentional.
+  :workflow/worktree-root "~/.miniforge/worktrees"
   :artifacts {:dir "~/.miniforge/artifacts"}
   :meta-loop {:enabled true
               :max-convergence-iterations 10

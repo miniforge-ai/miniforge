@@ -38,18 +38,29 @@
 (defn default-base-path
   "Default location for git worktrees acquired by the worktree executor.
 
-   Lives under `~/.miniforge/worktrees/` rather than `/tmp` so the
-   worktree (and any uncommitted implementer file writes living in it)
-   survives reboots and macOS-tmpfs cleanups. The 2026-04-17 gates
+   When called with no args returns the hardcoded default:
+   `~/.miniforge/worktrees/`. This path lives under the user's home so
+   worktrees (and any uncommitted implementer file writes inside them)
+   survive reboots and macOS-tmpfs cleanups. The 2026-04-17 gates
    workflow lost 8+ minutes of working code when its `/tmp` worktree
    was GC'd on process-tree restart; persistence outside `/tmp` is the
    foundation for the broader work in
    `work/worktree-persistence-scratch-branch.spec.edn`.
 
+   When called with a config map, checks `:workflow/worktree-root` first
+   and falls back to the no-arg default. This lets the executor read the
+   user's configured worktree root from `default-user-config.edn` without
+   requiring the caller to extract the key manually.
+
    Callers that need an ephemeral location (CI runs, sandbox tests)
-   can override via the `:base-path` config arg."
-  []
-  (str (System/getProperty "user.home") "/.miniforge/worktrees"))
+   can override via the `:base-path` config arg to `create-worktree-executor`,
+   or set `:workflow/worktree-root` in their user config to a `/tmp`-rooted
+   path for opt-in ephemeral behaviour."
+  ([]
+   (str (System/getProperty "user.home") "/.miniforge/worktrees"))
+  ([config]
+   (or (get config :workflow/worktree-root)
+       (default-base-path))))
 
 (def default-max-concurrent 4)
 
@@ -59,6 +70,42 @@
    and can be referenced from evidence bundles long after the run ends."
   []
   (str (System/getProperty "user.home") "/.miniforge/checkpoints"))
+
+;; ============================================================================
+;; Legacy /tmp worktree detection
+;; ============================================================================
+
+(defonce ^:private legacy-tmp-warned?
+  "Set to true once the legacy-/tmp-worktrees warning has fired in this JVM
+   session. Prevents noisy repetition across multiple worktree creates."
+  (atom false))
+
+(defn check-legacy-tmp-worktrees!
+  "Warn once per JVM session if /tmp/miniforge-worktrees/ exists and contains
+   worktree directories left over from the pre-2026-04-17 default path.
+
+   Non-blocking and non-throwing — purely advisory. Never prevents worktree
+   creation; the two paths coexist safely. Callers (e.g. CI environments)
+   that intentionally use /tmp can silence the warning by pointing
+   `:workflow/worktree-root` at the /tmp path in their user config, which
+   resets the detection expectation."
+  []
+  (when-not @legacy-tmp-warned?
+    (try
+      (let [legacy-dir (File. "/tmp/miniforge-worktrees")]
+        (when (and (.exists legacy-dir)
+                   (.isDirectory legacy-dir)
+                   (boolean (seq (filter #(.isDirectory ^File %)
+                                        (or (.listFiles legacy-dir) [])))))
+          (reset! legacy-tmp-warned? true)
+          (binding [*out* *err*]
+            (println "WARN [miniforge/worktree] Legacy /tmp/miniforge-worktrees/ detected with existing worktrees.")
+            (println "WARN [miniforge/worktree] Worktrees now default to ~/.miniforge/worktrees/ (survives reboots).")
+            (println "WARN [miniforge/worktree] Migration: mv /tmp/miniforge-worktrees/<name> ~/.miniforge/worktrees/")
+            (println "WARN [miniforge/worktree] Set :workflow/worktree-root in user config to suppress this warning."))))
+      (catch Exception _
+        ;; Advisory check only — filesystem errors must never block worktree creation
+        nil))))
 
 ;; ============================================================================
 ;; Helper Functions
@@ -126,6 +173,9 @@
 (defn create-worktree
   "Create a git worktree for the task.
 
+   Checks for legacy /tmp/miniforge-worktrees directories and emits an
+   advisory warning if found (never blocks creation).
+
    Serializes creation through worktree-lock to prevent concurrent git
    config.lock conflicts when multiple sub-workflows acquire environments
    simultaneously.
@@ -149,6 +199,7 @@
    This one-two punch keeps `git worktree add` failures from cascading into
    broken bundles whose only ref is a bare HEAD."
   [base-path repo-path worktree-name branch]
+  (check-legacy-tmp-worktrees!)
   (locking worktree-lock
     (let [worktree-path (str base-path "/" worktree-name)
           base-sha      (resolve-branch-sha repo-path branch)
@@ -724,16 +775,28 @@
 (defn create-worktree-executor
   "Create a worktree-based executor (fallback).
 
-   Config:
-   - :base-path - Base directory for worktrees (default:
-     `~/.miniforge/worktrees`). The previous `/tmp/miniforge-worktrees`
-     default was changed after the 2026-04-17 gates-workflow lost
-     8+ minutes of working code to a macOS tmpfs cleanup. Ephemeral
-     `/tmp`-rooted runs (CI, sandbox tests) opt in explicitly via
-     this key.
-   - :max-concurrent - Max concurrent worktrees (default: 4)"
+   Config keys (all optional):
+   - :base-path             - Explicit base directory for worktrees. Takes
+                              priority over everything else. Use for CI/sandbox
+                              runs that need an ephemeral path (e.g.
+                              `/tmp/miniforge-worktrees-ci`).
+   - :workflow/worktree-root - Base directory read from the user's
+                               `default-user-config.edn`. Checked when
+                               `:base-path` is absent. Defaults to
+                               `~/.miniforge/worktrees` in the EDN config.
+   - :max-concurrent         - Max concurrent worktrees (default: 4).
+
+   Resolution order for the base path:
+     1. `:base-path`              — explicit caller override
+     2. `:workflow/worktree-root` — from loaded user config
+     3. `(default-base-path)`     — hardcoded `~/.miniforge/worktrees`
+
+   The previous `/tmp/miniforge-worktrees` default was removed after the
+   2026-04-17 gates-workflow lost 8+ minutes of working code to a macOS
+   tmpfs cleanup. Ephemeral `/tmp`-rooted runs opt in explicitly."
   [config]
   (map->WorktreeExecutor
    {:config config
-    :base-path (get config :base-path (default-base-path))
+    :base-path (or (get config :base-path)
+                   (default-base-path config))
     :max-concurrent (get config :max-concurrent default-max-concurrent)}))
