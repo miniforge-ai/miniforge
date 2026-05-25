@@ -478,6 +478,40 @@
         (publish! stream event))
       (catch Exception _ nil))))
 
+(defn- emit-dag-activated!
+  "Emit :workflow/dag-activated when the DAG orchestrator takes over.
+
+   Distinct event type from :workflow/dag-considered so consumers can
+   filter on a single keyword to see every DAG activation without parsing
+   the outcome field.  Swallows errors — observability must not break execution."
+  [ctx plan]
+  (when-let [stream (resolve-event-stream ctx)]
+    (try
+      (let [publish! (requiring-resolve 'ai.miniforge.event-stream.interface/publish!)]
+        (publish! stream {:event/type      :workflow/dag-activated
+                          :event/timestamp (str (java.time.Instant/now))
+                          :workflow/id     (resolve-workflow-id ctx)
+                          :plan/id         (:plan/id plan)
+                          :plan/task-count (count (:plan/tasks plan))}))
+      (catch Exception _ nil))))
+
+(defn- emit-dag-skipped!
+  "Emit :workflow/dag-skipped when DAG execution is not attempted.
+
+   Distinct event type from :workflow/dag-considered so consumers can
+   filter on a single keyword to see every DAG skip without parsing the
+   outcome field.  Swallows errors — observability must not break execution."
+  [ctx reason extra]
+  (when-let [stream (resolve-event-stream ctx)]
+    (try
+      (let [publish! (requiring-resolve 'ai.miniforge.event-stream.interface/publish!)]
+        (publish! stream (merge {:event/type      :workflow/dag-skipped
+                                 :event/timestamp (str (java.time.Instant/now))
+                                 :workflow/id     (resolve-workflow-id ctx)
+                                 :dag/reason      reason}
+                                extra)))
+      (catch Exception _ nil))))
+
 (defn- merge-sub-worktree-changes!
   "Copy changed files from DAG sub-worktrees into the parent worktree.
    Each sub-workflow wrote to its own isolated worktree. For the release
@@ -572,7 +606,8 @@
                         (assoc base :dag/diagnostic
                                (dag-skip-diagnostic phase-result skip-reason))
                         base)]
-            (emit-dag-considered! ctx :skipped skip-reason extra)))
+            (emit-dag-considered! ctx :skipped skip-reason extra)
+            (emit-dag-skipped! ctx skip-reason extra)))
         nil)
       (let [plan (extract-plan-from-phase-result phase-result)
             ctx-with-resume (assoc ctx :pre-completed-ids
@@ -580,6 +615,7 @@
             _ (emit-dag-considered! ctx :activated :plan-has-tasks
                                     {:plan/id (:plan/id plan)
                                      :plan/task-count (count (:plan/tasks plan))})
+            _ (emit-dag-activated! ctx plan)
             dag-result (dag-orch/execute-plan-as-dag plan ctx-with-resume)]
         (if (schema/succeeded? dag-result)
           (apply-dag-success ctx dag-result pipeline

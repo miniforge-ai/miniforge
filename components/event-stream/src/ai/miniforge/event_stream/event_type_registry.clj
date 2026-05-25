@@ -40,331 +40,39 @@
      the browser switch; the remaining 39 silently fall through to `default: break`.
    * NAMING ASYMMETRIES: 13 constructors use a function name whose implied
      namespace differs from the actual `:event/type` namespace.  See
-     `naming-asymmetries` below."
+     `naming-asymmetries` below.
+
+   Registry data lives in
+   `resources/config/event-stream/event-type-registry.edn` — edit that
+   file to add or modify event types.  This namespace loads it and
+   derives the computed views below."
   (:require
+   [clojure.edn :as edn]
+   [clojure.java.io :as io]
    [clojure.string :as str]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Registry
+;; Registry — loaded from EDN resource
+
+(def ^:private registry-resource-path
+  "config/event-stream/event-type-registry.edn")
 
 (def event-type-registry
   "Complete mapping from constructor symbol name (as string) to serialised
    JSON event-type string, grouped by originating namespace.
+
+   Loaded from `resources/config/event-type-registry.edn` at namespace
+   init. Edit that file to add or modify event types — do not inline
+   data here.
 
    Columns:
      :constructor  — var name in `interface/events.clj` / `core.clj`
      :event-type   — Clojure keyword set on `:event/type`
      :json-string  — string the browser receives in `event['event/type']`
      :browser?     — true iff `handleWorkflowEvent` in `app.js` has a case"
-  [{:constructor "workflow-started"
-    :event-type  :workflow/started
-    :json-string "workflow/started"
-    :browser?    true}
-
-   {:constructor "phase-started"
-    :event-type  :workflow/phase-started
-    :json-string "workflow/phase-started"
-    :browser?    true}
-
-   {:constructor "phase-completed"
-    :event-type  :workflow/phase-completed
-    :json-string "workflow/phase-completed"
-    :browser?    true}
-
-   {:constructor "workflow-completed"
-    :event-type  :workflow/completed
-    :json-string "workflow/completed"
-    :browser?    true}
-
-   {:constructor "workflow-failed"
-    :event-type  :workflow/failed
-    :json-string "workflow/failed"
-    :browser?    true}
-
-   {:constructor "agent-chunk"
-    :event-type  :agent/chunk
-    :json-string "agent/chunk"
-    :browser?    true
-    :note        "High-frequency streaming event; browser intentionally does not toast but does refresh."}
-
-   ;; ── Events with no browser handler ──────────────────────────────────────
-
-   {:constructor "agent-status"
-    :event-type  :agent/status
-    :json-string "agent/status"
-    :browser?    false}
-
-   {:constructor "llm-request"
-    :event-type  :llm/request
-    :json-string "llm/request"
-    :browser?    false}
-
-   {:constructor "llm-response"
-    :event-type  :llm/response
-    :json-string "llm/response"
-    :browser?    false}
-
-   {:constructor "agent-started"
-    :event-type  :agent/started
-    :json-string "agent/started"
-    :browser?    false}
-
-   {:constructor "agent-completed"
-    :event-type  :agent/completed
-    :json-string "agent/completed"
-    :browser?    false}
-
-   {:constructor "agent-failed"
-    :event-type  :agent/failed
-    :json-string "agent/failed"
-    :browser?    false}
-
-   {:constructor "gate-started"
-    :event-type  :gate/started
-    :json-string "gate/started"
-    :browser?    false}
-
-   {:constructor "gate-passed"
-    :event-type  :gate/passed
-    :json-string "gate/passed"
-    :browser?    false}
-
-   {:constructor "gate-failed"
-    :event-type  :gate/failed
-    :json-string "gate/failed"
-    :browser?    false}
-
-   {:constructor "tool-invoked"
-    :event-type  :tool/invoked
-    :json-string "tool/invoked"
-    :browser?    false}
-
-   {:constructor "tool-completed"
-    :event-type  :tool/completed
-    :json-string "tool/completed"
-    :browser?    false}
-
-   {:constructor "workspace-persisted"
-    :event-type  :workspace/persisted
-    :json-string "workspace/persisted"
-    :browser?    false}
-
-   {:constructor "milestone-reached"
-    :event-type  :workflow/milestone-reached
-    :json-string "workflow/milestone-reached"
-    :browser?    false
-    :asymmetry?  true
-    :asymmetry-note "Constructor name implies namespace 'milestone'; actual namespace is 'workflow'"}
-
-   {:constructor "task-state-changed"
-    :event-type  :task/state-changed
-    :json-string "task/state-changed"
-    :browser?    false}
-
-   {:constructor "task-frontier-entered"
-    :event-type  :task/frontier-entered
-    :json-string "task/frontier-entered"
-    :browser?    false}
-
-   {:constructor "task-skip-propagated"
-    :event-type  :task/skip-propagated
-    :json-string "task/skip-propagated"
-    :browser?    false}
-
-   {:constructor "inter-agent-message-sent"
-    :event-type  :agent/message-sent
-    :json-string "agent/message-sent"
-    :browser?    false
-    :asymmetry?  true
-    :asymmetry-note "Constructor name implies namespace 'inter-agent'; actual namespace is 'agent'"}
-
-   {:constructor "inter-agent-message-received"
-    :event-type  :agent/message-received
-    :json-string "agent/message-received"
-    :browser?    false
-    :asymmetry?  true
-    :asymmetry-note "Constructor name implies namespace 'inter-agent'; actual namespace is 'agent'"}
-
-   {:constructor "listener-attached"
-    :event-type  :listener/attached
-    :json-string "listener/attached"
-    :browser?    false}
-
-   {:constructor "listener-detached"
-    :event-type  :listener/detached
-    :json-string "listener/detached"
-    :browser?    false}
-
-   {:constructor "annotation-created"
-    :event-type  :annotation/created
-    :json-string "annotation/created"
-    :browser?    false}
-
-   {:constructor "control-action-requested"
-    :event-type  :control-action/requested
-    :json-string "control-action/requested"
-    :browser?    false}
-
-   {:constructor "control-action-executed"
-    :event-type  :control-action/executed
-    :json-string "control-action/executed"
-    :browser?    false}
-
-   {:constructor "chain-started"
-    :event-type  :chain/started
-    :json-string "chain/started"
-    :browser?    false}
-
-   {:constructor "chain-step-started"
-    :event-type  :chain/step-started
-    :json-string "chain/step-started"
-    :browser?    false}
-
-   {:constructor "chain-step-completed"
-    :event-type  :chain/step-completed
-    :json-string "chain/step-completed"
-    :browser?    false}
-
-   {:constructor "chain-step-failed"
-    :event-type  :chain/step-failed
-    :json-string "chain/step-failed"
-    :browser?    false}
-
-   {:constructor "chain-completed"
-    :event-type  :chain/completed
-    :json-string "chain/completed"
-    :browser?    false}
-
-   {:constructor "chain-failed"
-    :event-type  :chain/failed
-    :json-string "chain/failed"
-    :browser?    false}
-
-   ;; ── Layer 1: OCI container events ────────────────────────────────────────
-
-   {:constructor "container-started"
-    :event-type  :oci/container-started
-    :json-string "oci/container-started"
-    :browser?    false
-    :asymmetry?  true
-    :asymmetry-note "Constructor name implies namespace 'container'; actual namespace is 'oci'"}
-
-   {:constructor "container-completed"
-    :event-type  :oci/container-completed
-    :json-string "oci/container-completed"
-    :browser?    false
-    :asymmetry?  true
-    :asymmetry-note "Constructor name implies namespace 'container'; actual namespace is 'oci'"}
-
-   ;; ── Layer 1: Tool supervision events ─────────────────────────────────────
-
-   {:constructor "tool-use-evaluated"
-    :event-type  :supervision/tool-use-evaluated
-    :json-string "supervision/tool-use-evaluated"
-    :browser?    false
-    :asymmetry?  true
-    :asymmetry-note "Constructor name implies namespace 'tool'; actual namespace is 'supervision'"}
-
-   ;; ── Layer 1: Control plane events ────────────────────────────────────────
-
-   {:constructor "cp-agent-registered"
-    :event-type  :control-plane/agent-registered
-    :json-string "control-plane/agent-registered"
-    :browser?    false
-    :asymmetry?  true
-    :asymmetry-note "Constructor prefix 'cp-' expands to full namespace 'control-plane'"}
-
-   {:constructor "cp-agent-heartbeat"
-    :event-type  :control-plane/agent-heartbeat
-    :json-string "control-plane/agent-heartbeat"
-    :browser?    false
-    :asymmetry?  true
-    :asymmetry-note "Constructor prefix 'cp-' expands to full namespace 'control-plane'"}
-
-   {:constructor "cp-agent-state-changed"
-    :event-type  :control-plane/agent-state-changed
-    :json-string "control-plane/agent-state-changed"
-    :browser?    false
-    :asymmetry?  true
-    :asymmetry-note "Constructor prefix 'cp-' expands to full namespace 'control-plane'"}
-
-   {:constructor "cp-decision-created"
-    :event-type  :control-plane/decision-created
-    :json-string "control-plane/decision-created"
-    :browser?    false
-    :asymmetry?  true
-    :asymmetry-note "Constructor prefix 'cp-' expands to full namespace 'control-plane'"}
-
-   {:constructor "cp-decision-resolved"
-    :event-type  :control-plane/decision-resolved
-    :json-string "control-plane/decision-resolved"
-    :browser?    false
-    :asymmetry?  true
-    :asymmetry-note "Constructor prefix 'cp-' expands to full namespace 'control-plane'"}
-
-   {:constructor "intervention-requested"
-    :event-type  :supervisory/intervention-requested
-    :json-string "supervisory/intervention-requested"
-    :browser?    false}
-
-   {:constructor "intervention-state-changed"
-    :event-type  :supervisory/intervention-state-changed
-    :json-string "supervisory/intervention-state-changed"
-    :browser?    false}
-
-   ;; PR fleet + scoring (N5-delta-2 §3 / §4.1)
-   {:constructor "pr-created"
-    :event-type  :pr/created
-    :json-string "pr/created"
-    :browser?    false}
-
-   {:constructor "pr-scored"
-    :event-type  :pr/scored
-    :json-string "pr/scored"
-    :browser?    false}
-
-   {:constructor "dependency-health-updated"
-    :event-type  :dependency/health-updated
-    :json-string "dependency/health-updated"
-    :browser?    false}
-
-   {:constructor "dependency-recovered"
-    :event-type  :dependency/recovered
-    :json-string "dependency/recovered"
-    :browser?    false}
-
-   ;; Zettelkasten lifecycle (miniforge-fleet Phase E.3 outbox path)
-   {:constructor "zettel-promoted"
-    :event-type  :zettel/promoted
-    :json-string "zettel/promoted"
-    :browser?    false}
-
-   ;; GROUP 1+2 foundation: tool-call lifecycle + phase heartbeat
-   {:constructor "agent-tool-call-started"
-    :event-type  :agent/tool-call-started
-    :json-string "agent/tool-call-started"
-    :browser?    false}
-
-   {:constructor "tool-call-completed"
-    :event-type  :tool/call-completed
-    :json-string "tool/call-completed"
-    :browser?    false}
-
-   {:constructor "phase-heartbeat"
-    :event-type  :workflow/phase-heartbeat
-    :json-string "workflow/phase-heartbeat"
-    :browser?    false}
-
-   ;; GROUP 1+4 / GROUP 2 agent stream-stall + session events
-   {:constructor "agent-stream-stalled"
-    :event-type  :agent/stream-stalled
-    :json-string "agent/stream-stalled"
-    :browser?    false}
-
-   {:constructor "agent-session-captured"
-    :event-type  :agent/session-captured
-    :json-string "agent/session-captured"
-    :browser?    false}])
+  (-> (io/resource registry-resource-path)
+      slurp
+      edn/read-string))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Derived views
@@ -415,7 +123,7 @@
 ;; Audit summary (machine-readable)
 
 (def audit-summary
-  {:audit/date          "2026-05-19"
+  {:audit/date          "2026-05-24"
    :audit/source-server "components/event-stream/src/ai/miniforge/event_stream/interface/events.clj"
    :audit/source-browser "components/web-dashboard/resources/public/js/app.js"
    :audit/browser-switch "handleWorkflowEvent"
