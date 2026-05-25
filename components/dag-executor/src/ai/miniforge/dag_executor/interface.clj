@@ -848,6 +848,11 @@
    Creates `~/.miniforge/` when it does not exist."
   scratch-gc-queue/gc-queue-path)
 
+(def gc-default-max-age-days
+  "Default scratch-ref retention period in days (7).  Reference this from CLI
+   commands instead of duplicating the magic number."
+  scratch-gc-queue/default-max-age-days)
+
 (def enqueue-workflow-gc!
   "Append a GC entry for `workflow-id` to `~/.miniforge/scratch-gc-queue.edn`.
 

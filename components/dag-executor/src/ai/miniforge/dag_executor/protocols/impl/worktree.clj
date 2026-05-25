@@ -695,7 +695,7 @@
                               (if (.isAbsolute f)
                                 f
                                 (File. ^String worktree-path ^String git-common-str)))
-            abs-git-common  (.getCanonicalPath git-common-file)
+            abs-git-common  (.getAbsolutePath git-common-file)
             parent-repo     (.getAbsolutePath
                              (.getParentFile (File. ^String abs-git-common)))]
         (result/ok {:parent-repo-path parent-repo}))

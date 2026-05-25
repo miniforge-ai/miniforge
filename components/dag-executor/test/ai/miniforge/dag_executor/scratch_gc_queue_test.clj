@@ -253,3 +253,28 @@
         (finally
           (delete-dir-recursive! tmp-dir)
           (delete-dir-recursive! repo))))))
+
+;;------------------------------------------------------------------------------ run-deferred-gc! — gc error path
+
+(deftest run-deferred-gc!-gc-failure-leaves-queue-intact-test
+  (testing "When gc-scratch-refs! fails the queue is not modified and result is err"
+    ;; Write a stale entry manually (8 days old) so it qualifies for GC.
+    (let [tmp-dir       (make-temp-dir!)
+          tmp-path      (str tmp-dir "/scratch-gc-queue.edn")
+          eight-days-ago (java.util.Date.
+                          (- (System/currentTimeMillis)
+                             (* 8 24 60 60 1000)))]
+      (try
+        (with-redefs [sut/gc-queue-path (constantly tmp-path)]
+          (spit tmp-path (pr-str [{:workflow-id "wf-stale-err"
+                                   :finished-at eight-days-ago}]))
+          ;; Pass a non-existent path as the repo — git plumbing will fail.
+          (let [r (sut/run-deferred-gc! "/nonexistent-path-for-gc-error-test" 0)]
+            ;; gc-scratch-refs! fails → result must be err.
+            (is (result/err? r))
+            ;; The queue file must still contain the stale entry (not wiped).
+            (let [remaining (read-raw-queue tmp-path)]
+              (is (= 1 (count remaining)))
+              (is (= "wf-stale-err" (:workflow-id (first remaining)))))))
+        (finally
+          (delete-dir-recursive! tmp-dir))))))

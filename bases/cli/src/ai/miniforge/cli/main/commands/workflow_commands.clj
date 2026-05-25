@@ -153,23 +153,24 @@
    - `:max-age-days` integer — age threshold in days (default 7; 0 = immediate)
    - `:repo-path`    string  — parent git repo path (default: current repo root)"
   [opts]
-  (let [max-age-days (or (:max-age-days opts) 7)
+  (let [max-age-days (get opts :max-age-days gc-queue/gc-default-max-age-days)
         repo-root    (or (:repo-path opts) (worktree/worktree-root))]
     (if-not repo-root
       (do
-        (display/print-error "gc-scratch: not inside a git repository (no .git found)")
+        (display/print-error (messages/t :workflow-cmd/gc-scratch-no-repo))
         (shared/exit! 1))
       (let [result (gc-queue/run-deferred-gc! repo-root max-age-days)]
-        (if (= :ok (:status result))
-          (let [{:keys [pruned remaining gc-result]} (:data result)
+        (if (gc-queue/ok? result)
+          (let [{:keys [pruned remaining gc-result]} (gc-queue/unwrap result)
                 deleted-count (count (:deleted gc-result))]
-            (println (str "Scratch-ref GC: pruned " pruned " queue entries"
-                          ", deleted " deleted-count " git refs"
-                          ", " remaining " queue entries remain.")))
+            (println (messages/t :workflow-cmd/gc-scratch-success
+                                 {:pruned    pruned
+                                  :deleted   deleted-count
+                                  :remaining remaining})))
           (do
             (display/print-error
-             (str "gc-scratch failed: "
-                  (get-in result [:error :message] "unknown error")))
+             (messages/t :workflow-cmd/gc-scratch-failed
+                         {:error (get-in result [:error :message] "unknown error")}))
             (shared/exit! 1)))))))
 
 ;------------------------------------------------------------------------------ Rich Comment
@@ -179,5 +180,8 @@
 
   ;; Test workflow cancel
   (workflow-cancel-cmd {:id "some-uuid"})
+
+  ;; Test GC scratch (run with max-age=0 to wipe all refs immediately)
+  (workflow-gc-scratch-cmd {:max-age-days 0})
 
   :end)

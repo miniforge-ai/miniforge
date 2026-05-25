@@ -118,27 +118,6 @@
         (agent/run-cycle-from-context! ctx))
       (catch Exception _e nil))))
 
-;------------------------------------------------------------------------------ Layer 0.7
-;; Deferred scratch-ref GC — piggyback cleanup on normal workflow traffic
-
-(defn- enqueue-workflow-gc-best-effort!
-  "Append `workflow-id` to the scratch-ref GC queue.
-   Never throws — GC housekeeping must not interfere with the workflow result."
-  [workflow-id]
-  (try
-    (gc-queue/enqueue-workflow-gc! workflow-id)
-    (catch Exception _ nil)))
-
-(defn- run-gc-pass-best-effort!
-  "Run the deferred scratch-ref GC pass using the current git repo as the
-   parent-repo-path.  Invoked once at workflow start so stale refs from prior
-   workflows are collected without a background daemon.  Never throws."
-  []
-  (try
-    (when-let [repo-root (worktree/worktree-root)]
-      (gc-queue/run-deferred-gc! repo-root))
-    (catch Exception _ nil)))
-
 ;------------------------------------------------------------------------------ Layer 0.6
 ;; Workflow interface resolution and pipeline helpers
 
@@ -170,6 +149,30 @@
       (when-not quiet
         (println (display/colorize :yellow (messages/t :workflow-runner/artifact-store-warning))))
       nil)))
+
+;------------------------------------------------------------------------------ Layer 0.7
+;; Deferred scratch-ref GC — piggyback cleanup on normal workflow traffic
+
+(defn- enqueue-workflow-gc-best-effort!
+  "Append `workflow-id` to the scratch-ref GC queue.
+   Never throws — GC housekeeping must not interfere with the workflow result."
+  [workflow-id]
+  (try
+    (gc-queue/enqueue-workflow-gc! workflow-id)
+    (catch Exception _ nil)))
+
+(defn- run-gc-pass-best-effort!
+  "Run the deferred scratch-ref GC pass using the current git repo as the
+   parent-repo-path.  Invoked once at workflow start so stale refs from prior
+   workflows are collected without a background daemon.  Never throws."
+  []
+  (try
+    (when-let [repo-root (worktree/worktree-root)]
+      (gc-queue/run-deferred-gc! repo-root))
+    (catch Exception _ nil)))
+
+;------------------------------------------------------------------------------ Layer 0.8
+;; Source-root and execution-context validation helpers
 
 (defn- valid-source-root?
   [source-root]
@@ -1033,10 +1036,6 @@
               ;; boot-time recovery pass picks up half-finished
               ;; archives on next start.
               (archive-workflow-manifest! manifest-handle workflow-id)
-              ;; Schedule deferred GC for this workflow's scratch ref — the
-              ;; ref will be deleted on a future run-gc-pass-best-effort! call
-              ;; once it is older than the 7-day retention window.
-              (enqueue-workflow-gc-best-effort! workflow-id)
               (display/print-result result opts)
               (cond-> result
                 (some? shutdown) (assoc :event-durability shutdown))))
@@ -1047,7 +1046,12 @@
             ;; publish-failure-event! :cancelled branch.
             (mark-manifest-terminal! manifest-handle :cancelled)
             (finish-workflow-manifest! manifest-handle)
-            (progress-cleanup)))))
+            (progress-cleanup)
+            ;; Schedule deferred GC for this workflow's scratch ref — fires
+            ;; here (finally) so it runs on both normal completion and any
+            ;; exception path.  The ref will be deleted on a future
+            ;; run-gc-pass-best-effort! call once older than 7 days.
+            (enqueue-workflow-gc-best-effort! workflow-id)))))
     (catch Exception e
       (when-not quiet
         (println (display/colorize :red (messages/t :workflow-runner/run-error {:error (ex-message e)}))))
@@ -1170,12 +1174,13 @@
             (move-spec-on-completion! provenance result)
             ;; Trigger meta-loop learning cycle in background
             (trigger-meta-loop-after-workflow! workflow-id outcome-status nil)
-            ;; Schedule deferred GC for this workflow's scratch ref.
-            (enqueue-workflow-gc-best-effort! workflow-id)
             result)
           (finally
             (progress-cleanup)
-            (when command-poller-cleanup (command-poller-cleanup))))))
+            (when command-poller-cleanup (command-poller-cleanup))
+            ;; Schedule deferred GC for this workflow's scratch ref — in finally
+            ;; so it fires on both normal completion and exception exit paths.
+            (enqueue-workflow-gc-best-effort! workflow-id)))))
     (catch Object _
       (let [e (:throwable &throw-context)]
         (when-not quiet

@@ -482,6 +482,9 @@
   :workflow-cmd/cancel-usage "Usage: {command}"
   :workflow-cmd/cancel-success "Cancel signal sent to workflow: {id}"
   :workflow-cmd/cancel-failed "Failed to cancel workflow: {error}"
+  :workflow-cmd/gc-scratch-no-repo "gc-scratch: not inside a git repository (no .git found)"
+  :workflow-cmd/gc-scratch-success "Scratch-ref GC: pruned {pruned} queue entries, deleted {deleted} git refs, {remaining} queue entries remain."
+  :workflow-cmd/gc-scratch-failed "gc-scratch failed: {error}"
 
   ;; ── PR ────────────────────────────────────────────────────────────────
   :pr/no-repos "No repositories specified."

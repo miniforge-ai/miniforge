@@ -17,13 +17,15 @@
 ;; limitations under the License.
 
 (ns ai.miniforge.cli.main.commands.workflow-commands-test
-  "Unit tests for workflow subcommands: execute, status, cancel."
+  "Unit tests for workflow subcommands: execute, status, cancel, gc-scratch."
   (:require
    [clojure.test :refer [deftest testing is use-fixtures]]
    [babashka.fs :as fs]
    [ai.miniforge.cli.app-config :as app-config]
    [ai.miniforge.cli.main.commands.shared :as shared]
-   [ai.miniforge.cli.main.commands.workflow-commands :as sut]))
+   [ai.miniforge.cli.main.commands.workflow-commands :as sut]
+   [ai.miniforge.cli.worktree :as worktree]
+   [ai.miniforge.dag-executor.interface :as gc-queue]))
 
 ;------------------------------------------------------------------------------ Layer 0: Fixtures & factories
 
@@ -120,3 +122,49 @@
           (is (fs/exists? commands-dir))
           (let [files (fs/list-dir commands-dir)]
             (is (pos? (count files)))))))))
+
+;------------------------------------------------------------------------------ gc-scratch-cmd tests
+
+(deftest workflow-gc-scratch-cmd-no-repo-test
+  (testing "exits with code 1 and prints an error when not inside a git repo"
+    (let [exited? (atom false)
+          output  (atom "")]
+      (with-redefs [worktree/worktree-root (constantly nil)
+                    shared/exit! (fn [_] (reset! exited? true))]
+        (reset! output (with-out-str (sut/workflow-gc-scratch-cmd {}))))
+      (is @exited?)
+      ;; The i18n message must mention "git repository" so the user understands the failure.
+      (is (re-find #"(?i)git" @output)))))
+
+(deftest workflow-gc-scratch-cmd-success-test
+  (testing "prints a summary line on successful GC"
+    (let [output  (atom "")
+          gc-data {:pruned 2 :remaining 1 :gc-result {:deleted ["refs/miniforge/scratch/wf-a"
+                                                                  "refs/miniforge/scratch/wf-b"]
+                                                       :retained 0}}]
+      (with-redefs [worktree/worktree-root (constantly "/fake/repo")
+                    gc-queue/run-deferred-gc! (fn [_ _] (gc-queue/ok gc-data))]
+        (reset! output (with-out-str (sut/workflow-gc-scratch-cmd {:max-age-days 7}))))
+      ;; Output must contain the pruned count and deleted count.
+      (is (re-find #"2" @output))
+      (is (re-find #"(?i)pruned|GC|scratch" @output)))))
+
+(deftest workflow-gc-scratch-cmd-gc-failure-test
+  (testing "exits with code 1 when gc-queue/run-deferred-gc! returns an error"
+    (let [exited? (atom false)]
+      (with-redefs [worktree/worktree-root (constantly "/fake/repo")
+                    gc-queue/run-deferred-gc! (fn [_ _]
+                                                (gc-queue/err :gc/test-error "simulated GC failure"))
+                    shared/exit! (fn [_] (reset! exited? true))]
+        (with-out-str (sut/workflow-gc-scratch-cmd {})))
+      (is @exited?))))
+
+(deftest workflow-gc-scratch-cmd-uses-default-max-age-test
+  (testing "passes gc-default-max-age-days when no :max-age-days option given"
+    (let [captured-age (atom nil)]
+      (with-redefs [worktree/worktree-root (constantly "/fake/repo")
+                    gc-queue/run-deferred-gc! (fn [_ age]
+                                                (reset! captured-age age)
+                                                (gc-queue/ok {:pruned 0 :remaining 0 :gc-result nil}))]
+        (with-out-str (sut/workflow-gc-scratch-cmd {})))
+      (is (= gc-queue/gc-default-max-age-days @captured-age)))))
