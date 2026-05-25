@@ -373,3 +373,22 @@
     (let [k (mock-executor :kubernetes {:available? false :reason "x"})
           d (mock-executor :docker     {:available? false :reason "y"})]
       (is (nil? (sut/select-executor {:kubernetes k :docker d}))))))
+
+;------------------------------------------------------------------------------ Layer 3
+;; GC queue interface contract — public vars added in GROUP 4
+
+(deftest gc-default-max-age-days-test
+  (testing "gc-default-max-age-days is 7"
+    (is (= 7 sut/gc-default-max-age-days))))
+
+(deftest gc-queue-path-returns-edn-path-test
+  (testing "gc-queue-path returns a non-blank string ending in .edn"
+    (let [p (sut/gc-queue-path)]
+      (is (string? p))
+      (is (not (clojure.string/blank? p)))
+      (is (clojure.string/ends-with? p ".edn")))))
+
+(deftest gc-queue-vars-are-callable-test
+  (testing "enqueue-workflow-gc! and run-deferred-gc! are re-exported as callable fns"
+    (is (fn? sut/enqueue-workflow-gc!))
+    (is (fn? sut/run-deferred-gc!))))

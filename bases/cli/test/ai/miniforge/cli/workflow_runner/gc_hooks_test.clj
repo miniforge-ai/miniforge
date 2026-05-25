@@ -97,3 +97,10 @@
           gc-fn            (constantly gc-result)]
       (is (= gc-result
              (sut/run-gc-pass-best-effort! worktree-root-fn gc-fn))))))
+
+(deftest run-gc-pass!-swallows-worktree-root-fn-exception-test
+  (testing "never propagates an exception thrown by worktree-root-fn"
+    (let [throwing-root-fn (fn [] (throw (Exception. "fs gone")))]
+      ;; The outer try/catch Exception in run-gc-pass-best-effort! covers
+      ;; exceptions from any collaborator, including worktree-root-fn itself.
+      (is (nil? (sut/run-gc-pass-best-effort! throwing-root-fn identity))))))

@@ -141,14 +141,12 @@
   [entry]
   (try
     (let [fa (:finished-at entry)]
-      (cond
+      (if (inst? fa)
         ;; #inst tagged literals are read back as java.util.Date by Clojure's
         ;; EDN reader, which implements java.util.Date and satisfies inst?.
-        (inst? fa) (quot (.getTime ^java.util.Date fa) 1000)
-        ;; Belt-and-suspenders: handle raw Instant if somehow stored that way.
-        (instance? Instant fa) (.getEpochSecond ^Instant fa)
+        (quot (.getTime ^java.util.Date fa) 1000)
         ;; Missing or unrecognised type — treat as never-stale to be safe.
-        :else Long/MAX_VALUE))
+        Long/MAX_VALUE))
     (catch Exception _ Long/MAX_VALUE)))
 
 (defn- with-queue-lock!
@@ -207,7 +205,7 @@
 
    Returns:
      result/ok  `{:workflow-id str :queue-size int}`
-     result/err `:scratch-gc-queue/enqueue-failed` on I/O failure
+     result/err `:scratch-gc-queue/enqueue-failed` on I/O failure during write
      result/err `:scratch-gc-queue/locked` when the lock is contended"
   [workflow-id]
   (try
@@ -220,9 +218,17 @@
                 entry   {:workflow-id (str workflow-id)
                          :finished-at (java.util.Date/from (Instant/now))}
                 updated (conj entries entry)]
-            (write-gc-queue! path updated)
-            (result/ok {:workflow-id (str workflow-id)
-                        :queue-size  (count updated)})))))
+            ;; Nested try so that spit failures surface as :enqueue-failed
+            ;; rather than being re-caught by with-queue-lock!'s outer handler
+            ;; (which would return the less-specific :lock-failed code).
+            (try
+              (write-gc-queue! path updated)
+              (result/ok {:workflow-id (str workflow-id)
+                          :queue-size  (count updated)})
+              (catch Exception e
+                (result/err :scratch-gc-queue/enqueue-failed
+                            (str "failed to write GC queue: " (.getMessage e))
+                            {:workflow-id (str workflow-id) :path path})))))))
     (catch Exception e
       (result/err :scratch-gc-queue/enqueue-failed
                   (str "failed to enqueue workflow GC entry: " (.getMessage e))
@@ -251,7 +257,7 @@
                          Defaults to [[default-max-age-days]] (7 days).
 
    Returns:
-     result/ok  `{:pruned int :remaining int :gc-result map-or-nil}`
+     result/ok  `{:pruned int :pruned-ids [str ...] :remaining int :gc-result map-or-nil}`
      result/err `:scratch-gc-queue/run-failed` on unexpected failure
      result/err `:scratch-gc-queue/locked` when the lock is contended"
   ([parent-repo-path]
@@ -301,10 +307,10 @@
   ;; Run GC piggybacking on next workflow start.
   ;; Deletes scratch refs older than 7 days; writes fresh entries back to queue.
   (run-deferred-gc! "/path/to/parent-repo")
-  ;=> {:status :ok :data {:pruned 0 :remaining 1 :gc-result nil}}
+  ;=> {:status :ok :data {:pruned 0 :pruned-ids [] :remaining 1 :gc-result nil}}
 
   ;; Immediate GC — wipe all scratch refs now.
   (run-deferred-gc! "/path/to/parent-repo" 0)
-  ;=> {:status :ok :data {:pruned 1 :remaining 0 :gc-result {:deleted [...] :retained 0}}}
+  ;=> {:status :ok :data {:pruned 1 :pruned-ids ["task-a5a93af5"] :remaining 0 :gc-result {:deleted [...] :retained 0}}}
 
   :leave-this-here)
