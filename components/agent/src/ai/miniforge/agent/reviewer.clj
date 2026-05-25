@@ -228,12 +228,38 @@
          (loop/fail-result :implementation-handoff :policy errors)
          (loop/pass-result :implementation-handoff :policy))))))
 
+(def ^:private blocking-gate-types
+  "Internal gate types whose failure overrides even an LLM :approved verdict —
+   the deterministic safety net the LLM cannot be trusted to replace: broken
+   syntax, policy violations (e.g. :no-secrets, degraded implementation
+   handoff), and failing tests. Advisory gates like :lint do NOT override
+   approval — a lint failure downgrades to :conditionally-approved instead.
+
+   Before this, every internal-gate error counted as blocking because
+   `loop/make-error` sets no :severity and the filter defaulted to :blocking.
+   A failing lint gate then flipped a verify-passed, LLM-:approved build to
+   :rejected, capping every dogfood spec at the :review-approved gate
+   (observed 2026-05-24, workflow adhoc-807481487)."
+  #{:syntax :policy :test})
+
+(defn- error-blocking?
+  "An internal-gate error blocks when it explicitly declares
+   `:severity :blocking`, or — absent an explicit severity — when it comes
+   from a blocking gate type. Advisory-gate errors (e.g. :lint) without an
+   explicit blocking severity are not blocking."
+  [gate-type error]
+  (if-let [severity (:severity error)]
+    (= :blocking severity)
+    (contains? blocking-gate-types gate-type)))
+
 (defn extract-blocking-issues
-  "Extract blocking errors from failed gates."
+  "Extract blocking errors from failed gates, honoring per-error severity and
+   gate type (see `error-blocking?`). Errors from advisory gates such as
+   :lint no longer force a rejection of an otherwise-approved review."
   [failed-gates]
   (->> failed-gates
-       (mapcat :errors)
-       (filter #(= :blocking (:severity % :blocking)))
+       (mapcat (fn [{:keys [gate-type errors]}]
+                 (filter #(error-blocking? gate-type %) errors)))
        vec))
 
 (defn extract-warning-messages

@@ -575,6 +575,49 @@
         (is (= :rejected  (get-in override-entry [:data :final-decision])))
         (is (= [:always-fails] (get-in override-entry [:data :failing-gate-ids])))))))
 
+(defn- failed-gate-feedback
+  "Failed gate feedback with a given type and errors. Errors mirror
+   loop/make-error (no :severity) unless a caller provides one."
+  [gate-type errors]
+  {:gate-id gate-type
+   :gate-type gate-type
+   :passed? false
+   :errors errors
+   :warnings []
+   :duration-ms 0})
+
+(deftest test-advisory-gate-failure-does-not-block-approval
+  ;; Regression: a failing :lint gate (errors carry no :severity, so the old
+  ;; :blocking default classified them blocking) flipped a verify-passed,
+  ;; LLM-:approved build to :rejected — capping every dogfood spec at the
+  ;; :review-approved gate (2026-05-24, workflow adhoc-807481487).
+  (testing "a :lint gate failure (no severity) is not a blocking issue"
+    (let [failed [(failed-gate-feedback :lint [{:code :lint-error
+                                                :message "trailing whitespace"}])]]
+      (is (empty? (reviewer/extract-blocking-issues failed)))
+      (is (= :conditionally-approved
+             (:decision (reviewer/make-review-decision failed {})))
+          "non-blocking failure downgrades to :conditionally-approved, not :rejected")))
+  (testing "deterministic safety-net gates still block an LLM :approved"
+    (doseq [gate-type [:syntax :policy :test]]
+      (let [failed [(failed-gate-feedback gate-type [{:code :err :message "boom"}])]]
+        (is (seq (reviewer/extract-blocking-issues failed))
+            (str gate-type " failure must remain blocking"))
+        (is (= :rejected (:decision (reviewer/make-review-decision failed {})))))))
+  (testing "explicit :severity overrides gate-type classification"
+    (is (seq (reviewer/extract-blocking-issues
+              [(failed-gate-feedback :lint [{:message "x" :severity :blocking}])]))
+        "an explicit :blocking severity blocks even on an advisory gate")
+    (is (empty? (reviewer/extract-blocking-issues
+                 [(failed-gate-feedback :policy [{:message "y" :severity :warning}])]))
+        "an explicit :warning severity does not block even on a safety-net gate"))
+  (testing "LLM :approved survives an advisory gate failure as :conditionally-approved (gate passes)"
+    (let [gate-decision (:decision (reviewer/make-review-decision
+                                    [(failed-gate-feedback :lint
+                                                           [{:message "style"}])] {}))]
+      (is (= :conditionally-approved
+             (reviewer/merge-gate-overrides :approved gate-decision {}))))))
+
 (deftest test-gate-result-feedback-resolves-real-gate-ids
   ;; Coverage gap exposed by the 2026-05-18 dogfood: gate-result->feedback
   ;; was reading `:gate/id` off the gate defrecord (where SyntaxGate /
