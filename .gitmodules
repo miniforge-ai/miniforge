@@ -1,8 +1,3 @@
-[submodule ".standards"]
-	path = .standards
-	# HTTPS (not SSH, not relative) so the submodule clones in every
-	# environment: local SSH dev, GitHub Actions with GITHUB_TOKEN,
-	# and Cloudflare Workers Builds via the "Cloudflare Workers and
-	# Pages" GitHub App. miniforge-standards is public, so no auth
-	# is required.
+[submodule "standards/miniforge"]
+	path = standards/miniforge
 	url = https://github.com/miniforge-ai/miniforge-standards.git
