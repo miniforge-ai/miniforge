@@ -64,7 +64,7 @@
    Lives under `~/.miniforge/worktrees/` rather than `/tmp` so the worktree
    (and any uncommitted implementer file writes living in it) survives reboots
    and macOS-tmpfs cleanups. The 2026-04-17 gates workflow lost 8+ minutes of
-   working code when its `/tmp` worktree was GC on process-tree restart;
+   working code when its `/tmp` worktree was GC'd on process-tree restart;
    persistence outside `/tmp` is the foundation for the broader work in
    `work/worktree-persistence-scratch-branch.spec.edn`.
 
@@ -178,7 +178,12 @@
    Git uses a config.lock file internally — concurrent worktree adds from
    multiple threads hit this lock and fail silently. Serializing creation at
    the JVM level prevents the conflict. Tasks still run in parallel once their
-   worktrees are acquired."
+   worktrees are acquired.
+
+   `check-legacy-tmp-worktrees!` runs inside this lock so that at most one
+   thread emits the advisory warning at a time, avoiding duplicated log lines
+   in high-parallelism scenarios where all default concurrent slots start
+   simultaneously."
   (Object.))
 
 (defn- resolve-branch-sha
@@ -190,22 +195,24 @@
    parent worktree is the one running miniforge — which is the common case
    for `bb dogfood`. Passing the resolved sha sidesteps the refusal.
 
-   Returns the sha string on success, nil on failure (caller falls back to
-   the branch name and accepts any failure that follows)."
+   Returns the sha string on success, nil on failure or empty output (caller
+   falls back to the branch name and accepts any failure that follows).
+   Guards the empty-string case explicitly: `(or \"\" branch)` treats the
+   empty string as truthy in Clojure and would pass an empty base-ref to
+   `git worktree add`, producing a confusing git error."
   [repo-path branch]
   (let [r (run-git "-C" repo-path "rev-parse" branch)]
     (when (zero? (:exit r))
-      (str/trim (or (:out r) "")))))
+      (let [sha (str/trim (or (:out r) ""))]
+        (when (seq sha) sha)))))
 
 (defn create-worktree
   "Create a git worktree for the task.
 
-   Emits a warning (via `*warn-fn*`) if the legacy /tmp/miniforge-worktrees
-   directory still has entries — this is a migration prompt, not an error.
-
    Serializes creation through worktree-lock to prevent concurrent git
    config.lock conflicts when multiple sub-workflows acquire environments
-   simultaneously.
+   simultaneously. The legacy /tmp worktree check also runs inside the lock so
+   at most one thread emits the advisory warning at a time.
 
    Attempts in order:
    1. git worktree add -b <name> <path> <sha-or-ref>
@@ -217,8 +224,8 @@
    This one-two punch keeps `git worktree add` failures from cascading into
    broken bundles whose only ref is a bare HEAD."
   [base-path repo-path worktree-name branch]
-  (check-legacy-tmp-worktrees!)
   (locking worktree-lock
+    (check-legacy-tmp-worktrees!)
     (let [worktree-path (str base-path "/" worktree-name)
           base-sha      (resolve-branch-sha repo-path branch)
           base-ref      (or base-sha branch)]
