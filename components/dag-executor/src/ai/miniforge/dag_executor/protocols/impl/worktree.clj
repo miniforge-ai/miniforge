@@ -35,78 +35,104 @@
 ;; Configuration
 ;; ============================================================================
 
+(def ^:dynamic *warn-fn*
+  "Emit a warning message to stderr.
+   Rebind via `binding` in tests to capture warnings without stderr noise."
+  (fn [msg] (binding [*out* *err*] (println msg))))
+
+(defn- expand-home
+  "Expand a leading `~/` in a path string to the user home directory.
+   Pass-through for absolute paths and bare paths that do not start with `~/`."
+  [path]
+  (let [home (System/getProperty "user.home")]
+    (cond
+      (str/starts-with? path "~/") (str home (subs path 1))
+      (= "~" path)                 home
+      :else                        path)))
+
 (defn default-base-path
   "Default location for git worktrees acquired by the worktree executor.
 
-   When called with no args returns the hardcoded default:
-   `~/.miniforge/worktrees/`. This path lives under the user's home so
-   worktrees (and any uncommitted implementer file writes inside them)
-   survive reboots and macOS-tmpfs cleanups. The 2026-04-17 gates
-   workflow lost 8+ minutes of working code when its `/tmp` worktree
-   was GC'd on process-tree restart; persistence outside `/tmp` is the
-   foundation for the broader work in
+   Arity 0: returns the hardcoded default `~/.miniforge/worktrees`.
+
+   Arity 1 (config map): reads `:workflow/worktree-root` from the supplied
+   map, expands any leading `~/`, and falls back to the no-arg default when
+   the key is absent or blank. This lets `create-worktree-executor` respect
+   the user `default-user-config.edn` setting without requiring a disk read
+   at namespace load time.
+
+   Lives under `~/.miniforge/worktrees/` rather than `/tmp` so the worktree
+   (and any uncommitted implementer file writes living in it) survives reboots
+   and macOS-tmpfs cleanups. The 2026-04-17 gates workflow lost 8+ minutes of
+   working code when its `/tmp` worktree was GC on process-tree restart;
+   persistence outside `/tmp` is the foundation for the broader work in
    `work/worktree-persistence-scratch-branch.spec.edn`.
 
-   When called with a config map, checks `:workflow/worktree-root` first
-   and falls back to the no-arg default. This lets the executor read the
-   user's configured worktree root from `default-user-config.edn` without
-   requiring the caller to extract the key manually.
-
-   Callers that need an ephemeral location (CI runs, sandbox tests)
-   can override via the `:base-path` config arg to `create-worktree-executor`,
-   or set `:workflow/worktree-root` in their user config to a `/tmp`-rooted
-   path for opt-in ephemeral behaviour."
+   Callers that need an ephemeral location (CI runs, sandbox tests) can opt in
+   to `/tmp` by setting `:workflow/worktree-root \"/tmp/miniforge-worktrees\"`
+   in their user config, or by passing `:base-path` directly to
+   `create-worktree-executor`."
   ([]
    (str (System/getProperty "user.home") "/.miniforge/worktrees"))
   ([config]
-   (or (get config :workflow/worktree-root)
-       (default-base-path))))
+   (let [configured (get config :workflow/worktree-root)]
+     (if (and configured (not (str/blank? (str configured))))
+       (expand-home configured)
+       (default-base-path)))))
 
 (def default-max-concurrent 4)
 
 (defn default-archive-dir
   "Default location for persisted task work archives.
-   Lives under the user's home rather than /tmp so checkpoints survive reboots
+   Lives under the user home rather than /tmp so checkpoints survive reboots
    and can be referenced from evidence bundles long after the run ends."
   []
   (str (System/getProperty "user.home") "/.miniforge/checkpoints"))
 
 ;; ============================================================================
-;; Legacy /tmp worktree detection
+;; Legacy /tmp detection
 ;; ============================================================================
 
-;; Set to true once the legacy-/tmp-worktrees warning has fired in this JVM
-;; session. Prevents noisy repetition across multiple worktree creates.
-;; Non-private so tests can reset it via with-redefs to exercise the check.
-(defonce legacy-tmp-warned?
-  (atom false))
+(def ^:private legacy-tmp-worktrees-path
+  "Legacy default worktree base directory that lived under /tmp.
+   Created before the 2026-04-17 gates-workflow data-loss incident forced the
+   move to `~/.miniforge/worktrees`. Checked at creation time to prompt
+   migration without blocking active workflows."
+  "/tmp/miniforge-worktrees")
+
+(defn legacy-tmp-worktrees-exist?
+  "Returns true if the legacy /tmp/miniforge-worktrees directory exists and
+   contains at least one entry (indicating active or stale worktrees).
+
+   Public so tests can rebind via `with-redefs` without touching the filesystem."
+  []
+  (let [dir (File. ^String legacy-tmp-worktrees-path)]
+    (and (.exists dir)
+         (.isDirectory dir)
+         (let [files (.listFiles dir)]
+           (and (some? files) (pos? (alength files)))))))
 
 (defn check-legacy-tmp-worktrees!
-  "Warn once per JVM session if /tmp/miniforge-worktrees/ exists and contains
-   worktree directories left over from the pre-2026-04-17 default path.
+  "Warn when the legacy /tmp/miniforge-worktrees directory has entries.
 
-   Non-blocking and non-throwing — purely advisory. Never prevents worktree
-   creation; the two paths coexist safely. Callers (e.g. CI environments)
-   that intentionally use /tmp can silence the warning by pointing
-   `:workflow/worktree-root` at the /tmp path in their user config, which
-   resets the detection expectation."
+   Does NOT error — graceful coexistence per the worktree-persistence spec
+   constraint. Existing /tmp worktrees remain usable; the warning tells
+   operators how to migrate to the persistent default path.
+
+   Rebind `*warn-fn*` via `binding` in tests to capture the output."
   []
-  (when-not @legacy-tmp-warned?
-    (try
-      (let [legacy-dir (File. "/tmp/miniforge-worktrees")]
-        (when (and (.exists legacy-dir)
-                   (.isDirectory legacy-dir)
-                   (boolean (seq (filter #(.isDirectory ^File %)
-                                        (or (.listFiles legacy-dir) [])))))
-          (reset! legacy-tmp-warned? true)
-          (binding [*out* *err*]
-            (println "WARN [miniforge/worktree] Legacy /tmp/miniforge-worktrees/ detected with existing worktrees.")
-            (println "WARN [miniforge/worktree] Worktrees now default to ~/.miniforge/worktrees/ (survives reboots).")
-            (println "WARN [miniforge/worktree] Migration: mv /tmp/miniforge-worktrees/<name> ~/.miniforge/worktrees/")
-            (println "WARN [miniforge/worktree] Set :workflow/worktree-root in user config to suppress this warning."))))
-      (catch Exception _
-        ;; Advisory check only — filesystem errors must never block worktree creation
-        nil))))
+  (when (legacy-tmp-worktrees-exist?)
+    (*warn-fn*
+     (str
+      "[miniforge] WARNING: legacy worktrees detected at "
+      legacy-tmp-worktrees-path "\n"
+      "  These worktrees live under /tmp and will not survive a reboot.\n"
+      "  To migrate to the persistent default:\n"
+      "    1. Add `:workflow/worktree-root \"~/.miniforge/worktrees\"` to\n"
+      "       ~/.miniforge/config.edn (this is already the shipped default).\n"
+      "    2. Let in-flight tasks complete, then remove the stale /tmp directory:\n"
+      "       rm -rf " legacy-tmp-worktrees-path "\n"
+      "  New worktrees are now created under: " (default-base-path)))))
 
 ;; ============================================================================
 ;; Helper Functions
@@ -174,8 +200,8 @@
 (defn create-worktree
   "Create a git worktree for the task.
 
-   Checks for legacy /tmp/miniforge-worktrees directories and emits an
-   advisory warning if found (never blocks creation).
+   Emits a warning (via `*warn-fn*`) if the legacy /tmp/miniforge-worktrees
+   directory still has entries — this is a migration prompt, not an error.
 
    Serializes creation through worktree-lock to prevent concurrent git
    config.lock conflicts when multiple sub-workflows acquire environments
@@ -183,17 +209,8 @@
 
    Attempts in order:
    1. git worktree add -b <name> <path> <sha-or-ref>
-                                                   — new branch from the
-                                                     branch's resolved sha
-                                                     (or the original ref
-                                                     name on lookup
-                                                     failure). The sha form
-                                                     works even when
-                                                     <branch> is checked
-                                                     out in another
-                                                     worktree.
    2. Clean up stale branch/directory and retry step 1
-   3. git worktree add --detach <path>             — detached HEAD (last resort)
+   3. git worktree add --detach <path> — detached HEAD (last resort)
 
    Detached HEAD is a real fallback path here, but downstream `archive-bundle!`
    handles it defensively by creating a real branch at HEAD before bundling.
@@ -253,7 +270,7 @@
 ;; ============================================================================
 
 (def ^:private default-commit-message
-  "Commit message for the per-phase persist commit when the caller didn't
+  "Commit message for the per-phase persist commit when the caller did not
    override `:message`. Internal infrastructure; not user-visible at
    commit time."
   "phase checkpoint")
@@ -265,7 +282,7 @@
   "main")
 
 (defn- ensure-archive-dir
-  "Create the archive directory if it doesn't exist. Returns the absolute path."
+  "Create the archive directory if it does not exist. Returns the absolute path."
   [archive-dir]
   (let [d (File. ^String archive-dir)]
     (.mkdirs d)
@@ -289,7 +306,7 @@
   (= detached-head-sentinel branch-name))
 
 (defn- current-branch
-  "Returns the worktree's HEAD branch name, or the literal sentinel
+  "Returns the worktree HEAD branch name, or the literal sentinel
    `\"HEAD\"` when the worktree is detached. Callers that need a real
    branch name should call `ensure-named-branch!` to materialize one."
   [worktree-path]
@@ -324,12 +341,7 @@
    Uses `git checkout -B` (force-reset to HEAD) so recovery is idempotent
    across reruns with the same task-id and across leftover local refs from
    prior runs. The branch is task-namespaced internal infrastructure, not
-   a user-curated ref; resetting it is the right semantics.
-
-   The bundle's ref namespace is what the harvest CLI fetches by name —
-   without a real branch, harvest correctly diagnoses the bundle as the
-   legacy `base..HEAD` shape and refuses to fetch. This helper makes that
-   diagnostic moot for new bundles by always producing the new shape."
+   a user-curated ref; resetting it is the right semantics."
   [worktree-path branch task-id]
   (if-not (detached? branch)
     (result/ok branch)
@@ -372,8 +384,8 @@
 
 (defn- commit-staged!
   "Commit staged changes with --no-verify. Persist runs inside a scratch
-   worktree where the host's pre-commit hook (bb pre-commit) fails because
-   deps aren't installed. Persist is infrastructure preservation, not a
+   worktree where the host pre-commit hook (bb pre-commit) fails because
+   deps are not installed. Persist is infrastructure preservation, not a
    validated commit — the gate layer upstream owns validation."
   [worktree-path message]
   (let [r (run-git "-C" worktree-path "commit"
@@ -436,7 +448,7 @@
                    :commits-ahead ahead}))))))))
 
 (defn- commit-and-bundle!
-  "Pipeline: stage → commit-if-dirty → recompute ahead → bundle-or-noop."
+  "Pipeline: stage -> commit-if-dirty -> recompute ahead -> bundle-or-noop."
   [worktree-path branch base-ref archive-dir task-id message]
   (-> (stage-all! worktree-path)
       (result/and-then (fn [_] (maybe-commit worktree-path message)))
@@ -449,7 +461,7 @@
 
 (defn- already-clean?
   "True when the worktree has no dirty paths AND no commits ahead of
-   base-ref — there's nothing to bundle. Returns a result so callers see
+   base-ref — there is nothing to bundle. Returns a result so callers see
    git failures rather than treating them as a clean state."
   [worktree-path base-ref]
   (-> (dirty? worktree-path)
@@ -461,23 +473,19 @@
                (result/map-ok zero?)))))))
 
 (defn archive-bundle!
-  "Persist a worktree's task work as a git bundle.
+  "Persist a worktree task work as a git bundle.
 
-   Pipeline: resolve current branch → check for dirty changes or commits
-   ahead of base-ref → if clean, return no-changes; otherwise stage,
+   Pipeline: resolve current branch -> check for dirty changes or commits
+   ahead of base-ref -> if clean, return no-changes; otherwise stage,
    commit on the task branch with --no-verify, and write a bundle of
-   `base-ref..HEAD` to <archive-dir>/<task-id>.bundle. A later
-   `git fetch <bundle> <branch>:<branch>` round-trips the work into the
-   host repo without touching the live worktree.
+   `base-ref..HEAD` to <archive-dir>/<task-id>.bundle.
 
    Arguments:
    - worktree-path: absolute path to the scratch worktree
-   - opts: {:archive-dir string  — destination dir for bundles
-           :task-id      string  — identifier used as the bundle filename
-           :base-ref     string  — base branch the worktree was forked from
-                                   (NEVER the task branch — that would make
-                                   commits-ahead always 0)
-           :message      string  — commit message for the persist commit}
+   - opts: {:archive-dir string  -- destination dir for bundles
+           :task-id      string  -- identifier used as the bundle filename
+           :base-ref     string  -- base branch the worktree was forked from
+           :message      string  -- commit message for the persist commit}
 
    Returns result/ok with one of:
    - {:persisted? true  :bundle-path str :commit-sha str :branch str}
@@ -504,12 +512,10 @@
   "Restore work from a previously-persisted bundle into the host repo.
 
    `git fetch <bundle> <branch>:<branch>` pulls the branch and all reachable
-   commits into the host repo without touching the working tree. The host
-   user (or orchestrator) can then check the branch out wherever they want.
+   commits into the host repo without touching the working tree.
 
    Arguments:
-   - host-repo-path: path to a worktree of the host repo (any worktree on
-                     the same repo works; fetch goes to the shared object DB)
+   - host-repo-path: path to a worktree of the host repo
    - opts: {:bundle-path str :branch str}
 
    Returns result/ok with {:restored? true :branch str} on success."
@@ -735,7 +741,7 @@
     ;; per-task work — successful agent output was destroyed when the scratch
     ;; worktree was torn down.
     ;;
-    ;; `:base-ref` only falls back across :base-branch → :base-ref →
+    ;; `:base-ref` only falls back across :base-branch -> :base-ref ->
     ;; default-base-ref. The task branch (`:branch` opt) is intentionally
     ;; NOT a fallback: using it would make `commits-ahead` compute
     ;; `task..HEAD` (always 0) and silently skip bundling.
@@ -744,7 +750,7 @@
                                      (get-in config [:archive-dir])
                                      (default-archive-dir))
           ;; Workflow id (when present) namespaces the archive path so
-          ;; concurrent runs don't collide on the same task-id stem.
+          ;; concurrent runs do not collide on the same task-id stem.
           archive-dir (if-let [wf (get opts :workflow-id)]
                         (str configured-archive-dir "/" wf)
                         configured-archive-dir)
@@ -760,7 +766,7 @@
                         :message     message})))
 
   (restore-workspace! [_this _environment-id opts]
-    ;; Pull a previously-persisted bundle back into the host repo's object DB.
+    ;; Pull a previously-persisted bundle back into the host repo object DB.
     ;; Caller supplies :host-repo-path (any worktree of the host repo works)
     ;; and :bundle-path. The branch shows up as a ref in the host repo and
     ;; can be checked out wherever the orchestrator wants.
@@ -776,28 +782,25 @@
 (defn create-worktree-executor
   "Create a worktree-based executor (fallback).
 
-   Config keys (all optional):
-   - :base-path             - Explicit base directory for worktrees. Takes
-                              priority over everything else. Use for CI/sandbox
-                              runs that need an ephemeral path (e.g.
-                              `/tmp/miniforge-worktrees-ci`).
-   - :workflow/worktree-root - Base directory read from the user's
-                               `default-user-config.edn`. Checked when
-                               `:base-path` is absent. Defaults to
-                               `~/.miniforge/worktrees` in the EDN config.
-   - :max-concurrent         - Max concurrent worktrees (default: 4).
+   Config:
+   - :base-path              - Explicit base directory for worktrees. Takes
+                               priority over all other path resolution.
+   - :workflow/worktree-root - User-config key. The shipped
+                               `default-user-config.edn` sets this to
+                               `\"~/.miniforge/worktrees\"`. Leading `~/`
+                               is expanded to the user home directory.
+                               Falls back to the hardcoded default when
+                               absent or blank.
+   - :max-concurrent         - Max concurrent worktrees (default: 4)
 
-   Resolution order for the base path:
-     1. `:base-path`              — explicit caller override
-     2. `:workflow/worktree-root` — from loaded user config
-     3. `(default-base-path)`     — hardcoded `~/.miniforge/worktrees`
-
-   The previous `/tmp/miniforge-worktrees` default was removed after the
+   The previous `/tmp/miniforge-worktrees` default was changed after the
    2026-04-17 gates-workflow lost 8+ minutes of working code to a macOS
-   tmpfs cleanup. Ephemeral `/tmp`-rooted runs opt in explicitly."
+   tmpfs cleanup. Ephemeral `/tmp`-rooted runs (CI, sandbox tests) opt in
+   by setting `:workflow/worktree-root \"/tmp/miniforge-worktrees\"` in user
+   config, or `:base-path` directly in the executor config."
   [config]
   (map->WorktreeExecutor
-   {:config config
-    :base-path (or (get config :base-path)
-                   (default-base-path config))
+   {:config         config
+    :base-path      (or (get config :base-path)
+                        (default-base-path config))
     :max-concurrent (get config :max-concurrent default-max-concurrent)}))

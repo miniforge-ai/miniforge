@@ -41,7 +41,13 @@
 
     (testing "default workflow checkpoint root is configured as data"
       (is (= "~/.miniforge/checkpoints"
-             (get-in cfg [:workflow :checkpoint-root]))))))
+             (get-in cfg [:workflow :checkpoint-root]))))
+
+    (testing "default worktree root lives under ~/.miniforge and not /tmp"
+      (is (= "~/.miniforge/worktrees"
+             (get cfg :workflow/worktree-root))
+          ":workflow/worktree-root must be present in the default config so
+           create-worktree-executor picks it up without a disk read"))))
 
 (deftest load-default-config-falls-back-to-edn-resource-test
   (let [orig-resource io/resource]
@@ -55,7 +61,11 @@
         (is (= :opencode (get-in cfg [:llm :backend])))
         (is (= "anthropic/claude-sonnet-4-6" (get-in cfg [:agents :default-models :execution])))
         (is (= "~/.miniforge/checkpoints"
-               (get-in cfg [:workflow :checkpoint-root])))))))
+               (get-in cfg [:workflow :checkpoint-root])))
+        (is (= "~/.miniforge/worktrees"
+               (get cfg :workflow/worktree-root))
+            "fallback EDN must carry :workflow/worktree-root so the dag-executor
+             can locate worktrees even when the primary resource is missing")))))
 
 (deftest repo-config-support-test
   (testing "repo-config-path appends .miniforge/config.edn to the provided root"
