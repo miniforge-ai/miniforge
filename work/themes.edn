@@ -188,7 +188,7 @@
     :relation :supporting}]
   :theme/completion-criteria
   ["Every enabled pack rule resolves to an executable check-fn of shape [artifacts context] -> {:passed? :violations} per N4 §3.1 — zero enabled rules with no enforcement mechanism"
-   "verify and review execute the pack-derived gate set filtered by the rule's :applies-to {:phases}; an :error-severity violation blocks phase completion per N4 §2.3.1"
+   "verify and review execute the pack-derived gate set filtered by the rule's :applies-to {:phases}; a violation from a rule with :rule/severity :error blocks phase completion per N4 §2.3.1"
    "lint and format are modeled as policy capabilities bound to clj-kondo / cljfmt, not standalone bb tasks outside the governed pipeline"
    "a DRY / dead-code / unwired-command violation fails a dogfood run before the PR opens (regression guard for PR #979)"
    "every run emits per-rule-id applied/passed/failed evidence; a human can see which policies gated a given workflow"]
