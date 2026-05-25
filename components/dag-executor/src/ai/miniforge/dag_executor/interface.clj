@@ -31,6 +31,7 @@
   (:require
    [ai.miniforge.dag-executor.branch-registry :as branch-registry]
    [ai.miniforge.dag-executor.result :as result]
+   [ai.miniforge.dag-executor.scratch-commit :as scratch-commit]
    [ai.miniforge.dag-executor.state-profile :as state-profile]
    [ai.miniforge.dag-executor.state :as state]
    [ai.miniforge.dag-executor.parallel :as parallel]
