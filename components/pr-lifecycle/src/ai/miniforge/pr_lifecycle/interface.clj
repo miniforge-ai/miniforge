@@ -738,6 +738,11 @@
    Returns DAG result with :prs vector of PR info maps."
   poller/poll-open-prs)
 
+(def current-github-login
+  "Resolve the authenticated GitHub login (default :self-author for PR
+   monitoring), or nil. See `pr-poller/current-github-login`."
+  poller/current-github-login)
+
 (def fetch-pr-comments
   "Fetch all comments for a PR (review + issue comments).
    Returns DAG result with :comments vector."

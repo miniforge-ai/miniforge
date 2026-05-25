@@ -99,7 +99,13 @@
             {:worktree-path worktree-path
              :self-author (or (get-in ctx [:execution/self-author])
                               (get-in ctx [:config :github/self-author])
-                              (:self-author shared-defaults))
+                              (:self-author shared-defaults)
+                              ;; Default to the authenticated gh login so the
+                              ;; monitor loop can find PRs this instance opened
+                              ;; when no self-author is configured. Without this,
+                              ;; poll-open-prs filters by a nil author and finds
+                              ;; nothing.
+                              (pr-lifecycle/current-github-login worktree-path))
              :generate-fn generate-fn
              :event-bus event-bus
              :logger logger}
@@ -111,6 +117,23 @@
               (get-in ctx [:config :pr-monitor/max-total-fix-attempts-per-pr])
               :abandon-after-hours
               (get-in ctx [:config :pr-monitor/abandon-after-hours])})))))
+
+(defn resolve-pr-infos
+  "Resolve the PR(s) to observe from the execution context.
+
+   DAG runs populate `[:execution/dag-pr-infos]`. For a single-PR run, the
+   release phase stores PR info at `[:execution/phase-results :release :result
+   :output :workflow/pr-info]` (with a `[:metrics :release :pr-info]`
+   fallback) — the SAME paths `dag-orchestrator/extract-pr-info-from-result`
+   reads. The prior single-PR fallback read `[:release :pr-info]` (one level
+   too shallow, wrong key), so observe always saw nil and skipped — a
+   single-PR dogfood opened its PR and exited without ever monitoring it."
+  [ctx]
+  (or (seq (get-in ctx [:execution/dag-pr-infos]))
+      (when-let [pr-info (or (get-in ctx [:execution/phase-results :release
+                                          :result :output :workflow/pr-info])
+                             (get-in ctx [:metrics :release :pr-info]))]
+        [pr-info])))
 
 (defn enter-observe
   "Execute the Observe phase.
@@ -124,10 +147,7 @@
 
    pr-lifecycle is a direct dependency of the workflow component."
   [ctx]
-  (let [pr-infos (or (get-in ctx [:execution/dag-pr-infos])
-                     ;; Single PR from release phase
-                     (when-let [pr-info (get-in ctx [:execution/phase-results :release :pr-info])]
-                       [pr-info]))
+  (let [pr-infos (resolve-pr-infos ctx)
         start-time (System/currentTimeMillis)]
 
     (if (empty? pr-infos)

@@ -21,6 +21,33 @@
    [ai.miniforge.workflow.observe-phase :as sut]
    [clojure.test :refer [deftest is testing]]))
 
+(def ^:private sample-pr
+  {:pr-number 42 :pr-url "https://github.com/o/r/pull/42" :pr-branch "mf/x"})
+
+(deftest resolve-pr-infos-test
+  (testing "DAG path: returns the populated dag-pr-infos"
+    (is (= [sample-pr]
+           (vec (sut/resolve-pr-infos {:execution/dag-pr-infos [sample-pr]})))))
+  (testing "single-PR: reads release result output :workflow/pr-info (the real release path)"
+    (is (= [sample-pr]
+           (sut/resolve-pr-infos
+            {:execution/phase-results
+             {:release {:result {:output {:workflow/pr-info sample-pr}}}}}))))
+  (testing "single-PR: metrics fallback path"
+    (is (= [sample-pr]
+           (sut/resolve-pr-infos {:metrics {:release {:pr-info sample-pr}}}))))
+  (testing "REGRESSION (the #979 handoff bug): the old shallow [:release :pr-info] key is NOT read"
+    (is (nil? (sut/resolve-pr-infos
+               {:execution/phase-results {:release {:pr-info sample-pr}}}))))
+  (testing "no PR anywhere -> nil (phase skips)"
+    (is (nil? (sut/resolve-pr-infos {}))))
+  (testing "empty dag-pr-infos falls through to single-PR resolution"
+    (is (= [sample-pr]
+           (sut/resolve-pr-infos
+            {:execution/dag-pr-infos []
+             :execution/phase-results
+             {:release {:result {:output {:workflow/pr-info sample-pr}}}}})))))
+
 (deftest default-config-loaded-from-edn-test
   (testing "observe phase defaults come from resource config"
     (is (= :default (:agent sut/default-config)))
