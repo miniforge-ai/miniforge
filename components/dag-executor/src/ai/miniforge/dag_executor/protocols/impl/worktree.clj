@@ -75,9 +75,10 @@
 ;; Legacy /tmp worktree detection
 ;; ============================================================================
 
-(defonce ^:private legacy-tmp-warned?
+(defonce legacy-tmp-warned?
   "Set to true once the legacy-/tmp-worktrees warning has fired in this JVM
-   session. Prevents noisy repetition across multiple worktree creates."
+   session. Prevents noisy repetition across multiple worktree creates.
+   Non-private so tests can reset it via with-redefs to exercise the check."
   (atom false))
 
 (defn check-legacy-tmp-worktrees!
