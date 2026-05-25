@@ -39,7 +39,7 @@
    [ai.miniforge.phase.interface :as phase]
    [ai.miniforge.response.interface :as response]
    [slingshot.slingshot :refer [try+]]
-   [ai.miniforge.dag-executor.scratch-gc-queue :as gc-queue]
+   [ai.miniforge.dag-executor.interface :as gc-queue]
    [ai.miniforge.cli.worktree :as worktree]))
 
 ;------------------------------------------------------------------------------ Layer 0

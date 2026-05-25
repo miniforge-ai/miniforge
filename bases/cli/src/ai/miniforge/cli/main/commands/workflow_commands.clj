@@ -32,7 +32,7 @@
    [ai.miniforge.cli.messages :as messages]
    [ai.miniforge.cli.main.commands.run :as cmd-run]
    [ai.miniforge.cli.worktree :as worktree]
-   [ai.miniforge.dag-executor.scratch-gc-queue :as gc-queue]))
+   [ai.miniforge.dag-executor.interface :as gc-queue]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Helpers
