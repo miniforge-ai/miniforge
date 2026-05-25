@@ -237,6 +237,29 @@
             (is (= 0 (:pruned (result/unwrap r))))))
         (finally (delete-dir-recursive! tmp-dir))))))
 
+;;------------------------------------------------------------------------------ run-deferred-gc! — missing :finished-at (Long/MAX_VALUE sentinel)
+
+(deftest run-deferred-gc!-entry-with-missing-finished-at-never-pruned-test
+  (testing "Entries missing :finished-at are treated as never-stale"
+    (let [tmp-dir  (make-temp-dir!)
+          tmp-path (str tmp-dir "/scratch-gc-queue.edn")
+          repo     (make-temp-git-repo!)]
+      (try
+        (with-redefs [sut/gc-queue-path (constantly tmp-path)]
+          ;; Write an entry with no :finished-at (manually crafted or migrated).
+          (spit tmp-path (pr-str [{:workflow-id "wf-no-timestamp"}]))
+          ;; Even with max-age-days=0 the entry must NOT be pruned.
+          (let [r (sut/run-deferred-gc! repo 0)]
+            (is (result/ok? r))
+            (let [data (result/unwrap r)]
+              (is (= 0 (:pruned data))    "entry with no :finished-at must never be stale")
+              (is (= 1 (:remaining data)) "entry must remain in the queue")))
+          ;; The entry must still be present in the queue file.
+          (is (= 1 (count (read-raw-queue tmp-path)))))
+        (finally
+          (delete-dir-recursive! tmp-dir)
+          (delete-dir-recursive! repo))))))
+
 ;;------------------------------------------------------------------------------ run-deferred-gc! — gc error path
 
 (deftest run-deferred-gc!-gc-failure-leaves-queue-intact-test

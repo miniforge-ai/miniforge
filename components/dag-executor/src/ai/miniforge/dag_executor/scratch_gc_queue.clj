@@ -75,16 +75,24 @@
    self-documenting and to avoid duplicating the magic number `86400`."
   86400)
 
+;; Lazily compute and cache the path on first call so `.mkdirs` is invoked
+;; at most once per JVM lifetime rather than on every enqueue/GC call.
+(def ^:private miniforge-queue-path
+  "Delay that computes and caches `~/.miniforge/scratch-gc-queue.edn`.
+   Side-effect: creates the `~/.miniforge/` directory on first deref."
+  (delay
+   (let [home (System/getProperty "user.home")
+         dir  (File. ^String home ".miniforge")]
+     (.mkdirs dir)
+     (.getAbsolutePath (File. dir ^String gc-queue-filename)))))
+
 (defn gc-queue-path
   "Return the absolute path string for `~/.miniforge/scratch-gc-queue.edn`.
 
-   Creates `~/.miniforge/` when it does not exist.  Safe to call on every
-   workflow start — the `mkdirs` is a no-op when the directory exists."
+   Creates `~/.miniforge/` on the first call; subsequent calls return the
+   cached path without any filesystem syscall."
   []
-  (let [home (System/getProperty "user.home")
-        dir  (File. ^String home ".miniforge")]
-    (.mkdirs dir)
-    (.getAbsolutePath (File. dir ^String gc-queue-filename))))
+  @miniforge-queue-path)
 
 ;;------------------------------------------------------------------------------ Layer 1
 ;; Queue I/O helpers
@@ -105,8 +113,13 @@
 
 (defn- write-gc-queue!
   "Overwrite `path` with the EDN representation of `entries`.
-   Entries are serialised with `pr-str` — callers must ensure they contain
-   only EDN-printable values (strings, `#inst` dates, keywords, numbers)."
+
+   Accepted entry value types: strings, keywords, numbers, `java.util.Date`
+   (serialised as `#inst` literals by `pr-str`), and nested maps/vectors of
+   the above.  Avoid `java.nio.file.Path`, `java.io.File`, or any type not
+   readable by `clojure.edn/read-string` — `pr-str` will emit
+   non-round-trippable output for those types without raising an error, which
+   will cause the next queue read to return `[]` and silently drop all entries."
   [path entries]
   (spit path (pr-str (vec entries))))
 
@@ -118,8 +131,13 @@
 (defn- finished-at-epoch-seconds
   "Extract the `:finished-at` value from a queue entry as epoch seconds.
    Supports `java.util.Date` instances (stored as `#inst` tagged literals).
-   Returns 0 when the field is absent or unparseable — such entries are
-   treated as freshly added and will never qualify as stale."
+
+   Returns `Long/MAX_VALUE` when the field is absent or unparseable — such
+   entries are treated as infinitely far in the future and will **never**
+   qualify as stale.  This is the safe/defensive default that prevents
+   accidentally GC-ing manually-crafted or migrated entries that lack a
+   `:finished-at` timestamp.  Callers that explicitly want to prune
+   malformed entries must do so via a separate code path."
   [entry]
   (try
     (let [fa (:finished-at entry)]
@@ -129,8 +147,9 @@
         (inst? fa) (quot (.getTime ^java.util.Date fa) 1000)
         ;; Belt-and-suspenders: handle raw Instant if somehow stored that way.
         (instance? Instant fa) (.getEpochSecond ^Instant fa)
-        :else 0))
-    (catch Exception _ 0)))
+        ;; Missing or unrecognised type — treat as never-stale to be safe.
+        :else Long/MAX_VALUE))
+    (catch Exception _ Long/MAX_VALUE)))
 
 (defn- with-queue-lock!
   "Acquire an exclusive advisory JVM file lock on `path`, execute `thunk`,
@@ -159,6 +178,13 @@
                 (result/err :scratch-gc-queue/locked
                             "queue file is locked by another process"
                             {:path path}))))))
+      (catch InterruptedException _
+        ;; Restore the interrupt flag so callers using cooperative cancellation
+        ;; (e.g. shutdown hooks, async frameworks) still see the signal.
+        (.interrupt (Thread/currentThread))
+        (result/err :scratch-gc-queue/lock-interrupted
+                    "interrupted while waiting for queue lock"
+                    {:path path}))
       (catch Exception e
         (result/err :scratch-gc-queue/lock-failed
                     (str "failed to acquire queue file lock: " (.getMessage e))
@@ -246,14 +272,16 @@
                    ;; GC succeeded: write back only fresh entries.
                    (do
                      (write-gc-queue! path (or fresh []))
-                     (result/ok {:pruned    (count stale)
-                                 :remaining (count (or fresh []))
-                                 :gc-result (get gc-result :data)}))
+                     (result/ok {:pruned     (count stale)
+                                 :pruned-ids (mapv :workflow-id stale)
+                                 :remaining  (count (or fresh []))
+                                 :gc-result  (get gc-result :data)}))
                    ;; GC failed: leave queue untouched; propagate the error.
                    gc-result))
-               (result/ok {:pruned    0
-                           :remaining (count entries)
-                           :gc-result nil}))))))
+               (result/ok {:pruned     0
+                           :pruned-ids []
+                           :remaining  (count entries)
+                           :gc-result  nil}))))))
      (catch Exception e
        (result/err :scratch-gc-queue/run-failed
                    (str "deferred GC pass failed: " (.getMessage e))
