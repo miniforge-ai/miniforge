@@ -652,23 +652,6 @@
     (is (nil? (worktree/check-legacy-tmp-worktrees!))
         "must return nil (not throw) in any filesystem state")))
 
-(deftest check-legacy-tmp-warning-format-test
-  (testing "warning output contains required WARN prefix and 'Legacy' keyword for operator grep-ability"
-    ;; We can't intercept `(File. path)` construction, so this test validates
-    ;; the warning message format by driving the output path directly.
-    (let [err-output (java.io.StringWriter.)]
-      (binding [*err* (java.io.PrintWriter. err-output)]
-        ;; Reproduce the exact output lines emitted by check-legacy-tmp-worktrees!
-        (binding [*out* *err*]
-          (println "WARN [miniforge/worktree] Legacy /tmp/miniforge-worktrees/ detected with existing worktrees.")
-          (println "WARN [miniforge/worktree] Set :workflow/worktree-root in user config to suppress this warning.")))
-      (is (str/includes? (str err-output) "Legacy")
-          "warning must contain 'Legacy' for operator grep-ability")
-      (is (str/includes? (str err-output) "WARN")
-          "warning must be prefixed with WARN for log-level parsers")
-      (is (str/includes? (str err-output) ":workflow/worktree-root")
-          "warning must reference :workflow/worktree-root so operators know how to suppress it"))))
-
 ;; ============================================================================
 ;; default-base-path — tilde expansion
 ;; ============================================================================
@@ -694,6 +677,8 @@
 (deftest check-legacy-tmp-worktrees-warns-with-message-test
   (testing "warning message includes legacy path, migration key, and cleanup command"
     (let [warnings (atom [])]
+      ;; Reset the one-shot dedup atom so this test is independent of execution order.
+      (reset! worktree/legacy-tmp-warned? false)
       (with-redefs [worktree/legacy-tmp-worktrees-exist? (constantly true)]
         (binding [worktree/*warn-fn* (fn [msg] (swap! warnings conj msg))]
           (worktree/check-legacy-tmp-worktrees!)
@@ -721,6 +706,8 @@
   (testing "create-worktree returns ok even when legacy /tmp worktrees exist"
     ;; Graceful coexistence constraint: a warning is emitted but the worktree
     ;; is still created at the new configured base-path without any error.
+    ;; Reset the one-shot dedup atom so this test is independent of execution order.
+    (reset! worktree/legacy-tmp-warned? false)
     (let [warned? (atom false)]
       (with-redefs [worktree/legacy-tmp-worktrees-exist? (constantly true)
                     worktree/run-git          (fn [& _] {:exit 0 :out "" :err ""})

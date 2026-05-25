@@ -112,16 +112,30 @@
          (let [files (.listFiles dir)]
            (and (some? files) (pos? (alength files)))))))
 
+;; Non-private so tests can `(reset! worktree/legacy-tmp-warned? false)` before
+;; exercising the warning path. `compare-and-set!` in check-legacy-tmp-worktrees!
+;; ensures the advisory fires at most once per JVM session even under concurrent
+;; load — without this, all four default worktree slots could race to emit
+;; identical WARNING lines before any of them acquires worktree-lock.
+(defonce legacy-tmp-warned?
+  (atom false))
+
 (defn check-legacy-tmp-worktrees!
-  "Warn when the legacy /tmp/miniforge-worktrees directory has entries.
+  "Warn once per JVM session when the legacy /tmp/miniforge-worktrees directory
+   has entries.
+
+   Uses `compare-and-set!` on `legacy-tmp-warned?` so exactly one thread emits
+   the advisory, even when multiple worktree-create calls race at startup.
 
    Does NOT error — graceful coexistence per the worktree-persistence spec
    constraint. Existing /tmp worktrees remain usable; the warning tells
    operators how to migrate to the persistent default path.
 
-   Rebind `*warn-fn*` via `binding` in tests to capture the output."
+   Rebind `*warn-fn*` via `binding` in tests to capture the output.
+   Reset `legacy-tmp-warned?` to false before tests that assert the warning fires."
   []
-  (when (legacy-tmp-worktrees-exist?)
+  (when (and (legacy-tmp-worktrees-exist?)
+             (compare-and-set! legacy-tmp-warned? false true))
     (*warn-fn*
      (str
       "[miniforge] WARNING: legacy worktrees detected at "
