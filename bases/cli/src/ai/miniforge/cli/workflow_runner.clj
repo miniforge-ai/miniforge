@@ -40,7 +40,8 @@
    [ai.miniforge.response.interface :as response]
    [slingshot.slingshot :refer [try+]]
    [ai.miniforge.dag-executor.interface :as gc-queue]
-   [ai.miniforge.cli.worktree :as worktree]))
+   [ai.miniforge.cli.worktree :as worktree]
+   [ai.miniforge.cli.workflow-runner.gc-hooks :as gc-hooks]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Work spec kanban lifecycle
@@ -151,25 +152,21 @@
       nil)))
 
 ;------------------------------------------------------------------------------ Layer 0.7
-;; Deferred scratch-ref GC — piggyback cleanup on normal workflow traffic
+;; Deferred scratch-ref GC — thin delegation to workflow-runner.gc-hooks
+;;
+;; The helpers are defined in their own lightweight namespace so they can be
+;; loaded and tested in isolation without pulling in the full runner stack
+;; (which starts threads that hang test JVMs).
 
-(defn- enqueue-workflow-gc-best-effort!
+(def ^:private enqueue-workflow-gc-best-effort!
   "Append `workflow-id` to the scratch-ref GC queue.
    Never throws — GC housekeeping must not interfere with the workflow result."
-  [workflow-id]
-  (try
-    (gc-queue/enqueue-workflow-gc! workflow-id)
-    (catch Exception _ nil)))
+  gc-hooks/enqueue-workflow-gc-best-effort!)
 
-(defn- run-gc-pass-best-effort!
-  "Run the deferred scratch-ref GC pass using the current git repo as the
-   parent-repo-path.  Invoked once at workflow start so stale refs from prior
-   workflows are collected without a background daemon.  Never throws."
-  []
-  (try
-    (when-let [repo-root (worktree/worktree-root)]
-      (gc-queue/run-deferred-gc! repo-root))
-    (catch Exception _ nil)))
+(def ^:private run-gc-pass-best-effort!
+  "Run the deferred scratch-ref GC pass piggybacked on workflow start.
+   Never throws."
+  gc-hooks/run-gc-pass-best-effort!)
 
 ;------------------------------------------------------------------------------ Layer 0.8
 ;; Source-root and execution-context validation helpers
