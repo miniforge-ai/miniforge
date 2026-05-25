@@ -54,7 +54,7 @@
    [ai.miniforge.dag-executor.result :as result])
   (:import
    [java.io File]
-   [java.nio.channels FileChannel FileLock]
+   [java.nio.channels FileChannel]
    [java.nio.file Paths StandardOpenOption]
    [java.time Instant]))
 
@@ -169,8 +169,11 @@
       (with-open [^FileChannel ch (FileChannel/open nio-path opts)]
         (let [deadline (+ (System/currentTimeMillis) 500)]
           (loop []
-            (if-let [^FileLock lk (.tryLock ch)]
-              (try (thunk) (finally (.release lk)))
+            (if-let [^java.lang.AutoCloseable lk (.tryLock ch)]
+              ;; FileLock implements AutoCloseable; .close releases the lock.
+              ;; Hinting AutoCloseable (not FileLock) keeps the ns loadable
+              ;; under babashka, which does not expose java.nio.channels.FileLock.
+              (try (thunk) (finally (.close lk)))
               (if (< (System/currentTimeMillis) deadline)
                 (do (Thread/sleep 25) (recur))
                 (result/err :scratch-gc-queue/locked
@@ -184,9 +187,21 @@
                     "interrupted while waiting for queue lock"
                     {:path path}))
       (catch Exception e
-        (result/err :scratch-gc-queue/lock-failed
-                    (str "failed to acquire queue file lock: " (.getMessage e))
-                    {:path path})))))
+        ;; Same-JVM overlap (OverlappingFileLockException) or a concurrently
+        ;; closed channel (ClosedChannelException) means the lock is simply
+        ;; unavailable — surface the expected contended :locked no-op, not a
+        ;; hard :lock-failed. Matched by class name (not a class literal in a
+        ;; catch clause) because this namespace loads under babashka, which
+        ;; does not expose those java.nio.channels classes.
+        (if (contains? #{"java.nio.channels.OverlappingFileLockException"
+                         "java.nio.channels.ClosedChannelException"}
+                       (.getName (class e)))
+          (result/err :scratch-gc-queue/locked
+                      "queue file lock unavailable (held in-JVM or channel closed)"
+                      {:path path})
+          (result/err :scratch-gc-queue/lock-failed
+                      (str "failed to acquire queue file lock: " (.getMessage e))
+                      {:path path}))))))
 
 ;;------------------------------------------------------------------------------ Layer 2
 ;; Public API

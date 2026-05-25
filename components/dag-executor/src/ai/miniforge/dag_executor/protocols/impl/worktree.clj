@@ -610,10 +610,12 @@
                              :status        :active | :released
                              :released-at   long  ; epoch ms, only present when :released}}
 
-   The registry preserves :released entries until an explicit GC sweep
-   (`gc-scratch-refs!`) removes the underlying git refs. This lets
-   post-mortem tooling inspect which workflows wrote which scratch commits
-   even after the worktrees are gone."
+   This is an in-memory atom that retains all entries (including :released)
+   for the lifetime of the process. It is NOT persisted and is NOT pruned by
+   `gc-scratch-refs!`. Git-ref cleanup happens independently via
+   `gc-scratch-refs!`, which neither reads nor mutates this registry. This
+   lets post-mortem tooling inspect which workflows wrote which scratch
+   commits even after the worktrees are gone."
   (atom {}))
 
 (defn get-worktree-registry

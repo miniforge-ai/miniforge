@@ -383,10 +383,19 @@
 
 (deftest gc-queue-path-returns-edn-path-test
   (testing "gc-queue-path returns a non-blank string ending in .edn"
-    (let [p (sut/gc-queue-path)]
-      (is (string? p))
-      (is (not (clojure.string/blank? p)))
-      (is (clojure.string/ends-with? p ".edn")))))
+    ;; Bind user.home to a temp dir so the test never writes the real
+    ;; ~/.miniforge directory.
+    (let [orig (System/getProperty "user.home")
+          tmp  (str (java.nio.file.Files/createTempDirectory
+                     "mf-home" (make-array java.nio.file.attribute.FileAttribute 0)))]
+      (try
+        (System/setProperty "user.home" tmp)
+        (let [p (sut/gc-queue-path)]
+          (is (string? p))
+          (is (not (clojure.string/blank? p)))
+          (is (clojure.string/ends-with? p ".edn")))
+        (finally
+          (System/setProperty "user.home" orig))))))
 
 (deftest gc-queue-vars-are-callable-test
   (testing "enqueue-workflow-gc! and run-deferred-gc! are re-exported as callable fns"

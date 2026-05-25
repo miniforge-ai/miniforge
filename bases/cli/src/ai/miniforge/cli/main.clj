@@ -302,6 +302,7 @@
 (defn workflow-execute-cmd [m] (cmd-workflow/workflow-execute-cmd (get-opts m)))
 (defn workflow-status-cmd  [m] (cmd-workflow/workflow-status-cmd  (get-opts m)))
 (defn workflow-cancel-cmd  [m] (cmd-workflow/workflow-cancel-cmd  (get-opts m)))
+(defn workflow-gc-scratch-cmd [m] (cmd-workflow/workflow-gc-scratch-cmd (get-opts m)))
 
 ;; Chain commands
 (defn chain-run-cmd
@@ -582,6 +583,10 @@
     :fn (wr-help/handler-with-help :workflow-cancel workflow-cancel-cmd)
     :args->opts [:id]
     :spec (wr-help-registry/spec-for :workflow-cancel)}
+
+   {:cmds ["workflow" "gc-scratch"]
+    :fn (wr-help/handler-with-help :workflow-gc-scratch workflow-gc-scratch-cmd)
+    :spec (wr-help-registry/spec-for :workflow-gc-scratch)}
 
    ;; Chain parent — `mf chain --help` / `mf chain` lists the group's
    ;; subcommands with their one-line summaries.

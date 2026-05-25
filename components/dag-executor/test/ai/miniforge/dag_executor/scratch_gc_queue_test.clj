@@ -79,12 +79,20 @@
 
 (deftest gc-queue-path-creates-miniforge-dir-test
   (testing "Calling gc-queue-path creates the ~/.miniforge directory if absent"
-    ;; We can't easily test the real home directory; just verify the function
-    ;; returns a path whose parent directory exists after the call.
-    (let [p      (sut/gc-queue-path)
-          parent (.getParentFile (File. ^String p))]
-      (is (.exists parent))
-      (is (.isDirectory parent)))))
+    ;; Bind user.home to a temp dir so the test never writes the real
+    ;; ~/.miniforge; verify the function returns a path whose parent
+    ;; directory exists after the call.
+    (let [orig (System/getProperty "user.home")
+          tmp  (str (java.nio.file.Files/createTempDirectory
+                     "mf-home" (make-array java.nio.file.attribute.FileAttribute 0)))]
+      (try
+        (System/setProperty "user.home" tmp)
+        (let [p      (sut/gc-queue-path)
+              parent (.getParentFile (File. ^String p))]
+          (is (.exists parent))
+          (is (.isDirectory parent)))
+        (finally
+          (System/setProperty "user.home" orig))))))
 
 ;;------------------------------------------------------------------------------ enqueue-workflow-gc!
 

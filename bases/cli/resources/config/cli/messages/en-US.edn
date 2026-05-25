@@ -732,6 +732,8 @@
   "Show the status of a workflow by ID."
   :workflow-runner.help/workflow-cancel-summary
   "Cancel a running workflow by ID."
+  :workflow-runner.help/workflow-gc-scratch-summary
+  "Garbage-collect stale workflow scratch git refs from the deferred GC queue."
   :workflow-runner.help/chain-run-summary
   "Execute a chain (multi-workflow) by ID."
   :workflow-runner.help/chain-list-summary
