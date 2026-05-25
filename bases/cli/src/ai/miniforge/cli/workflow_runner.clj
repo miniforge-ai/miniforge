@@ -154,19 +154,23 @@
 ;------------------------------------------------------------------------------ Layer 0.7
 ;; Deferred scratch-ref GC — thin delegation to workflow-runner.gc-hooks
 ;;
-;; The helpers are defined in their own lightweight namespace so they can be
-;; loaded and tested in isolation without pulling in the full runner stack
-;; (which starts threads that hang test JVMs).
+;; gc-hooks is a *pure* namespace (no external requires).  Its functions accept
+;; their collaborators as injected arguments.  We bind the concrete
+;; implementations here via `partial` so the rest of this namespace calls them
+;; with no extra ceremony.
 
 (def ^:private enqueue-workflow-gc-best-effort!
   "Append `workflow-id` to the scratch-ref GC queue.
    Never throws — GC housekeeping must not interfere with the workflow result."
-  gc-hooks/enqueue-workflow-gc-best-effort!)
+  (partial gc-hooks/enqueue-workflow-gc-best-effort!
+           gc-queue/enqueue-workflow-gc!))
 
 (def ^:private run-gc-pass-best-effort!
   "Run the deferred scratch-ref GC pass piggybacked on workflow start.
    Never throws."
-  gc-hooks/run-gc-pass-best-effort!)
+  (partial gc-hooks/run-gc-pass-best-effort!
+           worktree/worktree-root
+           gc-queue/run-deferred-gc!))
 
 ;------------------------------------------------------------------------------ Layer 0.8
 ;; Source-root and execution-context validation helpers
