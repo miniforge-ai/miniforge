@@ -1,0 +1,96 @@
+;; =============================================================================
+;; Spec: Compile policy-pack rules into executable check-fns
+;; =============================================================================
+;;
+;; Why this exists (dogfood evidence, 2026-05-25, PR #979):
+;;   Miniforge's thesis is policy-as-code that is APPLIED and GUARANTEED.
+;;   N4-policy-packs.md §3 mandates every rule provide a check-fn and §2.3.1
+;;   mandates :error severity blocks phase completion. But N4-delta deferred
+;;   the executable realization, and it was never built: in the compiled
+;;   standards pack (components/phase/resources/packs/miniforge-standards.pack.edn)
+;;   the large majority of detection rules are {:type :custom} with NO
+;;   :custom-fn symbol, so policy-pack/detection `detect-custom` returns nil →
+;;   the rule can never produce a violation. Rules reach agents only as
+;;   advisory prompt text. Result: PR #979 shipped a dead duplicate namespace,
+;;   an unwired CLI command, and a lying docstring even though DRY / dead-code
+;;   rules exist in the pack — because no rule is enforceable.
+;;
+;;   This spec builds the missing binding seam: a compiler that turns each
+;;   enabled pack rule into an N4 §3.1 check-fn. The phase wiring + per-run
+;;   evidence land in the dependent spec policy-gate-phase-wiring-and-evidence.
+
+{:spec/title "Compile policy-pack rules into executable check-fns"
+
+ :spec/description
+ "Build the rule -> enforcement binding the standards pack lacks. Every
+  enabled pack rule must resolve to an executable check-fn matching the
+  N4 §3.1 contract: (fn [artifacts context] -> {:passed? bool :violations
+  [...] :metadata {...}}). No enabled rule may silently no-op.
+
+  GROUP 1: Detection-typed rule -> check-fn compiler
+  Add a compiler in the policy-pack component that, given a compiled rule,
+  returns a check-fn dispatched on the rule's :detection :type:
+    - :content-scan / pattern rules -> deterministic content/regex check
+      over the artifact's changed files (pure, per N4 §3.1.1).
+    - mechanical/tool rules (see GROUP 2) -> bind to the named tool gate
+      capability (clj-kondo, cljfmt, reader-parse, poly-check, bb-load,
+      no-secrets) and adapt its result into the N4 violation shape.
+    - :custom / heuristic rules with no deterministic detector -> a
+      semantic check-fn backed by components/semantic-analyzer
+      (LLM-as-judge), classified :heuristic per N4-delta's enforceability
+      classes (NOT subject to the §3.1.1 pure/deterministic clause).
+  Back-fill or auto-derive so that every ENABLED rule produces a non-nil
+  check-fn. A rule that cannot be bound to any mechanism MUST be reported
+  at compile time (fail loud), not silently dropped.
+
+  GROUP 2: Mechanical tool gates as policy capabilities
+  The existing tool gates (loop/gates.clj clj-kondo lint, reader syntax,
+  no-secrets; gate/format.clj cljfmt; poly check; the graalvm/bb-load
+  gate) are real but hardcoded standalone and NOT discoverable as policy.
+  Introduce a capability registry that names each mechanical check and the
+  tool it invokes, so a pack rule can declare `:detection {:type :capability
+  :capability :lint}` (etc.) and the GROUP 1 compiler binds it to that
+  tool. Model lint AND format as first-class policy capabilities so they
+  are governed pipeline policy, not bb tasks beside it. Replace the
+  ad-hoc :custom-fn stubs for mechanical rules with capability bindings.
+
+  Out of scope (dependent spec): executing the pack-derived gate set in
+  verify/review and per-run rule-application evidence."
+
+ :spec/intent
+ {:type :feature
+  :scope ["components/policy-pack/src"
+          "components/gate/src"
+          "components/loop/src"
+          "components/semantic-analyzer/src"
+          "components/phase/resources/packs"
+          "standards/miniforge"]}
+
+ :spec/constraints
+ ["Conform to N4 §3.1: every check-fn is (fn [artifacts context] -> {:passed? :violations :metadata})"
+  "Deterministic (mechanical/content-scan) check-fns MUST be pure per N4 §3.1.1; heuristic (semantic-analyzer) checks are classified :heuristic per N4-delta and are exempt from the pure/deterministic clause"
+  "No ENABLED rule may compile to a no-op (nil/never-violates) check-fn; an unbindable enabled rule fails compilation loudly"
+  "Rule :severity is preserved end-to-end onto the produced violations (no downgrade in the compiler)"
+  "Mechanical capabilities wrap the EXISTING tool gates (clj-kondo, cljfmt, poly, bb-load, no-secrets) — do not reimplement linters"
+  "Compiler changes are additive: do not break the existing :behavioral gate / policy-pack check-artifact callers"
+  "Exceptions are data at component interfaces — the compiler returns anomalies, not throws, except at boundaries"]
+
+ :spec/acceptance-criteria
+ ["Given the compiled miniforge-standards pack, compiling its enabled rules yields a check-fn for 100% of them (zero enabled rules resolve to nil)"
+  "A unit test feeds a sample artifact with a DRY/duplication violation and the compiled rule's check-fn returns :passed? false with a violation naming the rule-id"
+  "A unit test feeds a clean artifact and the same check-fn returns :passed? true with empty :violations"
+  "A :capability :lint rule binds to clj-kondo and a lint error surfaces as an N4 violation with the rule's :severity"
+  "A :capability :format rule binds to cljfmt and an unformatted artifact yields a violation"
+  "A heuristic :custom rule with no deterministic detector binds to a semantic-analyzer check-fn that returns the N4 result shape"
+  "Compiling a pack containing an enabled rule with no bindable detection mechanism fails with a clear compile-time error naming the rule-id"
+  "Mechanical check-fns are pure: called twice on identical inputs they return equal results"]
+
+ :spec/priority
+ {:tier :blocker
+  :axes #{:correctness :dogfood-enabler :observation}
+  :theme :policy-enforcement
+  :rationale "The binding seam is the foundation of policy enforcement; without executable check-fns no policy can ever gate a run (PR #979 shipped pack-covered defects)."
+  :blocks ["policy-gate-phase-wiring-and-evidence.spec.edn"]
+  :blocked-by []}
+
+ :spec/workflow-type :canonical-sdlc}

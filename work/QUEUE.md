@@ -15,13 +15,15 @@ Make miniforge capable of running miniforge without paying for
 
 | tier | r | theme | spec | axes |
 |---|---|---|---|---|
-| blocker | ● | dogfood-resilience | `event-log-tool-visibility.spec.edn` — Event log — capture tool name / args / result on every agent tool call | observation+dogfoodenabler |
+| blocker | ● | dogfood-resilience | `agent-stream-watchdog-and-resume.spec.edn` — Agent stream watchdog + session-resume for hang recovery | tokenconservation+dogfoodenabler |
+| blocker | ● | dogfood-resilience | `dogfood-handoff-redirect-loop.spec.edn` — Dogfood: stop degraded handoff redirect loops | correctness+tokenconservation+dogfoodenabler |
 | blocker | ● | dogfood-resilience | `planner-convergence-and-artifact-submission.spec.edn` — Planner convergence — container-promoted plan artifact + forced context-MCP usage | correctness+observation+tokenconservation+dogfoodenabler |
+| blocker | ● | dogfood-resilience | `workflow-resume-fsm-advance-investigation.spec.edn` — Workflow resume — make FSM advance from production checkpoints, not just synthetic ones | observation+tokenconservation+dogfoodenabler |
+| blocker | ● | dogfood-resilience | `workflow-resume-status-handling.spec.edn` — Workflow resume — fail loud when the resumed run never enters a terminal status | observation+tokenconservation+dogfoodenabler |
 | blocker | ● | dogfood-resilience | `worktree-persistence-scratch-branch.spec.edn` — Persist worktrees outside /tmp + scratch-branch commits on every write | dogfoodenabler |
 | high | ● | dogfood-resilience | `pedestal-interceptor-chain.spec.edn` — Pedestal-style interceptor chain for phase lifecycle | correctness+dogfoodenabler |
 | high | ● | dogfood-resilience | `tech-registry-doctor-repo-scoped-bootstrap.spec.edn` — Tech-registry-driven runtime bootstrap — repo-scoped, print-don't-install | correctness+ux+dogfoodenabler |
 | high | ○ | dogfood-resilience | `workflow-dependency-declarations.spec.edn` — Workflow dependency declarations — supervisor sequencing + DAG dependencies | dogfoodenabler |
-| blocker | ○ | dogfood-resilience | `agent-stream-watchdog-and-resume.spec.edn` — Agent stream watchdog + session-resume for hang recovery | tokenconservation+dogfoodenabler |
 | blocker | ○ | dogfood-resilience | `workflow-phase-checkpoint-and-resume.spec.edn` — Workflow phase checkpoint + resume | tokenconservation+dogfoodenabler |
 
 ## Theme — Multi-backend CLI parity (`multi-backend-parity`, status: planned)
@@ -39,6 +41,26 @@ Miniforge is an agent-CLI-agnostic platform. Every supported CLI
 | tier | r | theme | spec | axes |
 |---|---|---|---|---|
 | blocker | ● | multi-backend-parity | `multi-backend-cli-parity.spec.edn` — Multi-backend CLI parity — make codex / cursor-agent / copilot / open-codex first-class planners and implementers | correctness+scale+dogfoodenabler |
+
+## Theme — Policy enforcement (applied + guaranteed) (`policy-enforcement`, status: planned)
+
+Miniforge's reason for existence: policy-as-code that is APPLIED and
+   GUARANTEED, not merely suggested. Today standards-pack rules are authored
+   and compiled but carry no executable check (most detection rules are
+   :custom with no :custom-fn), and the only pack-derived gate (:behavioral)
+   is wired solely to :observe — so a normal SDLC run never enforces them.
+   Rules reach agents as advisory prompt text; nothing fails a run for a DRY,
+   dead-code, lint, or format violation (dogfood PR #979 shipped exactly those
+   with the pack present). Close the binding seam N4-delta deferred: compile
+   pack rules into N4 §3.1 check-fns, execute the pack-derived gate set in
+   verify/review keyed off :applies-to {:phases} with :error -> block, model
+   the mechanical tool gates (lint/format) as policy capabilities, and emit
+   per-rule evidence per run.
+
+| tier | r | theme | spec | axes |
+|---|---|---|---|---|
+| blocker | ● | policy-enforcement | `policy-gate-compiler.spec.edn` — Compile policy-pack rules into executable check-fns | correctness+observation+dogfoodenabler |
+| blocker | ○ | policy-enforcement | `policy-gate-phase-wiring-and-evidence.spec.edn` — Execute pack-derived policy gates in verify/review + emit per-rule evidence | correctness+observation+tokenconservation+dogfoodenabler |
 
 ## Theme — Operational Policy Synthesis (OPSV) (`operational-policy-synthesis`, status: planned)
 
@@ -68,6 +90,18 @@ Miniforge's DAG executor exists and is wired but never fires for
 | blocker | ● | dag-orchestration | `plan-from-agent-dag-wiring.spec.edn` — plan-from-agent must emit :plan/id so the DAG orchestrator activates | observation+tokenconservation+dogfoodenabler |
 | high | ● | dag-orchestration | `per-task-base-chaining.spec.edn` — Per-Task Base Chaining for DAG Sub-Workflows | workfloworchestration+dagexecution+localmodefidelity |
 
+## Theme — Polylith compliance (`polylith-compliance`, status: in-flight)
+
+`poly check` currently reports 13 structural errors + 9 warnings.
+   Pre-commit's structural gate rejects commits because of them, which
+   blocks every dogfood run's release phase. Get to a clean workspace
+   and keep it clean by wiring the gate into CI and workflow-dep
+   ordering.
+
+| tier | r | theme | spec | axes |
+|---|---|---|---|---|
+| high | ● | polylith-compliance | `tui-phase-loader-classpath.spec.edn` — Fix miniforge-tui phase loader classpath drift | correctness+dogfoodenabler |
+
 ## Theme — unassigned (`unassigned`, status: planned)
 
 (no theme description)
@@ -87,6 +121,7 @@ Miniforge's DAG executor exists and is wired but never fires for
 | medium | ● | unassigned | `gitlab-support-tasks.spec.edn` — GitLab Support — Detailed Implementation Tasks | - |
 | medium | ● | unassigned | `gitlab-support.spec.edn` — Add GitLab Support for MR Lifecycle Management | - |
 | medium | ● | unassigned | `knowledge-mcp-query.spec.edn` — Agent-driven rule query via lookup_policy MCP tool | - |
+| medium | ● | unassigned | `meta-agent-repair-loop-intervention.spec.edn` — Meta-agent intervention on repair-loop temporal stagnation | - |
 | medium | ● | unassigned | `migrate-runner-println-to-structured-logging.spec.edn` — Migrate workflow runner println calls to structured logging | - |
 | medium | ● | unassigned | `n04-knowledge-safety-pack.spec.edn` — N4: Knowledge-safety policy pack with prompt-injection detection | - |
 | medium | ● | unassigned | `n04-kubernetes-diff-parsing.spec.edn` — N4: Kubernetes manifest diff parsing for policy gate evaluation | - |

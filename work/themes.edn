@@ -161,4 +161,36 @@
    "A conformance test suite replays one fixture spec per backend and asserts equivalent phase outcomes"
    "Backend selection is first-class in user config and session-resume works across all supported backends"]
   :theme/status :planned
+  :theme/owner :christopher}
+
+ :policy-enforcement
+ {:theme/id :policy-enforcement
+  :theme/title "Policy enforcement (applied + guaranteed)"
+  :theme/description
+  "Miniforge's reason for existence: policy-as-code that is APPLIED and
+   GUARANTEED, not merely suggested. Today standards-pack rules are authored
+   and compiled but carry no executable check (most detection rules are
+   :custom with no :custom-fn), and the only pack-derived gate (:behavioral)
+   is wired solely to :observe — so a normal SDLC run never enforces them.
+   Rules reach agents as advisory prompt text; nothing fails a run for a DRY,
+   dead-code, lint, or format violation (dogfood PR #979 shipped exactly those
+   with the pack present). Close the binding seam N4-delta deferred: compile
+   pack rules into N4 §3.1 check-fns, execute the pack-derived gate set in
+   verify/review keyed off :applies-to {:phases} with :error -> block, model
+   the mechanical tool gates (lint/format) as policy capabilities, and emit
+   per-rule evidence per run."
+  :theme/informative-spec nil
+  :theme/normative-refs
+  [{:doc "specs/normative/N4-policy-packs.md"
+    :section "§3 Gate Execution Contract; §2.3.1 Rule Severity Levels"
+    :relation :primary}
+   {:doc "specs/normative/N4-delta-policy-compilation-contract.md"
+    :relation :supporting}]
+  :theme/completion-criteria
+  ["Every enabled pack rule resolves to an executable check-fn of shape [artifacts context] -> {:passed? :violations} per N4 §3.1 — zero enabled rules with no enforcement mechanism"
+   "verify and review execute the pack-derived gate set filtered by the rule's :applies-to {:phases}; an :error-severity violation blocks phase completion per N4 §2.3.1"
+   "lint and format are modeled as policy capabilities bound to clj-kondo / cljfmt, not standalone bb tasks outside the governed pipeline"
+   "a DRY / dead-code / unwired-command violation fails a dogfood run before the PR opens (regression guard for PR #979)"
+   "every run emits per-rule-id applied/passed/failed evidence; a human can see which policies gated a given workflow"]
+  :theme/status :planned
   :theme/owner :christopher}}
