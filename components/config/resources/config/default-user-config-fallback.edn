@@ -11,6 +11,9 @@
              :max-tokens 150000
              :failure-strategy :retry
              :checkpoint-root "~/.miniforge/checkpoints"}
+  ;; Keep in sync with resources/config/default-user-config.edn.
+  ;; /tmp opt-in: override to "/tmp/miniforge-worktrees" for CI/sandbox runs.
+  :workflow/worktree-root "~/.miniforge/worktrees"
   :artifacts {:dir "~/.miniforge/artifacts"}
   :meta-loop {:enabled true
               :max-convergence-iterations 10

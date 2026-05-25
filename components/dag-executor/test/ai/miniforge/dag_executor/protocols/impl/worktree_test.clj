@@ -20,6 +20,7 @@
   "Tests for the worktree executor: concurrent-add lock and fallback strategy."
   (:require
    [clojure.test :refer [deftest is testing]]
+   [clojure.string :as str]
    [ai.miniforge.dag-executor.protocols.executor :as proto]
    [ai.miniforge.dag-executor.protocols.impl.worktree :as worktree]
    [ai.miniforge.dag-executor.result :as result]))
@@ -32,7 +33,8 @@
   (testing "returns ok with worktree-path when git worktree add -b succeeds immediately"
     (with-redefs [worktree/run-git     (fn [& _] {:exit 0 :out "" :err ""})
                   worktree/run-shell   (fn [& _] {:exit 0 :out "" :err ""})
-                  worktree/ensure-directory (fn [_] nil)]
+                  worktree/ensure-directory (fn [_] nil)
+                  worktree/check-legacy-tmp-worktrees! (fn [] nil)]
       (let [r (worktree/create-worktree "/tmp/base" "/tmp/repo" "task-abc" "main")]
         (is (result/ok? r))
         (is (= "/tmp/base/task-abc" (:worktree-path (:data r))))))))
@@ -58,7 +60,8 @@
 
                           :else {:exit 0 :out "" :err ""})))
                     worktree/run-shell        (fn [& _] {:exit 0 :out "" :err ""})
-                    worktree/ensure-directory (fn [_] nil)]
+                    worktree/ensure-directory (fn [_] nil)
+                    worktree/check-legacy-tmp-worktrees! (fn [] nil)]
         (worktree/create-worktree "/tmp/base" "/tmp/repo" "task-abc" "main")
         ;; Final positional arg of `worktree add` should be the resolved sha,
         ;; not the literal branch name. Without this, `git worktree add -b
@@ -81,7 +84,8 @@
                             {:exit 0 :out "" :err ""}))
                         {:exit 0 :out "" :err ""}))
                     worktree/run-shell        (fn [& _] {:exit 0 :out "" :err ""})
-                    worktree/ensure-directory (fn [_] nil)]
+                    worktree/ensure-directory (fn [_] nil)
+                    worktree/check-legacy-tmp-worktrees! (fn [] nil)]
         (let [r (worktree/create-worktree "/tmp/base" "/tmp/repo" "task-abc" "main")]
           (is (result/ok? r))
           (is (= "/tmp/base/task-abc" (:worktree-path (:data r)))))))))
@@ -103,7 +107,8 @@
                         :else
                         {:exit 0 :out "" :err ""}))
                     worktree/run-shell        (fn [& _] {:exit 0 :out "" :err ""})
-                    worktree/ensure-directory (fn [_] nil)]
+                    worktree/ensure-directory (fn [_] nil)
+                    worktree/check-legacy-tmp-worktrees! (fn [] nil)]
         (let [r (worktree/create-worktree "/tmp/base" "/tmp/repo" "task-abc" "main")]
           (is (result/ok? r))
           (is (= "/tmp/base/task-abc" (:worktree-path (:data r))))
@@ -118,7 +123,8 @@
                       {:exit 1 :out "" :err "fatal: cannot create worktree"}
                       {:exit 0 :out "" :err ""}))
                   worktree/run-shell        (fn [& _] {:exit 0 :out "" :err ""})
-                  worktree/ensure-directory (fn [_] nil)]
+                  worktree/ensure-directory (fn [_] nil)
+                  worktree/check-legacy-tmp-worktrees! (fn [] nil)]
       (let [r (worktree/create-worktree "/tmp/base" "/tmp/repo" "task-abc" "main")]
         (is (not (result/ok? r)))
         (is (= :worktree-create-failed (get-in r [:error :code])))))))
@@ -550,7 +556,7 @@
         (is (= :archive-bundle-failed (get-in r [:error :code])))))))
 
 ;; ============================================================================
-;; default-base-path — survives reboots
+;; default-base-path — survives reboots + config-aware resolution
 ;; ============================================================================
 
 (deftest default-base-path-lives-under-home-not-tmp-test
@@ -569,6 +575,30 @@
       (is (not (.startsWith ^String p "/tmp"))
           "must NOT be /tmp-rooted — that's the regression we're guarding"))))
 
+(deftest default-base-path-reads-workflow-worktree-root-from-config-test
+  (testing "default-base-path with config map returns :workflow/worktree-root when present"
+    (let [custom "/custom/worktrees"
+          p (worktree/default-base-path {:workflow/worktree-root custom})]
+      (is (= custom p)
+          "config :workflow/worktree-root overrides the hardcoded default")))
+
+  (testing "default-base-path with empty config falls back to hardcoded default"
+    (let [p (worktree/default-base-path {})
+          home (System/getProperty "user.home")]
+      (is (.startsWith ^String p home))
+      (is (.endsWith ^String p "/.miniforge/worktrees"))))
+
+  (testing "default-base-path with nil :workflow/worktree-root falls back to hardcoded"
+    (let [p (worktree/default-base-path {:workflow/worktree-root nil})]
+      (is (.endsWith ^String p "/.miniforge/worktrees")))))
+
+(deftest default-base-path-tmp-opt-in-via-config-test
+  (testing "/tmp-rooted path is valid when explicitly set via :workflow/worktree-root"
+    (let [tmp-path "/tmp/miniforge-worktrees-ci"
+          p (worktree/default-base-path {:workflow/worktree-root tmp-path})]
+      (is (= tmp-path p)
+          "/tmp opt-in works when caller sets :workflow/worktree-root explicitly"))))
+
 (deftest create-worktree-executor-uses-new-default-test
   (testing "create-worktree-executor with no :base-path picks up the home default"
     (let [exec (worktree/create-worktree-executor {})]
@@ -578,3 +608,116 @@
     (let [exec (worktree/create-worktree-executor
                 {:base-path "/tmp/miniforge-worktrees-ci"})]
       (is (= "/tmp/miniforge-worktrees-ci" (:base-path exec))))))
+
+(deftest create-worktree-executor-reads-workflow-worktree-root-test
+  (testing ":workflow/worktree-root in config is used as base-path when :base-path absent"
+    (let [exec (worktree/create-worktree-executor
+                {:workflow/worktree-root "/configured/worktrees"})]
+      (is (= "/configured/worktrees" (:base-path exec))
+          "executor picks up :workflow/worktree-root from user config")))
+
+  (testing ":base-path takes priority over :workflow/worktree-root"
+    (let [exec (worktree/create-worktree-executor
+                {:base-path "/explicit/override"
+                 :workflow/worktree-root "/configured/worktrees"})]
+      (is (= "/explicit/override" (:base-path exec))
+          ":base-path is highest priority, overrides :workflow/worktree-root"))))
+
+;; ============================================================================
+;; Legacy /tmp worktree detection
+;; ============================================================================
+
+(deftest check-legacy-tmp-worktrees-does-not-throw-test
+  (testing "check-legacy-tmp-worktrees! is safe to call regardless of filesystem state"
+    ;; No assertion on output — just verify it never throws.
+    (is (nil? (worktree/check-legacy-tmp-worktrees!)))))
+
+(deftest create-worktree-calls-legacy-check-test
+  (testing "create-worktree invokes check-legacy-tmp-worktrees! as advisory step"
+    (let [check-called? (atom false)]
+      (with-redefs [worktree/check-legacy-tmp-worktrees!
+                    (fn [] (reset! check-called? true))
+                    worktree/run-git        (fn [& _] {:exit 0 :out "" :err ""})
+                    worktree/run-shell      (fn [& _] {:exit 0 :out "" :err ""})
+                    worktree/ensure-directory (fn [_] nil)]
+        (worktree/create-worktree "/base" "/repo" "task-x" "main")
+        (is @check-called?
+            "create-worktree must delegate to check-legacy-tmp-worktrees!")))))
+
+(deftest check-legacy-tmp-worktrees-never-throws-test
+  (testing "check-legacy-tmp-worktrees! is safe against any real filesystem state"
+    ;; No mock needed: just runs against real FS. /tmp/miniforge-worktrees
+    ;; almost certainly does not exist in CI — but even if it does, the
+    ;; function only reads and emits a warning; it never throws.
+    (is (nil? (worktree/check-legacy-tmp-worktrees!))
+        "must return nil (not throw) in any filesystem state")))
+
+;; ============================================================================
+;; default-base-path — tilde expansion
+;; ============================================================================
+
+(deftest default-base-path-expands-tilde-test
+  (testing "leading ~/ in :workflow/worktree-root is expanded to user home"
+    (let [home (System/getProperty "user.home")
+          p    (worktree/default-base-path
+                {:workflow/worktree-root "~/.miniforge/worktrees"})]
+      (is (= (str home "/.miniforge/worktrees") p)
+          "tilde must be substituted with the actual home directory")))
+
+  (testing "absolute path in :workflow/worktree-root is returned unchanged"
+    (let [p (worktree/default-base-path
+             {:workflow/worktree-root "/absolute/custom/path"})]
+      (is (= "/absolute/custom/path" p)
+          "absolute path must pass through without modification"))))
+
+;; ============================================================================
+;; Legacy /tmp detection — warning content and graceful coexistence
+;; ============================================================================
+
+(deftest check-legacy-tmp-worktrees-warns-with-message-test
+  (testing "warning message includes legacy path, migration key, and cleanup command"
+    (let [warnings (atom [])]
+      ;; Reset the one-shot dedup atom so this test is independent of execution order.
+      (reset! worktree/legacy-tmp-warned? false)
+      (with-redefs [worktree/legacy-tmp-worktrees-exist? (constantly true)]
+        (binding [worktree/*warn-fn* (fn [msg] (swap! warnings conj msg))]
+          (worktree/check-legacy-tmp-worktrees!)
+          (is (= 1 (count @warnings))
+              "exactly one warning is emitted")
+          (is (str/includes? (first @warnings) "WARNING")
+              "message must include WARNING for operator visibility")
+          (is (str/includes? (first @warnings) "/tmp/miniforge-worktrees")
+              "message must identify the legacy path")
+          (is (str/includes? (first @warnings) ":workflow/worktree-root")
+              "message must reference the config key for migration")
+          (is (str/includes? (first @warnings) "rm -rf")
+              "message must include cleanup command"))))))
+
+(deftest check-legacy-tmp-worktrees-silent-when-absent-test
+  (testing "no warning is emitted when the legacy directory does not exist"
+    (let [warnings (atom [])]
+      (with-redefs [worktree/legacy-tmp-worktrees-exist? (constantly false)]
+        (binding [worktree/*warn-fn* (fn [msg] (swap! warnings conj msg))]
+          (worktree/check-legacy-tmp-worktrees!)
+          (is (zero? (count @warnings))
+              "warning must not fire when legacy path is absent"))))))
+
+(deftest create-worktree-succeeds-with-legacy-worktrees-present-test
+  (testing "create-worktree returns ok even when legacy /tmp worktrees exist"
+    ;; Graceful coexistence constraint: a warning is emitted but the worktree
+    ;; is still created at the new configured base-path without any error.
+    ;; Reset the one-shot dedup atom so this test is independent of execution order.
+    (reset! worktree/legacy-tmp-warned? false)
+    (let [warned? (atom false)]
+      (with-redefs [worktree/legacy-tmp-worktrees-exist? (constantly true)
+                    worktree/run-git          (fn [& _] {:exit 0 :out "" :err ""})
+                    worktree/run-shell        (fn [& _] {:exit 0 :out "" :err ""})
+                    worktree/ensure-directory (fn [_] nil)]
+        (binding [worktree/*warn-fn* (fn [_] (reset! warned? true))]
+          (let [r (worktree/create-worktree
+                   "/home/user/.miniforge/worktrees"
+                   "/repo" "task-coexist" "main")]
+            (is (result/ok? r)
+                "creation must succeed — the warning is advisory, not an error")
+            (is @warned?
+                "warning was emitted before creation proceeded")))))))
