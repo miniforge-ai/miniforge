@@ -59,10 +59,14 @@
 (defn- sh-git
   "Run a git command with CWD set to `dir`.
    Returns the standard {:exit int :out str :err str} shell map.
-   Catches process-launch exceptions and normalises them to {:exit 1}."
+   Catches process-launch exceptions and normalises them to {:exit 1}.
+
+   Passes `-c commit.gpgsign=false` so that `git commit-tree` never
+   attempts GPG signing — git plumbing commits are internal bookkeeping
+   and must not block waiting for a passphrase or gpg-agent."
   [dir & args]
   (try
-    (apply shell/sh "git" "-C" dir args)
+    (apply shell/sh "git" "-c" "commit.gpgsign=false" "-C" dir args)
     (catch Exception e
       {:exit 1 :out "" :err (.getMessage e)})))
 
@@ -70,7 +74,8 @@
   "Like sh-git but pipes `stdin` (a String) to the git process."
   [dir stdin & args]
   (try
-    (apply shell/sh "git" "-C" dir (concat args [:in stdin]))
+    (apply shell/sh "git" "-c" "commit.gpgsign=false" "-C" dir
+           (concat args [:in stdin]))
     (catch Exception e
       {:exit 1 :out "" :err (.getMessage e)})))
 
@@ -122,7 +127,9 @@
               file-name  (.getName (File. ^String file-path))
               ;; Step 2: build a minimal single-entry tree without touching the index.
               ;;   Tree-entry format: "<mode> blob <sha>\t<name>"
-              tree-entry (str "100644 blob " blob-sha "\t" file-name)
+              ;; git mktree reads one tree-entry per line from stdin.  The
+              ;; trailing newline ensures git sees a complete line before EOF.
+              tree-entry (str "100644 blob " blob-sha "\t" file-name "\n")
               tree-r     (sh-git-in parent-repo-path tree-entry "mktree")]
           (if-not (git-ok? tree-r)
             (result/err :scratch-commit/mktree-failed
