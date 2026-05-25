@@ -61,7 +61,12 @@ end your FINAL assistant message with the plan EDN wrapped in a ```clojure code 
 There is no separate artifact-submission MCP tool in this session.
 Narration-only responses (e.g. \"Based on my exploration...\" with no EDN or Write) are rejected by the runtime with :anomalies.agent/invoke-failed and cost a full turn's tokens. If the last thing you would say is prose, STOP and replace it by Writing `.miniforge/plan.edn` instead.
 
-Use (random-uuid) for all IDs - just write #uuid \"<any-uuid>\" placeholders that I'll fill in."
+Use (random-uuid) for all IDs - just write #uuid \"<any-uuid>\" placeholders that I'll fill in.
+
+CRITICAL: `:plan/tasks` MUST be a non-empty vector. A plan with zero tasks fails
+the workflow immediately with :anomalies.dag/no-tasks — there is no fallback.
+If the work is genuinely already done, use the :already-satisfied evidence bundle
+(described below in the Existing Files section), NOT an empty :plan/tasks list."
 
  ;; Existing-files block prepended to {{existing-files-section}}.
  ;; Substitution key: {{files-list}}.
@@ -393,6 +398,10 @@ These are documented real failures that cost real tokens:
    top-level Clojure map, not a vector or list. `{:plan/id ...}`,
    not `[{:plan/id ...}]`.
 4. **Invalid EDN** — file must parse. Check your syntax before Write.
+5. **Empty :plan/tasks** — writing `{:plan/tasks []}` or omitting :plan/tasks
+   fails the workflow with :anomalies.dag/no-tasks before any implement runs.
+   If the work is already done, write the :already-satisfied evidence bundle
+   instead (see Already-Satisfied Detection above). Never produce a zero-task plan.
 
 ## Standards enforcement (CRITICAL)
 

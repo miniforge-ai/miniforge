@@ -55,6 +55,58 @@
                                       :source :spec-provided}})))
 
 ;------------------------------------------------------------------------------ Layer 1
+;; Plan result validation (GROUP 1 — plan-from-agent-dag-wiring)
+
+(defn- validate-dag-readiness
+  "Validate that the agent result is DAG-ready after a successful plan.
+
+   Returns the result unchanged when valid, or a failure response with a
+   clear diagnostic when the plan would silently collapse DAG execution:
+
+     :anomalies.dag/no-tasks    — planner returned 0 tasks (would trigger
+                                   :no-tasks DAG skip → monolithic implement)
+     :anomalies.dag/unknown-deps — one or more tasks reference dep IDs that
+                                   don't exist in this plan (runtime orphans)
+
+   :already-satisfied and error/failure results pass through unchanged — their
+   statuses are handled by the workflow FSM via extract-status."
+  [agent-result]
+  (if (not= :success (:status agent-result))
+    agent-result
+    (let [output   (:output agent-result)
+          tasks    (:plan/tasks output)
+          task-ids (set (keep :task/id tasks))]
+      (cond
+        ;; Zero tasks → :no-tasks DAG skip → silent monolithic implement fallback
+        (empty? tasks)
+        (response/error
+         (ex-info
+          (str "Planner produced 0 tasks — DAG orchestrator cannot activate. "
+               "Planner must decompose the spec into a non-empty :plan/tasks vector. "
+               "Use :already-satisfied evidence bundle when the work is truly done.")
+          {:phase     :plan
+           :plan/id   (:plan/id output)
+           :plan/name (:plan/name output)
+           :anomaly   :anomalies.dag/no-tasks}))
+
+        ;; Unknown dep refs → orphan tasks at DAG runtime — fail early
+        :else
+        (let [invalid-deps (for [t    tasks
+                                 dep  (:task/dependencies t)
+                                 :when (not (contains? task-ids dep))]
+                             {:task/id (:task/id t) :unknown-dep dep})]
+          (if (seq invalid-deps)
+            (response/error
+             (ex-info
+              (str "Plan contains tasks with unknown dependency references. "
+                   "Each :task/dependencies entry must be a :task/id from this plan.")
+              {:phase        :plan
+               :plan/id      (:plan/id output)
+               :invalid-deps (vec invalid-deps)
+               :anomaly      :anomalies.dag/unknown-deps}))
+            agent-result))))))
+
+;------------------------------------------------------------------------------ Layer 1
 ;; Plan from LLM agent (normal path)
 
 (defn build-planner-task
@@ -103,10 +155,11 @@
         on-chunk (create-streaming-callback ctx)
         agent-ctx (cond-> ctx on-chunk (assoc :on-chunk on-chunk))
         planner-agent (agent/create-planner {})]
-    {:result (try
-               (agent/invoke planner-agent task agent-ctx)
-               (catch Exception e
-                 (response/failure e)))
+    {:result (validate-dag-readiness
+              (try
+                (agent/invoke planner-agent task agent-ctx)
+                (catch Exception e
+                  (response/failure e))))
      :rules-manifest rules-manifest}))
 
 ;------------------------------------------------------------------------------ Layer 1

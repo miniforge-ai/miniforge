@@ -364,7 +364,33 @@
    {:constructor "agent-session-captured"
     :event-type  :agent/session-captured
     :json-string "agent/session-captured"
-    :browser?    false}])
+    :browser?    false}
+
+   ;; ── DAG orchestration lifecycle (plan-from-agent-dag-wiring) ─────────────
+   ;; Three separate event types so consumers can filter without parsing
+   ;; the outcome/reason field.  dag-considered is the legacy catch-all;
+   ;; dag-activated and dag-skipped are the new fine-grained alternatives.
+
+   {:constructor "dag-considered"
+    :event-type  :workflow/dag-considered
+    :json-string "workflow/dag-considered"
+    :browser?    false
+    :asymmetry?  true
+    :asymmetry-note "Constructor name implies namespace 'dag'; actual namespace is 'workflow'"}
+
+   {:constructor "dag-activated"
+    :event-type  :workflow/dag-activated
+    :json-string "workflow/dag-activated"
+    :browser?    false
+    :asymmetry?  true
+    :asymmetry-note "Constructor name implies namespace 'dag'; actual namespace is 'workflow'"}
+
+   {:constructor "dag-skipped"
+    :event-type  :workflow/dag-skipped
+    :json-string "workflow/dag-skipped"
+    :browser?    false
+    :asymmetry?  true
+    :asymmetry-note "Constructor name implies namespace 'dag'; actual namespace is 'workflow'"}])
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Derived views
@@ -415,7 +441,7 @@
 ;; Audit summary (machine-readable)
 
 (def audit-summary
-  {:audit/date          "2026-05-19"
+  {:audit/date          "2026-05-24"
    :audit/source-server "components/event-stream/src/ai/miniforge/event_stream/interface/events.clj"
    :audit/source-browser "components/web-dashboard/resources/public/js/app.js"
    :audit/browser-switch "handleWorkflowEvent"
