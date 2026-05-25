@@ -19,7 +19,19 @@
 (ns ai.miniforge.pr-lifecycle.pr-poller-test
   (:require
    [ai.miniforge.pr-lifecycle.pr-poller :as sut]
+   [ai.miniforge.dag-executor.interface :as dag]
    [clojure.test :refer [deftest is testing]]))
+
+(deftest current-github-login-test
+  (testing "returns the trimmed login on success"
+    (with-redefs [sut/run-gh (fn [_args _wt] (dag/ok {:output "  octocat\n"}))]
+      (is (= "octocat" (sut/current-github-login "/tmp/repo")))))
+  (testing "returns nil when gh errors (e.g. unauthenticated)"
+    (with-redefs [sut/run-gh (fn [_args _wt] (dag/err :gh-command-failed "not logged in"))]
+      (is (nil? (sut/current-github-login "/tmp/repo")))))
+  (testing "returns nil on blank output"
+    (with-redefs [sut/run-gh (fn [_args _wt] (dag/ok {:output "   "}))]
+      (is (nil? (sut/current-github-login "/tmp/repo"))))))
 
 (deftest parse-gh-comments-test
   (testing "normalizes review comments with file context"

@@ -180,6 +180,18 @@
           (dag/err :json-parse-error (.getMessage e))))
       result)))
 
+(defn current-github-login
+  "Resolve the authenticated GitHub login via `gh api user --jq .login`.
+
+   Used as the default `:self-author` for PR monitoring so the monitor loop
+   can find PRs this instance authored when no self-author is configured.
+   Returns the login string, or nil when gh is unauthenticated/unavailable."
+  [worktree-path]
+  (let [result (run-gh ["gh" "api" "user" "--jq" ".login"] worktree-path)]
+    (when (dag/ok? result)
+      (let [login (str/trim (:output (:data result) ""))]
+        (when (seq login) login)))))
+
 ;------------------------------------------------------------------------------ Layer 1
 ;; Comment fetching
 

@@ -28,7 +28,8 @@
             [ai.miniforge.response.interface :as response]
             [ai.miniforge.schema.interface :as schema]
             [clojure.edn :as edn]
-            [clojure.java.io :as io]))
+            [clojure.java.io :as io]
+            [clojure.string :as str]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Config loading + defaults
@@ -99,7 +100,13 @@
             {:worktree-path worktree-path
              :self-author (or (get-in ctx [:execution/self-author])
                               (get-in ctx [:config :github/self-author])
-                              (:self-author shared-defaults))
+                              (:self-author shared-defaults)
+                              ;; Default to the authenticated gh login so the
+                              ;; monitor loop can find PRs this instance opened
+                              ;; when no self-author is configured. Without this,
+                              ;; poll-open-prs filters by a nil author and finds
+                              ;; nothing.
+                              (pr-lifecycle/current-github-login worktree-path))
              :generate-fn generate-fn
              :event-bus event-bus
              :logger logger}
@@ -111,6 +118,26 @@
               (get-in ctx [:config :pr-monitor/max-total-fix-attempts-per-pr])
               :abandon-after-hours
               (get-in ctx [:config :pr-monitor/abandon-after-hours])})))))
+
+(defn- resolve-pr-infos
+  "Resolve the PR(s) to observe from the execution context. Returns a vector
+   of pr-info maps, or nil when there is nothing to observe.
+
+   DAG runs populate `[:execution/dag-pr-infos]`. For a single-PR run, the
+   release phase stores PR info at `[:execution/phase-results :release :result
+   :output :workflow/pr-info]` (with a `[:metrics :release :pr-info]`
+   fallback) — the SAME paths `dag-orchestrator/extract-pr-info-from-result`
+   reads. The prior single-PR fallback read `[:release :pr-info]` (one level
+   too shallow, wrong key), so observe always saw nil and skipped — a
+   single-PR dogfood opened its PR and exited without ever monitoring it."
+  [ctx]
+  (let [dag-prs (get-in ctx [:execution/dag-pr-infos])]
+    (cond
+      (seq dag-prs) (vec dag-prs)
+      :else (when-let [pr-info (or (get-in ctx [:execution/phase-results :release
+                                                :result :output :workflow/pr-info])
+                                   (get-in ctx [:metrics :release :pr-info]))]
+              [pr-info]))))
 
 (defn enter-observe
   "Execute the Observe phase.
@@ -124,10 +151,7 @@
 
    pr-lifecycle is a direct dependency of the workflow component."
   [ctx]
-  (let [pr-infos (or (get-in ctx [:execution/dag-pr-infos])
-                     ;; Single PR from release phase
-                     (when-let [pr-info (get-in ctx [:execution/phase-results :release :pr-info])]
-                       [pr-info]))
+  (let [pr-infos (resolve-pr-infos ctx)
         start-time (System/currentTimeMillis)]
 
     (if (empty? pr-infos)
@@ -143,12 +167,23 @@
             generate-fn (get-in ctx [:execution/generate-fn])
             event-bus (get-in ctx [:execution/event-bus])
             monitor-config (resolve-monitor-config ctx logger generate-fn event-bus)
-            self-author (:self-author monitor-config)
+            self-author (:self-author monitor-config)]
+       (if (str/blank? self-author)
+         ;; Without a self-author, poll-open-prs would shell `gh pr list
+         ;; --author <nil>` and the loop would retry forever. Skip with an
+         ;; explicit reason instead of spinning — surfaces as data, not a hang.
+         (-> ctx
+             (assoc-in [:phase :name] :observe)
+             (assoc-in [:phase :started-at] start-time)
+             (assoc-in [:phase :status] :completed)
+             (assoc-in [:phase :result]
+                       (response/success
+                        {:observe/status :skipped
+                         :observe/reason "No self-author resolved (gh unauthenticated?) — cannot poll PRs"})))
+         (let [monitor (pr-lifecycle/create-pr-monitor monitor-config)
+               evidence (pr-lifecycle/run-pr-monitor-loop monitor self-author)
 
-            monitor (pr-lifecycle/create-pr-monitor monitor-config)
-            evidence (pr-lifecycle/run-pr-monitor-loop monitor self-author)
-
-            result-data {:observe/status :completed
+               result-data {:observe/status :completed
                          :observe/evidence evidence
                          :observe/prs-monitored (count pr-infos)
                          :observe/duration-hours (:duration-hours evidence)
@@ -162,7 +197,7 @@
             (assoc-in [:phase :started-at] start-time)
             (assoc-in [:phase :status] :completed)
             (assoc-in [:phase :result] (response/success result-data))
-            (assoc :execution/pr-lifecycle-evidence evidence))))))
+            (assoc :execution/pr-lifecycle-evidence evidence))))))))
 
 (defn leave-observe
   "Post-processing for Observe phase. Records evidence and duration metrics."
