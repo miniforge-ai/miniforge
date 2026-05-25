@@ -510,7 +510,7 @@
     :spec {:pack      {:alias :p}
            :rules     {:alias :r}
            :since     {:alias :s}
-           :standards {:default ".standards"}
+           :standards {:default "standards/miniforge"}
            :execute   {:coerce :boolean :alias :x}
            :report    {:coerce :boolean :default true}
            :no-lint   {:coerce :boolean}
@@ -655,7 +655,7 @@
     :spec {:url       {:alias :u}
            :repo      {}
            :base      {:alias :b}
-           :standards {:default ".standards"}
+           :standards {:default "standards/miniforge"}
            :pack      {:alias :p}
            :rules     {:alias :r}
            :out       {:default "table"}
@@ -671,7 +671,7 @@
     :fn pr-review-monitor-cmd
     :spec {:repo      {}
            :author    {:alias :a}
-           :standards {:default ".standards"}
+           :standards {:default "standards/miniforge"}
            :pack      {:alias :p}
            :rules     {:alias :r}
            :once      {:coerce :boolean :default true}}}

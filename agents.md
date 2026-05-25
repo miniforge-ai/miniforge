@@ -37,7 +37,8 @@ See `standards/miniforge/agents.md` for the full catalog. Key rules:
 
 ```text
 miniforge/
-├── standards/miniforge/   # git submodule — shared engineering standards
+├── standards/
+│   └── miniforge/   # git submodule — shared engineering standards
 ├── bases/                 # Polylith bases (entry points)
 ├── components/            # Polylith components (domain logic)
 │   ├── agent/             # Agent implementations (implementer, reviewer, etc.)
