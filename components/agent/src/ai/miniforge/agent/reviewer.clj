@@ -228,29 +228,30 @@
          (loop/fail-result :implementation-handoff :policy errors)
          (loop/pass-result :implementation-handoff :policy))))))
 
-(def ^:private blocking-gate-types
-  "Internal gate types whose failure overrides even an LLM :approved verdict —
-   the deterministic safety net the LLM cannot be trusted to replace: broken
-   syntax, policy violations (e.g. :no-secrets, degraded implementation
-   handoff), and failing tests. Advisory gates like :lint do NOT override
-   approval — a lint failure downgrades to :conditionally-approved instead.
+(def ^:private advisory-gate-types
+  "Internal gate types whose failure is advisory — it must NOT override an
+   LLM :approved verdict. Only :lint qualifies: a style/formatting failure on
+   a build that already passed verify is not a ship-blocker, and treating it
+   as one flipped verify-passed, LLM-:approved builds to :rejected, capping
+   every dogfood spec at the :review-approved gate (observed 2026-05-24,
+   workflow adhoc-807481487).
 
-   Before this, every internal-gate error counted as blocking because
-   `loop/make-error` sets no :severity and the filter defaulted to :blocking.
-   A failing lint gate then flipped a verify-passed, LLM-:approved build to
-   :rejected, capping every dogfood spec at the :review-approved gate
-   (observed 2026-05-24, workflow adhoc-807481487)."
-  #{:syntax :policy :test})
+   Every other gate type blocks by default — fail-safe. That deliberately
+   includes unresolved `:unknown` and gate-execution exceptions
+   (`create-exception-feedback` produces `:unknown` errors with no
+   `:severity`): a gate that crashed must block review, never silently
+   approve."
+  #{:lint})
 
 (defn- error-blocking?
-  "An internal-gate error blocks when it explicitly declares
-   `:severity :blocking`, or — absent an explicit severity — when it comes
-   from a blocking gate type. Advisory-gate errors (e.g. :lint) without an
-   explicit blocking severity are not blocking."
+  "An internal-gate error is non-blocking only when it explicitly declares a
+   non-:blocking severity, or — absent an explicit severity — comes from an
+   advisory gate type. Everything else blocks (fail-safe), so an unresolved
+   `:unknown` gate type or a gate crash cannot pass review open."
   [gate-type error]
   (if-let [severity (:severity error)]
     (= :blocking severity)
-    (contains? blocking-gate-types gate-type)))
+    (not (contains? advisory-gate-types gate-type))))
 
 (defn extract-blocking-issues
   "Extract blocking errors from failed gates, honoring per-error severity and

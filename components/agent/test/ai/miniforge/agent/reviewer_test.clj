@@ -598,12 +598,22 @@
       (is (= :conditionally-approved
              (:decision (reviewer/make-review-decision failed {})))
           "non-blocking failure downgrades to :conditionally-approved, not :rejected")))
-  (testing "deterministic safety-net gates still block an LLM :approved"
-    (doseq [gate-type [:syntax :policy :test]]
+  (testing "all non-advisory gates block by default (fail-safe), incl. :unknown"
+    (doseq [gate-type [:syntax :policy :test :unknown]]
       (let [failed [(failed-gate-feedback gate-type [{:code :err :message "boom"}])]]
         (is (seq (reviewer/extract-blocking-issues failed))
             (str gate-type " failure must remain blocking"))
         (is (= :rejected (:decision (reviewer/make-review-decision failed {})))))))
+  (testing "a gate-execution exception (create-exception-feedback) fails safe (blocking)"
+    ;; create-exception-feedback yields {:gate-type :unknown :errors [{:type
+    ;; :gate-exception ...}]} with no :severity — a crashed gate must block,
+    ;; never approve open.
+    (let [crashed (reviewer/create-exception-feedback
+                   {} 0 (RuntimeException. "gate blew up") 1)]
+      (is (false? (:passed? crashed)))
+      (is (seq (reviewer/extract-blocking-issues [crashed]))
+          "a crashed gate's error must be blocking")
+      (is (= :rejected (:decision (reviewer/make-review-decision [crashed] {}))))))
   (testing "explicit :severity overrides gate-type classification"
     (is (seq (reviewer/extract-blocking-issues
               [(failed-gate-feedback :lint [{:message "x" :severity :blocking}])]))
