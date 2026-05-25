@@ -39,7 +39,8 @@
    [ai.miniforge.dag-executor.executor :as executor]
    [ai.miniforge.dag-executor.protocols.impl.runtime.descriptor :as descriptor]
    [ai.miniforge.dag-executor.protocols.impl.runtime.registry :as registry]
-   [ai.miniforge.dag-executor.protocols.impl.runtime.selector :as selector]))
+   [ai.miniforge.dag-executor.protocols.impl.runtime.selector :as selector]
+   [ai.miniforge.dag-executor.protocols.impl.worktree :as worktree-impl]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Result helpers (re-exports)
@@ -735,6 +736,108 @@
         run-atom (create-run-atom run-state)
         context (apply create-scheduler-context (mapcat identity context-opts))]
     (apply run-scheduler run-atom context (mapcat identity run-opts))))
+
+;------------------------------------------------------------------------------ Layer 10
+;; Scratch-commit operations — lightweight git-object-store snapshots
+
+(def scratch-ref-name
+  "Return the fully-qualified scratch ref name for a workflow.
+
+   Example:
+     (scratch-ref-name \"wf-abc123\")
+     ;=> \"refs/miniforge/scratch/wf-abc123\""
+  scratch-commit/scratch-ref-name)
+
+(def scratch-commit!
+  "Snapshot a single file into the workflow's scratch ref without touching
+   the parent repo's working tree or index.
+
+   Arguments:
+   - parent-repo-path  Absolute path to the parent git repository
+   - workflow-id       Workflow identifier used as the ref suffix
+   - phase             Free-form phase label (e.g. \"implement\", \"verify\")
+   - file-path         Absolute path to the file to snapshot
+
+   Returns result/ok with {:commit-sha :ref :workflow-id :phase :file-path}
+   or result/err with :code :scratch-commit/<reason>."
+  scratch-commit/scratch-commit!)
+
+(def list-scratch-commits
+  "Return a vector of commit-metadata maps for a workflow's scratch ref,
+   newest first.
+
+   Each map contains :commit-sha :message :timestamp-epoch :workflow-id.
+   Returns an empty vector when the ref does not exist."
+  scratch-commit/list-scratch-commits)
+
+(def gc-scratch-refs!
+  "Delete scratch refs whose tip commit is older than `max-age-days` days.
+
+   max-age-days=0 deletes all scratch refs immediately (useful for cleanup).
+
+   Returns result/ok {:deleted [ref-names] :retained int}."
+  scratch-commit/gc-scratch-refs!)
+
+;------------------------------------------------------------------------------ Layer 11
+;; Worktree lifecycle registry and file-write hook
+
+(def get-worktree-registry
+  "Return a snapshot of the current worktree lifecycle registry.
+
+   Each entry is keyed by workflow-id and contains:
+     :scratch-ref    String ref name under refs/miniforge/scratch/<workflow-id>
+     :worktree-path  Absolute path to the scratch worktree
+     :created-at     Epoch ms when the worktree was acquired
+     :status         :active (worktree present) or :released (worktree removed)
+     :released-at    Epoch ms of release (only present when :status :released)"
+  worktree-impl/get-worktree-registry)
+
+(def register-worktree-entry!
+  "Register a new worktree entry in the lifecycle registry.
+
+   Called automatically by the WorktreeExecutor's acquire-environment! when
+   :workflow-id is present in env-config. Also callable directly.
+
+   Arguments:
+   - workflow-id    Workflow identifier (used as registry key and scratch-ref suffix)
+   - worktree-path  Absolute path to the scratch worktree"
+  worktree-impl/register-worktree-entry!)
+
+(def release-worktree-entry!
+  "Mark a registry entry as :released while preserving the scratch ref.
+
+   Called automatically by the WorktreeExecutor's release-environment!.
+   Also callable directly when lifecycle management is handled outside the
+   executor (e.g. Fleet or K8s teardown paths).
+
+   The underlying git scratch ref is NOT deleted here — use gc-scratch-refs!."
+  worktree-impl/release-worktree-entry!)
+
+(def derive-parent-repo-path
+  "Derive the parent repository path from a linked worktree path.
+
+   Uses `git rev-parse --git-common-dir` to locate the shared .git directory,
+   then returns the directory that contains it (the parent repo root).
+
+   Returns result/ok {:parent-repo-path string} or result/err."
+  worktree-impl/derive-parent-repo-path)
+
+(def notify-file-written!
+  "Snapshot a file written inside a worktree into the workflow's scratch ref.
+
+   Called by the layer that processes Write tool responses from agents running
+   inside the worktree. Derives the parent repo path via git plumbing and
+   delegates to scratch-commit! without touching the worktree's index or
+   working tree.
+
+   Arguments:
+   - worktree-path  Absolute path to the scratch worktree
+   - workflow-id    Workflow identifier (used as scratch-ref suffix)
+   - phase          Current phase label (e.g. \"implement\", \"verify\")
+   - file-path      Absolute path to the file that was written
+
+   Returns result/ok with scratch-commit data or result/err."
+  worktree-impl/notify-file-written!)
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
