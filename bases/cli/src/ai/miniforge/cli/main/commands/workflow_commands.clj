@@ -17,7 +17,7 @@
 ;; limitations under the License.
 
 (ns ai.miniforge.cli.main.commands.workflow-commands
-  "Workflow subcommands: execute (spec file), status, cancel.
+  "Workflow subcommands: execute (spec file), status, cancel, gc-scratch.
 
    Distinct from 'workflow run' (which takes a registered workflow-id) —
    'workflow execute' accepts a spec file path and routes through the full
@@ -30,7 +30,9 @@
    [ai.miniforge.cli.main.commands.shared :as shared]
    [ai.miniforge.cli.main.display :as display]
    [ai.miniforge.cli.messages :as messages]
-   [ai.miniforge.cli.main.commands.run :as cmd-run]))
+   [ai.miniforge.cli.main.commands.run :as cmd-run]
+   [ai.miniforge.cli.worktree :as worktree]
+   [ai.miniforge.dag-executor.scratch-gc-queue :as gc-queue]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Helpers
@@ -139,6 +141,36 @@
           (catch Exception e
             (display/print-error (messages/t :workflow-cmd/cancel-failed
                                             {:error (ex-message e)}))))))))
+
+(defn workflow-gc-scratch-cmd
+  "Scan the scratch-ref GC queue and delete refs older than `max-age-days`.
+
+   Reads `~/.miniforge/scratch-gc-queue.edn`, removes entries whose
+   `:finished-at` is older than `max-age-days` days (default 7), and calls
+   `gc-scratch-refs!` on the current git repository for those stale entries.
+
+   Options:
+   - `:max-age-days` integer — age threshold in days (default 7; 0 = immediate)
+   - `:repo-path`    string  — parent git repo path (default: current repo root)"
+  [opts]
+  (let [max-age-days (or (:max-age-days opts) 7)
+        repo-root    (or (:repo-path opts) (worktree/worktree-root))]
+    (if-not repo-root
+      (do
+        (display/print-error "gc-scratch: not inside a git repository (no .git found)")
+        (shared/exit! 1))
+      (let [result (gc-queue/run-deferred-gc! repo-root max-age-days)]
+        (if (= :ok (:status result))
+          (let [{:keys [pruned remaining gc-result]} (:data result)
+                deleted-count (count (:deleted gc-result))]
+            (println (str "Scratch-ref GC: pruned " pruned " queue entries"
+                          ", deleted " deleted-count " git refs"
+                          ", " remaining " queue entries remain.")))
+          (do
+            (display/print-error
+             (str "gc-scratch failed: "
+                  (get-in result [:error :message] "unknown error")))
+            (shared/exit! 1)))))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

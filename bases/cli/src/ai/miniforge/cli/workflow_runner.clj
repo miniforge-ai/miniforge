@@ -38,7 +38,9 @@
    [ai.miniforge.cli.workflow-runner.dashboard :as dashboard]
    [ai.miniforge.phase.interface :as phase]
    [ai.miniforge.response.interface :as response]
-   [slingshot.slingshot :refer [try+]]))
+   [slingshot.slingshot :refer [try+]]
+   [ai.miniforge.dag-executor.scratch-gc-queue :as gc-queue]
+   [ai.miniforge.cli.worktree :as worktree]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Work spec kanban lifecycle
@@ -115,6 +117,27 @@
         (agent/record-workflow-outcome! ctx workflow-id status failure-class)
         (agent/run-cycle-from-context! ctx))
       (catch Exception _e nil))))
+
+;------------------------------------------------------------------------------ Layer 0.7
+;; Deferred scratch-ref GC — piggyback cleanup on normal workflow traffic
+
+(defn- enqueue-workflow-gc-best-effort!
+  "Append `workflow-id` to the scratch-ref GC queue.
+   Never throws — GC housekeeping must not interfere with the workflow result."
+  [workflow-id]
+  (try
+    (gc-queue/enqueue-workflow-gc! workflow-id)
+    (catch Exception _ nil)))
+
+(defn- run-gc-pass-best-effort!
+  "Run the deferred scratch-ref GC pass using the current git repo as the
+   parent-repo-path.  Invoked once at workflow start so stale refs from prior
+   workflows are collected without a background daemon.  Never throws."
+  []
+  (try
+    (when-let [repo-root (worktree/worktree-root)]
+      (gc-queue/run-deferred-gc! repo-root))
+    (catch Exception _ nil)))
 
 ;------------------------------------------------------------------------------ Layer 0.6
 ;; Workflow interface resolution and pipeline helpers
@@ -960,6 +983,9 @@
 (defn run-workflow! [workflow-id {:keys [version output quiet event-stream dashboard-url]
                                     :or {version "latest" output :pretty quiet false}
                                     :as opts}]
+  ;; Piggyback deferred GC on each workflow start — deletes scratch refs
+  ;; from finished workflows that are older than the 7-day retention window.
+  (run-gc-pass-best-effort!)
   (try
     (let [{:keys [load-workflow run-pipeline]} (resolve-workflow-interface)
           ;; Create event stream if not provided (dashboard-url takes precedence)
@@ -1007,6 +1033,10 @@
               ;; boot-time recovery pass picks up half-finished
               ;; archives on next start.
               (archive-workflow-manifest! manifest-handle workflow-id)
+              ;; Schedule deferred GC for this workflow's scratch ref — the
+              ;; ref will be deleted on a future run-gc-pass-best-effort! call
+              ;; once it is older than the 7-day retention window.
+              (enqueue-workflow-gc-best-effort! workflow-id)
               (display/print-result result opts)
               (cond-> result
                 (some? shutdown) (assoc :event-durability shutdown))))
@@ -1063,6 +1093,8 @@
 ;; Spec-driven execution
 
 (defn run-workflow-from-spec! [spec {:keys [quiet] :or {quiet false} :as opts}]
+  ;; Piggyback deferred GC on each spec-driven workflow start.
+  (run-gc-pass-best-effort!)
   (try+
     (let [{:keys [load-workflow run-pipeline]} (resolve-workflow-interface)
           ;; Create initial LLM client for workflow selection
@@ -1138,6 +1170,8 @@
             (move-spec-on-completion! provenance result)
             ;; Trigger meta-loop learning cycle in background
             (trigger-meta-loop-after-workflow! workflow-id outcome-status nil)
+            ;; Schedule deferred GC for this workflow's scratch ref.
+            (enqueue-workflow-gc-best-effort! workflow-id)
             result)
           (finally
             (progress-cleanup)

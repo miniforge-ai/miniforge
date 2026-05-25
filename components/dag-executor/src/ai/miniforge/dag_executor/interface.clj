@@ -40,7 +40,8 @@
    [ai.miniforge.dag-executor.protocols.impl.runtime.descriptor :as descriptor]
    [ai.miniforge.dag-executor.protocols.impl.runtime.registry :as registry]
    [ai.miniforge.dag-executor.protocols.impl.runtime.selector :as selector]
-   [ai.miniforge.dag-executor.protocols.impl.worktree :as worktree-impl]))
+   [ai.miniforge.dag-executor.protocols.impl.worktree :as worktree-impl]
+   [ai.miniforge.dag-executor.scratch-gc-queue :as scratch-gc-queue]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Result helpers (re-exports)
@@ -838,6 +839,33 @@
 
    Returns result/ok with scratch-commit data or result/err."
   worktree-impl/notify-file-written!)
+
+;------------------------------------------------------------------------------ Layer 12
+;; Scratch-ref GC queue — deferred, daemon-free garbage collection
+
+(def gc-queue-path
+  "Return the absolute path string for `~/.miniforge/scratch-gc-queue.edn`.
+   Creates `~/.miniforge/` when it does not exist."
+  scratch-gc-queue/gc-queue-path)
+
+(def enqueue-workflow-gc!
+  "Append a GC entry for `workflow-id` to `~/.miniforge/scratch-gc-queue.edn`.
+
+   Called at workflow completion (success or failure) so the corresponding
+   scratch ref becomes eligible for GC after 7 days.
+
+   Returns result/ok `{:workflow-id str :queue-size int}` or result/err."
+  scratch-gc-queue/enqueue-workflow-gc!)
+
+(def run-deferred-gc!
+  "Scan the GC queue and delete stale scratch refs if any entries are overdue.
+
+   Pass `parent-repo-path` (the git repo whose `refs/miniforge/scratch/` to clean)
+   and optionally `max-age-days` (default 7).
+
+   Returns result/ok `{:pruned int :remaining int :gc-result map-or-nil}` or
+   result/err."
+  scratch-gc-queue/run-deferred-gc!)
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
