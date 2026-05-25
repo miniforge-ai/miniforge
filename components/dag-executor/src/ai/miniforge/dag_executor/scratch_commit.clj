@@ -156,7 +156,7 @@
                                 :ref         ref-name
                                 :workflow-id workflow-id
                                 :phase       phase
-                                :file-path   file-path}))))))))
+                                :file-path   file-path})))))))))
 
     (catch Exception e
       (result/err :scratch-commit/unexpected
