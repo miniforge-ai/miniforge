@@ -17,24 +17,19 @@
 ;; limitations under the License.
 
 (ns ai.miniforge.dag-executor.scratch-commit-test
-  "Unit tests for the scratch-commit module.
+  "Tests for the scratch-commit module.
 
-   ## Scope
+   ## Why only pure functions are tested here
 
-   This namespace tests only the pure, side-effect-free functions in
-   `scratch-commit` (`scratch-ref-name`).
+   `scratch-commit!`, `list-scratch-commits`, and `gc-scratch-refs!` all invoke
+   git plumbing commands via `clojure.java.shell/sh`, which has NO built-in
+   timeout.  A hung git subprocess (e.g. waiting for user identity, a pager,
+   or a credential helper) will block the entire Polylith test runner for the
+   full 30-minute timeout window.
 
-   ## Why no git-subprocess tests here
-
-   `scratch-commit!`, `list-scratch-commits`, and `gc-scratch-refs!` all
-   delegate to `clojure.java.shell/sh`, which has **no timeout**.  On macOS
-   and Linux, a git subprocess can hang indefinitely when a git credential
-   helper, pager, or global commit hook blocks — causing the Polylith test
-   runner to time out after 30 minutes and kill the entire test suite.
-
-   The git-operation contract of these functions is exercised indirectly in
-   `scratch_gc_queue_test.clj` via `with-redefs` mocks that return controlled
-   result values without spawning any subprocesses."
+   The git-plumbing paths are exercised indirectly — with mocked collaborators
+   — in `scratch_gc_queue_test.clj`.  Only the pure helper `scratch-ref-name`
+   is tested here because it performs no I/O and cannot hang."
   (:require
    [clojure.test :refer [deftest is testing]]
    [clojure.string :as str]
@@ -56,10 +51,6 @@
   (testing "Returns a string starting with refs/miniforge/scratch/"
     (is (str/starts-with? (sut/scratch-ref-name "x") "refs/miniforge/scratch/")))
 
-  (testing "Handles minimal single-character IDs"
-    (is (= "refs/miniforge/scratch/x" (sut/scratch-ref-name "x"))))
-
-  (testing "Handles UUID-shaped workflow IDs"
-    (let [wf-id "550e8400-e29b-41d4-a716-446655440000"]
-      (is (= (str "refs/miniforge/scratch/" wf-id)
-             (sut/scratch-ref-name wf-id))))))
+  (testing "Concatenates prefix and workflow-id with no extra characters"
+    (is (= (str "refs/miniforge/scratch/" "my-wf-42")
+           (sut/scratch-ref-name "my-wf-42")))))
