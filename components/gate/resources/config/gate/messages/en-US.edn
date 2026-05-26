@@ -22,4 +22,19 @@
 
   ;; Behavioral gate — programmer-error guard for non-callable :check-fn.
   :behavioral/check-fn-not-function
-  ":check-fn must be a function, got: {class}"}}
+  ":check-fn must be a function, got: {class}"
+
+  ;; Policy-pack gate — registry descriptions (phase-scoped).
+  :policy-pack/description-verify
+  "Runs standards-pack rules targeting the verify phase against the artifact"
+
+  :policy-pack/description-review
+  "Runs standards-pack rules targeting the review phase against the artifact"
+
+  ;; Policy-pack gate — no-packs warning (pack resource missing / none loaded).
+  :policy-pack/no-policy-packs
+  "No policy packs loaded — pack gate skipped"
+
+  ;; Policy-pack gate — repair-required result message.
+  :policy-pack/repair-required
+  "Policy violations require redirect to :implement phase — no in-place repair"}}
