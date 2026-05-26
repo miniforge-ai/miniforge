@@ -64,24 +64,34 @@
    `bb standards:pack`, placed on the classpath at build time)."
   "packs/miniforge-standards.pack.edn")
 
-(defn- load-standards-pack
-  "Read the shipped standards pack manifest from the classpath, or nil when
-   the resource is missing/unreadable. Fail-safe — never throws."
+(defn- read-standards-pack
+  "Read the shipped standards pack manifest from the classpath.
+
+   Returns nil ONLY when the resource is absent (a repo legitimately without a
+   compiled pack). A present-but-malformed/unreadable pack THROWS — so
+   `gate.interface/check-gate` converts it into a failed gate (fail-closed),
+   rather than letting a corrupt pack masquerade as 'no pack' and silently
+   skip enforcement."
   []
-  (try
-    (some-> (io/resource standards-pack-resource) slurp edn/read-string)
-    (catch Exception _ nil)))
+  (when-let [res (io/resource standards-pack-resource)]
+    (edn/read-string (slurp res))))
+
+(def ^:private standards-pack
+  "Memoized shipped pack — read once per JVM (the classpath is stable for a
+   process). A read failure is cached as a thrown deref, keeping enforcement
+   fail-closed on every evaluation."
+  (delay (read-standards-pack)))
 
 (defn- packs-for-gate
   "Packs to evaluate. When ctx carries an explicit `:policy-packs` key, that
    value is authoritative — even an empty vector (a run that disabled all
    packs is respected, not silently re-seeded). When the key is absent (the
-   normal SDLC path), the shipped standards pack is loaded from the classpath
-   so the gate actually evaluates. Empty when no pack is available."
+   normal SDLC path), the shipped standards pack is used so the gate actually
+   evaluates. Empty when no pack resource is present."
   [ctx]
   (if (contains? ctx :policy-packs)
     (vec (:policy-packs ctx))
-    (if-let [pack (load-standards-pack)] [pack] [])))
+    (if-let [pack @standards-pack] [pack] [])))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Context wiring
