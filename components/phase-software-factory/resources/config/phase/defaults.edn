@@ -12,7 +12,7 @@
   ;; No agent: verify runs the test suite directly in the executor environment.
   :verify
   {:agent nil
-   :gates [:pre-verify-lint :tests-pass :coverage]
+   :gates [:pre-verify-lint :tests-pass :coverage :policy-verify]
    :budget {:tokens 0
             :iterations 3
             :time-seconds 300}
@@ -21,7 +21,7 @@
   ;; Review phase defaults.
   :review
   {:agent :reviewer
-   :gates [:review-approved :quality-check]
+   :gates [:review-approved :quality-check :policy-review]
    :budget {:tokens 20000
             :iterations 2
             :time-seconds 180}
