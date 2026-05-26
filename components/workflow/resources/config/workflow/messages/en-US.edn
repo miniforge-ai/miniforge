@@ -15,7 +15,7 @@
   :status/gate-failed        "Gate validation failed"
   :status/no-phases          "Workflow has no phases"
   :status/max-phases         "Exceeded maximum phase count: {max-phases}"
-  :status/phase-retries-exhausted "Phase :{phase} failed {retries} times in a row — aborting to avoid a retry runaway"
+  :status/phase-retries-exhausted "Phase {phase} failed {retries} times in a row — aborting to avoid a retry runaway"
   :status/empty-pipeline     "Workflow pipeline is empty"
   :status/duplicate-phases   "Duplicate phase ids make transition targets ambiguous"
   :status/paused             "⏸  Workflow paused, waiting for resume..."

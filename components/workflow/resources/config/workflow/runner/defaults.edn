@@ -2,6 +2,7 @@
  {;; Pipeline execution limits
   :max-phases             50
   :max-redirects          5
+  :max-consecutive-phase-retries 3
   :max-backoff-ms         30000
   :backoff-base-ms        1000
   :pause-poll-interval-ms 1000
