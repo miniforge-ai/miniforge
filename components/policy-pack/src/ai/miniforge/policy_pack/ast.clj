@@ -163,6 +163,11 @@
         (if-not finished?
           (do
             (.destroyForcibly proc)
+            ;; destroyForcibly is asynchronous — wait (briefly, bounded) for the
+            ;; process to actually exit before the finally block deletes the temp
+            ;; files, otherwise the delete can fail (notably on Windows, where an
+            ;; open file can't be removed) and leak temp files.
+            (.waitFor proc 2000 java.util.concurrent.TimeUnit/MILLISECONDS)
             (future-cancel out-future)
             (future-cancel err-future)
             (schema/failure :matches
