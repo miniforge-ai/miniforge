@@ -31,6 +31,8 @@
 (def check-rules detection/check-rules)
 (def check-artifact core/check-artifact)
 (def check-artifacts core/check-artifacts)
+(def filter-applicable-rules core/filter-applicable-rules)
+(def rule-applies-to-phase? core/rule-applies-to-phase?)
 (def blocking-violations detection/blocking-violations)
 (def approval-required-violations detection/approval-required-violations)
 (def warning-violations detection/warning-violations)

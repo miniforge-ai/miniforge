@@ -90,6 +90,7 @@
 (def gate-started events/gate-started)
 (def gate-passed events/gate-passed)
 (def gate-failed events/gate-failed)
+(def gate-rule-applied events/gate-rule-applied)
 (def tool-invoked events/tool-invoked)
 (def tool-completed events/tool-completed)
 (def milestone-reached events/milestone-reached)

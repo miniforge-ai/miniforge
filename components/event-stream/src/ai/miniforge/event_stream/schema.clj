@@ -654,6 +654,10 @@
    :gate/started     :public
    :gate/passed      :public
    :gate/failed      :public
+   ;; Per-rule policy evidence is finer-grained governance telemetry (one per
+   ;; rule per phase) and may reference matched locations — :internal, not
+   ;; :public, so it never reaches externally visible logs.
+   :gate/rule-applied :internal
    :tool/invoked     :internal
    :tool/completed   :internal
    :llm/request      :internal
