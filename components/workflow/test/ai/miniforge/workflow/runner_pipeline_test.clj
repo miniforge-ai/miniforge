@@ -73,6 +73,28 @@
           result (execute-pipeline-loop [] ctx {} (atom {}) 50)]
       (is (some? result)))))
 
+(deftest execute-pipeline-loop-aborts-on-consecutive-phase-retries-test
+  (testing "a phase that re-runs every iteration aborts loud well before max-phases (the overnight runaway guard)"
+    (let [stuck-ctx {:execution/status        :running   ; non-terminal so the loop proceeds
+                     :execution/current-phase :implement ; never advances → in-place retry
+                     :execution/phase-results {}
+                     :execution/errors        []
+                     :execution/response-chain {}
+                     :execution/started-at    (System/currentTimeMillis)}
+          calls     (atom 0)]
+      ;; Stub one iteration to return the same stuck (same-phase, non-terminal)
+      ;; context, simulating implement failing + re-entering forever.
+      (with-redefs [runner/execute-single-iteration
+                    (fn [_pipeline ctx _callbacks _iteration _control] (swap! calls inc) ctx)]
+        (let [result (execute-pipeline-loop [{:phase :implement}] stuck-ctx {} (atom {}) 50)]
+          (is (= :failed (:execution/status result))
+              "the loop must terminate the workflow, not spin to max-phases")
+          (is (some #(= :phase-retries-exhausted (:type %)) (:execution/errors result))
+              "failure is the typed consecutive-retry anomaly, not max-phases")
+          ;; Default cap is 3 — must abort within a handful of iterations, nowhere near 50.
+          (is (<= @calls 3)
+              (str "expected ≤3 iterations before the breaker fired, got " @calls)))))))
+
 (deftest wrap-phase-callbacks-creates-both-keys-test
   (testing "wraps both on-phase-start and on-phase-complete"
     (let [callbacks (wrap-phase-callbacks nil {})]

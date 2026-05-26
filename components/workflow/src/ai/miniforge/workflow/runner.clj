@@ -120,6 +120,23 @@
                 :anomalies.workflow/max-phases {:error msg :max-phases max-phases})
         (ctx/transition-to-failed))))
 
+(defn handle-phase-retry-exhausted
+  "Runaway guard: the same phase has run in too many consecutive pipeline
+   iterations (in-place retries — e.g. implement re-entering on every agent
+   stall). Fail the workflow loud with a typed anomaly so the loop stops now
+   instead of grinding up to `max-phases` iterations (hours of tokens)."
+  [context phase retries]
+  (let [msg (messages/t :status/phase-retries-exhausted
+                        {:phase (name phase) :retries retries})]
+    (-> context
+        (update :execution/errors conj
+                (make-execution-error :phase-retries-exhausted msg))
+        (update :execution/response-chain
+                response/add-failure :pipeline
+                :anomalies.workflow/phase-retries-exhausted
+                {:error msg :phase phase :retries retries})
+        (ctx/transition-to-failed))))
+
 (defn terminal-state?
   "Check if workflow is in terminal state."
   [context]
@@ -406,13 +423,27 @@
   [pipeline initial-ctx callbacks control-state max-phases]
   (if (empty? pipeline)
     (handle-empty-pipeline initial-ctx)
-    (loop [context initial-ctx
-           iteration 0]
-      (cond
-        (terminal-state? context)      context
-        (>= iteration max-phases)      (handle-max-phases-exceeded context max-phases)
-        :else (recur (execute-single-iteration pipeline context callbacks iteration control-state)
-                     (inc iteration))))))
+    (let [max-phase-retries (defaults/max-consecutive-phase-retries)]
+      ;; `consecutive` counts how many times the phase about to run has been
+      ;; the active phase in immediately consecutive iterations. A healthy
+      ;; workflow advances to a new phase each iteration, so a count > the cap
+      ;; means one phase is stuck retrying in place — abort before it grinds
+      ;; up to `max-phases` (the runaway that burned ~17h overnight).
+      (loop [context     initial-ctx
+             iteration   0
+             prev-phase  nil
+             consecutive 1]
+        (let [phase       (:execution/current-phase context)
+              consecutive (if (= phase prev-phase) (inc consecutive) 1)]
+          (cond
+            (terminal-state? context)      context
+            (>= iteration max-phases)      (handle-max-phases-exceeded context max-phases)
+            (and phase (> consecutive max-phase-retries))
+            (handle-phase-retry-exhausted context phase max-phase-retries)
+            :else (recur (execute-single-iteration pipeline context callbacks iteration control-state)
+                         (inc iteration)
+                         phase
+                         consecutive)))))))
 
 (defn- validate-completion
   "Warn when a succeeded workflow produced no results."
