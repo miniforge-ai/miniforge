@@ -39,7 +39,12 @@
    sanitized strings correctly."
   [v]
   (if (string? v)
-    (str/replace v #"/Users/[^/\s]+/\S*" "<repo>/")
+    ;; Delimiter-aware: scrub only the absolute path TOKEN. The trailing class
+    ;; stops at whitespace and at quotes/backticks/brackets/parens/commas/
+    ;; semicolons so an embedded example like `:worktree "/Users/x/repo"` keeps
+    ;; its closing quote (a greedy \S* ate it, mangling the example) and any
+    ;; surrounding EDN/markdown structure stays intact.
+    (str/replace v #"/Users/[^/\s]+/[^\s\"'`(){}\[\],;]*" "<repo>/")
     v))
 
 (defn -main [& _args]
