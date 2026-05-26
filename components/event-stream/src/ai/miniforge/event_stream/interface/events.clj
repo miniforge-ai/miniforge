@@ -44,6 +44,7 @@
 (def gate-started core/gate-started)
 (def gate-passed core/gate-passed)
 (def gate-failed core/gate-failed)
+(def gate-rule-applied core/gate-rule-applied)
 (def tool-invoked core/tool-invoked)
 (def tool-completed core/tool-completed)
 (def milestone-reached core/milestone-reached)

@@ -654,6 +654,7 @@
    :gate/started     :public
    :gate/passed      :public
    :gate/failed      :public
+   :gate/rule-applied :public
    :tool/invoked     :internal
    :tool/completed   :internal
    :llm/request      :internal

@@ -109,6 +109,8 @@
 (def approval-enforcement builders/approval-enforcement)
 (def resolve-rules builders/resolve-rules)
 (def merge-rules builders/merge-rules)
+(def filter-applicable-rules checking/filter-applicable-rules)
+(def rule-applies-to-phase? checking/rule-applies-to-phase?)
 
 ;------------------------------------------------------------------------------ Intent validation API
 

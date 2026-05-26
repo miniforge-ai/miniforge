@@ -49,6 +49,7 @@
    `gate.interface/check-gate` (mirrors the reviewer fix in #977) — never a
    silent pass."
   (:require
+   [ai.miniforge.event-stream.interface :as event-stream]
    [ai.miniforge.gate.messages :as msg]
    [ai.miniforge.gate.registry :as registry]
    [ai.miniforge.policy-pack.interface :as policy-pack]
@@ -117,6 +118,59 @@
   {:type :no-policy-packs
    :message (msg/t :policy-pack/no-policy-packs)})
 
+;------------------------------------------------------------------------------ Layer 1.5
+;; Per-rule application evidence
+
+(defn- classify-rules
+  "Per-rule evidence: classify every enabled rule across `packs` for `phase`.
+   `violations` are the {:rule :violation} maps from `check-artifact`.
+
+     :skipped-by-phase — the rule's :applies-to {:phases} excludes `phase`
+     :not-applicable   — phase matches but file-glob/task-type excludes it
+     :failed           — considered and violated (carries :violation)
+     :passed           — considered and clean
+
+   Emitting all four (not just failures) makes the applied policy set for a
+   run reconstructable from the event log."
+  [packs phase artifact context violations]
+  (let [enabled        (filterv policy-pack/rule-enabled? (mapcat :pack/rules packs))
+        considered-ids (set (map :rule/id
+                                 (policy-pack/filter-applicable-rules
+                                  enabled (assoc context :phase phase :artifact artifact))))
+        violated       (into {} (map (fn [{:keys [rule violation]}]
+                                       [(:rule/id rule) violation]))
+                             violations)]
+    (mapv (fn [rule]
+            (let [id (:rule/id rule)]
+              {:rule-id     id
+               :status      (cond
+                              (not (policy-pack/rule-applies-to-phase? rule phase)) :skipped-by-phase
+                              (contains? violated id)                               :failed
+                              (contains? considered-ids id)                         :passed
+                              :else                                                 :not-applicable)
+               :severity    (:rule/severity rule)
+               :enforcement (get-in rule [:rule/enforcement :action])
+               :violation   (get violated id)}))
+          enabled)))
+
+(defn- emit-rule-evidence!
+  "Publish one :gate/rule-applied event per classified rule. No-op when the
+   run carries no event stream. Fail-safe: evidence emission must never break
+   enforcement, so a publish error is swallowed (the gate verdict still
+   stands)."
+  [ctx phase classified]
+  (when-let [stream (:event-stream ctx)]
+    (try
+      (let [wid (:workflow/id ctx)]
+        (doseq [{:keys [rule-id status severity enforcement violation]} classified]
+          (event-stream/publish!
+           stream
+           (event-stream/gate-rule-applied stream wid phase rule-id status
+                                           {:severity    severity
+                                            :enforcement enforcement
+                                            :violation   violation}))))
+      (catch Exception _ nil))))
+
 ;------------------------------------------------------------------------------ Layer 2
 ;; Phase-scoped check
 
@@ -138,6 +192,9 @@
       {:passed? true :warnings [(no-policy-packs-warning)]}
       (let [context (-> ctx with-semantic-wiring (assoc :phase phase))
             result  (policy-pack/check-artifact packs artifact context)]
+        (emit-rule-evidence! ctx phase
+                             (classify-rules packs phase artifact context
+                                             (:violations result)))
         {:passed?  (:passed? result)
          :errors   (vec (:blocking result))
          :warnings (vec (concat (:require-approval result)
