@@ -301,6 +301,88 @@
       (is (= :dispatched (:rule-id result)))
       (is (= :minor (:severity result))))))
 
+;------------------------------------------------------------------------------ Layer 1
+;; Semantic (LLM-as-judge) detection tests
+
+(defn a-resolvable-custom-fn
+  "A real custom detection fn used to prove resolvable :custom-fn rules stay
+   on the deterministic detect-custom path (not routed to the judge)."
+  [_artifact _context]
+  {:matches ["custom-hit"]})
+
+(deftest custom-fn-resolvable-test
+  (testing "a :custom rule with a resolvable :custom-fn is resolvable"
+    (is (detection/custom-fn-resolvable?
+         {:rule/detection
+          {:type :custom
+           :custom-fn 'ai.miniforge.policy-pack.detection-test/a-resolvable-custom-fn}})))
+  (testing "a :custom rule with no :custom-fn is not resolvable"
+    (is (not (detection/custom-fn-resolvable? {:rule/detection {:type :custom}}))))
+  (testing "a :custom rule with an unresolvable :custom-fn is not resolvable"
+    (is (not (detection/custom-fn-resolvable?
+              {:rule/detection {:type :custom :custom-fn 'no.such.ns/missing}})))))
+
+(deftest detect-semantic-routes-no-custom-fn-rule-test
+  (testing "a :custom rule with no :custom-fn routes to analyze-rule and adapts the shape"
+    (let [captured (atom nil)
+          rule     {:rule/id :dry-violation
+                    :rule/severity :error
+                    :rule/detection {:type :custom}
+                    :rule/enforcement {:message "Do not repeat yourself"}}
+          ;; Stub the injected analyze-rule-shaped fn (mirrors semantic-analyzer).
+          analyze  (fn [llm-client complete-fn repo-path r]
+                     (reset! captured {:llm-client llm-client
+                                       :complete-fn complete-fn
+                                       :repo-path repo-path
+                                       :rule r})
+                     {:rule/id (:rule/id r)
+                      :violations [{:file "a.clj" :reason "dup"}]
+                      :status :completed})
+          context  {:semantic-analyze-fn analyze
+                    :llm-client :stub-client
+                    :complete-fn (fn [_])
+                    :repo-path "/tmp/repo"}
+          result   (detection/detect-violation rule {} context)]
+      (testing "analyze-rule was invoked with the context-derived wiring"
+        (is (= :stub-client (:llm-client @captured)))
+        (is (= "/tmp/repo" (:repo-path @captured)))
+        (is (= rule (:rule @captured))))
+      (testing "judge result is adapted to the policy-pack violation shape"
+        (is (= :semantic (:type result)))
+        (is (= :dry-violation (:rule-id result)))
+        (is (= :error (:severity result)))
+        (is (= [{:file "a.clj" :reason "dup"}] (:violations result)))
+        (is (= "Do not repeat yourself" (:message result)))))))
+
+(deftest detect-semantic-no-violation-returns-nil-test
+  (testing "judge reporting no violations yields nil"
+    (let [rule    {:rule/id :clean :rule/severity :error :rule/detection {:type :custom}}
+          analyze (fn [_ _ _ _] {:violations [] :status :completed})
+          context {:semantic-analyze-fn analyze
+                   :llm-client :c :complete-fn (fn [_])}]
+      (is (nil? (detection/detect-violation rule {} context))))))
+
+(deftest detect-semantic-absent-wiring-returns-nil-test
+  (testing "no semantic wiring in context -> nil, no throw"
+    (let [rule {:rule/id :unwired :rule/severity :error :rule/detection {:type :custom}}]
+      (is (nil? (detection/detect-violation rule {} {})))
+      (testing "analyze-fn present but llm-client missing -> still nil"
+        (is (nil? (detection/detect-violation
+                   rule {} {:semantic-analyze-fn (fn [_ _ _ _] {:violations [{:x 1}]})})))))))
+
+(deftest detect-custom-still-used-for-resolvable-fn-test
+  (testing "a :custom rule WITH a resolvable :custom-fn stays on detect-custom"
+    (let [rule   {:rule/id :resolvable
+                  :rule/detection
+                  {:type :custom
+                   :custom-fn 'ai.miniforge.policy-pack.detection-test/a-resolvable-custom-fn}}
+          ;; If this routed to the judge it would NPE on a nil analyze-fn /
+          ;; return nil; detect-custom must produce the custom-tagged violation.
+          result (detection/detect-violation rule {} {})]
+      (is (= :custom (:type result)))
+      (is (= :resolvable (:rule-id result)))
+      (is (= ["custom-hit"] (:matches result))))))
+
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
   ;; Run tests

@@ -73,6 +73,7 @@
 (def write-pack-to-file loading/write-pack-to-file)
 
 (def detect-violation checking/detect-violation)
+(def detect-semantic checking/detect-semantic)
 (def check-rules checking/check-rules)
 (def check-artifact checking/check-artifact)
 (def check-artifacts checking/check-artifacts)
@@ -81,6 +82,10 @@
 (def warning-violations checking/warning-violations)
 (def violation->error checking/violation->error)
 (def violation->warning checking/violation->warning)
+
+(def resolve-detector checking/resolve-detector)
+(def rule-enabled? checking/rule-enabled?)
+(def compile-pack checking/compile-pack)
 
 ;------------------------------------------------------------------------------ Capability registry API
 
