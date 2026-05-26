@@ -24,13 +24,16 @@
    [clojure.test :refer [deftest is testing]]))
 
 (deftest register-mechanical-capabilities-test
-  (testing "registers :lint :format :syntax :no-secrets into the registry"
+  (testing "registers the failing mechanical gates as capabilities"
     (let [available (sut/register-mechanical-capabilities!)]
-      (doseq [capability-kw [:lint :format :syntax :no-secrets]]
+      (doseq [capability-kw [:lint :syntax :no-secrets]]
         (is (contains? available capability-kw))
         (is (policy-pack/capability-available? capability-kw)
             (str capability-kw " should be registered"))
-        (is (fn? (:check (policy-pack/get-capability capability-kw))))))))
+        (is (fn? (:check (policy-pack/get-capability capability-kw)))))
+      (testing ":format is intentionally NOT registered — its gate never fails"
+        (is (not (contains? available :format)))
+        (is (not (policy-pack/capability-available? :format)))))))
 
 (deftest no-secrets-capability-surfaces-violation-test
   (testing "a hardcoded secret surfaces as a capability violation"

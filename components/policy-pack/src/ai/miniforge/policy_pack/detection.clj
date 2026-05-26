@@ -382,17 +382,19 @@
         entry         (when capability-kw (capability/get-capability capability-kw))]
     (cond
       (nil? capability-kw)
-      {:type     :capability-error
-       :rule-id  (:rule/id rule)
-       :severity (:rule/severity rule)
-       :message  "Capability detection rule is missing :capability keyword"}
+      {:type          :capability-error
+       :rule-id       (:rule/id rule)
+       :severity      (:rule/severity rule)
+       :artifact-path (or (:artifact/path artifact) (:path artifact))
+       :message       "Capability detection rule is missing :capability keyword"}
 
       (nil? entry)
-      {:type       :capability-error
-       :rule-id    (:rule/id rule)
-       :severity   (:rule/severity rule)
-       :capability capability-kw
-       :message    (str "Capability not registered: " capability-kw)}
+      {:type          :capability-error
+       :rule-id       (:rule/id rule)
+       :severity      (:rule/severity rule)
+       :capability    capability-kw
+       :artifact-path (or (:artifact/path artifact) (:path artifact))
+       :message       (str "Capability not registered: " capability-kw)}
 
       :else
       (when-let [violation ((:check entry) artifact context)]

@@ -70,10 +70,16 @@
 (defn gate-result->violation
   "Adapt a gate result into the policy-pack capability violation shape, or
    nil when the gate passed. `capability` keys the violation; `artifact`
-   supplies the path."
+   supplies the path. Preserves diagnostics from BOTH the legacy
+   `{:errors [...]}` shape and the canonical `response/error` shape (whose
+   detail lives under `:error`), so response-based gates don't lose their
+   message/data."
   [capability gate-result artifact]
   (when (gate-failed? gate-result)
-    (let [errors (vec (:errors gate-result))]
+    (let [errors (vec (or (seq (:errors gate-result))
+                          (when (response/error? gate-result)
+                            [{:message (get-in gate-result [:error :message])
+                              :data    (get-in gate-result [:error :data])}])))]
       {:type          :capability
        :capability    capability
        :matches       errors
@@ -85,10 +91,21 @@
 (defn- run-gate-capability
   "Run the named `gate-kw` gate's `:check` on `artifact`/`context` and adapt
    the result into a capability violation (or nil on pass). Tagged
-   `capability` for the violation shape."
+   `capability` for the violation shape.
+
+   A gate check that throws is converted into a failing gate-result here (the
+   raw `:check` lacks the try/catch that `gate.interface/check-gate` provides),
+   so a tool/IO/misconfiguration error surfaces as a fail-loud violation —
+   data, not an exception escaping rule evaluation."
   [capability gate-kw artifact context]
   (let [{:keys [check]} (registry/get-gate gate-kw)
-        result          (check artifact context)]
+        result          (try
+                          (check artifact context)
+                          (catch Exception e
+                            {:passed? false
+                             :errors  [{:message (str (name gate-kw)
+                                                      " gate check threw: "
+                                                      (ex-message e))}]}))]
     (gate-result->violation capability result artifact)))
 
 ;------------------------------------------------------------------------------ Layer 1
@@ -98,11 +115,6 @@
   "Lint capability — wraps the clj-kondo lint gate."
   [artifact context]
   (run-gate-capability :lint :lint artifact context))
-
-(defn check-format
-  "Format capability — wraps the cljfmt/LSP format gate."
-  [artifact context]
-  (run-gate-capability :format :format artifact context))
 
 (defn check-syntax
   "Syntax capability — wraps the reader/syntax gate."
@@ -121,14 +133,15 @@
   "Capability keyword -> {:meta {...} :check fn} for the mechanical tool
    gates. Injected into the policy-pack registry by
    `register-mechanical-capabilities!`."
+  ;; NOTE: :format is intentionally NOT registered. The :format gate's check
+  ;; "always passes — formatting is repair" (gate/format.clj), so a rule using
+  ;; :format would never produce a violation — a silent no-op, exactly what the
+  ;; policy-gate compiler exists to eliminate. Register :format only once a
+  ;; failing format-CHECK gate (e.g. `cljfmt check`) exists. (Follow-up.)
   {:lint       {:meta  {:tool :clj-kondo
                         :class :deterministic
                         :description "Lint Clojure code via the clj-kondo gate"}
                 :check check-lint}
-   :format     {:meta  {:tool :cljfmt
-                        :class :deterministic
-                        :description "Verify formatting via the cljfmt/LSP gate"}
-                :check check-format}
    :syntax     {:meta  {:tool :reader
                         :class :deterministic
                         :description "Parse code via the reader/syntax gate"}
