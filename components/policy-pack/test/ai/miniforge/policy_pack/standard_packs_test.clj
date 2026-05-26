@@ -60,6 +60,25 @@
           (is (= :miniforge/dewey (get-in pack [:pack/taxonomy-ref :taxonomy/id]))
               (str file " references miniforge/dewey taxonomy")))))))
 
+(deftest compiled-standards-pack-is-valid-edn-test
+  ;; Regression guard for the corruption that made policy unloadable: the
+  ;; compiled standards pack (a phase resource produced by `bb standards:pack`)
+  ;; was serialized valid by pprint, then a text-level sanitize regex consumed
+  ;; the escaping backslash of an embedded `\"/Users/…\"`, leaving an unescaped
+  ;; quote. The runtime loader's edn/read-string then failed → zero rules
+  ;; loaded → policy silently never enforced. Parse the shipped file directly;
+  ;; edn/read-string throws (fails the test) if the pack regresses.
+  (testing "components/phase/.../miniforge-standards.pack.edn round-trips through edn/read-string"
+    (let [f (io/file "components/phase/resources/packs/miniforge-standards.pack.edn")]
+      (is (.exists f) "compiled standards pack present (run from repo root)")
+      (when (.exists f)
+        (let [content (slurp f)
+              pack    (edn/read-string content)]
+          (is (map? pack))
+          (is (pos? (count (:pack/rules pack))) "compiled pack has rules")
+          (is (not (re-find #"/Users/[A-Za-z0-9._-]+/" content))
+              "no real local /Users/<name>/ path leaked (doc placeholders like /Users/$USER are fine)"))))))
+
 (deftest all-packs-have-valid-rules-test
   (doseq [{:keys [file]} pack-specs]
     (testing (str "Rules in " file " have required fields")

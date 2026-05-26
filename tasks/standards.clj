@@ -26,26 +26,23 @@
   (let [{:keys [exit]} (deref (apply p/process {:out :inherit :err :inherit} args))]
     exit))
 
-(defn- sanitize-user-paths
-  "Replace /Users/<name>/... paths with <repo>/ to avoid leaking local paths."
-  [text]
-  (str/replace text #"/Users/[^/]+/[^\s,\)\]\}\"]*" "<repo>/"))
-
 ;; ──────────────────────────────────────────────────────────────────────────────
 ;; bb standards:pack
 ;; ──────────────────────────────────────────────────────────────────────────────
 
-(def ^:private output-path
-  "components/phase/resources/packs/miniforge-standards.pack.edn")
-
 (defn pack
-  "Compile .standards/ MDC files into a policy pack EDN resource.
+  "Compile the standards submodule's MDC files into a policy pack EDN resource.
 
-   Delegates to tasks/compile_standards.clj via `clojure -M:dev` because the
-   compiler requires Malli (JVM-only). Writes the pack to
-   components/phase/resources/packs/miniforge-standards.pack.edn."
+   Delegates to development/src/compile_standards.clj via `clojure -M:dev`
+   because the compiler requires Malli (JVM-only). That script reads from
+   standards/miniforge/, sanitizes local paths at the data level, and writes
+   components/phase/resources/packs/miniforge-standards.pack.edn as valid EDN.
+
+   (Path sanitization lives in the compiler, on parsed data — a prior
+   text-regex pass here corrupted EDN string escaping and made the pack
+   unloadable.)"
   []
-  (println "Compiling standards pack from .standards/ ...")
+  (println "Compiling standards pack from standards/miniforge/ ...")
   (let [clojure-cmd (proc/clojure-command)
         {:keys [exit out err]}
         (p/sh {:out :string :err :string}
@@ -53,15 +50,9 @@
     (when-not (str/blank? out) (println out))
     (when-not (str/blank? err)
       (binding [*out* *err*] (println err)))
-    (if (zero? exit)
-      (let [content   (slurp output-path)
-            sanitized (sanitize-user-paths content)]
-        (when (not= content sanitized)
-          (spit output-path sanitized)
-          (println "  Sanitized local paths in output")))
-      (do
-        (println "standards:pack failed with exit code:" exit)
-        (System/exit exit)))))
+    (when-not (zero? exit)
+      (println "standards:pack failed with exit code:" exit)
+      (System/exit exit))))
 
 ;; ──────────────────────────────────────────────────────────────────────────────
 ;; bb review
