@@ -52,6 +52,22 @@
   (testing "returns boolean"
     (is (boolean? (sut/tree-sitter-available?)))))
 
+(deftest run-query-returns-gracefully-without-hanging-test
+  ;; Regression guard for the pipe-buffer deadlock: run-query drained stdout
+  ;; fully before stderr, so a tree-sitter process flooding stderr wedged the
+  ;; JVM in an uninterruptible read with no timeout. It now drains both pipes
+  ;; concurrently and caps the wait at tree-sitter-query-timeout-ms. This test
+  ;; asserts the contract that matters regardless of tree-sitter presence:
+  ;; run-query always returns a :success?-keyed map, never throws or hangs.
+  (testing "returns a bounded result map (never hangs/throws)"
+    (let [start   (System/currentTimeMillis)
+          result  (sut/run-query "(ns x)" "(sym_lit) @s" "clojure" "clj")
+          elapsed (- (System/currentTimeMillis) start)]
+      (is (map? result))
+      (is (contains? result :success?))
+      (is (< elapsed sut/tree-sitter-query-timeout-ms)
+          "completes well under the timeout cap"))))
+
 (deftest state-comparison-detection-test
   (testing "detects drift between desired and current state"
     (let [detect (requiring-resolve 'ai.miniforge.policy-pack.detection/detect-state-comparison)

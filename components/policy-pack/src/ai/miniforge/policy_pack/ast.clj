@@ -121,6 +121,13 @@
                     :text    (nth m 5)})))
          vec)))
 
+(def ^:const tree-sitter-query-timeout-ms
+  "Wall-clock cap on a single `tree-sitter query` invocation. A query over a
+   well-formed source file completes in well under a second; the cap exists so
+   a wedged/runaway tree-sitter process fails the check instead of hanging the
+   JVM (which previously stalled an entire dogfood implement phase)."
+  30000)
+
 (defn run-query
   "Execute a tree-sitter query against source content.
 
@@ -143,15 +150,32 @@
                  (.getAbsolutePath source-file)])
             _    (-> (.environment pb) (.put "TREE_SITTER_LANGUAGE" lang))
             proc (.start pb)
-            out  (slurp (.getInputStream proc))
-            err  (slurp (.getErrorStream proc))
-            _    (.waitFor proc)
-            exit (.exitValue proc)]
-        (if (zero? exit)
-          (schema/success :matches (or (parse-query-output out) []) {})
-          (schema/failure :matches
-                          (str "tree-sitter query failed (exit " exit "): "
-                               (str/trim err)))))
+            ;; Drain stdout AND stderr on separate threads. tree-sitter writes
+            ;; to both pipes; reading one fully before the other deadlocks
+            ;; when the unread pipe's kernel buffer (~64KB) fills — the child
+            ;; blocks on write, the JVM blocks on read, forever and
+            ;; uninterruptibly. (Observed: a dogfood implement phase wedged
+            ;; here in state U at 0% CPU with no timeout.)
+            out-future (future (slurp (.getInputStream proc)))
+            err-future (future (slurp (.getErrorStream proc)))
+            finished?  (.waitFor proc tree-sitter-query-timeout-ms
+                                 java.util.concurrent.TimeUnit/MILLISECONDS)]
+        (if-not finished?
+          (do
+            (.destroyForcibly proc)
+            (future-cancel out-future)
+            (future-cancel err-future)
+            (schema/failure :matches
+                            (str "tree-sitter query timed out after "
+                                 tree-sitter-query-timeout-ms "ms")))
+          (let [out  @out-future
+                err  @err-future
+                exit (.exitValue proc)]
+            (if (zero? exit)
+              (schema/success :matches (or (parse-query-output out) []) {})
+              (schema/failure :matches
+                              (str "tree-sitter query failed (exit " exit "): "
+                                   (str/trim err)))))))
       (catch Exception e
         (schema/failure :matches (.getMessage e)))
       (finally
