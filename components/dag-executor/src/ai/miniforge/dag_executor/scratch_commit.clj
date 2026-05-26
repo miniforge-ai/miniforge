@@ -89,6 +89,72 @@
   [{:keys [out]}]
   (str/trim (or out "")))
 
+(def ^:private seconds-per-day
+  "Seconds in one calendar day — named constant so age arithmetic in
+   `gc-scratch-refs!` reads clearly and avoids the magic number `86400`."
+  86400)
+
+;;------------------------------------------------------------------------------ Layer 2
+;; scratch-commit! pipeline steps
+;;
+;; Each step takes the accumulated context map and returns result/ok (with its
+;; output merged in) or result/err. They compose via `result/and-then` in
+;; `scratch-commit!`, replacing a deep nested if-not ladder with a flat pipe.
+
+(defn- hash-blob-step
+  "Step 1 — hash the file content into the object store (no index touched).
+   Adds :blob-sha to the context."
+  [{:keys [parent-repo-path file-path] :as ctx}]
+  (let [abs-path (.getAbsolutePath (File. ^String file-path))
+        r        (sh-git parent-repo-path "hash-object" "-w" abs-path)]
+    (if (git-ok? r)
+      (result/ok (assoc ctx :blob-sha (out-trim r)))
+      (result/err :scratch-commit/hash-object-failed
+                  (str "hash-object failed for " file-path ": " (:err r))
+                  {:file-path file-path :stderr (:err r)}))))
+
+(defn- mktree-step
+  "Step 2 — build a minimal single-entry tree without touching the index.
+   Tree-entry format: \"<mode> blob <sha>\\t<name>\"; git mktree reads one
+   entry per line from stdin (trailing newline ⇒ a complete line before EOF).
+   Adds :tree-sha to the context."
+  [{:keys [parent-repo-path file-path blob-sha] :as ctx}]
+  (let [file-name  (.getName (File. ^String file-path))
+        tree-entry (str "100644 blob " blob-sha "\t" file-name "\n")
+        r          (sh-git-in parent-repo-path tree-entry "mktree")]
+    (if (git-ok? r)
+      (result/ok (assoc ctx :tree-sha (out-trim r)))
+      (result/err :scratch-commit/mktree-failed
+                  (str "mktree failed: " (:err r))
+                  {:stderr (:err r)}))))
+
+(defn- commit-tree-step
+  "Step 3 — resolve the current scratch-ref tip (optional parent) and create
+   the commit object (-p precedes -m). Adds :commit-sha to the context."
+  [{:keys [parent-repo-path ref-name workflow-id phase file-path tree-sha] :as ctx}]
+  (let [parent-r   (sh-git parent-repo-path "rev-parse" "--verify" ref-name)
+        parent-sha (when (git-ok? parent-r) (out-trim parent-r))
+        commit-msg (str "scratch: " workflow-id " " phase " " file-path)
+        ct-args    (-> ["commit-tree" tree-sha]
+                       (cond-> parent-sha (into ["-p" parent-sha]))
+                       (into ["-m" commit-msg]))
+        r          (apply sh-git parent-repo-path ct-args)]
+    (if (git-ok? r)
+      (result/ok (assoc ctx :commit-sha (out-trim r)))
+      (result/err :scratch-commit/commit-tree-failed
+                  (str "commit-tree failed: " (:err r))
+                  {:tree-sha tree-sha :stderr (:err r)}))))
+
+(defn- update-ref-step
+  "Step 4 — atomically advance the scratch ref to the new commit."
+  [{:keys [parent-repo-path ref-name commit-sha] :as ctx}]
+  (let [r (sh-git parent-repo-path "update-ref" ref-name commit-sha)]
+    (if (git-ok? r)
+      (result/ok ctx)
+      (result/err :scratch-commit/update-ref-failed
+                  (str "update-ref failed: " (:err r))
+                  {:ref ref-name :stderr (:err r)}))))
+
 ;;------------------------------------------------------------------------------ Layer 2
 ;; Core operations
 
@@ -113,58 +179,25 @@
      result/err with :code :scratch-commit/<reason> on any git failure"
   [parent-repo-path workflow-id phase file-path]
   (try
-    (let [ref-name (scratch-ref-name workflow-id)
-          abs-path (.getAbsolutePath (File. ^String file-path))
-
-          ;; Step 1: hash the file content into the object store — no index touched.
-          blob-r   (sh-git parent-repo-path "hash-object" "-w" abs-path)]
-      (if-not (git-ok? blob-r)
-        (result/err :scratch-commit/hash-object-failed
-                    (str "hash-object failed for " file-path ": " (:err blob-r))
-                    {:file-path file-path :stderr (:err blob-r)})
-
-        (let [blob-sha   (out-trim blob-r)
-              file-name  (.getName (File. ^String file-path))
-              ;; Step 2: build a minimal single-entry tree without touching the index.
-              ;;   Tree-entry format: "<mode> blob <sha>\t<name>"
-              ;; git mktree reads one tree-entry per line from stdin.  The
-              ;; trailing newline ensures git sees a complete line before EOF.
-              tree-entry (str "100644 blob " blob-sha "\t" file-name "\n")
-              tree-r     (sh-git-in parent-repo-path tree-entry "mktree")]
-          (if-not (git-ok? tree-r)
-            (result/err :scratch-commit/mktree-failed
-                        (str "mktree failed: " (:err tree-r))
-                        {:stderr (:err tree-r)})
-
-            (let [tree-sha   (out-trim tree-r)
-                  ;; Step 3a: resolve the current scratch-ref tip (optional parent).
-                  parent-r   (sh-git parent-repo-path "rev-parse" "--verify" ref-name)
-                  parent-sha (when (git-ok? parent-r) (out-trim parent-r))
-                  commit-msg (str "scratch: " workflow-id " " phase " " file-path)
-                  ;; Step 3b: build commit-tree arg list; -p precedes -m.
-                  ct-args    (-> ["commit-tree" tree-sha]
-                                 (cond-> parent-sha (into ["-p" parent-sha]))
-                                 (into ["-m" commit-msg]))
-                  commit-r   (apply sh-git parent-repo-path ct-args)]
-              (if-not (git-ok? commit-r)
-                (result/err :scratch-commit/commit-tree-failed
-                            (str "commit-tree failed: " (:err commit-r))
-                            {:tree-sha tree-sha :stderr (:err commit-r)})
-
-                (let [commit-sha (out-trim commit-r)
-                      ;; Step 4: atomically advance the scratch ref.
-                      ref-r      (sh-git parent-repo-path
-                                         "update-ref" ref-name commit-sha)]
-                  (if-not (git-ok? ref-r)
-                    (result/err :scratch-commit/update-ref-failed
-                                (str "update-ref failed: " (:err ref-r))
-                                {:ref ref-name :stderr (:err ref-r)})
-                    (result/ok {:commit-sha  commit-sha
-                                :ref         ref-name
-                                :workflow-id workflow-id
-                                :phase       phase
-                                :file-path   file-path})))))))))
-
+    ;; A short-circuiting pipeline: each step takes the accumulated context
+    ;; map and returns result/ok (context enriched with its output) or
+    ;; result/err; `and-then` stops at the first error. The final map-ok
+    ;; reshapes the internal context into the documented public return value.
+    (-> (result/ok {:parent-repo-path parent-repo-path
+                    :workflow-id      workflow-id
+                    :phase            phase
+                    :file-path        file-path
+                    :ref-name         (scratch-ref-name workflow-id)})
+        (result/and-then hash-blob-step)
+        (result/and-then mktree-step)
+        (result/and-then commit-tree-step)
+        (result/and-then update-ref-step)
+        (result/map-ok (fn [{:keys [commit-sha ref-name workflow-id phase file-path]}]
+                         {:commit-sha  commit-sha
+                          :ref         ref-name
+                          :workflow-id workflow-id
+                          :phase       phase
+                          :file-path   file-path})))
     (catch Exception e
       (result/err :scratch-commit/unexpected
                   (str "unexpected error in scratch-commit!: " (.getMessage e))))))
@@ -199,6 +232,27 @@
                                             (catch Exception _ 0))
                       :workflow-id     workflow-id})))))))
 
+(defn- parse-ref-line
+  "Parse one `for-each-ref` line ('<ref><sep><unix-ts>') into {:ref :ts}.
+   A missing/garbage timestamp defaults to 0 (treated as ancient → eligible)."
+  [line]
+  (let [parts (str/split line sep-pattern 2)
+        ref   (str/trim (get parts 0 ""))
+        ts    (try (Long/parseLong (str/trim (get parts 1 "0")))
+                   (catch Exception _ 0))]
+    {:ref ref :ts ts}))
+
+(defn- delete-refs!
+  "Delete each ref in `refs` (maps carrying :ref) via `git update-ref -d`.
+   Returns the vector of ref names that were deleted successfully (a failed
+   delete is skipped, not fatal — best-effort GC)."
+  [parent-repo-path refs]
+  (reduce (fn [acc {:keys [ref]}]
+            (let [del-r (sh-git parent-repo-path "update-ref" "-d" ref)]
+              (if (git-ok? del-r) (conj acc ref) acc)))
+          []
+          refs))
+
 (defn gc-scratch-refs!
   "Delete scratch refs whose tip commit is older than `max-age-days` days.
 
@@ -229,23 +283,11 @@
                     {:stderr (:err r)})
 
         (let [now-s     (quot (System/currentTimeMillis) 1000)
-              max-age-s (* max-age-days 86400)
+              max-age-s (* max-age-days seconds-per-day)
               lines     (->> (str/split-lines (out-trim r)) (remove str/blank?))
-              parsed    (mapv (fn [line]
-                                (let [parts (str/split line sep-pattern 2)
-                                      ref   (str/trim (get parts 0 ""))
-                                      ts    (try (Long/parseLong
-                                                  (str/trim (get parts 1 "0")))
-                                                 (catch Exception _ 0))]
-                                  {:ref ref :ts ts}))
-                              lines)
+              parsed    (mapv parse-ref-line lines)
               to-delete (filter #(>= (- now-s (:ts %)) max-age-s) parsed)
-              deleted   (reduce (fn [acc {:keys [ref]}]
-                                  (let [del-r (sh-git parent-repo-path
-                                                      "update-ref" "-d" ref)]
-                                    (if (git-ok? del-r) (conj acc ref) acc)))
-                                []
-                                to-delete)]
+              deleted   (delete-refs! parent-repo-path to-delete)]
           (result/ok {:deleted  deleted
                       :retained (- (count parsed) (count deleted))}))))
 
