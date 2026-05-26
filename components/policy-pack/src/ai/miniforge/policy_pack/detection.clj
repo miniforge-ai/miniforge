@@ -324,6 +324,31 @@
 ;------------------------------------------------------------------------------ Layer 1
 ;; Custom detection
 
+(defn- resolve-custom-fn
+  "Resolve a `:custom` rule's `:custom-fn` symbol to a var, or nil. Never
+   throws — an unresolvable symbol is the no-op case routed to the judge."
+  [rule]
+  (when-let [custom-fn-sym (get-in rule [:rule/detection :custom-fn])]
+    (try (resolve custom-fn-sym)
+         (catch Exception _ nil))))
+
+(defn- run-resolved-custom
+  "Run an already-resolved custom fn against `artifact`/`context`, adapting
+   the result (or a thrown exception) into a violation map, or nil on pass.
+   The fn is resolved once by the caller, so neither `detect-custom` nor the
+   dispatcher resolves twice."
+  [f rule artifact context]
+  (try
+    (when-let [result (f artifact context)]
+      (assoc result
+             :type :custom
+             :rule-id (:rule/id rule)))
+    (catch Exception e
+      {:type :custom-error
+       :rule-id (:rule/id rule)
+       :error (.getMessage e)
+       :message (str "Custom detection failed: " (.getMessage e))})))
+
 (defn detect-custom
   "Detect violations using a custom function.
 
@@ -339,22 +364,8 @@
    Returns:
    - Violation map if detected, nil otherwise"
   [rule artifact context]
-  (let [detection (:rule/detection rule)
-        custom-fn-sym (:custom-fn detection)]
-    (when custom-fn-sym
-      (try
-        ;; Attempt to resolve the function
-        (when-let [f (resolve custom-fn-sym)]
-          (when-let [result (f artifact context)]
-            (assoc result
-                   :type :custom
-                   :rule-id (:rule/id rule))))
-        (catch Exception e
-          ;; Return error as violation
-          {:type :custom-error
-           :rule-id (:rule/id rule)
-           :error (.getMessage e)
-           :message (str "Custom detection failed: " (.getMessage e))})))))
+  (when-let [f (resolve-custom-fn rule)]
+    (run-resolved-custom f rule artifact context)))
 
 (defn custom-fn-resolvable?
   "True when a `:custom` rule names a `:custom-fn` symbol that resolves to a var.
@@ -363,10 +374,7 @@
    compiled standards pack is full of (PR #979): such rules route to the
    LLM-as-judge semantic detector instead of silently never firing."
   [rule]
-  (let [custom-fn-sym (get-in rule [:rule/detection :custom-fn])]
-    (boolean (and custom-fn-sym
-                  (try (resolve custom-fn-sym)
-                       (catch Exception _ nil))))))
+  (some? (resolve-custom-fn rule)))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Semantic (LLM-as-judge) detection
@@ -411,15 +419,24 @@
         complete-fn (:complete-fn context)
         repo-path   (get context :repo-path ".")]
     (when (and (fn? analyze-fn) llm-client complete-fn)
-      (let [result     (analyze-fn llm-client complete-fn repo-path rule)
-            violations (:violations result)]
-        (when (seq violations)
-          {:type       :semantic
-           :rule-id    (:rule/id rule)
-           :severity   (:rule/severity rule)
-           :violations (vec violations)
-           :status     (:status result)
-           :message    (get-in rule [:rule/enforcement :message])})))))
+      (try
+        (let [result     (analyze-fn llm-client complete-fn repo-path rule)
+              violations (:violations result)]
+          (when (seq violations)
+            {:type       :semantic
+             :rule-id    (:rule/id rule)
+             :severity   (:rule/severity rule)
+             :violations (vec violations)
+             :status     (:status result)
+             :message    (get-in rule [:rule/enforcement :message])}))
+        (catch Exception e
+          ;; The judge can throw (network/API errors, malformed response). Fail
+          ;; loud as data so one rule's failure can't abort the whole scan.
+          {:type     :semantic-error
+           :rule-id  (:rule/id rule)
+           :severity (:rule/severity rule)
+           :error    (.getMessage e)
+           :message  (str "Semantic detection failed: " (.getMessage e))})))))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Capability detection (mechanical tool-gate checks via the registry)
@@ -496,8 +513,8 @@
       :content-scan (detect-content-scan rule artifact context)
       :diff-analysis (detect-diff-analysis rule artifact context)
       :plan-output (detect-plan-output rule artifact context)
-      :custom (if (custom-fn-resolvable? rule)
-                (detect-custom rule artifact context)
+      :custom (if-let [f (resolve-custom-fn rule)]
+                (run-resolved-custom f rule artifact context)
                 (detect-semantic rule artifact context))
       :state-comparison (detect-state-comparison rule artifact context)
       :ast-analysis (detect-ast-analysis rule artifact context)

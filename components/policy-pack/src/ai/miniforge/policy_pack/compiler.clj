@@ -106,24 +106,30 @@
    enabled rules resolve to `:none`; its `:anomaly/data` names
    `:unbindable-rule-ids` so the failure is actionable and fails loud."
   [pack]
-  (let [enabled    (filter rule-enabled? (:pack/rules pack))
-        resolved   (map (fn [rule]
-                          {:rule/id  (:rule/id rule)
-                           :detector (resolve-detector rule)})
-                        enabled)
-        unbindable (->> resolved
-                        (filter #(= :none (:detector %)))
-                        (map :rule/id)
-                        vec)]
-    (if (seq unbindable)
-      (anomaly/anomaly :invalid-input
-                       (str "Policy pack has " (count unbindable)
-                            " enabled rule(s) that bind to no detection mechanism")
-                       {:unbindable-rule-ids unbindable
-                        :rule-count          (count enabled)})
-      {:ok              true
-       :rule-count      (count enabled)
-       :detector-counts (frequencies (map :detector resolved))})))
+  (if-not (sequential? (:pack/rules pack))
+    ;; A validator must fail loud on a malformed pack shape, not treat a
+    ;; missing/garbage :pack/rules as an empty (vacuously-valid) rule list.
+    (anomaly/anomaly :invalid-input
+                     "Policy pack :pack/rules must be a sequential collection of rules"
+                     {:pack-rules-type (some-> (:pack/rules pack) type str)})
+    (let [enabled    (filter rule-enabled? (:pack/rules pack))
+          resolved   (map (fn [rule]
+                            {:rule/id  (:rule/id rule)
+                             :detector (resolve-detector rule)})
+                          enabled)
+          unbindable (->> resolved
+                          (filter #(= :none (:detector %)))
+                          (map :rule/id)
+                          vec)]
+      (if (seq unbindable)
+        (anomaly/anomaly :invalid-input
+                         (str "Policy pack has " (count unbindable)
+                              " enabled rule(s) that bind to no detection mechanism")
+                         {:unbindable-rule-ids unbindable
+                          :rule-count          (count enabled)})
+        {:ok              true
+         :rule-count      (count enabled)
+         :detector-counts (frequencies (map :detector resolved))}))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

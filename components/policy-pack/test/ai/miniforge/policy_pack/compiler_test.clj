@@ -118,6 +118,13 @@
       (is (:ok result))
       (is (= 1 (:rule-count result))))))
 
+(deftest compile-pack-malformed-rules-anomaly-test
+  (testing "a non-sequential :pack/rules fails loud rather than vacuously passing"
+    (doseq [bad [{} {:pack/rules nil} {:pack/rules {:rule/id :x}} {:pack/rules 42}]]
+      (let [result (sut/compile-pack bad)]
+        (is (anomaly/anomaly? result) (str "expected anomaly for " (pr-str bad)))
+        (is (= :invalid-input (:anomaly/type result)))))))
+
 ;------------------------------------------------------------------------------ compile-pack — REAL shipped pack (headline acceptance criterion)
 
 (deftest compile-real-pack-zero-unbindable-test
@@ -131,6 +138,4 @@
             (str "expected zero unbindable rules, got: " (pr-str result)))
         (is (:ok result))
         (is (pos? (:rule-count result)))
-        (is (not (contains? (:detector-counts result) :none)))
-        ;; Print the breakdown so the report can cite it.
-        (println "REAL PACK compile-pack =>" (pr-str result))))))
+        (is (not (contains? (:detector-counts result) :none)))))))
