@@ -17,7 +17,7 @@
 ;; limitations under the License.
 
 (ns ai.miniforge.cli.main.commands.workflow-commands
-  "Workflow subcommands: execute (spec file), status, cancel.
+  "Workflow subcommands: execute (spec file), status, cancel, gc-scratch.
 
    Distinct from 'workflow run' (which takes a registered workflow-id) —
    'workflow execute' accepts a spec file path and routes through the full
@@ -30,10 +30,16 @@
    [ai.miniforge.cli.main.commands.shared :as shared]
    [ai.miniforge.cli.main.display :as display]
    [ai.miniforge.cli.messages :as messages]
-   [ai.miniforge.cli.main.commands.run :as cmd-run]))
+   [ai.miniforge.cli.main.commands.run :as cmd-run]
+   [ai.miniforge.cli.worktree :as worktree]
+   [ai.miniforge.dag-executor.interface :as gc-queue]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Helpers
+
+(def ^:private exit-code-error
+  "Process exit code signalling command failure (non-zero)."
+  1)
 
 (defn- read-event-lines
   "Read all non-blank EDN lines from a workflow event file."
@@ -88,7 +94,7 @@
             event-file (str events-dir "/" id ".edn")]
         (if-not (fs/exists? event-file)
           (do (display/print-error (messages/t :workflow-cmd/status-not-found {:id id}))
-              (shared/exit! 1))
+              (shared/exit! exit-code-error))
           (let [events  (read-event-lines event-file)
                 status  (derive-status events)
                 started (first (filter #(= :workflow/started (:event/type %)) events))
@@ -140,6 +146,37 @@
             (display/print-error (messages/t :workflow-cmd/cancel-failed
                                             {:error (ex-message e)}))))))))
 
+(defn workflow-gc-scratch-cmd
+  "Scan the scratch-ref GC queue and delete refs older than `max-age-days`.
+
+   Reads `~/.miniforge/scratch-gc-queue.edn`, removes entries whose
+   `:finished-at` is older than `max-age-days` days (default 7), and calls
+   `gc-scratch-refs!` on the current git repository for those stale entries.
+
+   Options:
+   - `:max-age-days` integer — age threshold in days (default 7; 0 = immediate)
+   - `:repo-path`    string  — parent git repo path (default: current repo root)"
+  [opts]
+  (let [max-age-days (get opts :max-age-days gc-queue/gc-default-max-age-days)
+        repo-root    (or (:repo-path opts) (worktree/worktree-root))]
+    (if-not repo-root
+      (do
+        (display/print-error (messages/t :workflow-cmd/gc-scratch-no-repo))
+        (shared/exit! exit-code-error))
+      (let [result (gc-queue/run-deferred-gc! repo-root max-age-days)]
+        (if (gc-queue/ok? result)
+          (let [{:keys [pruned remaining gc-result]} (gc-queue/unwrap result)
+                deleted-count (count (:deleted gc-result))]
+            (println (messages/t :workflow-cmd/gc-scratch-success
+                                 {:pruned    pruned
+                                  :deleted   deleted-count
+                                  :remaining remaining})))
+          (do
+            (display/print-error
+             (messages/t :workflow-cmd/gc-scratch-failed
+                         {:error (get-in result [:error :message] "unknown error")}))
+            (shared/exit! exit-code-error)))))))
+
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
   ;; Test workflow status
@@ -147,5 +184,8 @@
 
   ;; Test workflow cancel
   (workflow-cancel-cmd {:id "some-uuid"})
+
+  ;; Test GC scratch (run with max-age=0 to wipe all refs immediately)
+  (workflow-gc-scratch-cmd {:max-age-days 0})
 
   :end)

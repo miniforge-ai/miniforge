@@ -24,6 +24,7 @@
    separation - processes run on the host."
   (:require
    [ai.miniforge.dag-executor.result :as result]
+   [ai.miniforge.dag-executor.scratch-commit :as scratch-commit]
    [ai.miniforge.dag-executor.protocols.executor :as proto]
    [clojure.java.shell :as shell]
    [clojure.string :as str])
@@ -597,6 +598,140 @@
         (result/err :archive-restore-failed (.getMessage e))))))
 
 ;; ============================================================================
+;; Worktree Lifecycle Registry
+;; ============================================================================
+
+(def ^:private worktree-lifecycle-registry
+  "Lightweight atom-based registry tracking worktrees created by the executor.
+
+   Structure: {workflow-id {:scratch-ref   str
+                             :worktree-path str
+                             :created-at    long  ; epoch ms
+                             :status        :active | :released
+                             :released-at   long  ; epoch ms, only present when :released}}
+
+   This is an in-memory atom that retains all entries (including :released)
+   for the lifetime of the process. It is NOT persisted and is NOT pruned by
+   `gc-scratch-refs!`. Git-ref cleanup happens independently via
+   `gc-scratch-refs!`, which neither reads nor mutates this registry. This
+   lets post-mortem tooling inspect which workflows wrote which scratch
+   commits even after the worktrees are gone."
+  (atom {}))
+
+(defn get-worktree-registry
+  "Return a snapshot of the current worktree lifecycle registry.
+
+   Each entry is keyed by workflow-id and contains:
+     :scratch-ref    String ref name under refs/miniforge/scratch/<workflow-id>
+     :worktree-path  Absolute path to the scratch worktree
+     :created-at     Epoch ms when the worktree was acquired
+     :status         :active (worktree present) or :released (worktree removed)
+     :released-at    Epoch ms of release (only present when :status :released)"
+  []
+  @worktree-lifecycle-registry)
+
+(defn register-worktree-entry!
+  "Register a new worktree entry in the lifecycle registry.
+
+   Called on worktree creation to record the scratch-ref and worktree path
+   associated with a workflow. If an entry already exists for workflow-id,
+   it is replaced — creation is idempotent across re-acquisitions."
+  [workflow-id worktree-path]
+  (swap! worktree-lifecycle-registry
+         assoc workflow-id
+         {:scratch-ref   (scratch-commit/scratch-ref-name workflow-id)
+          :worktree-path worktree-path
+          :created-at    (System/currentTimeMillis)
+          :status        :active})
+  nil)
+
+(defn release-worktree-entry!
+  "Mark a registry entry as :released while preserving the scratch ref.
+
+   Called on worktree destruction. The entry is retained in the registry
+   (with :status :released and :released-at epoch ms) so post-mortem tooling
+   and GC can inspect it. The underlying git scratch ref is NOT deleted here —
+   use gc-scratch-refs! for that."
+  [workflow-id]
+  (swap! worktree-lifecycle-registry
+         (fn [registry]
+           (if (contains? registry workflow-id)
+             (update registry workflow-id assoc
+                     :status      :released
+                     :released-at (System/currentTimeMillis))
+             registry)))
+  nil)
+
+(defn- find-workflow-id-by-worktree
+  "Find the workflow-id whose registry entry has the given worktree-path.
+   Returns nil when no match is found."
+  [worktree-path]
+  (some (fn [[wf-id entry]]
+          (when (= worktree-path (:worktree-path entry))
+            wf-id))
+        @worktree-lifecycle-registry))
+
+;; ============================================================================
+;; Parent-Repo Derivation
+;; ============================================================================
+
+(defn derive-parent-repo-path
+  "Derive the parent repository path from a linked worktree path.
+
+   Uses `git rev-parse --git-common-dir` which returns the shared .git
+   directory of the parent (main) repository for linked worktrees. The
+   parent repo path is the directory that contains that .git directory.
+
+   For a plain (non-worktree) repo `--git-common-dir` returns `.git` —
+   the parent in that case is the repo root itself, which is correct.
+
+   Returns result/ok {:parent-repo-path string} or result/err."
+  [worktree-path]
+  (let [r (run-git "-C" worktree-path "rev-parse" "--git-common-dir")]
+    (if (zero? (:exit r))
+      (let [git-common-str  (str/trim (or (:out r) ""))
+            ;; --git-common-dir may return a relative path; resolve against
+            ;; the worktree's CWD so we get the correct absolute path even
+            ;; when the worktree lives far from the parent repo.
+            git-common-file (let [f (File. ^String git-common-str)]
+                              (if (.isAbsolute f)
+                                f
+                                (File. ^String worktree-path ^String git-common-str)))
+            abs-git-common  (.getAbsolutePath git-common-file)
+            parent-repo     (.getAbsolutePath
+                             (.getParentFile (File. ^String abs-git-common)))]
+        (result/ok {:parent-repo-path parent-repo}))
+      (result/err :derive-parent-repo-failed
+                  (str "git rev-parse --git-common-dir failed: " (:err r))
+                  {:worktree-path worktree-path
+                   :stderr        (get r :err "")}))))
+
+;; ============================================================================
+;; File-Write Scratch-Commit Hook
+;; ============================================================================
+
+(defn notify-file-written!
+  "Snapshot a file written inside a worktree into the workflow's scratch ref.
+
+   Called by the layer that processes Write tool responses from agents running
+   inside the worktree. Derives the parent repo path via git plumbing and
+   delegates to scratch-commit! without touching the worktree's index or
+   working tree.
+
+   Arguments:
+   - worktree-path  Absolute path to the scratch worktree
+   - workflow-id    Workflow identifier (used as scratch-ref suffix)
+   - phase          Current phase label (e.g. \"implement\", \"verify\")
+   - file-path      Absolute path to the file that was written
+
+   Returns result/ok with scratch-commit data or result/err."
+  [worktree-path workflow-id phase file-path]
+  (-> (derive-parent-repo-path worktree-path)
+      (result/and-then
+       (fn [{:keys [parent-repo-path]}]
+         (scratch-commit/scratch-commit! parent-repo-path workflow-id phase file-path)))))
+
+;; ============================================================================
 ;; Command Execution
 ;; ============================================================================
 
@@ -710,22 +845,27 @@
 
   (acquire-environment! [_this task-id env-config]
     (let [worktree-name (str "task-" (subs (str task-id) 0 8))
-          repo-path (get env-config :repo-path ".")
-          branch (get env-config :branch "main")
+          repo-path     (get env-config :repo-path ".")
+          branch        (get env-config :branch "main")
+          workflow-id   (get env-config :workflow-id)
           create-result (create-worktree base-path repo-path worktree-name branch)]
       (if (result/ok? create-result)
-        (let [data (:data create-result)
+        (let [data          (:data create-result)
               worktree-path (:worktree-path data)]
+          ;; Lifecycle hook: register the scratch-ref for this workflow so
+          ;; callers can call notify-file-written! and find the right path.
+          (when workflow-id
+            (register-worktree-entry! workflow-id worktree-path))
           (result/ok (proto/create-environment-record
                       worktree-name :worktree task-id worktree-path
                       (assoc env-config
                              :metadata {:worktree-path worktree-path
-                                        :repo-path repo-path
-                                        :base-sha (:base-sha data)
+                                        :repo-path     repo-path
+                                        :base-sha      (:base-sha data)
                                         ;; Stored so persist-workspace! can bundle
                                         ;; the right base..HEAD range without
                                         ;; guessing the parent branch.
-                                        :base-branch branch}))))
+                                        :base-branch   branch}))))
         create-result)))
 
   (execute! [_this environment-id command opts]
@@ -744,6 +884,10 @@
 
   (release-environment! [_this environment-id]
     (let [worktree-path (str base-path "/" environment-id)]
+      ;; Lifecycle hook: mark the registry entry as :released while preserving
+      ;; the scratch ref. The scratch ref survives until gc-scratch-refs! runs.
+      (when-let [wf-id (find-workflow-id-by-worktree worktree-path)]
+        (release-worktree-entry! wf-id))
       (try
         (remove-worktree worktree-path)
         (catch Exception e

@@ -38,7 +38,10 @@
    [ai.miniforge.cli.workflow-runner.dashboard :as dashboard]
    [ai.miniforge.phase.interface :as phase]
    [ai.miniforge.response.interface :as response]
-   [slingshot.slingshot :refer [try+]]))
+   [slingshot.slingshot :refer [try+]]
+   [ai.miniforge.dag-executor.interface :as gc-queue]
+   [ai.miniforge.cli.worktree :as worktree]
+   [ai.miniforge.cli.workflow-runner.gc-hooks :as gc-hooks]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Work spec kanban lifecycle
@@ -147,6 +150,30 @@
       (when-not quiet
         (println (display/colorize :yellow (messages/t :workflow-runner/artifact-store-warning))))
       nil)))
+
+;------------------------------------------------------------------------------ Layer 0.7
+;; Deferred scratch-ref GC — thin delegation to workflow-runner.gc-hooks
+;;
+;; gc-hooks is a *pure* namespace (no external requires).  Its functions accept
+;; their collaborators as injected arguments.  We use defn- here (rather than
+;; partial + def) so that `with-redefs` on the gc-hooks vars is intercepted
+;; correctly at call time — partial captures the function value at load time,
+;; bypassing with-redefs in tests.
+
+(defn- enqueue-workflow-gc-best-effort!
+  "Append `workflow-id` to the scratch-ref GC queue.
+   Never throws — GC housekeeping must not interfere with the workflow result."
+  [workflow-id]
+  (gc-hooks/enqueue-workflow-gc-best-effort! gc-queue/enqueue-workflow-gc! workflow-id))
+
+(defn- run-gc-pass-best-effort!
+  "Run the deferred scratch-ref GC pass piggybacked on workflow start.
+   Never throws."
+  []
+  (gc-hooks/run-gc-pass-best-effort! worktree/worktree-root gc-queue/run-deferred-gc!))
+
+;------------------------------------------------------------------------------ Layer 0.8
+;; Source-root and execution-context validation helpers
 
 (defn- valid-source-root?
   [source-root]
@@ -960,6 +987,9 @@
 (defn run-workflow! [workflow-id {:keys [version output quiet event-stream dashboard-url]
                                     :or {version "latest" output :pretty quiet false}
                                     :as opts}]
+  ;; Piggyback deferred GC on each workflow start — deletes scratch refs
+  ;; from finished workflows that are older than the 7-day retention window.
+  (run-gc-pass-best-effort!)
   (try
     (let [{:keys [load-workflow run-pipeline]} (resolve-workflow-interface)
           ;; Create event stream if not provided (dashboard-url takes precedence)
@@ -1017,7 +1047,12 @@
             ;; publish-failure-event! :cancelled branch.
             (mark-manifest-terminal! manifest-handle :cancelled)
             (finish-workflow-manifest! manifest-handle)
-            (progress-cleanup)))))
+            (progress-cleanup)
+            ;; Schedule deferred GC for this workflow's scratch ref — fires
+            ;; here (finally) so it runs on both normal completion and any
+            ;; exception path.  The ref will be deleted on a future
+            ;; run-gc-pass-best-effort! call once older than 7 days.
+            (enqueue-workflow-gc-best-effort! workflow-id)))))
     (catch Exception e
       (when-not quiet
         (println (display/colorize :red (messages/t :workflow-runner/run-error {:error (ex-message e)}))))
@@ -1063,6 +1098,8 @@
 ;; Spec-driven execution
 
 (defn run-workflow-from-spec! [spec {:keys [quiet] :or {quiet false} :as opts}]
+  ;; Piggyback deferred GC on each spec-driven workflow start.
+  (run-gc-pass-best-effort!)
   (try+
     (let [{:keys [load-workflow run-pipeline]} (resolve-workflow-interface)
           ;; Create initial LLM client for workflow selection
@@ -1141,7 +1178,10 @@
             result)
           (finally
             (progress-cleanup)
-            (when command-poller-cleanup (command-poller-cleanup))))))
+            (when command-poller-cleanup (command-poller-cleanup))
+            ;; Schedule deferred GC for this workflow's scratch ref — in finally
+            ;; so it fires on both normal completion and exception exit paths.
+            (enqueue-workflow-gc-best-effort! workflow-id)))))
     (catch Object _
       (let [e (:throwable &throw-context)]
         (when-not quiet

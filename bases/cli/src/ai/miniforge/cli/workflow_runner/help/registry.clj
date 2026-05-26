@@ -71,6 +71,11 @@
 (def workflow-cancel-flag-spec
   (with-help-flag {}))
 
+(def workflow-gc-scratch-flag-spec
+  (with-help-flag
+    {:max-age-days {:coerce :int :alias :a :default 7}
+     :repo-path    {:coerce :string :alias :r}}))
+
 (def chain-run-flag-spec
   (with-help-flag
     {:version    {:coerce :string :alias :v :default "latest"}
@@ -106,6 +111,10 @@
                       :summary-key :workflow-runner.help/workflow-cancel-summary
                       :spec        workflow-cancel-flag-spec
                       :positional  [:id]}
+   :workflow-gc-scratch {:subcommand  "workflow gc-scratch"
+                         :summary-key :workflow-runner.help/workflow-gc-scratch-summary
+                         :spec        workflow-gc-scratch-flag-spec
+                         :positional  []}
    :chain-run        {:subcommand  "chain run"
                       :summary-key :workflow-runner.help/chain-run-summary
                       :spec        chain-run-flag-spec
@@ -118,7 +127,7 @@
 (def workflow-subcommand-keys
   "Display order for `mf workflow --help`."
   [:workflow-run :workflow-list :workflow-execute :workflow-status
-   :workflow-cancel])
+   :workflow-cancel :workflow-gc-scratch])
 
 (def chain-subcommand-keys
   "Display order for `mf chain --help`."
