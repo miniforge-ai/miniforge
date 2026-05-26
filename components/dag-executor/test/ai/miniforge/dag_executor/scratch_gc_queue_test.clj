@@ -230,6 +230,65 @@
             (is (= "wf-fresh-2" (:workflow-id (first remaining))))))
         (finally (delete-dir-recursive! tmp-dir))))))
 
+;;------------------------------------------------------------------------------ prune-stale-queue-entries! — extracted lock-body logic
+
+(deftest prune-stale-queue-entries!-partitions-and-writes-back-test
+  (testing "the extracted GC step prunes stale entries, retains fresh, writes back only fresh"
+    (let [tmp-dir        (make-temp-dir!)
+          tmp-path       (str tmp-dir "/scratch-gc-queue.edn")
+          eight-days-ago (java.util.Date.
+                          (- (System/currentTimeMillis) (* 8 24 60 60 1000)))
+          now            (java.util.Date.)]
+      (try
+        (with-redefs [scratch-commit/gc-scratch-refs! (fn [_ _]
+                                                         (result/ok {:deleted ["refs/miniforge/scratch/wf-old"]
+                                                                     :retained 0}))]
+          (spit tmp-path (pr-str [{:workflow-id "wf-old"   :finished-at eight-days-ago}
+                                  {:workflow-id "wf-fresh" :finished-at now}]))
+          ;; Call the extracted fn directly (no lock thunk) with a 7-day window.
+          (let [r    (sut/prune-stale-queue-entries! tmp-path "/unused" 7)
+                data (result/unwrap r)]
+            (is (result/ok? r))
+            (is (= 1 (:pruned data)))
+            (is (= ["wf-old"] (:pruned-ids data)))
+            (is (= 1 (:remaining data)))
+            (is (some? (:gc-result data))))
+          (let [remaining (read-raw-queue tmp-path)]
+            (is (= ["wf-fresh"] (mapv :workflow-id remaining)))))
+        (finally (delete-dir-recursive! tmp-dir))))))
+
+(deftest prune-stale-queue-entries!-no-stale-leaves-queue-untouched-test
+  (testing "with no stale entries the queue is left unchanged and GC is not invoked"
+    (let [tmp-dir  (make-temp-dir!)
+          tmp-path (str tmp-dir "/scratch-gc-queue.edn")
+          gc-calls (atom 0)]
+      (try
+        (with-redefs [scratch-commit/gc-scratch-refs! (fn [_ _] (swap! gc-calls inc) (result/ok {}))]
+          (spit tmp-path (pr-str [{:workflow-id "wf-fresh" :finished-at (java.util.Date.)}]))
+          (let [r    (sut/prune-stale-queue-entries! tmp-path "/unused" 7)
+                data (result/unwrap r)]
+            (is (result/ok? r))
+            (is (= 0 (:pruned data)))
+            (is (= 1 (:remaining data)))
+            (is (nil? (:gc-result data)))
+            (is (zero? @gc-calls) "gc-scratch-refs! must not run when nothing is stale")))
+        (finally (delete-dir-recursive! tmp-dir))))))
+
+(deftest prune-stale-queue-entries!-propagates-gc-failure-test
+  (testing "a git-level GC failure propagates and leaves the queue untouched"
+    (let [tmp-dir  (make-temp-dir!)
+          tmp-path (str tmp-dir "/scratch-gc-queue.edn")
+          stale    (java.util.Date. (- (System/currentTimeMillis) (* 8 24 60 60 1000)))]
+      (try
+        (with-redefs [scratch-commit/gc-scratch-refs! (fn [_ _]
+                                                         (result/err :scratch-commit/gc-list-failed "boom" {}))]
+          (spit tmp-path (pr-str [{:workflow-id "wf-old" :finished-at stale}]))
+          (let [r (sut/prune-stale-queue-entries! tmp-path "/unused" 7)]
+            (is (result/err? r) "the GC error must propagate"))
+          ;; Queue is untouched so the stale entry is retried next pass.
+          (is (= ["wf-old"] (mapv :workflow-id (read-raw-queue tmp-path)))))
+        (finally (delete-dir-recursive! tmp-dir))))))
+
 ;;------------------------------------------------------------------------------ run-deferred-gc! — arity
 
 (deftest run-deferred-gc!-default-arity-test

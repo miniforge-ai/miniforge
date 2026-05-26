@@ -37,6 +37,10 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Helpers
 
+(def ^:private exit-code-error
+  "Process exit code signalling command failure (non-zero)."
+  1)
+
 (defn- read-event-lines
   "Read all non-blank EDN lines from a workflow event file."
   [event-file]
@@ -90,7 +94,7 @@
             event-file (str events-dir "/" id ".edn")]
         (if-not (fs/exists? event-file)
           (do (display/print-error (messages/t :workflow-cmd/status-not-found {:id id}))
-              (shared/exit! 1))
+              (shared/exit! exit-code-error))
           (let [events  (read-event-lines event-file)
                 status  (derive-status events)
                 started (first (filter #(= :workflow/started (:event/type %)) events))
@@ -158,7 +162,7 @@
     (if-not repo-root
       (do
         (display/print-error (messages/t :workflow-cmd/gc-scratch-no-repo))
-        (shared/exit! 1))
+        (shared/exit! exit-code-error))
       (let [result (gc-queue/run-deferred-gc! repo-root max-age-days)]
         (if (gc-queue/ok? result)
           (let [{:keys [pruned remaining gc-result]} (gc-queue/unwrap result)
@@ -171,7 +175,7 @@
             (display/print-error
              (messages/t :workflow-cmd/gc-scratch-failed
                          {:error (get-in result [:error :message] "unknown error")}))
-            (shared/exit! 1)))))))
+            (shared/exit! exit-code-error)))))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

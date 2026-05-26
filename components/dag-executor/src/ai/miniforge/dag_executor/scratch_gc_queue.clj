@@ -75,6 +75,19 @@
    self-documenting and to avoid duplicating the magic number `86400`."
   86400)
 
+(def ^:private lock-acquire-timeout-ms
+  "Upper bound on how long `with-queue-lock!` waits for the advisory file
+   lock before giving up with `:scratch-gc-queue/locked`.  Bounded because GC
+   is best-effort — a contended queue should yield quickly, not block a CLI
+   command or workflow start."
+  500)
+
+(def ^:private lock-poll-interval-ms
+  "Backoff between `.tryLock` attempts while waiting for the queue lock.
+   Small relative to [[lock-acquire-timeout-ms]] so contention resolves
+   promptly without busy-spinning."
+  25)
+
 ;; Lazily compute and cache the path on first call so `.mkdirs` is invoked
 ;; at most once per JVM lifetime rather than on every enqueue/GC call.
 (def ^:private miniforge-queue-path
@@ -167,15 +180,22 @@
                               StandardOpenOption/CREATE])]
     (try
       (with-open [^FileChannel ch (FileChannel/open nio-path opts)]
-        (let [deadline (+ (System/currentTimeMillis) 500)]
+        (let [deadline (+ (System/currentTimeMillis) lock-acquire-timeout-ms)]
           (loop []
             (if-let [^java.lang.AutoCloseable lk (.tryLock ch)]
               ;; FileLock implements AutoCloseable; .close releases the lock.
               ;; Hinting AutoCloseable (not FileLock) keeps the ns loadable
               ;; under babashka, which does not expose java.nio.channels.FileLock.
               (try (thunk) (finally (.close lk)))
+              ;; Why Thread/sleep here is acceptable: an OS advisory file lock
+              ;; has no blocking-with-timeout acquire API — `.tryLock` is
+              ;; non-blocking and the blocking `.lock` waits forever (no
+              ;; timeout), which we must avoid for a best-effort GC. So we
+              ;; poll: brief sleep, retry, give up at the bounded deadline.
+              ;; This runs on the calling CLI/workflow thread (no pool starved)
+              ;; and the total wait is capped at lock-acquire-timeout-ms.
               (if (< (System/currentTimeMillis) deadline)
-                (do (Thread/sleep 25) (recur))
+                (do (Thread/sleep lock-poll-interval-ms) (recur))
                 (result/err :scratch-gc-queue/locked
                             "queue file is locked by another process"
                             {:path path}))))))
@@ -249,6 +269,44 @@
                   (str "failed to enqueue workflow GC entry: " (.getMessage e))
                   {:workflow-id (str workflow-id)}))))
 
+(defn prune-stale-queue-entries!
+  "Core of a deferred-GC pass, run while holding the queue lock.
+
+   Reads the queue at `path`, partitions entries into stale (age ≥
+   `max-age-days`) and fresh, and — only when stale entries exist — runs
+   `gc-scratch-refs!` once on `parent-repo-path`, then writes back only the
+   fresh entries. On git-level GC failure the queue is left untouched (the
+   error propagates) so stale entries are retried next pass.
+
+   Extracted from `run-deferred-gc!`'s lock thunk so the partition/write-back
+   logic is independently testable.
+
+   Returns:
+     result/ok  `{:pruned int :pruned-ids [str ...] :remaining int :gc-result map-or-nil}`
+     result/err the propagated `gc-scratch-refs!` error when GC fails"
+  [path parent-repo-path max-age-days]
+  (let [entries   (read-gc-queue path)
+        max-age-s (* (long max-age-days) seconds-per-day)
+        now-s     (epoch-seconds)
+        stale?    (fn [e] (>= (- now-s (finished-at-epoch-seconds e)) max-age-s))
+        {stale true fresh false} (group-by stale? entries)]
+    (if (seq stale)
+      (let [gc-result (scratch-commit/gc-scratch-refs! parent-repo-path max-age-days)]
+        (if (result/ok? gc-result)
+          ;; GC succeeded: write back only fresh entries.
+          (do
+            (write-gc-queue! path (or fresh []))
+            (result/ok {:pruned     (count stale)
+                        :pruned-ids (mapv :workflow-id stale)
+                        :remaining  (count (or fresh []))
+                        :gc-result  (get gc-result :data)}))
+          ;; GC failed: leave queue untouched; propagate the error.
+          gc-result))
+      (result/ok {:pruned     0
+                  :pruned-ids []
+                  :remaining  (count entries)
+                  :gc-result  nil}))))
+
 (defn run-deferred-gc!
   "Scan the GC queue and delete stale scratch refs if any entries are overdue.
 
@@ -281,28 +339,7 @@
    (try
      (let [path (gc-queue-path)]
        (with-queue-lock! path
-         (fn []
-           (let [entries   (read-gc-queue path)
-                 max-age-s (* (long max-age-days) seconds-per-day)
-                 now-s     (epoch-seconds)
-                 stale?    (fn [e] (>= (- now-s (finished-at-epoch-seconds e)) max-age-s))
-                 {stale true fresh false} (group-by stale? entries)]
-             (if (seq stale)
-               (let [gc-result (scratch-commit/gc-scratch-refs! parent-repo-path max-age-days)]
-                 (if (result/ok? gc-result)
-                   ;; GC succeeded: write back only fresh entries.
-                   (do
-                     (write-gc-queue! path (or fresh []))
-                     (result/ok {:pruned     (count stale)
-                                 :pruned-ids (mapv :workflow-id stale)
-                                 :remaining  (count (or fresh []))
-                                 :gc-result  (get gc-result :data)}))
-                   ;; GC failed: leave queue untouched; propagate the error.
-                   gc-result))
-               (result/ok {:pruned     0
-                           :pruned-ids []
-                           :remaining  (count entries)
-                           :gc-result  nil}))))))
+         (fn [] (prune-stale-queue-entries! path parent-repo-path max-age-days))))
      (catch Exception e
        (result/err :scratch-gc-queue/run-failed
                    (str "deferred GC pass failed: " (.getMessage e))
