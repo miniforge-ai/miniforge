@@ -768,7 +768,8 @@
    applied set for a run is reconstructable (closes the rule-visibility gap).
 
    `extra` may carry :severity, :enforcement (the rule's enforcement action),
-   and :violation (detail for a :failed rule)."
+   and :violation (a NON-SENSITIVE summary for a :failed rule — callers must
+   not pass raw match content; see gate/policy-pack's violation-summary)."
   [stream workflow-id phase rule-id status & [extra]]
   (-> (create-envelope stream :gate/rule-applied workflow-id
                        (str "Rule " rule-id " " (name status) " in " (name phase)))

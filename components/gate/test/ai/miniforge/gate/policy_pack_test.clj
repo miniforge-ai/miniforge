@@ -154,9 +154,11 @@
       (is (= :passed (by-id :r/pass)))
       (is (= :skipped-by-phase (by-id :r/skip)))
       (is (= :not-applicable (by-id :r/na)))
-      (testing "a failed rule carries its violation detail + severity"
+      (testing "a failed rule carries a non-sensitive violation summary + severity"
         (let [fail-rec (first (filter #(= :r/fail (:rule-id %)) classified))]
-          (is (= {:message "boom"} (:violation fail-rec)))
+          (is (= "boom" (-> fail-rec :violation :message)))
+          (is (not (contains? (:violation fail-rec) :matches))
+              "raw matches must be redacted from evidence")
           (is (= :critical (:severity fail-rec))))))))
 
 (deftest emits-rule-applied-events-test
