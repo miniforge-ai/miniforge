@@ -8,11 +8,17 @@
 (ns compile-standards
   (:require
    [clojure.pprint :as pprint]
+   [clojure.string :as str]
    [clojure.walk :as walk]
    [ai.miniforge.policy-pack.mdc-compiler :as mdc-compiler]))
 
 (def ^:private output-path
   "components/phase/resources/packs/miniforge-standards.pack.edn")
+
+(def ^:private standards-dir
+  "Source directory of compiled .mdc rules — the miniforge-standards submodule,
+   relocated from .standards/ to standards/miniforge/ (PR #975)."
+  "standards/miniforge")
 
 (defn- instant->date
   "Convert java.time.Instant to java.util.Date for #inst EDN serialization."
@@ -21,10 +27,26 @@
     (java.util.Date/from v)
     v))
 
+(defn- sanitize-user-paths
+  "Replace absolute /Users/<name>/… paths with <repo>/ inside a STRING VALUE,
+   so local developer paths don't leak into the committed pack.
+
+   Sanitizing the parsed DATA (here) rather than the serialized EDN text is
+   essential: the previous text-level regex (in tasks/standards.clj) consumed
+   the escaping backslash of an embedded `\\\"/Users/…\\\"` and left an
+   unescaped quote, producing an EDN file that `clojure.edn/read-string` (the
+   runtime pack loader) could not parse at all. pprint re-escapes the
+   sanitized strings correctly."
+  [v]
+  (if (string? v)
+    (str/replace v #"/Users/[^/\s]+/\S*" "<repo>/")
+    v))
+
 (defn -main [& _args]
-  (let [result (mdc-compiler/compile-standards-pack ".standards")]
+  (let [result (mdc-compiler/compile-standards-pack standards-dir)]
     (if (:success? result)
-      (let [pack (walk/postwalk instant->date (:pack result))]
+      (let [pack (walk/postwalk (comp sanitize-user-paths instant->date)
+                                (:pack result))]
         (spit output-path (with-out-str (pprint/pprint pack)))
         (println (str "Compiled " (:compiled-count result) " rules"))
         (when (seq (:warnings result))
