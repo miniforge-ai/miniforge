@@ -49,7 +49,7 @@
 
 (def detection-types
   "Types of violation detection."
-  [:plan-output :diff-analysis :state-comparison :content-scan :ast-analysis :custom])
+  [:plan-output :diff-analysis :state-comparison :content-scan :ast-analysis :custom :capability])
 
 (def DetectionType
   "Schema for detection type enum."
@@ -134,13 +134,16 @@
    - :pattern - Single regex pattern
    - :patterns - Multiple regex patterns
    - :context-lines - Lines of context to include
-   - :custom-fn - Symbol for custom detection function"
+   - :custom-fn - Symbol for custom detection function
+   - :capability - Keyword naming a registered mechanical-check capability
+     (used with :type :capability; resolved via the capability registry)"
   [:map
    [:type DetectionType]
    [:pattern {:optional true} [:or string? [:fn {:error/message "should be a regex pattern"} #(instance? java.util.regex.Pattern %)]]]
    [:patterns {:optional true} [:vector [:or string? [:fn {:error/message "should be a regex pattern"} #(instance? java.util.regex.Pattern %)]]]]
    [:context-lines {:optional true} pos-int?]
    [:custom-fn {:optional true} symbol?]
+   [:capability {:optional true} keyword?]
    [:mode {:optional true} DetectionMode]
    [:email-pattern {:optional true} string?]])
 

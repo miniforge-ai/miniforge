@@ -21,6 +21,7 @@
    Public API groups live under ai.miniforge.policy-pack.interface.* namespaces,
    while this namespace remains the Polylith entrypoint."
   (:require
+   [ai.miniforge.policy-pack.capability :as capability]
    [ai.miniforge.policy-pack.interface.builders :as builders]
    [ai.miniforge.policy-pack.interface.checking :as checking]
    [ai.miniforge.policy-pack.interface.loading :as loading]
@@ -80,6 +81,13 @@
 (def warning-violations checking/warning-violations)
 (def violation->error checking/violation->error)
 (def violation->warning checking/violation->warning)
+
+;------------------------------------------------------------------------------ Capability registry API
+
+(def register-capability! capability/register-capability!)
+(def get-capability capability/get-capability)
+(def list-capabilities capability/list-capabilities)
+(def capability-available? capability/capability-available?)
 
 ;------------------------------------------------------------------------------ Builders and rule resolution
 

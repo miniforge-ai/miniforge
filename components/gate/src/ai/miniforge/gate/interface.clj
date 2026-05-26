@@ -38,6 +38,10 @@
    [ai.miniforge.gate.policy]
    [ai.miniforge.gate.precommit-discipline]
    [ai.miniforge.gate.behavioral]
+   ;; Injects the mechanical tool gates into the policy-pack capability
+   ;; registry on load, so pack-gate evaluation sees :lint/:format/:syntax/
+   ;; :no-secrets capabilities without an explicit caller.
+   [ai.miniforge.gate.capabilities]
    [ai.miniforge.gate.registry :as registry]
    [ai.miniforge.response.interface :as response]
    [ai.miniforge.schema.interface :as schema]))
