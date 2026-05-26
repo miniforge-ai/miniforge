@@ -31,6 +31,14 @@
 
 (defn max-phases           [] (get @defaults :max-phases 50))
 (defn max-redirects        [] (get @defaults :max-redirects 5))
+(defn max-consecutive-phase-retries
+  "Cap on how many times the SAME phase may run in immediately consecutive
+   pipeline iterations before the workflow fails loud. Distinct from
+   `max-phases` (total steps) and `max-redirects` (phase→phase redirects):
+   this catches a single phase retrying itself in place (e.g. implement
+   failing + re-entering on every agent stall), which would otherwise burn
+   up to `max-phases` iterations — hours of tokens — before stopping."
+  [] (get @defaults :max-consecutive-phase-retries 3))
 (defn max-backoff-ms       [] (get @defaults :max-backoff-ms 30000))
 (defn backoff-base-ms      [] (get @defaults :backoff-base-ms 1000))
 (defn pause-poll-interval-ms [] (get @defaults :pause-poll-interval-ms 1000))
