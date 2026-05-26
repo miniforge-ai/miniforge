@@ -21,6 +21,7 @@
   (:require
    [clojure.string]
    [clojure.test :refer [deftest is testing]]
+   [ai.miniforge.policy-pack.capability :as capability]
    [ai.miniforge.policy-pack.detection :as detection]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -239,6 +240,66 @@
           warning (detection/violation->warning violation)]
       (is (= :test-rule (:code warning)))
       (is (= :minor (:severity warning))))))
+
+;------------------------------------------------------------------------------ Layer 1
+;; Capability detection tests
+;;
+;; A stub :lint capability is registered via register-capability! so these
+;; tests do not depend on clj-kondo or the gate layer.
+
+(defn- stub-lint-check
+  "Flags a violation when the artifact content contains the token BADLINT."
+  [artifact _context]
+  (when (clojure.string/includes? (str (:artifact/content artifact)) "BADLINT")
+    {:type :capability :capability :lint :message "lint error"}))
+
+(deftest detect-capability-registered-violation-test
+  (testing "a :capability :lint rule surfaces the registered check's violation"
+    (capability/register-capability!
+     ::stub-lint {:meta {:tool :stub} :check stub-lint-check})
+    (let [rule     {:rule/id :no-lint-errors
+                    :rule/severity :major
+                    :rule/detection {:type :capability :capability ::stub-lint}}
+          artifact {:artifact/content "(defn x [] BADLINT)"
+                    :artifact/path "core.clj"}
+          result   (detection/detect-capability rule artifact {})]
+      (is (some? result))
+      (is (= :no-lint-errors (:rule-id result)))
+      (is (= :major (:severity result)) "severity is preserved onto the violation")
+      (is (= :lint (:capability result)) "check's own violation fields pass through"))))
+
+(deftest detect-capability-clean-test
+  (testing "a clean artifact yields nil (no violation) through the registered check"
+    (capability/register-capability!
+     ::stub-lint-clean {:meta {:tool :stub} :check stub-lint-check})
+    (let [rule     {:rule/id :no-lint-errors
+                    :rule/severity :major
+                    :rule/detection {:type :capability :capability ::stub-lint-clean}}
+          artifact {:artifact/content "(defn x [] 42)" :artifact/path "core.clj"}]
+      (is (nil? (detection/detect-capability rule artifact {}))))))
+
+(deftest detect-capability-unregistered-fails-loud-test
+  (testing "an unregistered capability returns a :capability-error, not a silent pass"
+    (let [rule   {:rule/id :missing-cap
+                  :rule/severity :critical
+                  :rule/detection {:type :capability :capability ::never-registered}}
+          result (detection/detect-capability rule {:artifact/content "x"} {})]
+      (is (= :capability-error (:type result)))
+      (is (= :missing-cap (:rule-id result)))
+      (is (= :critical (:severity result)))
+      (is (= ::never-registered (:capability result))))))
+
+(deftest detect-violation-dispatches-capability-test
+  (testing "detect-violation routes :capability detection to detect-capability"
+    (capability/register-capability!
+     ::stub-dispatch {:meta {:tool :stub} :check stub-lint-check})
+    (let [rule     {:rule/id :dispatched
+                    :rule/severity :minor
+                    :rule/detection {:type :capability :capability ::stub-dispatch}}
+          artifact {:artifact/content "BADLINT" :artifact/path "core.clj"}
+          result   (detection/detect-violation rule artifact {})]
+      (is (= :dispatched (:rule-id result)))
+      (is (= :minor (:severity result))))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

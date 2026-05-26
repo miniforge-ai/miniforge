@@ -45,10 +45,10 @@
     (is (= 4 (count sut/enforcement-actions)))))
 
 (deftest detection-types-test
-  (testing "detection-types has six detection mechanisms"
-    (is (= [:plan-output :diff-analysis :state-comparison :content-scan :ast-analysis :custom]
+  (testing "detection-types has seven detection mechanisms"
+    (is (= [:plan-output :diff-analysis :state-comparison :content-scan :ast-analysis :custom :capability]
            sut/detection-types))
-    (is (= 6 (count sut/detection-types)))))
+    (is (= 7 (count sut/detection-types)))))
 
 (deftest task-types-test
   (testing "task-types has five task operations"
@@ -195,6 +195,10 @@
   (testing "detection with custom-fn symbol"
     (is (sut/valid? sut/RuleDetection {:type :custom
                                        :custom-fn 'my.ns/detect-fn})))
+
+  (testing "detection with capability keyword"
+    (is (sut/valid? sut/RuleDetection {:type :capability
+                                       :capability :lint})))
 
   (testing "type is required"
     (is (not (sut/valid? sut/RuleDetection {}))))

@@ -32,6 +32,7 @@
    - :custom - Custom detection function"
   (:require
    [ai.miniforge.policy-pack.ast :as ast]
+   [ai.miniforge.policy-pack.capability :as capability]
    [ai.miniforge.policy-pack.schema :as schema]
    [clojure.data :as data]
    [clojure.string :as str]))
@@ -353,6 +354,54 @@
            :error (.getMessage e)
            :message (str "Custom detection failed: " (.getMessage e))})))))
 
+;------------------------------------------------------------------------------ Layer 1
+;; Capability detection (mechanical tool-gate checks via the registry)
+
+(defn detect-capability
+  "Detect violations by running a registered mechanical-check capability.
+
+   Looks up `(get-in rule [:rule/detection :capability])` in the capability
+   registry, runs its `:check`, and tags the resulting violation with the
+   rule id and the rule's severity. The capability check-fns are injected by
+   the gate layer (see `ai.miniforge.gate.capabilities`); this dispatcher
+   does NOT itself depend on `loop`/`gate`.
+
+   An unregistered capability is NOT a silent pass: it returns a
+   `:type :capability-error` violation naming the missing capability, so an
+   enabled rule pointing at a bad capability fails loud.
+
+   Arguments:
+   - rule     - Rule with :rule/detection containing :capability
+   - artifact - Artifact being checked
+   - context  - Execution context passed through to the capability check
+
+   Returns:
+   - Violation map if detected, error-violation if unregistered, nil if clean."
+  [rule artifact context]
+  (let [capability-kw (get-in rule [:rule/detection :capability])
+        entry         (when capability-kw (capability/get-capability capability-kw))]
+    (cond
+      (nil? capability-kw)
+      {:type          :capability-error
+       :rule-id       (:rule/id rule)
+       :severity      (:rule/severity rule)
+       :artifact-path (or (:artifact/path artifact) (:path artifact))
+       :message       "Capability detection rule is missing :capability keyword"}
+
+      (nil? entry)
+      {:type          :capability-error
+       :rule-id       (:rule/id rule)
+       :severity      (:rule/severity rule)
+       :capability    capability-kw
+       :artifact-path (or (:artifact/path artifact) (:path artifact))
+       :message       (str "Capability not registered: " capability-kw)}
+
+      :else
+      (when-let [violation ((:check entry) artifact context)]
+        (assoc violation
+               :rule-id  (:rule/id rule)
+               :severity (:rule/severity rule))))))
+
 ;------------------------------------------------------------------------------ Layer 2
 ;; Unified detection dispatcher
 
@@ -383,6 +432,7 @@
       :custom (detect-custom rule artifact context)
       :state-comparison (detect-state-comparison rule artifact context)
       :ast-analysis (detect-ast-analysis rule artifact context)
+      :capability (detect-capability rule artifact context)
       nil)))
 
 (defn check-rules
