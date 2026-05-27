@@ -84,6 +84,22 @@
    :anomaly/data    (or data {})
    :anomaly/at      (now)})
 
+(defn sub-anomaly
+  "Construct an anomaly carrying a domain `:anomaly/subtype` — a finer
+   classification (e.g. `:gate/validation-failed`, `:agent/tool-loop`)
+   that routing and classification dispatch on. `type` stays one of the
+   generic vocabulary; `subtype` names the domain-specific failure.
+   Use when a consumer needs more than the generic type to route."
+  [type subtype message data]
+  (assoc (anomaly type message data) :anomaly/subtype subtype))
+
+(defn subtype
+  "The domain `:anomaly/subtype` of `a`, or nil when it carries only a
+   generic `:anomaly/type`. Routing/classification should prefer this
+   over `:anomaly/type` when present."
+  [a]
+  (:anomaly/subtype a))
+
 (defn validation-anomaly
   "Construct an `:invalid-input` anomaly describing a schema-validation
    failure. The schema name, offending value, and explain data are

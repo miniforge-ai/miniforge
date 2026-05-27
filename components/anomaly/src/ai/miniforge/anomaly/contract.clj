@@ -69,12 +69,21 @@
    - :anomaly/type    — keyword from the standard vocabulary
    - :anomaly/message — human-readable description
    - :anomaly/data    — caller-supplied context map (defaults to {})
-   - :anomaly/at      — instant of construction"
+   - :anomaly/at      — instant of construction
+
+   Optionally:
+   - :anomaly/subtype — a finer domain classification keyword (e.g.
+     :gate/validation-failed, :agent/tool-loop) that routing and
+     classification dispatch on. Narrower than the generic
+     :anomaly/type, which stays one of the standard vocabulary while the
+     subtype names the domain-specific failure. Absent for purely
+     generic anomalies."
   [:map {:closed true}
    [:anomaly/type    (into [:enum] anomaly-types)]
    [:anomaly/message :string]
    [:anomaly/data    [:map-of :any :any]]
-   [:anomaly/at      inst?]])
+   [:anomaly/at      inst?]
+   [:anomaly/subtype {:optional true} :keyword]])
 
 ;------------------------------------------------------------------------------ Layer 2
 ;; Validation helpers
