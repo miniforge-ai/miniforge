@@ -199,6 +199,28 @@
 ;------------------------------------------------------------------------------ Layer 3
 ;; Query schemas
 
+(def PolicyQuery
+  "Input schema for policy-pack rule lookup.
+   All fields are optional; omitting all returns every loaded :rule zettel.
+   Multiple criteria are ANDed.
+
+   :query        Case-insensitive substring matched against rule title + body.
+   :tags         Vector of keywords; a rule matches if it carries at least one.
+   :dewey-prefix Prefix string matched at the start of the rule's Dewey code
+                 (e.g. \"21\" matches \"210\" and \"211\"; \"210\" matches
+                 \"210\" but not \"211\")."
+  [:map
+   [:query        {:optional true} [:string {:min 1}]]
+   [:tags         {:optional true} [:vector keyword?]]
+   [:dewey-prefix {:optional true} [:string {:min 1}]]])
+
+(def PolicyResult
+  "Compact rule result returned by lookup-policy-rules.
+   Contains only the title and full markdown content of the matched rule."
+  [:map
+   [:rule/title   string?]
+   [:rule/content string?]])
+
 (def KnowledgeQuery
   "Query specification for retrieving relevant knowledge."
   [:map
