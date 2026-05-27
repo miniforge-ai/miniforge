@@ -36,8 +36,9 @@
   "Coerce a scalar dewey-prefix string into the list form the store expects.
    Returns nil when the prefix is nil or blank."
   [dewey-prefix]
-  (when (seq dewey-prefix)
-    [dewey-prefix]))
+  (let [trimmed (str/trim (or dewey-prefix ""))]
+    (when (seq trimmed)
+      [trimmed])))
 
 (defn- normalise-query-string
   "Return nil for nil/blank query, otherwise the trimmed string.
