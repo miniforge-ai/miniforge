@@ -110,12 +110,25 @@
 
 ;------------------------------------------------------------------------------ Tests
 
+(defn- assert-within-base-dir!
+  "Guard against path-traversal in test writes.
+   Mirrors the production guard in files/assert-within-worktree!."
+  [base-dir file-path]
+  (let [root      (.toPath (.getCanonicalFile (io/file base-dir)))
+        candidate (.toPath (.getCanonicalFile file-path))]
+    (when-not (.startsWith candidate root)
+      (throw (ex-info "Path traversal detected: candidate path escapes base dir"
+                      {:type :path-traversal
+                       :path (str file-path)
+                       :root (str base-dir)})))))
+
 (defn write-file!
-  "Simple file writer for testing."
+  "Simple file writer for testing. Rejects path traversal."
   [base-dir file-spec]
-  (try
-    (let [file-path (io/file base-dir (:path file-spec))
-          parent (.getParentFile file-path)]
+  (let [file-path (io/file base-dir (:path file-spec))
+        parent    (.getParentFile file-path)]
+    (assert-within-base-dir! base-dir file-path)
+    (try
       (when parent (.mkdirs parent))
       (case (:action file-spec :create)
         :create (do (spit file-path (:content file-spec))
@@ -123,9 +136,9 @@
         :modify (do (spit file-path (:content file-spec))
                     {:success? true})
         :delete (do (.delete file-path)
-                    {:success? true})))
-    (catch Exception e
-      {:success? false :error (ex-message e)})))
+                    {:success? true}))
+      (catch Exception e
+        {:success? false :error (ex-message e)}))))
 
 (defn write-files!
   "Write multiple files."
@@ -283,16 +296,17 @@
           (cleanup-temp-dir temp-dir))))))
 
 (deftest invalid-path-handling-test
-  ;; TODO: write-file! should reject path traversal (../), currently writes outside repo
-  (testing "Handling invalid file paths"
+  (testing "write-file! rejects path traversal (../)"
     (let [temp-dir (create-temp-dir)]
       (try
         (let [file-spec {:path "../outside/repo.clj"
                          :content "(ns outside)"
-                         :action :create}
-              result (write-file! temp-dir file-spec)]
-          ;; Currently succeeds (path traversal not validated) — tracked for future fix
-          (is (some? result) "write-file! handles path without crashing"))
+                         :action :create}]
+          (is (thrown-with-msg?
+               clojure.lang.ExceptionInfo
+               #"[Pp]ath traversal"
+               (write-file! temp-dir file-spec))
+              "write-file! must throw on path traversal"))
         (finally
           (cleanup-temp-dir temp-dir))))))
 

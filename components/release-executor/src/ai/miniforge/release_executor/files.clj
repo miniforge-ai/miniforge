@@ -28,6 +28,19 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; File operation helpers
 
+(defn assert-within-worktree!
+  "Guard against path-traversal attacks.
+   Throws ex-info {:type :path-traversal :path candidate-path} when
+   candidate-path resolves outside worktree-root after normalization."
+  [worktree-root candidate-path]
+  (let [root      (-> worktree-root fs/absolutize fs/normalize)
+        candidate (-> candidate-path fs/absolutize fs/normalize)]
+    (when-not (fs/starts-with? candidate root)
+      (throw (ex-info "Path traversal detected: candidate path escapes worktree root"
+                      {:type :path-traversal
+                       :path (str candidate-path)
+                       :root (str worktree-root)})))))
+
 (defn ensure-parent-dir!
   "Create parent directories for a file path if they don't exist."
   [file-path]
@@ -63,6 +76,7 @@
   [worktree-path {:keys [path content]} logger]
   (try
     (let [full-path (fs/path worktree-path path)]
+      (assert-within-worktree! worktree-path full-path)
       (write-file! full-path content)
       (when logger
         (log/debug logger :release-executor :file-created {:data {:path path}}))
@@ -77,6 +91,7 @@
   [worktree-path {:keys [path content]} logger]
   (try
     (let [full-path (fs/path worktree-path path)]
+      (assert-within-worktree! worktree-path full-path)
       (write-file! full-path content)
       (when logger
         (log/debug logger :release-executor :file-modified {:data {:path path}}))
@@ -90,11 +105,12 @@
 (defmethod process-file-action :delete
   [worktree-path {:keys [path]} logger]
   (try
-    (let [full-path (fs/path worktree-path path)
-          deleted? (delete-file! full-path)]
-      (when logger
-        (log/debug logger :release-executor :file-deleted {:data {:path path :existed? deleted?}}))
-      {:success? true :action :delete :path path :deleted? deleted?})
+    (let [full-path (fs/path worktree-path path)]
+      (assert-within-worktree! worktree-path full-path)
+      (let [deleted? (delete-file! full-path)]
+        (when logger
+          (log/debug logger :release-executor :file-deleted {:data {:path path :existed? deleted?}}))
+        {:success? true :action :delete :path path :deleted? deleted?}))
     (catch Exception e
       (when logger
         (log/error logger :release-executor :file-delete-failed

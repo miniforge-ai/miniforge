@@ -97,10 +97,21 @@
       (result/shell-failure (str "Failed to fetch: " (:error fetch-r)) {:branch nil})
       (try-checkout-branch executor env-id branch-name default-branch))))
 
+(defn- assert-no-traversal!
+  "Guard against path-traversal attacks in sandbox paths.
+   Throws ex-info {:type :path-traversal :path path} if path contains
+   a '..' segment that could escape the sandbox working directory."
+  [path]
+  (when (re-find #"(?:^|/)\.\.(?:/|$)" (str path))
+    (throw (ex-info "Path traversal detected: path contains '..' segment"
+                    {:type :path-traversal
+                     :path (str path)}))))
+
 (defn write-file!
   "Write content to a file inside the sandbox container.
    Uses base64 encoding to safely transfer arbitrary content."
   [executor env-id path content]
+  (assert-no-traversal! path)
   (let [encoded (.encodeToString (java.util.Base64/getEncoder)
                                   (.getBytes content "UTF-8"))
         cmd (str "mkdir -p \"$(dirname '" path "')\" && "
@@ -110,6 +121,7 @@
 (defn delete-file!
   "Delete a file inside the sandbox container."
   [executor env-id path]
+  (assert-no-traversal! path)
   (exec! executor env-id (str "rm -f '" path "'")))
 
 (defn stage-files!
