@@ -45,7 +45,7 @@
   resolved for dogfood runs); introducing a second PR-creation path."
 
  :spec/intent
- {:type :fix
+ {:type :bugfix
   :scope ["components/release-executor/src"
           "components/phase-software-factory/src"]}
 
