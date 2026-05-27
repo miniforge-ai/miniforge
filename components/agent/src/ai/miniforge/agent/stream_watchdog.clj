@@ -75,10 +75,12 @@
      2. Global :agent/stream-gap-threshold-ms in config
      3. `default-gap-threshold-ms` (420 000 ms)
 
-   Any override MUST honor the same invariant as `default-gap-threshold-ms`:
-   keep it >= the LLM client's stream-line-timeout-ms (360 000 ms) so the
-   watchdog stays a backstop and does not false-fire on legitimate model
-   silence.
+   In production/real runs an override MUST honor the same invariant as
+   `default-gap-threshold-ms`: keep it >= the LLM client's
+   stream-line-timeout-ms (360 000 ms) so the watchdog stays a backstop and
+   does not false-fire on legitimate model silence. (Tests deliberately set
+   tiny sub-threshold values — e.g. 1 ms — to force a fast stall; that is an
+   intentional exception, not a real-run configuration.)
 
    Example config:
      {:agent/stream-gap-threshold-ms 420000
@@ -206,7 +208,7 @@
   "Create and start a stream-gap watchdog.
 
    Options map:
-     :threshold-ms      — gap in ms before the kill fires (default 90 000)
+     :threshold-ms      — gap in ms before the kill fires (default 420 000)
      :check-interval-ms — how often to check for a stall (default 5 000)
      :phase-id          — keyword or string identifying the current phase
      :backend           — keyword identifying the agent backend (e.g. :claude-code)

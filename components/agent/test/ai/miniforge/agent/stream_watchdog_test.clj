@@ -19,6 +19,8 @@
 (ns ai.miniforge.agent.stream-watchdog-test
   "Tests for the per-phase stream-gap watchdog timer."
   (:require
+   [clojure.edn :as edn]
+   [clojure.java.io :as io]
    [clojure.test :refer [deftest is testing]]
    [ai.miniforge.agent.stream-watchdog :as sut]
    [ai.miniforge.event-stream.interface :as event-stream-iface])
@@ -92,21 +94,26 @@
     (is (= sut/default-gap-threshold-ms
            (sut/resolve-gap-threshold {} :any-backend)))))
 
-(def ^:private llm-stream-line-timeout-ms
-  "The LLM client's tuned stdout-silence tolerance
-   (components/llm/resources/llm/client-defaults.edn :line-timeout-ms). The
-   watchdog must not false-fire inside this window — keep this mirror in sync
-   if that config changes."
-  360000)
+(defn- llm-stream-line-timeout-ms
+  "The LLM client's tuned stdout-silence tolerance, read live from
+   components/llm/resources/llm/client-defaults.edn so this guard can't drift
+   from the real configured value. The watchdog must not false-fire inside
+   this window."
+  []
+  (-> (io/resource "llm/client-defaults.edn")
+      slurp
+      edn/read-string
+      (get-in [:stream :line-timeout-ms])))
 
 (deftest default-gap-threshold-is-a-backstop-above-llm-idle-timeout
   (testing "the watchdog default must stay >= the LLM idle timeout so it is a
             backstop, not a primary that kills legitimate model silence
             (regression guard for the 90s-default 17h-runaway)"
-    (is (>= sut/default-gap-threshold-ms llm-stream-line-timeout-ms)
-        (str "default-gap-threshold-ms (" sut/default-gap-threshold-ms
-             ") must be >= the LLM stream-line-timeout-ms ("
-             llm-stream-line-timeout-ms ")"))))
+    (let [idle-ms (llm-stream-line-timeout-ms)]
+      (is (some? idle-ms) "llm client-defaults must expose :stream :line-timeout-ms")
+      (is (>= sut/default-gap-threshold-ms idle-ms)
+          (str "default-gap-threshold-ms (" sut/default-gap-threshold-ms
+               ") must be >= the LLM stream-line-timeout-ms (" idle-ms ")")))))
 
 (deftest resolve-gap-threshold-returns-global-override
   (testing "global :agent/stream-gap-threshold-ms overrides the default"
