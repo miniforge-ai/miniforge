@@ -33,6 +33,17 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Helpers
 
+(defn assert-safe-container-path!
+  "Assert that `path` contains no `..` segments that could escape the container
+   working directory.  The check is lexical because `path` targets the container
+   filesystem — host-side normalization cannot be applied.
+   Throws ex-info with {:type :path-traversal :path path} on violation."
+  [path]
+  (when (re-find #"(^|[/\\])\.\.([/\\]|$)" (str path))
+    (throw (ex-info "Path traversal rejected: sandbox path contains .. segment"
+                    {:type :path-traversal
+                     :path (str path)}))))
+
 (defn exec!
   "Execute a command in the sandbox environment.
    Returns {:success? bool :output string :error string}.
@@ -131,8 +142,10 @@
 
 (defn write-file!
   "Write content to a file inside the sandbox container.
-   Uses base64 encoding to safely transfer arbitrary content."
+   Uses base64 encoding to safely transfer arbitrary content.
+   Throws ex-info with {:type :path-traversal} if path contains `..` segments."
   [executor env-id path content]
+  (assert-safe-container-path! path)
   (let [encoded (.encodeToString (java.util.Base64/getEncoder)
                                   (.getBytes content "UTF-8"))
         cmd (str "mkdir -p \"$(dirname '" path "')\" && "
@@ -140,8 +153,10 @@
     (exec! executor env-id cmd)))
 
 (defn delete-file!
-  "Delete a file inside the sandbox container."
+  "Delete a file inside the sandbox container.
+   Throws ex-info with {:type :path-traversal} if path contains `..` segments."
   [executor env-id path]
+  (assert-safe-container-path! path)
   (exec! executor env-id (str "rm -f '" path "'")))
 
 (defn stage-files!

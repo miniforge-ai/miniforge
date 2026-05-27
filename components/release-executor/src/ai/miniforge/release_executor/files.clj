@@ -28,6 +28,26 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; File operation helpers
 
+(defn assert-within-worktree!
+  "Throw ex-info with :type :path-traversal when the resolved file-path escapes
+   the worktree root.  Uses normalized absolute paths so that any combination of
+   '../', symlink components, or redundant separators is collapsed before
+   comparison.
+
+   This is a programmer-error guard called at the I/O boundary of
+   process-file-action.  It throws rather than returning an anomaly because
+   the surrounding process-file-action methods already catch Exception and
+   convert it into a {:success? false} result."
+  [worktree-path file-path]
+  (let [normalized-root (str (fs/normalize (fs/absolutize worktree-path)))
+        normalized-path (str (fs/normalize (fs/absolutize file-path)))]
+    (when-not (fs/starts-with? normalized-path normalized-root)
+      (throw (ex-info "Path traversal rejected: candidate path escapes worktree root"
+                      {:type       :path-traversal
+                       :path       (str file-path)
+                       :root       normalized-root
+                       :normalized normalized-path})))))
+
 (defn ensure-parent-dir!
   "Create parent directories for a file path if they don't exist."
   [file-path]
@@ -63,6 +83,7 @@
   [worktree-path {:keys [path content]} logger]
   (try
     (let [full-path (fs/path worktree-path path)]
+      (assert-within-worktree! worktree-path full-path)
       (write-file! full-path content)
       (when logger
         (log/debug logger :release-executor :file-created {:data {:path path}}))
@@ -77,6 +98,7 @@
   [worktree-path {:keys [path content]} logger]
   (try
     (let [full-path (fs/path worktree-path path)]
+      (assert-within-worktree! worktree-path full-path)
       (write-file! full-path content)
       (when logger
         (log/debug logger :release-executor :file-modified {:data {:path path}}))
@@ -91,6 +113,7 @@
   [worktree-path {:keys [path]} logger]
   (try
     (let [full-path (fs/path worktree-path path)
+          _ (assert-within-worktree! worktree-path full-path)
           deleted? (delete-file! full-path)]
       (when logger
         (log/debug logger :release-executor :file-deleted {:data {:path path :existed? deleted?}}))
