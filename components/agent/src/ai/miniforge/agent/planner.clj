@@ -228,16 +228,34 @@
                     :prior-content prior-content}))
 
 (defn- planner-submission-retry?
-  "True when a failed planner turn produced useful prose but no submitted plan."
-  [llm-response submitted-plan parsed-plan]
-  (let [err (llm/get-error llm-response)
-        stdout (:stdout err)
-        err-type (:type err)]
-    (and (nil? submitted-plan)
-         (nil? parsed-plan)
-         (not (llm/success? llm-response))
-         (seq stdout)
-         (#{"adaptive_timeout" "cli_error"} err-type))))
+  "True when a planner turn produced useful plan prose but delivered NO
+   artifact (neither `.miniforge/plan.edn` nor a parseable final-message EDN
+   fence), so a short submission-only retry can recover the plan that already
+   exists in the agent's output.
+
+   Fires in TWO cases:
+   (a) SUCCESS-but-no-artifact — the planner ended cleanly with prose-only
+       narration and never wrote the file. This was the intermittent dogfood
+       failure: the plan was reasoned out (it's in `response-content`) but no
+       submission channel produced a file, so the phase failed despite a good
+       plan. Previously NO retry fired here because the turn was a success.
+   (b) Recoverable ERROR — an adaptive_timeout / cli_error that still left
+       useful stdout to retry from (the original trigger).
+
+   In both cases the recovery turn re-submits using `response-content` as the
+   prior plan text."
+  [llm-response submitted-plan parsed-plan response-content]
+  (and (nil? submitted-plan)
+       (nil? parsed-plan)
+       (or
+        ;; (a) clean success but no artifact — prose-only narration
+        (and (llm/success? llm-response)
+             (seq response-content))
+        ;; (b) recoverable error with useful stdout
+        (let [err (llm/get-error llm-response)]
+          (and (not (llm/success? llm-response))
+               (seq (:stdout err))
+               (#{"adaptive_timeout" "cli_error"} (:type err)))))))
 
 ;; make-fallback-plan removed — silent fallback masks real failures.
 ;; Plan generation now throws with evidence on failure (see invoke-fn below).
@@ -640,9 +658,11 @@
                                 (:parsed-content normalized))
                   retry-result (when (planner-submission-retry? llm-response
                                                                 submitted-plan
-                                                                parsed-plan)
+                                                                parsed-plan
+                                                                response-content)
                                  (log/info logger :planner :planner/submission-retry
                                            {:data {:reason :missing-plan-submission
+                                                   :llm-success? (llm/success? llm-response)
                                                    :content-length (count response-content)}})
                                  (recover-submitted-plan llm-client spec-text
                                                          effective-system
