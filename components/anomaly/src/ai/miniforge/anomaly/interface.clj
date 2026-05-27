@@ -84,6 +84,34 @@
    :anomaly/data    (or data {})
    :anomaly/at      (now)})
 
+(defn validation-anomaly
+  "Construct an `:invalid-input` anomaly describing a schema-validation
+   failure. The schema name, offending value, and explain data are
+   carried under `:anomaly/data` so callers can inspect why validation
+   failed without re-running it."
+  [message schema-name value explain-data]
+  (anomaly :invalid-input
+           message
+           {:anomaly/schema  schema-name
+            :anomaly/value   value
+            :anomaly/explain explain-data}))
+
+(defn exception-anomaly
+  "Wrap an exception as an anomaly of `type`, preserving the original
+   provenance — exception message and class (plus `ex-data` when
+   present) — under `:anomaly/data`. Any caller `data` is merged in.
+   Use at boundaries that must translate a thrown exception into the
+   data-first anomaly contract."
+  ([type message ex]
+   (exception-anomaly type message {} ex))
+  ([type message data ex]
+   (anomaly type
+            message
+            (cond-> (assoc data
+                           :anomaly/ex-message (ex-message ex)
+                           :anomaly/ex-class   (.getName (class ex)))
+              (ex-data ex) (assoc :anomaly/ex-data (ex-data ex))))))
+
 ;------------------------------------------------------------------------------ Layer 2
 ;; Predicate
 
