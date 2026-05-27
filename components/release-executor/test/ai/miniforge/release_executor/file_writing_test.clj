@@ -24,7 +24,9 @@
   (:require
    [clojure.test :refer [deftest testing is]]
    [clojure.java.io :as io]
-   [clojure.string :as str]))
+   [clojure.string :as str]
+   [ai.miniforge.release-executor.files :as files]
+   [babashka.fs :as fs]))
 
 ;------------------------------------------------------------------------------ Mock Data
 
@@ -283,16 +285,46 @@
           (cleanup-temp-dir temp-dir))))))
 
 (deftest invalid-path-handling-test
-  ;; TODO: write-file! should reject path traversal (../), currently writes outside repo
-  (testing "Handling invalid file paths"
+  (testing "assert-within-worktree! rejects path traversal (../)"
     (let [temp-dir (create-temp-dir)]
       (try
-        (let [file-spec {:path "../outside/repo.clj"
-                         :content "(ns outside)"
-                         :action :create}
-              result (write-file! temp-dir file-spec)]
-          ;; Currently succeeds (path traversal not validated) — tracked for future fix
-          (is (some? result) "write-file! handles path without crashing"))
+        (let [worktree   (fs/path temp-dir)
+              escape-path (fs/path temp-dir "../outside/repo.clj")]
+          (is (thrown-with-msg?
+               clojure.lang.ExceptionInfo
+               #"Path traversal rejected"
+               (files/assert-within-worktree! worktree escape-path))
+              "assert-within-worktree! should throw for ../outside/repo.clj")
+          (is (= :path-traversal
+                 (:type (ex-data (try
+                                   (files/assert-within-worktree! worktree escape-path)
+                                   nil
+                                   (catch clojure.lang.ExceptionInfo e e)))))
+              "ex-data :type should be :path-traversal"))
+        (finally
+          (cleanup-temp-dir temp-dir)))))
+
+  (testing "assert-within-worktree! accepts paths inside the worktree"
+    (let [temp-dir (create-temp-dir)]
+      (try
+        (let [worktree    (fs/path temp-dir)
+              inside-path (fs/path temp-dir "src/feature.clj")]
+          (is (nil? (files/assert-within-worktree! worktree inside-path))
+              "assert-within-worktree! should return nil for valid path"))
+        (finally
+          (cleanup-temp-dir temp-dir)))))
+
+  (testing "process-file-action :create converts path traversal into failure result"
+    (let [temp-dir (create-temp-dir)]
+      (try
+        (let [result (files/process-file-action
+                      temp-dir
+                      {:path "../outside/repo.clj" :content "(ns outside)" :action :create}
+                      nil)]
+          (is (false? (:success? result))
+              "process-file-action should report failure for path traversal")
+          (is (re-find #"traversal" (str (:error result)))
+              "error message should mention traversal"))
         (finally
           (cleanup-temp-dir temp-dir))))))
 
@@ -333,7 +365,7 @@
         (let [files [{:path "file1.clj"
                       :content "(ns file1)"
                       :action :create}
-                     {:path "invalid/\u0000/file2.clj" ; Invalid filename
+                     {:path "invalid/ /file2.clj" ; Invalid filename
                       :content "(ns file2)"
                       :action :create}]
               result (write-files! temp-dir files)]
