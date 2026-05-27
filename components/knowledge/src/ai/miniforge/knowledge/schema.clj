@@ -207,7 +207,8 @@
    :query        Case-insensitive substring matched against rule title + body.
    :tags         Vector of keywords; a rule matches if it carries at least one.
    :dewey-prefix Prefix string matched at the start of the rule's Dewey code
-                 (e.g. \"210\" matches \"210\" and \"211\")."
+                 (e.g. \"21\" matches \"210\" and \"211\"; \"210\" matches
+                 \"210\" but not \"211\")."
   [:map
    [:query        {:optional true} [:string {:min 1}]]
    [:tags         {:optional true} [:vector keyword?]]

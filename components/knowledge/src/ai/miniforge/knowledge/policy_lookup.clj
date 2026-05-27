@@ -34,7 +34,7 @@
 
 (defn- dewey-prefixes
   "Coerce a scalar dewey-prefix string into the list form the store expects.
-   Returns nil when the prefix is nil or blank."
+   Returns nil when the prefix is nil, blank, or whitespace-only."
   [dewey-prefix]
   (let [trimmed (str/trim (or dewey-prefix ""))]
     (when (seq trimmed)
@@ -91,7 +91,7 @@
 
 (comment
   ;; Example: search for all Clojure-tagged rules
-  (require '[ai.miniforge.knowledge.store :as store])
+  ;; (store ns already required above; alias available as `store`)
   (def s (store/create-store))
   (lookup-policy-rules s {:tags [:clojure]})
 
