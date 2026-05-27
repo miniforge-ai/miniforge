@@ -250,9 +250,10 @@
      (lookup-policy-rules store {:dewey-prefix \"210\"})
      (lookup-policy-rules store {:query \"namespace\" :tags [:clojure]})"
   [knowledge-store policy-query]
-  (if (m/validate schema/PolicyQuery (or policy-query {}))
-    (policy-lookup/lookup-policy-rules knowledge-store (or policy-query {}))
-    []))
+  (let [q (or policy-query {})]
+    (if (m/validate schema/PolicyQuery q)
+      (policy-lookup/lookup-policy-rules knowledge-store q)
+      [])))
 
 ;------------------------------------------------------------------------------ Layer 5
 ;; Agent injection

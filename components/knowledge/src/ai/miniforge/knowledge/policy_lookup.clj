@@ -43,22 +43,19 @@
   "Return nil for nil/blank query, otherwise the trimmed string.
    Ensures the store text-search filter is skipped when no keyword was given."
   [q]
-  (when (seq (str/trim (or q "")))
-    (str/trim q)))
+  (let [trimmed (str/trim (or q ""))]
+    (when (seq trimmed) trimmed)))
 
 (defn- build-store-query
   "Translate a PolicyQuery map to the KnowledgeStore query map.
    Always restricts to :rule type so only policy-pack rules are searched."
   [{:keys [query tags dewey-prefix]}]
-  (cond-> {:include-types [:rule]}
-    (normalise-query-string query)
-    (assoc :text-search (normalise-query-string query))
-
-    (seq tags)
-    (assoc :tags (vec tags))
-
-    (dewey-prefixes dewey-prefix)
-    (assoc :dewey-prefixes (dewey-prefixes dewey-prefix))))
+  (let [text-search (normalise-query-string query)
+        prefixes    (dewey-prefixes dewey-prefix)]
+    (cond-> {:include-types [:rule]}
+      text-search (assoc :text-search text-search)
+      (seq tags)  (assoc :tags (vec tags))
+      prefixes    (assoc :dewey-prefixes prefixes))))
 
 (defn- zettel->policy-result
   "Project a zettel into the compact {:rule/title :rule/content} shape."
