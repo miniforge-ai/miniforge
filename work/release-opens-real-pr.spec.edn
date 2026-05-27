@@ -13,34 +13,46 @@
 {:spec/title "Release phase opens a real PR even in deterministic (no-LLM) mode"
 
  :spec/description
- "Decouple PR-opening (mechanical: push branch + gh pr create) from
-  PR-narrative generation (LLM-or-fallback metadata). Today release-executor
-  falls back to deterministic metadata when no releaser agent/LLM is available
-  (release-executor/metadata.clj ~279) and the run ends with a PR *doc* but no
-  opened PR. Opening the PR does NOT require an LLM — the branch push and
-  `gh pr create` are deterministic and already implemented in
-  pr-lifecycle/controller.clj (push-and-create-pr! / create-pr!). Wire the
-  release phase so that, whenever :create-pr? is true (release.clj default),
-  it pushes the task's scratch/worktree branch and opens a real GitHub PR
-  using the generated metadata (LLM narrative when available, deterministic
-  title/body otherwise), and populates :workflow/pr-info with the real
-  pr-number/url. Fallback metadata must degrade the PR *prose*, never skip the
-  PR itself.
+ "DIAGNOSE-THEN-FIX: release-executor ALREADY has a full PR pipeline — its
+  step chain is step-push -> step-create-pr (-> sandbox/create-pr!) ->
+  step-generate-pr-doc -> step-update-pr-body (release-executor/core.clj
+  ~647-672), each gated on :create-pr? (default true, release.clj ~297).
+  Metadata generation falling back to deterministic mode
+  (release-executor/metadata.clj ~279) is SEPARATE from PR creation — fallback
+  metadata only changes the PR prose, it does not itself skip step-create-pr.
+  So the dogfood run producing a doc but no PR is NOT 'release lacks PR
+  creation'; it is 'step-create-pr did not open a PR on this run'.
 
-  Non-goals: changing the PR-doc generator; the observe-phase PR monitoring
+  FIRST, find the real cause (do NOT replace working release-executor plumbing,
+  and do NOT route through pr-lifecycle/controller — that is a different
+  surface): candidates to check on the 2026-05-27 local dogfood configuration —
+  (a) was :create-pr? actually true on the adhoc/dogfood path? (b) did
+  step-push push a real feature branch, or did the run commit to the main
+  checkout's worktree (the run logged 'Branch: main, Worktree: <repo>') with
+  nothing to PR? (c) does sandbox/create-pr! actually open a PR for the LOCAL
+  executor used in a `bb dogfood` run, or is it a no-op outside a Docker/sandbox
+  executor? (d) did a step short-circuit (skip) silently?
+
+  THEN fix so that a successful run with :create-pr? true opens a real GitHub
+  PR (push a real branch, invoke the existing create-pr step against an
+  executor that can reach GitHub) and populates :workflow/pr-info with the real
+  pr-number/url — with deterministic metadata still producing a usable
+  title/body. Whatever the cause, a green local dogfood must end with an open
+  PR.
+
+  Non-goals: changing the PR-doc generator; observe-phase PR monitoring
   (separate, already built); GitHub auth setup (GITHUB_TOKEN is already
-  resolved for dogfood runs)."
+  resolved for dogfood runs); introducing a second PR-creation path."
 
  :spec/intent
- {:type :feature
+ {:type :fix
   :scope ["components/release-executor/src"
-          "components/phase-software-factory/src"
-          "components/pr-lifecycle/src"]}
+          "components/phase-software-factory/src"]}
 
  :spec/constraints
- ["PR-opening is mechanical and MUST run in deterministic mode — absence of a releaser agent/LLM degrades only the PR title/body prose, never whether a PR is opened"
-  "Reuse pr-lifecycle/controller push-and-create-pr! / create-pr! — do not add a second PR-creation path"
-  "Honor :create-pr? (release.clj config / :execution/opts) — when false, keep today's doc-only behavior (e.g. local-only runs)"
+ ["Fix the EXISTING release-executor PR pipeline (step-push/step-create-pr/sandbox/create-pr!); do NOT replace it or route release through pr-lifecycle/controller (a different surface) — no second PR-creation path"
+  "PR-opening is mechanical and MUST run in deterministic mode — absence of a releaser agent/LLM degrades only the PR title/body prose (metadata), never whether step-create-pr opens a PR"
+  "Honor :create-pr? (release.clj config / :execution/opts, default true) — when explicitly false, keep doc-only behavior (e.g. local-only runs)"
   "On success populate :workflow/pr-info with the real {:pr-number :url :branch} so the observe phase hand-off (project_observe_phase_pr_handoff_bug) and metrics see it"
   "Exceptions are data: a push/create-pr failure returns an anomaly that fails the release phase loud (with the partial state), not a silent fallback to doc-only"
   "No duplicate PRs on retry: if a PR already exists for the task branch, reuse/update it rather than opening a second"]

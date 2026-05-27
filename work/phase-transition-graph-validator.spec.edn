@@ -16,8 +16,20 @@
 {:spec/title "Phase transition graph validator — static checks over phase EDN configs"
 
  :spec/description
- "Build a directed graph from the loaded phase configs (nodes = phase names;
-  edges = transitions labelled :next / :on-failure / :on-budget-exhausted) and
+ "FIRST locate the canonical transition source, THEN validate it. NOTE: the
+  phase config EDN (phase-software-factory/resources/config/phase/defaults.edn)
+  does NOT currently carry explicit :next / :on-failure / :on-budget-exhausted
+  edge keys — transitions are derived elsewhere: the linear pipeline/phase
+  sequence gives the :next edges, and redirects/failure edges come from the FSM
+  compilation (workflow/fsm.clj redirect-event / redirect-transition, driven by
+  a phase's :on-fail and the pipeline) plus budget handling. Task 0 of this
+  spec is to identify/define that canonical source and, if edges are implicit,
+  either (a) derive the graph from the pipeline + FSM transition definitions,
+  or (b) introduce explicit transition keys in the phase config and migrate the
+  shipped pack to declare them. Do not assume the keys already exist.
+
+  Build a directed graph (nodes = phase names; edges = derived transitions
+  labelled by kind: :next / :on-failure / :on-budget-exhausted / :redirect) and
   validate structural properties:
 
     1. Existence    — every referenced phase name resolves to a loaded impl
@@ -61,7 +73,8 @@
           "components/phase/resources/config"]}
 
  :spec/constraints
- ["All public fns return data (graph map / report map / anomaly); no throws at the component interface (exceptions-as-data)"
+ ["Derive edges from the ACTUAL transition source (pipeline sequence + workflow/fsm.clj redirect/on-fail compilation + budget handling), NOT from assumed :next/:on-failure/:on-budget-exhausted keys in the phase EDN (those keys do not exist today) — see Task 0 in the description"
+  "All public fns return data (graph map / report map / anomaly); no throws at the component interface (exceptions-as-data)"
   "bb.edn stays a thin wrapper — validation logic in a component, bb task delegates (feedback_bb_edn_thin_wrapper)"
   "Load-time validation fails LOUD (refuse to start with an actionable anomaly naming the offending phase/edge), never a silent skip"
   "Terminal states are configurable/derivable, not hardcoded to one keyword — recognize :done/:completed/:failed/:escalated"

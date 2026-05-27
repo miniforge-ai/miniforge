@@ -18,14 +18,14 @@
 
   (a) The :review-approved gate blocks on :warning-severity findings, so the
   reviewer can hold a PR hostage over nits indefinitely. Per N4 §2.3.1 only
-  :error MUST block; :warning SHOULD block ONLY when not auto-repaired.
+  :blocking severity MUST block; :warning SHOULD block ONLY when not auto-repaired.
   Decide and implement the policy: warnings are advisory after the first
   redirect (mirroring the #977 fix that made :lint advisory), or block only
   when severity >= a configured floor.
 
   (b) Even with a severity floor, review can fail to converge if each pass
   surfaces NEW findings. Add a bounded review-iteration policy: track review
-  attempts per task; once non-:error findings persist across N review→implement
+  attempts per task; once non-:blocking findings persist across N review→implement
   cycles (config, small default), STOP redirecting — either accept-with-
   warnings (open the PR carrying the unresolved nits as PR comments / known
   issues) or emit a :needs-decomposition signal (per
@@ -33,7 +33,7 @@
   rather than burning redirects to max-redirects.
 
   Crucially the meta-agent must be able to DISTINGUISH causes before acting
-  (user, 2026-05-26): persistent :error findings = real defect (keep
+  (user, 2026-05-26): persistent :blocking findings = real defect (keep
   blocking/redirecting); persistent :warning churn = either accept-with-
   warnings or under-decomposition — never blindly decompose.
 
@@ -49,16 +49,16 @@
           "components/phase/resources/config"]}
 
  :spec/constraints
- [":error findings always block and redirect — convergence policy applies ONLY to non-:error (warning/nit/audit) findings"
+ ["Use the EXISTING reviewer severity vocabulary :blocking/:warning/:nit (components/agent/.../reviewer.clj ~65, :blocking checked ~246-254) — do NOT introduce a new :error level. :blocking findings always block and redirect; the convergence policy applies ONLY to non-:blocking (:warning/:nit) findings"
   "A review-iteration counter is tracked per task (not global) and is distinct from max-redirects and from #988's consecutive-same-phase counter (review↔implement alternates, so #988 never fires here)"
-  "On giving up on nit-churn, the outcome is explicit and observable: either accept-with-warnings (PR opened, unresolved nits recorded) or a :needs-decomposition signal — never a silent infinite redirect, never a silent pass that hides an :error"
+  "On giving up on nit-churn, the outcome is explicit and observable: either accept-with-warnings (PR opened, unresolved nits recorded) or a :needs-decomposition signal — never a silent infinite redirect, never a silent pass that hides a :blocking"
   "The cause must be classified before the terminal decision (error vs warning-churn vs stall) — the decision and its reason are emitted as an event"
   "No regression: a task whose review passes cleanly (task-1 in the dogfood run) is unaffected; warnings on a first pass still trigger one repair attempt"
   "Reuse the existing reviewer gate-feedback shape and emit-gate-event! surface"]
 
  :spec/acceptance-criteria
  ["A task whose review yields only :warning findings on every pass converges to a terminal outcome (accept-with-warnings or :needs-decomposition) within the configured review-iteration cap — it does not run to max-redirects"
-  "A task with an :error finding still blocks and redirects to implement every time (no weakening of real-defect gating)"
+  "A task with a :blocking finding still blocks and redirects to implement every time (no weakening of real-defect gating)"
   "Accept-with-warnings opens the PR (per release-opens-real-pr) carrying the unresolved warnings as recorded known-issues/comments"
   "The terminal review decision (pass / accept-with-warnings / needs-decomposition / blocked-on-error) and its classification reason are emitted as a structured event"
   "A clean first-pass review still reaches release unchanged (no regression)"
