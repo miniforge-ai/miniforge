@@ -652,6 +652,42 @@
               (is (>= (:max-total-ms state) min-total-budget-ms)
                   "Total budget must be ≥ min-total-budget-ms — covers the longest historical successful planner run"))))))))
 
+;------------------------------------------------------------------------------ Layer 1
+;; planner-submission-retry? — recovery trigger (incl. success-but-no-artifact)
+
+(def ^:private submission-retry? #'planner/planner-submission-retry?)
+
+(deftest planner-submission-retry-fires-on-success-without-artifact
+  (testing "a CLEAN success that produced plan prose but NO artifact triggers recovery
+            (the intermittent dogfood failure — previously no retry fired here)"
+    (is (true? (boolean (submission-retry? {:success true} nil nil "## Plan\nTask A -> B"))))))
+
+(deftest planner-submission-retry-not-on-success-without-prose
+  (testing "a success with no prose content has nothing to recover — no retry"
+    (is (false? (boolean (submission-retry? {:success true} nil nil ""))))
+    (is (false? (boolean (submission-retry? {:success true} nil nil nil))))))
+
+(deftest planner-submission-retry-still-fires-on-recoverable-error
+  (testing "the original trigger survives: adaptive_timeout/cli_error with useful stdout"
+    (is (true? (boolean (submission-retry?
+                         {:success false :error {:stdout "plan prose" :type "cli_error"}}
+                         nil nil ""))))
+    (is (true? (boolean (submission-retry?
+                         {:success false :error {:stdout "plan prose" :type "adaptive_timeout"}}
+                         nil nil ""))))))
+
+(deftest planner-submission-retry-no-fire-when-artifact-present
+  (testing "an artifact (submitted or parsed) means no recovery is needed"
+    (is (false? (boolean (submission-retry? {:success true} {:plan/id 1} nil "prose"))))
+    (is (false? (boolean (submission-retry? {:success true} nil {:plan/id 1} "prose"))))))
+
+(deftest planner-submission-retry-no-fire-on-unrecoverable-error
+  (testing "an error without useful stdout or with a non-retriable type does not retry"
+    (is (false? (boolean (submission-retry?
+                          {:success false :error {:stdout "" :type "cli_error"}} nil nil ""))))
+    (is (false? (boolean (submission-retry?
+                          {:success false :error {:stdout "x" :type "other"}} nil nil ""))))))
+
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
   (test/run-tests 'ai.miniforge.agent.planner-test)
