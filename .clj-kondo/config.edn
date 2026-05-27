@@ -15,6 +15,7 @@
  ;; See `.cursor/rules/languages/clojure-railway-binding.mdc` (dewey 211)
  ;; for the macro semantics; for kondo it's enough that the bindings
  ;; are in scope of the body, exactly like `let`.
- :lint-as {ai.miniforge.dag-executor.interface/when-let-ok clojure.core/let}
+ :lint-as {ai.miniforge.dag-executor.interface/when-let-ok clojure.core/let
+           ai.miniforge.anomaly.interface/let-ok clojure.core/let}
 
  :linters {:underscore-in-namespace {:level :off}}}

@@ -116,17 +116,18 @@
 
    Returns the first anomaly encountered, otherwise the body's value."
   [bindings & body]
-  (assert (vector? bindings) "let-ok requires a binding vector")
-  (assert (even? (count bindings)) "let-ok requires an even number of binding forms")
-  (if (empty? bindings)
-    `(do ~@body)
-    (let [[binding expr & more] bindings
-          result (gensym "result__")]
-      `(let [~result ~expr]
-         (if (anomaly? ~result)
-           ~result
-           (let [~binding ~result]
-             (let-ok [~@more] ~@body)))))))
+  (when-not (vector? bindings)
+    (throw (IllegalArgumentException. "let-ok requires a binding vector")))
+  (when-not (even? (count bindings))
+    (throw (IllegalArgumentException. "let-ok requires an even number of binding forms")))
+  (reduce
+   (fn [acc [sym expr]]
+     `(let [~sym ~expr]
+        (if (anomaly? ~sym)
+          ~sym
+          ~acc)))
+   `(do ~@body)
+   (reverse (partition 2 bindings))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 

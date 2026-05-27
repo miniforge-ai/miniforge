@@ -42,7 +42,8 @@
              (anomaly/let-ok [a (do (swap! seen conj :a) 1)
                               b (do (swap! seen conj :b) boom)
                               c (do (swap! seen conj :c) 9)]
-               (+ a c))))
+               ;; body references all three; it never runs (b short-circuits)
+               (+ a b c))))
       (is (= [:a :b] @seen)
           "the :c binding must not run once :b is an anomaly"))))
 
@@ -56,3 +57,36 @@
 (deftest let-ok-empty-bindings-runs-body
   (testing "an empty binding vector simply evaluates the body"
     (is (= :ok (anomaly/let-ok [] :ok)))))
+
+(defn- cause-chain-message
+  "Walk the cause chain of `t`, returning the first message matching
+   `pattern`, or nil. `macroexpand` wraps the IllegalArgumentException
+   in a CompilerException, so the useful message is down the chain."
+  [^Throwable t pattern]
+  (loop [^Throwable t t]
+    (cond
+      (nil? t)                                  nil
+      (re-find pattern (or (.getMessage t) "")) (.getMessage t)
+      :else                                     (recur (.getCause t)))))
+
+(defn- throws-on-expand?
+  "True when `(macroexpand form)` throws with a cause-chain message
+   matching `pattern`; false when nothing throws."
+  [form pattern]
+  (try
+    #_:clj-kondo/ignore (macroexpand form)
+    false
+    (catch Throwable t
+      (some? (cause-chain-message t pattern)))))
+
+(deftest let-ok-rejects-non-vector-bindings
+  (testing "a non-vector binding form throws at macroexpansion"
+    (is (throws-on-expand?
+         '(ai.miniforge.anomaly.interface/let-ok (a 1) :x)
+         #"binding vector"))))
+
+(deftest let-ok-rejects-odd-binding-count
+  (testing "an odd-length binding vector throws at macroexpansion"
+    (is (throws-on-expand?
+         '(ai.miniforge.anomaly.interface/let-ok [a 1 b] :x)
+         #"even number"))))
