@@ -18,13 +18,17 @@ Make miniforge capable of running miniforge without paying for
 | blocker | ● | dogfood-resilience | `agent-stream-watchdog-and-resume.spec.edn` — Agent stream watchdog + session-resume for hang recovery | tokenconservation+dogfoodenabler |
 | blocker | ● | dogfood-resilience | `dogfood-handoff-redirect-loop.spec.edn` — Dogfood: stop degraded handoff redirect loops | correctness+tokenconservation+dogfoodenabler |
 | blocker | ● | dogfood-resilience | `planner-convergence-and-artifact-submission.spec.edn` — Planner convergence — container-promoted plan artifact + forced context-MCP usage | correctness+observation+tokenconservation+dogfoodenabler |
+| blocker | ● | dogfood-resilience | `release-opens-real-pr.spec.edn` — Release phase opens a real PR even in deterministic (no-LLM) mode | correctness+dogfoodenabler |
 | blocker | ● | dogfood-resilience | `workflow-resume-fsm-advance-investigation.spec.edn` — Workflow resume — make FSM advance from production checkpoints, not just synthetic ones | observation+tokenconservation+dogfoodenabler |
 | blocker | ● | dogfood-resilience | `workflow-resume-status-handling.spec.edn` — Workflow resume — fail loud when the resumed run never enters a terminal status | observation+tokenconservation+dogfoodenabler |
 | blocker | ● | dogfood-resilience | `worktree-persistence-scratch-branch.spec.edn` — Persist worktrees outside /tmp + scratch-branch commits on every write | dogfoodenabler |
 | high | ● | dogfood-resilience | `pedestal-interceptor-chain.spec.edn` — Pedestal-style interceptor chain for phase lifecycle | correctness+dogfoodenabler |
+| high | ● | dogfood-resilience | `phase-transition-graph-validator.spec.edn` — Phase transition graph validator — static checks over phase EDN configs | correctness+observation+dogfoodenabler |
 | high | ● | dogfood-resilience | `tech-registry-doctor-repo-scoped-bootstrap.spec.edn` — Tech-registry-driven runtime bootstrap — repo-scoped, print-don't-install | correctness+ux+dogfoodenabler |
 | high | ○ | dogfood-resilience | `workflow-dependency-declarations.spec.edn` — Workflow dependency declarations — supervisor sequencing + DAG dependencies | dogfoodenabler |
+| blocker | ○ | dogfood-resilience | `review-redirect-convergence.spec.edn` — Review redirect convergence — stop nit-churn from blocking release | correctness+tokenconservation+dogfoodenabler |
 | blocker | ○ | dogfood-resilience | `workflow-phase-checkpoint-and-resume.spec.edn` — Workflow phase checkpoint + resume | tokenconservation+dogfoodenabler |
+| high | ○ | dogfood-resilience | `phase-boundary-contracts.spec.edn` — Phase boundary contracts — declare + enforce :phase/input/:output (Ixi pattern, re-derived) | correctness+observation+dogfoodenabler |
 
 ## Theme — Multi-backend CLI parity (`multi-backend-parity`, status: planned)
 

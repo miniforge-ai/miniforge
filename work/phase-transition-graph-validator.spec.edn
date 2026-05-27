@@ -1,0 +1,104 @@
+;; =============================================================================
+;; Spec: Phase transition graph validator (static analysis over phase configs)
+;; =============================================================================
+;;
+;; Motivation (docs/architecture/state-ownership-and-phase-graph.md): phase
+;; chains are data-driven EDN composed at load time — powerful but opaque. No
+;; static analysis sees the runtime transition graph, so ordering/termination/
+;; retry-bound errors surface only at runtime. This validator treats every
+;; phase as a node and every transition (:next, :on-failure,
+;; :on-budget-exhausted) as a directed edge, builds the graph, and checks
+;; structural invariants — at load time (fail fast) and as a standalone CI
+;; check (bb phases:validate). It would have caught, e.g., a phase config that
+;; re-enters a phase with no bounded exit, or a transition target that doesn't
+;; resolve.
+
+{:spec/title "Phase transition graph validator — static checks over phase EDN configs"
+
+ :spec/description
+ "FIRST locate the canonical transition source, THEN validate it. NOTE: the
+  phase config EDN (phase-software-factory/resources/config/phase/defaults.edn)
+  does NOT currently carry explicit :next / :on-failure / :on-budget-exhausted
+  edge keys — transitions are derived elsewhere: the linear pipeline/phase
+  sequence gives the :next edges, and redirects/failure edges come from the FSM
+  compilation (workflow/fsm.clj redirect-event / redirect-transition, driven by
+  a phase's :on-fail and the pipeline) plus budget handling. Task 0 of this
+  spec is to identify/define that canonical source and, if edges are implicit,
+  either (a) derive the graph from the pipeline + FSM transition definitions,
+  or (b) introduce explicit transition keys in the phase config and migrate the
+  shipped pack to declare them. Do not assume the keys already exist.
+
+  Build a directed graph (nodes = phase names; edges = derived transitions
+  labelled by kind: :next / :on-failure / :on-budget-exhausted / :redirect) and
+  validate structural properties:
+
+    1. Existence    — every referenced phase name resolves to a loaded impl
+    2. Termination  — every chain has at least one reachable terminal state
+                      (:done/:completed/:failed/:escalated)
+    3. Cycles       — flag any cycle lacking a bounded exit condition
+    4. Retry bounds — any back-edge (A→A or A→B→A) MUST carry an explicit
+                      max-retries with a transition to a terminal when exhausted
+    5. Failure paths — every non-terminal phase has an :on-failure transition;
+                       none dangling
+    6. Budget paths  — every non-terminal phase has an :on-budget-exhausted
+                       transition; none dangling
+    7. Interceptors  — every interceptor hook referenced resolves to a fn that
+                       exists at load time
+
+  Public API (data-returning, exceptions-as-data):
+    build-transition-graph : phase-configs -> {:nodes #{name} :edges #{[from to label]}}
+    validate-graph         : graph -> {:unresolved-refs [] :unbounded-cycles []
+                                       :missing-failure [] :missing-budget []
+                                       :unreachable [] :unbounded-back-edges []
+                                       :missing-interceptors []}
+    valid? / a single aggregate predicate over the report.
+
+  Wire at TWO points:
+    - Load time: fail fast (loud anomaly, refuse to start) when the graph of
+      the active phase pack is invalid.
+    - bb phases:validate (and mf phases:validate): standalone, runs in CI and
+      before deploying a new phase pack. Non-zero exit on invalid.
+
+  bb.edn must stay a thin wrapper (feedback_bb_edn_thin_wrapper): the validation
+  logic lives in a component; bb:validate calls it.
+
+  Non-goals: graph RENDERING (bb phases:graph — follow-up in the doc's Fix 1),
+  Malli input/output contract checking (doc Fix 2), runtime trace overlay
+  (doc Fix 3 / N3). This spec is the structural validator only."
+
+ :spec/intent
+ {:type :feature
+  :scope ["components/phase/src"
+          "components/phase-software-factory/src"
+          "components/phase/resources/config"]}
+
+ :spec/constraints
+ ["Derive edges from the ACTUAL transition source (pipeline sequence + workflow/fsm.clj redirect/on-fail compilation + budget handling), NOT from assumed :next/:on-failure/:on-budget-exhausted keys in the phase EDN (those keys do not exist today) — see Task 0 in the description"
+  "All public fns return data (graph map / report map / anomaly); no throws at the component interface (exceptions-as-data)"
+  "bb.edn stays a thin wrapper — validation logic in a component, bb task delegates (feedback_bb_edn_thin_wrapper)"
+  "Load-time validation fails LOUD (refuse to start with an actionable anomaly naming the offending phase/edge), never a silent skip"
+  "Terminal states are configurable/derivable, not hardcoded to one keyword — recognize :done/:completed/:failed/:escalated"
+  "A back-edge without an explicit max-retries + exhaustion-to-terminal is a validation FAILURE (this is the static analog of the #988 runaway guard)"
+  "The validator loads under babashka for bb phases:validate (graalvm-compat gate) — keep it on the bb-loadable class set"
+  "Report is per-property and actionable: each finding names the phase/edge and the rule violated"]
+
+ :spec/acceptance-criteria
+ ["build-transition-graph returns the correct nodes + labelled edges for the shipped canonical-sdlc phase pack"
+  "validate-graph on the shipped pack returns a clean report (the current config is valid) — establishing the baseline"
+  "A config referencing a non-existent phase target is reported under :unresolved-refs"
+  "A config with a phase that has no path to any terminal is reported under :unreachable / termination"
+  "A back-edge without explicit max-retries + exhaustion transition is reported under :unbounded-back-edges"
+  "A non-terminal phase missing :on-failure or :on-budget-exhausted is reported under :missing-failure / :missing-budget"
+  "An interceptor hook naming an unresolvable fn is reported under :missing-interceptors"
+  "Load-time init refuses to start (loud anomaly) on an invalid graph; a valid graph starts normally"
+  "bb phases:validate exits non-zero on an invalid pack, zero on a valid one, and loads under babashka"]
+
+ :spec/priority
+ {:tier :high
+  :axes #{:correctness :dogfood-enabler :observation}
+  :theme :dogfood-resilience
+  :rationale "Static guard over the most data-driven, opaque part of the system (phase chains). Catches termination/retry/failure-path defects at load/CI time instead of as runtime runaways — the static analog of #988."
+  :blocks []
+  :blocked-by []}
+
+ :spec/workflow-type :canonical-sdlc}

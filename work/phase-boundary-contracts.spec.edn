@@ -1,0 +1,95 @@
+;; =============================================================================
+;; Spec: Phase boundary contracts — declared :input/:output schemas + enforcement
+;; =============================================================================
+;;
+;; Design: docs/architecture/state-ownership-and-phase-graph.md §5 Fix 2.
+;; Reimplements the Ixi custom-flow-control two-level boundary pattern FRESH
+;; (the pattern is uncopyrightable and re-derived from scratch; NO ixi source is
+;; copied — miniforge stays documented-clean). Malli-only (miniforge is
+;; malli-single-source; the spec+malli DSL is deliberately left behind).
+;;
+;; Depends on phase-transition-graph-validator.spec.edn: that spec builds the
+;; transition graph this one walks for chain compatibility, and adds the
+;; :phase/input / :phase/output declarations to the phase config shape.
+
+{:spec/title "Phase boundary contracts — declare + enforce :phase/input/:output (Ixi pattern, re-derived)"
+
+ :spec/description
+ "Give phases formal contracts and enforce them at the boundary with the right
+  cost profile in dev vs production. Two parts.
+
+  PART A — Declare + load-time chain compatibility.
+  Phase configs gain `:phase/input` and `:phase/output` Malli schema refs.
+  At chain load time, walk each `A -> B` edge (graph from the transition-graph
+  validator) and check that A's `:phase/output` satisfies B's `:phase/input`.
+  An incompatible transition FAILS AT LOAD TIME with an actionable message
+  naming the chain, the edge, and the missing/mismatched keys — turning
+  'wrong shape flows silently until a downstream crash' into a startup error.
+
+  PART B — Runtime boundary enforcement (new `boundary-validation` component).
+  Reimplement the Ixi two-level pattern, malli-only:
+    - asserting-passthru: wraps a phase call in an ELIDE-ABLE hard schema
+      assertion (compiles out under :elide-asserts true → zero bytecode cost).
+      Dev/test: a contract violation throws loudly (programmer error).
+    - conforming-passthru: gated by `^:dynamic *validate-boundaries*`. When
+      false (production fast path) validation is skipped; when true it runs the
+      Malli check.
+    - defphase macro: phase authors declare :input/:output; the boundary
+      wrappers are generated so authors don't hand-wire them.
+
+  PART C — Production third tier (the ixi-lacks addition).
+  On a Level-2 (conforming-passthru) production validation FAILURE, do not
+  merely log: emit a structured `:phase/schema-violation` event to the
+  event-stream (telemetry without crashing), observable in the observe loop and
+  overlayable on the phase graph. Net strategy: dev throws (Level 1);
+  production-with-validation emits an event and continues degraded (Level 2 +
+  N3); production fast-path skips (Level 2 off).
+
+  NOTE on provenance: this is a clean-room re-derivation of a pattern, not a
+  port. Do NOT copy ixi `custom-flow-control` / `malli-common` source.
+
+  NOTE on the existing `boundary` component: that is exception->anomaly->chain
+  handling (H-series), NOT schema validation. This `boundary-validation`
+  component is additive and distinct — do not conflate or merge them.
+
+  Non-goals: the transition-graph validator itself (dependency spec); graph
+  rendering (doc Fix 1); runtime path overlay (doc Fix 3); registering schemas
+  with clj-kondo/Calva (nice-to-have, can be a follow-up)."
+
+ :spec/intent
+ {:type :feature
+  :scope ["components/boundary-validation/src"
+          "components/phase/src"
+          "components/phase/resources/config"
+          "components/event-stream/src"]}
+
+ :spec/constraints
+ ["Clean-room re-derivation — NO ixi source (custom-flow-control / malli-common) is copied; the pattern is reimplemented from scratch"
+  "Malli-only — no clojure.spec dispatch (miniforge is malli-single-source; the spec+malli DSL is deliberately left behind)"
+  "New `boundary-validation` component is DISTINCT from the existing `boundary` component (which is exception->anomaly->chain, not schema validation) — do not merge or rename"
+  "asserting-passthru MUST compile out under :elide-asserts true (zero runtime cost in release builds)"
+  "conforming-passthru MUST honor `*validate-boundaries*`: false = skip all validation (fast path); true = full Malli check"
+  "A production (Level-2) validation failure emits a :phase/schema-violation event and continues degraded — it does NOT throw/crash the run (telemetry, not a hard stop); dev (Level-1) still throws"
+  "Load-time chain compatibility failure is LOUD and fails fast (refuse to start), naming chain + edge + missing keys"
+  "Exceptions are data at the component interface; the elide-able dev assert is the only sanctioned throw, scoped to dev/test"
+  "Loads under babashka (graalvm-compat gate) so phase config loading stays bb-safe"]
+
+ :spec/acceptance-criteria
+ ["Phase configs accept :phase/input and :phase/output Malli schema refs; the shipped canonical-sdlc phases declare them"
+  "At load time, an A->B edge where A's :output does not satisfy B's :input fails with a message naming the chain, the edge, and the missing keys"
+  "A compatible shipped chain loads cleanly (baseline — no regression)"
+  "asserting-passthru throws on a bad shape in dev/test, and compiles to a no-op under :elide-asserts true (verified zero-cost)"
+  "conforming-passthru with *validate-boundaries* false skips validation (fast path); with true it validates"
+  "A Level-2 production validation failure emits a :phase/schema-violation event (task-id, phase, expected schema, offending keys) and the run continues — no crash"
+  "defphase declares :input/:output and generates the boundary wrappers (a phase authored via defphase is validated without hand-wiring)"
+  "boundary-validation is a separate component from boundary; poly check passes; loads under babashka"]
+
+ :spec/priority
+ {:tier :high
+  :axes #{:correctness :observation :dogfood-enabler}
+  :theme :dogfood-resilience
+  :rationale "Turns implicit phase chain compatibility into a load-time type check and gives a dev-throw / prod-event / prod-skip enforcement strategy. Closes the 'wrong shape flows silently' failure mode the data-driven phase graph hides."
+  :blocks []
+  :blocked-by ["phase-transition-graph-validator.spec.edn"]}
+
+ :spec/workflow-type :canonical-sdlc}
