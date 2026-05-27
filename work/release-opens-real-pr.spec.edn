@@ -1,0 +1,64 @@
+;; =============================================================================
+;; Spec: Release phase opens a real PR (not a fallback doc-only release)
+;; =============================================================================
+;;
+;; Dogfood evidence (2026-05-27, knowledge-mcp-query run): a task drove the full
+;; SDLC to :done, but the release phase logged
+;;   release-executor/using-fallback-metadata
+;;   "No releaser agent or LLM available, using deterministic metadata"
+;; and produced ONLY a PR doc (docs/pull-requests/<date>-task-<id>.md) + a
+;; checkpoint bundle. No GitHub PR was opened. So even a fully successful
+;; autonomous run cannot actually SHIP — the dogfood loop dead-ends at a doc.
+
+{:spec/title "Release phase opens a real PR even in deterministic (no-LLM) mode"
+
+ :spec/description
+ "Decouple PR-opening (mechanical: push branch + gh pr create) from
+  PR-narrative generation (LLM-or-fallback metadata). Today release-executor
+  falls back to deterministic metadata when no releaser agent/LLM is available
+  (release-executor/metadata.clj ~279) and the run ends with a PR *doc* but no
+  opened PR. Opening the PR does NOT require an LLM — the branch push and
+  `gh pr create` are deterministic and already implemented in
+  pr-lifecycle/controller.clj (push-and-create-pr! / create-pr!). Wire the
+  release phase so that, whenever :create-pr? is true (release.clj default),
+  it pushes the task's scratch/worktree branch and opens a real GitHub PR
+  using the generated metadata (LLM narrative when available, deterministic
+  title/body otherwise), and populates :workflow/pr-info with the real
+  pr-number/url. Fallback metadata must degrade the PR *prose*, never skip the
+  PR itself.
+
+  Non-goals: changing the PR-doc generator; the observe-phase PR monitoring
+  (separate, already built); GitHub auth setup (GITHUB_TOKEN is already
+  resolved for dogfood runs)."
+
+ :spec/intent
+ {:type :feature
+  :scope ["components/release-executor/src"
+          "components/phase-software-factory/src"
+          "components/pr-lifecycle/src"]}
+
+ :spec/constraints
+ ["PR-opening is mechanical and MUST run in deterministic mode — absence of a releaser agent/LLM degrades only the PR title/body prose, never whether a PR is opened"
+  "Reuse pr-lifecycle/controller push-and-create-pr! / create-pr! — do not add a second PR-creation path"
+  "Honor :create-pr? (release.clj config / :execution/opts) — when false, keep today's doc-only behavior (e.g. local-only runs)"
+  "On success populate :workflow/pr-info with the real {:pr-number :url :branch} so the observe phase hand-off (project_observe_phase_pr_handoff_bug) and metrics see it"
+  "Exceptions are data: a push/create-pr failure returns an anomaly that fails the release phase loud (with the partial state), not a silent fallback to doc-only"
+  "No duplicate PRs on retry: if a PR already exists for the task branch, reuse/update it rather than opening a second"]
+
+ :spec/acceptance-criteria
+ ["A run that reaches release with :create-pr? true opens a real GitHub PR (verifiable pr-number/url in :workflow/pr-info) — not just a docs/pull-requests/*.md file"
+  "With no releaser agent/LLM, the PR is STILL opened; only the title/body fall back to deterministic metadata"
+  "With :create-pr? false, behavior is unchanged (doc-only, no PR)"
+  "A push or gh-pr-create failure fails the release phase with an anomaly carrying the cause — it does not silently report success"
+  "Re-running release for a task whose branch already has an open PR does not create a duplicate"
+  "A dogfood run on a small spec ends with an actual open PR on GitHub"]
+
+ :spec/priority
+ {:tier :blocker
+  :axes #{:dogfood-enabler :correctness}
+  :theme :dogfood-resilience
+  :rationale "Without this a fully successful autonomous run cannot ship — the loop dead-ends at a doc. PR-opening is mechanical and must not depend on an LLM being present."
+  :blocks []
+  :blocked-by []}
+
+ :spec/workflow-type :canonical-sdlc}
