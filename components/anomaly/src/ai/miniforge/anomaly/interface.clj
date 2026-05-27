@@ -105,12 +105,13 @@
   ([type message ex]
    (exception-anomaly type message {} ex))
   ([type message data ex]
-   (anomaly type
-            message
-            (cond-> (assoc data
-                           :anomaly/ex-message (ex-message ex)
-                           :anomaly/ex-class   (.getName (class ex)))
-              (ex-data ex) (assoc :anomaly/ex-data (ex-data ex))))))
+   (let [ed (ex-data ex)]
+     (anomaly type
+              message
+              (cond-> (assoc data
+                             :anomaly/ex-message (ex-message ex)
+                             :anomaly/ex-class   (.getName (class ex)))
+                ed (assoc :anomaly/ex-data ed))))))
 
 ;------------------------------------------------------------------------------ Layer 2
 ;; Predicate
