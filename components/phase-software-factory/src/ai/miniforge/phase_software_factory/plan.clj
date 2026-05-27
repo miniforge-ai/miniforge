@@ -159,7 +159,15 @@
               (try
                 (agent/invoke planner-agent task agent-ctx)
                 (catch Exception e
-                  (response/failure e))))
+                  ;; Preserve the spent-token count from the agent's failure
+                  ;; anomaly (planner tags ex-data with :tokens) into the
+                  ;; failure result's :metrics, so leave-plan still merges the
+                  ;; real cost into :execution/metrics instead of reporting $0.
+                  (let [ed   (ex-data e)
+                        toks (get ed :tokens 0)]
+                    (response/failure e {:data ed
+                                         :tokens toks
+                                         :metrics {:tokens toks}})))))
      :rules-manifest rules-manifest}))
 
 ;------------------------------------------------------------------------------ Layer 1
@@ -196,28 +204,41 @@
         end-time (System/currentTimeMillis)
         duration-ms (- end-time start-time)
         result (get-in ctx [:phase :result])
-        metrics (-> (get result :metrics {:tokens 0 :duration-ms duration-ms})
+        success? (response/success? result)
+        already-satisfied? (= :already-satisfied (:status result))
+        ;; Read tokens from :metrics, falling back to a top-level :tokens —
+        ;; failure results carry the spent count one or the other way, and we
+        ;; merge cost into :execution/metrics REGARDLESS of success so a failed
+        ;; plan turn no longer reports $0.
+        metrics (-> (get result :metrics {:tokens (get result :tokens 0)
+                                          :duration-ms duration-ms})
                     (assoc :duration-ms duration-ms))
+        ;; already-satisfied is a NEUTRAL success outcome, not a failure.
+        succeeded-or-done? (or success? already-satisfied?)
+        phase-status (cond already-satisfied? :already-satisfied
+                           success?           :completed
+                           :else              :failed)
         updated-ctx (-> ctx
                         (assoc-in [:phase :ended-at] end-time)
                         (assoc-in [:phase :duration-ms] duration-ms)
-                        (assoc-in [:phase :status] :completed)
+                        (assoc-in [:phase :status] phase-status)
                         (assoc-in [:phase :metrics] metrics)
-                        (update-in [:execution :phases-completed] (fnil conj []) :plan)
-                        ;; Merge agent metrics into execution metrics
+                        ;; Count a completed OR already-satisfied plan; not a failure.
+                        (cond-> succeeded-or-done?
+                          (update-in [:execution :phases-completed] (fnil conj []) :plan))
+                        ;; Merge agent metrics into execution metrics on EVERY
+                        ;; outcome — tokens were spent whether or not the plan
+                        ;; succeeded.
                         (update-in [:execution/metrics :tokens] (fnil + 0) (:tokens metrics 0))
                         (update-in [:execution/metrics :duration-ms] (fnil + 0) (:duration-ms metrics 0)))]
-    ;; Handle :already-satisfied — signal pipeline to skip to :done
-    (let [final-ctx (if (= :already-satisfied (:status result))
-                      (assoc-in updated-ctx [:phase :status] :already-satisfied)
-                      updated-ctx)]
-      ;; Emit phase-completed telemetry with termination reason
-      (phase/emit-phase-completed! final-ctx :plan
-        (merge {:outcome     :success
-                :duration-ms duration-ms
-                :tokens      (get metrics :tokens 0)}
-               (phase-terminal/derive-termination-reason result nil)))
-      final-ctx)))
+    ;; Emit phase-completed with the REAL outcome — never a false :success on a
+    ;; failure result (that produced the ✓-then-✗ double-emit).
+    (phase/emit-phase-completed! updated-ctx :plan
+      (merge {:outcome     (if succeeded-or-done? :success :failure)
+              :duration-ms duration-ms
+              :tokens      (get metrics :tokens 0)}
+             (phase-terminal/derive-termination-reason result nil)))
+    updated-ctx))
 
 (defn error-plan
   "Handle planning phase errors. Retry within budget, then fail in

@@ -702,9 +702,16 @@
                       ;; so external try+ callers see the same shape
                       ;; they did before the data-first migration.
                       plan (if (anomaly/anomaly? plan-or-anom)
+                             ;; Carry the spent-token count into the anomaly
+                             ;; data so the failure path still reports cost
+                             ;; (exception-error preserves ex-data → the phase
+                             ;; surfaces :tokens into :execution/metrics). A
+                             ;; failed plan turn still SPENT tokens; dropping
+                             ;; them made the run summary read $0.0000.
                              (response/throw-anomaly! :anomalies.agent/invoke-failed
                                                      (:anomaly/message plan-or-anom)
-                                                     (:anomaly/data plan-or-anom))
+                                                     (assoc (:anomaly/data plan-or-anom)
+                                                            :tokens tokens))
                              plan-or-anom)
                       plan-final (finalize-plan plan)]
                   ;; Check for already-satisfied response
@@ -725,7 +732,9 @@
                           (log/info logger :planner :planner/already-satisfied-rejected
                                     {:data {:reason (:reason validation)}})
                           (response/error (str "Already-satisfied claim rejected: "
-                                               (:reason validation))))))
+                                               (:reason validation))
+                                          {:tokens tokens
+                                           :metrics {:tokens tokens}}))))
                     (response/success plan-final
                                       {:tokens tokens
                                        :metrics (cond-> {:tasks-created (count (:plan/tasks plan-final))
