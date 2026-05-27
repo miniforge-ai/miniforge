@@ -92,6 +92,22 @@
     (is (= sut/default-gap-threshold-ms
            (sut/resolve-gap-threshold {} :any-backend)))))
 
+(def ^:private llm-stream-line-timeout-ms
+  "The LLM client's tuned stdout-silence tolerance
+   (components/llm/resources/llm/client-defaults.edn :line-timeout-ms). The
+   watchdog must not false-fire inside this window — keep this mirror in sync
+   if that config changes."
+  360000)
+
+(deftest default-gap-threshold-is-a-backstop-above-llm-idle-timeout
+  (testing "the watchdog default must stay >= the LLM idle timeout so it is a
+            backstop, not a primary that kills legitimate model silence
+            (regression guard for the 90s-default 17h-runaway)"
+    (is (>= sut/default-gap-threshold-ms llm-stream-line-timeout-ms)
+        (str "default-gap-threshold-ms (" sut/default-gap-threshold-ms
+             ") must be >= the LLM stream-line-timeout-ms ("
+             llm-stream-line-timeout-ms ")"))))
+
 (deftest resolve-gap-threshold-returns-global-override
   (testing "global :agent/stream-gap-threshold-ms overrides the default"
     (is (= 60000
@@ -110,9 +126,9 @@
                   :agent/per-backend-gap-thresholds  {:claude-code 120000}}]
       (is (= 60000 (sut/resolve-gap-threshold config :other-backend))))))
 
-(deftest resolve-gap-threshold-default-constant-is-90s
-  (testing "default constant is 90 000 ms"
-    (is (= 90000 sut/default-gap-threshold-ms))))
+(deftest resolve-gap-threshold-default-constant-is-420s
+  (testing "default constant is 420 000 ms — a backstop above the 360 000 ms LLM idle timeout"
+    (is (= 420000 sut/default-gap-threshold-ms))))
 
 ;; ---------------------------------------------------------------------------
 ;; create-watchdog structure
