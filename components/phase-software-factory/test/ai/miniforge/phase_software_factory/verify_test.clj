@@ -79,7 +79,7 @@
   (testing "default config has correct structure"
     (is (nil? (:agent verify/default-config))
         "Verify phase has no agent — runs tests directly")
-    (is (= [:pre-verify-lint :tests-pass :coverage] (:gates verify/default-config)))
+    (is (= [:pre-verify-lint :tests-pass :coverage :policy-verify] (:gates verify/default-config)))
     (is (map? (:budget verify/default-config)))
     (is (= 3 (get-in verify/default-config [:budget :iterations])))))
 
@@ -89,7 +89,7 @@
       (is (some? defaults))
       (is (nil? (:agent defaults))
           "Verify has no agent in the new environment model")
-      (is (= [:pre-verify-lint :tests-pass :coverage] (:gates defaults))))))
+      (is (= [:pre-verify-lint :tests-pass :coverage :policy-verify] (:gates defaults))))))
 
 ;------------------------------------------------------------------------------ Layer 1: Interceptor enter tests
 
@@ -104,7 +104,7 @@
             (is (= :verify (get-in result [:phase :name])))
             (is (nil? (get-in result [:phase :agent]))
                 "No agent in new environment model")
-            (is (= [:pre-verify-lint :tests-pass :coverage] (get-in result [:phase :gates])))
+            (is (= [:pre-verify-lint :tests-pass :coverage :policy-verify] (get-in result [:phase :gates])))
             (is (= :running (get-in result [:phase :status])))
             (is (number? (get-in result [:phase :started-at]))))
 
