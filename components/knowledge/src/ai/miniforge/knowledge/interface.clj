@@ -38,7 +38,9 @@
    [ai.miniforge.knowledge.learning :as learning]
    [ai.miniforge.knowledge.loader :as loader]
    [ai.miniforge.knowledge.messages :as messages]
-   [ai.miniforge.knowledge.trust]))
+   [ai.miniforge.knowledge.policy-lookup :as policy-lookup]
+   [ai.miniforge.knowledge.trust]
+   [malli.core :as m]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Schema re-exports
@@ -62,6 +64,10 @@
 ;; producer-side share-learning gate can reference it without
 ;; reaching into `knowledge.schema` directly.
 (def TrustLevel     schema/TrustLevel)
+;; Policy-pack rule lookup schemas. Callers may validate their own
+;; inputs against PolicyQuery before passing to lookup-policy-rules.
+(def PolicyQuery    schema/PolicyQuery)
+(def PolicyResult   schema/PolicyResult)
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Store creation
@@ -222,6 +228,31 @@
   "Full-text search across zettel titles and content.
    Returns matching zettels sorted by relevance."
   store/search)
+
+(defn lookup-policy-rules
+  "Search loaded policy-pack rules by keyword, dewey code, or tag.
+
+   Only :rule-type zettels are searched — those loaded from .mdc rule files
+   or compiled policy packs. Validates the query against PolicyQuery schema
+   before delegating; returns an empty vector when the query is invalid.
+
+   Arguments:
+   - knowledge-store  KnowledgeStore instance (nil-safe — returns [])
+   - policy-query     {:query string :tags [keyword] :dewey-prefix string}
+                      All fields are optional. Multiple criteria are ANDed.
+
+   Returns a vector of {:rule/title string :rule/content string}.
+   Returns an empty vector on no match or invalid / nil store.
+
+   Examples:
+     (lookup-policy-rules store {:query \"try+\"})
+     (lookup-policy-rules store {:tags [:clojure]})
+     (lookup-policy-rules store {:dewey-prefix \"210\"})
+     (lookup-policy-rules store {:query \"namespace\" :tags [:clojure]})"
+  [knowledge-store policy-query]
+  (if (m/validate schema/PolicyQuery (or policy-query {}))
+    (policy-lookup/lookup-policy-rules knowledge-store (or policy-query {}))
+    []))
 
 ;------------------------------------------------------------------------------ Layer 5
 ;; Agent injection
