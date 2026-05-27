@@ -96,6 +96,39 @@
   (and (map? x)
        (contract/valid? x)))
 
+;------------------------------------------------------------------------------ Macros
+;; Compile-time control flow; expansion composes the Layer 2 predicate.
+
+(defmacro let-ok
+  "Sequential `let`-style bindings that short-circuit on the first
+   anomaly. Each right-hand expression is evaluated and bound
+   left-to-right; if one evaluates to an anomaly (per `anomaly?`), that
+   anomaly is returned immediately and the remaining bindings and
+   `body` are skipped. When no binding yields an anomaly, evaluates
+   `body` like `let`.
+
+   Use for railway-style pipelines over anomaly-returning steps in
+   place of nested `(if (anomaly? x) x (let [...] ...))` pyramids:
+
+     (let-ok [user    (lookup id)
+              account (account-for user)]
+       (summarize account))
+
+   Returns the first anomaly encountered, otherwise the body's value."
+  [bindings & body]
+  (when-not (vector? bindings)
+    (throw (IllegalArgumentException. "let-ok requires a binding vector")))
+  (when-not (even? (count bindings))
+    (throw (IllegalArgumentException. "let-ok requires an even number of binding forms")))
+  (reduce
+   (fn [acc [sym expr]]
+     `(let [~sym ~expr]
+        (if (anomaly? ~sym)
+          ~sym
+          ~acc)))
+   `(do ~@body)
+   (reverse (partition 2 bindings))))
+
 ;------------------------------------------------------------------------------ Rich Comment
 
 (comment
