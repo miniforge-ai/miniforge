@@ -221,6 +221,35 @@
                    :anomaly/message  msg
                    :review/fingerprint-history (vec fingerprint-history)}))))
 
+(def ^:private default-max-no-progress-attempts
+  "After this many CONSECUTIVE review→implement repair cycles where each
+   review still rejects (with non-identical fingerprints — stagnation hasn't
+   fired) the workflow emits :needs-decomposition rather than continuing to
+   burn the redirect budget. Catches the dogfood case where the implementer
+   keeps fixing the reviewer's prior blockers but the reviewer keeps surfacing
+   new legitimate ones — a strong signal the task is too coarse for one
+   implement turn to satisfy in full. Default 3; configurable via
+   `:phase :budget :max-no-progress-attempts` (and overridable by
+   `:phase-config`)."
+  3)
+
+(defn- terminate-needs-decomposition
+  "Mark the phase as failed with a :needs-decomposition signal — review keeps
+   surfacing different legitimate blockers each pass; the task likely needs
+   to be split. Distinct from :stagnated (identical-fingerprint loop) and
+   :exhausted (ran out of redirect budget): this is a CONVERGENCE failure
+   with a specific recommendation for the meta-agent."
+  [ctx fingerprint-history iterations]
+  (let [msg (messages/t :review/needs-decomposition {:iterations iterations})]
+    (-> ctx
+        (assoc-in [:phase :needs-decomposition?] true)
+        (assoc-in [:phase :error]
+                  {:message msg
+                   :anomaly/category :anomalies.review/needs-decomposition
+                   :anomaly/message  msg
+                   :review/iterations iterations
+                   :review/fingerprint-history (vec fingerprint-history)}))))
+
 (defn- redirect-to-implement
   "Update phase to redirect back to :implement with review feedback for
    repair. Caller is responsible for the iteration-budget guard."
@@ -260,6 +289,17 @@
   (and reviewer-blocked?
        (agent/review-stagnated? (peek prior-history) current-fp)))
 
+(defn- compute-needs-decomposition?
+  "True when the reviewer has rejected for `max-no-progress-attempts`
+   consecutive cycles WITHOUT stagnation firing — i.e. each pass found
+   different legitimate blockers but the loop is not converging. The current
+   `iterations` value is the count of redirects already taken; it equals the
+   number of completed review→implement repair cycles."
+  [reviewer-blocked? stagnated? iterations max-no-progress-attempts]
+  (and reviewer-blocked?
+       (not stagnated?)
+       (>= iterations max-no-progress-attempts)))
+
 (defn- compute-phase-status
   [reviewer-blocked? gate-failed?]
   (cond
@@ -268,22 +308,26 @@
     :else             :completed))
 
 (defn- compute-decision
-  "Pick the post-review action: :stagnated | :repair | :exhausted | :complete."
-  [{:keys [reviewer-blocked? stagnated? within-budget? phase-status actionable-feedback?]}]
+  "Pick the post-review action:
+     :stagnated | :needs-decomposition | :repair | :exhausted | :complete."
+  [{:keys [reviewer-blocked? stagnated? needs-decomposition? within-budget?
+           phase-status actionable-feedback?]}]
   (cond
-    stagnated?                                               :stagnated
+    stagnated?                                                 :stagnated
+    needs-decomposition?                                       :needs-decomposition
     (and reviewer-blocked? within-budget? actionable-feedback?) :repair
-    (= :failed phase-status)                                 :exhausted
-    :else                                                    :complete))
+    (= :failed phase-status)                                   :exhausted
+    :else                                                      :complete))
 
 (defn- apply-decision
   "Apply the chosen post-review action to the updated context."
-  [decision updated-ctx feedback fingerprint-history]
+  [decision updated-ctx feedback fingerprint-history iterations]
   (case decision
-    :stagnated (terminate-stagnated updated-ctx fingerprint-history)
-    :repair    (redirect-to-implement updated-ctx feedback)
-    :exhausted updated-ctx
-    :complete  (mark-completed updated-ctx)))
+    :stagnated            (terminate-stagnated updated-ctx fingerprint-history)
+    :needs-decomposition  (terminate-needs-decomposition updated-ctx fingerprint-history iterations)
+    :repair               (redirect-to-implement updated-ctx feedback)
+    :exhausted            updated-ctx
+    :complete             (mark-completed updated-ctx)))
 
 (defn- accumulate-base-ctx
   "Apply the always-on context updates: phase metadata, metrics,
@@ -347,15 +391,26 @@
         phase-status      (compute-phase-status reviewer-blocked? gate-failed?)
         within-budget?    (< iterations max-iterations)
         feedback          (review-feedback result)
+        ;; Convergence cap: terminate with :needs-decomposition after N
+        ;; consecutive non-stagnated review rejections (legit blockers that
+        ;; keep rotating) before exhausting max-iterations — a sharper signal
+        ;; for the meta-agent to split the task than a generic "exhausted".
+        max-no-progress-attempts (get-in ctx [:phase :budget :max-no-progress-attempts]
+                                         default-max-no-progress-attempts)
+        needs-decomposition? (compute-needs-decomposition?
+                              reviewer-blocked? stagnated?
+                              iterations max-no-progress-attempts)
         decision          (compute-decision {:reviewer-blocked?    reviewer-blocked?
                                              :stagnated?           stagnated?
+                                             :needs-decomposition? needs-decomposition?
                                              :within-budget?       within-budget?
                                              :phase-status         phase-status
                                              :actionable-feedback? (actionable-feedback? feedback)})
         updated-ctx       (accumulate-base-ctx ctx end-time duration-ms phase-status
                                                metrics iterations current-fp)
         next-ctx          (apply-decision decision updated-ctx feedback
-                                          (conj prior-history current-fp))]
+                                          (conj prior-history current-fp)
+                                          iterations)]
     (when (= :repair decision)
       (knowledge/capture-feedback-learning!
        (:knowledge-store ctx) :reviewer

@@ -362,3 +362,62 @@
                                        :prior-fingerprints [seed-fp]})]
       (is (= two-fingerprints (count (get-in final-ctx [:execution :review-fingerprints])))
           "second iteration appends without dropping prior history"))))
+
+;;----------------------------------------------------------------------------- Convergence cap (:needs-decomposition)
+
+(def ^:private third-iteration
+  "Iteration counter when two repair cycles have already happened (the
+   reviewer is now on its third rejection in a row) — the default cap."
+  3)
+
+(def ^:private prior-distinct-fingerprints
+  "Two distinct prior fingerprints — stagnation must NOT fire (it requires
+   IDENTICAL adjacent fingerprints), so the convergence cap is what should
+   trigger when the third review also rejects with yet a different blocker."
+  [{:review/fingerprint :fp-1}
+   {:review/fingerprint :fp-2}])
+
+(def ^:private yet-another-blocking-issue
+  {:severity :blocking :file "src/baz.clj" :line 7 :description "And worse"})
+
+(deftest needs-decomposition-fires-after-n-non-stagnated-rejections-test
+  (testing "3 consecutive non-stagnated review rejections (different blockers
+            each pass) trip :needs-decomposition — the implementer is fixing
+            prior findings but new legitimate ones keep surfacing, signal the
+            task needs splitting rather than burning more redirect budget"
+    (let [final-ctx (run-leave-review {:issues             [yet-another-blocking-issue]
+                                       :iterations         third-iteration
+                                       :prior-fingerprints prior-distinct-fingerprints})
+          phase (:phase final-ctx)]
+      (is (true? (:needs-decomposition? phase))
+          "phase tagged :needs-decomposition?")
+      (is (= :anomalies.review/needs-decomposition
+             (get-in phase [:error :anomaly/category]))
+          "convergence-cap anomaly attached")
+      (is (= third-iteration (get-in phase [:error :review/iterations]))
+          "iteration count carried in the anomaly")
+      (is (not (phase/redirect-requested? phase))
+          "no redirect-to-implement on :needs-decomposition — repair budget conserved"))))
+
+(deftest needs-decomposition-yields-to-stagnation-test
+  (testing "when the new fingerprint matches the immediate prior one, stagnation
+            wins over :needs-decomposition (identical-loop is the sharper signal)"
+    ;; Iterations >= cap AND fingerprints match the prior → stagnation should fire.
+    (let [seed-issue {:severity :blocking :description "same"}
+          seed-ctx   (run-leave-review {:issues [seed-issue] :iterations first-iteration})
+          seed-fp    (peek (get-in seed-ctx [:execution :review-fingerprints]))
+          final-ctx  (run-leave-review {:issues             [seed-issue]
+                                        :iterations         third-iteration
+                                        :prior-fingerprints [seed-fp]})
+          phase (:phase final-ctx)]
+      (is (true? (:stagnated? phase)) "stagnation fires, not :needs-decomposition")
+      (is (nil? (:needs-decomposition? phase))))))
+
+(deftest needs-decomposition-does-not-fire-below-cap-test
+  (testing "two rejection cycles (below the default cap of 3) still redirect normally"
+    (let [final-ctx (run-leave-review {:issues             [different-blocking-issue]
+                                       :iterations         second-iteration
+                                       :prior-fingerprints [{:review/fingerprint :only}]})
+          phase (:phase final-ctx)]
+      (is (nil? (:needs-decomposition? phase)) "below cap, no decomposition signal")
+      (is (phase/redirect-requested? phase) "still redirects on a normal repair cycle"))))
