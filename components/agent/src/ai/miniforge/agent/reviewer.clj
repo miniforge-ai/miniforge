@@ -747,11 +747,9 @@
    rejection in place and re-introduce the churn the validator exists to
    eliminate)."
   [re-review]
-  ;; Use the RAW `:review/decision` (a ReviewArtifact-schema enum), not the
-  ;; normalized decision — `normalize-llm-decision` collapses
-  ;; `:conditionally-approved` into `:changes-requested` via its default
-  ;; fall-through, which would wrongly classify a legitimate
-  ;; "approved with non-blocking warnings" correction as a rejection here.
+  ;; The raw `:review/decision` is already a ReviewArtifact-schema enum;
+  ;; reading it directly (rather than re-normalizing) keeps this predicate
+  ;; insulated from any future change to `normalize-llm-decision`.
   (let [dec (:review/decision re-review)]
     (or (not (contains? rejection-decisions dec))
         (review-has-blocking? (get re-review :review/issues [])))))
@@ -876,13 +874,17 @@
                     counts (calculate-gate-counts gate-feedbacks)
                     timeout-failure-message (backend-failure-message response llm-review)
                     timeout-only-review? (timeout-only-review? llm-review gate-result)
-                    raw-llm-decision (cond
-                                       timeout-only-review? nil
-                                       parse-failed? :rejected
-                                       llm-review (normalize-llm-decision (:review/decision llm-review)))
-                    raw-llm-issues (get llm-review :review/issues [])
-                    raw-llm-strengths (get llm-review :review/strengths [])
-                    raw-llm-summary (:review/summary llm-review)
+                    ;; "initial" = the first-call decision/issues fed into the
+                    ;; enumeration validator. Named to contrast with
+                    ;; `recovered-review` below; these are already normalized,
+                    ;; not literally "raw".
+                    initial-llm-decision (cond
+                                           timeout-only-review? nil
+                                           parse-failed? :rejected
+                                           llm-review (normalize-llm-decision (:review/decision llm-review)))
+                    initial-llm-issues    (get llm-review :review/issues [])
+                    initial-llm-strengths (get llm-review :review/strengths [])
+                    initial-llm-summary   (:review/summary llm-review)
 
                     ;; ENUMERATION VALIDATOR: a rejection without enumerated
                     ;; :blocking findings is malformed — the implementer
@@ -890,31 +892,38 @@
                     ;; nothing" reviews drove the 2026-05-27 dogfood
                     ;; review-redirect churn. Re-run the reviewer ONCE with an
                     ;; enumeration-retry prompt; use the recovered review iff
-                    ;; it now lists blockers. Otherwise the raw rejection
-                    ;; stands as-is.
+                    ;; it now lists blockers OR corrects to a non-rejection.
+                    ;; Otherwise the initial rejection stands as-is.
                     recovered-review (when (enumeration-retry?
-                                            raw-llm-decision raw-llm-issues
+                                            initial-llm-decision initial-llm-issues
                                             (:blocking-issues gate-result))
                                        (log/info logger :reviewer
                                                  :reviewer/enumeration-retry
-                                                 {:data {:raw-decision        raw-llm-decision
-                                                         :raw-issue-count     (count raw-llm-issues)
+                                                 {:data {:initial-decision    initial-llm-decision
+                                                         :initial-issue-count (count initial-llm-issues)
                                                          :gate-blocking-count (count (:blocking-issues gate-result))}})
                                        (recover-review-enumeration
                                         llm-client base-opts on-chunk
                                         user-prompt content))
+                    ;; When recovery succeeds, the first call's parse failure
+                    ;; no longer represents the agent's verdict — clearing
+                    ;; this stops `all-blocking` from appending the parse-
+                    ;; failure message on top of an otherwise-clean recovered
+                    ;; review (could even falsely block a recovered
+                    ;; :approved).
+                    parse-failed? (and parse-failed? (nil? recovered-review))
                     llm-decision  (if recovered-review
                                     (normalize-llm-decision (:review/decision recovered-review))
-                                    raw-llm-decision)
+                                    initial-llm-decision)
                     llm-issues    (if recovered-review
                                     (get recovered-review :review/issues [])
-                                    raw-llm-issues)
+                                    initial-llm-issues)
                     llm-strengths (if recovered-review
                                     (get recovered-review :review/strengths [])
-                                    raw-llm-strengths)
+                                    initial-llm-strengths)
                     llm-summary   (if recovered-review
                                     (:review/summary recovered-review)
-                                    raw-llm-summary)
+                                    initial-llm-summary)
 
                     ;; Merge decisions: gates can override LLM
                     final-decision (if llm-decision
