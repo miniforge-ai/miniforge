@@ -27,6 +27,7 @@
    [ai.miniforge.agent.result-boundary :as result-boundary]
    [ai.miniforge.agent.role-config :as role-config]
    [ai.miniforge.agent.specialized :as specialized]
+   [ai.miniforge.agent.submission-recovery :as submission-recovery]
    [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.schema.interface :as schema]
    [ai.miniforge.logging.interface :as log]
@@ -156,15 +157,9 @@
                [path content]))
         existing-files))
 
-(defn- render-template
-  "Render a `{{key}}`-style template with the given substitutions.
-   Each substitutions map entry `{kw v}` replaces the literal string
-   \"{{kw}}\" with `v` (nil values render as the empty string)."
-  [template substitutions]
-  (reduce-kv (fn [text k v]
-               (str/replace text (str "{{" (name k) "}}") (or v "")))
-             (or template "")
-             substitutions))
+(def ^:private render-template
+  "Shared `{{key}}` template renderer (single source in the prompts ns)."
+  prompts/render-template)
 
 (defn- existing-files-section
   "Build the planner-prompt section that previews existing in-scope
@@ -245,17 +240,10 @@
    In both cases the recovery turn re-submits using `response-content` as the
    prior plan text."
   [llm-response submitted-plan parsed-plan response-content]
-  (and (nil? submitted-plan)
-       (nil? parsed-plan)
-       (or
-        ;; (a) clean success but no artifact — prose-only narration
-        (and (llm/success? llm-response)
-             (seq response-content))
-        ;; (b) recoverable error with useful stdout
-        (let [err (llm/get-error llm-response)]
-          (and (not (llm/success? llm-response))
-               (seq (:stdout err))
-               (#{"adaptive_timeout" "cli_error"} (:type err)))))))
+  ;; Delegates to the agent-agnostic predicate (single source of truth for the
+  ;; success-vs-error retry trigger, now shared with the implementer et al.).
+  (submission-recovery/submission-retry? llm-response submitted-plan
+                                         parsed-plan response-content))
 
 ;; make-fallback-plan removed — silent fallback masks real failures.
 ;; Plan generation now throws with evidence on failure (see invoke-fn below).
@@ -512,41 +500,35 @@
       (:num-turns llm-response)
       (assoc :num-turns (:num-turns llm-response)))))
 
-(defn- invoke-planner-submission-retry-session
-  "Run one short follow-up turn that only submits the final plan.
-   Turn cap and progress-monitor thresholds come from
-   resources/prompts/planner.edn (:prompt/submission-retry-max-turns,
-   :prompt/submission-retry-monitor).
-
-   `effective-system` is the same base-plus-addendum string used by the
-   main session, so the retry turn enforces the same compiled policy
-   pack the planner saw on the first call."
-  [session llm-client retry-prompt effective-system config context on-chunk]
-  (let [prompt-data    @planner-prompt-data
-        budget-usd     (budget/resolve-cost-budget-usd :planner config context)
+(defn- planner-retry-mcp-opts
+  "Build the planner's submission-retry session opts from a fresh session.
+   Turn cap + progress-monitor come from planner.edn; model/disallowed-tools
+   match the main planner turn so the retry enforces the same policy pack."
+  [config context session]
+  (let [prompt-data     @planner-prompt-data
+        budget-usd      (budget/resolve-cost-budget-usd :planner config context)
         retry-max-turns (get prompt-data :prompt/submission-retry-max-turns)
-        retry-monitor  (prompts/load-progress-monitor
-                        prompt-data :prompt/submission-retry-monitor)
-        mcp-opts       (cond-> (artifact-session/session->mcp-opts session budget-usd retry-max-turns)
-                         true (assoc :model (model/default-model-for-role :planner)
-                                     :disallowed-tools planner-disallowed-tools
-                                     :progress-monitor retry-monitor)
-                         (:workdir session) (assoc :workdir (:workdir session)))]
-    (if on-chunk
-      (llm/chat-stream llm-client retry-prompt on-chunk
-                       (merge {:system effective-system} mcp-opts))
-      (llm/chat llm-client retry-prompt
-                (merge {:system effective-system} mcp-opts)))))
+        retry-monitor   (prompts/load-progress-monitor
+                         prompt-data :prompt/submission-retry-monitor)]
+    (cond-> (artifact-session/session->mcp-opts session budget-usd retry-max-turns)
+      true (assoc :model (model/default-model-for-role :planner)
+                  :disallowed-tools planner-disallowed-tools
+                  :progress-monitor retry-monitor)
+      (:workdir session) (assoc :workdir (:workdir session)))))
 
 (defn- recover-submitted-plan
   "Retry planner submission once when analysis exists but the final submission
-   did not land. Returns {:llm-response ... :submitted-plan ... :parsed-plan ...}."
+   did not land, via the shared agent-agnostic runner. Returns
+   {:llm-response ... :submitted-plan ... :parsed-plan ...}."
   [llm-client spec-text effective-system config context on-chunk prior-content]
-  (let [retry-prompt   (submission-retry-prompt spec-text prior-content)
-        run-retry      #(invoke-planner-submission-retry-session
-                          % llm-client retry-prompt effective-system config context on-chunk)
-        {:keys [llm-result artifact worktree-artifacts]}
-        (artifact-session/with-session context run-retry)
+  (let [{:keys [llm-result artifact worktree-artifacts]}
+        (submission-recovery/run-recovery-session
+         {:context          context
+          :llm-client       llm-client
+          :on-chunk         on-chunk
+          :effective-system effective-system
+          :retry-prompt     (submission-retry-prompt spec-text prior-content)
+          :mcp-opts-fn      (partial planner-retry-mcp-opts config context)})
         normalized     (normalize-planner-result llm-result worktree-artifacts artifact)
         submitted-plan (:structured-artifact normalized)
         parsed-plan    (when-not submitted-plan

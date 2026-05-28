@@ -28,6 +28,7 @@
    [ai.miniforge.agent.result-boundary :as result-boundary]
    [ai.miniforge.agent.role-config :as role-config]
    [ai.miniforge.agent.specialized :as specialized]
+   [ai.miniforge.agent.submission-recovery :as submission-recovery]
    [ai.miniforge.patterns.interface :as patterns]
    [ai.miniforge.repo-index.interface :as messages]
    [ai.miniforge.response.interface :as response]
@@ -705,6 +706,62 @@
         (file-artifacts/collect-written-files pre-session-snapshot
                                               working-dir))))
 
+(defn- submission-retry-prompt
+  "Submission-only retry prompt: re-feed the task + the prior (prose) output
+   and ask the implementer to deliver the actual file writes now."
+  [task-text prior-content]
+  (prompts/render-template (get @implementer-prompt-data :prompt/submission-retry-template)
+                           {:task-text task-text :prior-content prior-content}))
+
+(defn- normalize-implementer-result
+  "Re-normalize a session's raw channels into the implementer result shape,
+   re-collecting the file artifact from what was written this turn. Used by the
+   submission-recovery turn (the main turn normalizes inline so it can also
+   surface the file artifact for its fallback log)."
+  [{:keys [llm-result artifact worktree-artifacts pre-session-snapshot session-mode]}
+   context working-dir]
+  (let [file-artifact (collect-session-artifact context session-mode working-dir
+                                                pre-session-snapshot)]
+    (result-boundary/normalize-llm-result
+     {:role :implement
+      :response llm-result
+      :worktree-artifacts worktree-artifacts
+      :artifact artifact
+      :fallback-artifact file-artifact
+      :parse-response parse-code-response
+      :derive-artifact code-from-blocks})))
+
+(defn- recover-implementer-submission
+  "When the main turn produced usable analysis but NO artifact, run one short
+   submission-only retry that asks the implementer to write the files now, then
+   re-normalize. Returns the recovered normalized map, or nil when recovery
+   produced no artifact either. Generalizes PR #997's planner recovery."
+  [{:keys [llm-client config context on-chunk working-dir effective-system-prompt
+           input normalized logger]}]
+  (log/info logger :implementer :implementer/submission-retry
+            {:data {:llm-success? (llm/success? (:response normalized))
+                    :content-length (count (:content normalized))}})
+  (let [raw (submission-recovery/run-recovery-session
+             {:context          context
+              :llm-client       llm-client
+              :on-chunk         on-chunk
+              :effective-system effective-system-prompt
+              :retry-prompt     (submission-retry-prompt (task->text input)
+                                                         (:content normalized))
+              :mcp-opts-fn      (fn [session]
+                                  (let [budget-usd      (budget/resolve-cost-budget-usd
+                                                         :implementer config context)
+                                        retry-max-turns (get @implementer-prompt-data
+                                                             :prompt/submission-retry-max-turns 6)]
+                                    (cond-> (artifact-session/session->mcp-opts
+                                             session budget-usd retry-max-turns)
+                                      working-dir (assoc :workdir working-dir))))})
+        recovered (normalize-implementer-result raw context working-dir)]
+    (when (or (:structured-artifact recovered)
+              (:parsed-content recovered)
+              (:derived-artifact recovered))
+      recovered)))
+
 (defn- invoke-with-llm
   "Invoke the implementer via the LLM backend."
   [llm-client user-prompt effective-system-prompt config context on-chunk logger
@@ -755,16 +812,40 @@
     ;; successful stream of edits; the old path discarded a real
     ;; artifact because the LLM response was classified as failure.
     ;; Mirrors the planner fix in `(or worktree-plan (llm/success? …))`.
-    (if (result-boundary/usable-content? normalized)
-      (process-llm-response normalized context logger input)
-      ;; LLM call failed, no artifact — preserve the full llm-error
-      ;; shape into :data so the phase-completed event carries
-      ;; :type (e.g. "cli_error" / "adaptive_timeout"), :stderr /
-      ;; :stdout / :timeout / :exit-code for post-mortem. Iters
-      ;; 11-12 of planner-convergence lost this context and produced
-      ;; undiagnosable "Unknown error" phase errors; same trap here.
-      (result-boundary/error-response normalized
-                                      (messages/t :error/llm-failed)))))
+    ;; Submission recovery: if the turn produced usable analysis but NO
+    ;; artifact (no files, no MCP submit, no parseable code) — the same
+    ;; intermittent failure PR #997 fixed for the planner — run ONE short
+    ;; submission-only retry that asks the implementer to write the files now.
+    ;; Without this, a prose-only implement turn fails "no artifact found",
+    ;; which is what stalled redirect-implements in the review-redirect churn.
+    (let [submitted (:structured-artifact normalized)
+          ;; Fold the derived artifact (code extracted from final-message
+          ;; fences) into the "artifact already exists" guard so a turn that
+          ;; produced usable code blocks does NOT trigger an unnecessary
+          ;; recovery LLM call.
+          parsed    (or (:parsed-content normalized) (:derived-artifact normalized))
+          recovered (when (submission-recovery/submission-retry?
+                           response submitted parsed (:content normalized))
+                      (recover-implementer-submission
+                       {:llm-client llm-client :config config :context context
+                        :on-chunk on-chunk :working-dir working-dir
+                        :effective-system-prompt effective-system-prompt
+                        :input input :normalized normalized :logger logger}))
+          final     (or recovered normalized)]
+      ;; Container-promotion precedence: if the agent wrote files into
+      ;; the worktree (file-artifact via collect-written-files) or
+      ;; submitted via the MCP artifact path, honor that even when the
+      ;; CLI itself terminated with a timeout/error. Iter-20 of the
+      ;; planner-convergence dogfood showed Claude stalling AFTER a
+      ;; successful stream of edits; the old path discarded a real
+      ;; artifact because the LLM response was classified as failure.
+      (if (result-boundary/usable-content? final)
+        (process-llm-response final context logger input)
+        ;; LLM call failed, no artifact (even after recovery) — preserve the
+        ;; full llm-error shape into :data so the phase-completed event carries
+        ;; :type / :stderr / :stdout / :timeout / :exit-code for post-mortem.
+        (result-boundary/error-response final
+                                        (messages/t :error/llm-failed))))))
 
 ;------------------------------------------------------------------------------ Layer 2
 ;; Public API
