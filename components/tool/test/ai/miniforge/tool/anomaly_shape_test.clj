@@ -1,0 +1,80 @@
+;; Title: Miniforge.ai
+;; Subtitle: An agentic SDLC / fleet-control platform
+;; Author: Christopher Lester
+;; Line: Founder, Miniforge.ai (project)
+;; Copyright 2025-2026 Christopher Lester (christopher@miniforge.ai)
+;;
+;; Licensed under the Apache License, Version 2.0 (the "License");
+;; you may not use this file except in compliance with the License.
+;; You may obtain a copy of the License at
+;;
+;;     http://www.apache.org/licenses/LICENSE-2.0
+;;
+;; Unless required by applicable law or agreed to in writing, software
+;; distributed under the License is distributed on an "AS IS" BASIS,
+;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+;; See the License for the specific language governing permissions and
+;; limitations under the License.
+
+(ns ai.miniforge.tool.anomaly-shape-test
+  "Lock the canonical anomaly shape produced by the tool component
+   after the W2 anomaly convergence flip.
+
+   The tool component produces anomalies on three failure paths:
+   - parameter validation failure → `:invalid-input`
+   - handler exception           → `:fault`
+   - tool-not-found in registry  → `:not-found`
+
+   All three previously used the legacy `response/make-anomaly` /
+   `response/from-exception` constructors carrying `:anomaly/category`.
+   Post-flip they use `ai.miniforge.anomaly.interface` with canonical
+   `:anomaly/type`; all three are generic-standard cognitect categories
+   with no `:anomaly/subtype` per
+   `docs/runbooks/anomaly-convergence.md`."
+  (:require
+   [clojure.test :refer [deftest is testing]]
+   [ai.miniforge.anomaly.interface :as anomaly]
+   [ai.miniforge.tool.interface :as tool]))
+
+(defn- echo-handler [params _ctx] (:message params))
+(defn- throwing-handler [_params _ctx] (throw (ex-info "boom" {:why :test})))
+
+(deftest execute-validation-error-emits-invalid-input-anomaly
+  (testing "missing required parameter yields :invalid-input anomaly"
+    (let [t (tool/create-tool
+             {:id          :tools/echo
+              :description "echo"
+              :parameters  {:message {:type :string :required true}}
+              :handler     echo-handler})
+          result (tool/execute t {} {})
+          a      (:anomaly result)]
+      (is (false? (:success result)))
+      (is (anomaly/anomaly? a))
+      (is (= :invalid-input (:anomaly/type a)))
+      (is (nil? (:anomaly/subtype a))
+          "generic-standard incorrect has no domain subtype"))))
+
+(deftest execute-handler-exception-emits-fault-anomaly
+  (testing "handler exception yields :fault anomaly with provenance"
+    (let [t (tool/create-tool
+             {:id          :tools/throws
+              :description "throws"
+              :parameters  {}
+              :handler     throwing-handler})
+          result (tool/execute t {} {})
+          a      (:anomaly result)]
+      (is (false? (:success result)))
+      (is (anomaly/anomaly? a))
+      (is (= :fault (:anomaly/type a)))
+      (is (nil? (:anomaly/subtype a)))
+      (is (= "boom" (:anomaly/ex-message (:anomaly/data a)))))))
+
+(deftest execute-tool-not-found-emits-not-found-anomaly
+  (testing "execute-tool on a missing tool yields :not-found anomaly"
+    (let [reg    (tool/create-registry)
+          result (tool/execute-by-id reg :tools/missing {} {})
+          a      (:anomaly result)]
+      (is (false? (:success result)))
+      (is (anomaly/anomaly? a))
+      (is (= :not-found (:anomaly/type a)))
+      (is (nil? (:anomaly/subtype a))))))
