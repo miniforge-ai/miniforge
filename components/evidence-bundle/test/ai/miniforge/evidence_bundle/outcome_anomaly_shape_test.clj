@@ -32,6 +32,9 @@
    [ai.miniforge.evidence-bundle.collector :as collector]
    [ai.miniforge.response.interface :as response]))
 
+;------------------------------------------------------------------------------ Layer 0
+;; Fixtures + factories
+
 (defn- workflow-state-with-error [error]
   {:workflow/id (random-uuid)
    :workflow/status :failed
@@ -40,7 +43,8 @@
    :workflow/gate-results []
    :workflow/error error})
 
-;------------------------------------------------------------------------------ Canonical anomaly shape (post-W2 producers)
+;------------------------------------------------------------------------------ Layer 1
+;; Canonical anomaly shape (post-W2 producers)
 
 (deftest canonical-anomaly-at-error-info-routes-through-outcome
   (testing "a canonical anomaly map as :workflow/error is detected"
@@ -58,7 +62,7 @@
       (is (false? (:outcome/success outcome)))
       (is (= "agent timed out" (:outcome/error-message outcome))))))
 
-;------------------------------------------------------------------------------ Legacy anomaly shape (pre-W2 producers)
+;; Legacy anomaly shape (pre-W2 producers)
 
 (deftest legacy-anomaly-at-error-info-still-detected
   (testing "a legacy :anomaly/category map as :workflow/error is detected"
@@ -76,7 +80,7 @@
       (is (false? (:outcome/success outcome)))
       (is (= "slow" (:outcome/error-message outcome))))))
 
-;------------------------------------------------------------------------------ Non-anomaly fallback (legacy shape error map)
+;; Non-anomaly fallback (legacy shape error map)
 
 (deftest non-anomaly-error-falls-back-to-legacy-shape
   (testing "a plain error map (no :anomaly/type, no :anomaly/category)
