@@ -25,8 +25,10 @@
    and no worktree-promoted `.miniforge/<role>.edn` (and, for the implementer,
    no files written) — the work exists in the turn's text but the phase has
    nothing to carry forward, so it fails. This was first fixed for the planner
-   (PR #997); intermittent submission affects EVERY agent, so the trigger and
-   the short retry-turn runner live here and are reused by each agent.
+   (PR #997); intermittent submission affects every agent, so the trigger and
+   the short retry-turn runner live here. Both the planner and the implementer
+   route their recovery through `run-recovery-session`; verify/review/release
+   can adopt the same path as they're shown to need it.
 
    The recovery is a SINGLE bounded follow-up turn that re-feeds the prior
    content and asks only for the Write/submit — no further exploration. Each

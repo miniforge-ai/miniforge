@@ -706,25 +706,18 @@
         (file-artifacts/collect-written-files pre-session-snapshot
                                               working-dir))))
 
-(defn- render-template
-  "Render a `{{key}}`-style template with the given substitutions."
-  [template substitutions]
-  (reduce-kv (fn [text k v]
-               (str/replace text (str "{{" (name k) "}}") (or v "")))
-             (or template "")
-             substitutions))
-
 (defn- submission-retry-prompt
   "Submission-only retry prompt: re-feed the task + the prior (prose) output
    and ask the implementer to deliver the actual file writes now."
   [task-text prior-content]
-  (render-template (get @implementer-prompt-data :prompt/submission-retry-template)
-                   {:task-text task-text :prior-content prior-content}))
+  (prompts/render-template (get @implementer-prompt-data :prompt/submission-retry-template)
+                           {:task-text task-text :prior-content prior-content}))
 
 (defn- normalize-implementer-result
   "Re-normalize a session's raw channels into the implementer result shape,
-   re-collecting the file artifact from what was written this turn. Shared by
-   the main turn and the submission-recovery turn."
+   re-collecting the file artifact from what was written this turn. Used by the
+   submission-recovery turn (the main turn normalizes inline so it can also
+   surface the file artifact for its fallback log)."
   [{:keys [llm-result artifact worktree-artifacts pre-session-snapshot session-mode]}
    context working-dir]
   (let [file-artifact (collect-session-artifact context session-mode working-dir
@@ -826,7 +819,11 @@
     ;; Without this, a prose-only implement turn fails "no artifact found",
     ;; which is what stalled redirect-implements in the review-redirect churn.
     (let [submitted (:structured-artifact normalized)
-          parsed    (:parsed-content normalized)
+          ;; Fold the derived artifact (code extracted from final-message
+          ;; fences) into the "artifact already exists" guard so a turn that
+          ;; produced usable code blocks does NOT trigger an unnecessary
+          ;; recovery LLM call.
+          parsed    (or (:parsed-content normalized) (:derived-artifact normalized))
           recovered (when (submission-recovery/submission-retry?
                            response submitted parsed (:content normalized))
                       (recover-implementer-submission
