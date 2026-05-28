@@ -27,9 +27,14 @@
    - :multi  - Combine multiple sinks"
   (:require
    [ai.miniforge.config.interface :as config]
+   [cheshire.core :as json]
    [clojure.java.io :as io]
    [clojure.string :as str]
-   [ai.miniforge.logging.core :as core]))
+   [ai.miniforge.logging.core :as core])
+  (:import
+   [java.net URI]
+   [java.net.http HttpClient HttpRequest HttpRequest$BodyPublishers HttpResponse$BodyHandlers]
+   [java.time Duration]))
 
 ;;------------------------------------------------------------------------------ Layer 0: File Sink
 
@@ -145,28 +150,42 @@
      Optional:
        :batch-size - Number of logs to batch (default 50)
        :flush-interval-ms - Max time before flushing (default 10000)
+       :timeout-ms - HTTP timeout in ms (default 10000)
+       :http-client - java.net.http.HttpClient instance (default: HttpClient/newHttpClient)
 
    Returns: Sink function (fn [log-entry] -> nil)"
   [opts]
-  (let [_url (or (:url opts) (throw (ex-info "Fleet sink requires :url" {})))
-        _api-key (:api-key opts)
-        batch-size (:batch-size opts 50)
+  (let [url               (or (:url opts) (throw (ex-info "Fleet sink requires :url" {})))
+        api-key           (:api-key opts)
+        batch-size        (:batch-size opts 50)
         flush-interval-ms (:flush-interval-ms opts 10000)
-        batch-atom (atom [])
-        last-flush-atom (atom (System/currentTimeMillis))]
+        timeout-ms        (:timeout-ms opts 10000)
+        http-client       (or (:http-client opts) (HttpClient/newHttpClient))
+        batch-atom        (atom [])
+        last-flush-atom   (atom (System/currentTimeMillis))]
 
     (letfn [(flush-batch! []
               (let [logs @batch-atom]
                 (when (seq logs)
                   (try
-                    ;; TODO: Implement HTTP POST to fleet command
-                    ;; (http/post (str _url "/logs")
-                    ;;            {:headers {"Authorization" (str "Bearer " _api-key)}
-                    ;;             :body (json/generate-string {:logs logs})})
-                    (reset! batch-atom [])
-                    (reset! last-flush-atom (System/currentTimeMillis))
-                    (catch Exception _e
-                      nil)))))]
+                    (let [body    (json/generate-string {:logs logs})
+                          request (-> (HttpRequest/newBuilder)
+                                      (.uri (URI/create (str url "/logs")))
+                                      (.timeout (Duration/ofMillis timeout-ms))
+                                      (.header "Authorization" (str "Bearer " api-key))
+                                      (.header "Content-Type" "application/json")
+                                      (.POST (HttpRequest$BodyPublishers/ofString body))
+                                      (.build))
+                          response (.send http-client request (HttpResponse$BodyHandlers/discarding))]
+                      (when (>= (.statusCode response) 400)
+                        (binding [*out* *err*]
+                          (println (str "fleet-sink: POST " url "/logs returned HTTP "
+                                        (.statusCode response))))))
+                    (catch Exception e
+                      (binding [*out* *err*]
+                        (println "fleet-sink: flush error:" (ex-message e)))))
+                  (reset! batch-atom [])
+                  (reset! last-flush-atom (System/currentTimeMillis)))))]
 
       (fn [entry]
         (swap! batch-atom conj entry)

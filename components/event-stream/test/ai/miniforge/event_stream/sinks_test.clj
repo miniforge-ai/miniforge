@@ -377,18 +377,22 @@
     (is (fn? (sinks/fleet-sink {:url "https://fleet.example.com"
                                 :api-key "test-key"}))))
 
-  (testing "batches events according to batch-size"
-    (let [sink (sinks/fleet-sink {:url "https://fleet.example.com"
-                                  :batch-size 3
-                                  :flush-interval-ms 999999})]
-      ;; Should accept events without throwing
+  (testing "batches events and POSTs on flush"
+    (let [posted      (atom nil)
+          mock-resp   (reify java.net.http.HttpResponse
+                        (statusCode [_] 200))
+          mock-client (proxy [java.net.http.HttpClient] []
+                        (send [_req _handler]
+                          (reset! posted true)
+                          mock-resp))
+          sink (sinks/fleet-sink {:url              "https://fleet.example.com"
+                                  :batch-size        3
+                                  :flush-interval-ms 999999
+                                  :http-client       mock-client})]
       (sink (sample-event))
       (sink (sample-event))
-      ;; Third event should trigger a flush attempt
       (sink (sample-event))
-      ;; No assertions on HTTP call since it's stubbed,
-      ;; but verify it doesn't throw
-      (is true))))
+      (is (true? @posted) "flush sends an HTTP POST on batch-size trigger"))))
 
 ;------------------------------------------------------------------------------ Layer 1b
 ;; file-sink error reporting

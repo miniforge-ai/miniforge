@@ -39,13 +39,16 @@
    [ai.miniforge.event-stream.snowflake :as snowflake]
    [ai.miniforge.event-stream.storage-layout :as layout]
    [ai.miniforge.response.interface :as response]
+   [cheshire.core :as json]
    [clojure.java.io :as io]
    [clojure.string :as str]
    [clojure.pprint :as pprint]
    [cognitect.transit :as transit])
   (:import
    [java.io ByteArrayOutputStream]
-   [java.time Instant ZonedDateTime ZoneOffset]
+   [java.net URI]
+   [java.net.http HttpClient HttpRequest HttpRequest$BodyPublishers HttpResponse$BodyHandlers]
+   [java.time Duration Instant ZonedDateTime ZoneOffset]
    [java.time.format DateTimeFormatter]))
 
 ;;------------------------------------------------------------------------------ Internal helpers
@@ -349,36 +352,45 @@
        :batch-size - Number of events to batch (default 10)
        :flush-interval-ms - Max time before flushing (default 5000)
        :timeout-ms - HTTP timeout (default 10000)
+       :http-client - java.net.http.HttpClient instance (default: HttpClient/newHttpClient)
 
    Returns: Sink function (fn [event] -> nil)"
   [opts]
-  (let [safe-opts (dissoc opts :api-key :token :secret :password)
-        _url (or (:url opts)
-                 (response/throw-anomaly! :anomalies/incorrect
-                                          "Fleet sink requires :url"
-                                          {:opts safe-opts}))
-        _api-key (:api-key opts)
-        batch-size (:batch-size opts 10)
+  (let [safe-opts   (dissoc opts :api-key :token :secret :password)
+        url         (or (:url opts)
+                        (response/throw-anomaly! :anomalies/incorrect
+                                                 "Fleet sink requires :url"
+                                                 {:opts safe-opts}))
+        api-key          (:api-key opts)
+        batch-size       (:batch-size opts 10)
         flush-interval-ms (:flush-interval-ms opts 5000)
-        _timeout-ms (:timeout-ms opts 10000)
-        batch-atom (atom [])
-        last-flush-atom (atom (System/currentTimeMillis))]
+        timeout-ms       (:timeout-ms opts 10000)
+        http-client      (or (:http-client opts) (HttpClient/newHttpClient))
+        batch-atom       (atom [])
+        last-flush-atom  (atom (System/currentTimeMillis))]
 
     (letfn [(flush-batch! []
               (let [events @batch-atom]
                 (when (seq events)
                   (try
-                    ;; TODO: Implement HTTP POST to fleet command
-                    ;; (http/post (str _url "/events")
-                    ;;            {:headers {"Authorization" (str "Bearer " _api-key)
-                    ;;                       "Content-Type" "application/json"}
-                    ;;             :body (json/generate-string {:events events})
-                    ;;             :timeout _timeout-ms})
-                    (reset! batch-atom [])
-                    (reset! last-flush-atom (System/currentTimeMillis))
-                    (catch Exception _e
-                      ;; Log error but don't fail
-                      nil)))))]
+                    (let [body    (json/generate-string {:events events})
+                          request (-> (HttpRequest/newBuilder)
+                                      (.uri (URI/create (str url "/events")))
+                                      (.timeout (Duration/ofMillis timeout-ms))
+                                      (.header "Authorization" (str "Bearer " api-key))
+                                      (.header "Content-Type" "application/json")
+                                      (.POST (HttpRequest$BodyPublishers/ofString body))
+                                      (.build))
+                          response (.send http-client request (HttpResponse$BodyHandlers/discarding))]
+                      (when (>= (.statusCode response) 400)
+                        (binding [*out* *err*]
+                          (println (str "fleet-sink: POST " url "/events returned HTTP "
+                                        (.statusCode response))))))
+                    (catch Exception e
+                      (binding [*out* *err*]
+                        (println "fleet-sink: flush error:" (ex-message e)))))
+                  (reset! batch-atom [])
+                  (reset! last-flush-atom (System/currentTimeMillis)))))]
 
       (fn [event]
         (swap! batch-atom conj event)
