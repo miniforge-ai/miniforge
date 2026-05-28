@@ -693,6 +693,60 @@
 ;------------------------------------------------------------------------------ Layer 5
 ;; Agent creation
 
+;;----------------------------------------------------------------------------- Enumeration-retry validator
+;; A rejection without enumerated :blocking findings is malformed (the
+;; implementer cannot act on it). Mirrors the planner/implementer
+;; submission-recovery pattern but for the reviewer's *output shape* — re-runs
+;; the reviewer once with an enumeration-retry prompt that demands the inline
+;; list. The reviewer doesn't use artifact-session/worktree-promotion, so the
+;; retry is a direct LLM call (not the session-wrapped run-recovery-session).
+
+(def ^:private rejection-decisions
+  "Decisions that mean 'rejected — needs work'. Mirrors review.clj's
+   `blocking-decisions`; defined locally to avoid a cross-component require."
+  #{:rejected :changes-requested})
+
+(defn- review-has-blocking?
+  "True when `issues` contains at least one entry with :severity :blocking."
+  [issues]
+  (boolean (some #(= :blocking (:severity %)) issues)))
+
+(defn- enumeration-retry?
+  "True when the LLM's review decision is a rejection but it enumerated NO
+   :blocking findings AND the deterministic gates have no blocking issues
+   either — a malformed rejection the implementer cannot act on. The validator
+   rejects this review and demands a re-enumeration."
+  [llm-decision llm-issues gate-blocking]
+  (and (contains? rejection-decisions llm-decision)
+       (not (review-has-blocking? llm-issues))
+       (empty? gate-blocking)))
+
+(defn- enumeration-retry-prompt
+  "Render the enumeration-retry template with the prior (malformed) review
+   output folded in as reference."
+  [prior-content]
+  (prompts/render-template
+   (get @reviewer-prompt-data :prompt/enumeration-retry-template)
+   {:prior-content prior-content}))
+
+(defn- recover-review-enumeration
+  "Run ONE bounded enumeration-retry turn and return the re-parsed
+   ReviewArtifact when recovery now enumerates blockers, or nil when recovery
+   also failed to enumerate (the original rejection then stands as-is)."
+  [llm-client base-opts on-chunk prior-content]
+  (let [retry-prompt (enumeration-retry-prompt prior-content)
+        retry-opts   (assoc base-opts :max-turns
+                            (get @reviewer-prompt-data
+                                 :prompt/enumeration-retry-max-turns 6))
+        response     (if on-chunk
+                       (llm/chat-stream llm-client retry-prompt on-chunk retry-opts)
+                       (llm/chat llm-client retry-prompt retry-opts))
+        normalized   (result-boundary/normalize-llm-result
+                      {:response response :parse-response parse-review-response})
+        re-review    (:parsed-content normalized)]
+    (when (review-has-blocking? (get re-review :review/issues []))
+      re-review)))
+
 (defn create-reviewer
   "Create a Reviewer agent with optional configuration overrides.
 
@@ -793,13 +847,44 @@
                     counts (calculate-gate-counts gate-feedbacks)
                     timeout-failure-message (backend-failure-message response llm-review)
                     timeout-only-review? (timeout-only-review? llm-review gate-result)
-                    llm-decision (cond
-                                   timeout-only-review? nil
-                                   parse-failed? :rejected
-                                   llm-review (normalize-llm-decision (:review/decision llm-review)))
-                    llm-issues (get llm-review :review/issues [])
-                    llm-strengths (get llm-review :review/strengths [])
-                    llm-summary (:review/summary llm-review)
+                    raw-llm-decision (cond
+                                       timeout-only-review? nil
+                                       parse-failed? :rejected
+                                       llm-review (normalize-llm-decision (:review/decision llm-review)))
+                    raw-llm-issues (get llm-review :review/issues [])
+                    raw-llm-strengths (get llm-review :review/strengths [])
+                    raw-llm-summary (:review/summary llm-review)
+
+                    ;; ENUMERATION VALIDATOR: a rejection without enumerated
+                    ;; :blocking findings is malformed — the implementer
+                    ;; cannot act on it, and silent "rejected but listed
+                    ;; nothing" reviews drove the 2026-05-27 dogfood
+                    ;; review-redirect churn. Re-run the reviewer ONCE with an
+                    ;; enumeration-retry prompt; use the recovered review iff
+                    ;; it now lists blockers. Otherwise the raw rejection
+                    ;; stands as-is.
+                    recovered-review (when (enumeration-retry?
+                                            raw-llm-decision raw-llm-issues
+                                            (:blocking-issues gate-result))
+                                       (log/info logger :reviewer
+                                                 :reviewer/enumeration-retry
+                                                 {:data {:raw-decision        raw-llm-decision
+                                                         :raw-issue-count     (count raw-llm-issues)
+                                                         :gate-blocking-count (count (:blocking-issues gate-result))}})
+                                       (recover-review-enumeration
+                                        llm-client base-opts on-chunk content))
+                    llm-decision  (if recovered-review
+                                    (normalize-llm-decision (:review/decision recovered-review))
+                                    raw-llm-decision)
+                    llm-issues    (if recovered-review
+                                    (get recovered-review :review/issues [])
+                                    raw-llm-issues)
+                    llm-strengths (if recovered-review
+                                    (get recovered-review :review/strengths [])
+                                    raw-llm-strengths)
+                    llm-summary   (if recovered-review
+                                    (:review/summary recovered-review)
+                                    raw-llm-summary)
 
                     ;; Merge decisions: gates can override LLM
                     final-decision (if llm-decision

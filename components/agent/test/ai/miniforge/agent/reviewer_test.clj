@@ -978,3 +978,35 @@
             ;; The base prompt is unchanged when no addendum is appended;
             ;; assertion is just that we didn't NPE or get nil.
             (is (pos? (count system-prompt)))))))))
+
+;;----------------------------------------------------------------------------- Enumeration-retry validator
+
+(def ^:private enumeration-retry? #'reviewer/enumeration-retry?)
+
+(deftest enumeration-retry-fires-on-rejection-without-blockers
+  (testing "a :rejected (or :changes-requested) decision with NO :blocking
+            findings inline AND no gate blockers is malformed — the validator
+            triggers a re-enumeration"
+    (is (true? (boolean (enumeration-retry? :rejected           [] []))))
+    (is (true? (boolean (enumeration-retry? :changes-requested  [] []))))
+    (is (true? (boolean (enumeration-retry? :rejected
+                                            [{:severity :warning :description "nit"}]
+                                            []))))))
+
+(deftest enumeration-retry-no-fire-when-blockers-enumerated
+  (testing "a rejection with an inline :blocking finding is well-formed"
+    (is (false? (boolean (enumeration-retry?
+                          :rejected
+                          [{:severity :blocking :description "real issue"}]
+                          []))))))
+
+(deftest enumeration-retry-no-fire-when-gate-blocks
+  (testing "a rejection backed by a deterministic gate blocker is well-formed
+            (the implementer has something concrete to fix)"
+    (is (false? (boolean (enumeration-retry?
+                          :rejected [] ["gate-blocking-issue"]))))))
+
+(deftest enumeration-retry-no-fire-on-non-rejection
+  (testing ":approved / :conditionally-approved never trigger the validator"
+    (is (false? (boolean (enumeration-retry? :approved [] []))))
+    (is (false? (boolean (enumeration-retry? :conditionally-approved [] []))))))

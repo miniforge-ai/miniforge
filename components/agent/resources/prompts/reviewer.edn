@@ -161,4 +161,35 @@ artifact.**
   commented-out blocks (008 no-dead-code). Treat them as blocking
   issues, not style preferences.
 
-Output your review as a Clojure map inside a ```clojure code block."}
+Output your review as a Clojure map inside a ```clojure code block."
+
+ ;; Bounded enumeration-retry turn — used by the review-output validator when a
+ ;; :rejected / :changes-requested decision lands WITHOUT any :blocking items
+ ;; in :review/issues. A rejection without enumerated blockers can't tell the
+ ;; implementer what to fix; the validator rejects that decision and demands a
+ ;; re-review that lists every blocking finding inline.
+ :prompt/enumeration-retry-max-turns 6
+
+ :prompt/enumeration-retry-template
+ "Your last review returned a rejection decision without enumerating any
+:blocking findings in :review/issues. A rejection the implementer cannot act on
+is malformed — the implementer needs the concrete list of blockers to fix.
+
+Re-review NOW and produce a SINGLE comprehensive ReviewArtifact map that:
+- Repeats the decision (:rejected or :changes-requested as appropriate).
+- Lists EVERY blocking finding inline in :review/issues with :severity
+  :blocking, :file, :line (when applicable), :description, and a concrete
+  :suggestion. Walk every changed file; do not stop after the first.
+- Include :warning and :nit findings too in the same map.
+
+If on re-review you find no real blockers, return :approved (or
+:conditionally-approved with only :warning/:nit findings) — do not invent
+blockers to justify the prior rejection.
+
+Your previous (malformed) review output, for reference only — DO NOT just
+repeat it:
+
+{{prior-content}}
+
+Output ONLY the corrected ReviewArtifact map inside a ```clojure code block.
+No prose narration outside the block."}
