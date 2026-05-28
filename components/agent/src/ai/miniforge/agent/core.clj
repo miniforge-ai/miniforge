@@ -29,6 +29,7 @@
    [ai.miniforge.agent.memory :as memory]
    [ai.miniforge.agent.role-config :as role-config]
    [ai.miniforge.agent.task-classifier :as classifier]
+   [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.llm.interface :as llm]
    [ai.miniforge.response.interface :as response]
    [ai.miniforge.tool.interface :as tool]
@@ -147,11 +148,21 @@ Output execution logs and status reports."})
 
 (defn execution-failure
   "Build a canonical execution failure response from an exception.
-   Uses response/failure as the base and merges domain-specific agent keys."
+   Uses response/failure as the base and merges domain-specific agent
+   keys.
+
+   W2 convergence: the embedded `:anomaly` is a canonical
+   `ai.miniforge.anomaly` map of type `:fault` (per the runbook's
+   generic-standard `:anomalies/fault` → `:fault` mapping) carrying the
+   exception's class + message + ex-data provenance under
+   `:anomaly/data` via `anomaly/exception-anomaly`."
   [^Throwable e & [extra]]
   (merge (response/failure (ex-message e)
                            {:data {:exception-type (str (type e))}})
-         {:anomaly (response/from-exception e)
+         {:anomaly (anomaly/exception-anomaly
+                    :fault
+                    (or (ex-message e) (str (type e)))
+                    e)
           :outputs []
           :decisions [:execution-error]
           :signals [:task-failed]
