@@ -26,16 +26,17 @@
 
 (deftest sub-anomaly-is-canonical-with-subtype
   (testing "result satisfies anomaly?, keeps the generic type, carries the subtype"
-    (let [a (anomaly/sub-anomaly :invalid-input :gate/validation-failed "gate rejected" {:gate "lint"})]
+    (let [a (anomaly/sub-anomaly :invalid-input :anomalies.gate/validation-failed
+                                 "gate rejected" {:gate "lint"})]
       (is (anomaly/anomaly? a))
       (is (= :invalid-input (:anomaly/type a)))
-      (is (= :gate/validation-failed (:anomaly/subtype a)))
+      (is (= :anomalies.gate/validation-failed (:anomaly/subtype a)))
       (is (= "lint" (get-in a [:anomaly/data :gate]))))))
 
 (deftest subtype-reads-domain-classification
   (testing "subtype returns the keyword, or nil for a generic anomaly"
-    (is (= :agent/tool-loop
-           (anomaly/subtype (anomaly/sub-anomaly :fault :agent/tool-loop "loop" {}))))
+    (is (= :anomalies.agent/tool-loop
+           (anomaly/subtype (anomaly/sub-anomaly :fault :anomalies.agent/tool-loop "loop" {}))))
     (is (nil? (anomaly/subtype (anomaly/anomaly :fault "plain" {}))))))
 
 (deftest generic-anomaly-omits-subtype-key
@@ -44,7 +45,9 @@
       (is (not (contains? a :anomaly/subtype)))
       (is (anomaly/anomaly? a)))))
 
-(deftest subtype-rejects-non-keyword
-  (testing "a non-keyword subtype violates the schema (anomaly? is false)"
-    (is (false? (anomaly/anomaly? (assoc (anomaly/anomaly :fault "x" {})
-                                         :anomaly/subtype "not-a-keyword"))))))
+(deftest sub-anomaly-rejects-non-keyword-subtype
+  (testing "a nil or non-keyword subtype throws, never yields a schema-invalid map"
+    (is (thrown? IllegalArgumentException
+                 (anomaly/sub-anomaly :fault "not-a-keyword" "x" {})))
+    (is (thrown? IllegalArgumentException
+                 (anomaly/sub-anomaly :fault nil "x" {})))))

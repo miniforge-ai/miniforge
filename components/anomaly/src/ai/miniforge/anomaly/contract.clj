@@ -73,11 +73,11 @@
 
    Optionally:
    - :anomaly/subtype — a finer domain classification keyword (e.g.
-     :gate/validation-failed, :agent/tool-loop) that routing and
-     classification dispatch on. Narrower than the generic
-     :anomaly/type, which stays one of the standard vocabulary while the
-     subtype names the domain-specific failure. Absent for purely
-     generic anomalies."
+     :anomalies.gate/validation-failed, :anomalies.agent/tool-loop) that
+     routing and classification dispatch on. It is the established
+     domain category from the :anomalies.* vocabulary, carried
+     alongside the generic :anomaly/type (which stays one of the
+     standard set). Absent for purely generic anomalies."
   [:map {:closed true}
    [:anomaly/type    (into [:enum] anomaly-types)]
    [:anomaly/message :string]
