@@ -39,10 +39,16 @@
   [(gates/make-error :syntax-error "Unexpected EOF")
    (gates/make-error :missing-require "core required but not imported")])
 
+(defn- failing-syntax-check
+  "Factory: a `fail-result` for the canonical `:syntax-check`/`:syntax`
+   gate with the test's `sample-errors`. Centralises the fixture so the
+   `gates/fail-result` arglist is bound in exactly one place."
+  []
+  (gates/fail-result :syntax-check :syntax sample-errors))
+
 (deftest fail-result-emits-canonical-gate-anomaly
   (testing ":gate/anomaly satisfies the canonical anomaly contract"
-    (let [result (gates/fail-result :syntax-check :syntax sample-errors)
-          anom   (:gate/anomaly result)]
+    (let [anom (:gate/anomaly (failing-syntax-check))]
       (is (anomaly/anomaly? anom)
           ":gate/anomaly is a canonical anomaly map after W2 flip")
       (is (= :invalid-input (:anomaly/type anom))
@@ -51,8 +57,7 @@
           "legacy gate category preserved verbatim as :anomaly/subtype")))
 
   (testing "gate identity + error payload live under :anomaly/data"
-    (let [result (gates/fail-result :syntax-check :syntax sample-errors)
-          data   (:anomaly/data (:gate/anomaly result))]
+    (let [data (:anomaly/data (:gate/anomaly (failing-syntax-check)))]
       (is (= :syntax-check (:gate/id data))
           "gate id moves from top-level :anomaly.gate/* into :anomaly/data")
       (is (= :syntax (:gate/type data)))
@@ -60,14 +65,14 @@
           "gate errors carried under :anomaly/data :gate/errors")))
 
   (testing "flat :gate/errors on the result map is unchanged"
-    (let [result (gates/fail-result :syntax-check :syntax sample-errors)]
+    (let [result (failing-syntax-check)]
       (is (= sample-errors (:gate/errors result))
           "flat :gate/errors on the gate result is independent of the embedded anomaly")
       (is (false? (:gate/passed? result))))))
 
 (deftest fail-result-no-top-level-domain-keys-on-anomaly
   (testing "domain payload does NOT leak onto the anomaly's top level"
-    (let [anom (:gate/anomaly (gates/fail-result :syntax-check :syntax sample-errors))]
+    (let [anom (:gate/anomaly (failing-syntax-check))]
       (is (nil? (:anomaly.gate/errors anom))
           "legacy :anomaly.gate/errors no longer set at the anomaly's top level")
       (is (nil? (:gate/errors anom))

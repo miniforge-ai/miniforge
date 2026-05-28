@@ -18,6 +18,7 @@
 
 (ns ai.miniforge.loop.inner-test
   (:require [clojure.test :as test :refer [deftest testing is]]
+            [ai.miniforge.anomaly.interface :as anomaly]
             [ai.miniforge.fsm.interface :as fsm]
             [ai.miniforge.loop.inner :as inner]
             [ai.miniforge.loop.gates :as gates]
@@ -202,7 +203,25 @@
           failing-fn (fn [_t _c] (throw (Exception. "Generation error")))
           result (inner/generate-step loop-state failing-fn {})]
       (is (= :failed (:loop/state result)))
-      (is (seq (:loop/errors result))))))
+      (is (seq (:loop/errors result)))))
+
+  (testing "generation exception emits canonical :fault anomaly (W2 shape)"
+    (let [loop-state (inner/create-inner-loop test-task {})
+          failing-fn (fn [_t _c] (throw (Exception. "Generation error")))
+          result (inner/generate-step loop-state failing-fn {})
+          err (first (:loop/errors result))
+          anom (:anomaly err)]
+      (is (anomaly/anomaly? anom)
+          ":anomaly on the error map is a canonical anomaly after W2 flip")
+      (is (= :fault (:anomaly/type anom))
+          "generic-standard :anomalies/fault maps to :fault with no subtype")
+      (is (nil? (:anomaly/subtype anom))
+          "exception path does not carry a domain subtype")
+      (is (= "Generation error" (:anomaly/message anom)))
+      (is (= "Generation error" (get-in anom [:anomaly/data :anomaly/ex-message]))
+          "original exception message preserved under :anomaly/data")
+      (is (= "java.lang.Exception" (get-in anom [:anomaly/data :anomaly/ex-class]))
+          "exception class preserved under :anomaly/data"))))
 
 (deftest validate-step-test
   (testing "all gates pass transitions to complete"

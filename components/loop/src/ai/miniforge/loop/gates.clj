@@ -72,10 +72,14 @@
    W2 convergence: anomaly is constructed via `anomaly/sub-anomaly` with
    `:anomaly/type :invalid-input` (per the runbook map for
    `:anomalies.gate/validation-failed`) and the gate errors live under
-   `:anomaly/data :gate/errors` — the canonical schema is closed; only
-   the four canonical keys live at the top level. The errors are also
-   kept as a flat `:gate/errors` on the gate result map for downstream
-   consumers that already read it there (independent of the anomaly)."
+   `:anomaly/data :gate/errors`. The canonical schema is closed over the
+   `:anomaly/*` namespace — only `:anomaly/type`, `:anomaly/message`,
+   `:anomaly/data`, `:anomaly/at`, and the optional `:anomaly/subtype`
+   live at the top level; all domain payload (here `:gate/id`,
+   `:gate/type`, `:gate/errors`) lives under `:anomaly/data`. The errors
+   are also kept as a flat `:gate/errors` on the gate result map for
+   downstream consumers that already read it there (independent of the
+   embedded anomaly)."
   [gate-id gate-type errors & {:keys [warnings duration-ms]}]
   (cond-> {:gate/id gate-id
            :gate/type gate-type
