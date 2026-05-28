@@ -74,6 +74,18 @@
       (when-let [canonical-key (get domain-key-bridge legacy-key)]
         (get-in anomaly-map [:anomaly/data canonical-key]))))
 
+(defn- assoc-domain-value
+  "Bridge-read `legacy-key` from `anomaly-map` and, when present, assoc it
+   under `out-key` in `target`. Bridges via `domain-value` so both legacy
+   and canonical anomaly shapes hit the same output slot. When `out-key`
+   is omitted it defaults to `legacy-key`."
+  ([target anomaly-map legacy-key]
+   (assoc-domain-value target anomaly-map legacy-key legacy-key))
+  ([target anomaly-map legacy-key out-key]
+   (if-let [v (domain-value anomaly-map legacy-key)]
+     (assoc target out-key v)
+     target)))
+
 ;; User-facing message translation (defined first — used by HTTP translator)
 
 (def category->user-message
@@ -282,23 +294,14 @@
    ;; `domain-value`. `:anomaly/id` is legacy-only — canonical anomalies
    ;; don't carry one and it's simply absent for them.
    :outcome/error-details
-   (cond-> (select-keys anomaly-map [:anomaly/id :anomaly/category])
-     (domain-value anomaly-map :anomaly.gate/errors)
-     (assoc :anomaly.gate/errors (domain-value anomaly-map :anomaly.gate/errors))
-
-     (domain-value anomaly-map :anomaly.agent/role)
-     (assoc :anomaly.agent/role (domain-value anomaly-map :anomaly.agent/role))
-
-     (domain-value anomaly-map :anomaly.llm/model)
-     (assoc :anomaly.llm/model (domain-value anomaly-map :anomaly.llm/model))
-
-     (domain-value anomaly-map :anomaly.repair/strategy)
-     (assoc :anomaly.repair/strategy
-            (domain-value anomaly-map :anomaly.repair/strategy))
-
-     (domain-value anomaly-map :anomaly.repair/attempts)
-     (assoc :anomaly.repair/attempts
-            (domain-value anomaly-map :anomaly.repair/attempts)))})
+   (reduce (fn [details legacy-key]
+             (assoc-domain-value details anomaly-map legacy-key))
+           (select-keys anomaly-map [:anomaly/id :anomaly/category])
+           [:anomaly.gate/errors
+            :anomaly.agent/role
+            :anomaly.llm/model
+            :anomaly.repair/strategy
+            :anomaly.repair/attempts])})
 
 ;------------------------------------------------------------------------------ Layer 5
 ;; Error coercion (any shape -> anomaly map)
