@@ -111,3 +111,67 @@
            (:outcome/anomaly-code
             (response/anomaly->outcome-evidence
              (canonical-anomaly :unavailable :anomalies/unavailable)))))))
+
+;; ---------------------------------------------------------------------------- Domain-payload dual-shape reads
+
+(deftest log-data-reads-gate-errors-from-both-shapes
+  (testing "anomaly->log-data finds :anomaly.gate/errors whether they live at
+            the legacy top level or under :anomaly/data after the flatten"
+    (let [legacy   {:anomaly/category :anomalies.gate/validation-failed
+                    :anomaly/message "gate"
+                    :anomaly.gate/errors [{:e 1} {:e 2}]}
+          canonical {:anomaly/type :invalid-input
+                     :anomaly/subtype :anomalies.gate/validation-failed
+                     :anomaly/message "gate"
+                     :anomaly/data {:gate/errors [{:e 1} {:e 2}]}}]
+      (is (= 2 (:anomaly.gate/error-count (response/anomaly->log-data legacy))))
+      (is (= 2 (:anomaly.gate/error-count (response/anomaly->log-data canonical)))))))
+
+(deftest log-data-reads-agent-role-from-both-shapes
+  (testing "anomaly->log-data finds :anomaly.agent/role on either shape"
+    (let [legacy {:anomaly/category :anomalies.agent/tool-loop
+                  :anomaly/message "loop"
+                  :anomaly.agent/role :implementer}
+          canonical {:anomaly/type :exhausted
+                     :anomaly/subtype :anomalies.agent/tool-loop
+                     :anomaly/message "loop"
+                     :anomaly/data {:agent/role :implementer}}]
+      (is (= :implementer (:anomaly.agent/role (response/anomaly->log-data legacy))))
+      (is (= :implementer (:anomaly.agent/role (response/anomaly->log-data canonical)))))))
+
+(deftest outcome-evidence-reads-domain-payload-from-both-shapes
+  (testing "anomaly->outcome-evidence :outcome/error-details carries gate /
+            agent / llm / repair payload regardless of whether the producer
+            emitted them at the top level or under :anomaly/data"
+    (let [legacy {:anomaly/category :anomalies.repair/repair-failed
+                  :anomaly/message "boom"
+                  :anomaly.gate/errors [{:e 1}]
+                  :anomaly.agent/role :reviewer
+                  :anomaly.llm/model "gpt-4o"
+                  :anomaly.repair/strategy :rebuild
+                  :anomaly.repair/attempts 3}
+          canonical {:anomaly/type :fault
+                     :anomaly/subtype :anomalies.repair/repair-failed
+                     :anomaly/message "boom"
+                     :anomaly/data {:gate/errors [{:e 1}]
+                                    :agent/role :reviewer
+                                    :llm/model "gpt-4o"
+                                    :repair/strategy :rebuild
+                                    :repair/attempts 3}}
+          legacy-details (:outcome/error-details (response/anomaly->outcome-evidence legacy))
+          canonical-details (:outcome/error-details (response/anomaly->outcome-evidence canonical))]
+      (doseq [k [:anomaly.gate/errors :anomaly.agent/role :anomaly.llm/model
+                 :anomaly.repair/strategy :anomaly.repair/attempts]]
+        (is (= (get legacy-details k) (get canonical-details k))
+            (str k " survives the flatten via :anomaly/data bridge"))))))
+
+(deftest outcome-evidence-omits-domain-payload-when-absent
+  (testing "domain keys are only emitted when present in either shape — no
+            spurious nils in :outcome/error-details when the anomaly carries
+            no domain payload at all"
+    (let [details (:outcome/error-details
+                   (response/anomaly->outcome-evidence
+                    {:anomaly/type :fault :anomaly/message "x"}))]
+      (is (not (contains? details :anomaly.gate/errors)))
+      (is (not (contains? details :anomaly.agent/role)))
+      (is (not (contains? details :anomaly.llm/model))))))
