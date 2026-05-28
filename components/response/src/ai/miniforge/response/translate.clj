@@ -31,7 +31,8 @@
    - Evidence:      anomaly->outcome-evidence
    - Inbound:       coerce (legacy error -> anomaly map)"
   (:require
-   [ai.miniforge.response.anomaly :as anomaly]))
+   [ai.miniforge.response.anomaly :as anomaly]
+   [ai.miniforge.response.messages :as msg]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Shape-bridging accessor (read both legacy and canonical anomaly shapes)
@@ -103,7 +104,10 @@
   [anomaly-map]
   (let [category (dispatch-key anomaly-map)]
     (or (get category->user-message category)
-        (str "An error occurred: " (name category)))))
+        (if category
+          (msg/t :error/anomaly-fallback-with-category
+                 {:category (name category)})
+          (msg/t :error/anomaly-fallback-unknown)))))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; HTTP boundary translation

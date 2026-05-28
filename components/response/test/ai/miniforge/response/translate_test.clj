@@ -54,6 +54,15 @@
     (is (string? (response/anomaly->user-message {:anomaly/type :fault}))
         "type-only generic anomalies still get a (fallback) string message")))
 
+(deftest user-message-never-throws-on-missing-classification
+  (testing "an anomaly with no :anomaly/subtype, :anomaly/category, or
+            :anomaly/type does not NPE on (name nil); it falls back to a
+            localized 'unknown error' string. Preserves the translator's
+            'never exposes internal details, never throws' contract."
+    (is (string? (response/anomaly->user-message {})))
+    (is (string? (response/anomaly->user-message
+                  {:anomaly/message "internal"})))))
+
 (deftest http-status-honors-subtype-over-category
   (testing "subtype wins when both are set — half-migrated maps cannot
             revert the status via a stale :anomaly/category"
