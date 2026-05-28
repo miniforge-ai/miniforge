@@ -409,3 +409,49 @@
           (is (fc/valid-failure-class? result)
               (str "classify returned invalid class " result
                    " for input " (pr-str input))))))))
+
+;; ---------------------------------------------------------------------------- Anomaly-shape dispatch (response→anomaly convergence)
+
+(deftest classify-prefers-anomaly-subtype-over-category-test
+  (testing "after the convergence flip, :anomaly/subtype carries the legacy
+            category keyword verbatim — classify dispatches on it just like
+            it dispatched on :anomaly/category before, returning the same
+            failure class"
+    (is (= :failure.class/timeout
+           (fc/classify {:anomaly/subtype :anomalies/timeout
+                         :anomaly/type :timeout})))
+    (is (= :failure.class/external
+           (fc/classify {:anomaly/subtype :anomalies/unavailable
+                         :anomaly/type :unavailable})))))
+
+(deftest classify-still-honors-legacy-category-during-migration-test
+  (testing "un-migrated callers still emit :anomaly/category; classify must
+            keep classifying them until every producer has flipped (the
+            fallback is removed in W5)"
+    (is (= :failure.class/timeout
+           (fc/classify {:anomaly/category :anomalies/timeout})))
+    (is (= :failure.class/external
+           (fc/classify {:anomaly/category :anomalies/unavailable})))))
+
+(deftest classify-subtype-wins-over-category-when-both-present-test
+  (testing "subtype is preferred over category; if both are set, the canonical
+            (subtype) value wins so a half-migrated caller cannot revert
+            classification by leaving stale :anomaly/category in place"
+    (is (= :failure.class/timeout
+           (fc/classify {:anomaly/subtype :anomalies/timeout
+                         :anomaly/category :anomalies/unavailable})))))
+
+(deftest classify-falls-back-to-type-for-generic-canonical-anomalies-test
+  (testing "a purely generic canonical anomaly (no subtype, no legacy
+            category) classifies via :anomaly/type when the rules-map has
+            an entry — otherwise falls through to message/exception
+            strategies. :anomalies/timeout is already in anomaly-map, so a
+            canonical :timeout-only anomaly classifies via that mapping
+            because :anomalies/timeout has the same name; type-only generic
+            anomalies whose type isn't a rules-map key fall through."
+    ;; canonical-only anomaly with no subtype/category — type is :unknown-key
+    ;; to the anomaly-map → must fall through, never throw
+    (let [result (fc/classify {:anomaly/type :fault})]
+      (is (fc/valid-failure-class? result)
+          "type-only generic anomaly still produces a valid failure class
+           (via fall-through to exception/message/unknown)"))))

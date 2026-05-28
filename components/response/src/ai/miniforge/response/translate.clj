@@ -34,6 +34,22 @@
    [ai.miniforge.response.anomaly :as anomaly]))
 
 ;------------------------------------------------------------------------------ Layer 0
+;; Shape-bridging accessor (read both legacy and canonical anomaly shapes)
+
+(defn- dispatch-key
+  "Read the dispatch keyword from an anomaly map, transparently bridging
+   the legacy `:anomaly/category` shape and the canonical
+   `:anomaly/subtype` + `:anomaly/type` shape during the convergence
+   migration. Prefer `:anomaly/subtype` (which carries the legacy
+   category keyword verbatim post-flip), then fall back to the legacy
+   `:anomaly/category`, then to the canonical generic `:anomaly/type`
+   for purely generic anomalies. The legacy-category fallback is
+   removed once all producers are migrated."
+  [anomaly-map]
+  (or (:anomaly/subtype anomaly-map)
+      (:anomaly/category anomaly-map)
+      (:anomaly/type anomaly-map)))
+
 ;; User-facing message translation (defined first — used by HTTP translator)
 
 (def category->user-message
@@ -85,7 +101,7 @@
 
    Returns: Human-friendly string."
   [anomaly-map]
-  (let [category (:anomaly/category anomaly-map)]
+  (let [category (dispatch-key anomaly-map)]
     (or (get category->user-message category)
         (str "An error occurred: " (name category)))))
 
@@ -146,7 +162,7 @@
       :headers {\"Content-Type\" \"application/json\"}
       :body {:error {:code string :message string}}}"
   [anomaly-map]
-  (let [category (:anomaly/category anomaly-map)
+  (let [category (dispatch-key anomaly-map)
         status (anomaly->http-status category)]
     {:status status
      :headers {"Content-Type" "application/json"}
@@ -166,7 +182,7 @@
 
    Returns: Map with selected anomaly fields for structured logging."
   [anomaly-map]
-  (let [category (:anomaly/category anomaly-map)]
+  (let [category (dispatch-key anomaly-map)]
     (cond-> {:anomaly/category category
              :anomaly/message  (:anomaly/message anomaly-map)}
       (anomaly/retryable? category)
@@ -204,7 +220,7 @@
       :retryable? boolean
       :phase keyword|nil}"
   [anomaly-map]
-  (let [category (:anomaly/category anomaly-map)]
+  (let [category (dispatch-key anomaly-map)]
     {:message (:anomaly/message anomaly-map)
      :anomaly-code category
      :retryable? (anomaly/retryable? category)
@@ -229,7 +245,7 @@
       :outcome/error-details map}"
   [anomaly-map]
   {:outcome/success false
-   :outcome/anomaly-code (:anomaly/category anomaly-map)
+   :outcome/anomaly-code (dispatch-key anomaly-map)
    :outcome/error-message (:anomaly/message anomaly-map)
    :outcome/error-phase (:anomaly/phase anomaly-map)
    :outcome/error-details (select-keys anomaly-map
