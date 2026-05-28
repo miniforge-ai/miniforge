@@ -24,14 +24,14 @@
    Layer 1: Step functions (generate, validate, repair)
    Layer 2: Loop runner"
   (:require
+   [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.fsm.interface :as fsm]
    [ai.miniforge.logging.interface :as log]
    [ai.miniforge.loop.escalation :as escalation]
    [ai.miniforge.loop.inner-config :as inner-config]
    [ai.miniforge.loop.gates :as gates]
    [ai.miniforge.loop.messages :as loop-messages]
-   [ai.miniforge.loop.repair :as repair]
-   [ai.miniforge.response.interface :as response]))
+   [ai.miniforge.loop.repair :as repair]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; State machine definition and derived transition helpers
@@ -314,7 +314,7 @@
             (log/error logger :loop :inner/validation-failed
                        {:message (loop-messages/t :inner/generation-failed)
                         :data {:error (.getMessage e)}}))
-          (let [anom (response/from-exception e)]
+          (let [anom (anomaly/exception-anomaly :fault (.getMessage e) e)]
             (-> loop-state
                 (set-errors [{:code :generation-error
                               :message (.getMessage e)

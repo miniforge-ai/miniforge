@@ -27,10 +27,10 @@
    Layer 1: Built-in gates (syntax, lint, test, policy)
    Layer 2: Gate runner and composition"
   (:require
+   [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.clock.interface :as clock]
    [ai.miniforge.loop.interface.protocols.gate :as p]
    [ai.miniforge.logging.interface :as log]
-   [ai.miniforge.response.interface :as response]
    [clojure.string]))
 
 ;; Re-export protocol for backward compatibility
@@ -66,16 +66,32 @@
 
 (defn fail-result
   "Create a failing gate result.
-   Includes :gate/anomaly — a canonical anomaly map preserving gate error richness."
+   Includes :gate/anomaly — a canonical anomaly map preserving gate error
+   richness.
+
+   W2 convergence: anomaly is constructed via `anomaly/sub-anomaly` with
+   `:anomaly/type :invalid-input` (per the runbook map for
+   `:anomalies.gate/validation-failed`) and the gate errors live under
+   `:anomaly/data :gate/errors`. The canonical schema is closed over the
+   `:anomaly/*` namespace — only `:anomaly/type`, `:anomaly/message`,
+   `:anomaly/data`, `:anomaly/at`, and the optional `:anomaly/subtype`
+   live at the top level; all domain payload (here `:gate/id`,
+   `:gate/type`, `:gate/errors`) lives under `:anomaly/data`. The errors
+   are also kept as a flat `:gate/errors` on the gate result map for
+   downstream consumers that already read it there (independent of the
+   embedded anomaly)."
   [gate-id gate-type errors & {:keys [warnings duration-ms]}]
   (cond-> {:gate/id gate-id
            :gate/type gate-type
            :gate/passed? false
            :gate/errors errors
-           :gate/anomaly (response/gate-anomaly
+           :gate/anomaly (anomaly/sub-anomaly
+                          :invalid-input
                           :anomalies.gate/validation-failed
                           (str "Gate " (name gate-id) " (" (name gate-type) ") failed")
-                          errors)}
+                          {:gate/id gate-id
+                           :gate/type gate-type
+                           :gate/errors errors})}
     warnings (assoc :gate/warnings warnings)
     duration-ms (assoc :gate/duration-ms duration-ms)))
 
