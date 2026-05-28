@@ -33,13 +33,22 @@
 
 (defn format-error-entry
   "Format a single error entry for display.
-   Reads :anomaly/message and :anomaly/category when available,
-   falls back to :message and :code for legacy shapes."
+   Reads :anomaly/message and the anomaly classification when available,
+   falls back to :message and :code for legacy shapes.
+
+   Classification is taken as `:anomaly/subtype` first (the canonical W2
+   domain classification carried alongside `:anomaly/type`), then
+   `:anomaly/category` (legacy pre-convergence shape) — so errors from
+   already-flipped producers and not-yet-flipped producers both render
+   identically during the convergence window."
   [idx err]
   (let [anomaly (:anomaly err)
         msg (or (when anomaly (:anomaly/message anomaly))
                 (:message err))
-        code (or (when anomaly (name (:anomaly/category anomaly)))
+        classification (when anomaly
+                         (or (:anomaly/subtype anomaly)
+                             (:anomaly/category anomaly)))
+        code (or (when classification (name classification))
                  (when-let [c (:code err)] (name c)))]
     (str "  " (inc idx) ". " msg
          (when code (str " [" code "]")))))
