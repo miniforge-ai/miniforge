@@ -24,6 +24,7 @@
    [clojure.string :as str]
    [cheshire.core :as json]
    [org.httpkit.client :as http]
+   [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.logging.interface :as log]
    [ai.miniforge.llm.cost :as cost]
    [ai.miniforge.llm.progress-monitor :as pm]
@@ -108,8 +109,65 @@
               :tokens (+ (get usage :input-tokens 0) (get usage :output-tokens 0))}
        (some? exit-code) (assoc :exit-code exit-code)))))
 
+(def ^:private category->type
+  "W2 convergence map (subset). Maps every legacy `:anomalies/*` and
+   `:anomalies.*/*` category this brick actually produces (per
+   `(grep '(llm-error ' …)`) to the canonical `:anomaly/type` from the
+   runbook (`docs/runbooks/anomaly-convergence.md`). Generic-standard
+   categories map to a bare type and emit no subtype; domain categories
+   map to a `(type, subtype)` pair where the subtype is the legacy
+   category keyword verbatim.
+
+   Only the categories actually emitted today are listed — an unmapped
+   category throws `IllegalArgumentException` in `->canonical-anomaly`,
+   forcing the table to grow when a new producer site is added (per
+   the no-dead-code policy)."
+  {:anomalies/fault              :fault
+   :anomalies/unavailable        :unavailable
+   :anomalies/unsupported        :unsupported
+   :anomalies/timeout            :timeout
+   :anomalies.agent/llm-error    :fault
+   :anomalies.agent/rate-limited :unavailable})
+
+(def ^:private generic-standard-categories
+  "Subset of the cognitect-standard categories (per the runbook
+   `Generic standard (no subtype)` table) that this brick emits — these
+   four map 1:1 to a type and carry no `:anomaly/subtype`. The runbook's
+   full set is eight; the other four (`:anomalies/incorrect`,
+   `:anomalies/not-found`, `:anomalies/forbidden`, `:anomalies/conflict`)
+   are not produced by `llm-error` in this brick today."
+  #{:anomalies/fault
+    :anomalies/unavailable
+    :anomalies/unsupported
+    :anomalies/timeout})
+
+(defn- ->canonical-anomaly
+  "Build a canonical anomaly map from the brick's legacy category
+   keyword + message + extra data. Generic-standard categories produce
+   `(anomaly/anomaly type msg data)`; domain categories produce
+   `(anomaly/sub-anomaly type category msg data)`.
+
+   `category` MUST be in `category->type`; an unmapped category is a
+   programmer error (the table must be updated when new categories
+   are introduced)."
+  [category message data]
+  (let [a-type (or (category->type category)
+                   (throw (IllegalArgumentException.
+                           (str "Unmapped LLM anomaly category: "
+                                (pr-str category)
+                                ". Add it to `category->type` in "
+                                "ai.miniforge.llm.protocols.impl.llm-client"))))]
+    (if (contains? generic-standard-categories category)
+      (anomaly/anomaly a-type message data)
+      (anomaly/sub-anomaly a-type category message data))))
+
 (defn llm-error
-  "Build a failed LLM response with anomaly."
+  "Build a failed LLM response with anomaly.
+
+   The `:anomaly` map is canonical (W2 convergence): `:anomaly/type` from
+   the runbook, `:anomaly/subtype` set to the original category for
+   domain categories (so failure-classifier / response/translate dispatch
+   identically). The original `:operation` lives under `:anomaly/data`."
   ([category error-type message]
    (llm-error category error-type message nil))
   ([category error-type message {:keys [exit-code stderr stdout raw-stdout timeout]}]
@@ -119,9 +177,9 @@
                      stdout  (assoc :stdout stdout)
                      raw-stdout (assoc :raw-stdout raw-stdout)
                      timeout (assoc :timeout timeout))
-            :anomaly (response/make-anomaly
+            :anomaly (->canonical-anomaly
                       category message
-                      {:anomaly/operation :llm-complete})}
+                      {:operation :llm-complete})}
      (some? exit-code) (assoc :exit-code exit-code))))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -619,30 +677,52 @@
      :messages [{:role "user" :content msg-content}]
      :stream (boolean streaming?)}))
 
+(defn- http-failure-anomaly
+  "Build the canonical `:unavailable` anomaly that this brick emits for
+   any HTTP-layer failure on an LLM call (thrown exception or http-kit
+   `{:error <Throwable>}` deref). Centralizes the shape so the throwing
+   and non-throwing failure modes converge."
+  [^Throwable cause url]
+  (anomaly/anomaly
+   :unavailable
+   (str "HTTP request failed: " (.getMessage cause))
+   {:operation :http-request
+    :url url}))
+
 (defn http-post-request
   "Make HTTP POST request to LLM API.
 
-   Returns HTTP response map or anomaly map on exception."
+   Returns HTTP response map or canonical anomaly map on failure
+   (W2 convergence: `:anomaly/type :unavailable`, no subtype since
+   `:anomalies/unavailable` is a generic-standard category).
+
+   http-kit signals connection failures via either a thrown exception
+   or a `{:error <Throwable>}` response map (depending on whether the
+   error surfaces before or after the future resolves); both modes
+   collapse to the same canonical anomaly."
   [url headers body]
   (try
-    @(http/post url
-                {:headers headers
-                 :body (json/generate-string body)})
+    (let [response @(http/post url
+                               {:headers headers
+                                :body (json/generate-string body)})]
+      (if-let [cause (:error response)]
+        (http-failure-anomaly cause url)
+        response))
     (catch Exception e
-      (response/make-anomaly
-       :anomalies/unavailable
-       (str "HTTP request failed: " (.getMessage e))
-       {:anomaly/operation :http-request
-        :anomaly.llm/url url}))))
+      (http-failure-anomaly e url))))
 
 (defn parse-ollama-response
   "Parse Ollama API response.
 
-   Handles anomaly maps from http-post-request or HTTP response maps."
+   Handles canonical anomaly maps from http-post-request or HTTP
+   response maps. After W2 convergence, http-post-request returns
+   `:anomaly/type :unavailable` (no subtype) on failure — the legacy
+   category `:anomalies/unavailable` is reconstituted explicitly for
+   `llm-error` so downstream classification stays identical."
   [response]
-  ;; If response is already an anomaly map, pass it through
-  (if (response/anomaly-map? response)
-    (llm-error (:anomaly/category response) "http_error" (:anomaly/message response))
+  ;; If response is already a canonical anomaly map, pass it through
+  (if (anomaly/anomaly? response)
+    (llm-error :anomalies/unavailable "http_error" (:anomaly/message response))
     (try
       (let [body (json/parse-string (:body response) true)]
         (if (= 200 (:status response))
@@ -767,7 +847,7 @@
 
 (defn- stream-read-failure
   [ex]
-  (response/from-exception ex))
+  (anomaly/exception-anomaly :fault (or (ex-message ex) (str (type ex))) ex))
 
 (defn- enqueue-stream-line!
   [line-queue line]
@@ -834,7 +914,7 @@
 
 (defn- anomaly-signal?
   [line-or-signal]
-  (response/anomaly-map? line-or-signal))
+  (anomaly/anomaly? line-or-signal))
 
 (defn- eof-signal?
   [line-or-signal]
