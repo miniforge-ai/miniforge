@@ -37,7 +37,8 @@
 
 (def anomaly-types
   "Standard anomaly type keywords. Mirrors the cognitect anomalies
-   vocabulary, with `:fatal` added for unrecoverable programmer errors.
+   vocabulary, with `:fatal` (unrecoverable programmer errors) and
+   `:exhausted` (a budget/limit/effort ceiling was reached) added.
 
    Each type encodes a category of failure:
    - :not-found      — referenced entity does not exist
@@ -48,6 +49,9 @@
    - :conflict       — operation conflicts with existing state
    - :timeout        — operation exceeded its time budget
    - :unsupported    — operation not implemented for this case
+   - :exhausted      — a budget, limit, or effort ceiling was reached
+                       (not a bug; the operation ran out of its
+                       allowance — e.g. loop/retry/phase/token budgets)
    - :fatal          — unrecoverable; the process should stop"
   #{:not-found
     :invalid-input
@@ -57,6 +61,7 @@
     :conflict
     :timeout
     :unsupported
+    :exhausted
     :fatal})
 
 ;------------------------------------------------------------------------------ Layer 1
