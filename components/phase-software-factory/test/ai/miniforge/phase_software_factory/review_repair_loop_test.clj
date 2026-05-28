@@ -23,6 +23,7 @@
    engine redirects back to :implement (not re-running :review in place)."
   (:require
    [clojure.test :refer [deftest is testing use-fixtures]]
+   [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.phase.interface :as phase]
    [ai.miniforge.phase.loader :as loader]
    [ai.miniforge.phase-software-factory.review]
@@ -316,12 +317,17 @@
           "phase tagged stagnated when current fingerprint matches prior")
       (is (not (phase/redirect-requested? phase))
           "no redirect to :implement on stagnation — repair loop is the burn we are stopping")
+      (is (anomaly/anomaly? (:error phase))
+          ":phase :error is a canonical anomaly map (W2 convergence)")
+      (is (= :exhausted (get-in phase [:error :anomaly/type]))
+          "stagnation is an :exhausted type (review repair budget spent without progress)")
       (is (= :anomalies.review/stagnation
-             (get-in phase [:error :anomaly/category]))
-          ":anomalies.review/stagnation anomaly attached to :phase :error")
-      (is (some? (get-in phase [:error :message]))
-          "message key set so display/diagnostic consumers don't show blank")
-      (is (>= (count (get-in phase [:error :review/fingerprint-history])) two-fingerprints)
+             (get-in phase [:error :anomaly/subtype]))
+          ":anomalies.review/stagnation preserved as :anomaly/subtype")
+      (is (some? (get-in phase [:error :anomaly/message]))
+          ":anomaly/message set so display/diagnostic consumers don't show blank")
+      (is (>= (count (get-in phase [:error :anomaly/data :review/fingerprint-history]))
+              two-fingerprints)
           "fingerprint history carries the chain that proved stagnation"))))
 
 (deftest non-stagnant-progress-still-redirects-test
@@ -337,7 +343,7 @@
           "different fingerprint ⇒ not stagnated")
       (is (= :implement (phase/transition-target phase))
           "ordinary repair: redirect to implement")
-      (is (nil? (get-in phase [:error :anomaly/category]))
+      (is (nil? (get-in phase [:error :anomaly/subtype]))
           "no stagnation anomaly when progress is detected"))))
 
 (deftest first-iteration-never-stagnates-test

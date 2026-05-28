@@ -23,6 +23,7 @@
    Agent: :reviewer
    Default gates: [:review-approved :quality-check]"
   (:require
+   [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.phase.interface :as phase]
    [ai.miniforge.phase-software-factory.messages :as messages]
    [ai.miniforge.phase-software-factory.phase-config :as phase-config]
@@ -207,19 +208,22 @@
 
 (defn- terminate-stagnated
   "Mark a stagnated phase as failed and skip the redirect-to-implement
-   path. Carries the fingerprint chain in :phase/error so the
-   workflow runner / evidence bundle can report what didn't move.
-   Sets both :message and :anomaly/message so display / diagnostic
-   consumers that read either key get the localized text."
+   path. The phase `:error` is a canonical anomaly map (W2 convergence):
+   `:anomaly/type :exhausted` (the review repair budget has been
+   spent without progress) carrying the legacy
+   `:anomalies.review/stagnation` keyword as `:anomaly/subtype` and the
+   fingerprint chain under `:anomaly/data` so the workflow runner /
+   evidence bundle can report what didn't move."
   [ctx fingerprint-history]
   (let [msg (messages/t :review/stagnation)]
     (-> ctx
         (assoc-in [:phase :stagnated?] true)
         (assoc-in [:phase :error]
-                  {:message msg
-                   :anomaly/category :anomalies.review/stagnation
-                   :anomaly/message  msg
-                   :review/fingerprint-history (vec fingerprint-history)}))))
+                  (anomaly/sub-anomaly
+                   :exhausted
+                   :anomalies.review/stagnation
+                   msg
+                   {:review/fingerprint-history (vec fingerprint-history)})))))
 
 (def ^:private default-max-no-progress-attempts
   "After this many CONSECUTIVE review→implement repair cycles where each
