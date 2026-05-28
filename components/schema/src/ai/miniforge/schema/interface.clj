@@ -25,8 +25,7 @@
    [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.schema.core :as core]
    [ai.miniforge.schema.logging :as logging]
-   [ai.miniforge.schema.supervisory :as supervisory]
-   [ai.miniforge.response.interface :as response]))
+   [ai.miniforge.schema.supervisory :as supervisory]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Schema re-exports (allow other components to reference schemas)
@@ -228,7 +227,7 @@
   ([data-key error opts]
    (let [msg (if (string? error) error (or (:message error) (pr-str error)))]
      (merge {:success? false data-key nil :error error
-             :anomaly (response/make-anomaly :anomalies/fault msg)}
+             :anomaly (anomaly/anomaly :fault msg {})}
             opts))))
 
 (defn failure-with-errors
@@ -273,7 +272,7 @@
    (let [error-map (cond-> {:message (ex-message ex)}
                      (ex-data ex) (assoc :data (ex-data ex)))]
      (merge {:success? false data-key nil :error error-map
-             :anomaly (response/from-exception ex)}
+             :anomaly (anomaly/exception-anomaly :fault (ex-message ex) ex)}
             opts))))
 
 (defn succeeded?
