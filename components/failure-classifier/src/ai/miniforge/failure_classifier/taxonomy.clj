@@ -154,9 +154,17 @@
     value))
 
 (defn- invalid-constructor-input
-  "Create a canonical ex-info payload for invalid constructor inputs."
+  "Create a canonical ex-info payload for invalid constructor inputs.
+
+   The ex-data carries the canonical anomaly classification key
+   (`:anomaly/type :invalid-input`) so any catcher routing through
+   `classify-failure` resolves to the same `:failure.class/*` it would
+   have under the legacy `:anomaly/category :anomalies/incorrect`
+   shape. `:anomalies/incorrect` is one of the eight cognitect-standard
+   categories the convergence runbook maps 1:1 to a generic
+   `:anomaly/type` with no subtype."
   [message data]
-  (ex-info message (assoc data :anomaly/category :anomalies/incorrect)))
+  (ex-info message (assoc data :anomaly/type :invalid-input)))
 
 (defn- require-field!
   "Require a non-nil field and throw ex-info when missing."

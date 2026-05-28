@@ -23,11 +23,19 @@
 ;; Config loading and compilation
 
 (defn- missing-resource
-  "Create a canonical missing-resource exception."
+  "Create a canonical missing-resource exception.
+
+   The ex-data carries the canonical anomaly classification key
+   (`:anomaly/type :not-found`) so any catcher routing through
+   `classify-failure` resolves to the same `:failure.class/*` it would
+   have under the legacy `:anomaly/category :anomalies/not-found` shape.
+   `:anomalies/not-found` is one of the eight cognitect-standard
+   categories the convergence runbook maps 1:1 to a generic
+   `:anomaly/type` with no subtype."
   [resource-path]
   (ex-info (str "Missing EDN resource: " resource-path)
            {:resource/path resource-path
-            :anomaly/category :anomalies/not-found}))
+            :anomaly/type :not-found}))
 
 (defn- load-edn-resource
   "Load a required EDN resource by path."
@@ -241,9 +249,8 @@
   "Convenience: classify a Throwable directly."
   [^Throwable ex]
   (classify-failure
-   {:anomaly/category  nil
-    :exception/class   (str (type ex))
-    :error/message     (.getMessage ex)}))
+   {:exception/class (str (type ex))
+    :error/message   (.getMessage ex)}))
 
 (defn classify-failure-record
   "Classify a failure into a canonical record with optional dependency

@@ -125,7 +125,18 @@
   "clojure.lang.ExceptionInfo"            nil}
 
  :anomaly-map
- {:anomalies/timeout                  :failure.class/timeout
+ ;; Lookups receive whichever of :anomaly/subtype, :anomaly/category, or
+ ;; :anomaly/type is present (in that precedence; see classify-failure).
+ ;; Domain subtypes carry the legacy `:anomalies/*` keyword verbatim post-
+ ;; W2 flip — those keys stay legacy-shaped here. Generic-standard types
+ ;; (the cognitect-eight + :exhausted) are added as canonical keys so a
+ ;; producer that has flipped to `(anomaly/anomaly :type msg {})` still
+ ;; routes to the same `:failure.class/*` it did pre-flip. Legacy
+ ;; `:anomalies/*` keys are kept alongside the canonical entries during
+ ;; the W2-W4 convergence window; both rows map to identical classes so
+ ;; behaviour is unchanged. Legacy rows are dropped in W5.
+ {;; Legacy generic-standard categories
+  :anomalies/timeout                  :failure.class/timeout
   :anomalies/unavailable              :failure.class/external
   :anomalies/interrupted              :failure.class/external
   :anomalies/busy                     :failure.class/resource
@@ -135,6 +146,21 @@
   :anomalies/incorrect                nil
   :anomalies/fault                    nil
   :anomalies/unsupported              nil
+  ;; Canonical generic types — match the legacy rows above so post-flip
+  ;; producers dispatch identically. `:exhausted` is the convergence-
+  ;; introduced type (budget/limit/effort ceiling) and routes to the
+  ;; resource class consistent with `:anomalies.phase/budget-exceeded`.
+  :timeout                            :failure.class/timeout
+  :unavailable                        :failure.class/external
+  :invalid-input                      nil
+  :unauthorized                       :failure.class/policy
+  :not-found                          :failure.class/data-integrity
+  :conflict                           :failure.class/concurrency
+  :fault                              nil
+  :unsupported                        nil
+  :exhausted                          :failure.class/resource
+  ;; Domain subtypes — keyword is preserved verbatim from the legacy
+  ;; category, so these rows stay as-is across the W2 flip.
   :anomalies.phase/budget-exceeded    :failure.class/resource
   :anomalies.phase/agent-failed       :failure.class/agent-error
   :anomalies.phase/no-agent           :failure.class/agent-error
