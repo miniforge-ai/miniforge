@@ -17,6 +17,9 @@
   :review/stagnation
   "Review-repair loop stagnated: actionable-issue fingerprint did not change between iterations. Terminating instead of redirecting back to implement to avoid burning more tokens on a useless loop."
 
+  :review/needs-decomposition
+  "Review-repair loop is not converging: {iterations} consecutive review→implement cycles each surfaced different legitimate blockers without reaching approval. The task is likely too coarse for one implement turn to satisfy in full — emitting :needs-decomposition so a meta-agent can split it instead of burning the remaining redirect budget."
+
   ;; Verify phase
   :verify/no-environment      "Verify phase has no execution environment"
   :verify/no-environment-hint "Workflow runner must acquire an execution environment before verify phase"
