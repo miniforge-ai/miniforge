@@ -45,7 +45,8 @@
    Layer 3: Multi-parent base resolution primitives (v2 — pure-data
             inputs to the orchestrator's git-using `merge-parent-branches!`).
             Helpers ship in 1A; orchestrator consumes them in 1B."
-  (:require [ai.miniforge.messages.interface :as messages]
+  (:require [ai.miniforge.anomaly.interface :as anomaly]
+            [ai.miniforge.messages.interface :as messages]
             [clojure.string :as str])
   (:import (java.security MessageDigest)))
 
@@ -97,7 +98,19 @@
 ;; Resolution — dep set → base branch decision
 
 (def ^:private dag-non-forest-anomaly
+  "Canonical `:anomaly/subtype` keyword for the multi-parent / non-forest
+   anomaly emitted by this brick. Kept as the legacy `:anomalies/*`
+   namespace verbatim per the anomaly-convergence runbook (the legacy
+   category keyword IS the subtype after the W2 flip)."
   :anomalies/dag-non-forest)
+
+(def ^:private dag-non-forest-anomaly-type
+  "Generic `:anomaly/type` for non-forest anomalies. Per the
+   `docs/runbooks/anomaly-convergence.md` map,
+   `:anomalies/dag-non-forest` is one of the dag-executor's custom
+   subtypes that classifies as `:conflict` (the plan asserts a shape the
+   runtime cannot reconcile single-parent execution against)."
+  :conflict)
 
 (defn- non-forest-anomaly
   "Build the canonical anomaly map for a multi-parent task.
@@ -105,11 +118,19 @@
    Returned as data (not thrown) at the resolve boundary so the
    orchestrator can short-circuit the workflow with the same anomaly
    shape downstream consumers (evidence bundle, dashboard) already
-   expect from other anomaly emitters."
+   expect from other anomaly emitters.
+
+   W2 convergence: produces a canonical `ai.miniforge.anomaly` map with
+   `:anomaly/type :conflict` and the legacy category keyword preserved
+   verbatim as `:anomaly/subtype`. The multi-parent domain payload
+   (`:task/dependencies`) is flattened under `:anomaly/data` per the
+   batch-2 domain-flatten precedent (key name unchanged so telemetry
+   survives once consumers migrate their reads)."
   [task-deps]
-  {:anomaly/category dag-non-forest-anomaly
-   :anomaly/message  (t :resolve/multi-parent)
-   :task/dependencies (vec task-deps)})
+  (anomaly/sub-anomaly dag-non-forest-anomaly-type
+                       dag-non-forest-anomaly
+                       (t :resolve/multi-parent)
+                       {:task/dependencies (vec task-deps)}))
 
 (defn resolve-base-branch
   "Decide which branch a task's scratch worktree should be forked from.
@@ -142,10 +163,16 @@
 (defn resolve-error?
   "True for `resolve-base-branch` outputs that represent an anomaly rather
    than a usable branch name. Lets callers branch on the result without
-   coupling to the anomaly shape."
+   coupling to the anomaly shape.
+
+   Post-W2 the anomaly carries the legacy category keyword verbatim as
+   `:anomaly/subtype` on a canonical `ai.miniforge.anomaly` map; this
+   predicate reads the subtype directly. The producer is own-brick, so a
+   single-shape read is sufficient — no upstream-of-uncertain-shape
+   dual-predicate."
   [resolved]
   (and (map? resolved)
-       (= dag-non-forest-anomaly (:anomaly/category resolved))))
+       (= dag-non-forest-anomaly (:anomaly/subtype resolved))))
 
 ;------------------------------------------------------------------------------ Layer 2
 ;; Plan-time forest validation — reject non-forests before any task runs
@@ -181,9 +208,10 @@
   [tasks]
   (let [violations (multi-parent-tasks tasks)]
     (when (seq violations)
-      {:anomaly/category dag-non-forest-anomaly
-       :anomaly/message  (t :validate/multi-parent)
-       :multi-parent-tasks violations})))
+      (anomaly/sub-anomaly dag-non-forest-anomaly-type
+                           dag-non-forest-anomaly
+                           (t :validate/multi-parent)
+                           {:multi-parent-tasks violations}))))
 
 (defn forest?
   "Predicate form of `validate-forest`. True when the DAG is a forest."
@@ -346,7 +374,11 @@
   ;; => "main"  (single dep, not yet registered, falls back)
 
   (resolve-base-branch (create-registry) [:a :b] "main")
-  ;; => {:anomaly/category :anomalies/dag-non-forest ...}
+  ;; => {:anomaly/type :conflict
+  ;;     :anomaly/subtype :anomalies/dag-non-forest
+  ;;     :anomaly/message "..."
+  ;;     :anomaly/data {:task/dependencies [:a :b]}
+  ;;     :anomaly/at  #inst "..."}
 
   (validate-forest [{:task/id :a :task/dependencies []}
                     {:task/id :b :task/dependencies [:a]}
@@ -356,7 +388,12 @@
   (validate-forest [{:task/id :a :task/dependencies []}
                     {:task/id :b :task/dependencies [:a]}
                     {:task/id :c :task/dependencies [:a :b]}])
-  ;; => {:anomaly/category :anomalies/dag-non-forest
-  ;;     :multi-parent-tasks [{:task/id :c :dep-count 2 :dependencies [:a :b]}]}
+  ;; => {:anomaly/type :conflict
+  ;;     :anomaly/subtype :anomalies/dag-non-forest
+  ;;     :anomaly/message "..."
+  ;;     :anomaly/data
+  ;;       {:multi-parent-tasks
+  ;;          [{:task/id :c :dep-count 2 :dependencies [:a :b]}]}
+  ;;     :anomaly/at #inst "..."}
 
   :leave-this-here)

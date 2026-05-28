@@ -72,14 +72,18 @@
   (testing "multiple deps: return :anomalies/dag-non-forest as data"
     (let [resolved (br/resolve-base-branch (br/create-registry) [:a :b] "main")]
       (is (br/resolve-error? resolved))
-      (is (= :anomalies/dag-non-forest (:anomaly/category resolved)))
-      (is (= [:a :b] (:task/dependencies resolved)))
+      (is (= :conflict (:anomaly/type resolved))
+          "non-forest classifies as :conflict per the convergence runbook")
+      (is (= :anomalies/dag-non-forest (:anomaly/subtype resolved))
+          "legacy category keyword preserved verbatim as :anomaly/subtype")
+      (is (= [:a :b] (get-in resolved [:anomaly/data :task/dependencies]))
+          "multi-parent domain payload flattened under :anomaly/data")
       (is (string? (:anomaly/message resolved))
           "anomaly carries a human-readable message for downstream display"))))
 
 (deftest resolve-error-predicate-test
   (testing "resolve-error? distinguishes anomaly maps from branch strings"
-    (is (true?  (br/resolve-error? {:anomaly/category :anomalies/dag-non-forest})))
+    (is (true?  (br/resolve-error? {:anomaly/subtype :anomalies/dag-non-forest})))
     (is (false? (br/resolve-error? "task-a")))
     (is (false? (br/resolve-error? nil)))
     (is (false? (br/resolve-error? {:branch "task-a"}))
@@ -119,11 +123,13 @@
                   [{:task/id :a :task/dependencies []}
                    {:task/id :b :task/dependencies [:a]}
                    {:task/id :c :task/dependencies [:a]}
-                   {:task/id :d :task/dependencies [:b :c]}])]
+                   {:task/id :d :task/dependencies [:b :c]}])
+          violations (get-in anomaly [:anomaly/data :multi-parent-tasks])]
       (is (some? anomaly))
-      (is (= :anomalies/dag-non-forest (:anomaly/category anomaly)))
-      (is (= 1 (count (:multi-parent-tasks anomaly))))
-      (let [violation (first (:multi-parent-tasks anomaly))]
+      (is (= :conflict (:anomaly/type anomaly)))
+      (is (= :anomalies/dag-non-forest (:anomaly/subtype anomaly)))
+      (is (= 1 (count violations)))
+      (let [violation (first violations)]
         (is (= :d (:task/id violation)))
         (is (= 2  (:dep-count violation)))
         (is (= [:b :c] (:dependencies violation)))))))
@@ -135,7 +141,8 @@
                    {:task/id :b :task/dependencies []}
                    {:task/id :c :task/dependencies [:a :b]}
                    {:task/id :d :task/dependencies [:a :b :c]}])
-          ids (set (map :task/id (:multi-parent-tasks anomaly)))]
+          violations (get-in anomaly [:anomaly/data :multi-parent-tasks])
+          ids (set (map :task/id violations))]
       (is (= #{:c :d} ids)
           "both offending tasks surface so the user can fix the plan in one pass"))))
 
