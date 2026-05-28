@@ -51,6 +51,41 @@
       (:anomaly/category anomaly-map)
       (:anomaly/type anomaly-map)))
 
+(def ^:private domain-key-bridge
+  "Map of legacy top-level domain payload keys (the shape
+   `response/{gate,agent,llm,executor,repair}-anomaly` wrote) to their
+   canonical placement under `:anomaly/data` after the producer flip.
+   Read sites consult both during the W2-W4 transition; entries are
+   removed in W5 once every producer is migrated."
+  {:anomaly.gate/errors      :gate/errors
+   :anomaly.agent/role       :agent/role
+   :anomaly.llm/model        :llm/model
+   :anomaly.repair/strategy  :repair/strategy
+   :anomaly.repair/attempts  :repair/attempts})
+
+(defn- domain-value
+  "Read a domain payload field, transparently bridging legacy top-level
+   placement (e.g. `:anomaly.gate/errors`) and the canonical placement
+   under `:anomaly/data` (e.g. `:gate/errors`). Output keys in
+   downstream wire shapes (log records, evidence bundles) stay legacy
+   so log/event/evidence consumers aren't broken."
+  [anomaly-map legacy-key]
+  (or (get anomaly-map legacy-key)
+      (when-let [canonical-key (get domain-key-bridge legacy-key)]
+        (get-in anomaly-map [:anomaly/data canonical-key]))))
+
+(defn- assoc-domain-value
+  "Bridge-read `legacy-key` from `anomaly-map` and, when present, assoc it
+   under `out-key` in `target`. Bridges via `domain-value` so both legacy
+   and canonical anomaly shapes hit the same output slot. When `out-key`
+   is omitted it defaults to `legacy-key`."
+  ([target anomaly-map legacy-key]
+   (assoc-domain-value target anomaly-map legacy-key legacy-key))
+  ([target anomaly-map legacy-key out-key]
+   (if-let [v (domain-value anomaly-map legacy-key)]
+     (assoc target out-key v)
+     target)))
+
 ;; User-facing message translation (defined first — used by HTTP translator)
 
 (def category->user-message
@@ -198,11 +233,13 @@
       (:anomaly/operation anomaly-map)
       (assoc :anomaly/operation (:anomaly/operation anomaly-map))
 
-      (:anomaly.gate/errors anomaly-map)
-      (assoc :anomaly.gate/error-count (count (:anomaly.gate/errors anomaly-map)))
+      (domain-value anomaly-map :anomaly.gate/errors)
+      (assoc :anomaly.gate/error-count
+             (count (domain-value anomaly-map :anomaly.gate/errors)))
 
-      (:anomaly.agent/role anomaly-map)
-      (assoc :anomaly.agent/role (:anomaly.agent/role anomaly-map))
+      (domain-value anomaly-map :anomaly.agent/role)
+      (assoc :anomaly.agent/role
+             (domain-value anomaly-map :anomaly.agent/role))
 
       (:anomaly/ex-class anomaly-map)
       (assoc :anomaly/ex-class (:anomaly/ex-class anomaly-map)))))
@@ -252,14 +289,19 @@
    :outcome/anomaly-code (dispatch-key anomaly-map)
    :outcome/error-message (:anomaly/message anomaly-map)
    :outcome/error-phase (:anomaly/phase anomaly-map)
-   :outcome/error-details (select-keys anomaly-map
-                            [:anomaly/id
-                             :anomaly/category
-                             :anomaly.gate/errors
-                             :anomaly.agent/role
-                             :anomaly.llm/model
-                             :anomaly.repair/strategy
-                             :anomaly.repair/attempts])})
+   ;; Output wire shape preserved (legacy `:anomaly.<domain>/*` keys); reads
+   ;; bridge to `:anomaly/data` for canonical-shape producers via
+   ;; `domain-value`. `:anomaly/id` is legacy-only — canonical anomalies
+   ;; don't carry one and it's simply absent for them.
+   :outcome/error-details
+   (reduce (fn [details legacy-key]
+             (assoc-domain-value details anomaly-map legacy-key))
+           (select-keys anomaly-map [:anomaly/id :anomaly/category])
+           [:anomaly.gate/errors
+            :anomaly.agent/role
+            :anomaly.llm/model
+            :anomaly.repair/strategy
+            :anomaly.repair/attempts])})
 
 ;------------------------------------------------------------------------------ Layer 5
 ;; Error coercion (any shape -> anomaly map)
