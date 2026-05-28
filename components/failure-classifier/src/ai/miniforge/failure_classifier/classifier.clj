@@ -217,13 +217,22 @@
 
    Arguments:
      failure-context - map with optional keys:
-       :anomaly/category   - keyword from anomaly taxonomy
+       :anomaly/subtype    - canonical anomaly subtype keyword (preferred)
+       :anomaly/category   - legacy anomaly category keyword
+       :anomaly/type       - canonical generic anomaly type
        :exception/class    - string, Java exception class name
        :error/message      - string, human-readable error message
 
+   Anomaly lookup prefers :anomaly/subtype (carries the legacy category
+   keyword verbatim after the convergence flip), falls back to
+   :anomaly/category for un-migrated callers, then to :anomaly/type for
+   purely generic canonical anomalies. The category fallback is dropped
+   once every producer is migrated.
+
    Returns: keyword from the canonical failure class set."
-  [{:keys [anomaly/category exception/class error/message]}]
-  (or (classify-by-anomaly-category category)
+  [{:keys [anomaly/subtype anomaly/category anomaly/type
+           exception/class error/message]}]
+  (or (classify-by-anomaly-category (or subtype category type))
       (classify-by-exception-class class)
       (classify-by-message message)
       :failure.class/unknown))

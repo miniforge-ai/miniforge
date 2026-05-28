@@ -1,0 +1,9 @@
+{:response/messages
+ {;; User-facing fallbacks for anomaly->user-message when the anomaly
+  ;; carries no recognised classification keyword in any of
+  ;; :anomaly/subtype, :anomaly/category, or :anomaly/type — and so
+  ;; cannot be looked up in category->user-message. The translator's
+  ;; contract guarantees a string (never NPE) and never leaks
+  ;; internal details.
+  :error/anomaly-fallback-with-category "An error occurred: {category}"
+  :error/anomaly-fallback-unknown       "An unknown error occurred."}}
