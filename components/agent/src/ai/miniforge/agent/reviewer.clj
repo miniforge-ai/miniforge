@@ -712,6 +712,16 @@
    `blocking-decisions`; defined locally to avoid a cross-component require."
   #{:rejected :changes-requested})
 
+(def ^:private valid-decisions
+  "The full set of `:review/decision` keywords the ReviewArtifact schema
+   allows (see `ReviewArtifact` ~L75). `parse-review-response` does not itself
+   validate the decision enum, so the enumeration-retry validator must — an
+   unexpected decision (`:approve` typo, `nil`, etc.) would otherwise slip
+   past `well-formed-recovery?` as 'non-rejection' and get collapsed
+   downstream to `:changes-requested`, re-introducing the exact malformed
+   rejection the validator exists to prevent."
+  #{:approved :rejected :conditionally-approved :changes-requested})
+
 (defn- review-has-blocking?
   "True when `issues` contains at least one entry with :severity :blocking."
   [issues]
@@ -747,12 +757,16 @@
    rejection in place and re-introduce the churn the validator exists to
    eliminate)."
   [re-review]
-  ;; The raw `:review/decision` is already a ReviewArtifact-schema enum;
-  ;; reading it directly (rather than re-normalizing) keeps this predicate
-  ;; insulated from any future change to `normalize-llm-decision`.
+  ;; The raw `:review/decision` is read directly (not re-normalized) to keep
+  ;; this insulated from future `normalize-llm-decision` changes — but we
+  ;; MUST validate it is one of the ReviewArtifact enums first
+  ;; (`parse-review-response` doesn't check), otherwise a typo or nil decision
+  ;; would slip past as "non-rejection" and get collapsed downstream to
+  ;; :changes-requested — defeating the whole validator.
   (let [dec (:review/decision re-review)]
-    (or (not (contains? rejection-decisions dec))
-        (review-has-blocking? (get re-review :review/issues [])))))
+    (and (contains? valid-decisions dec)
+         (or (not (contains? rejection-decisions dec))
+             (review-has-blocking? (get re-review :review/issues []))))))
 
 (defn- recover-review-enumeration
   "Run ONE bounded enumeration-retry turn and return the re-parsed

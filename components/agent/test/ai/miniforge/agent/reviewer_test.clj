@@ -1084,3 +1084,16 @@
     (is (= :approved          (reviewer/normalize-llm-decision :approved)))
     (is (= :rejected          (reviewer/normalize-llm-decision :rejected)))
     (is (= :changes-requested (reviewer/normalize-llm-decision :changes-requested)))))
+
+(deftest well-formed-recovery-rejects-unknown-decision-keyword
+  (testing "an invalid :review/decision (typo / nil / unknown) is NOT
+            well-formed — parse-review-response doesn't validate the enum,
+            so the validator must, otherwise downstream normalize-llm-decision
+            would collapse the bogus value to :changes-requested and
+            reintroduce the malformed-rejection outcome"
+    (is (false? (well-formed-recovery? {:review/decision :approve  ; typo
+                                        :review/issues []})))
+    (is (false? (well-formed-recovery? {:review/decision nil
+                                        :review/issues []})))
+    (is (false? (well-formed-recovery? {:review/decision :looks-good
+                                        :review/issues []})))))
