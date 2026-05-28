@@ -37,7 +37,8 @@
 
 (def anomaly-types
   "Standard anomaly type keywords. Mirrors the cognitect anomalies
-   vocabulary, with `:fatal` added for unrecoverable programmer errors.
+   vocabulary, with `:fatal` (unrecoverable programmer errors) and
+   `:exhausted` (a budget/limit/effort ceiling was reached) added.
 
    Each type encodes a category of failure:
    - :not-found      — referenced entity does not exist
@@ -48,6 +49,9 @@
    - :conflict       — operation conflicts with existing state
    - :timeout        — operation exceeded its time budget
    - :unsupported    — operation not implemented for this case
+   - :exhausted      — a budget, limit, or effort ceiling was reached
+                       (not a bug; the operation ran out of its
+                       allowance — e.g. loop/retry/phase/token budgets)
    - :fatal          — unrecoverable; the process should stop"
   #{:not-found
     :invalid-input
@@ -57,6 +61,7 @@
     :conflict
     :timeout
     :unsupported
+    :exhausted
     :fatal})
 
 ;------------------------------------------------------------------------------ Layer 1
@@ -69,12 +74,21 @@
    - :anomaly/type    — keyword from the standard vocabulary
    - :anomaly/message — human-readable description
    - :anomaly/data    — caller-supplied context map (defaults to {})
-   - :anomaly/at      — instant of construction"
+   - :anomaly/at      — instant of construction
+
+   Optionally:
+   - :anomaly/subtype — a finer domain classification keyword (e.g.
+     :anomalies.gate/validation-failed, :anomalies.agent/tool-loop) that
+     routing and classification dispatch on. It is the established
+     domain category from the :anomalies.* vocabulary, carried
+     alongside the generic :anomaly/type (which stays one of the
+     standard set). Absent for purely generic anomalies."
   [:map {:closed true}
    [:anomaly/type    (into [:enum] anomaly-types)]
    [:anomaly/message :string]
    [:anomaly/data    [:map-of :any :any]]
-   [:anomaly/at      inst?]])
+   [:anomaly/at      inst?]
+   [:anomaly/subtype {:optional true} :keyword]])
 
 ;------------------------------------------------------------------------------ Layer 2
 ;; Validation helpers

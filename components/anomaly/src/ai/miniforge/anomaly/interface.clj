@@ -84,6 +84,30 @@
    :anomaly/data    (or data {})
    :anomaly/at      (now)})
 
+(defn sub-anomaly
+  "Construct an anomaly carrying a domain `:anomaly/subtype` — a finer
+   classification (e.g. `:anomalies.gate/validation-failed`,
+   `:anomalies.agent/tool-loop`) that routing and classification dispatch
+   on. `type` stays one of the generic vocabulary; `subtype` is the
+   established domain category keyword (the `:anomalies.*` vocabulary).
+   Use when a consumer needs more than the generic type to route.
+
+   `subtype` must be a keyword — a nil or non-keyword would produce a
+   map that fails the `Anomaly` schema, so it throws
+   IllegalArgumentException, mirroring `anomaly`'s guard on `type`."
+  [type subtype message data]
+  (when-not (keyword? subtype)
+    (throw (IllegalArgumentException.
+            (str "Anomaly subtype must be a keyword, got: " (pr-str subtype)))))
+  (assoc (anomaly type message data) :anomaly/subtype subtype))
+
+(defn subtype
+  "The domain `:anomaly/subtype` of `a`, or nil when it carries only a
+   generic `:anomaly/type`. Routing/classification should prefer this
+   over `:anomaly/type` when present."
+  [a]
+  (:anomaly/subtype a))
+
 (defn validation-anomaly
   "Construct an `:invalid-input` anomaly describing a schema-validation
    failure. The schema name, offending value, and explain data are

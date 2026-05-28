@@ -25,9 +25,9 @@
    [ai.miniforge.anomaly.interface :as anomaly]))
 
 (deftest standard-vocabulary-is-locked
-  (testing "the published vocabulary mirrors the cognitect set plus :fatal"
+  (testing "the published vocabulary mirrors the cognitect set plus :fatal and :exhausted"
     (is (= #{:not-found :invalid-input :unauthorized :fault :unavailable
-             :conflict :timeout :unsupported :fatal}
+             :conflict :timeout :unsupported :exhausted :fatal}
            anomaly/anomaly-types))))
 
 (deftest every-standard-type-constructs-cleanly
