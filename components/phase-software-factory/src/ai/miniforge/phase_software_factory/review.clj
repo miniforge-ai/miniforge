@@ -238,16 +238,18 @@
    surfacing different legitimate blockers each pass; the task likely needs
    to be split. Distinct from :stagnated (identical-fingerprint loop) and
    :exhausted (ran out of redirect budget): this is a CONVERGENCE failure
-   with a specific recommendation for the meta-agent."
-  [ctx fingerprint-history iterations]
-  (let [msg (messages/t :review/needs-decomposition {:iterations iterations})]
+   with a specific recommendation for the meta-agent. `review-cycle-count` is
+   the task-level number of completed reviews carried into the anomaly so the
+   diagnostic message names the actual count."
+  [ctx fingerprint-history review-cycle-count]
+  (let [msg (messages/t :review/needs-decomposition {:iterations review-cycle-count})]
     (-> ctx
         (assoc-in [:phase :needs-decomposition?] true)
         (assoc-in [:phase :error]
                   {:message msg
                    :anomaly/category :anomalies.review/needs-decomposition
                    :anomaly/message  msg
-                   :review/iterations iterations
+                   :review/cycle-count review-cycle-count
                    :review/fingerprint-history (vec fingerprint-history)}))))
 
 (defn- redirect-to-implement
@@ -292,13 +294,18 @@
 (defn- compute-needs-decomposition?
   "True when the reviewer has rejected for `max-no-progress-attempts`
    consecutive cycles WITHOUT stagnation firing — i.e. each pass found
-   different legitimate blockers but the loop is not converging. The current
-   `iterations` value is the count of redirects already taken; it equals the
-   number of completed review→implement repair cycles."
-  [reviewer-blocked? stagnated? iterations max-no-progress-attempts]
+   different legitimate blockers but the loop is not converging.
+
+   `review-cycle-count` is the TASK-LEVEL count of completed review attempts
+   (`(inc (count prior-history))` — prior fingerprints plus the current one).
+   The phase-local `[:phase :iterations]` counter is too narrow: it resets on
+   each phase entry, and the shipped review `:budget :iterations` is 2, so
+   `within-budget?` would short-circuit to `:exhausted` long before any
+   phase-iteration count could reach 3."
+  [reviewer-blocked? stagnated? review-cycle-count max-no-progress-attempts]
   (and reviewer-blocked?
        (not stagnated?)
-       (>= iterations max-no-progress-attempts)))
+       (>= review-cycle-count max-no-progress-attempts)))
 
 (defn- compute-phase-status
   [reviewer-blocked? gate-failed?]
@@ -321,10 +328,10 @@
 
 (defn- apply-decision
   "Apply the chosen post-review action to the updated context."
-  [decision updated-ctx feedback fingerprint-history iterations]
+  [decision updated-ctx feedback fingerprint-history review-cycle-count]
   (case decision
     :stagnated            (terminate-stagnated updated-ctx fingerprint-history)
-    :needs-decomposition  (terminate-needs-decomposition updated-ctx fingerprint-history iterations)
+    :needs-decomposition  (terminate-needs-decomposition updated-ctx fingerprint-history review-cycle-count)
     :repair               (redirect-to-implement updated-ctx feedback)
     :exhausted            updated-ctx
     :complete             (mark-completed updated-ctx)))
@@ -397,9 +404,14 @@
         ;; for the meta-agent to split the task than a generic "exhausted".
         max-no-progress-attempts (get-in ctx [:phase :budget :max-no-progress-attempts]
                                          default-max-no-progress-attempts)
+        ;; Task-level review count: prior fingerprints already recorded + this
+        ;; cycle. The phase-local :iterations counter resets per phase entry,
+        ;; so it can never reach the shipped review :budget :iterations of 2;
+        ;; the cap MUST key off the task-wide history or it stays dead code.
+        review-cycle-count (inc (count prior-history))
         needs-decomposition? (compute-needs-decomposition?
                               reviewer-blocked? stagnated?
-                              iterations max-no-progress-attempts)
+                              review-cycle-count max-no-progress-attempts)
         decision          (compute-decision {:reviewer-blocked?    reviewer-blocked?
                                              :stagnated?           stagnated?
                                              :needs-decomposition? needs-decomposition?
@@ -410,7 +422,7 @@
                                                metrics iterations current-fp)
         next-ctx          (apply-decision decision updated-ctx feedback
                                           (conj prior-history current-fp)
-                                          iterations)]
+                                          review-cycle-count)]
     (when (= :repair decision)
       (knowledge/capture-feedback-learning!
        (:knowledge-store ctx) :reviewer

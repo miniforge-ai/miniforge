@@ -380,11 +380,29 @@
 (def ^:private yet-another-blocking-issue
   {:severity :blocking :file "src/baz.clj" :line 7 :description "And worse"})
 
+(def ^:private default-convergence-cap
+  "Default `max-no-progress-attempts` — matches `default-max-no-progress-attempts`
+   in review.clj. Locks the magic number to the shipped value so test math stays
+   honest if either side drifts."
+  3)
+
+(def ^:private cycles-at-cap
+  "Number of completed review cycles that should trip the convergence cap.
+   Equals the cap itself: cycle 1 (no prior) + cycle 2 (one prior) + cycle 3
+   (two prior) = cap-3 reached on the third review."
+  default-convergence-cap)
+
 (deftest needs-decomposition-fires-after-n-non-stagnated-rejections-test
   (testing "3 consecutive non-stagnated review rejections (different blockers
             each pass) trip :needs-decomposition — the implementer is fixing
             prior findings but new legitimate ones keep surfacing, signal the
-            task needs splitting rather than burning more redirect budget"
+            task needs splitting rather than burning more redirect budget.
+
+            Note: the cap keys off the TASK-LEVEL fingerprint history
+            (`(inc (count prior-fingerprints))`), not `:phase :iterations`.
+            The phase-local counter resets per phase entry and the shipped
+            review `:budget :iterations` is 2, so the cap MUST count cycles
+            across re-entries or it would be unreachable in production."
     (let [final-ctx (run-leave-review {:issues             [yet-another-blocking-issue]
                                        :iterations         third-iteration
                                        :prior-fingerprints prior-distinct-fingerprints})
@@ -394,27 +412,33 @@
       (is (= :anomalies.review/needs-decomposition
              (get-in phase [:error :anomaly/category]))
           "convergence-cap anomaly attached")
-      (is (= third-iteration (get-in phase [:error :review/iterations]))
-          "iteration count carried in the anomaly")
+      (is (= cycles-at-cap (get-in phase [:error :review/cycle-count]))
+          "task-level cycle count carried in the anomaly")
       (is (not (phase/redirect-requested? phase))
           "no redirect-to-implement on :needs-decomposition — repair budget conserved"))))
 
 (deftest needs-decomposition-yields-to-stagnation-test
   (testing "when the new fingerprint matches the immediate prior one, stagnation
-            wins over :needs-decomposition (identical-loop is the sharper signal)"
-    ;; Iterations >= cap AND fingerprints match the prior → stagnation should fire.
+            wins over :needs-decomposition (identical-loop is the sharper signal).
+            Seed with two prior fingerprints so the task-level cycle count would
+            otherwise hit the cap — proves stagnation pre-empts."
     (let [seed-issue {:severity :blocking :description "same"}
           seed-ctx   (run-leave-review {:issues [seed-issue] :iterations first-iteration})
           seed-fp    (peek (get-in seed-ctx [:execution :review-fingerprints]))
+          ;; Pad to 2 distinct priors so cycle count would tip the cap if
+          ;; stagnation didn't fire first. Last prior must equal current fp
+          ;; for stagnation to trigger.
+          padded-priors [{:review/fingerprint :prelude} seed-fp]
           final-ctx  (run-leave-review {:issues             [seed-issue]
                                         :iterations         third-iteration
-                                        :prior-fingerprints [seed-fp]})
+                                        :prior-fingerprints padded-priors})
           phase (:phase final-ctx)]
       (is (true? (:stagnated? phase)) "stagnation fires, not :needs-decomposition")
       (is (nil? (:needs-decomposition? phase))))))
 
 (deftest needs-decomposition-does-not-fire-below-cap-test
-  (testing "two rejection cycles (below the default cap of 3) still redirect normally"
+  (testing "two cycles total (one prior + this review) — below the default
+            cap of 3 — still redirect normally"
     (let [final-ctx (run-leave-review {:issues             [different-blocking-issue]
                                        :iterations         second-iteration
                                        :prior-fingerprints [{:review/fingerprint :only}]})
