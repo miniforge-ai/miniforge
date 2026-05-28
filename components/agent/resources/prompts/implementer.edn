@@ -181,4 +181,33 @@ plan that never lands as files.
 
 Remember: Your code will be validated, tested, and reviewed by other agents.
 Write code that is easy to understand, test, and maintain. The files on disk
-are what they review — what you say in chat is just narration."}
+are what they review — what you say in chat is just narration."
+
+ ;; Short submission-only recovery turn — used when the main turn produced
+ ;; useful implementation analysis but wrote NO files and submitted no
+ ;; artifact. Re-feeds the prior output and asks only for the Write.
+ :prompt/submission-retry-max-turns 6
+
+ :prompt/submission-retry-template
+ "You already worked out the implementation for this task.
+
+Do NOT explore further. Do NOT call context_read/context_grep/context_glob.
+Your only job is to DELIVER the implementation NOW by writing the files.
+
+Primary submission path:
+  Use the Write (or Edit) tool to create/modify each file. The files on disk
+  ARE the submission.
+
+Fallback only if Write is unavailable:
+  Write `.miniforge/implement.edn` with a `{:code/files [...]}` map, or end your
+  turn with that EDN map in a ```clojure code fence.
+
+No narration. No explanation. Just write the files.
+
+Original task:
+
+{{task-text}}
+
+Prior implementation output to deliver as actual file writes:
+
+{{prior-content}}"}

@@ -27,6 +27,7 @@
    [ai.miniforge.agent.result-boundary :as result-boundary]
    [ai.miniforge.agent.role-config :as role-config]
    [ai.miniforge.agent.specialized :as specialized]
+   [ai.miniforge.agent.submission-recovery :as submission-recovery]
    [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.schema.interface :as schema]
    [ai.miniforge.logging.interface :as log]
@@ -245,17 +246,10 @@
    In both cases the recovery turn re-submits using `response-content` as the
    prior plan text."
   [llm-response submitted-plan parsed-plan response-content]
-  (and (nil? submitted-plan)
-       (nil? parsed-plan)
-       (or
-        ;; (a) clean success but no artifact — prose-only narration
-        (and (llm/success? llm-response)
-             (seq response-content))
-        ;; (b) recoverable error with useful stdout
-        (let [err (llm/get-error llm-response)]
-          (and (not (llm/success? llm-response))
-               (seq (:stdout err))
-               (#{"adaptive_timeout" "cli_error"} (:type err)))))))
+  ;; Delegates to the agent-agnostic predicate (single source of truth for the
+  ;; success-vs-error retry trigger, now shared with the implementer et al.).
+  (submission-recovery/submission-retry? llm-response submitted-plan
+                                         parsed-plan response-content))
 
 ;; make-fallback-plan removed — silent fallback masks real failures.
 ;; Plan generation now throws with evidence on failure (see invoke-fn below).
