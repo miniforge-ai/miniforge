@@ -233,6 +233,14 @@
             :phase/succeed success-target
             :phase/already-done already-done-target
             :phase/fail failure-target
+            ;; Terminal failure event: bypasses `:on-fail` and routes
+            ;; straight to `:failed`. Used by phases that have decided the
+            ;; only forward path is escalation (e.g. review stagnation, the
+            ;; convergence-cap :needs-decomposition signal) — without this,
+            ;; setting `:stagnated?` / `:needs-decomposition?` on the phase
+            ;; result is dead code: the FSM still follows on-fail and the
+            ;; review→implement loop burns until `max-redirects`.
+            :phase/terminal-fail :failed
             :pause paused-state-id
             :cancel :cancelled
             :fail :failed

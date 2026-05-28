@@ -91,6 +91,27 @@
     (is (= :phase/fail
            (exec/determine-phase-event {} {:status :failed})))))
 
+(deftest determine-phase-event-stagnated-emits-terminal-fail
+  (testing "a failed result tagged :stagnated? produces :phase/terminal-fail —
+            this MUST beat the on-fail redirect (review→implement) so a
+            repair loop that has stopped making progress actually terminates"
+    (is (= :phase/terminal-fail
+           (exec/determine-phase-event {} {:status :failed :stagnated? true})))
+    ;; Even when a redirect was also requested (shouldn't happen in
+    ;; practice, but be defensive), terminal-fail still wins.
+    (let [with-redirect (phase-result/request-redirect
+                          {:status :failed :stagnated? true} :implement)]
+      (is (= :phase/terminal-fail
+             (exec/determine-phase-event {} with-redirect))
+          "stagnated? must trump redirect-requested?"))))
+
+(deftest determine-phase-event-needs-decomposition-emits-terminal-fail
+  (testing "the convergence-cap signal `:needs-decomposition?` produces
+            :phase/terminal-fail — without this the cap is dead code because
+            :phase/fail follows :on-fail back to :implement"
+    (is (= :phase/terminal-fail
+           (exec/determine-phase-event {} {:status :failed :needs-decomposition? true})))))
+
 (deftest determine-phase-event-catchall-defaults-to-succeed
   (testing "an unrecognised status falls through to :phase/succeed (catch-all branch)"
     ;; This branch is the safety net for results whose status doesn't

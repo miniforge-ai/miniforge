@@ -244,6 +244,34 @@
       (is (= :verify (fsm/current-phase-id machine s6)))
       (is (= :done (fsm/current-phase-id machine s7))))))
 
+(deftest phase-terminal-fail-bypasses-on-fail-redirect-test
+  (testing ":phase/terminal-fail routes straight to :failed even when the
+            phase has :on-fail configured — this is the whole point of the
+            event. :phase/fail on the same phase follows :on-fail to
+            :implement; :phase/terminal-fail must NOT."
+    (let [workflow {:workflow/id :terminal-fail-test
+                    :workflow/pipeline [{:phase :plan}
+                                        {:phase :implement}
+                                        {:phase :verify}
+                                        {:phase :review :on-fail :implement}
+                                        {:phase :done}]}
+          machine (fsm/compile-execution-machine workflow)
+          at-review (->> (fsm/initialize-execution machine)
+                         (fsm/start-execution machine)
+                         (#(fsm/transition-execution machine % :phase/succeed))   ; plan→implement
+                         (#(fsm/transition-execution machine % :phase/succeed))   ; implement→verify
+                         (#(fsm/transition-execution machine % :phase/succeed)))] ; verify→review
+      (is (= :review (fsm/current-phase-id machine at-review))
+          "fixture parks the FSM at :review so on-fail behavior is observable")
+      (testing ":phase/fail at :review follows on-fail back to :implement (baseline)"
+        (let [after-fail (fsm/transition-execution machine at-review :phase/fail)]
+          (is (= :implement (fsm/current-phase-id machine after-fail))
+              "baseline confirmed — :phase/fail honors :on-fail")))
+      (testing ":phase/terminal-fail at :review goes straight to :failed"
+        (let [after-terminal (fsm/transition-execution machine at-review :phase/terminal-fail)]
+          (is (= :failed (fsm/execution-status machine after-terminal))
+              "terminal-fail MUST bypass :on-fail and land in :failed"))))))
+
 (deftest compiled-execution-machine-reachability-test
   (let [workflow {:workflow/id :test
                   :workflow/pipeline [{:phase :plan}

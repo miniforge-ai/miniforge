@@ -275,6 +275,22 @@
   (when (phase/redirect-requested? phase-result)
     (phase/transition-target phase-result)))
 
+(defn- terminal-failure?
+  "True when the phase result carries a terminal-failure marker — the phase
+   decided that no amount of further on-fail redirects can make progress
+   (review stagnation; convergence-cap :needs-decomposition). These are
+   distinct from ordinary failure: they MUST bypass `:on-fail`.
+
+   Pre-`:phase/terminal-fail`, setting `:stagnated?` or
+   `:needs-decomposition?` was effectively dead code — the FSM saw
+   `:phase/fail` and followed `:on-fail :implement`, so the review→implement
+   loop burned until `max-redirects` exhaustion regardless. Validated in the
+   2026-05-28 dogfood: convergence cap fired at review #3 but the workflow
+   ran a 4th implement+verify+review cycle anyway."
+  [phase-result]
+  (or (:stagnated? phase-result)
+      (:needs-decomposition? phase-result)))
+
 (defn determine-phase-event
   "Translate a phase result into an execution-machine event."
   [_phase-config phase-result]
@@ -285,6 +301,11 @@
 
       (phase/already-done? phase-result)
       :phase/already-done
+
+      ;; Terminal failure markers must beat the on-fail redirect; check
+      ;; before the redirect branches.
+      (and (phase/failed? phase-result) (terminal-failure? phase-result))
+      :phase/terminal-fail
 
       (phase/succeeded? phase-result)
       :phase/succeed
