@@ -1010,3 +1010,64 @@
   (testing ":approved / :conditionally-approved never trigger the validator"
     (is (false? (boolean (enumeration-retry? :approved [] []))))
     (is (false? (boolean (enumeration-retry? :conditionally-approved [] []))))))
+
+;;----------------------------------------------------------------------------- well-formed-recovery? + recover-review-enumeration
+
+(def ^:private well-formed-recovery? #'reviewer/well-formed-recovery?)
+(def ^:private recover-review-enumeration #'reviewer/recover-review-enumeration)
+
+(deftest well-formed-recovery-accepts-approval-correction
+  (testing ":approved / :conditionally-approved from the retry are well-formed
+            — the retry template explicitly permits self-correction, and
+            DISCARDING those would leave the original malformed rejection
+            in place (the exact churn the validator exists to eliminate)"
+    (is (true? (well-formed-recovery? {:review/decision :approved
+                                       :review/issues []})))
+    (is (true? (well-formed-recovery? {:review/decision :conditionally-approved
+                                       :review/issues [{:severity :nit
+                                                        :description "trivial"}]})))))
+
+(deftest well-formed-recovery-accepts-enumerated-rejection
+  (is (true? (well-formed-recovery?
+              {:review/decision :rejected
+               :review/issues   [{:severity :blocking :description "real issue"}]}))))
+
+(deftest well-formed-recovery-rejects-rejection-without-blockers
+  (is (false? (well-formed-recovery?
+               {:review/decision :rejected :review/issues []}))))
+
+(deftest recover-review-enumeration-returns-approval-correction-test
+  (testing "when the retry corrects to :approved, recovery returns it
+            (regression guard: previously it required :blocking and
+            silently dropped approvals)"
+    (let [calls (atom 0)
+          stub  "```clojure\n{:review/decision :approved
+                              :review/summary \"clean on re-review\"
+                              :review/issues []}\n```"]
+      (with-redefs [llm/chat (fn [_client _prompt _opts]
+                               (swap! calls inc)
+                               {:success true :content stub})]
+        (let [recovered (recover-review-enumeration
+                         :stub-client {} nil "orig user prompt" "prior malformed content")]
+          (is (= 1 @calls) "exactly one retry LLM call")
+          (is (= :approved (:review/decision recovered))))))))
+
+(deftest recover-review-enumeration-returns-enumerated-rejection-test
+  (testing "when the retry enumerates :blocking findings, recovery returns it"
+    (let [stub "```clojure\n{:review/decision :rejected
+                             :review/issues [{:severity :blocking :description \"x\"}]}\n```"]
+      (with-redefs [llm/chat (fn [_client _prompt _opts]
+                               {:success true :content stub})]
+        (let [recovered (recover-review-enumeration
+                         :stub-client {} nil "orig" "prior")]
+          (is (= :rejected (:review/decision recovered)))
+          (is (= 1 (count (:review/issues recovered)))))))))
+
+(deftest recover-review-enumeration-returns-nil-on-still-malformed-test
+  (testing "when the retry ALSO returns a rejection with no blockers,
+            recovery returns nil (the raw rejection stands as-is, logged)"
+    (let [stub "```clojure\n{:review/decision :rejected :review/issues []}\n```"]
+      (with-redefs [llm/chat (fn [_client _prompt _opts]
+                               {:success true :content stub})]
+        (is (nil? (recover-review-enumeration
+                   :stub-client {} nil "orig" "prior")))))))

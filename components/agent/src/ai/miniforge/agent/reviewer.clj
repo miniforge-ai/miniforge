@@ -722,19 +722,42 @@
        (empty? gate-blocking)))
 
 (defn- enumeration-retry-prompt
-  "Render the enumeration-retry template with the prior (malformed) review
-   output folded in as reference."
-  [prior-content]
-  (prompts/render-template
-   (get @reviewer-prompt-data :prompt/enumeration-retry-template)
-   {:prior-content prior-content}))
+  "Build the enumeration-retry prompt: the ORIGINAL review user-prompt (so the
+   retry has the same artifact/diff evidence the first call had — `llm/chat`
+   is single-turn with no history) followed by the retry instruction with the
+   prior malformed output for reference."
+  [user-prompt prior-content]
+  (str user-prompt
+       "\n\n---\n\n"
+       (prompts/render-template
+        (get @reviewer-prompt-data :prompt/enumeration-retry-template)
+        {:prior-content prior-content})))
+
+(defn- well-formed-recovery?
+  "True when a re-reviewed ReviewArtifact resolves the malformed-rejection
+   case: either it now enumerates :blocking findings, OR it correctly
+   concludes :approved / :conditionally-approved (the retry template
+   explicitly allows that — discarding it would leave the original malformed
+   rejection in place and re-introduce the churn the validator exists to
+   eliminate)."
+  [re-review]
+  ;; Use the RAW `:review/decision` (a ReviewArtifact-schema enum), not the
+  ;; normalized decision — `normalize-llm-decision` collapses
+  ;; `:conditionally-approved` into `:changes-requested` via its default
+  ;; fall-through, which would wrongly classify a legitimate
+  ;; "approved with non-blocking warnings" correction as a rejection here.
+  (let [dec (:review/decision re-review)]
+    (or (not (contains? rejection-decisions dec))
+        (review-has-blocking? (get re-review :review/issues [])))))
 
 (defn- recover-review-enumeration
   "Run ONE bounded enumeration-retry turn and return the re-parsed
-   ReviewArtifact when recovery now enumerates blockers, or nil when recovery
-   also failed to enumerate (the original rejection then stands as-is)."
-  [llm-client base-opts on-chunk prior-content]
-  (let [retry-prompt (enumeration-retry-prompt prior-content)
+   ReviewArtifact when the recovery is well-formed (enumerates blockers OR
+   corrects to a non-rejection decision), or nil when recovery ALSO produced
+   a malformed rejection — in which case the original raw rejection stands
+   as-is."
+  [llm-client base-opts on-chunk user-prompt prior-content]
+  (let [retry-prompt (enumeration-retry-prompt user-prompt prior-content)
         retry-opts   (assoc base-opts :max-turns
                             (get @reviewer-prompt-data
                                  :prompt/enumeration-retry-max-turns 6))
@@ -744,7 +767,7 @@
         normalized   (result-boundary/normalize-llm-result
                       {:response response :parse-response parse-review-response})
         re-review    (:parsed-content normalized)]
-    (when (review-has-blocking? (get re-review :review/issues []))
+    (when (and re-review (well-formed-recovery? re-review))
       re-review)))
 
 (defn create-reviewer
@@ -872,7 +895,8 @@
                                                          :raw-issue-count     (count raw-llm-issues)
                                                          :gate-blocking-count (count (:blocking-issues gate-result))}})
                                        (recover-review-enumeration
-                                        llm-client base-opts on-chunk content))
+                                        llm-client base-opts on-chunk
+                                        user-prompt content))
                     llm-decision  (if recovered-review
                                     (normalize-llm-decision (:review/decision recovered-review))
                                     raw-llm-decision)
