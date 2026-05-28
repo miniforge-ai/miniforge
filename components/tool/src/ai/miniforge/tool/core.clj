@@ -23,8 +23,8 @@
   (:require
    [clojure.set :as set]
    [clojure.string :as str]
+   [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.logging.interface :as log]
-   [ai.miniforge.response.interface :as response]
    [ai.miniforge.tool.tracking :as tracking]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -139,17 +139,19 @@
                      {:success true
                       :result (handler params context)}
                      (catch Exception e
-                       {:success false
-                        :error {:type "execution_error"
-                                :message (.getMessage e)}
-                        :anomaly (response/from-exception e)}))
+                       (let [ex-msg (or (ex-message e) (.getName (class e)))]
+                         {:success false
+                          :error {:type "execution_error"
+                                  :message ex-msg}
+                          :anomaly (anomaly/exception-anomaly :fault ex-msg e)})))
                    {:success false
                     :error {:type "validation_error"
                             :errors (:errors validation)}
-                    :anomaly (response/make-anomaly
-                              :anomalies/incorrect
+                    :anomaly (anomaly/anomaly
+                              :invalid-input
                               (str "Tool parameter validation failed: "
-                                   (first (:errors validation))))})
+                                   (first (:errors validation)))
+                              {})})
           end-ms (System/currentTimeMillis)
           invocation (tracking/build-invocation id params start-ms end-ms result)]
       (tracking/record-invocation context invocation)
@@ -235,9 +237,10 @@
     {:success false
      :error {:type "not_found"
              :message (str "Tool not found: " tool-id)}
-     :anomaly (response/make-anomaly
-               :anomalies/not-found
-               (str "Tool not found: " tool-id))}))
+     :anomaly (anomaly/anomaly
+               :not-found
+               (str "Tool not found: " tool-id)
+               {})}))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
