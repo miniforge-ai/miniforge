@@ -20,9 +20,26 @@
   "Utilities for collecting evidence during workflow execution.
    Provides helpers for gathering phase results, artifacts, and metadata."
   (:require
+   [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.content-hash.interface :as content-hash]
    [ai.miniforge.evidence-bundle.schema :as schema]
    [ai.miniforge.response.interface :as response]))
+
+;------------------------------------------------------------------------------ Layer 0
+;; Anomaly detection (dual shape during W2 convergence)
+
+(defn- any-anomaly?
+  "True when `x` is either a canonical anomaly (`:anomaly/type`) or a
+   legacy response anomaly (`:anomaly/category`).
+
+   evidence-bundle reads anomalies from arbitrary upstream producers
+   (workflow/error, error-info :anomaly), so it must detect both
+   shapes until W5 retires the legacy producers. Prefers the canonical
+   predicate; falls back to the legacy one. Mirrors the dispatch-key
+   pattern in `failure-classifier/classify-failure`."
+  [x]
+  (or (anomaly/anomaly? x)
+      (response/anomaly-map? x)))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Intent Collection
@@ -297,9 +314,10 @@
         pr-info (:workflow/pr-info workflow-state)
         error-info (:workflow/error workflow-state)
         ;; Check for anomaly map in error-info or workflow state
+        ;; (dual-shape during W2: matches both canonical and legacy)
         anomaly-map (cond
-                      (response/anomaly-map? error-info) error-info
-                      (response/anomaly-map? (:anomaly error-info)) (:anomaly error-info)
+                      (any-anomaly? error-info) error-info
+                      (any-anomaly? (:anomaly error-info)) (:anomaly error-info)
                       :else nil)]
     (merge
      {:outcome/success (= status :completed)}
