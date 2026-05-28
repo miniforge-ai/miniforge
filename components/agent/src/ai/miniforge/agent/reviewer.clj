@@ -420,12 +420,18 @@
       nil)))
 
 (defn normalize-llm-decision
-  "Map LLM decision keywords to ReviewArtifact-compatible decisions."
+  "Map LLM decision keywords to ReviewArtifact-compatible decisions.
+   Preserves every variant the ReviewArtifact schema allows — collapsing
+   `:conditionally-approved` to `:changes-requested` (a rejection-class
+   decision) would misclassify a legitimate conditional approval as a
+   rejection and defeat the enumeration validator + the retry's permitted
+   self-correction to conditionally-approved."
   [decision]
   (case decision
-    :approved :approved
-    :rejected :rejected
-    :changes-requested :changes-requested
+    :approved               :approved
+    :rejected               :rejected
+    :changes-requested      :changes-requested
+    :conditionally-approved :conditionally-approved
     ;; default
     :changes-requested))
 
