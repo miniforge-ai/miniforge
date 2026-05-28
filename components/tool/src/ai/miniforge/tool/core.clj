@@ -139,10 +139,11 @@
                      {:success true
                       :result (handler params context)}
                      (catch Exception e
-                       {:success false
-                        :error {:type "execution_error"
-                                :message (.getMessage e)}
-                        :anomaly (anomaly/exception-anomaly :fault (ex-message e) e)}))
+                       (let [ex-msg (or (ex-message e) (.getName (class e)))]
+                         {:success false
+                          :error {:type "execution_error"
+                                  :message ex-msg}
+                          :anomaly (anomaly/exception-anomaly :fault ex-msg e)})))
                    {:success false
                     :error {:type "validation_error"
                             :errors (:errors validation)}

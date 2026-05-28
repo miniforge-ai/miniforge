@@ -36,16 +36,32 @@
    [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.tool.interface :as tool]))
 
+;------------------------------------------------------------------------------ Layer 0
+;; Test factories + handler fixtures.
+
 (defn- echo-handler [params _ctx] (:message params))
 (defn- throwing-handler [_params _ctx] (throw (ex-info "boom" {:why :test})))
+(defn- nil-message-throwing-handler [_params _ctx] (throw (Exception.)))
+
+(defn- make-tool
+  "Factory for a `tool/create-tool` invocation. Always supplies the
+   four-field map shape so each test only varies what it cares about."
+  [{:keys [id description parameters handler]
+    :or   {description "test tool"
+           parameters  {}}}]
+  (tool/create-tool {:id          id
+                     :description description
+                     :parameters  parameters
+                     :handler     handler}))
+
+;------------------------------------------------------------------------------ Layer 1
+;; Anomaly-shape tests, one per failure path.
 
 (deftest execute-validation-error-emits-invalid-input-anomaly
   (testing "missing required parameter yields :invalid-input anomaly"
-    (let [t (tool/create-tool
-             {:id          :tools/echo
-              :description "echo"
-              :parameters  {:message {:type :string :required true}}
-              :handler     echo-handler})
+    (let [t      (make-tool {:id         :tools/echo
+                             :parameters {:message {:type :string :required true}}
+                             :handler    echo-handler})
           result (tool/execute t {} {})
           a      (:anomaly result)]
       (is (false? (:success result)))
@@ -56,11 +72,8 @@
 
 (deftest execute-handler-exception-emits-fault-anomaly
   (testing "handler exception yields :fault anomaly with provenance"
-    (let [t (tool/create-tool
-             {:id          :tools/throws
-              :description "throws"
-              :parameters  {}
-              :handler     throwing-handler})
+    (let [t      (make-tool {:id      :tools/throws
+                             :handler throwing-handler})
           result (tool/execute t {} {})
           a      (:anomaly result)]
       (is (false? (:success result)))
@@ -68,6 +81,22 @@
       (is (= :fault (:anomaly/type a)))
       (is (nil? (:anomaly/subtype a)))
       (is (= "boom" (:anomaly/ex-message (:anomaly/data a)))))))
+
+(deftest execute-handler-nil-message-exception-falls-back-to-class-name
+  (testing "handler throwing an exception with no message still yields a schema-valid anomaly"
+    (let [t      (make-tool {:id      :tools/throws-blank
+                             :handler nil-message-throwing-handler})
+          result (tool/execute t {} {})
+          a      (:anomaly result)]
+      (is (false? (:success result)))
+      (is (anomaly/anomaly? a)
+          "nil ex-message must not break the canonical anomaly schema")
+      (is (= :fault (:anomaly/type a)))
+      (is (string? (:anomaly/message a)))
+      (is (= "java.lang.Exception" (:anomaly/message a))
+          "fallback is the exception class name")
+      (is (= "java.lang.Exception" (get-in result [:error :message]))
+          ":error :message stays consistent with the anomaly fallback"))))
 
 (deftest execute-tool-not-found-emits-not-found-anomaly
   (testing "execute-tool on a missing tool yields :not-found anomaly"
