@@ -116,22 +116,26 @@
    runbook (`docs/runbooks/anomaly-convergence.md`). Generic-standard
    categories map to a bare type and emit no subtype; domain categories
    map to a `(type, subtype)` pair where the subtype is the legacy
-   category keyword verbatim."
-  {:anomalies/fault                  :fault
-   :anomalies/unavailable            :unavailable
-   :anomalies/unsupported            :unsupported
-   :anomalies/timeout                :timeout
-   :anomalies.agent/llm-error        :fault
-   :anomalies.agent/rate-limited     :unavailable
-   :anomalies.llm/rate-limited       :unavailable
-   :anomalies.llm/unavailable        :unavailable
-   :anomalies.llm/timeout            :timeout
-   :anomalies.llm/context-exceeded   :exhausted})
+   category keyword verbatim.
+
+   Only the categories actually emitted today are listed — an unmapped
+   category throws `IllegalArgumentException` in `->canonical-anomaly`,
+   forcing the table to grow when a new producer site is added (per
+   the no-dead-code policy)."
+  {:anomalies/fault              :fault
+   :anomalies/unavailable        :unavailable
+   :anomalies/unsupported        :unsupported
+   :anomalies/timeout            :timeout
+   :anomalies.agent/llm-error    :fault
+   :anomalies.agent/rate-limited :unavailable})
 
 (def ^:private generic-standard-categories
-  "The eight cognitect-standard categories (per the runbook
+  "Subset of the cognitect-standard categories (per the runbook
    `Generic standard (no subtype)` table) that this brick emits — these
-   map 1:1 to a type and carry no `:anomaly/subtype`."
+   four map 1:1 to a type and carry no `:anomaly/subtype`. The runbook's
+   full set is eight; the other four (`:anomalies/incorrect`,
+   `:anomalies/not-found`, `:anomalies/forbidden`, `:anomalies/conflict`)
+   are not produced by `llm-error` in this brick today."
   #{:anomalies/fault
     :anomalies/unavailable
     :anomalies/unsupported
@@ -673,23 +677,39 @@
      :messages [{:role "user" :content msg-content}]
      :stream (boolean streaming?)}))
 
+(defn- http-failure-anomaly
+  "Build the canonical `:unavailable` anomaly that this brick emits for
+   any HTTP-layer failure on an LLM call (thrown exception or http-kit
+   `{:error <Throwable>}` deref). Centralizes the shape so the throwing
+   and non-throwing failure modes converge."
+  [^Throwable cause url]
+  (anomaly/anomaly
+   :unavailable
+   (str "HTTP request failed: " (.getMessage cause))
+   {:operation :http-request
+    :url url}))
+
 (defn http-post-request
   "Make HTTP POST request to LLM API.
 
-   Returns HTTP response map or canonical anomaly map on exception
+   Returns HTTP response map or canonical anomaly map on failure
    (W2 convergence: `:anomaly/type :unavailable`, no subtype since
-   `:anomalies/unavailable` is a generic-standard category)."
+   `:anomalies/unavailable` is a generic-standard category).
+
+   http-kit signals connection failures via either a thrown exception
+   or a `{:error <Throwable>}` response map (depending on whether the
+   error surfaces before or after the future resolves); both modes
+   collapse to the same canonical anomaly."
   [url headers body]
   (try
-    @(http/post url
-                {:headers headers
-                 :body (json/generate-string body)})
+    (let [response @(http/post url
+                               {:headers headers
+                                :body (json/generate-string body)})]
+      (if-let [cause (:error response)]
+        (http-failure-anomaly cause url)
+        response))
     (catch Exception e
-      (anomaly/anomaly
-       :unavailable
-       (str "HTTP request failed: " (.getMessage e))
-       {:operation :http-request
-        :url url}))))
+      (http-failure-anomaly e url))))
 
 (defn parse-ollama-response
   "Parse Ollama API response.
