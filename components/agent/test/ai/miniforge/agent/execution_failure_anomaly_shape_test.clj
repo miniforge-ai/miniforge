@@ -35,11 +35,37 @@
    [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.agent.core :as agent-core]))
 
+;------------------------------------------------------------------------------ Layer 0
+;; Factories — keep test bodies focused on what they assert, not on
+;; how to drive `execution-failure` from a Throwable.
+
+(def ^:private boom-message
+  "Reusable plain-exception message — exercises the non-ex-info path
+   without coupling the assertion text to a fresh literal each time."
+  "boom")
+
+(defn- failure-response
+  "Build the failure response `core/execution-failure` produces for
+   `ex`. The single entry point under test in this file."
+  [ex]
+  (agent-core/execution-failure ex))
+
+(defn- failure-anomaly
+  "The `:anomaly` map embedded in the failure response for `ex`."
+  [ex]
+  (:anomaly (failure-response ex)))
+
+(defn- failure-anomaly-data
+  "The `:anomaly/data` map carried by the embedded anomaly for `ex`."
+  [ex]
+  (:anomaly/data (failure-anomaly ex)))
+
+;------------------------------------------------------------------------------ Layer 1
+;; Shape-lock tests
+
 (deftest execution-failure-embeds-canonical-fault-anomaly
   (testing "ordinary exceptions yield a canonical :fault anomaly"
-    (let [ex   (Exception. "agent blew up")
-          resp (agent-core/execution-failure ex)
-          a    (:anomaly resp)]
+    (let [a (failure-anomaly (Exception. "agent blew up"))]
       (is (anomaly/anomaly? a))
       (is (= :fault (:anomaly/type a))
           "the runbook maps generic :anomalies/fault to :fault with no subtype")
@@ -47,17 +73,15 @@
       (is (= "agent blew up" (:anomaly/message a)))))
 
   (testing "exception-info provenance is preserved under :anomaly/data"
-    (let [ex   (ex-info "implementer failed" {:role :implementer :iteration 3})
-          resp (agent-core/execution-failure ex)
-          data (:anomaly/data (:anomaly resp))]
+    (let [data (failure-anomaly-data
+                (ex-info "implementer failed" {:role :implementer :iteration 3}))]
       (is (= "implementer failed" (:anomaly/ex-message data)))
-      (is (= "clojure.lang.ExceptionInfo" (:anomaly/ex-class data)))
+      (is (= (.getName clojure.lang.ExceptionInfo) (:anomaly/ex-class data)))
       (is (= {:role :implementer :iteration 3} (:anomaly/ex-data data))
           "ex-data carried through under :anomaly/data")))
 
   (testing "the outer execution-failure shape is unchanged"
-    (let [ex   (Exception. "boom")
-          resp (agent-core/execution-failure ex)]
+    (let [resp (failure-response (Exception. boom-message))]
       (is (= [] (:outputs resp)))
       (is (= [:execution-error] (:decisions resp)))
       (is (= [:task-failed] (:signals resp)))
@@ -68,8 +92,7 @@
 
 (deftest execution-failure-no-top-level-domain-keys-on-anomaly
   (testing "exception provenance keys do NOT leak onto the anomaly's top level"
-    (let [a (:anomaly (agent-core/execution-failure
-                       (ex-info "boom" {:role :reviewer})))]
+    (let [a (failure-anomaly (ex-info boom-message {:role :reviewer}))]
       (is (nil? (:anomaly/ex-message a))
           "legacy :anomaly/ex-message stays under :anomaly/data")
       (is (nil? (:anomaly/ex-class a)))
