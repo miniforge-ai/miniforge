@@ -149,6 +149,13 @@
   {:error :empty-pipeline
    :message (messages/t :status/empty-pipeline)})
 
+(defn- unknown-entry-phase-error
+  [entry-phase]
+  {:error :unknown-entry-phase
+   :entry-phase entry-phase
+   :message (messages/t :status/unknown-entry-phase
+                        {:entry-phase entry-phase})})
+
 (defn- first-phase-index
   [pipeline phase]
   (some (partial matching-phase-index phase)
@@ -378,6 +385,19 @@
                               (filter duplicate-phase?)
                               (map first)
                               vec)
+        ;; Check that an explicitly declared entry phase actually exists in the
+        ;; legacy-phases list. We only validate when the caller declared an entry
+        ;; explicitly (via :workflow/entry or :workflow/entry-phase) AND the
+        ;; workflow uses the legacy :workflow/phases format. If no entry is
+        ;; declared the runtime falls back to the first declared phase, which is
+        ;; always valid.
+        explicit-entry (or (:workflow/entry workflow) (:workflow/entry-phase workflow))
+        phase-ids (when (:workflow/phases workflow)
+                    (set (map :phase/id (:workflow/phases workflow))))
+        bad-entry-phase (when (and explicit-entry
+                                   phase-ids
+                                   (not (contains? phase-ids explicit-entry)))
+                          explicit-entry)
         unresolved-success (->> pipeline
                                 (keep (partial unknown-success-target pipeline))
                                 vec)
@@ -385,6 +405,7 @@
                              (keep (partial unknown-fail-target pipeline))
                              vec)
         machine (when (and (seq pipeline)
+                           (nil? bad-entry-phase)
                            (empty? unresolved-success)
                            (empty? unresolved-fail))
                   (compile-execution-machine normalized-workflow))
@@ -399,6 +420,8 @@
         errors (vec (concat
                      (when (empty? pipeline)
                        [(empty-pipeline-error)])
+                     (when bad-entry-phase
+                       [(unknown-entry-phase-error bad-entry-phase)])
                      unresolved-success
                      unresolved-fail
                      (when (seq unreachable-phases)
