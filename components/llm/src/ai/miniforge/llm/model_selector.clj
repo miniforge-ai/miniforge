@@ -46,6 +46,11 @@
    :google    "GOOGLE_API_KEY"
    :groq      "GROQ_API_KEY"})
 
+(def get-env-var
+  "Wraps System/getenv; rebind in tests to inject env state without mutating
+   the real process environment."
+  #(System/getenv %))
+
 (defn model-available?
   "Returns true when the model key is registered in the model catalog and
    its provider's API key env var is present (non-blank) in the process
@@ -55,7 +60,8 @@
   (when-let [model (registry/get-model model-key)]
     (let [env-var (get provider-env-vars (:provider model))]
       (or (nil? env-var)
-          (seq (System/getenv env-var))))))
+          (boolean (when-let [v (get-env-var env-var)]
+                     (not (.isBlank ^String v))))))))
 
 (defn meets-context-requirement?
   "Check if model can handle the required context size."

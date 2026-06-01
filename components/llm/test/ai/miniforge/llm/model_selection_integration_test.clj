@@ -20,10 +20,16 @@
   "Integration tests for the complete intelligent model selection system.
    Tests the full flow: task -> classification -> model selection -> execution."
   (:require
-   [clojure.test :refer [deftest is testing]]
+   [clojure.test :refer [deftest is testing use-fixtures]]
    [ai.miniforge.agent.interface :as agent]
    [ai.miniforge.llm.model-registry :as registry]
    [ai.miniforge.llm.model-selector :as selector]))
+
+;; Simulate all provider API keys present so cloud-model assertions are
+;; deterministic regardless of the CI environment's real env vars.
+(use-fixtures :each (fn [f]
+                      (with-redefs [selector/get-env-var (constantly "test-key")]
+                        (f))))
 
 (deftest test-end-to-end-planning-task
   (testing "End-to-end: Planning task selects Opus"
