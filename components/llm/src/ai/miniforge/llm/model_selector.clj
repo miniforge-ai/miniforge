@@ -37,17 +37,25 @@
    :allow-downgrade true
    :require-local false})
 
+(def ^:private provider-env-vars
+  "Maps each known provider to the env var that must be non-blank for the
+   provider's API to be reachable. Providers absent from this map (e.g.
+   :local) need no external key and are unconditionally considered available."
+  {:anthropic "ANTHROPIC_API_KEY"
+   :openai    "OPENAI_API_KEY"
+   :google    "GOOGLE_API_KEY"
+   :groq      "GROQ_API_KEY"})
+
 (defn model-available?
-  "Check if a model is available in the current environment.
-   TODO: Integrate with backend health checking."
-  [_model-key]
-  ;; For now, assume all models are available
-  ;; In production, this would check:
-  ;; - Backend health status
-  ;; - API keys configured
-  ;; - CLI tools installed
-  ;; - Local models downloaded
-  true)
+  "Returns true when the model key is registered in the model catalog and
+   its provider's API key env var is present (non-blank) in the process
+   environment. Local-runner models with no entry in provider-env-vars are
+   always considered available. Unregistered keys return false."
+  [model-key]
+  (when-let [model (registry/get-model model-key)]
+    (let [env-var (get provider-env-vars (:provider model))]
+      (or (nil? env-var)
+          (seq (System/getenv env-var))))))
 
 (defn meets-context-requirement?
   "Check if model can handle the required context size."
