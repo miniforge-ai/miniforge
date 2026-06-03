@@ -30,7 +30,7 @@
 
    At machine-compile time, every keyword-form `:guard` reference is
    resolved against the registry. A keyword that does not resolve causes
-   `validate-execution-machine` to surface a `:dangling-guard-reference`
+   `validate-execution-machine` to surface a `:dangling-guard-references`
    error — caught at workflow-validation time, NOT at the next dogfood
    run. This is the Phase 1 deliverable of the RFC at
    `docs/architecture/workflow-fsm-guarded-transitions.md`: the registry
@@ -69,7 +69,9 @@
              (messages/t :guards/non-keyword-key
                          {:value (pr-str guard-key)
                           :class (->class-name guard-key)}))))
-  (when-not (fn? f)
+  ;; ifn? not fn? — clj-statecharts accepts any IFn (clojure.lang.MultiFn,
+  ;; keyword, set used as a predicate, etc), so the registry should too.
+  (when-not (ifn? f)
     (throw (IllegalArgumentException.
              (messages/t :guards/non-fn-value
                          {:value     (pr-str f)

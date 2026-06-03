@@ -74,13 +74,28 @@
     (is (thrown? IllegalArgumentException
                  (guards/register-guard! nil always-true)))))
 
-(deftest register-rejects-non-fn-value-test
-  (testing "register-guard! refuses non-fn values with IllegalArgumentException
-            — programmer-error guard per standards rule 005"
+(deftest register-rejects-non-ifn-value-test
+  (testing "register-guard! refuses non-IFn values with IllegalArgumentException
+            — programmer-error guard per standards rule 005. Uses `ifn?` not
+            `fn?` so multimethods, keywords-used-as-predicates, and sets
+            are accepted (clj-statecharts accepts any callable)."
     (is (thrown? IllegalArgumentException
-                 (guards/register-guard! :verdict/terminal? :not-a-fn)))
+                 (guards/register-guard! :verdict/terminal? 42)))
+    (is (thrown? IllegalArgumentException
+                 (guards/register-guard! :verdict/terminal? "a string")))
     (is (thrown? IllegalArgumentException
                  (guards/register-guard! :verdict/terminal? nil)))))
+
+(deftest register-accepts-non-fn-ifn-values-test
+  (testing "register-guard! accepts callables that aren't fn? (keywords, sets,
+            multimethods) because clj-statecharts dispatches on IFn — rejecting
+            them at the registry would be tighter than the engine."
+    ;; Keyword used as a predicate function (kw acts as (get m kw))
+    (guards/register-guard! :verdict/kw-callable :some-keyword)
+    (is (= :some-keyword (guards/lookup-guard :verdict/kw-callable)))
+    ;; Set used as a predicate
+    (guards/register-guard! :verdict/set-callable #{:a :b})
+    (is (= #{:a :b} (guards/lookup-guard :verdict/set-callable)))))
 
 ;------------------------------------------------------------------------------ Reference walker
 
