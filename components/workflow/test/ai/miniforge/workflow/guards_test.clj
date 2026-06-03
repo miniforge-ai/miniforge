@@ -219,16 +219,21 @@
 ;; workflow validation time.
 
 (deftest validate-execution-machine-passes-on-no-guards-test
-  (testing "the current production-shape workflow (no guard refs) validates
-            cleanly — Phase 1 must be behavior-neutral"
+  (testing "a workflow whose pipeline uses no guarded phases still
+            validates cleanly — Phase 1 baseline. Post-Phase-3c the
+            usual production phases (:review, :verify, :release,
+            :implement) all reference standard guards by keyword; this
+            test deliberately uses a NON-guarded-phase shape so it
+            still exercises the 'no guard refs in the pipeline' path
+            (the fixture wipes the registry for isolation, so any
+            guarded phase would trip the dangling-ref check)."
     (let [workflow {:workflow/id :plain
                     :workflow/pipeline [{:phase :plan}
-                                        {:phase :implement}
                                         {:phase :done}]}
           result (workflow-fsm/validate-execution-machine workflow)]
       (is (:valid? result))
       (is (empty? (:errors result))
-          "no :dangling-guard-references entry in :errors when no guards present"))))
+          "no :dangling-guard-references entry when no guarded phase is in the pipeline"))))
 
 ;------------------------------------------------------------------------------ Resolver (Phase 2a)
 ;;

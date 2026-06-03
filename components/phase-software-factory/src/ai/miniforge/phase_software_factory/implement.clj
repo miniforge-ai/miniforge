@@ -622,14 +622,44 @@
         summary (or (get-in result [:output :code/summary])
                     (when (string? (:output result)) (:output result))
                     (messages/t :implement/summary-default))
-        updated-ctx (-> ctx
-                        (assoc-in [:phase :ended-at] end-time)
-                        (assoc-in [:phase :duration-ms] duration-ms)
-                        (assoc-in [:phase :status] phase-status)
-                        (assoc-in [:phase :metrics] metrics)
+        on-fail (get-in ctx [:phase-config :on-fail])
+        ;; Phase 3c verdict — only meaningful for terminal phase
+        ;; statuses (:completed → :approved; :failed → one of the
+        ;; failure verdicts). During :retrying / :already-implemented
+        ;; the FSM doesn't see a transition that needs verdict input.
+        verdict (cond
+                  (= :completed phase-status)
+                  :approved
+
+                  (not= :failed phase-status)
+                  nil
+
+                  rate-limited?
+                  :implement/rate-limited
+
+                  curator-empty-diff?
+                  :implement/empty-diff
+
+                  invalid-already-implemented?
+                  :implement/already-implemented-invalid
+
+                  (some? on-fail)
+                  :repair-requested
+
+                  :else
+                  :exhausted)
+        updated-ctx (cond-> ctx
+                      true
+                      (-> (assoc-in [:phase :ended-at] end-time)
+                          (assoc-in [:phase :duration-ms] duration-ms)
+                          (assoc-in [:phase :status] phase-status)
+                          (assoc-in [:phase :metrics] metrics))
+                      verdict
+                      (-> (assoc-in [:phase :verdict] verdict)
+                          (assoc-in [:phase :result :output :phase/verdict] verdict)))
+        updated-ctx (-> updated-ctx
                         (assoc-in [:metrics :implementation :duration-ms] duration-ms)
                         (assoc-in [:metrics :implementation :repair-cycles] (dec iterations))
-                        ;; Merge agent metrics into execution metrics
                         (update-in [:execution/metrics :tokens] (fnil + 0) (:tokens metrics 0))
                         (update-in [:execution/metrics :cost-usd] (fnil + 0.0) cost-usd)
                         (update-in [:execution/metrics :duration-ms] (fnil + 0) (:duration-ms metrics 0)))]

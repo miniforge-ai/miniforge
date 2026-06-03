@@ -398,6 +398,46 @@
           (is (= 1 (get after :redirect-count 0))
               "single accounting site bumps for release→implement too"))))))
 
+(deftest implement-phase-verdict-routes-fail-via-guarded-array-test
+  (testing "Phase 3c: implement joins the guarded :phase/fail array.
+            :implement/rate-limited, :implement/empty-diff, and
+            :implement/already-implemented-invalid are terminal —
+            FSM bypasses on-fail because retrying would hit the same
+            wall."
+    (let [workflow {:workflow/id :impl-verdict-test
+                    :workflow/pipeline [{:phase :plan}
+                                        {:phase :implement :on-fail :plan}
+                                        {:phase :verify}
+                                        {:phase :review}
+                                        {:phase :done}]}
+          machine (fsm/compile-execution-machine workflow)
+          at-implement (->> (fsm/initialize-execution machine)
+                            (fsm/start-execution machine)
+                            (#(fsm/transition-execution machine % :phase/succeed)))]
+      (is (= :implement (fsm/current-phase-id machine at-implement)))
+      (testing ":implement/rate-limited terminates straight to :failed"
+        (let [evt {:type :phase/fail :phase/verdict :implement/rate-limited}
+              after (fsm/transition-execution machine at-implement evt)]
+          (is (= :failed (fsm/execution-status machine after))
+              "implement rate-limit MUST NOT redirect — provider quota
+               won't change between attempts")))
+      (testing ":implement/empty-diff terminates straight to :failed"
+        (let [evt {:type :phase/fail :phase/verdict :implement/empty-diff}
+              after (fsm/transition-execution machine at-implement evt)]
+          (is (= :failed (fsm/execution-status machine after))
+              "curator's no-files-written verdict MUST NOT redirect")))
+      (testing ":implement/already-implemented-invalid terminates"
+        (let [evt {:type :phase/fail
+                   :phase/verdict :implement/already-implemented-invalid}
+              after (fsm/transition-execution machine at-implement evt)]
+          (is (= :failed (fsm/execution-status machine after)))))
+      (testing ":repair-requested follows on-fail (here :plan) + counter"
+        (let [evt {:type :phase/fail :phase/verdict :repair-requested}
+              after (fsm/transition-execution machine at-implement evt)]
+          (is (= :plan (fsm/current-phase-id machine after)))
+          (is (= 1 (get after :redirect-count 0))
+              "single accounting site for implement→on-fail too"))))))
+
 (deftest state-graph-walks-guarded-array-transitions-test
   ;; Phase 2a permits transition values shaped as ordered vectors of
   ;; map entries (guarded arrays — first matching guard wins; each
