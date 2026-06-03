@@ -58,6 +58,31 @@
   (when (.isDirectory dir)
     (vec (.listFiles dir))))
 
+(defn mock-http-client
+  "Construct a minimal `HttpClient` stub for tests.
+   `send-fn` is called as `(send-fn req handler)` and must return an
+   `HttpResponse`; defaults to a 200 no-op.  All other abstract methods
+   return safe defaults so accidental calls don't throw AbstractMethodError."
+  [& [send-fn]]
+  (let [default-resp (reify java.net.http.HttpResponse
+                       (statusCode [_] 200))
+        f            (or send-fn (fn [_req _handler] default-resp))]
+    (proxy [java.net.http.HttpClient] []
+      (send [req handler] (f req handler))
+      (sendAsync
+        ([req handler]
+         (java.util.concurrent.CompletableFuture/completedFuture (f req handler)))
+        ([req handler _push]
+         (java.util.concurrent.CompletableFuture/completedFuture (f req handler))))
+      (cookieHandler   [] (java.util.Optional/empty))
+      (connectTimeout  [] (java.util.Optional/empty))
+      (followRedirects [] java.net.http.HttpClient$Redirect/NORMAL)
+      (sslContext      [] (javax.net.ssl.SSLContext/getDefault))
+      (sslParameters   [] (javax.net.ssl.SSLParameters.))
+      (authenticator   [] (java.util.Optional/empty))
+      (version         [] java.net.http.HttpClient$Version/HTTP_2)
+      (executor        [] (java.util.Optional/empty)))))
+
 ;------------------------------------------------------------------------------ Layer 0
 ;; workflow-dir / event-file-path normalisation
 
@@ -384,30 +409,11 @@
 
   (testing "batches events and POSTs on flush"
     (let [posted      (atom nil)
-          mock-resp   (reify java.net.http.HttpResponse
-                        (statusCode [_] 200))
-          ;; `java.net.http.HttpClient` is an abstract class with many
-          ;; abstract methods beyond `send`. Stub the most common ones
-          ;; with safe defaults so an accidental future call from the sink
-          ;; doesn't throw AbstractMethodError. Only `send` matters for
-          ;; the assertion below.
-          mock-client (proxy [java.net.http.HttpClient] []
-                        (send [_req _handler]
-                          (reset! posted true)
-                          mock-resp)
-                        (sendAsync
-                          ([_req _handler]
-                           (java.util.concurrent.CompletableFuture/completedFuture mock-resp))
-                          ([_req _handler _push]
-                           (java.util.concurrent.CompletableFuture/completedFuture mock-resp)))
-                        (cookieHandler [] (java.util.Optional/empty))
-                        (connectTimeout [] (java.util.Optional/empty))
-                        (followRedirects [] java.net.http.HttpClient$Redirect/NORMAL)
-                        (sslContext [] (javax.net.ssl.SSLContext/getDefault))
-                        (sslParameters [] (javax.net.ssl.SSLParameters.))
-                        (authenticator [] (java.util.Optional/empty))
-                        (version [] java.net.http.HttpClient$Version/HTTP_2)
-                        (executor [] (java.util.Optional/empty)))
+          mock-client (mock-http-client
+                       (fn [_req _handler]
+                         (reset! posted true)
+                         (reify java.net.http.HttpResponse
+                           (statusCode [_] 200))))
           sink (sinks/fleet-sink {:url              "https://fleet.example.com"
                                   :api-key           "test-key"
                                   :batch-size        3

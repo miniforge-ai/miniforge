@@ -141,6 +141,17 @@
 
 ;;------------------------------------------------------------------------------ Layer 2: Fleet Sink
 
+(defn- build-json-post
+  "Build an HTTP POST request with a JSON string body and Bearer auth header."
+  [uri body api-key timeout-ms]
+  (-> (HttpRequest/newBuilder)
+      (.uri (URI/create uri))
+      (.timeout (Duration/ofMillis timeout-ms))
+      (.header "Authorization" (str "Bearer " api-key))
+      (.header "Content-Type" "application/json")
+      (.POST (HttpRequest$BodyPublishers/ofString body))
+      (.build)))
+
 (defn fleet-sink
   "Create a fleet sink that sends logs to fleet command via HTTP.
 
@@ -176,14 +187,8 @@
               (let [logs (first (swap-vals! batch-atom (constantly [])))]
                 (when (seq logs)
                   (try
-                    (let [body    (json/generate-string {:logs logs})
-                          request (-> (HttpRequest/newBuilder)
-                                      (.uri (URI/create (str url "/logs")))
-                                      (.timeout (Duration/ofMillis timeout-ms))
-                                      (.header "Authorization" (str "Bearer " api-key))
-                                      (.header "Content-Type" "application/json")
-                                      (.POST (HttpRequest$BodyPublishers/ofString body))
-                                      (.build))
+                    (let [body     (json/generate-string {:logs logs})
+                          request  (build-json-post (str url "/logs") body api-key timeout-ms)
                           response (.send http-client request (HttpResponse$BodyHandlers/discarding))]
                       (when (>= (.statusCode response) 400)
                         (binding [*out* *err*]
