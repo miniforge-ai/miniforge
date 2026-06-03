@@ -701,6 +701,29 @@
           result ((:leave interceptor) ctx)]
       (is (= :failed (get-in result [:phase :status]))))))
 
+(deftest leave-release-skips-verdict-on-retrying-status-test
+  ;; Phase 3b regression guard. compute-verdict's `phase-failed?`
+  ;; predicate is false when status is :retrying — without the
+  ;; only-on-terminal-status guard, the verdict would fall through to
+  ;; :approved and silently mark the result as approved during in-phase
+  ;; retries. The FSM never sees :retrying transitions; the runner
+  ;; handles them — so the verdict must be NIL until the phase finishes.
+  (testing "leave-release does NOT attach :phase/verdict during :retrying"
+    (let [interceptor (phase/get-phase-interceptor {:phase :release})
+          ctx {:phase {:started-at (System/currentTimeMillis)
+                       :result {:status :error
+                                :error {:message "transient blip"}}
+                       :budget {:iterations 4}
+                       :iterations 1}
+               :execution/metrics {:tokens 0 :duration-ms 0}}
+          result ((:leave interceptor) ctx)]
+      (is (= :retrying (get-in result [:phase :status]))
+          "fixture must be inside the retry budget so status is :retrying")
+      (is (nil? (get-in result [:phase :verdict]))
+          ":phase :verdict not attached during :retrying")
+      (is (nil? (get-in result [:phase :result :output :phase/verdict]))
+          ":phase/verdict on the result not attached during :retrying"))))
+
 (deftest error-release-treats-zero-files-as-terminal-test
   (testing "zero-files exceptions fail instead of retrying the release phase"
     (let [interceptor (phase/get-phase-interceptor {:phase :release})
