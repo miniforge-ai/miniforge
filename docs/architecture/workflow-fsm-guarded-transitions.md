@@ -296,8 +296,10 @@ is dangling. Test: dangling reference fails the validator.
 **Deliverable.** Replace `{:phase/fail failure-target}` in
 `build-phase-state` with the ordered guarded form FOR REVIEW PHASES
 ONLY. Three named guards (`:verdict/terminal?`, `:budget/redirects-spent?`,
+`build-phase-state` with the ordered guarded form FOR REVIEW PHASES
+ONLY. Three named guards (`:verdict/terminal?`, `:budget/redirects-spent?`,
 `:config/on-fail-set?`) and one named action (`:redirect/inc-count`).
-`leave-review` emits `:phase/verdict` and drops the `:stagnated?` /
+`leave-review` adds `:phase/verdict` to the phase result and drops the `:stagnated?` /
 `:needs-decomposition?` flag bag.
 
 **Files touched.**
