@@ -337,6 +337,46 @@ window.miniforge = {
     discoverRepos: fleetDiscoverRepos,
     syncPrs: fleetSyncPrs,
     discoverAndSync: fleetDiscoverAndSync
+  },
+  filters: {
+    addFilter(field, op, value, _scope) {
+      addFilterChip(field, value, `${field} ${op} ${value}`);
+    },
+    toggleFilter(field, value, _scope) {
+      const filterKey = `${field}:${value}`;
+      if (activeFilters.has(filterKey)) {
+        removeFilterChip(filterKey);
+      } else {
+        addFilterChip(field, value, `${field}: ${value}`);
+      }
+    },
+    setTextFilter(field, value) {
+      const existingKey = `text:${field}`;
+      if (activeFilters.has(existingKey)) {
+        removeFilterChip(existingKey);
+      }
+      if (value && value.trim()) {
+        addFilterChip('text', `${field}:${value}`, `${field}: "${value.trim()}"`);
+      }
+    },
+    clearFilters(_scope) {
+      Array.from(activeFilters.keys()).forEach(key => removeFilterChip(key));
+    },
+    shareCurrentView() {
+      if (navigator.clipboard) {
+        navigator.clipboard.writeText(window.location.href)
+          .then(() => showToast('Link copied to clipboard', 'info', 2000))
+          .catch(() => {});
+      }
+    },
+    toggleCloudFilter(el) {
+      const filterKey = 'cloud:enabled';
+      if (el && el.checked) {
+        addFilterChip('cloud', 'enabled', 'Cloud only');
+      } else {
+        removeFilterChip(filterKey);
+      }
+    }
   }
 };
 
