@@ -291,10 +291,24 @@
   (or (:stagnated? phase-result)
       (:needs-decomposition? phase-result)))
 
+(defn- phase-verdict
+  "Phase 2b: read the `:phase/verdict` keyword from a phase result, if
+   the phase code set one. Review-phase failures attach this; other
+   phases don't yet (Phase 3 generalizes)."
+  [phase-result]
+  (get-in phase-result [:output :phase/verdict]))
+
 (defn determine-phase-event
-  "Translate a phase result into an execution-machine event."
+  "Translate a phase result into an execution-machine event.
+
+   For review-phase failures (verdict present), returns a map event
+   `{:type :phase/fail :phase/verdict <v>}` so the verdict-driven
+   guarded `:phase/fail` array can dispatch via the
+   `:verdict/terminal?` guard. Non-verdict paths preserve the
+   pre-Phase-2 behavior (keyword event)."
   [_phase-config phase-result]
-  (let [target-phase (redirect-target phase-result)]
+  (let [target-phase (redirect-target phase-result)
+        verdict      (phase-verdict phase-result)]
     (cond
       (phase/retrying? phase-result)
       :phase/retry
@@ -302,13 +316,22 @@
       (phase/already-done? phase-result)
       :phase/already-done
 
-      ;; Terminal failure markers must beat the on-fail redirect; check
-      ;; before the redirect branches.
+      ;; Terminal failure markers (legacy `:stagnated?` / `:needs-
+      ;; decomposition?` flags) must beat the on-fail redirect; check
+      ;; before the redirect branches. Phase 4 deletes this path once
+      ;; verify/release/implement also emit verdicts.
       (and (phase/failed? phase-result) (terminal-failure? phase-result))
       :phase/terminal-fail
 
       (phase/succeeded? phase-result)
       :phase/succeed
+
+      ;; Phase 2b: review-phase failures carry a verdict — send a map
+      ;; event so the FSM's guarded array reads it via
+      ;; `:verdict/terminal?`. Skip if a redirect was explicitly
+      ;; requested via the legacy `request-redirect` path (other phases).
+      (and (phase/failed? phase-result) verdict (not target-phase))
+      {:type :phase/fail :phase/verdict verdict}
 
       (and (phase/failed? phase-result) target-phase)
       (workflow-fsm/redirect-event target-phase)

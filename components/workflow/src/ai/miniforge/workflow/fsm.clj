@@ -43,7 +43,13 @@
    [ai.miniforge.workflow.actions :as actions]
    [ai.miniforge.workflow.definition :as definition]
    [ai.miniforge.workflow.guards :as guards]
-   [ai.miniforge.workflow.messages :as messages]))
+   [ai.miniforge.workflow.messages :as messages]
+   ;; Side-effecting require — registers `:verdict/terminal?`,
+   ;; `:budget/redirects-spent?` and `:redirect/inc-count` at load
+   ;; time so `compile-execution-machine`'s resolver can substitute
+   ;; them. Phase 2b consumes these from the review-phase
+   ;; `:phase/fail` guarded array.
+   [ai.miniforge.workflow.standard-guards-and-actions]))
 
 (declare current-state first-phase-index reachable-states unreachable-states)
 
@@ -218,6 +224,40 @@
               {:state current-state
                :event event}))
 
+(defn- review-phase-fail-transition
+  "Phase 2b: emit the guarded `:phase/fail` array for the review phase.
+
+   Ordering matters — clj-statecharts picks the first guard whose
+   predicate returns truthy. The compile-time choice to include or omit
+   the redirect branch makes the runtime `:config/on-fail-set?` guard
+   from the RFC's three-guard set unnecessary (when on-fail isn't
+   configured, the branch is simply absent).
+
+   * Branch 1: terminal verdict (stagnated / needs-decomposition /
+     exhausted) → straight to `:failed`.
+   * Branch 2: redirect budget spent → straight to `:failed` (no more
+     on-fail redirects).
+   * Branch 3 (only when `:on-fail` is configured): the on-fail
+     redirect, plus the `:redirect/inc-count` action that bumps the
+     FSM-owned `:redirect-count` (single accounting site — Phase 4
+     deletes the runner's parallel `redirect-event?` check).
+   * Branch 4: default — no verdict, no on-fail, just fail."
+  [failure-target on-fail-configured?]
+  (if on-fail-configured?
+    [{:target :failed         :guard :verdict/terminal?}
+     {:target :failed         :guard :budget/redirects-spent?}
+     {:target failure-target  :actions [:redirect/inc-count]}
+     {:target :failed}]
+    [{:target :failed :guard :verdict/terminal?}
+     {:target :failed}]))
+
+(defn- review-phase?
+  "True when this phase entry's config drives the review-phase behavior.
+   Phase 2b migrates review-phase fail-routing to the guarded array;
+   Phase 3 generalizes to verify / release / implement."
+  [config]
+  (= :review (:phase config)))
+
 (defn- build-phase-state
   [phase-entries {:keys [index config state-id paused-state-id]}]
   (let [terminal-phase? (:terminal? config)
@@ -235,20 +275,26 @@
         failure-target (or (state-target phase-entries on-fail-index)
                            :failed)
         already-done-target (or (state-target phase-entries done-index)
-                                :completed)]
+                                :completed)
+        ;; Phase 2b: review-phase routes :phase/fail through a guarded
+        ;; array; other phases keep the flat shape until Phase 3.
+        phase-fail-transition (if (review-phase? config)
+                                (review-phase-fail-transition failure-target
+                                                              (some? on-fail-index))
+                                failure-target)]
     [state-id
      {:on (merge
            {:phase/retry state-id
             :phase/succeed success-target
             :phase/already-done already-done-target
-            :phase/fail failure-target
+            :phase/fail phase-fail-transition
             ;; Terminal failure event: bypasses `:on-fail` and routes
             ;; straight to `:failed`. Used by phases that have decided the
-            ;; only forward path is escalation (e.g. review stagnation, the
-            ;; convergence-cap :needs-decomposition signal) — without this,
-            ;; setting `:stagnated?` / `:needs-decomposition?` on the phase
-            ;; result is dead code: the FSM still follows on-fail and the
-            ;; review→implement loop burns until `max-redirects`.
+            ;; only forward path is escalation. For review phase this
+            ;; mechanism is superseded by Phase 2b's verdict-driven
+            ;; guarded array, but we keep the event mapping until Phase 4
+            ;; drops the workaround so verify/release/implement (and
+            ;; in-flight checkpoints) keep working.
             :phase/terminal-fail :failed
             :pause paused-state-id
             :cancel :cancelled

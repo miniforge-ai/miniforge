@@ -29,8 +29,12 @@
 
 (use-fixtures :each
   (fn [f]
-    (actions/clear-registry!)
-    (try (f) (finally (actions/clear-registry!)))))
+    ;; Snapshot/restore so namespace-load-time registrations from
+    ;; `standard-guards-and-actions` survive across tests that need a
+    ;; clean slate. See guards_test for the same pattern.
+    (let [snap (actions/snapshot-registry)]
+      (actions/clear-registry!)
+      (try (f) (finally (actions/restore-registry! snap))))))
 
 (defn- bump-counter [state _event]
   (update-in state [:context :redirect-count] (fnil inc 0)))

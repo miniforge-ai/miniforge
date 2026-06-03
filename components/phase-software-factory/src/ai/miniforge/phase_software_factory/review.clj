@@ -202,28 +202,9 @@
   "Reviewer decisions that mean 'don't ship this — fix it.' Iter 23
    regression: :rejected fell through to :completed, letting release
    open a PR against a reviewer-rejected artifact. Both decisions
-   route through the :failed branch so the workflow can either redirect
-   to :implement or terminate."
+   route through the :failed branch; the FSM's verdict-driven guarded
+   :phase/fail array (Phase 2b) decides between redirect and terminate."
   #{:rejected :changes-requested})
-
-(defn- terminate-stagnated
-  "Mark a stagnated phase as failed and skip the redirect-to-implement
-   path. The phase `:error` is a canonical anomaly map (W2 convergence):
-   `:anomaly/type :exhausted` (the review repair budget has been
-   spent without progress) carrying the legacy
-   `:anomalies.review/stagnation` keyword as `:anomaly/subtype` and the
-   fingerprint chain under `:anomaly/data` so the workflow runner /
-   evidence bundle can report what didn't move."
-  [ctx fingerprint-history]
-  (let [msg (messages/t :review/stagnation)]
-    (-> ctx
-        (assoc-in [:phase :stagnated?] true)
-        (assoc-in [:phase :error]
-                  (anomaly/sub-anomaly
-                   :exhausted
-                   :anomalies.review/stagnation
-                   msg
-                   {:review/fingerprint-history (vec fingerprint-history)})))))
 
 (def ^:private default-max-no-progress-attempts
   "After this many CONSECUTIVE review→implement repair cycles where each
@@ -237,28 +218,40 @@
    `:phase-config`)."
   3)
 
-(defn- terminate-needs-decomposition
-  "Mark the phase as failed with a :needs-decomposition signal — review keeps
-   surfacing different legitimate blockers each pass; the task likely needs
-   to be split. Distinct from :stagnated (identical-fingerprint loop) and
-   :exhausted (ran out of redirect budget): this is a CONVERGENCE failure
-   with a specific recommendation for the meta-agent. `review-cycle-count` is
-   the task-level number of completed reviews carried into the anomaly so the
-   diagnostic message names the actual count."
+(defn- attach-stagnated-anomaly
+  "Phase 2b: attach the stagnation anomaly to the phase result so the
+   workflow runner / evidence bundle can report what didn't move.
+   No more :stagnated? flag bit on the result — the FSM reads the
+   verdict directly."
+  [ctx fingerprint-history]
+  (let [msg (messages/t :review/stagnation)]
+    (assoc-in ctx [:phase :error]
+              (anomaly/sub-anomaly
+               :exhausted
+               :anomalies.review/stagnation
+               msg
+               {:review/fingerprint-history (vec fingerprint-history)}))))
+
+(defn- attach-needs-decomposition-anomaly
+  "Phase 2b: attach the needs-decomposition anomaly to the phase result.
+   No more :needs-decomposition? flag bit — verdict carries the signal."
   [ctx fingerprint-history review-cycle-count]
   (let [msg (messages/t :review/needs-decomposition {:iterations review-cycle-count})]
-    (-> ctx
-        (assoc-in [:phase :needs-decomposition?] true)
-        (assoc-in [:phase :error]
-                  {:message msg
-                   :anomaly/category :anomalies.review/needs-decomposition
-                   :anomaly/message  msg
-                   :review/cycle-count review-cycle-count
-                   :review/fingerprint-history (vec fingerprint-history)}))))
+    (assoc-in ctx [:phase :error]
+              {:message msg
+               :anomaly/category :anomalies.review/needs-decomposition
+               :anomaly/message  msg
+               :review/cycle-count review-cycle-count
+               :review/fingerprint-history (vec fingerprint-history)})))
 
-(defn- redirect-to-implement
-  "Update phase to redirect back to :implement with review feedback for
-   repair. Caller is responsible for the iteration-budget guard."
+(defn- attach-repair-handoff
+  "Phase 2b: attach repair feedback + a typed handoff so the implementer
+   can pick up the work. Does NOT call `phase/request-redirect` anymore
+   — the FSM's guarded `:phase/fail` array (registered at compile time
+   in `build-phase-state`) decides between on-fail redirect and
+   terminal :failed, with `:redirect/inc-count` as the single accounting
+   site. `leave-review` just attaches the verdict + feedback to the
+   result; the workflow engine handles routing."
   [updated-ctx feedback]
   (let [repair-attempt (inc (get-in updated-ctx [:phase :iterations] 0))
         handoff (phase-handoff/repair-request
@@ -270,8 +263,7 @@
         phase-result (-> (:phase updated-ctx)
                          (assoc :iterations repair-attempt)
                          (assoc :review-feedback feedback)
-                         (assoc :phase/handoff handoff)
-                         (phase/request-redirect :implement))]
+                         (assoc :phase/handoff handoff))]
     (-> updated-ctx
         (assoc :phase phase-result)
         (phase-handoff/append-execution-handoff handoff))))
@@ -318,27 +310,82 @@
     gate-failed?      :failed
     :else             :completed))
 
-(defn- compute-decision
-  "Pick the post-review action:
-     :stagnated | :needs-decomposition | :repair | :exhausted | :complete."
-  [{:keys [reviewer-blocked? stagnated? needs-decomposition? within-budget?
-           phase-status actionable-feedback?]}]
-  (cond
-    stagnated?                                                 :stagnated
-    needs-decomposition?                                       :needs-decomposition
-    (and reviewer-blocked? within-budget? actionable-feedback?) :repair
-    (= :failed phase-status)                                   :exhausted
-    :else                                                      :complete))
+(def ^:private verdicts
+  "Phase 2b verdict tag set. Replaces the old flag bag
+   (`:stagnated?` / `:needs-decomposition?`) + `compute-decision` ladder
+   with a single keyword that flows through `[:phase :result :output
+   :phase/verdict]` to the FSM. The FSM's verdict-driven guarded
+   `:phase/fail` array reads it via `:verdict/terminal?` to decide
+   between on-fail redirect and terminal `:failed`.
 
-(defn- apply-decision
-  "Apply the chosen post-review action to the updated context."
-  [decision updated-ctx feedback fingerprint-history review-cycle-count]
-  (case decision
-    :stagnated            (terminate-stagnated updated-ctx fingerprint-history)
-    :needs-decomposition  (terminate-needs-decomposition updated-ctx fingerprint-history review-cycle-count)
-    :repair               (redirect-to-implement updated-ctx feedback)
-    :exhausted            updated-ctx
-    :complete             (mark-completed updated-ctx)))
+     :approved            — reviewer green-lit; `:phase/succeed` event
+     :repair-requested    — actionable feedback + within budget;
+                            FSM may redirect via on-fail
+     :stagnated           — same blocking fingerprint as prior cycle;
+                            FSM terminates
+     :needs-decomposition — N non-stagnated rejections; FSM terminates
+                            with the decomposition signal
+     :exhausted           — reviewer blocked but no actionable
+                            feedback or over phase-level budget;
+                            FSM terminates"
+  #{:approved :repair-requested :stagnated :needs-decomposition :exhausted})
+
+(defn- compute-verdict
+  "Pick the verdict that should flow on the phase result. Mirrors the
+   former `compute-decision` semantics one-for-one — `:stagnated` and
+   `:needs-decomposition` keep their priority over `:repair-requested`;
+   a reviewer-blocked failure with no actionable feedback collapses to
+   `:exhausted`."
+  [{:keys [reviewer-blocked? stagnated? needs-decomposition? within-budget?
+           actionable-feedback?]}]
+  (cond
+    stagnated?
+    :stagnated
+
+    needs-decomposition?
+    :needs-decomposition
+
+    (and reviewer-blocked? within-budget? actionable-feedback?)
+    :repair-requested
+
+    reviewer-blocked?
+    :exhausted
+
+    :else
+    :approved))
+
+(defn- attach-verdict
+  "Phase 2b: attach the verdict to both the phase-internal `:phase
+   :verdict` slot (so phase callers / tests can inspect it) AND the
+   phase result's `:output :phase/verdict` slot, where
+   `determine-phase-event` reads it before constructing the FSM event."
+  [ctx verdict]
+  (-> ctx
+      (assoc-in [:phase :verdict] verdict)
+      (assoc-in [:phase :result :output :phase/verdict] verdict)))
+
+(defn- apply-verdict
+  "Carry out the side-effects implied by a verdict — attach anomalies
+   for terminal verdicts, attach handoff feedback for repair-requested,
+   mark completed for approved. The FSM drives the actual phase
+   transition; this fn only enriches the ctx with payload data that
+   evidence-bundle / downstream phases consume."
+  [verdict updated-ctx feedback fingerprint-history review-cycle-count]
+  (case verdict
+    :stagnated
+    (attach-stagnated-anomaly updated-ctx fingerprint-history)
+
+    :needs-decomposition
+    (attach-needs-decomposition-anomaly updated-ctx fingerprint-history review-cycle-count)
+
+    :repair-requested
+    (attach-repair-handoff updated-ctx feedback)
+
+    :exhausted
+    updated-ctx
+
+    :approved
+    (mark-completed updated-ctx)))
 
 (defn- accumulate-base-ctx
   "Apply the always-on context updates: phase metadata, metrics,
@@ -416,18 +463,19 @@
         needs-decomposition? (compute-needs-decomposition?
                               reviewer-blocked? stagnated?
                               review-cycle-count max-no-progress-attempts)
-        decision          (compute-decision {:reviewer-blocked?    reviewer-blocked?
-                                             :stagnated?           stagnated?
-                                             :needs-decomposition? needs-decomposition?
-                                             :within-budget?       within-budget?
-                                             :phase-status         phase-status
-                                             :actionable-feedback? (actionable-feedback? feedback)})
-        updated-ctx       (accumulate-base-ctx ctx end-time duration-ms phase-status
-                                               metrics iterations current-fp)
-        next-ctx          (apply-decision decision updated-ctx feedback
-                                          (conj prior-history current-fp)
-                                          review-cycle-count)]
-    (when (= :repair decision)
+        verdict           (compute-verdict {:reviewer-blocked?    reviewer-blocked?
+                                            :stagnated?           stagnated?
+                                            :needs-decomposition? needs-decomposition?
+                                            :within-budget?       within-budget?
+                                            :actionable-feedback? (actionable-feedback? feedback)})
+        updated-ctx       (-> ctx
+                              (accumulate-base-ctx end-time duration-ms phase-status
+                                                   metrics iterations current-fp)
+                              (attach-verdict verdict))
+        next-ctx          (apply-verdict verdict updated-ctx feedback
+                                         (conj prior-history current-fp)
+                                         review-cycle-count)]
+    (when (= :repair-requested verdict)
       (knowledge/capture-feedback-learning!
        (:knowledge-store ctx) :reviewer
        (get-in ctx [:execution/input :title]) feedback))
