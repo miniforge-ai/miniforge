@@ -156,10 +156,17 @@
 
    Returns: Sink function (fn [log-entry] -> nil)"
   [opts]
+  ;; Missing-config throws are PROGRAMMER ERROR guards per standards
+  ;; rule 005 §programmer-error-guards: IllegalArgumentException is the
+  ;; rule-prescribed shape (not ex-info, not throw-anomaly!) because the
+  ;; constructor has no return-value channel to surface an anomaly map
+  ;; without breaking caller expectations of a callable sink.
   (let [url               (or (:url opts)
-                              (throw (ex-info (messages/t :fleet-sink.system/missing-url) {})))
+                              (throw (IllegalArgumentException.
+                                       (messages/t :fleet-sink.system/missing-url))))
         api-key           (or (:api-key opts)
-                              (throw (ex-info (messages/t :fleet-sink.system/missing-api-key) {})))
+                              (throw (IllegalArgumentException.
+                                       (messages/t :fleet-sink.system/missing-api-key))))
         batch-size        (:batch-size opts 50)
         flush-interval-ms (:flush-interval-ms opts 10000)
         timeout-ms        (:timeout-ms opts 10000)

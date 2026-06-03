@@ -358,15 +358,18 @@
 
    Returns: Sink function (fn [event] -> nil)"
   [opts]
-  (let [safe-opts   (dissoc opts :api-key :token :secret :password)
-        url         (or (:url opts)
-                        (response/throw-anomaly! :anomalies/incorrect
-                                                 (messages/t :fleet-sink.system/missing-url)
-                                                 {:opts safe-opts}))
+  ;; Missing-config throws are PROGRAMMER ERROR guards per standards
+  ;; rule 005 §programmer-error-guards: IllegalArgumentException is the
+  ;; rule-prescribed shape (not throw-anomaly! — that's for boundary
+  ;; namespaces, and `event-stream.sinks` is not one). The constructor
+  ;; has no return-value channel to surface an anomaly map without
+  ;; breaking caller expectations of a callable sink.
+  (let [url         (or (:url opts)
+                        (throw (IllegalArgumentException.
+                                 (messages/t :fleet-sink.system/missing-url))))
         api-key          (or (:api-key opts)
-                             (response/throw-anomaly! :anomalies/incorrect
-                                                      (messages/t :fleet-sink.system/missing-api-key)
-                                                      {:opts safe-opts}))
+                             (throw (IllegalArgumentException.
+                                      (messages/t :fleet-sink.system/missing-api-key))))
         batch-size       (:batch-size opts 10)
         flush-interval-ms (:flush-interval-ms opts 5000)
         timeout-ms       (:timeout-ms opts 10000)
