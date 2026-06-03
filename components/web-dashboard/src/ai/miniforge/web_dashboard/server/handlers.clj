@@ -33,15 +33,16 @@
 ;; Anomaly/response helpers
 ;;
 ;; W2 convergence: producer sites in this brick emit canonical
-;; `ai.miniforge.anomaly` maps. The HTTP-status / user-message
-;; translators in `response/translate` already dispatch on
-;; `:anomaly/type` (#1001), so the legacy `:anomalies/*` keywords used
-;; at call sites must be mapped to the canonical generic type at
-;; construction time. All four call-site categories used by this
-;; brick (`:anomalies/incorrect`, `:anomalies/not-found`,
-;; `:anomalies/forbidden`, `:anomalies/fault`) are cognitect-standard
-;; categories that the convergence runbook maps 1:1 to a generic type
-;; with no subtype.
+;; `ai.miniforge.anomaly` maps. The brick's HTTP boundary
+;; (`anomaly-http-response`) routes through `response/anomaly->http-response`
+;; whose status + user-message tables are still keyed by legacy
+;; `:anomalies/*` keywords (translate's `dispatch-key` prefers
+;; `:anomaly/subtype` for routing — see #1001). To preserve cross-brick
+;; HTTP translation behavior during the convergence, callers pass a
+;; legacy `:anomalies/*` category which is mapped to its canonical
+;; generic `:anomaly/type` AND carried verbatim under `:anomaly/subtype`.
+;; Both are removed once `response/translate` is reshaped to dispatch on
+;; canonical generic types directly (anomaly-convergence W5).
 
 (def ^:private legacy-category->canonical-type
   "Map of legacy `:anomalies/*` categories used at this brick's call
@@ -53,6 +54,13 @@
    :anomalies/not-found :not-found
    :anomalies/forbidden :unauthorized
    :anomalies/fault     :fault})
+
+(def ^:private exception-fallback-subtype
+  "Legacy `:anomalies/*` category carried as `:anomaly/subtype` on
+   exception-derived anomalies so the HTTP translate tables (still
+   keyed by `:anomalies/*`) return the canonical 500/`internal error`
+   status + message for unexpected exceptions caught at boundaries."
+  :anomalies/fault)
 
 (defn- canonical-type
   "Resolve a category keyword to its canonical `:anomaly/type`. Passes
@@ -66,25 +74,35 @@
   "Create a canonical anomaly map.
 
    `category-or-type` accepts either the legacy `:anomalies/*` keyword
-   used pre-flip or the canonical `:anomaly/type` keyword directly —
-   both produce the same canonical anomaly. The map is built via
-   `anomaly/anomaly` with no subtype (all categories emitted by this
-   brick's call sites are cognitect-standard generics per the
-   anomaly-convergence runbook)."
+   used pre-flip or the canonical `:anomaly/type` keyword directly.
+   When a legacy keyword is supplied, the canonical generic type is
+   set under `:anomaly/type` AND the legacy keyword is preserved
+   verbatim under `:anomaly/subtype` — `response/translate` dispatches
+   on subtype first, so the HTTP boundary keeps returning the right
+   status + user message during the convergence (translate tables are
+   still keyed by `:anomalies/*`). When a canonical type is supplied
+   directly the result carries no subtype."
   [category-or-type message & [context]]
-  (anomaly/anomaly (canonical-type category-or-type)
-                   message
-                   (or context {})))
+  (let [a-type (canonical-type category-or-type)
+        ctx (or context {})]
+    (if (contains? legacy-category->canonical-type category-or-type)
+      (anomaly/sub-anomaly a-type category-or-type message ctx)
+      (anomaly/anomaly a-type message ctx))))
 
 (defn from-exception
   "Convert an exception to a canonical anomaly map of type `:fault`,
    preserving the exception class + message + ex-data under
    `:anomaly/data`. Nil exception message falls back to the class
-   name per the W2 batch-2 precedent in #1003."
+   name per the W2 batch-2 precedent in #1003.
+
+   `:anomaly/subtype` is set to `:anomalies/fault` so the HTTP
+   translate boundary (legacy-keyword-keyed during convergence) still
+   resolves to 500 + the canonical internal-error user message."
   [^Throwable e]
-  (anomaly/exception-anomaly :fault
-                             (or (ex-message e) (.getName (class e)))
-                             e))
+  (assoc (anomaly/exception-anomaly :fault
+                                    (or (ex-message e) (.getName (class e)))
+                                    e)
+         :anomaly/subtype exception-fallback-subtype))
 
 (defn response-success?
   "Check if a response builder result represents success."
