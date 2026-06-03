@@ -50,16 +50,31 @@
 (defonce ^:private registry
   (atom {}))
 
+(defn- ->class-name [v]
+  (if (nil? v) "nil" (.getName (class v))))
+
 (defn register-guard!
   "Register a guard predicate under `guard-key`. Subsequent compiles
-   resolve `:guard guard-key` references against this entry."
+   resolve `:guard guard-key` references against this entry.
+
+   Validates inputs eagerly: a non-keyword key or non-fn value is a
+   PROGRAMMER ERROR (typo, misread docs) discovered at namespace-load
+   time, so per standards rule 005 `IllegalArgumentException` is the
+   correct shape — not an anomaly return (the function is a side-effect
+   registrar with no return-value channel where a caller would inspect
+   one) and not a slingshot throw+ (no anomaly category to dispatch on)."
   [guard-key f]
   (when-not (keyword? guard-key)
-    (throw (ex-info "Guard key must be a keyword"
-                    {:guard-key guard-key})))
+    (throw (IllegalArgumentException.
+             (messages/t :guards/non-keyword-key
+                         {:value (pr-str guard-key)
+                          :class (->class-name guard-key)}))))
   (when-not (fn? f)
-    (throw (ex-info "Guard value must be a function"
-                    {:guard-key guard-key :value f})))
+    (throw (IllegalArgumentException.
+             (messages/t :guards/non-fn-value
+                         {:value     (pr-str f)
+                          :class     (->class-name f)
+                          :guard-key guard-key}))))
   (swap! registry assoc guard-key f))
 
 (defn unregister-guard!

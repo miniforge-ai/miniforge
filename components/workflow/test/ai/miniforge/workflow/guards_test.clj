@@ -67,14 +67,20 @@
         "registered-keys no longer includes it")))
 
 (deftest register-rejects-non-keyword-test
-  (testing "register-guard! refuses non-keyword keys — protects against typos"
-    (is (thrown? Exception (guards/register-guard! "verdict/terminal?" always-true)))
-    (is (thrown? Exception (guards/register-guard! nil always-true)))))
+  (testing "register-guard! refuses non-keyword keys with IllegalArgumentException
+            — programmer-error guard per standards rule 005"
+    (is (thrown? IllegalArgumentException
+                 (guards/register-guard! "verdict/terminal?" always-true)))
+    (is (thrown? IllegalArgumentException
+                 (guards/register-guard! nil always-true)))))
 
 (deftest register-rejects-non-fn-value-test
-  (testing "register-guard! refuses non-fn values — protects against misuse"
-    (is (thrown? Exception (guards/register-guard! :verdict/terminal? :not-a-fn)))
-    (is (thrown? Exception (guards/register-guard! :verdict/terminal? nil)))))
+  (testing "register-guard! refuses non-fn values with IllegalArgumentException
+            — programmer-error guard per standards rule 005"
+    (is (thrown? IllegalArgumentException
+                 (guards/register-guard! :verdict/terminal? :not-a-fn)))
+    (is (thrown? IllegalArgumentException
+                 (guards/register-guard! :verdict/terminal? nil)))))
 
 ;------------------------------------------------------------------------------ Reference walker
 

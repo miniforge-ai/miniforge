@@ -41,6 +41,10 @@
   "Entry phase {entry-phase} does not exist in the workflow phases"
   :guards/dangling-references
   "Workflow machine references unregistered guard(s): {dangling}. Registered: {registered}"
+  :guards/non-keyword-key
+  "Guard key must be a keyword; got {value} (class {class})"
+  :guards/non-fn-value
+  "Guard value must be a function; got {value} (class {class}) under key {guard-key}"
   :status/missing-workflow-id "Workflow must have :workflow/id"
   :status/invalid-workflow-registration
   "Workflow {workflow-id} failed registration validation"
