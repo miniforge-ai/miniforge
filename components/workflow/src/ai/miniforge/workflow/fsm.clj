@@ -285,18 +285,28 @@
   [entry]
   [(:paused-state-id entry) entry])
 
-(defn- transition-target
+(defn- transition-targets
+  "Return the set of target state-ids referenced by a single transition
+   value. Handles the three transition shapes clj-statecharts accepts:
+   bare keyword (target), single map (`:target` slot), and ordered
+   vector of maps (guarded array — every map's `:target` is a reachable
+   edge, since first matching guard wins but ANY of them MAY fire)."
   [transition]
   (cond
-    (keyword? transition) transition
-    (map? transition) (:target transition)
-    :else nil))
+    (keyword? transition)    #{transition}
+    (map? transition)        (some-> (:target transition) hash-set)
+    (sequential? transition) (into #{}
+                                   (keep (fn [entry]
+                                           (when (map? entry) (:target entry))))
+                                   transition)
+    :else                    #{}))
 
 (defn- state-transition-targets
   [state-config]
   (->> (get state-config :on {})
        vals
-       (keep transition-target)
+       (mapcat transition-targets)
+       (filter some?)
        set))
 
 (defn- build-state-graph

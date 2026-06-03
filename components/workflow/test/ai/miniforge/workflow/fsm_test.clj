@@ -272,6 +272,26 @@
           (is (= :failed (fsm/execution-status machine after-terminal))
               "terminal-fail MUST bypass :on-fail and land in :failed"))))))
 
+(deftest state-graph-walks-guarded-array-transitions-test
+  ;; Phase 2a permits transition values shaped as ordered vectors of
+  ;; map entries (guarded arrays — first matching guard wins; each
+  ;; branch is a reachable edge). The state-graph walker used by the
+  ;; reachability validator must traverse every map's `:target` slot
+  ;; in the array, not just bare-keyword + single-map shapes — else
+  ;; phases reachable only via a guarded branch are misreported as
+  ;; unreachable.
+  (testing "guarded-array transitions contribute every branch's :target
+            to the state graph"
+    (let [states {:s1 {:on {:event-a [{:target :s2 :guard :always}
+                                       {:target :s3}]}}
+                  :s2 {:type :final}
+                  :s3 {:type :final}}
+          graph  (#'fsm/build-state-graph states)]
+      (is (= #{:s2 :s3} (get graph :s1))
+          "BOTH branches should be edges from :s1; pre-Phase-2a code
+           returned #{} because (keep transition-target) discarded the
+           vector"))))
+
 (deftest compiled-execution-machine-reachability-test
   (let [workflow {:workflow/id :test
                   :workflow/pipeline [{:phase :plan}
