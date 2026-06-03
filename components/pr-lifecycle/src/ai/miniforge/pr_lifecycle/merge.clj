@@ -22,13 +22,34 @@
    Handles the final step of the PR lifecycle - determining when
    a PR is ready to merge and executing the merge."
   (:require
+   [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.dag-executor.interface :as dag]
    [ai.miniforge.pr-lifecycle.conflict-resolution :as conflict-resolution]
    [ai.miniforge.pr-lifecycle.events :as events]
    [ai.miniforge.logging.interface :as log]
+   [ai.miniforge.response.interface :as response]
    [babashka.process :as process]
    [cheshire.core :as json]
    [clojure.string :as str]))
+
+;------------------------------------------------------------------------------ Layer 0
+;; Anomaly detection (dual shape during W2 convergence)
+
+(defn- any-anomaly?
+  "True when `x` is either a canonical anomaly (`:anomaly/type`) or a
+   legacy response anomaly (`:anomaly/category`).
+
+   `normalize-resolution-outcome` inspects the return of the injected
+   `resolve-fn` (workflow.merge-resolution/resolve-conflict! today,
+   still legacy-shape pre W2 batch 4). The terminal
+   `:dag-multi-parent-unresolvable` anomaly arrives as a bare map and
+   must be detected by both shape conventions until W5 retires the
+   legacy producers. Prefers the canonical predicate; falls back to
+   the legacy one. Mirrors the dispatch-key pattern in
+   `failure-classifier/classify-failure`."
+  [x]
+  (or (anomaly/anomaly? x)
+      (response/anomaly-map? x)))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Merge policies
@@ -335,8 +356,7 @@
    instead of looping. The original anomaly is preserved under
    :data :anomaly for diagnostic surfacing."
   [outcome]
-  (if (and (map? outcome)
-           (contains? outcome :anomaly/category)
+  (if (and (any-anomaly? outcome)
            (not (dag/ok? outcome))
            (not (dag/err? outcome)))
     (dag/err :conflict-unresolvable
