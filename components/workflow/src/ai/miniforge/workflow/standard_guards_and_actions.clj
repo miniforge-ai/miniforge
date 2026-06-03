@@ -53,7 +53,14 @@
    redirect. Mirrors the legacy `:stagnated?` / `:needs-decomposition?`
    flag bits from the workaround era; collapsed here into a single
    FSM-readable signal."
-  #{:stagnated :needs-decomposition :exhausted})
+  #{;; Convergence-failure verdicts (review phase)
+    :stagnated
+    :needs-decomposition
+    :exhausted
+    ;; Verify-specific (Phase 3): retrying implement does not unblock a
+    ;; timed-out test process or a provider rate-limit. Both terminate.
+    :verify/timeout
+    :verify/rate-limited})
 
 (defn verdict-terminal?
   "Guard: true when the failing-phase event carries a terminal verdict.

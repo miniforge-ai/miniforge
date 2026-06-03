@@ -329,6 +329,42 @@
               "budget-spent guard takes the second :failed branch
                before the redirect branch fires"))))))
 
+(deftest verify-phase-verdict-routes-fail-via-guarded-array-test
+  (testing "Phase 3: verify phase now ALSO uses the guarded :phase/fail
+            array. :verify/timeout and :verify/rate-limited are terminal
+            verdicts that bypass on-fail :implement — fixes the
+            2026-05-28 dogfood bottleneck where verify timed out, looped
+            to implement, implementer wrote a recovery, verify timed out
+            again, repeat for hours."
+    (let [workflow {:workflow/id :verify-verdict-test
+                    :workflow/pipeline [{:phase :plan}
+                                        {:phase :implement}
+                                        {:phase :verify :on-fail :implement}
+                                        {:phase :review}
+                                        {:phase :done}]}
+          machine (fsm/compile-execution-machine workflow)
+          at-verify (->> (fsm/initialize-execution machine)
+                         (fsm/start-execution machine)
+                         (#(fsm/transition-execution machine % :phase/succeed))
+                         (#(fsm/transition-execution machine % :phase/succeed)))]
+      (is (= :verify (fsm/current-phase-id machine at-verify)))
+      (testing ":verify/timeout terminates straight to :failed"
+        (let [evt {:type :phase/fail :phase/verdict :verify/timeout}
+              after (fsm/transition-execution machine at-verify evt)]
+          (is (= :failed (fsm/execution-status machine after))
+              "verify timeout MUST NOT redirect to implement — retrying
+               the implementer cannot unblock a hung test process")))
+      (testing ":verify/rate-limited terminates straight to :failed"
+        (let [evt {:type :phase/fail :phase/verdict :verify/rate-limited}
+              after (fsm/transition-execution machine at-verify evt)]
+          (is (= :failed (fsm/execution-status machine after)))))
+      (testing ":repair-requested follows on-fail to :implement (baseline)"
+        (let [evt {:type :phase/fail :phase/verdict :repair-requested}
+              after (fsm/transition-execution machine at-verify evt)]
+          (is (= :implement (fsm/current-phase-id machine after)))
+          (is (= 1 (get after :redirect-count 0))
+              "single accounting site bumps for verify→implement too"))))))
+
 (deftest state-graph-walks-guarded-array-transitions-test
   ;; Phase 2a permits transition values shaped as ordered vectors of
   ;; map entries (guarded arrays — first matching guard wins; each

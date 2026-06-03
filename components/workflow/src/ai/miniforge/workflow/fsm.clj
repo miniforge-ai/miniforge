@@ -224,8 +224,8 @@
               {:state current-state
                :event event}))
 
-(defn- review-phase-fail-transition
-  "Phase 2b: emit the guarded `:phase/fail` array for the review phase.
+(defn- guarded-fail-transition
+  "Emit the verdict-driven guarded `:phase/fail` array.
 
    Ordering matters — clj-statecharts picks the first guard whose
    predicate returns truthy. The compile-time choice to include or omit
@@ -233,8 +233,9 @@
    from the RFC's three-guard set unnecessary (when on-fail isn't
    configured, the branch is simply absent).
 
-   * Branch 1: terminal verdict (stagnated / needs-decomposition /
-     exhausted) → straight to `:failed`.
+   * Branch 1: terminal verdict (`:stagnated` / `:needs-decomposition`
+     / `:exhausted` / `:verify/timeout` / `:verify/rate-limited`) →
+     straight to `:failed`. Bypasses on-fail.
    * Branch 2: redirect budget spent → straight to `:failed` (no more
      on-fail redirects).
    * Branch 3 (only when `:on-fail` is configured): the on-fail
@@ -251,12 +252,19 @@
     [{:target :failed :guard :verdict/terminal?}
      {:target :failed}]))
 
-(defn- review-phase?
-  "True when this phase entry's config drives the review-phase behavior.
-   Phase 2b migrates review-phase fail-routing to the guarded array;
-   Phase 3 generalizes to verify / release / implement."
+(def ^:private guarded-phases
+  "Phases whose `:phase/fail` dispatch routes through the verdict-driven
+   guarded array. Phase 2b started with :review; Phase 3 adds :verify
+   (where `:verify/timeout` and `:verify/rate-limited` are terminal
+   verdicts the on-fail-to-:implement loop must NOT swallow — retrying
+   implement does not unblock a hung test process or a provider quota).
+   Phase 3b will add :release and :implement; Phase 4 drops this set
+   and applies the guarded form to every phase unconditionally."
+  #{:review :verify})
+
+(defn- guarded-phase?
   [config]
-  (= :review (:phase config)))
+  (contains? guarded-phases (:phase config)))
 
 (defn- build-phase-state
   [phase-entries {:keys [index config state-id paused-state-id]}]
@@ -276,11 +284,13 @@
                            :failed)
         already-done-target (or (state-target phase-entries done-index)
                                 :completed)
-        ;; Phase 2b: review-phase routes :phase/fail through a guarded
-        ;; array; other phases keep the flat shape until Phase 3.
-        phase-fail-transition (if (review-phase? config)
-                                (review-phase-fail-transition failure-target
-                                                              (some? on-fail-index))
+        ;; Phase 2b/3: review + verify route :phase/fail through the
+        ;; verdict-driven guarded array; release + implement keep the
+        ;; flat shape until Phase 3b. Phase 4 drops the per-phase
+        ;; opt-in and applies the guarded form unconditionally.
+        phase-fail-transition (if (guarded-phase? config)
+                                (guarded-fail-transition failure-target
+                                                         (some? on-fail-index))
                                 failure-target)]
     [state-id
      {:on (merge

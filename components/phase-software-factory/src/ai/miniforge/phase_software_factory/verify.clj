@@ -325,12 +325,81 @@
 
     (phase/enter-context ctx :verify nil gates budget start-time result)))
 
+(def ^:private verdicts
+  "Phase 3 verdict tag set for verify. Mirrors review's shape (Phase 2b)
+   with verify-specific terminal kinds:
+
+     :approved            — gates passed; `:phase/succeed` event
+     :repair-requested    — generic test failure with `:on-fail` set;
+                            FSM redirects to implement (subject to
+                            budget)
+     :verify/timeout      — test process timed out (hung BB/cargo); FSM
+                            terminates because retrying implement won't
+                            unstick the process
+     :verify/rate-limited — provider quota blocked the phase; FSM
+                            terminates because retrying implement won't
+                            change LLM quota
+     :exhausted           — failed but no redirect target configured"
+  #{:approved :repair-requested :verify/timeout :verify/rate-limited :exhausted})
+
+(defn- compute-verdict
+  "Pick the verdict that should flow on the phase result.
+
+   `:verify/timeout` and `:verify/rate-limited` take priority over
+   `:repair-requested` — those failure modes are not code-quality
+   issues, so retrying implement is wasted work (this was the
+   2026-05-28 dogfood's bottleneck: verify hit a 30-min timeout, the
+   loop redirected to implement, implement wrote a recovery, verify
+   timed out AGAIN, repeat. The FSM's `:verdict/terminal?` guard now
+   short-circuits the loop)."
+  [{:keys [phase-failed? on-fail-configured? timeout? rate-limited?]}]
+  (cond
+    timeout?
+    :verify/timeout
+
+    rate-limited?
+    :verify/rate-limited
+
+    (and phase-failed? on-fail-configured?)
+    :repair-requested
+
+    phase-failed?
+    :exhausted
+
+    :else
+    :approved))
+
+(defn- attach-verify-error
+  "Attach the verify error map to the phase result for the evidence
+   bundle. Carries the legacy `:timeout?` / `:rate-limited?` flag bits
+   too so consumers reading those keys keep working until Phase 4
+   removes them."
+  [ctx error-message agent-status timeout? rate-limited? gate-failed?]
+  (assoc-in ctx [:phase :error]
+            {:message       error-message
+             :agent-status  agent-status
+             :timeout?      timeout?
+             :rate-limited? rate-limited?
+             :gate-failed?  gate-failed?}))
+
 (defn leave-verify
   "Post-processing for verification phase.
 
    Records test metrics: count, pass rate, coverage.
-   When verification fails and :on-fail is configured, requests a redirect
-   so the execution engine jumps to the target phase (typically :implement)."
+
+   Phase 3 (Phase 2b shape generalized to verify): when verification
+   fails, attaches a `:phase/verdict` to the result so the FSM's
+   verdict-driven guarded `:phase/fail` array (see
+   `workflow/fsm/build-phase-state` and
+   `workflow/standard-guards-and-actions`) decides between an on-fail
+   redirect and a terminal `:failed`. No more `phase/request-redirect`
+   — the FSM owns routing.
+
+   `:verify/timeout` and `:verify/rate-limited` are TERMINAL verdicts:
+   the FSM bypasses on-fail and lands on `:failed` because retrying
+   the implement target wouldn't help (a hung test process is a
+   process issue; a provider rate-limit is a quota issue; implementing
+   different code doesn't fix either)."
   [ctx]
   (let [start-time (get-in ctx [:phase :started-at])
         end-time (System/currentTimeMillis)
@@ -355,50 +424,42 @@
                     (assoc :duration-ms duration-ms))
         iterations (get-in ctx [:phase :iterations] 1)
         on-fail (get-in ctx [:phase-config :on-fail])
+        error-message (or (not-empty (get-in result [:error :message]))
+                          (when gate-failed? (messages/t :verify/gate-failed))
+                          (messages/t :verify/failed))
+        verdict (compute-verdict {:phase-failed?       (= :failed phase-status)
+                                  :on-fail-configured? (some? on-fail)
+                                  :timeout?            timeout?
+                                  :rate-limited?       rate-limited?})
         updated-ctx (-> ctx
                         (assoc-in [:phase :ended-at] end-time)
                         (assoc-in [:phase :duration-ms] duration-ms)
                         (assoc-in [:phase :status] phase-status)
                         (assoc-in [:phase :metrics] metrics)
+                        (assoc-in [:phase :verdict] verdict)
+                        (assoc-in [:phase :result :output :phase/verdict] verdict)
                         (assoc-in [:metrics :verification :duration-ms] duration-ms)
                         (assoc-in [:metrics :verification :repair-cycles] (dec iterations))
-                        ;; Merge agent metrics into execution metrics
                         (update-in [:execution/metrics :tokens] (fnil + 0) (:tokens metrics 0))
                         (update-in [:execution/metrics :duration-ms] (fnil + 0) (:duration-ms metrics 0)))
-        error-message (or (not-empty (get-in result [:error :message]))
-                          (when gate-failed? (messages/t :verify/gate-failed))
-                          (messages/t :verify/failed))]
-    ;; When verify failed and on-fail is configured, redirect to target phase.
-    ;; Timeout and rate-limit failures are not code quality issues — retrying
-    ;; implement won't help, so we do not redirect in those cases.
-    (doto (if (and (= :failed phase-status) on-fail
-                     (not timeout?) (not rate-limited?))
-              (let [phase-result (-> (:phase updated-ctx)
-                                     (assoc :error
-                                            {:message      error-message
-                                             :agent-status agent-status
-                                             :gate-failed? gate-failed?})
-                                     (phase/request-redirect on-fail))]
-                (assoc updated-ctx :phase phase-result))
-              (cond-> updated-ctx
-                (= :completed phase-status)
-                (update-in [:execution :phases-completed] (fnil conj []) :verify)
-                (= :failed phase-status)
-                (assoc-in [:phase :error]
-                          {:message       error-message
-                           :agent-status  agent-status
-                           :timeout?      timeout?
-                           :rate-limited? rate-limited?
-                           :gate-failed?  gate-failed?})))
-        (phase/emit-phase-completed! :verify
-          (merge {:outcome     (if (= :completed phase-status) :success :failure)
-                  :duration-ms duration-ms
-                  :tokens      (get metrics :tokens 0)}
-                 ;; :stalled? true when the test process timed out (hung BB/cargo)
-                 ;; :rate-limited? true when provider quota blocked the phase
-                 (phase-terminal/derive-termination-reason result
-                   {:stalled?      timeout?
-                    :rate-limited? rate-limited?}))))))
+        next-ctx (cond
+                   (= :completed phase-status)
+                   (update-in updated-ctx [:execution :phases-completed] (fnil conj []) :verify)
+
+                   (= :failed phase-status)
+                   (attach-verify-error updated-ctx error-message agent-status
+                                        timeout? rate-limited? gate-failed?)
+
+                   :else
+                   updated-ctx)]
+    (phase/emit-phase-completed! next-ctx :verify
+      (merge {:outcome     (if (= :completed phase-status) :success :failure)
+              :duration-ms duration-ms
+              :tokens      (get metrics :tokens 0)}
+             (phase-terminal/derive-termination-reason result
+               {:stalled?      timeout?
+                :rate-limited? rate-limited?})))
+    next-ctx))
 
 (defn error-verify
   "Handle verification phase errors. Retries within budget; on

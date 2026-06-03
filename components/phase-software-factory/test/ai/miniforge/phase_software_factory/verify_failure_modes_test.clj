@@ -199,60 +199,79 @@
            :execution/metrics {:tokens 0 :duration-ms 0}}
     on-fail (assoc :phase-config {:on-fail on-fail})))
 
-(deftest leave-verify-redirects-on-normal-failure-test
-  (testing "normal verify failure with :on-fail configured requests a redirect"
+(deftest leave-verify-normal-failure-emits-repair-requested-verdict-test
+  (testing "Phase 3: normal verify failure with :on-fail configured sets
+            verdict :repair-requested on the phase result. FSM's
+            guarded :phase/fail array dispatches to on-fail :implement
+            from there."
     (let [ctx (make-leave-ctx {:status :error
                                :error {:message "Tests failed: 3 assertions"}}
                               :implement)
           result (verify/leave-verify ctx)]
-      (is (= :implement (phase/transition-target (get result :phase))))
+      (is (= :repair-requested (get-in result [:phase :verdict]))
+          "verdict :repair-requested drives FSM on-fail redirect")
+      (is (= :repair-requested (get-in result [:phase :result :output :phase/verdict]))
+          ":phase/verdict on the result is what determine-phase-event reads")
       (is (phase/failed? (get result :phase))))))
 
-(deftest leave-verify-redirects-parse-error-output-with-provider-words-test
-  (testing "parse-error previews are actionable even when test output contains provider-like fragments"
+(deftest leave-verify-parse-error-with-provider-words-emits-repair-requested-test
+  (testing "parse-error previews are actionable even when test output
+            contains provider-like fragments. Verdict :repair-requested
+            because the failure isn't a real timeout/rate-limit."
     (let [ctx (make-leave-ctx {:status :error
                                :error {:message (str (messages/t :verify/output-unparseable)
                                                      "\nHTTP 429 from project test output timed out")}
                                :metrics {:parse-error? true}}
                               :implement)
           result (verify/leave-verify ctx)]
-      (is (= :implement (phase/transition-target (get result :phase))))
+      (is (= :repair-requested (get-in result [:phase :verdict])))
       (is (phase/failed? (get result :phase))))))
 
-(deftest leave-verify-no-redirect-on-timeout-test
-  (testing "timeout error does NOT redirect even with :on-fail configured"
+(deftest leave-verify-emits-verify-timeout-verdict-test
+  (testing "Phase 3: timeout error sets verdict :verify/timeout. The
+            FSM's :verdict/terminal? guard routes :phase/fail straight
+            to :failed, bypassing :on-fail :implement — retrying the
+            implementer wouldn't unblock a hung test process. This was
+            the 2026-05-28 dogfood's biggest token sink."
     (let [ctx (make-leave-ctx {:status :error
                                :error {:message "Agent timed out after 600000ms"}}
                               :implement)
           result (verify/leave-verify ctx)]
-      (is (not (phase/redirect-requested? (get result :phase))))
+      (is (= :verify/timeout (get-in result [:phase :verdict])))
+      (is (= :verify/timeout (get-in result [:phase :result :output :phase/verdict])))
       (is (phase/failed? (get result :phase)))
-      (is (true? (get-in result [:phase :error :timeout?]))))))
+      (is (true? (get-in result [:phase :error :timeout?]))
+          "legacy :timeout? flag still in the error map (Phase 4 removes)"))))
 
-(deftest leave-verify-no-redirect-on-rate-limit-test
-  (testing "rate-limit error does NOT redirect even with :on-fail configured"
+(deftest leave-verify-emits-verify-rate-limited-verdict-test
+  (testing "Phase 3: rate-limit error sets verdict :verify/rate-limited.
+            FSM terminates rather than redirecting to implement —
+            retrying the implementer doesn't change the provider quota."
     (let [ctx (make-leave-ctx {:status :error
                                :error {:message "429 rate limit exceeded"}}
                               :implement)
           result (verify/leave-verify ctx)]
-      (is (not (phase/redirect-requested? (get result :phase))))
+      (is (= :verify/rate-limited (get-in result [:phase :verdict])))
       (is (phase/failed? (get result :phase)))
-      (is (some? (get-in result [:phase :error :rate-limited?]))))
+      (is (some? (get-in result [:phase :error :rate-limited?]))
+          "legacy :rate-limited? flag still in error map until Phase 4"))
 
-    (testing "rate-limit variant: you've hit your limit"
+    (testing "rate-limit variant: 'you've hit your limit'"
       (let [ctx (make-leave-ctx {:status :error
                                  :error {:message "You've hit your limit · resets 7pm"}}
                                 :implement)
             result (verify/leave-verify ctx)]
-        (is (not (phase/redirect-requested? (get result :phase))))))))
+        (is (= :verify/rate-limited (get-in result [:phase :verdict])))))))
 
-(deftest leave-verify-no-redirect-without-on-fail-test
-  (testing "normal failure without :on-fail does not request a redirect"
+(deftest leave-verify-emits-exhausted-when-no-on-fail-test
+  (testing "Phase 3: failed verify without :on-fail set emits verdict
+            :exhausted. FSM has no redirect target to take — the
+            guarded array's third branch is absent at compile time."
     (let [ctx (make-leave-ctx {:status :error
                                :error {:message "Tests failed"}}
                               nil)
           result (verify/leave-verify ctx)]
-      (is (not (phase/redirect-requested? (get result :phase))))
+      (is (= :exhausted (get-in result [:phase :verdict])))
       (is (phase/failed? (get result :phase))))))
 
 ;------------------------------------------------------------------------------ Rich Comment
