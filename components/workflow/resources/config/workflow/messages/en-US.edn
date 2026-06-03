@@ -39,6 +39,8 @@
   "Compiled workflow machine contains unreachable phases: {phases}"
   :status/unknown-entry-phase
   "Entry phase {entry-phase} does not exist in the workflow phases"
+  :guards/dangling-references
+  "Workflow machine references unregistered guard(s): {dangling}. Registered: {registered}"
   :status/missing-workflow-id "Workflow must have :workflow/id"
   :status/invalid-workflow-registration
   "Workflow {workflow-id} failed registration validation"
