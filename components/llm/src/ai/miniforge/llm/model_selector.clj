@@ -20,16 +20,25 @@
   "Intelligent model selection based on task classification.
    Layer 0: Selection constraints and availability checking
    Layer 1: Model selection strategies
-   Layer 2: Selection orchestration with fallback logic"
+   Layer 2: Selection orchestration with fallback logic
+
+   Operational configuration (default selection policy + the
+   provider→env-var map) lives in `resources/llm/model-selector.edn` per
+   standards rule 007 (config-as-data). The constants below are
+   code-side FALLBACKS used only when that resource is absent at
+   classpath load."
   (:require
    [ai.miniforge.llm.model-registry :as registry]
-   [ai.miniforge.logging.interface :as log]))
+   [ai.miniforge.logging.interface :as log]
+   [clojure.edn :as edn]
+   [clojure.java.io :as io]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Constraints and availability
 
-(def default-config
-  "Default configuration for model selection."
+(def default-config-fallback
+  "Hard-coded fallback when `llm/model-selector.edn :default-config` is
+   absent. The active value comes from that EDN file per rule 007."
   {:enabled true
    :strategy :automatic ; :automatic | :fixed | :cost-optimized
    :cost-limit-per-task 0.10
@@ -37,14 +46,34 @@
    :allow-downgrade true
    :require-local false})
 
-(def ^:private provider-env-vars
-  "Maps each known provider to the env var that must be non-blank for the
-   provider's API to be reachable. Providers absent from this map (e.g.
-   :local) need no external key and are unconditionally considered available."
+(def ^:private fallback-provider-env-vars
+  "Hard-coded fallback when `llm/model-selector.edn :provider-env-vars` is
+   absent. Operators override by editing the EDN file, not this constant."
   {:anthropic "ANTHROPIC_API_KEY"
    :openai    "OPENAI_API_KEY"
    :google    "GOOGLE_API_KEY"
    :groq      "GROQ_API_KEY"})
+
+(defn- load-model-selector-config
+  []
+  (if-let [resource (io/resource "llm/model-selector.edn")]
+    (edn/read-string (slurp resource))
+    {}))
+
+(def ^:private model-selector-config
+  (delay (load-model-selector-config)))
+
+(def default-config
+  "Active default configuration for model selection. EDN-loaded value
+   from `llm/model-selector.edn :default-config` if present, else the
+   code-side `default-config-fallback`. Realized via `delay` so the
+   resource read happens once per process."
+  (delay (or (:default-config @model-selector-config)
+             default-config-fallback)))
+
+(def ^:private provider-env-vars
+  (delay (or (:provider-env-vars @model-selector-config)
+             fallback-provider-env-vars)))
 
 (def get-env-var
   "Wraps System/getenv; rebind in tests to inject env state without mutating
@@ -58,7 +87,7 @@
    always considered available. Unregistered keys return false."
   [model-key]
   (when-let [model (registry/get-model model-key)]
-    (let [env-var (get provider-env-vars (:provider model))]
+    (let [env-var (get @provider-env-vars (:provider model))]
       (or (nil? env-var)
           (boolean (when-let [v (get-env-var env-var)]
                      (not (.isBlank ^String v))))))))
@@ -197,7 +226,7 @@
   ([task-classification config]
    (select-model task-classification config {}))
   ([task-classification config constraints]
-   (let [merged-config (merge default-config config)
+   (let [merged-config (merge @default-config config)
          strategy (:strategy merged-config)
          task-type (:type task-classification)
          confidence (:confidence task-classification)
