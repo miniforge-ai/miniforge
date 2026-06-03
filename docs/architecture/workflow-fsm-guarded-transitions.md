@@ -36,7 +36,7 @@ already wrapped in the `fsm` component, and already proven Babashka-compatible
 by other in-process FSMs. The redesign moves every transition decision
 into the FSM as a typed, enumerable guard — the bug class becomes
 structurally impossible to express. Migration is five independently
-mergeable phases. Net delete on LOC.
+mergeable phases. Net negative LOC.
 
 ## Problem
 
