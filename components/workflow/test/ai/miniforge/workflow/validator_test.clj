@@ -151,27 +151,25 @@
       (is (some #(re-find #"unknown on-success target" %) (:errors result))
           "Should report unknown target")))
 
-  ;; TODO: Validator doesn't currently validate :workflow/entry-phase
-  ;; It just uses first phase by default. Uncomment when implemented.
-  #_(testing "Non-existent entry phase fails validation"
-      (let [config {:workflow/id :test
-                    :workflow/version "1.0.0"
-                    :workflow/name "Test"
-                    :workflow/description "Test"
-                    :workflow/created-at (java.util.Date.)
-                    :workflow/task-types [:test]
-                    :workflow/type :test
-                    :workflow/phases
-                    [{:phase/id :start
-                      :phase/name "Start"
-                      :phase/agent :planner
-                      :phase/next []}]
-                    :workflow/entry-phase :missing  ; Non-existent entry phase
-                    :workflow/exit-phases [:start]}
-            result (validator/validate-dag config)]
-        (is (not (:valid? result)) "Non-existent entry phase should fail")
-        (is (some #(re-find #"Entry phase" %) (:errors result))
-            "Should report entry phase not found")))
+  (testing "Non-existent entry phase fails validation"
+    (let [config {:workflow/id :test
+                  :workflow/version "1.0.0"
+                  :workflow/name "Test"
+                  :workflow/description "Test"
+                  :workflow/created-at (java.util.Date.)
+                  :workflow/task-types [:test]
+                  :workflow/type :test
+                  :workflow/phases
+                  [{:phase/id :start
+                    :phase/name "Start"
+                    :phase/agent :planner
+                    :phase/next []}]
+                  :workflow/entry-phase :missing  ; Non-existent entry phase
+                  :workflow/exit-phases [:start]}
+          result (validator/validate-dag config)]
+      (is (not (:valid? result)) "Non-existent entry phase should fail")
+      (is (some #(re-find #"Entry phase" %) (:errors result))
+          "Should report entry phase not found")))
 
   (testing "Unreachable phases fail validation"
     (let [config {:workflow/id :test
