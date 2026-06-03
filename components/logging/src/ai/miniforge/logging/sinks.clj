@@ -30,7 +30,8 @@
    [cheshire.core :as json]
    [clojure.java.io :as io]
    [clojure.string :as str]
-   [ai.miniforge.logging.core :as core])
+   [ai.miniforge.logging.core :as core]
+   [ai.miniforge.logging.messages :as messages])
   (:import
    [java.net URI]
    [java.net.http HttpClient HttpRequest HttpRequest$BodyPublishers HttpResponse$BodyHandlers]
@@ -155,9 +156,10 @@
 
    Returns: Sink function (fn [log-entry] -> nil)"
   [opts]
-  (let [url               (or (:url opts) (throw (ex-info "Fleet sink requires :url" {})))
+  (let [url               (or (:url opts)
+                              (throw (ex-info (messages/t :fleet-sink.system/missing-url) {})))
         api-key           (or (:api-key opts)
-                              (throw (ex-info "Fleet sink requires :api-key" {})))
+                              (throw (ex-info (messages/t :fleet-sink.system/missing-api-key) {})))
         batch-size        (:batch-size opts 50)
         flush-interval-ms (:flush-interval-ms opts 10000)
         timeout-ms        (:timeout-ms opts 10000)
@@ -185,16 +187,19 @@
                           response (.send http-client request (HttpResponse$BodyHandlers/discarding))]
                       (when (>= (.statusCode response) 400)
                         (binding [*out* *err*]
-                          (println (str "fleet-sink: POST " url "/logs returned HTTP "
-                                        (.statusCode response))))))
+                          (println (messages/t :fleet-sink.system/http-error
+                                               {:url    (str url "/logs")
+                                                :status (.statusCode response)})))))
                     (catch InterruptedException e
                       ;; Preserve interrupt semantics for callers.
                       (.interrupt (Thread/currentThread))
                       (binding [*out* *err*]
-                        (println "fleet-sink: interrupted during flush:" (ex-message e))))
+                        (println (messages/t :fleet-sink.system/interrupted
+                                             {:error (ex-message e)}))))
                     (catch Exception e
                       (binding [*out* *err*]
-                        (println "fleet-sink: flush error:" (ex-message e))))
+                        (println (messages/t :fleet-sink.system/flush-error
+                                             {:error (ex-message e)}))))
                     (finally
                       (reset! last-flush-atom (System/currentTimeMillis)))))))]
 

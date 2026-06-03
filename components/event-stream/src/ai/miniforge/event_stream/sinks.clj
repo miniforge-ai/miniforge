@@ -36,6 +36,7 @@
    - :multi  - Combine multiple sinks"
   (:require
    [ai.miniforge.config.interface :as config]
+   [ai.miniforge.event-stream.messages :as messages]
    [ai.miniforge.event-stream.snowflake :as snowflake]
    [ai.miniforge.event-stream.storage-layout :as layout]
    [ai.miniforge.response.interface :as response]
@@ -359,11 +360,11 @@
   (let [safe-opts   (dissoc opts :api-key :token :secret :password)
         url         (or (:url opts)
                         (response/throw-anomaly! :anomalies/incorrect
-                                                 "Fleet sink requires :url"
+                                                 (messages/t :fleet-sink.system/missing-url)
                                                  {:opts safe-opts}))
         api-key          (or (:api-key opts)
                              (response/throw-anomaly! :anomalies/incorrect
-                                                      "Fleet sink requires :api-key"
+                                                      (messages/t :fleet-sink.system/missing-api-key)
                                                       {:opts safe-opts}))
         batch-size       (:batch-size opts 10)
         flush-interval-ms (:flush-interval-ms opts 5000)
@@ -392,16 +393,19 @@
                           response (.send http-client request (HttpResponse$BodyHandlers/discarding))]
                       (when (>= (.statusCode response) 400)
                         (binding [*out* *err*]
-                          (println (str "fleet-sink: POST " url "/events returned HTTP "
-                                        (.statusCode response))))))
+                          (println (messages/t :fleet-sink.system/http-error
+                                               {:url    (str url "/events")
+                                                :status (.statusCode response)})))))
                     (catch InterruptedException e
                       ;; Preserve interrupt semantics for callers.
                       (.interrupt (Thread/currentThread))
                       (binding [*out* *err*]
-                        (println "fleet-sink: interrupted during flush:" (ex-message e))))
+                        (println (messages/t :fleet-sink.system/interrupted
+                                             {:error (ex-message e)}))))
                     (catch Exception e
                       (binding [*out* *err*]
-                        (println "fleet-sink: flush error:" (ex-message e))))
+                        (println (messages/t :fleet-sink.system/flush-error
+                                             {:error (ex-message e)}))))
                     (finally
                       (reset! last-flush-atom (System/currentTimeMillis)))))))]
 
