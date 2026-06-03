@@ -17,13 +17,15 @@
 ;; limitations under the License.
 
 (ns ai.miniforge.event-stream.anomaly.sinks-anomaly-test
-  "Coverage for `sinks/fleet-sink` and `sinks/create-sink` boundary
-   escalation via `response/throw-anomaly!`.
+  "Coverage for `sinks/fleet-sink` and `sinks/create-sink` configuration
+   validation.
 
-   Configuration validation surfaces as anomalies in `ex-data` rather
-   than ad-hoc throws. Fleet-sink without `:url` → `:anomalies/incorrect`;
-   unknown sink-type in `create-sink` → `:anomalies/unsupported`;
-   non-map non-vector sink-config → `:anomalies/incorrect`."
+   `fleet-sink` constructor validation surfaces as IllegalArgumentException
+   per standards rule 005 §programmer-error-guards (a missing required
+   :url / :api-key is a programmer error, not a runtime anomaly to be
+   recovered from). `create-sink`'s unknown-type / invalid-config paths
+   still throw via `response/throw-anomaly!` because they predate this
+   PR; flagging for opportunistic cleanup per rule 211."
   (:require
    [clojure.test :refer [deftest is testing]]
    [ai.miniforge.event-stream.sinks :as sinks])
@@ -32,11 +34,19 @@
 
 ;------------------------------------------------------------------------------ fleet-sink missing :url
 
-(deftest fleet-sink-missing-url-throws-anomaly
-  (testing "fleet-sink without :url raises :anomalies/incorrect"
-    (is (thrown-with-msg? ExceptionInfo
+(deftest fleet-sink-missing-url-rejects-config
+  (testing "fleet-sink without :url throws IllegalArgumentException
+            (programmer-error guard per rule 005)"
+    (is (thrown-with-msg? IllegalArgumentException
                           #"Fleet sink requires :url"
                           (sinks/fleet-sink {:api-key "k"})))))
+
+(deftest fleet-sink-missing-api-key-rejects-config
+  (testing "fleet-sink without :api-key throws IllegalArgumentException
+            (programmer-error guard per rule 005)"
+    (is (thrown-with-msg? IllegalArgumentException
+                          #"Fleet sink requires :api-key"
+                          (sinks/fleet-sink {:url "https://fleet.example.com"})))))
 
 ;------------------------------------------------------------------------------ create-sink unknown type
 

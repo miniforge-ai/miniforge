@@ -67,4 +67,23 @@
   "Snowflake generator: wall clock {now-ms} is before the miniforge epoch {epoch-ms}"
 
   ;; Zettelkasten lifecycle (miniforge-fleet Phase E.3 outbox path)
-  :zettel/promoted            "Zettel {uid} promoted to trusted"}}
+  :zettel/promoted            "Zettel {uid} promoted to trusted"
+
+  ;; Fleet sink — operator-internal strings (system-locale, never
+  ;; user-localized, but routed through the catalog so there's one place
+  ;; to audit and change them). Mirrors the workflow component's
+  ;; :dag.merge.system/* pattern.
+  :fleet-sink.system/missing-url
+  "Fleet sink requires :url"
+
+  :fleet-sink.system/missing-api-key
+  "Fleet sink requires :api-key"
+
+  :fleet-sink.system/http-error
+  "fleet-sink: POST {url} returned HTTP {status}"
+
+  :fleet-sink.system/interrupted
+  "fleet-sink: interrupted during flush: {error}"
+
+  :fleet-sink.system/flush-error
+  "fleet-sink: flush error: {error}"}}

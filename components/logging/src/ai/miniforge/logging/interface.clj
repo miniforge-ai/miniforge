@@ -18,9 +18,14 @@
 
 (ns ai.miniforge.logging.interface
   "Public API for structured EDN logging.
-   Provides logger creation, context management, and level-specific log functions."
+   Provides logger creation, context management, and level-specific log
+   functions, plus the small HTTP-request-builder helper the fleet sink
+   uses (and that event-stream's fleet sink imports — extracted here to
+   avoid duplication; promote to a dedicated http-utils brick if a third
+   consumer arrives)."
   (:require
-   [ai.miniforge.logging.core :as core]))
+   [ai.miniforge.logging.core :as core]
+   [ai.miniforge.logging.http :as http]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Logger creation and configuration
@@ -160,6 +165,17 @@
        (do-expensive-work))"
   [logger level category event & body]
   `(timed ~logger ~level ~category ~event (fn [] ~@body)))
+
+;------------------------------------------------------------------------------ Layer 3
+;; HTTP request builder — used by both the in-brick fleet sink and the
+;; event-stream fleet sink. Pass-through to `ai.miniforge.logging.http`.
+
+(defn build-json-post
+  "Build a `java.net.http.HttpRequest` POST with a JSON-string `body`
+   and a Bearer `api-key` header. `timeout-ms` sets the request-level
+   timeout. Used by every fleet-style HTTP sink (logging + event-stream)."
+  [uri body api-key timeout-ms]
+  (http/build-json-post uri body api-key timeout-ms))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

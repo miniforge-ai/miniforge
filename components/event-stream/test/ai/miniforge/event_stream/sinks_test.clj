@@ -24,7 +24,8 @@
    [clojure.string :as str]
    [clojure.edn :as edn]
    [cognitect.transit :as transit]
-   [ai.miniforge.event-stream.sinks :as sinks]))
+   [ai.miniforge.event-stream.sinks :as sinks]
+   [ai.miniforge.event-stream.test-helpers.http-mock :as http-mock]))
 
 ;------------------------------------------------------------------------------ Helpers
 
@@ -57,6 +58,11 @@
 (defn list-files [^java.io.File dir]
   (when (.isDirectory dir)
     (vec (.listFiles dir))))
+
+;; `mock-http-client` lives in the shared
+;; `ai.miniforge.event-stream.test-helpers.http-mock` namespace so other
+;; sink tests can reuse the same proxy stubs without re-implementing
+;; HttpClient's ~10 abstract methods.
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; workflow-dir / event-file-path normalisation
@@ -373,22 +379,31 @@
   (testing "requires :url option"
     (is (thrown? Exception (sinks/fleet-sink {}))))
 
-  (testing "creates a function when url is provided"
+  (testing "requires :api-key option"
+    (is (thrown? Exception
+                 (sinks/fleet-sink {:url "https://fleet.example.com"}))
+        "missing :api-key must fail loud at construction so misconfiguration doesn't produce 401 noise at flush time"))
+
+  (testing "creates a function when url and api-key are provided"
     (is (fn? (sinks/fleet-sink {:url "https://fleet.example.com"
                                 :api-key "test-key"}))))
 
-  (testing "batches events according to batch-size"
-    (let [sink (sinks/fleet-sink {:url "https://fleet.example.com"
-                                  :batch-size 3
-                                  :flush-interval-ms 999999})]
-      ;; Should accept events without throwing
+  (testing "batches events and POSTs on flush"
+    (let [posted      (atom nil)
+          mock-client (http-mock/mock-http-client
+                       (fn [_req _handler]
+                         (reset! posted true)
+                         (reify java.net.http.HttpResponse
+                           (statusCode [_] 200))))
+          sink (sinks/fleet-sink {:url              "https://fleet.example.com"
+                                  :api-key           "test-key"
+                                  :batch-size        3
+                                  :flush-interval-ms 999999
+                                  :http-client       mock-client})]
       (sink (sample-event))
       (sink (sample-event))
-      ;; Third event should trigger a flush attempt
       (sink (sample-event))
-      ;; No assertions on HTTP call since it's stubbed,
-      ;; but verify it doesn't throw
-      (is true))))
+      (is (true? @posted) "flush sends an HTTP POST on batch-size trigger"))))
 
 ;------------------------------------------------------------------------------ Layer 1b
 ;; file-sink error reporting

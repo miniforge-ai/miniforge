@@ -1,4 +1,7 @@
 {:paths ["src" "resources"]
- :deps {ai.miniforge/config {:local/root "../config"}}
+ :deps {ai.miniforge/config     {:local/root "../config"}
+        ai.miniforge/messages    {:local/root "../messages"}
+        cheshire/cheshire        {:mvn/version "5.13.0"}
+        slingshot/slingshot      {:mvn/version "0.12.2"}}
  :aliases {:test {:extra-paths ["test"]
                   :extra-deps {}}}}

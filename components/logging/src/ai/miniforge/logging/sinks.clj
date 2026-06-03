@@ -27,9 +27,15 @@
    - :multi  - Combine multiple sinks"
   (:require
    [ai.miniforge.config.interface :as config]
+   [cheshire.core :as json]
    [clojure.java.io :as io]
    [clojure.string :as str]
-   [ai.miniforge.logging.core :as core]))
+   [ai.miniforge.logging.core :as core]
+   [ai.miniforge.logging.http :as http]
+   [ai.miniforge.logging.messages :as messages]
+   [slingshot.slingshot :refer [try+]])
+  (:import
+   [java.net.http HttpClient HttpResponse$BodyHandlers]))
 
 ;;------------------------------------------------------------------------------ Layer 0: File Sink
 
@@ -145,28 +151,62 @@
      Optional:
        :batch-size - Number of logs to batch (default 50)
        :flush-interval-ms - Max time before flushing (default 10000)
+       :timeout-ms - HTTP timeout in ms (default 10000)
+       :http-client - java.net.http.HttpClient instance (default: HttpClient/newHttpClient)
 
    Returns: Sink function (fn [log-entry] -> nil)"
   [opts]
-  (let [_url (or (:url opts) (throw (ex-info "Fleet sink requires :url" {})))
-        _api-key (:api-key opts)
-        batch-size (:batch-size opts 50)
+  ;; Missing-config throws are PROGRAMMER ERROR guards per standards
+  ;; rule 005 §programmer-error-guards: IllegalArgumentException is the
+  ;; rule-prescribed shape (not ex-info, not throw-anomaly!) because the
+  ;; constructor has no return-value channel to surface an anomaly map
+  ;; without breaking caller expectations of a callable sink.
+  (let [url               (or (:url opts)
+                              (throw (IllegalArgumentException.
+                                       (messages/t :fleet-sink.system/missing-url))))
+        api-key           (or (:api-key opts)
+                              (throw (IllegalArgumentException.
+                                       (messages/t :fleet-sink.system/missing-api-key))))
+        batch-size        (:batch-size opts 50)
         flush-interval-ms (:flush-interval-ms opts 10000)
-        batch-atom (atom [])
-        last-flush-atom (atom (System/currentTimeMillis))]
+        timeout-ms        (:timeout-ms opts 10000)
+        http-client       (or (:http-client opts) (HttpClient/newHttpClient))
+        batch-atom        (atom [])
+        last-flush-atom   (atom (System/currentTimeMillis))]
 
     (letfn [(flush-batch! []
-              (let [logs @batch-atom]
+              ;; Atomically drain the batch so concurrent senders don't race
+              ;; on @batch-atom + reset!. swap-vals! returns [prev new] —
+              ;; first prev = the snapshot we own. Events appended while
+              ;; the HTTP call is in flight go into the FRESH atom value
+              ;; and are picked up by the next flush.
+              (let [logs (first (swap-vals! batch-atom (constantly [])))]
                 (when (seq logs)
-                  (try
-                    ;; TODO: Implement HTTP POST to fleet command
-                    ;; (http/post (str _url "/logs")
-                    ;;            {:headers {"Authorization" (str "Bearer " _api-key)}
-                    ;;             :body (json/generate-string {:logs logs})})
-                    (reset! batch-atom [])
-                    (reset! last-flush-atom (System/currentTimeMillis))
-                    (catch Exception _e
-                      nil)))))]
+                  ;; try+ per standards rule 211 — boundary catch around
+                  ;; Java HttpClient.send. The component's other plain
+                  ;; `try` sites (file write, mkdirs) predate this rule
+                  ;; and are migrated opportunistically (211 §migration).
+                  (try+
+                    (let [body     (json/generate-string {:logs logs})
+                          request  (http/build-json-post (str url "/logs") body api-key timeout-ms)
+                          response (.send http-client request (HttpResponse$BodyHandlers/discarding))]
+                      (when (>= (.statusCode response) 400)
+                        (binding [*out* *err*]
+                          (println (messages/t :fleet-sink.system/http-error
+                                               {:url    (str url "/logs")
+                                                :status (.statusCode response)})))))
+                    (catch InterruptedException e
+                      ;; Preserve interrupt semantics for callers.
+                      (.interrupt (Thread/currentThread))
+                      (binding [*out* *err*]
+                        (println (messages/t :fleet-sink.system/interrupted
+                                             {:error (ex-message e)}))))
+                    (catch Exception e
+                      (binding [*out* *err*]
+                        (println (messages/t :fleet-sink.system/flush-error
+                                             {:error (ex-message e)}))))
+                    (finally
+                      (reset! last-flush-atom (System/currentTimeMillis)))))))]
 
       (fn [entry]
         (swap! batch-atom conj entry)

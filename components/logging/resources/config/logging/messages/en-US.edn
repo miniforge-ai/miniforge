@@ -1,0 +1,19 @@
+{:logging/messages
+ {;; Fleet sink — operator-internal strings (system-locale, never
+  ;; user-localized, but routed through the catalog so we have one place
+  ;; to audit and change them). Mirrors the pattern in workflow's
+  ;; en-US.edn under :dag.merge.system/*.
+  :fleet-sink.system/missing-url
+  "Fleet sink requires :url"
+
+  :fleet-sink.system/missing-api-key
+  "Fleet sink requires :api-key"
+
+  :fleet-sink.system/http-error
+  "fleet-sink: POST {url} returned HTTP {status}"
+
+  :fleet-sink.system/interrupted
+  "fleet-sink: interrupted during flush: {error}"
+
+  :fleet-sink.system/flush-error
+  "fleet-sink: flush error: {error}"}}
