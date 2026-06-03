@@ -57,10 +57,15 @@
     :stagnated
     :needs-decomposition
     :exhausted
-    ;; Verify-specific (Phase 3): retrying implement does not unblock a
+    ;; Verify-specific (Phase 3a): retrying implement does not unblock a
     ;; timed-out test process or a provider rate-limit. Both terminate.
     :verify/timeout
-    :verify/rate-limited})
+    :verify/rate-limited
+    ;; Release-specific (Phase 3b): curator-rejected (no files to ship).
+    ;; Retrying implement won't change the curator's decision — the
+    ;; diff is empty and the next pass would just produce another empty
+    ;; diff. Terminal.
+    :release/zero-files})
 
 (defn verdict-terminal?
   "Guard: true when the failing-phase event carries a terminal verdict.

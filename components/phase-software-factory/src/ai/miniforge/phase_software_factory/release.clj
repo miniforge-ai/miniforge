@@ -405,10 +405,50 @@
         (cond-> (phase/result-succeeded? result)
           (assoc-in [:workflow/pr-info] (get-in (:output result) [:workflow/pr-info]))))))))
 
+(def ^:private verdicts
+  "Phase 3b verdict tag set for release.
+
+     :approved            — PR opened or release artifact persisted;
+                            `:phase/succeed` event
+     :repair-requested    — release failed with `:on-fail` set; FSM
+                            redirects (subject to budget)
+     :release/zero-files  — curator's empty-diff verdict; FSM
+                            terminates because retrying implement
+                            won't change the curator's decision
+     :exhausted           — release failed without `:on-fail` set"
+  #{:approved :repair-requested :release/zero-files :exhausted})
+
+(defn- compute-verdict
+  "Pick the verdict that should flow on the phase result.
+
+   `:release/zero-files` pre-empts `:repair-requested` — when the curator
+   reports an empty diff, retrying the implementer is wasted work: the
+   next pass would just produce another empty diff. Make this FSM-visible
+   so the verdict-driven guarded array terminates the loop."
+  [{:keys [phase-failed? on-fail-configured? zero-files?]}]
+  (cond
+    zero-files?
+    :release/zero-files
+
+    (and phase-failed? on-fail-configured?)
+    :repair-requested
+
+    phase-failed?
+    :exhausted
+
+    :else
+    :approved))
+
 (defn leave-release
   "Post-processing for release phase.
 
-   Records release metrics and PR info."
+   Records release metrics and PR info.
+
+   Phase 3b: attaches a `:phase/verdict` to the phase result so the
+   FSM's verdict-driven guarded `:phase/fail` array picks the right
+   target. `:release/zero-files` is a TERMINAL verdict — the FSM
+   bypasses `:on-fail` and lands on `:failed` because the curator's
+   empty-diff signal means the implementer has nothing left to do."
   [ctx]
   (let [start-time (get-in ctx [:phase :started-at])
         end-time (System/currentTimeMillis)
@@ -428,21 +468,24 @@
                        (phase/determine-phase-status
                         agent-status iterations max-iterations))
         pr-info (get-in ctx [:workflow/pr-info])
+        on-fail (get-in ctx [:phase-config :on-fail])
+        verdict (compute-verdict {:phase-failed?       (= :failed phase-status)
+                                  :on-fail-configured? (some? on-fail)
+                                  :zero-files?         zero-files?})
         updated-ctx (-> ctx
                         (assoc-in [:phase :ended-at] end-time)
                         (assoc-in [:phase :duration-ms] duration-ms)
                         (assoc-in [:phase :status] phase-status)
                         (assoc-in [:phase :metrics] metrics)
+                        (assoc-in [:phase :verdict] verdict)
+                        (assoc-in [:phase :result :output :phase/verdict] verdict)
                         (assoc-in [:metrics :release :duration-ms] duration-ms)
                         (assoc-in [:metrics :release :repair-cycles] (dec iterations))
-                        ;; Include PR info in metrics for evidence bundle
                         (cond-> pr-info
                           (assoc-in [:metrics :release :pr-info] pr-info))
                         (update-in [:execution :phases-completed] (fnil conj []) :release)
-                        ;; Merge agent metrics into execution metrics
                         (update-in [:execution/metrics :tokens] (fnil + 0) (:tokens metrics 0))
                         (update-in [:execution/metrics :duration-ms] (fnil + 0) (:duration-ms metrics 0)))]
-    ;; Handle retrying: increment iteration counter, then emit telemetry
     (doto (cond-> updated-ctx
             (phase/retrying? (:phase updated-ctx))
             (-> (update-in [:phase :iterations] (fnil inc 1))
@@ -452,39 +495,58 @@
         (merge {:outcome     (if (= :completed phase-status) :success :failure)
                 :duration-ms duration-ms
                 :tokens      (:tokens metrics 0)}
-               ;; :release/zero-files is treated as curator-rejected (nothing to ship)
                (phase-terminal/derive-termination-reason result nil))))))
 
+(defn- attach-error-verdict
+  "Phase 3b: when error-release fails terminally, attach the verdict to
+   the result so the FSM's guarded :phase/fail array reads it. The
+   `:release/zero-files` case is terminal; everything else is either
+   :repair-requested (on-fail set, FSM will redirect) or :exhausted
+   (no on-fail target)."
+  [ctx zero-files? on-fail-configured?]
+  (let [verdict (cond
+                  zero-files?            :release/zero-files
+                  on-fail-configured?    :repair-requested
+                  :else                  :exhausted)]
+    (-> ctx
+        (assoc-in [:phase :verdict] verdict)
+        (assoc-in [:phase :result :output :phase/verdict] verdict))))
+
 (defn error-release
-  "Handle release phase errors."
+  "Handle release phase errors.
+
+   Phase 3b: failures no longer call `phase/fail-and-request-redirect`
+   — the FSM's verdict-driven guarded :phase/fail array routes via
+   `:on-fail` if configured, or to `:failed` otherwise. error-release
+   stays responsible for the phase-level retry budget; once that's
+   exhausted it just attaches the verdict + error and lets the FSM
+   dispatch."
   [ctx ex]
   (let [iterations (get-in ctx [:phase :iterations] 0)
         max-iterations (get-in ctx [:phase :budget :iterations] 2)
         on-fail (get-in ctx [:phase-config :on-fail])
-        error-map (phase/exception-error ex)]
+        error-map (phase/exception-error ex)
+        zero-files? (= :release/zero-files (get (ex-data ex) :type))]
     (cond
-      (= :release/zero-files (get (ex-data ex) :type))
-      (assoc ctx :phase (phase/fail-phase (:phase ctx) error-map))
+      zero-files?
+      (-> ctx
+          (assoc :phase (phase/fail-phase (:phase ctx) error-map))
+          (attach-error-verdict true (some? on-fail)))
 
-      ;; Within budget - retry
+      ;; Within phase-level retry budget — retry in place. The FSM
+      ;; doesn't see this as a transition.
       (< iterations max-iterations)
       (-> ctx
           (update-in [:phase :iterations] (fnil inc 0))
           (assoc-in [:phase :last-error] (ex-message ex))
           (assoc-in [:phase :status] :retrying))
 
-      ;; Has on-fail transition - redirect
-      on-fail
-      (let [phase-result (-> (:phase ctx)
-                             (phase/fail-and-request-redirect
-                              error-map
-                              on-fail))]
-        (assoc ctx :phase phase-result))
-
-      ;; No recovery - propagate
+      ;; Out of retries — attach verdict and let the FSM dispatch
+      ;; (:repair-requested when on-fail set, :exhausted otherwise).
       :else
       (-> ctx
-          (assoc :phase (phase/fail-phase (:phase ctx) error-map)))))) 
+          (assoc :phase (phase/fail-phase (:phase ctx) error-map))
+          (attach-error-verdict false (some? on-fail))))))
 
 ;------------------------------------------------------------------------------ Layer 2
 ;; Registry methods

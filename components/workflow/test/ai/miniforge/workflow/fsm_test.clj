@@ -365,6 +365,39 @@
           (is (= 1 (get after :redirect-count 0))
               "single accounting site bumps for verify→implement too"))))))
 
+(deftest release-phase-verdict-routes-fail-via-guarded-array-test
+  (testing "Phase 3b: release phase joins the guarded :phase/fail array.
+            `:release/zero-files` (curator's empty-diff verdict) is
+            terminal — bypasses on-fail because retrying the implementer
+            wouldn't change the curator's decision (the diff is empty;
+            the next pass would just produce another empty diff)."
+    (let [workflow {:workflow/id :release-verdict-test
+                    :workflow/pipeline [{:phase :plan}
+                                        {:phase :implement}
+                                        {:phase :verify}
+                                        {:phase :review}
+                                        {:phase :release :on-fail :implement}
+                                        {:phase :done}]}
+          machine (fsm/compile-execution-machine workflow)
+          at-release (->> (fsm/initialize-execution machine)
+                          (fsm/start-execution machine)
+                          (#(fsm/transition-execution machine % :phase/succeed))
+                          (#(fsm/transition-execution machine % :phase/succeed))
+                          (#(fsm/transition-execution machine % :phase/succeed))
+                          (#(fsm/transition-execution machine % :phase/succeed)))]
+      (is (= :release (fsm/current-phase-id machine at-release)))
+      (testing ":release/zero-files terminates straight to :failed"
+        (let [evt {:type :phase/fail :phase/verdict :release/zero-files}
+              after (fsm/transition-execution machine at-release evt)]
+          (is (= :failed (fsm/execution-status machine after))
+              "curator's empty-diff verdict MUST NOT redirect")))
+      (testing ":repair-requested follows on-fail to :implement"
+        (let [evt {:type :phase/fail :phase/verdict :repair-requested}
+              after (fsm/transition-execution machine at-release evt)]
+          (is (= :implement (fsm/current-phase-id machine after)))
+          (is (= 1 (get after :redirect-count 0))
+              "single accounting site bumps for release→implement too"))))))
+
 (deftest state-graph-walks-guarded-array-transitions-test
   ;; Phase 2a permits transition values shaped as ordered vectors of
   ;; map entries (guarded arrays — first matching guard wins; each
