@@ -41,6 +41,7 @@
    [clojure.set :as set]
    [ai.miniforge.fsm.interface :as fsm]
    [ai.miniforge.workflow.definition :as definition]
+   [ai.miniforge.workflow.guards :as guards]
    [ai.miniforge.workflow.messages :as messages]))
 
 (declare current-state first-phase-index reachable-states unreachable-states)
@@ -380,6 +381,12 @@
            :workflow/state->entry state->entry
            :workflow/state-graph state-graph
            :workflow/state-ids (set (keys compiled-states))
+           ;; Attach the SOURCE states map so the guard validator can walk
+           ;; transitions without depending on whatever the underlying
+           ;; clj-statecharts engine stores internally. The compiled
+           ;; machine's runtime shape is the engine's contract; this
+           ;; auxiliary key is ours.
+           :workflow/source-states compiled-states
            :workflow/initial-state :pending)))
 
 (defn validate-execution-machine
@@ -425,6 +432,14 @@
                                           (when (contains? unreachable-state-set state-id)
                                             phase)))
                                   vec))
+        ;; Named-guard registry check — every keyword-form `:guard` in the
+        ;; compiled states must resolve against the registry, else surface
+        ;; the dangling reference here rather than at runtime. Phase 1 of
+        ;; the FSM RFC: registry ships before any state uses guards, so in
+        ;; the current pipeline this returns nil.
+        dangling-guards (when machine
+                          (guards/validate-guard-references
+                            (:workflow/source-states machine)))
         errors (vec (concat
                      (when (empty? pipeline)
                        [(empty-pipeline-error)])
@@ -435,7 +450,9 @@
                      (when (seq unreachable-phases)
                        [(unreachable-phase-error unreachable-phases)])
                      (when (seq unreachable-state-set)
-                       [(unreachable-state-error (vec unreachable-state-set))])))
+                       [(unreachable-state-error (vec unreachable-state-set))])
+                     (when dangling-guards
+                       [dangling-guards])))
         warnings (vec (concat
                        (when (seq duplicate-phases)
                          [(duplicate-phase-warning duplicate-phases)])))]
