@@ -18,6 +18,7 @@
    [clojure.string :as str]
    [clojure.java.io :as io]
    [cheshire.core :as json]
+   [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.coerce.interface :as coerce]
    [ai.miniforge.event-stream.interface :as event-stream]
    [ai.miniforge.response.interface :as response]
@@ -30,16 +31,60 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Anomaly/response helpers
+;;
+;; W2 convergence: producer sites in this brick emit canonical
+;; `ai.miniforge.anomaly` maps. The HTTP-status / user-message
+;; translators in `response/translate` already dispatch on
+;; `:anomaly/type` (#1001), so the legacy `:anomalies/*` keywords used
+;; at call sites must be mapped to the canonical generic type at
+;; construction time. All four call-site categories used by this
+;; brick (`:anomalies/incorrect`, `:anomalies/not-found`,
+;; `:anomalies/forbidden`, `:anomalies/fault`) are cognitect-standard
+;; categories that the convergence runbook maps 1:1 to a generic type
+;; with no subtype.
+
+(def ^:private legacy-category->canonical-type
+  "Map of legacy `:anomalies/*` categories used at this brick's call
+   sites to the canonical generic `:anomaly/type`. The eight cognitect-
+   standard rows that the convergence runbook maps 1:1 to a generic
+   type — only the four this brick actually emits are listed. Removed
+   in W5 once call sites pass canonical types directly."
+  {:anomalies/incorrect :invalid-input
+   :anomalies/not-found :not-found
+   :anomalies/forbidden :unauthorized
+   :anomalies/fault     :fault})
+
+(defn- canonical-type
+  "Resolve a category keyword to its canonical `:anomaly/type`. Passes
+   canonical type keywords through unchanged so call sites can adopt
+   the canonical name immediately."
+  [category-or-type]
+  (or (get legacy-category->canonical-type category-or-type)
+      category-or-type))
 
 (defn make-anomaly
-  "Create an anomaly map."
-  [category message & [context]]
-  (response/make-anomaly category message (or context {})))
+  "Create a canonical anomaly map.
+
+   `category-or-type` accepts either the legacy `:anomalies/*` keyword
+   used pre-flip or the canonical `:anomaly/type` keyword directly —
+   both produce the same canonical anomaly. The map is built via
+   `anomaly/anomaly` with no subtype (all categories emitted by this
+   brick's call sites are cognitect-standard generics per the
+   anomaly-convergence runbook)."
+  [category-or-type message & [context]]
+  (anomaly/anomaly (canonical-type category-or-type)
+                   message
+                   (or context {})))
 
 (defn from-exception
-  "Convert an exception to an anomaly map."
+  "Convert an exception to a canonical anomaly map of type `:fault`,
+   preserving the exception class + message + ex-data under
+   `:anomaly/data`. Nil exception message falls back to the class
+   name per the W2 batch-2 precedent in #1003."
   [^Throwable e]
-  (response/from-exception e))
+  (anomaly/exception-anomaly :fault
+                             (or (ex-message e) (.getName (class e)))
+                             e))
 
 (defn response-success?
   "Check if a response builder result represents success."

@@ -15,13 +15,13 @@
 (ns ai.miniforge.web-dashboard.state.trains
   "PR Train, DAG, and fleet repository onboarding/sync accessors."
   (:require
+   [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.config.interface :as config]
    [clojure.edn :as edn]
    [clojure.java.io :as io]
    [clojure.java.shell :as shell]
    [clojure.string :as str]
    [cheshire.core :as json]
-   [ai.miniforge.response.interface :as response]
    [ai.miniforge.web-dashboard.state.core :as core]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -115,6 +115,12 @@
          data))
 
 (defn result-failure
+  "Build a canonical failure-shaped result map.
+
+   W2 convergence: the embedded `:anomaly` is a canonical
+   `ai.miniforge.anomaly` map of type `:fault` (the runbook's 1:1
+   mapping for the legacy `:anomalies/fault` generic-standard
+   category) with no subtype."
   ([message]
    (result-failure message nil))
   ([message data]
@@ -122,10 +128,17 @@
      (merge {:success? false
              :success false
              :error msg
-             :anomaly (response/make-anomaly :anomalies/fault msg)}
+             :anomaly (anomaly/anomaly :fault msg {})}
             data))))
 
 (defn result-exception
+  "Build a canonical exception-result map.
+
+   W2 convergence: the embedded `:anomaly` is a canonical
+   `ai.miniforge.anomaly` map built via `anomaly/exception-anomaly`,
+   preserving the exception class + message + ex-data under
+   `:anomaly/data`. Nil exception message falls back to the class
+   name per the #1003 precedent."
   ([message ex]
    (result-exception message ex nil))
   ([message ex data]
@@ -134,7 +147,10 @@
              :success false
              :error msg
              :exception (ex-msg ex)
-             :anomaly (response/from-exception ex)}
+             :anomaly (anomaly/exception-anomaly
+                       :fault
+                       (or (ex-message ex) (.getName (class ex)))
+                       ex)}
             data))))
 
 (defn gh-error-message
