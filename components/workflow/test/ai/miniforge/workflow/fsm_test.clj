@@ -20,7 +20,9 @@
   "Tests for workflow FSM."
   (:require
    [clojure.test :refer [deftest is testing]]
-   [ai.miniforge.workflow.fsm :as fsm]))
+   [ai.miniforge.fsm.interface :as engine]
+   [ai.miniforge.workflow.fsm :as fsm]
+   [ai.miniforge.workflow.runner-defaults :as defaults]))
 
 (deftest workflow-states-test
   (testing "All workflow states are defined"
@@ -271,6 +273,61 @@
         (let [after-terminal (fsm/transition-execution machine at-review :phase/terminal-fail)]
           (is (= :failed (fsm/execution-status machine after-terminal))
               "terminal-fail MUST bypass :on-fail and land in :failed"))))))
+
+;------------------------------------------------------------------------------ Phase 2b: verdict-driven :phase/fail array
+
+(deftest review-phase-verdict-routes-fail-via-guarded-array-test
+  (testing "Phase 2b: the review phase's :phase/fail dispatch reads
+            :phase/verdict from the event. A terminal verdict
+            (:stagnated / :needs-decomposition / :exhausted) routes
+            straight to :failed bypassing :on-fail, while a
+            :repair-requested verdict (within budget) takes the on-fail
+            redirect AND bumps :redirect-count via the registered
+            :redirect/inc-count action."
+    (let [workflow {:workflow/id :verdict-array-test
+                    :workflow/pipeline [{:phase :plan}
+                                        {:phase :implement}
+                                        {:phase :verify}
+                                        {:phase :review :on-fail :implement}
+                                        {:phase :done}]}
+          machine (fsm/compile-execution-machine workflow)
+          at-review (->> (fsm/initialize-execution machine)
+                         (fsm/start-execution machine)
+                         (#(fsm/transition-execution machine % :phase/succeed))
+                         (#(fsm/transition-execution machine % :phase/succeed))
+                         (#(fsm/transition-execution machine % :phase/succeed)))]
+      (is (= :review (fsm/current-phase-id machine at-review)))
+      (testing ":phase/verdict :stagnated terminates straight to :failed"
+        (let [evt {:type :phase/fail :phase/verdict :stagnated}
+              after (fsm/transition-execution machine at-review evt)]
+          (is (= :failed (fsm/execution-status machine after))
+              "terminal verdict bypasses :on-fail :implement")))
+      (testing ":phase/verdict :needs-decomposition terminates straight to :failed"
+        (let [evt {:type :phase/fail :phase/verdict :needs-decomposition}
+              after (fsm/transition-execution machine at-review evt)]
+          (is (= :failed (fsm/execution-status machine after)))))
+      (testing ":phase/verdict :exhausted terminates straight to :failed"
+        (let [evt {:type :phase/fail :phase/verdict :exhausted}
+              after (fsm/transition-execution machine at-review evt)]
+          (is (= :failed (fsm/execution-status machine after)))))
+      (testing ":phase/verdict :repair-requested follows on-fail to :implement"
+        (let [evt {:type :phase/fail :phase/verdict :repair-requested}
+              after (fsm/transition-execution machine at-review evt)]
+          (is (= :implement (fsm/current-phase-id machine after))
+              "non-terminal verdict + on-fail set → redirect branch fires")
+          (is (= 1 (get after :redirect-count 0))
+              ":redirect/inc-count action bumped the FSM-context counter
+               — the SINGLE accounting site that Phase 4 will rely on
+               when the runner's parallel namespace-sniff check is removed")))
+      (testing "budget-redirects-spent? guard pre-empts the redirect when
+                the FSM-context :redirect-count is already at the ceiling"
+        (let [max-r (defaults/max-redirects)
+              over-budget (engine/update-context at-review assoc :redirect-count max-r)
+              evt {:type :phase/fail :phase/verdict :repair-requested}
+              after (fsm/transition-execution machine over-budget evt)]
+          (is (= :failed (fsm/execution-status machine after))
+              "budget-spent guard takes the second :failed branch
+               before the redirect branch fires"))))))
 
 (deftest state-graph-walks-guarded-array-transitions-test
   ;; Phase 2a permits transition values shaped as ordered vectors of

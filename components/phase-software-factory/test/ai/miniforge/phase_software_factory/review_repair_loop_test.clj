@@ -103,13 +103,17 @@
       (is (not (phase/retrying? phase))
           "Should NOT be retrying (would cause review to re-run in place)"))))
 
-(deftest changes-requested-within-budget-redirects-to-implement
-  (testing "changes-requested within budget requests redirect to :implement"
+(deftest changes-requested-within-budget-emits-repair-requested-verdict
+  (testing "changes-requested within budget sets :phase/verdict :repair-requested
+            on the phase result so the FSM's verdict-driven guarded
+            :phase/fail array can route via :on-fail (Phase 2b)"
     (let [phase (simulate-leave-review :changes-requested 1 4)]
-      (is (= :implement (phase/transition-target phase))
-          "Should redirect to implement for repair")
+      (is (= :repair-requested (:verdict phase))
+          ":verdict is exposed on the phase map for callers/tests")
+      (is (= :repair-requested (get-in phase [:result :output :phase/verdict]))
+          ":phase/verdict on the phase result is what determine-phase-event reads")
       (is (phase/failed? phase)
-          "Must be failed for the transition request to be honored by execution"))))
+          "Status stays :failed; the FSM's guarded array picks the on-fail target"))))
 
 (deftest changes-requested-over-budget-no-redirect
   (testing "changes-requested at max iterations fails without redirect"
@@ -143,13 +147,17 @@
       (is (= [handoff] (:execution/phase-handoffs result-ctx)))
       (is (= default-review-issue-summary (:finding/summary finding))))))
 
-(deftest rejected-redirects-to-implement-like-changes-requested
-  (testing "iter-23 regression: :rejected decision must trigger redirect, not :completed"
+(deftest rejected-emits-repair-requested-verdict-like-changes-requested
+  (testing "iter-23 regression guard (Phase 2b shape): :rejected must set
+            :failed AND set verdict :repair-requested (NOT silently fall
+            through to :completed and let an empty-diff PR open). The
+            FSM's guarded array dispatches to on-fail :implement from
+            there."
     (let [phase (simulate-leave-review :rejected 1 4)]
       (is (phase/failed? phase)
-          "Rejected must set :failed — falling through to :completed lets an empty-diff PR open")
-      (is (= :implement (phase/transition-target phase))
-          "Rejected within budget must redirect to implement like :changes-requested"))))
+          "rejected must be :failed — falling through to :completed lets an empty-diff PR open")
+      (is (= :repair-requested (:verdict phase))
+          "verdict drives the FSM's on-fail dispatch"))))
 
 (deftest rejected-over-budget-no-redirect
   (testing ":rejected at max iterations fails terminally (no redirect)"
@@ -303,8 +311,12 @@
         interceptor (phase/get-phase-interceptor {:phase :review})]
     ((:leave interceptor) ctx)))
 
-(deftest stagnation-terminates-instead-of-redirecting-test
-  (testing "two consecutive identical fingerprints ⇒ no redirect, anomaly attached"
+(deftest stagnation-emits-stagnated-verdict-test
+  (testing "Phase 2b: two consecutive identical fingerprints ⇒ verdict
+            :stagnated. No call to request-redirect — the FSM's
+            :verdict/terminal? guard routes :phase/fail straight to
+            :failed, bypassing on-fail. Anomaly stays on :phase :error
+            for the evidence bundle."
     (let [issues          [blocking-issue]
           first-pass-ctx  (run-leave-review {:issues issues
                                              :iterations first-iteration})
@@ -313,10 +325,13 @@
                                              :iterations second-iteration
                                              :prior-fingerprints [first-fp]})
           phase           (:phase stagnated-ctx)]
-      (is (true? (:stagnated? phase))
-          "phase tagged stagnated when current fingerprint matches prior")
+      (is (= :stagnated (:verdict phase))
+          "phase verdict is :stagnated when current fp matches prior")
+      (is (= :stagnated (get-in phase [:result :output :phase/verdict]))
+          ":phase/verdict on the result is what determine-phase-event reads")
       (is (not (phase/redirect-requested? phase))
-          "no redirect to :implement on stagnation — repair loop is the burn we are stopping")
+          "Phase 2b: review.clj never calls request-redirect anymore — the
+           FSM owns routing, so no redirect is ever attached to the result")
       (is (anomaly/anomaly? (:error phase))
           ":phase :error is a canonical anomaly map (W2 convergence)")
       (is (= :exhausted (get-in phase [:error :anomaly/type]))
@@ -330,8 +345,10 @@
               two-fingerprints)
           "fingerprint history carries the chain that proved stagnation"))))
 
-(deftest non-stagnant-progress-still-redirects-test
-  (testing "fingerprint changed between iterations ⇒ ordinary repair redirect"
+(deftest non-stagnant-progress-emits-repair-requested-test
+  (testing "Phase 2b: fingerprint changed between iterations ⇒ verdict
+            :repair-requested. FSM routes to on-fail :implement via the
+            third branch of the guarded array."
     (let [first-fp     (run-leave-review {:issues [blocking-issue]
                                           :iterations first-iteration})
           first-print  (peek (get-in first-fp [:execution :review-fingerprints]))
@@ -339,22 +356,23 @@
                                           :iterations second-iteration
                                           :prior-fingerprints [first-print]})
           phase        (:phase progressed)]
-      (is (not (:stagnated? phase))
-          "different fingerprint ⇒ not stagnated")
-      (is (= :implement (phase/transition-target phase))
-          "ordinary repair: redirect to implement")
+      (is (= :repair-requested (:verdict phase))
+          "different fingerprint ⇒ verdict :repair-requested (FSM redirects)")
       (is (nil? (get-in phase [:error :anomaly/subtype]))
           "no stagnation anomaly when progress is detected"))))
 
 (deftest first-iteration-never-stagnates-test
-  (testing "no prior fingerprint history ⇒ first review must not short-circuit"
+  (testing "Phase 2b: no prior fingerprint history ⇒ first review must
+            not short-circuit. Verdict is :repair-requested (within
+            budget, has feedback) and the FSM dispatches to implement
+            via on-fail."
     (let [phase (:phase (run-leave-review {:issues [blocking-issue]
                                            :iterations first-iteration
                                            :prior-fingerprints []}))]
-      (is (not (:stagnated? phase))
-          "first review iteration is never stagnation")
-      (is (= :implement (phase/transition-target phase))
-          "first :changes-requested still redirects normally"))))
+      (is (not= :stagnated (:verdict phase))
+          "first review iteration cannot be :stagnated")
+      (is (= :repair-requested (:verdict phase))
+          "first :changes-requested produces :repair-requested verdict"))))
 
 (deftest fingerprint-recorded-on-every-review-test
   (testing "every review iteration appends its fingerprint to the execution history"
@@ -399,55 +417,54 @@
   default-convergence-cap)
 
 (deftest needs-decomposition-fires-after-n-non-stagnated-rejections-test
-  (testing "3 consecutive non-stagnated review rejections (different blockers
-            each pass) trip :needs-decomposition — the implementer is fixing
-            prior findings but new legitimate ones keep surfacing, signal the
-            task needs splitting rather than burning more redirect budget.
+  (testing "Phase 2b: 3 consecutive non-stagnated review rejections trip
+            verdict :needs-decomposition. FSM's :verdict/terminal? guard
+            routes to terminal :failed rather than on-fail redirect.
 
-            Note: the cap keys off the TASK-LEVEL fingerprint history
-            (`(inc (count prior-fingerprints))`), not `:phase :iterations`.
-            The phase-local counter resets per phase entry and the shipped
-            review `:budget :iterations` is 2, so the cap MUST count cycles
-            across re-entries or it would be unreachable in production."
+            Cap keys off task-level fingerprint history (`(inc (count
+            prior))`), not phase-local :iterations — see the convergence
+            cap PR #1011 commit message for why the latter is unreachable
+            under shipped config."
     (let [final-ctx (run-leave-review {:issues             [yet-another-blocking-issue]
                                        :iterations         third-iteration
                                        :prior-fingerprints prior-distinct-fingerprints})
           phase (:phase final-ctx)]
-      (is (true? (:needs-decomposition? phase))
-          "phase tagged :needs-decomposition?")
+      (is (= :needs-decomposition (:verdict phase))
+          "verdict :needs-decomposition surfaces on the phase map")
+      (is (= :needs-decomposition (get-in phase [:result :output :phase/verdict]))
+          ":phase/verdict on the result is what determine-phase-event reads")
       (is (= :anomalies.review/needs-decomposition
              (get-in phase [:error :anomaly/category]))
           "convergence-cap anomaly attached")
       (is (= cycles-at-cap (get-in phase [:error :review/cycle-count]))
-          "task-level cycle count carried in the anomaly")
-      (is (not (phase/redirect-requested? phase))
-          "no redirect-to-implement on :needs-decomposition — repair budget conserved"))))
+          "task-level cycle count carried in the anomaly"))))
 
 (deftest needs-decomposition-yields-to-stagnation-test
-  (testing "when the new fingerprint matches the immediate prior one, stagnation
-            wins over :needs-decomposition (identical-loop is the sharper signal).
-            Seed with two prior fingerprints so the task-level cycle count would
-            otherwise hit the cap — proves stagnation pre-empts."
+  (testing "when the new fingerprint matches the immediate prior one,
+            stagnation wins over :needs-decomposition (identical-loop is
+            the sharper signal). Seed with two prior fingerprints so the
+            task-level cycle count would otherwise hit the cap — proves
+            stagnation pre-empts."
     (let [seed-issue {:severity :blocking :description "same"}
           seed-ctx   (run-leave-review {:issues [seed-issue] :iterations first-iteration})
           seed-fp    (peek (get-in seed-ctx [:execution :review-fingerprints]))
-          ;; Pad to 2 distinct priors so cycle count would tip the cap if
-          ;; stagnation didn't fire first. Last prior must equal current fp
-          ;; for stagnation to trigger.
           padded-priors [{:review/fingerprint :prelude} seed-fp]
           final-ctx  (run-leave-review {:issues             [seed-issue]
                                         :iterations         third-iteration
                                         :prior-fingerprints padded-priors})
           phase (:phase final-ctx)]
-      (is (true? (:stagnated? phase)) "stagnation fires, not :needs-decomposition")
-      (is (nil? (:needs-decomposition? phase))))))
+      (is (= :stagnated (:verdict phase))
+          "stagnation pre-empts :needs-decomposition in compute-verdict"))))
 
 (deftest needs-decomposition-does-not-fire-below-cap-test
-  (testing "two cycles total (one prior + this review) — below the default
-            cap of 3 — still redirect normally"
+  (testing "Phase 2b: two cycles total (one prior + this review) — below
+            the default cap of 3 — emit :repair-requested verdict so the
+            FSM redirects via on-fail rather than terminating."
     (let [final-ctx (run-leave-review {:issues             [different-blocking-issue]
                                        :iterations         second-iteration
                                        :prior-fingerprints [{:review/fingerprint :only}]})
           phase (:phase final-ctx)]
-      (is (nil? (:needs-decomposition? phase)) "below cap, no decomposition signal")
-      (is (phase/redirect-requested? phase) "still redirects on a normal repair cycle"))))
+      (is (not= :needs-decomposition (:verdict phase))
+          "below cap, no decomposition verdict")
+      (is (= :repair-requested (:verdict phase))
+          "below cap with progress + actionable feedback = :repair-requested"))))

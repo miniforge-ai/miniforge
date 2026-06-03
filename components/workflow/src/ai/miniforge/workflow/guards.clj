@@ -96,9 +96,21 @@
   (set (keys @registry)))
 
 (defn clear-registry!
-  "Drop all registered guards. Test fixture only."
+  "Drop all registered guards. Test fixture only — prefer the
+   snapshot/restore pair below so namespace-load-time registrations
+   from `standard-guards-and-actions` aren't wiped between tests."
   []
   (reset! registry {}))
+
+(defn snapshot-registry
+  "Return the current registry state for save/restore patterns in tests."
+  []
+  @registry)
+
+(defn restore-registry!
+  "Restore the registry to a previously-snapshot'd state."
+  [snapshot]
+  (reset! registry snapshot))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Reference extraction

@@ -39,8 +39,14 @@
 
 (use-fixtures :each
   (fn [f]
-    (guards/clear-registry!)
-    (try (f) (finally (guards/clear-registry!)))))
+    ;; Snapshot/restore so namespace-load-time registrations from
+    ;; `standard-guards-and-actions` survive across tests that need a
+    ;; clean slate. Clearing without restoration left :verdict/terminal?
+    ;; / :budget/redirects-spent? unregistered for any test that ran
+    ;; after this fixture.
+    (let [snap (guards/snapshot-registry)]
+      (guards/clear-registry!)
+      (try (f) (finally (guards/restore-registry! snap))))))
 
 ;------------------------------------------------------------------------------ Helpers
 
