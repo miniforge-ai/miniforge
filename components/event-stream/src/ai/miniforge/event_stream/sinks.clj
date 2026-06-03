@@ -39,6 +39,7 @@
    [ai.miniforge.event-stream.messages :as messages]
    [ai.miniforge.event-stream.snowflake :as snowflake]
    [ai.miniforge.event-stream.storage-layout :as layout]
+   [ai.miniforge.logging.interface :as logging]
    [ai.miniforge.response.interface :as response]
    [cheshire.core :as json]
    [clojure.java.io :as io]
@@ -48,9 +49,8 @@
    [slingshot.slingshot :refer [try+]])
   (:import
    [java.io ByteArrayOutputStream]
-   [java.net URI]
-   [java.net.http HttpClient HttpRequest HttpRequest$BodyPublishers HttpResponse$BodyHandlers]
-   [java.time Duration Instant ZonedDateTime ZoneOffset]
+   [java.net.http HttpClient HttpResponse$BodyHandlers]
+   [java.time Instant ZonedDateTime ZoneOffset]
    [java.time.format DateTimeFormatter]))
 
 ;;------------------------------------------------------------------------------ Internal helpers
@@ -343,17 +343,6 @@
 
 ;;------------------------------------------------------------------------------ Layer 2: Fleet Sink
 
-(defn- build-json-post
-  "Build an HTTP POST request with a JSON string body and Bearer auth header."
-  [uri body api-key timeout-ms]
-  (-> (HttpRequest/newBuilder)
-      (.uri (URI/create uri))
-      (.timeout (Duration/ofMillis timeout-ms))
-      (.header "Authorization" (str "Bearer " api-key))
-      (.header "Content-Type" "application/json")
-      (.POST (HttpRequest$BodyPublishers/ofString body))
-      (.build)))
-
 (defn fleet-sink
   "Create a fleet sink that sends events to fleet command via HTTP.
 
@@ -399,7 +388,7 @@
                   ;; rule and are migrated opportunistically (211 §migration).
                   (try+
                     (let [body     (json/generate-string {:events events})
-                          request  (build-json-post (str url "/events") body api-key timeout-ms)
+                          request  (logging/build-json-post (str url "/events") body api-key timeout-ms)
                           response (.send http-client request (HttpResponse$BodyHandlers/discarding))]
                       (when (>= (.statusCode response) 400)
                         (binding [*out* *err*]

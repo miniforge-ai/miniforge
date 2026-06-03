@@ -24,7 +24,8 @@
    [clojure.string :as str]
    [clojure.edn :as edn]
    [cognitect.transit :as transit]
-   [ai.miniforge.event-stream.sinks :as sinks]))
+   [ai.miniforge.event-stream.sinks :as sinks]
+   [ai.miniforge.event-stream.test-helpers.http-mock :as http-mock]))
 
 ;------------------------------------------------------------------------------ Helpers
 
@@ -58,30 +59,10 @@
   (when (.isDirectory dir)
     (vec (.listFiles dir))))
 
-(defn mock-http-client
-  "Construct a minimal `HttpClient` stub for tests.
-   `send-fn` is called as `(send-fn req handler)` and must return an
-   `HttpResponse`; defaults to a 200 no-op.  All other abstract methods
-   return safe defaults so accidental calls don't throw AbstractMethodError."
-  [& [send-fn]]
-  (let [default-resp (reify java.net.http.HttpResponse
-                       (statusCode [_] 200))
-        f            (or send-fn (fn [_req _handler] default-resp))]
-    (proxy [java.net.http.HttpClient] []
-      (send [req handler] (f req handler))
-      (sendAsync
-        ([req handler]
-         (java.util.concurrent.CompletableFuture/completedFuture (f req handler)))
-        ([req handler _push]
-         (java.util.concurrent.CompletableFuture/completedFuture (f req handler))))
-      (cookieHandler   [] (java.util.Optional/empty))
-      (connectTimeout  [] (java.util.Optional/empty))
-      (followRedirects [] java.net.http.HttpClient$Redirect/NORMAL)
-      (sslContext      [] (javax.net.ssl.SSLContext/getDefault))
-      (sslParameters   [] (javax.net.ssl.SSLParameters.))
-      (authenticator   [] (java.util.Optional/empty))
-      (version         [] java.net.http.HttpClient$Version/HTTP_2)
-      (executor        [] (java.util.Optional/empty)))))
+;; `mock-http-client` lives in the shared
+;; `ai.miniforge.event-stream.test-helpers.http-mock` namespace so other
+;; sink tests can reuse the same proxy stubs without re-implementing
+;; HttpClient's ~10 abstract methods.
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; workflow-dir / event-file-path normalisation
@@ -409,7 +390,7 @@
 
   (testing "batches events and POSTs on flush"
     (let [posted      (atom nil)
-          mock-client (mock-http-client
+          mock-client (http-mock/mock-http-client
                        (fn [_req _handler]
                          (reset! posted true)
                          (reify java.net.http.HttpResponse

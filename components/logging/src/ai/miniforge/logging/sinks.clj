@@ -31,12 +31,11 @@
    [clojure.java.io :as io]
    [clojure.string :as str]
    [ai.miniforge.logging.core :as core]
+   [ai.miniforge.logging.http :as http]
    [ai.miniforge.logging.messages :as messages]
    [slingshot.slingshot :refer [try+]])
   (:import
-   [java.net URI]
-   [java.net.http HttpClient HttpRequest HttpRequest$BodyPublishers HttpResponse$BodyHandlers]
-   [java.time Duration]))
+   [java.net.http HttpClient HttpResponse$BodyHandlers]))
 
 ;;------------------------------------------------------------------------------ Layer 0: File Sink
 
@@ -142,17 +141,6 @@
 
 ;;------------------------------------------------------------------------------ Layer 2: Fleet Sink
 
-(defn- build-json-post
-  "Build an HTTP POST request with a JSON string body and Bearer auth header."
-  [uri body api-key timeout-ms]
-  (-> (HttpRequest/newBuilder)
-      (.uri (URI/create uri))
-      (.timeout (Duration/ofMillis timeout-ms))
-      (.header "Authorization" (str "Bearer " api-key))
-      (.header "Content-Type" "application/json")
-      (.POST (HttpRequest$BodyPublishers/ofString body))
-      (.build)))
-
 (defn fleet-sink
   "Create a fleet sink that sends logs to fleet command via HTTP.
 
@@ -193,7 +181,7 @@
                   ;; and are migrated opportunistically (211 §migration).
                   (try+
                     (let [body     (json/generate-string {:logs logs})
-                          request  (build-json-post (str url "/logs") body api-key timeout-ms)
+                          request  (http/build-json-post (str url "/logs") body api-key timeout-ms)
                           response (.send http-client request (HttpResponse$BodyHandlers/discarding))]
                       (when (>= (.statusCode response) 400)
                         (binding [*out* *err*]
