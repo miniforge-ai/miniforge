@@ -268,9 +268,8 @@
   "Convenience: classify a Throwable into a canonical record."
   [^Throwable ex]
   (classify-failure-record
-   {:anomaly/category  nil
-    :exception/class   (str (type ex))
-    :error/message     (.getMessage ex)}))
+   {:exception/class (str (type ex))
+    :error/message   (.getMessage ex)}))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

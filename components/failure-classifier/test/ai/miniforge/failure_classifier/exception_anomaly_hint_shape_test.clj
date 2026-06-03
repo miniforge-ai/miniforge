@@ -82,12 +82,17 @@
       (is (= :invalid-input (:anomaly/type data))
           "canonical :anomaly/type is set per the runbook generic-standard map")))
 
-  (testing "legacy hint keys are not written on the producer side"
+  (testing "legacy hint keys are absent from the producer ex-data"
+    ;; `contains?` (not nil-check) — pre-flip the producer wrote
+    ;; `:anomaly/category :anomalies/incorrect`, and `(:anomaly/category
+    ;; data)` would also return nil when the key were re-introduced with
+    ;; an explicit nil value. Pin absence so a regression to either of
+    ;; the legacy producer shapes is caught.
     (let [data (catch-ex-data #(fc/make-classified-failure incomplete-attribution))]
-      (is (nil? (:anomaly/category data))
-          ":anomaly/category is not written by the post-flip producer")
-      (is (nil? (:anomaly/subtype data))
-          ":anomalies/incorrect is cognitect-standard, no subtype attached"))))
+      (is (false? (contains? data :anomaly/category))
+          ":anomaly/category key is not present on post-flip producer")
+      (is (false? (contains? data :anomaly/subtype))
+          ":anomalies/incorrect is cognitect-standard, no subtype key attached"))))
 
 ;------------------------------------------------------------------------------ Layer 2
 ;; Dispatch equivalence — the canonical hint is sufficient.
