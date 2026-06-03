@@ -149,6 +149,25 @@
   (and (map? x)
        (contract/valid? x)))
 
+(defn any-anomaly?
+  "Transitional dual-shape predicate. True for both the canonical
+   `ai.miniforge.anomaly` map (`:anomaly/type` key) and the legacy
+   `ai.miniforge.response` anomaly map (`:anomaly/category` key) that
+   un-migrated producers still emit during the convergence wave.
+   Removed in W5 once every producer is canonical; until then,
+   readers consult this when their upstream's shape is uncertain.
+
+   The legacy half is detected with `contains?` rather than a value
+   check so the anomaly component need not depend on `response`. A
+   map with `:anomaly/category` bound to nil is therefore treated as
+   the caller's bug, not as 'not an anomaly': the key is present so
+   `contains?` returns true. Downstream classifiers see the same
+   degenerate map either way; this predicate flags it instead of
+   silently dropping it."
+  [x]
+  (or (anomaly? x)
+      (and (map? x) (contains? x :anomaly/category))))
+
 ;------------------------------------------------------------------------------ Macros
 ;; Compile-time control flow; expansion composes the Layer 2 predicate.
 
