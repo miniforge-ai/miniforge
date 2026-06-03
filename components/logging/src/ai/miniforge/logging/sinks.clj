@@ -31,7 +31,8 @@
    [clojure.java.io :as io]
    [clojure.string :as str]
    [ai.miniforge.logging.core :as core]
-   [ai.miniforge.logging.messages :as messages])
+   [ai.miniforge.logging.messages :as messages]
+   [slingshot.slingshot :refer [try+]])
   (:import
    [java.net URI]
    [java.net.http HttpClient HttpRequest HttpRequest$BodyPublishers HttpResponse$BodyHandlers]
@@ -186,7 +187,11 @@
               ;; and are picked up by the next flush.
               (let [logs (first (swap-vals! batch-atom (constantly [])))]
                 (when (seq logs)
-                  (try
+                  ;; try+ per standards rule 211 — boundary catch around
+                  ;; Java HttpClient.send. The component's other plain
+                  ;; `try` sites (file write, mkdirs) predate this rule
+                  ;; and are migrated opportunistically (211 §migration).
+                  (try+
                     (let [body     (json/generate-string {:logs logs})
                           request  (build-json-post (str url "/logs") body api-key timeout-ms)
                           response (.send http-client request (HttpResponse$BodyHandlers/discarding))]

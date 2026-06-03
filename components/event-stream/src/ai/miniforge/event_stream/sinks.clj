@@ -44,7 +44,8 @@
    [clojure.java.io :as io]
    [clojure.string :as str]
    [clojure.pprint :as pprint]
-   [cognitect.transit :as transit])
+   [cognitect.transit :as transit]
+   [slingshot.slingshot :refer [try+]])
   (:import
    [java.io ByteArrayOutputStream]
    [java.net URI]
@@ -392,7 +393,11 @@
               ;; and are picked up by the next flush.
               (let [events (first (swap-vals! batch-atom (constantly [])))]
                 (when (seq events)
-                  (try
+                  ;; try+ per standards rule 211 — boundary catch around
+                  ;; Java HttpClient.send. The component's other plain
+                  ;; `try` sites (file write, mkdirs, etc.) predate this
+                  ;; rule and are migrated opportunistically (211 §migration).
+                  (try+
                     (let [body     (json/generate-string {:events events})
                           request  (build-json-post (str url "/events") body api-key timeout-ms)
                           response (.send http-client request (HttpResponse$BodyHandlers/discarding))]

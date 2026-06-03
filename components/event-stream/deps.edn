@@ -5,7 +5,8 @@
         ai.miniforge/response {:local/root "../response"}
         ai.miniforge/schema {:local/root "../schema"}
         cheshire/cheshire {:mvn/version "5.13.0"}
-        com.cognitect/transit-clj {:mvn/version "1.0.333"}}
+        com.cognitect/transit-clj {:mvn/version "1.0.333"}
+        slingshot/slingshot {:mvn/version "0.12.2"}}
  :aliases {:test {:extra-paths ["test"]
                   :extra-deps {io.github.cognitect-labs/test-runner
                                {:git/tag "v0.5.1" :git/sha "dfb30dd"}}}}}
