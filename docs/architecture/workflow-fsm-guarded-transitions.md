@@ -99,7 +99,7 @@ runner EXECUTES the FSM-chosen edge plus any FSM-owned hooks.
 | `components/phase-software-factory/src/.../review.clj` | Worst-offender decision site | `compute-decision:317`, `apply-decision:329`, `compute-stagnated?:286`, `compute-needs-decomposition?:294` |
 | `components/phase-software-factory/src/.../verify.clj` | Same shape, simpler | `leave-verify:357` |
 | `components/phase-software-factory/src/.../release.clj` | Same shape | `leave-release:463` |
-| `components/fsm/src/.../core.clj` | `clj-statecharts` wrapper (already exposes `guard`, `assign`, `entry`, `exit`) | `assign:200`, `guard:237` |
+| `components/fsm/src/.../core.clj` | `clj-statecharts` wrapper (already exposes `guard`, `assign`, `entry`, `exit`) | `assign:200`, `guard:237`, `all-guards:249`, `any-guard:261` |
 | `components/dag-executor/src/.../state.clj` | INDEPENDENT FSM, no cross-cutting | `transition-task!:200` |
 
 ### Two-channel mechanism, expressed in five lines
@@ -296,11 +296,11 @@ is dangling. Test: dangling reference fails the validator.
 **Deliverable.** Replace `{:phase/fail failure-target}` in
 `build-phase-state` with the ordered guarded form FOR REVIEW PHASES
 ONLY. Three named guards (`:verdict/terminal?`, `:budget/redirects-spent?`,
-`build-phase-state` with the ordered guarded form FOR REVIEW PHASES
-ONLY. Three named guards (`:verdict/terminal?`, `:budget/redirects-spent?`,
 `:config/on-fail-set?`) and one named action (`:redirect/inc-count`).
-`leave-review` adds `:phase/verdict` to the phase result and drops the `:stagnated?` /
-`:needs-decomposition?` flag bag.
+`leave-review` attaches a `:phase/verdict` key to the phase result
+(payload — not a new event type; the FSM still receives `:phase/fail` or
+`:phase/succeed` and reads the verdict from the result via a guard input).
+The `:stagnated?` / `:needs-decomposition?` flag bag is dropped.
 
 **Files touched.**
 
