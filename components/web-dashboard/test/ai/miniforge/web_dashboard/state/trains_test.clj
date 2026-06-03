@@ -25,6 +25,20 @@
    [ai.miniforge.web-dashboard.state.core :as core]
    [ai.miniforge.web-dashboard.state.trains :as sut]))
 
+;; ---------------------------------------------------------------------------- Fixture text
+
+(def ^:private provider-unavailable-message
+  "Anomaly message used in the failing-sync fixture — mirrors a real
+   upstream provider-unavailable error so the aggregation behaviour
+   tested matches what production callers see."
+  "Provider unavailable")
+
+(def ^:private aggregate-fault-clause
+  "Test-clause rationale for the aggregate :fault assertion: the
+   bricks's aggregated failure result emits a generic canonical
+   :fault anomaly with no domain subtype."
+  "aggregate failure anomaly is generic :fault, no subtype")
+
 (defn temp-config-path
   []
   (let [dir (.toFile (java.nio.file.Files/createTempDirectory
@@ -788,8 +802,8 @@
                       {:success? false
                        :success false
                        :repo "acme/web"
-                       :error "Provider unavailable"
-                       :anomaly (anomaly/anomaly :unavailable "Provider unavailable" {})}}]
+                       :error provider-unavailable-message
+                       :anomaly (anomaly/anomaly :unavailable provider-unavailable-message {})}}]
     (with-redefs-fn {#'sut/get-configured-repos (fn [_] ["acme/service" "acme/web"])
                      #'sut/sync-repo-prs-into-train! (fn [_ repo] (get sync-results repo))}
       (fn []
@@ -804,7 +818,7 @@
                  (:summary result)))
           (is (= :fault (get-in result [:anomaly :anomaly/type])))
           (is (nil? (get-in result [:anomaly :anomaly/subtype]))
-              "aggregate failure anomaly is generic :fault, no subtype"))))))
+              aggregate-fault-clause))))))
 
 (deftest sync-configured-repos-all-success-test
   (testing "All repos succeed produces success result"
