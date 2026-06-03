@@ -469,16 +469,26 @@
                         agent-status iterations max-iterations))
         pr-info (get-in ctx [:workflow/pr-info])
         on-fail (get-in ctx [:phase-config :on-fail])
-        verdict (compute-verdict {:phase-failed?       (= :failed phase-status)
-                                  :on-fail-configured? (some? on-fail)
-                                  :zero-files?         zero-files?})
-        updated-ctx (-> ctx
-                        (assoc-in [:phase :ended-at] end-time)
-                        (assoc-in [:phase :duration-ms] duration-ms)
-                        (assoc-in [:phase :status] phase-status)
-                        (assoc-in [:phase :metrics] metrics)
-                        (assoc-in [:phase :verdict] verdict)
-                        (assoc-in [:phase :result :output :phase/verdict] verdict)
+        ;; Verdict is only meaningful for terminal phase statuses
+        ;; (:completed → :approved; :failed → one of the failure
+        ;; verdicts). For :retrying the runner handles the in-phase
+        ;; loop and the FSM never sees a transition, so skip the
+        ;; verdict attachment — leaving the prior verdict in place if
+        ;; the phase has been around the loop before, else nothing.
+        verdict (when (contains? #{:completed :failed} phase-status)
+                  (compute-verdict {:phase-failed?       (= :failed phase-status)
+                                    :on-fail-configured? (some? on-fail)
+                                    :zero-files?         zero-files?}))
+        updated-ctx (cond-> ctx
+                      true
+                      (-> (assoc-in [:phase :ended-at] end-time)
+                          (assoc-in [:phase :duration-ms] duration-ms)
+                          (assoc-in [:phase :status] phase-status)
+                          (assoc-in [:phase :metrics] metrics))
+                      verdict
+                      (-> (assoc-in [:phase :verdict] verdict)
+                          (assoc-in [:phase :result :output :phase/verdict] verdict)))
+        updated-ctx (-> updated-ctx
                         (assoc-in [:metrics :release :duration-ms] duration-ms)
                         (assoc-in [:metrics :release :repair-cycles] (dec iterations))
                         (cond-> pr-info
