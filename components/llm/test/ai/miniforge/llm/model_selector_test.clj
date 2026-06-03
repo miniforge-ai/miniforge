@@ -18,16 +18,33 @@
 
 (ns ai.miniforge.llm.model-selector-test
   (:require
-   [clojure.test :refer [deftest is testing]]
+   [clojure.test :refer [deftest is testing use-fixtures]]
    [ai.miniforge.llm.model-selector :as selector]
    [ai.miniforge.llm.model-registry :as registry]))
 
+;; Simulate all provider API keys being set so selection tests are
+;; deterministic regardless of the CI environment's real env vars.
+(use-fixtures :each (fn [f]
+                      (with-redefs [selector/get-env-var (constantly "test-key")]
+                        (f))))
+
 (deftest test-model-available
-  (testing "Model availability check"
-    ;; For now, all models are considered available
-    (is (selector/model-available? :opus-4.6))
+  (testing "cloud model available when API key env var is set"
+    ;; fixture already sets get-env-var -> "test-key" for the outer cases
     (is (selector/model-available? :sonnet-4.6))
-    (is (selector/model-available? :haiku-4.5))))
+    (is (selector/model-available? :opus-4.6))
+    (is (selector/model-available? :haiku-4.5)))
+  (testing "cloud model unavailable when API key env var is absent"
+    (with-redefs [selector/get-env-var (constantly nil)]
+      (is (not (selector/model-available? :sonnet-4.6)))))
+  (testing "cloud model unavailable when API key env var is whitespace-only"
+    (with-redefs [selector/get-env-var (constantly "   ")]
+      (is (not (selector/model-available? :sonnet-4.6)))))
+  (testing "local model always available regardless of env vars"
+    (with-redefs [selector/get-env-var (constantly nil)]
+      (is (selector/model-available? :qwen-2.5-coder-32b))))
+  (testing "unregistered model key returns falsy"
+    (is (not (selector/model-available? :nonexistent-model-xyz)))))
 
 (deftest test-meets-context-requirement
   (testing "Context requirement checks"
