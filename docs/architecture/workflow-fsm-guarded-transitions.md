@@ -99,7 +99,7 @@ runner EXECUTES the FSM-chosen edge plus any FSM-owned hooks.
 | `components/phase-software-factory/src/.../review.clj` | Worst-offender decision site | `compute-decision:317`, `apply-decision:329`, `compute-stagnated?:286`, `compute-needs-decomposition?:294` |
 | `components/phase-software-factory/src/.../verify.clj` | Same shape, simpler | `leave-verify:357` |
 | `components/phase-software-factory/src/.../release.clj` | Same shape | `leave-release:463` |
-| `components/fsm/src/.../core.clj` | `clj-statecharts` wrapper (already exposes `guard`, `assign`, `entry`, `exit`) | `guard:43`, `assign:62` |
+| `components/fsm/src/.../core.clj` | `clj-statecharts` wrapper (already exposes `guard`, `assign`, `entry`, `exit`) | `assign:200`, `guard:237` |
 | `components/dag-executor/src/.../state.clj` | INDEPENDENT FSM, no cross-cutting | `transition-task!:200` |
 
 ### Two-channel mechanism, expressed in five lines
