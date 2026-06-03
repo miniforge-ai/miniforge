@@ -270,7 +270,7 @@ and lands in 2-3 weeks instead of 3 months.
 
 ## Migration plan
 
-Five phases, each independently mergeable. The workflow runs at every
+Five phases (plus an optional Phase 6), each independently mergeable. The workflow runs at every
 phase boundary, including all in-flight checkpoints.
 
 ### Phase 1 — Named guard registry, no behavior change
