@@ -156,7 +156,8 @@
    Returns: Sink function (fn [log-entry] -> nil)"
   [opts]
   (let [url               (or (:url opts) (throw (ex-info "Fleet sink requires :url" {})))
-        api-key           (:api-key opts)
+        api-key           (or (:api-key opts)
+                              (throw (ex-info "Fleet sink requires :api-key" {})))
         batch-size        (:batch-size opts 50)
         flush-interval-ms (:flush-interval-ms opts 10000)
         timeout-ms        (:timeout-ms opts 10000)
@@ -165,7 +166,12 @@
         last-flush-atom   (atom (System/currentTimeMillis))]
 
     (letfn [(flush-batch! []
-              (let [logs @batch-atom]
+              ;; Atomically drain the batch so concurrent senders don't race
+              ;; on @batch-atom + reset!. swap-vals! returns [prev new] —
+              ;; first prev = the snapshot we own. Events appended while
+              ;; the HTTP call is in flight go into the FRESH atom value
+              ;; and are picked up by the next flush.
+              (let [logs (first (swap-vals! batch-atom (constantly [])))]
                 (when (seq logs)
                   (try
                     (let [body    (json/generate-string {:logs logs})
@@ -181,11 +187,16 @@
                         (binding [*out* *err*]
                           (println (str "fleet-sink: POST " url "/logs returned HTTP "
                                         (.statusCode response))))))
+                    (catch InterruptedException e
+                      ;; Preserve interrupt semantics for callers.
+                      (.interrupt (Thread/currentThread))
+                      (binding [*out* *err*]
+                        (println "fleet-sink: interrupted during flush:" (ex-message e))))
                     (catch Exception e
                       (binding [*out* *err*]
-                        (println "fleet-sink: flush error:" (ex-message e)))))
-                  (reset! batch-atom [])
-                  (reset! last-flush-atom (System/currentTimeMillis)))))]
+                        (println "fleet-sink: flush error:" (ex-message e))))
+                    (finally
+                      (reset! last-flush-atom (System/currentTimeMillis)))))))]
 
       (fn [entry]
         (swap! batch-atom conj entry)

@@ -373,7 +373,12 @@
   (testing "requires :url option"
     (is (thrown? Exception (sinks/fleet-sink {}))))
 
-  (testing "creates a function when url is provided"
+  (testing "requires :api-key option"
+    (is (thrown? Exception
+                 (sinks/fleet-sink {:url "https://fleet.example.com"}))
+        "missing :api-key must fail loud at construction so misconfiguration doesn't produce 401 noise at flush time"))
+
+  (testing "creates a function when url and api-key are provided"
     (is (fn? (sinks/fleet-sink {:url "https://fleet.example.com"
                                 :api-key "test-key"}))))
 
@@ -381,11 +386,30 @@
     (let [posted      (atom nil)
           mock-resp   (reify java.net.http.HttpResponse
                         (statusCode [_] 200))
+          ;; `java.net.http.HttpClient` is an abstract class with many
+          ;; abstract methods beyond `send`. Stub the most common ones
+          ;; with safe defaults so an accidental future call from the sink
+          ;; doesn't throw AbstractMethodError. Only `send` matters for
+          ;; the assertion below.
           mock-client (proxy [java.net.http.HttpClient] []
                         (send [_req _handler]
                           (reset! posted true)
-                          mock-resp))
+                          mock-resp)
+                        (sendAsync
+                          ([_req _handler]
+                           (java.util.concurrent.CompletableFuture/completedFuture mock-resp))
+                          ([_req _handler _push]
+                           (java.util.concurrent.CompletableFuture/completedFuture mock-resp)))
+                        (cookieHandler [] (java.util.Optional/empty))
+                        (connectTimeout [] (java.util.Optional/empty))
+                        (followRedirects [] java.net.http.HttpClient$Redirect/NORMAL)
+                        (sslContext [] (javax.net.ssl.SSLContext/getDefault))
+                        (sslParameters [] (javax.net.ssl.SSLParameters.))
+                        (authenticator [] (java.util.Optional/empty))
+                        (version [] java.net.http.HttpClient$Version/HTTP_2)
+                        (executor [] (java.util.Optional/empty)))
           sink (sinks/fleet-sink {:url              "https://fleet.example.com"
+                                  :api-key           "test-key"
                                   :batch-size        3
                                   :flush-interval-ms 999999
                                   :http-client       mock-client})]
