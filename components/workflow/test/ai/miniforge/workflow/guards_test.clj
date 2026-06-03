@@ -223,3 +223,42 @@
       (is (:valid? result))
       (is (empty? (:errors result))
           "no :dangling-guard-references entry in :errors when no guards present"))))
+
+;------------------------------------------------------------------------------ Resolver (Phase 2a)
+;;
+;; Resolution substitutes keyword-form `:guard` references with the
+;; registered fn at machine-compile time. Lives alongside the validator
+;; so a single registry round-trip is testable end-to-end.
+
+(deftest resolve-substitutes-registered-fns-test
+  (testing "resolve-guard-keywords replaces keyword refs with fns"
+    (guards/register-guard! :verdict/terminal? always-true)
+    (let [states  {:phase-0-review
+                   {:on {:phase/fail [{:target :failed :guard :verdict/terminal?}
+                                      {:target :failed}]}}}
+          resolved (guards/resolve-guard-keywords states)
+          entry    (-> resolved :phase-0-review :on :phase/fail first)]
+      (is (= always-true (:guard entry))
+          "keyword replaced by the registered fn"))))
+
+(deftest resolve-leaves-non-keyword-guards-untouched-test
+  (testing "guards that are already fns pass through resolution"
+    (let [states  {:s {:on {:e [{:target :a :guard always-true}]}}}
+          resolved (guards/resolve-guard-keywords states)
+          entry    (-> resolved :s :on :e first)]
+      (is (= always-true (:guard entry))))))
+
+(deftest resolve-throws-on-unregistered-keyword-test
+  (testing "an unregistered keyword that survived validation throws
+            IllegalStateException at resolve time — programmer-error
+            guard per rule 005, because the validator should have caught
+            it before this step"
+    (let [states {:s {:on {:e [{:target :a :guard :not/registered}]}}}]
+      (is (thrown? IllegalStateException
+                   (guards/resolve-guard-keywords states))))))
+
+(deftest resolve-handles-bare-keyword-transitions-test
+  (testing "transition that is just a keyword (target state-id, no guard)
+            passes through resolution unchanged"
+    (let [states {:s {:on {:e :other-state}}}]
+      (is (= states (guards/resolve-guard-keywords states))))))
