@@ -340,23 +340,27 @@ window.miniforge = {
   },
   filters: {
     addFilter(field, op, value, _scope) {
-      addFilterChip(field, value, `${field} ${op} ${value}`);
+      addFilterChip(`${field} ${op} ${value}`, field, value);
     },
     toggleFilter(field, value, _scope) {
       const filterKey = `${field}:${value}`;
       if (activeFilters.has(filterKey)) {
         removeFilterChip(filterKey);
       } else {
-        addFilterChip(field, value, `${field}: ${value}`);
+        addFilterChip(`${field}: ${value}`, field, value);
       }
     },
     setTextFilter(field, value) {
+      // key is always text:<field> so only one text filter per field exists at a time
       const existingKey = `text:${field}`;
       if (activeFilters.has(existingKey)) {
         removeFilterChip(existingKey);
       }
       if (value && value.trim()) {
-        addFilterChip('text', `${field}:${value}`, `${field}: "${value.trim()}"`);
+        const trimmed = value.trim();
+        // HTML-escape user input before it reaches addFilterChip's innerHTML label
+        const escaped = trimmed.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        addFilterChip(`${field}: "${escaped}"`, 'text', field);
       }
     },
     clearFilters(_scope) {
@@ -372,7 +376,7 @@ window.miniforge = {
     toggleCloudFilter(el) {
       const filterKey = 'cloud:enabled';
       if (el && el.checked) {
-        addFilterChip('cloud', 'enabled', 'Cloud only');
+        addFilterChip('Cloud only', 'cloud', 'enabled');
       } else {
         removeFilterChip(filterKey);
       }
