@@ -254,13 +254,13 @@
 
 (def ^:private guarded-phases
   "Phases whose `:phase/fail` dispatch routes through the verdict-driven
-   guarded array. Phase 2b started with :review; Phase 3a added :verify
-   (where `:verify/timeout` / `:verify/rate-limited` are terminal
-   verdicts); Phase 3b adds :release (where `:release/zero-files` —
-   the curator's empty-diff verdict — is terminal). Phase 3c adds
-   :implement. Phase 4 drops this set and applies the guarded form to
-   every phase unconditionally."
-  #{:review :verify :release})
+   guarded array. Phase 2b started with :review; Phase 3a added :verify;
+   Phase 3b added :release; Phase 3c adds :implement (where
+   `:implement/rate-limited`, `:implement/empty-diff`, and
+   `:implement/already-implemented-invalid` are terminal verdicts).
+   Phase 4 drops this set and applies the guarded form to every phase
+   unconditionally."
+  #{:review :verify :release :implement})
 
 (defn- guarded-phase?
   [config]

@@ -65,7 +65,19 @@
     ;; Retrying implement won't change the curator's decision — the
     ;; diff is empty and the next pass would just produce another empty
     ;; diff. Terminal.
-    :release/zero-files})
+    :release/zero-files
+    ;; Implement-specific (Phase 3c). All three are cases where the
+    ;; on-fail :implement loop would just re-enter and hit the same
+    ;; wall — terminate the workflow instead.
+    ;;   :rate-limited — provider quota; budget retries won't change it
+    ;;   :empty-diff   — curator: no files written; retry would produce
+    ;;                   another empty diff
+    ;;   :already-implemented-invalid — the implementer claimed done
+    ;;                   but verify hadn't passed; retry won't fix the
+    ;;                   stale claim
+    :implement/rate-limited
+    :implement/empty-diff
+    :implement/already-implemented-invalid})
 
 (defn verdict-terminal?
   "Guard: true when the failing-phase event carries a terminal verdict.
