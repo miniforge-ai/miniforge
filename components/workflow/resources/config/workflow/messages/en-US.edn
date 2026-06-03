@@ -45,6 +45,16 @@
   "Guard key must be a keyword; got {value} (class {class})"
   :guards/non-fn-value
   "Guard value must be a function; got {value} (class {class}) under key {guard-key}"
+  :guards/unregistered-at-resolve
+  "Guard {guard} survived validation but is not registered at resolve time"
+  :actions/dangling-references
+  "Workflow machine references unregistered action(s): {dangling}. Registered: {registered}"
+  :actions/non-keyword-key
+  "Action key must be a keyword; got {value} (class {class})"
+  :actions/non-fn-value
+  "Action value must be a function; got {value} (class {class}) under key {action-key}"
+  :actions/unregistered-at-resolve
+  "Action {action} survived validation but is not registered at resolve time"
   :status/missing-workflow-id "Workflow must have :workflow/id"
   :status/invalid-workflow-registration
   "Workflow {workflow-id} failed registration validation"

@@ -200,6 +200,56 @@
        :references dangling
        :message (dangling-reference-message dangling (registered-keys))})))
 
+;------------------------------------------------------------------------------ Layer 3
+;; Resolution
+;;
+;; Substitutes every keyword-form `:guard` reference with the actual
+;; registered fn. Called from `compile-execution-machine` AFTER
+;; validation so dangling refs are surfaced first.
+;;
+;; A keyword that survived validation but is not registered surfaces as
+;; an IllegalStateException at resolve time — programmer-error guard,
+;; not an anomaly return, because the validator should have caught it.
+
+(defn- resolve-guard-keyword
+  [k]
+  (or (lookup-guard k)
+      (throw (IllegalStateException.
+               (messages/t :guards/unregistered-at-resolve
+                           {:guard k})))))
+
+(defn- resolve-guards-in-entry
+  [entry]
+  (let [g (:guard entry)]
+    (if (keyword? g)
+      (assoc entry :guard (resolve-guard-keyword g))
+      entry)))
+
+(defn- resolve-guards-in-transition
+  [transition]
+  (cond
+    (keyword? transition)    transition
+    (map? transition)        (resolve-guards-in-entry transition)
+    (sequential? transition) (mapv (fn [t] (if (map? t) (resolve-guards-in-entry t) t))
+                                    transition)
+    :else                    transition))
+
+(defn resolve-guard-keywords
+  "Walk `compiled-states` and substitute every keyword-form `:guard`
+   reference with its registered fn. Idempotent — entries with no
+   keyword refs pass through. Validator should have run first to ensure
+   coverage."
+  [compiled-states]
+  (into {}
+        (map (fn [[state-id state-config]]
+               (let [on (get state-config :on {})
+                     resolved-on (into {}
+                                       (map (fn [[event-key t]]
+                                              [event-key (resolve-guards-in-transition t)]))
+                                       on)]
+                 [state-id (assoc state-config :on resolved-on)])))
+        compiled-states))
+
 ;------------------------------------------------------------------------------ Rich comment
 
 (comment

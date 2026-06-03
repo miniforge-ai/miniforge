@@ -40,6 +40,7 @@
   (:require
    [clojure.set :as set]
    [ai.miniforge.fsm.interface :as fsm]
+   [ai.miniforge.workflow.actions :as actions]
    [ai.miniforge.workflow.definition :as definition]
    [ai.miniforge.workflow.guards :as guards]
    [ai.miniforge.workflow.messages :as messages]))
@@ -284,18 +285,28 @@
   [entry]
   [(:paused-state-id entry) entry])
 
-(defn- transition-target
+(defn- transition-targets
+  "Return the set of target state-ids referenced by a single transition
+   value. Handles the three transition shapes clj-statecharts accepts:
+   bare keyword (target), single map (`:target` slot), and ordered
+   vector of maps (guarded array — every map's `:target` is a reachable
+   edge, since first matching guard wins but ANY of them MAY fire)."
   [transition]
   (cond
-    (keyword? transition) transition
-    (map? transition) (:target transition)
-    :else nil))
+    (keyword? transition)    #{transition}
+    (map? transition)        (some-> (:target transition) hash-set)
+    (sequential? transition) (into #{}
+                                   (keep (fn [entry]
+                                           (when (map? entry) (:target entry))))
+                                   transition)
+    :else                    #{}))
 
 (defn- state-transition-targets
   [state-config]
   (->> (get state-config :on {})
        vals
-       (keep transition-target)
+       (mapcat transition-targets)
+       (filter some?)
        set))
 
 (defn- build-state-graph
@@ -332,12 +343,12 @@
    :message (messages/t :status/unreachable-machine-states
                         {:states states})})
 
-(defn compile-execution-machine
-  "Compile a per-run execution machine from a workflow pipeline.
-
-   The compiled machine is the authoritative source of truth for workflow
-   progression. Coarse lifecycle status and phase/index projections are derived
-   from the resulting machine snapshot."
+(defn- build-raw-states
+  "Construct the unresolved states map from a workflow pipeline. Returns
+   `{:states <raw-states-map> :phase-entries <vec>}`. Extracted from
+   `compile-execution-machine` so `validate-execution-machine` can check
+   keyword-ref coverage BEFORE keyword→fn resolution throws on dangling
+   references."
   [workflow]
   (let [pipeline (definition/execution-pipeline workflow)
         phase-entries (mapv build-phase-entry (range) pipeline)
@@ -360,8 +371,30 @@
                  :failed {:type :final}
                  :cancelled {:type :final}}
                 (into {} (map (partial build-phase-state phase-entries)) phase-entries)
-                (into {} (map build-paused-state) phase-entries))
-        compiled-states (into {} (remove (comp nil? val)) states)
+                (into {} (map build-paused-state) phase-entries))]
+    {:states        (into {} (remove (comp nil? val)) states)
+     :phase-entries phase-entries}))
+
+(defn compile-execution-machine
+  "Compile a per-run execution machine from a workflow pipeline.
+
+   The compiled machine is the authoritative source of truth for workflow
+   progression. Coarse lifecycle status and phase/index projections are derived
+   from the resulting machine snapshot.
+
+   Resolves keyword-form `:guard` and `:actions` references against their
+   registries before handing the table to clj-statecharts (the engine
+   expects fns, not keywords). `validate-execution-machine` checks
+   keyword-ref coverage on the RAW states map BEFORE this resolution so
+   dangling refs surface as validation errors; an unregistered keyword
+   that survives validation trips the resolve-time
+   IllegalStateException (programmer-error)."
+  [workflow]
+  (let [{:keys [states phase-entries]} (build-raw-states workflow)
+        raw-compiled-states states
+        compiled-states (-> raw-compiled-states
+                            guards/resolve-guard-keywords
+                            actions/resolve-action-keywords)
         state-graph (build-state-graph compiled-states)
         state->phase (into {}
                            (concat
@@ -381,12 +414,13 @@
            :workflow/state->entry state->entry
            :workflow/state-graph state-graph
            :workflow/state-ids (set (keys compiled-states))
-           ;; Attach the SOURCE states map so the guard validator can walk
-           ;; transitions without depending on whatever the underlying
-           ;; clj-statecharts engine stores internally. The compiled
-           ;; machine's runtime shape is the engine's contract; this
-           ;; auxiliary key is ours.
-           :workflow/source-states compiled-states
+           ;; Attach the RAW (pre-resolve) states map so the guard and
+           ;; action validators can walk transitions and surface keyword
+           ;; refs. The compiled `compiled-states` map has fns in the
+           ;; `:guard` / `:actions` slots — validators can't recover
+           ;; the keyword refs from there. Validation runs against this
+           ;; raw form in `validate-execution-machine`.
+           :workflow/source-states raw-compiled-states
            :workflow/initial-state :pending)))
 
 (defn validate-execution-machine
@@ -419,10 +453,31 @@
         unresolved-fail (->> pipeline
                              (keep (partial unknown-fail-target pipeline))
                              vec)
-        machine (when (and (seq pipeline)
-                           (nil? bad-entry-phase)
-                           (empty? unresolved-success)
-                           (empty? unresolved-fail))
+        ;; Phase 2a: build the raw (unresolved) states FIRST so the guard
+        ;; and action validators see keyword refs. Only run the full
+        ;; `compile-execution-machine` (which RESOLVES keywords → fns
+        ;; and would throw on dangling refs) AFTER ref-validation has
+        ;; passed. The raw-build is identical structurally to what the
+        ;; full compile uses internally.
+        raw-build (when (and (seq pipeline)
+                             (nil? bad-entry-phase)
+                             (empty? unresolved-success)
+                             (empty? unresolved-fail))
+                    (build-raw-states normalized-workflow))
+        raw-states (:states raw-build)
+        ;; Named-registry checks — every keyword-form `:guard` and
+        ;; `:actions` reference in the raw states must resolve against
+        ;; their registries, else surface the dangling reference here
+        ;; rather than at runtime IllegalStateException.
+        dangling-guards (when raw-states
+                          (guards/validate-guard-references raw-states))
+        dangling-actions (when raw-states
+                           (actions/validate-action-references raw-states))
+        ref-errors (filterv some? [dangling-guards dangling-actions])
+        ;; Only compile (with keyword resolution) if ref validation is
+        ;; clean — otherwise compile would throw IllegalStateException
+        ;; and bypass the structured error report below.
+        machine (when (and raw-build (empty? ref-errors))
                   (compile-execution-machine normalized-workflow))
         unreachable-state-set (when machine
                                 (unreachable-states machine))
@@ -432,14 +487,6 @@
                                           (when (contains? unreachable-state-set state-id)
                                             phase)))
                                   vec))
-        ;; Named-guard registry check — every keyword-form `:guard` in the
-        ;; compiled states must resolve against the registry, else surface
-        ;; the dangling reference here rather than at runtime. Phase 1 of
-        ;; the FSM RFC: registry ships before any state uses guards, so in
-        ;; the current pipeline this returns nil.
-        dangling-guards (when machine
-                          (guards/validate-guard-references
-                            (:workflow/source-states machine)))
         errors (vec (concat
                      (when (empty? pipeline)
                        [(empty-pipeline-error)])
@@ -447,12 +494,11 @@
                        [(unknown-entry-phase-error bad-entry-phase)])
                      unresolved-success
                      unresolved-fail
+                     ref-errors
                      (when (seq unreachable-phases)
                        [(unreachable-phase-error unreachable-phases)])
                      (when (seq unreachable-state-set)
-                       [(unreachable-state-error (vec unreachable-state-set))])
-                     (when dangling-guards
-                       [dangling-guards])))
+                       [(unreachable-state-error (vec unreachable-state-set))])))
         warnings (vec (concat
                        (when (seq duplicate-phases)
                          [(duplicate-phase-warning duplicate-phases)])))]
