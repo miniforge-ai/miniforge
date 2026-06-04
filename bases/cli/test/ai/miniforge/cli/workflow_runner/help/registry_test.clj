@@ -25,7 +25,8 @@
 (deftest registry-covers-every-workflow-runner-subcommand-test
   (testing "subcommands map contains every workflow / chain subcommand by key"
     (is (= #{:workflow-run :workflow-list :workflow-execute :workflow-status
-             :workflow-cancel :workflow-gc-scratch :chain-run :chain-list}
+             :workflow-inspect :workflow-cancel :workflow-gc-scratch
+             :chain-run :chain-list}
            (set (keys sut/subcommands))))))
 
 (deftest every-subcommand-spec-carries-the-help-flag-test
@@ -47,7 +48,7 @@
 (deftest group-listings-cover-every-child-test
   (testing "workflow group lists every workflow-* subcommand"
     (is (= #{:workflow-run :workflow-list :workflow-execute :workflow-status
-             :workflow-cancel :workflow-gc-scratch}
+             :workflow-inspect :workflow-cancel :workflow-gc-scratch}
            (set sut/workflow-subcommand-keys))))
   (testing "chain group lists every chain-* subcommand"
     (is (= #{:chain-run :chain-list}

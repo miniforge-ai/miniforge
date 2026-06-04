@@ -300,6 +300,7 @@
 
 ;; Workflow subcommands — spec-driven execution and lifecycle (N5)
 (defn workflow-execute-cmd [m] (cmd-workflow/workflow-execute-cmd (get-opts m)))
+(defn workflow-inspect-cmd [m] (cmd-workflow/workflow-inspect-cmd (get-opts m)))
 (defn workflow-status-cmd  [m] (cmd-workflow/workflow-status-cmd  (get-opts m)))
 (defn workflow-cancel-cmd  [m] (cmd-workflow/workflow-cancel-cmd  (get-opts m)))
 (defn workflow-gc-scratch-cmd [m] (cmd-workflow/workflow-gc-scratch-cmd (get-opts m)))
@@ -578,6 +579,11 @@
     :fn (wr-help/handler-with-help :workflow-status workflow-status-cmd)
     :args->opts [:id]
     :spec (wr-help-registry/spec-for :workflow-status)}
+
+   {:cmds ["workflow" "inspect"]
+    :fn (wr-help/handler-with-help :workflow-inspect workflow-inspect-cmd)
+    :args->opts [:path]
+    :spec (wr-help-registry/spec-for :workflow-inspect)}
 
    {:cmds ["workflow" "cancel"]
     :fn (wr-help/handler-with-help :workflow-cancel workflow-cancel-cmd)

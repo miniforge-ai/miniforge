@@ -21,6 +21,7 @@
    Public API groups live under ai.miniforge.workflow.interface.* namespaces,
    while this namespace remains the Polylith entrypoint."
   (:require
+   [ai.miniforge.workflow.fsm :as fsm]
    [ai.miniforge.workflow.interface.checkpoints :as checkpoints]
    [ai.miniforge.workflow.interface.configurable :as configurable]
    [ai.miniforge.workflow.interface.pipeline :as pipeline]
@@ -28,7 +29,8 @@
    [ai.miniforge.workflow.interface.protocols :as protocols]
    [ai.miniforge.workflow.interface.registry :as registry]
    [ai.miniforge.workflow.interface.runtime :as runtime]
-   [ai.miniforge.workflow.interface.supervision :as supervision]))
+   [ai.miniforge.workflow.interface.supervision :as supervision]
+   [ai.miniforge.workflow.visualize :as visualize]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Protocols and workflow topology
@@ -116,3 +118,23 @@
 (def ensure-initialized! registry/ensure-initialized!)
 (def valid-recommendation? registry/valid-recommendation?)
 (def explain-recommendation registry/explain-recommendation)
+
+;------------------------------------------------------------------------------ Layer 4
+;; FSM compile + visualization (Phase 6 of the FSM RFC)
+
+(def compile-execution-machine
+  "Compile a workflow map into an execution machine. Re-exports the
+   internal `fsm/compile-execution-machine` so external callers (CLI
+   inspect, evidence-bundle export) can produce a machine without
+   reaching into the brick's internals."
+  fsm/compile-execution-machine)
+
+(def validate-execution-machine
+  "Validate a workflow map against the structural/guard/action
+   invariants. Returns `{:valid? :errors :warnings :machine}`."
+  fsm/validate-execution-machine)
+
+(def machine->mermaid
+  "Render a compiled execution machine as a Mermaid stateDiagram-v2
+   block — Phase 6 visual-audit export."
+  visualize/machine->mermaid)

@@ -479,6 +479,9 @@
   :workflow-cmd/status-started "  Started: {value}"
   :workflow-cmd/status-phases "  Phases:"
   :workflow-cmd/status-error "  Error:   {value}"
+  :workflow-cmd/inspect-usage "Usage: {command}"
+  :workflow-cmd/inspect-not-found "No workflow file found at: {path}"
+  :workflow-cmd/inspect-failed "workflow inspect failed: {error}"
   :workflow-cmd/cancel-usage "Usage: {command}"
   :workflow-cmd/cancel-success "Cancel signal sent to workflow: {id}"
   :workflow-cmd/cancel-failed "Failed to cancel workflow: {error}"
@@ -730,6 +733,8 @@
   "Execute a workflow from a spec file path (alias for `run <spec>`)."
   :workflow-runner.help/workflow-status-summary
   "Show the status of a workflow by ID."
+  :workflow-runner.help/workflow-inspect-summary
+  "Print a Mermaid stateDiagram-v2 of the compiled FSM for a workflow EDN file."
   :workflow-runner.help/workflow-cancel-summary
   "Cancel a running workflow by ID."
   :workflow-runner.help/workflow-gc-scratch-summary

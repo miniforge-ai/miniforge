@@ -17,7 +17,8 @@
 ;; limitations under the License.
 
 (ns ai.miniforge.cli.main.commands.workflow-commands
-  "Workflow subcommands: execute (spec file), status, cancel, gc-scratch.
+  "Workflow subcommands: execute (spec file), inspect, status, cancel,
+   gc-scratch.
 
    Distinct from 'workflow run' (which takes a registered workflow-id) —
    'workflow execute' accepts a spec file path and routes through the full
@@ -32,7 +33,8 @@
    [ai.miniforge.cli.messages :as messages]
    [ai.miniforge.cli.main.commands.run :as cmd-run]
    [ai.miniforge.cli.worktree :as worktree]
-   [ai.miniforge.dag-executor.interface :as gc-queue]))
+   [ai.miniforge.dag-executor.interface :as gc-queue]
+   [ai.miniforge.workflow.interface :as workflow]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Helpers
@@ -80,6 +82,37 @@
     (if-not spec
       (shared/usage-error! :workflow-cmd/execute-usage "workflow execute <spec-file>")
       (cmd-run/run-cmd opts))))
+
+(defn workflow-inspect-cmd
+  "Print a Mermaid stateDiagram-v2 of the compiled execution machine
+   for a workflow EDN file. Phase 6 of the FSM RFC — visual audit of
+   the verdict-driven guarded `:phase/fail` array shape, including the
+   per-transition guard and action keywords.
+
+   Usage:
+     mf workflow inspect <workflow.edn>
+
+   The EDN file must contain a workflow map with `:workflow/id` and
+   `:workflow/pipeline`. Output is plain Mermaid text — pipe through
+   `pbcopy` and paste into a Markdown renderer, or redirect to a file
+   and open in an IDE preview."
+  [opts]
+  (let [{:keys [path]} opts]
+    (if-not path
+      (shared/usage-error! :workflow-cmd/inspect-usage
+                           "workflow inspect <workflow.edn>")
+      (if-not (fs/exists? path)
+        (do (display/print-error
+             (messages/t :workflow-cmd/inspect-not-found {:path path}))
+            (shared/exit! exit-code-error))
+        (try
+          (let [workflow-edn (-> path slurp edn/read-string)
+                machine      (workflow/compile-execution-machine workflow-edn)]
+            (println (workflow/machine->mermaid machine)))
+          (catch Exception e
+            (display/print-error
+             (messages/t :workflow-cmd/inspect-failed {:error (ex-message e)}))
+            (shared/exit! exit-code-error)))))))
 
 (defn workflow-status-cmd
   "Show the status of a workflow by ID.

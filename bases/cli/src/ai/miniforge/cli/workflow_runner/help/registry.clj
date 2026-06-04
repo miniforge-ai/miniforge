@@ -68,6 +68,9 @@
 (def workflow-status-flag-spec
   (with-help-flag {}))
 
+(def workflow-inspect-flag-spec
+  (with-help-flag {}))
+
 (def workflow-cancel-flag-spec
   (with-help-flag {}))
 
@@ -107,6 +110,10 @@
                       :summary-key :workflow-runner.help/workflow-status-summary
                       :spec        workflow-status-flag-spec
                       :positional  [:id]}
+   :workflow-inspect {:subcommand  "workflow inspect"
+                      :summary-key :workflow-runner.help/workflow-inspect-summary
+                      :spec        workflow-inspect-flag-spec
+                      :positional  [:path]}
    :workflow-cancel  {:subcommand  "workflow cancel"
                       :summary-key :workflow-runner.help/workflow-cancel-summary
                       :spec        workflow-cancel-flag-spec
@@ -127,7 +134,7 @@
 (def workflow-subcommand-keys
   "Display order for `mf workflow --help`."
   [:workflow-run :workflow-list :workflow-execute :workflow-status
-   :workflow-cancel :workflow-gc-scratch])
+   :workflow-inspect :workflow-cancel :workflow-gc-scratch])
 
 (def chain-subcommand-keys
   "Display order for `mf chain --help`."
