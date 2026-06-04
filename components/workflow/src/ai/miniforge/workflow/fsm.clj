@@ -483,23 +483,42 @@
         :when (> (count idxs) 1)]
     {:state state-id :entry-indices idxs}))
 
-;; ---- Invariant 3: budget guard precedes redirect branch in document order ----
+;; ---- Invariant 3: budget guard must exist and precede the redirect branch ----
+;;
+;; Split into two distinct error keywords so the user's diagnostic
+;; message names the actual problem:
+;;   * `:budget-guard-misordered` — present but in the wrong place
+;;   * `:budget-guard-missing`    — absent entirely
 
-(defn- budget-precedence-error
+(defn- budget-misordered-error
   [state-id redirect-idx budget-idx]
   {:error :budget-guard-misordered
    :state state-id
    :redirect-index redirect-idx
    :budget-guard-index budget-idx
    :message (messages/t :structural/budget-guard-misordered
-                        {:state state-id})})
+                        {:state state-id
+                         :redirect-index redirect-idx
+                         :budget-index budget-idx})})
+
+(defn- budget-missing-error
+  [state-id redirect-idx]
+  {:error :budget-guard-missing
+   :state state-id
+   :redirect-index redirect-idx
+   :message (messages/t :structural/budget-guard-missing
+                        {:state state-id
+                         :redirect-index redirect-idx})})
 
 (defn- budget-guard-misordered-states
-  "Return the seq of {:state :redirect-index :budget-guard-index} entries
-   where the redirect branch fires BEFORE the budget-check branch in
-   document order. clj-statecharts picks the first matching guard, so a
-   redirect branch ahead of the budget check effectively bypasses the
-   ceiling."
+  "Return per-state error data for arrays where the redirect branch is
+   present but the budget guard either does not exist or fires AFTER
+   the redirect. clj-statecharts picks the first matching guard, so a
+   missing or misordered budget check effectively bypasses the ceiling.
+
+   Returns a vector of `{:state ... :kind :missing|:misordered
+                         :redirect-index ... :budget-index ...}` for
+   the aggregator to convert into typed errors."
   [compiled-states]
   (for [[state-id entries] (guarded-fail-states compiled-states)
         :let [redirect-idx (->> entries
@@ -515,9 +534,10 @@
         :when (and (some? redirect-idx)
                    (or (nil? budget-idx)
                        (> budget-idx redirect-idx)))]
-    {:state state-id
-     :redirect-index redirect-idx
-     :budget-guard-index budget-idx}))
+    (if (nil? budget-idx)
+      {:state state-id :kind :missing      :redirect-index redirect-idx}
+      {:state state-id :kind :misordered   :redirect-index redirect-idx
+       :budget-index budget-idx})))
 
 (defn- structural-invariant-errors
   "Phase 5 RFC-prescribed structural invariants. Operates on the RAW
@@ -528,16 +548,18 @@
   [compiled-states]
   (let [missing-defaults (missing-default-branches compiled-states)
         multi-redirects  (multiple-redirect-actions-states compiled-states)
-        budget-misorders (budget-guard-misordered-states compiled-states)]
+        budget-problems  (budget-guard-misordered-states compiled-states)]
     (vec
      (concat
       (map guarded-fail-missing-default-error missing-defaults)
       (map (fn [{:keys [state entry-indices]}]
              (multiple-redirect-actions-error state entry-indices))
            multi-redirects)
-      (map (fn [{:keys [state redirect-index budget-guard-index]}]
-             (budget-precedence-error state redirect-index budget-guard-index))
-           budget-misorders)))))
+      (map (fn [{:keys [state kind redirect-index budget-index]}]
+             (case kind
+               :missing    (budget-missing-error state redirect-index)
+               :misordered (budget-misordered-error state redirect-index budget-index)))
+           budget-problems)))))
 
 (defn- build-raw-states
   "Construct the unresolved states map from a workflow pipeline. Returns
