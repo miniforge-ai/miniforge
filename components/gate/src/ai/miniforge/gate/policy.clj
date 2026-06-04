@@ -24,7 +24,9 @@
    - :review-approved - Review approval check
    - :release-ready - Release readiness check
    - :plan-complete - Plan completeness check"
-  (:require [ai.miniforge.gate.registry :as registry]))
+  (:require [ai.miniforge.gate.messages  :as msg]
+            [ai.miniforge.gate.registry  :as registry]
+            [slingshot.slingshot         :refer [try+]]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Policy checks
@@ -248,7 +250,7 @@
    Returns:
      {:passed? bool :errors [] :warnings [] :approval-required []}"
   [artifact ctx]
-  (try
+  (try+
     (let [check-fn (requiring-resolve 'ai.miniforge.policy-pack.core/check-artifact)
           packs (get ctx :policy-packs [])
           task-type (get ctx :task-type :implement)
@@ -266,10 +268,10 @@
            :approval-required (mapv #(violation->gate-result :approval-required %) approval-required)
            :warnings (mapv #(violation->gate-result :policy-warning %)
                            (concat warnings (:audits cascade)))})))
-    (catch Exception e
+    (catch Object e
       {:passed? false
        :errors [{:type :policy-check-error
-                  :message (str "Policy check failed: " (ex-message e))}]
+                  :message (msg/t :policy-pack/check-error {:message (ex-message e)})}]
        :warnings []
        :approval-required []})))
 

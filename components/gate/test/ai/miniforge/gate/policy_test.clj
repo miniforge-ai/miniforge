@@ -18,6 +18,7 @@
 
 (ns ai.miniforge.gate.policy-test
   (:require [clojure.test :refer [deftest is testing]]
+            [ai.miniforge.gate.messages :as msg]
             [ai.miniforge.gate.policy :as policy]))
 
 ;; -------------------------------------------------------------------------- check-review-approved
@@ -86,8 +87,9 @@
                   (fn [_sym] (throw (RuntimeException. "policy loader crashed")))]
       (let [result (policy/check-policy-pack {:content "test"}
                                              {:policy-packs ["some-pack"]})]
-        (is (false? (:passed? result))
-            "exception must not let the artifact through")
+        (is (false? (:passed? result)))
         (is (= :policy-check-error (-> result :errors first :type)))
+        (is (= (msg/t :policy-pack/check-error {:message "policy loader crashed"})
+               (-> result :errors first :message)))
         (is (empty? (:warnings result)))
         (is (empty? (:approval-required result)))))))
