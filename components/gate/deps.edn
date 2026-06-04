@@ -4,7 +4,8 @@
         ai.miniforge/messages {:local/root "../messages"}
         ai.miniforge/policy-pack {:local/root "../policy-pack"}
         ai.miniforge/response {:local/root "../response"}
-        ai.miniforge/semantic-analyzer {:local/root "../semantic-analyzer"}}
+        ai.miniforge/semantic-analyzer {:local/root "../semantic-analyzer"}
+        slingshot/slingshot {:mvn/version "0.12.2"}}
  :aliases
  {:test {:extra-paths ["test"]
          :extra-deps {}}}}
