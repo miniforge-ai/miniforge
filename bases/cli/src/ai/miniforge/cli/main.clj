@@ -300,6 +300,7 @@
 
 ;; Workflow subcommands — spec-driven execution and lifecycle (N5)
 (defn workflow-execute-cmd [m] (cmd-workflow/workflow-execute-cmd (get-opts m)))
+(defn workflow-inspect-cmd [m] (cmd-workflow/workflow-inspect-cmd (get-opts m)))
 (defn workflow-status-cmd  [m] (cmd-workflow/workflow-status-cmd  (get-opts m)))
 (defn workflow-cancel-cmd  [m] (cmd-workflow/workflow-cancel-cmd  (get-opts m)))
 (defn workflow-gc-scratch-cmd [m] (cmd-workflow/workflow-gc-scratch-cmd (get-opts m)))
