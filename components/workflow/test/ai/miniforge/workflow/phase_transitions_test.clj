@@ -91,26 +91,30 @@
     (is (= :phase/fail
            (exec/determine-phase-event {} {:status :failed})))))
 
-(deftest determine-phase-event-stagnated-emits-terminal-fail
-  (testing "a failed result tagged :stagnated? produces :phase/terminal-fail —
-            this MUST beat the on-fail redirect (review→implement) so a
-            repair loop that has stopped making progress actually terminates"
-    (is (= :phase/terminal-fail
-           (exec/determine-phase-event {} {:status :failed :stagnated? true})))
-    ;; Even when a redirect was also requested (shouldn't happen in
-    ;; practice, but be defensive), terminal-fail still wins.
-    (let [with-redirect (phase-result/request-redirect
-                          {:status :failed :stagnated? true} :implement)]
-      (is (= :phase/terminal-fail
-             (exec/determine-phase-event {} with-redirect))
-          "stagnated? must trump redirect-requested?"))))
+(deftest determine-phase-event-verdict-failure-emits-map-event
+  (testing "Phase 4a (superseding the deleted :phase/terminal-fail
+            workaround): a failed phase that attached a `:phase/verdict`
+            produces a MAP event `{:type :phase/fail :phase/verdict v}`
+            so the FSM's guarded-array `:verdict/terminal?` guard can
+            read the verdict directly.
 
-(deftest determine-phase-event-needs-decomposition-emits-terminal-fail
-  (testing "the convergence-cap signal `:needs-decomposition?` produces
-            :phase/terminal-fail — without this the cap is dead code because
-            :phase/fail follows :on-fail back to :implement"
-    (is (= :phase/terminal-fail
-           (exec/determine-phase-event {} {:status :failed :needs-decomposition? true})))))
+            Production shape: leave-* fns assoc the verdict at
+            `[:phase :result :output :phase/verdict]` on the ctx; the
+            extracted phase-result (= the `:phase` map) carries it at
+            `[:result :output :phase/verdict]`. Use that shape here so
+            a regression in the extraction path surfaces as a test
+            failure rather than as silently-dropped FSM events
+            (which is what bit us between Phase 2b and Phase 4a)."
+    (let [shape (fn [verdict]
+                  {:status :failed
+                   :result {:status :failed
+                            :output {:phase/verdict verdict}}})]
+      (is (= {:type :phase/fail :phase/verdict :stagnated}
+             (exec/determine-phase-event {} (shape :stagnated))))
+      (is (= {:type :phase/fail :phase/verdict :needs-decomposition}
+             (exec/determine-phase-event {} (shape :needs-decomposition))))
+      (is (= {:type :phase/fail :phase/verdict :verify/timeout}
+             (exec/determine-phase-event {} (shape :verify/timeout)))))))
 
 (deftest determine-phase-event-catchall-defaults-to-succeed
   (testing "an unrecognised status falls through to :phase/succeed (catch-all branch)"

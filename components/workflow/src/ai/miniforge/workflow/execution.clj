@@ -275,37 +275,38 @@
   (when (phase/redirect-requested? phase-result)
     (phase/transition-target phase-result)))
 
-(defn- terminal-failure?
-  "True when the phase result carries a terminal-failure marker — the phase
-   decided that no amount of further on-fail redirects can make progress
-   (review stagnation; convergence-cap :needs-decomposition). These are
-   distinct from ordinary failure: they MUST bypass `:on-fail`.
-
-   Pre-`:phase/terminal-fail`, setting `:stagnated?` or
-   `:needs-decomposition?` was effectively dead code — the FSM saw
-   `:phase/fail` and followed `:on-fail :implement`, so the review→implement
-   loop burned until `max-redirects` exhaustion regardless. Validated in the
-   2026-05-28 dogfood: convergence cap fired at review #3 but the workflow
-   ran a 4th implement+verify+review cycle anyway."
-  [phase-result]
-  (or (:stagnated? phase-result)
-      (:needs-decomposition? phase-result)))
-
 (defn- phase-verdict
-  "Phase 2b: read the `:phase/verdict` keyword from a phase result, if
-   the phase code set one. Review-phase failures attach this; other
-   phases don't yet (Phase 3 generalizes)."
+  "Read the `:phase/verdict` keyword from a phase result.
+
+   Production shape: leave-* fns assoc the verdict into the inner agent
+   result at `[:phase :result :output :phase/verdict]` on the ctx —
+   so the `phase-result` extracted by `extract-phase-result` (which is
+   the `:phase` map) carries it at `[:result :output :phase/verdict]`.
+
+   Copilot's #1030 review caught the original `[:output :phase/verdict]`
+   read path that never resolved against the production shape — the
+   path-bug was latent from Phase 2b and silently dropped verdict
+   events for the whole Phase 3 series. Fall back to a top-level
+   `:phase/verdict` for synthetic test results."
   [phase-result]
-  (get-in phase-result [:output :phase/verdict]))
+  (or (get-in phase-result [:result :output :phase/verdict])
+      (get-in phase-result [:output :phase/verdict])
+      (get phase-result :phase/verdict)))
 
 (defn determine-phase-event
   "Translate a phase result into an execution-machine event.
 
-   For review-phase failures (verdict present), returns a map event
-   `{:type :phase/fail :phase/verdict <v>}` so the verdict-driven
+   For failed phases that attached a `:phase/verdict`, returns a map
+   event `{:type :phase/fail :phase/verdict <v>}` so the verdict-driven
    guarded `:phase/fail` array can dispatch via the
-   `:verdict/terminal?` guard. Non-verdict paths preserve the
-   pre-Phase-2 behavior (keyword event)."
+   `:verdict/terminal?` guard.
+
+   Phase 4a removed the `:phase/terminal-fail` legacy workaround
+   (introduced by #1013 to bypass on-fail when phase code set
+   `:stagnated?` / `:needs-decomposition?` flag bits). Phase 2b's
+   verdict-driven array supersedes that mechanism for every phase
+   that now emits a verdict; the flag bits are no longer set anywhere
+   in production code."
   [_phase-config phase-result]
   (let [target-phase (redirect-target phase-result)
         verdict      (phase-verdict phase-result)]
@@ -316,20 +317,14 @@
       (phase/already-done? phase-result)
       :phase/already-done
 
-      ;; Terminal failure markers (legacy `:stagnated?` / `:needs-
-      ;; decomposition?` flags) must beat the on-fail redirect; check
-      ;; before the redirect branches. Phase 4 deletes this path once
-      ;; verify/release/implement also emit verdicts.
-      (and (phase/failed? phase-result) (terminal-failure? phase-result))
-      :phase/terminal-fail
-
       (phase/succeeded? phase-result)
       :phase/succeed
 
-      ;; Phase 2b: review-phase failures carry a verdict — send a map
-      ;; event so the FSM's guarded array reads it via
-      ;; `:verdict/terminal?`. Skip if a redirect was explicitly
-      ;; requested via the legacy `request-redirect` path (other phases).
+      ;; Failed phase with a verdict — send a map event so the FSM's
+      ;; guarded array reads it via `:verdict/terminal?`. Skip if a
+      ;; redirect was explicitly requested via the legacy
+      ;; request-redirect path (used by handle-error in some flows
+      ;; — Phase 4c migrates those to verdict too).
       (and (phase/failed? phase-result) verdict (not target-phase))
       {:type :phase/fail :phase/verdict verdict}
 

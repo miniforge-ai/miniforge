@@ -292,20 +292,19 @@
                                 (guarded-fail-transition failure-target
                                                          (some? on-fail-index))
                                 failure-target)]
+    ;; Phase 4a: `:phase/terminal-fail` removed. The verdict-driven
+    ;; guarded `:phase/fail` array (Phase 2b/3) is the superseding
+    ;; mechanism — terminal verdicts bypass on-fail through the
+    ;; `:verdict/terminal?` guard, not a parallel event keyword.
+    ;; `determine-phase-event` no longer emits the event; production
+    ;; code no longer sets the `:stagnated?` / `:needs-decomposition?`
+    ;; flag bits the workaround read.
     [state-id
      {:on (merge
            {:phase/retry state-id
             :phase/succeed success-target
             :phase/already-done already-done-target
             :phase/fail phase-fail-transition
-            ;; Terminal failure event: bypasses `:on-fail` and routes
-            ;; straight to `:failed`. Used by phases that have decided the
-            ;; only forward path is escalation. For review phase this
-            ;; mechanism is superseded by Phase 2b's verdict-driven
-            ;; guarded array, but we keep the event mapping until Phase 4
-            ;; drops the workaround so verify/release/implement (and
-            ;; in-flight checkpoints) keep working.
-            :phase/terminal-fail :failed
             :pause paused-state-id
             :cancel :cancelled
             :fail :failed
