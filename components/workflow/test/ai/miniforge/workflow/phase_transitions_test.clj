@@ -96,19 +96,25 @@
             workaround): a failed phase that attached a `:phase/verdict`
             produces a MAP event `{:type :phase/fail :phase/verdict v}`
             so the FSM's guarded-array `:verdict/terminal?` guard can
-            read the verdict directly. This is the post-Phase-3
-            equivalent of the old :phase/terminal-fail branch — verdict
-            on the result, dispatch on the guard, single accounting
-            site via `:redirect/inc-count`."
-    (is (= {:type :phase/fail :phase/verdict :stagnated}
-           (exec/determine-phase-event
-             {} {:status :failed :output {:phase/verdict :stagnated}})))
-    (is (= {:type :phase/fail :phase/verdict :needs-decomposition}
-           (exec/determine-phase-event
-             {} {:status :failed :output {:phase/verdict :needs-decomposition}})))
-    (is (= {:type :phase/fail :phase/verdict :verify/timeout}
-           (exec/determine-phase-event
-             {} {:status :failed :output {:phase/verdict :verify/timeout}})))))
+            read the verdict directly.
+
+            Production shape: leave-* fns assoc the verdict at
+            `[:phase :result :output :phase/verdict]` on the ctx; the
+            extracted phase-result (= the `:phase` map) carries it at
+            `[:result :output :phase/verdict]`. Use that shape here so
+            a regression in the extraction path surfaces as a test
+            failure rather than as silently-dropped FSM events
+            (which is what bit us between Phase 2b and Phase 4a)."
+    (let [shape (fn [verdict]
+                  {:status :failed
+                   :result {:status :failed
+                            :output {:phase/verdict verdict}}})]
+      (is (= {:type :phase/fail :phase/verdict :stagnated}
+             (exec/determine-phase-event {} (shape :stagnated))))
+      (is (= {:type :phase/fail :phase/verdict :needs-decomposition}
+             (exec/determine-phase-event {} (shape :needs-decomposition))))
+      (is (= {:type :phase/fail :phase/verdict :verify/timeout}
+             (exec/determine-phase-event {} (shape :verify/timeout)))))))
 
 (deftest determine-phase-event-catchall-defaults-to-succeed
   (testing "an unrecognised status falls through to :phase/succeed (catch-all branch)"

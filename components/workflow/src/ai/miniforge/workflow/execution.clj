@@ -276,11 +276,22 @@
     (phase/transition-target phase-result)))
 
 (defn- phase-verdict
-  "Read the `:phase/verdict` keyword from a phase result. All four
-   work-loop phases (:review, :verify, :release, :implement) attach
-   this on terminal phase statuses since Phase 3."
+  "Read the `:phase/verdict` keyword from a phase result.
+
+   Production shape: leave-* fns assoc the verdict into the inner agent
+   result at `[:phase :result :output :phase/verdict]` on the ctx —
+   so the `phase-result` extracted by `extract-phase-result` (which is
+   the `:phase` map) carries it at `[:result :output :phase/verdict]`.
+
+   Copilot's #1030 review caught the original `[:output :phase/verdict]`
+   read path that never resolved against the production shape — the
+   path-bug was latent from Phase 2b and silently dropped verdict
+   events for the whole Phase 3 series. Fall back to a top-level
+   `:phase/verdict` for synthetic test results."
   [phase-result]
-  (get-in phase-result [:output :phase/verdict]))
+  (or (get-in phase-result [:result :output :phase/verdict])
+      (get-in phase-result [:output :phase/verdict])
+      (get phase-result :phase/verdict)))
 
 (defn determine-phase-event
   "Translate a phase result into an execution-machine event.
