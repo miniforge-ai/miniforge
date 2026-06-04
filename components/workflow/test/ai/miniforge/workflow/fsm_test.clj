@@ -443,6 +443,136 @@
            returned #{} because (keep transition-target) discarded the
            vector"))))
 
+;------------------------------------------------------------------------------ Phase 5: structural invariants
+
+(defn- production-shape-workflow
+  "A workflow that includes all four work-loop guarded phases so the
+   structural-invariant tests can synthesize per-state mutations
+   (extra :redirect/inc-count action, removed default branch, etc.)
+   against a realistic compile target."
+  []
+  {:workflow/id :phase5-structural-test
+   :workflow/pipeline [{:phase :plan}
+                       {:phase :implement :on-fail :plan}
+                       {:phase :verify    :on-fail :implement}
+                       {:phase :review    :on-fail :implement}
+                       {:phase :release   :on-fail :implement}
+                       {:phase :done}]})
+
+(deftest structural-invariants-clean-on-production-workflow-test
+  (testing "the production-shape workflow (every guarded phase) emits a
+            machine that passes ALL three Phase 5 structural invariants.
+            Phase 5 is locking IN the post-Phase-4 shape — the baseline
+            must validate."
+    (let [result (fsm/validate-execution-machine (production-shape-workflow))]
+      (is (:valid? result)
+          (str "production workflow must validate; errors: " (:errors result)))
+      (is (empty? (filter (comp #{:guarded-fail-missing-default
+                                  :multiple-redirect-counting-actions
+                                  :budget-guard-misordered}
+                                :error)
+                          (:errors result)))
+          "no structural-invariant errors on the production shape"))))
+
+(deftest structural-invariant-guarded-fail-missing-default-test
+  (testing "if a state's guarded :phase/fail array has no default
+            (no-guard) branch, the validator surfaces a
+            :guarded-fail-missing-default error so the regression is
+            caught at workflow validation, not at the next dogfood.
+
+            clj-statecharts picks the FIRST matching guard in document
+            order; without a default branch a transition that fails
+            every guard would be silently dropped."
+    (with-redefs [;; Force a guarded-phase to emit an array with no
+                  ;; default branch by overriding the helper.
+                  fsm/validate-execution-machine
+                  (fn [workflow]
+                    ;; Simulate by injecting a bad workflow through the
+                    ;; raw-states pipeline.
+                    (let [{:keys [states]} (#'fsm/build-raw-states workflow)
+                          ;; Strip the default branch (last entry, no
+                          ;; :guard) from review-phase's :phase/fail
+                          ;; array.
+                          review-state (first (keep #(when (= :phase-3-review (first %)) %) states))
+                          bad-states (when review-state
+                                       (let [[sid scfg] review-state
+                                             entries (get-in scfg [:on :phase/fail])
+                                             bad-entries (vec (remove #(and (map? %) (not (contains? % :guard))) entries))]
+                                         (assoc states sid
+                                                (assoc-in scfg [:on :phase/fail] bad-entries))))
+                          errs (when bad-states
+                                 (#'fsm/structural-invariant-errors bad-states))]
+                      {:valid? (empty? errs)
+                       :errors (vec errs)
+                       :warnings []}))]
+      (let [result (fsm/validate-execution-machine (production-shape-workflow))
+            errs   (:errors result)]
+        (is (some #(= :guarded-fail-missing-default (:error %)) errs)
+            "missing-default error must surface")
+        (is (not (:valid? result))
+            "workflow with a default-less guarded array is invalid")))))
+
+(deftest structural-invariant-multiple-redirect-actions-test
+  (testing "if a single state's guarded :phase/fail array lists
+            :redirect/inc-count on more than one entry, the validator
+            surfaces a :multiple-redirect-counting-actions error.
+            Locks out double-counting (channel-A's regression vector)."
+    (let [bad-states
+          {:phase-0-review
+           {:on {:phase/fail [{:target :failed
+                               :guard :verdict/terminal?}
+                              ;; TWO entries with the redirect action
+                              {:target :phase-1-implement
+                               :actions [:redirect/inc-count]}
+                              {:target :phase-1-implement
+                               :actions [:redirect/inc-count :review/record-fingerprint]}
+                              {:target :failed}]}}}
+          errs (#'fsm/structural-invariant-errors bad-states)]
+      (is (some #(= :multiple-redirect-counting-actions (:error %)) errs)
+          "multi-redirect error must surface")
+      (let [err (first (filter #(= :multiple-redirect-counting-actions (:error %)) errs))]
+        (is (= :phase-0-review (:state err))
+            "error names the offending state")
+        (is (= [1 2] (:entry-indices err))
+            "error lists the indices of the offending entries")))))
+
+(deftest structural-invariant-budget-guard-misordered-test
+  (testing "if the redirect branch precedes the :budget/redirects-spent?
+            guard in document order, the budget check would never fire
+            (clj-statecharts picks the first matching branch). Validator
+            surfaces a :budget-guard-misordered error."
+    (let [bad-states
+          {:phase-0-review
+           {:on {:phase/fail [{:target :failed :guard :verdict/terminal?}
+                              ;; redirect FIRST — wrong order
+                              {:target :phase-1-implement
+                               :actions [:redirect/inc-count]}
+                              ;; budget check AFTER, would never fire
+                              {:target :failed :guard :budget/redirects-spent?}
+                              {:target :failed}]}}}
+          errs (#'fsm/structural-invariant-errors bad-states)]
+      (is (some #(= :budget-guard-misordered (:error %)) errs)
+          "budget-misordered error must surface")
+      (let [err (first (filter #(= :budget-guard-misordered (:error %)) errs))]
+        (is (= :phase-0-review (:state err)))
+        (is (< (:redirect-index err) (:budget-guard-index err))
+            "the error data names the redirect-before-budget mismatch"))))
+
+  (testing "budget-misordered also fires when the redirect branch is
+            present but there's NO budget-check at all — the redirect
+            branch could fire without an upstream ceiling, defeating
+            the purpose"
+    (let [bad-states
+          {:phase-0-review
+           {:on {:phase/fail [{:target :failed :guard :verdict/terminal?}
+                              ;; No budget-check guard anywhere; just redirect
+                              {:target :phase-1-implement
+                               :actions [:redirect/inc-count]}
+                              {:target :failed}]}}}
+          errs (#'fsm/structural-invariant-errors bad-states)]
+      (is (some #(= :budget-guard-misordered (:error %)) errs)
+          "missing-budget-check is misordered too"))))
+
 (deftest compiled-execution-machine-reachability-test
   (let [workflow {:workflow/id :test
                   :workflow/pipeline [{:phase :plan}

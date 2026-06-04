@@ -383,6 +383,162 @@
    :message (messages/t :status/unreachable-machine-states
                         {:states states})})
 
+;------------------------------------------------------------------------------ Phase 5: structural invariants
+;;
+;; Three compile-time invariants on the guarded `:phase/fail` arrays
+;; locked in by Phase 2b/3 and Phase 4. Future regressions where a
+;; contributor adds a second redirect-counting path or forgets the
+;; default branch fail at workflow-validation time — at runner startup,
+;; not at the next dogfood.
+
+(def ^:private redirect-action
+  "Sentinel action keyword whose presence in a `:phase/fail` array means
+   THAT entry is the on-fail redirect branch. Defined here so the
+   document-order invariant can find it without coupling to
+   `standard-guards-and-actions` (which depends on this module
+   transitively via fsm.clj's `:require`)."
+  :redirect/inc-count)
+
+(def ^:private redirect-budget-guard
+  "Sentinel guard keyword that must precede the redirect branch in
+   document order — the redirect-budget check."
+  :budget/redirects-spent?)
+
+(defn- phase-fail-entries
+  "Return the vector entries of a state's `:phase/fail` transition, or
+   nil when the transition is the flat (keyword) form. Only `:phase/fail`
+   is inspected — other transitions are simpler and have their own
+   walker-based validators (reachability, ref coverage)."
+  [state-config]
+  (let [t (get-in state-config [:on :phase/fail])]
+    (when (sequential? t) (vec t))))
+
+(defn- guarded-fail-states
+  "Return a seq of `[state-id entries]` for every state whose
+   `:phase/fail` transition is the guarded-array form."
+  [compiled-states]
+  (keep (fn [[state-id config]]
+          (when-let [entries (phase-fail-entries config)]
+            [state-id entries]))
+        compiled-states))
+
+(defn- entry-has-action?
+  [entry action-kw]
+  (and (map? entry)
+       (some #(= action-kw %) (get entry :actions []))))
+
+(defn- entry-default?
+  "A 'default' entry in a guarded array has NO `:guard` slot — it always
+   matches when reached. clj-statecharts picks the first matching
+   branch in document order; without a default at the end, a transition
+   that fails every guard is silently dropped."
+  [entry]
+  (and (map? entry)
+       (not (contains? entry :guard))))
+
+;; ---- Invariant 1: each guarded `:phase/fail` array has a default branch ----
+
+(defn- guarded-fail-missing-default-error
+  [state-id]
+  {:error :guarded-fail-missing-default
+   :state state-id
+   :message (messages/t :structural/guarded-fail-missing-default
+                        {:state state-id})})
+
+(defn- missing-default-branches
+  "Return the seq of state-ids whose guarded `:phase/fail` array has no
+   default (no-guard) branch."
+  [compiled-states]
+  (for [[state-id entries] (guarded-fail-states compiled-states)
+        :when (not (some entry-default? entries))]
+    state-id))
+
+;; ---- Invariant 2: at most one `:redirect/inc-count` per guarded array ----
+;;
+;; RFC §Phase 5: "At most one action across the vector increments
+;; redirect-count." The scope is the per-state `:phase/fail` array —
+;; each work-loop phase legitimately has its own (review, verify,
+;; release, implement); what we lock OUT is a single state's array
+;; bumping the counter twice on the same transition, which would
+;; double-count and silently halve the effective ceiling.
+
+(defn- multiple-redirect-actions-error
+  [state-id indices]
+  {:error :multiple-redirect-counting-actions
+   :state state-id
+   :entry-indices indices
+   :message (messages/t :structural/multiple-redirect-counting-actions
+                        {:state state-id :count (count indices)})})
+
+(defn- multiple-redirect-actions-states
+  "Return `[{:state :entry-indices}, ...]` for every state whose
+   `:phase/fail` array has MORE THAN ONE entry with the
+   `:redirect/inc-count` action. Single occurrence is normal — every
+   guarded-phase array has one redirect-counting branch."
+  [compiled-states]
+  (for [[state-id entries] (guarded-fail-states compiled-states)
+        :let [idxs (vec (keep-indexed
+                          (fn [i e] (when (entry-has-action? e redirect-action) i))
+                          entries))]
+        :when (> (count idxs) 1)]
+    {:state state-id :entry-indices idxs}))
+
+;; ---- Invariant 3: budget guard precedes redirect branch in document order ----
+
+(defn- budget-precedence-error
+  [state-id redirect-idx budget-idx]
+  {:error :budget-guard-misordered
+   :state state-id
+   :redirect-index redirect-idx
+   :budget-guard-index budget-idx
+   :message (messages/t :structural/budget-guard-misordered
+                        {:state state-id})})
+
+(defn- budget-guard-misordered-states
+  "Return the seq of {:state :redirect-index :budget-guard-index} entries
+   where the redirect branch fires BEFORE the budget-check branch in
+   document order. clj-statecharts picks the first matching guard, so a
+   redirect branch ahead of the budget check effectively bypasses the
+   ceiling."
+  [compiled-states]
+  (for [[state-id entries] (guarded-fail-states compiled-states)
+        :let [redirect-idx (->> entries
+                                (keep-indexed
+                                 (fn [i e] (when (entry-has-action? e redirect-action) i)))
+                                first)
+              budget-idx   (->> entries
+                                (keep-indexed
+                                 (fn [i e] (when (and (map? e)
+                                                       (= redirect-budget-guard (:guard e)))
+                                             i)))
+                                first)]
+        :when (and (some? redirect-idx)
+                   (or (nil? budget-idx)
+                       (> budget-idx redirect-idx)))]
+    {:state state-id
+     :redirect-index redirect-idx
+     :budget-guard-index budget-idx}))
+
+(defn- structural-invariant-errors
+  "Phase 5 RFC-prescribed structural invariants. Operates on the RAW
+   (pre-resolve) states map so it sees keyword refs.
+
+   Returns a vector of error maps (possibly empty) in the same shape
+   as the rest of the validator's errors."
+  [compiled-states]
+  (let [missing-defaults (missing-default-branches compiled-states)
+        multi-redirects  (multiple-redirect-actions-states compiled-states)
+        budget-misorders (budget-guard-misordered-states compiled-states)]
+    (vec
+     (concat
+      (map guarded-fail-missing-default-error missing-defaults)
+      (map (fn [{:keys [state entry-indices]}]
+             (multiple-redirect-actions-error state entry-indices))
+           multi-redirects)
+      (map (fn [{:keys [state redirect-index budget-guard-index]}]
+             (budget-precedence-error state redirect-index budget-guard-index))
+           budget-misorders)))))
+
 (defn- build-raw-states
   "Construct the unresolved states map from a workflow pipeline. Returns
    `{:states <raw-states-map> :phase-entries <vec>}`. Extracted from
@@ -513,6 +669,11 @@
                           (guards/validate-guard-references raw-states))
         dangling-actions (when raw-states
                            (actions/validate-action-references raw-states))
+        ;; Phase 5: structural invariants on guarded `:phase/fail`
+        ;; arrays. Locks in the SINGLE-accounting-site / default-branch
+        ;; / budget-precedes-redirect guarantees from Phase 2b/3/4.
+        structural-errors (when raw-states
+                            (structural-invariant-errors raw-states))
         ref-errors (filterv some? [dangling-guards dangling-actions])
         ;; Only compile (with keyword resolution) if ref validation is
         ;; clean — otherwise compile would throw IllegalStateException
@@ -535,6 +696,7 @@
                      unresolved-success
                      unresolved-fail
                      ref-errors
+                     structural-errors
                      (when (seq unreachable-phases)
                        [(unreachable-phase-error unreachable-phases)])
                      (when (seq unreachable-state-set)
