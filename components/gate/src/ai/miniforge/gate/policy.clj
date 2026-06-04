@@ -267,9 +267,9 @@
            :warnings (mapv #(violation->gate-result :policy-warning %)
                            (concat warnings (:audits cascade)))})))
     (catch Exception e
-      {:passed? true
-       :warnings [{:type :policy-check-error
-                    :message (str "Policy check failed: " (ex-message e))}]})))
+      {:passed? false
+       :errors [{:type :policy-check-error
+                  :message (str "Policy check failed: " (ex-message e))}]})))
 
 (defn repair-policy-pack
   "Attempt to repair policy violations.
