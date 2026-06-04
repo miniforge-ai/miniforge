@@ -168,11 +168,19 @@
         action                 (action-refs-in-transition entry)]
     {:state state-id :event event-key :action action}))
 
+(defn- state-entry->action-refs
+  "Pipeline helper: from a `[state-id state-config]` tuple, return the
+   action-ref location records for that state. Extracted from the
+   `action-references-with-locations` walker per standards rule
+   `No Inline Anonymous Functions in Pipelines`."
+  [[state-id state-config]]
+  (state-action-refs-with-location state-id state-config))
+
 (defn action-references-with-locations
   "Return every action reference with its source `{:state :event}` tuple."
   [compiled-states]
   (->> compiled-states
-       (mapcat (fn [[state-id config]] (state-action-refs-with-location state-id config)))
+       (mapcat state-entry->action-refs)
        vec))
 
 ;------------------------------------------------------------------------------ Layer 2
@@ -192,7 +200,7 @@
   [compiled-states]
   (let [known (registered-keys)]
     (->> (action-references-with-locations compiled-states)
-         (remove (fn [{:keys [action]}] (contains? known action)))
+         (remove (comp known :action))
          vec)))
 
 (defn validate-action-references
@@ -241,21 +249,27 @@
                                     transition)
     :else                    transition))
 
+(defn- resolve-event-transition
+  "Resolve a single `[event-key transition]` map-entry into a vector
+   pair with the transition's keyword refs substituted."
+  [[event-key transition]]
+  [event-key (resolve-actions-in-transition transition)])
+
+(defn- resolve-state-actions
+  "Resolve every keyword-form `:actions` reference within a single
+   `[state-id state-config]` pair, returning a `[state-id new-config]`
+   tuple suitable for `into {}`."
+  [[state-id state-config]]
+  (let [resolved-on (into {} (map resolve-event-transition) (get state-config :on {}))]
+    [state-id (assoc state-config :on resolved-on)]))
+
 (defn resolve-action-keywords
   "Walk `compiled-states` and substitute every keyword-form `:actions`
    reference with its registered fn. Idempotent — entries with no
    keyword refs pass through. Validator should have run first to ensure
    coverage."
   [compiled-states]
-  (into {}
-        (map (fn [[state-id state-config]]
-               (let [on (get state-config :on {})
-                     resolved-on (into {}
-                                       (map (fn [[event-key t]]
-                                              [event-key (resolve-actions-in-transition t)]))
-                                       on)]
-                 [state-id (assoc state-config :on resolved-on)])))
-        compiled-states))
+  (into {} (map resolve-state-actions) compiled-states))
 
 ;------------------------------------------------------------------------------ Rich comment
 

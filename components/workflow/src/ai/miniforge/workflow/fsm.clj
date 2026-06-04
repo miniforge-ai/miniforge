@@ -539,6 +539,22 @@
       {:state state-id :kind :misordered   :redirect-index redirect-idx
        :budget-index budget-idx})))
 
+(defn- ->multiple-redirect-error
+  "Pipeline helper: build the typed error map from a multi-redirect
+   walker record. Extracted to satisfy `No Inline Anonymous Functions
+   in Pipelines` and so each branch of the aggregator reads as a one-
+   liner."
+  [{:keys [state entry-indices]}]
+  (multiple-redirect-actions-error state entry-indices))
+
+(defn- ->budget-error
+  "Pipeline helper: dispatch on `:kind` and build the appropriate
+   typed error for a budget-guard walker record."
+  [{:keys [state kind redirect-index budget-index]}]
+  (case kind
+    :missing    (budget-missing-error state redirect-index)
+    :misordered (budget-misordered-error state redirect-index budget-index)))
+
 (defn- structural-invariant-errors
   "Phase 5 RFC-prescribed structural invariants. Operates on the RAW
    (pre-resolve) states map so it sees keyword refs.
@@ -552,14 +568,8 @@
     (vec
      (concat
       (map guarded-fail-missing-default-error missing-defaults)
-      (map (fn [{:keys [state entry-indices]}]
-             (multiple-redirect-actions-error state entry-indices))
-           multi-redirects)
-      (map (fn [{:keys [state kind redirect-index budget-index]}]
-             (case kind
-               :missing    (budget-missing-error state redirect-index)
-               :misordered (budget-misordered-error state redirect-index budget-index)))
-           budget-problems)))))
+      (map ->multiple-redirect-error multi-redirects)
+      (map ->budget-error budget-problems)))))
 
 (defn- build-raw-states
   "Construct the unresolved states map from a workflow pipeline. Returns
