@@ -733,6 +733,8 @@
   "Execute a workflow from a spec file path (alias for `run <spec>`)."
   :workflow-runner.help/workflow-status-summary
   "Show the status of a workflow by ID."
+  :workflow-runner.help/workflow-inspect-summary
+  "Print a Mermaid stateDiagram-v2 of the compiled FSM for a workflow EDN file."
   :workflow-runner.help/workflow-cancel-summary
   "Cancel a running workflow by ID."
   :workflow-runner.help/workflow-gc-scratch-summary

@@ -580,6 +580,11 @@
     :args->opts [:id]
     :spec (wr-help-registry/spec-for :workflow-status)}
 
+   {:cmds ["workflow" "inspect"]
+    :fn (wr-help/handler-with-help :workflow-inspect workflow-inspect-cmd)
+    :args->opts [:path]
+    :spec (wr-help-registry/spec-for :workflow-inspect)}
+
    {:cmds ["workflow" "cancel"]
     :fn (wr-help/handler-with-help :workflow-cancel workflow-cancel-cmd)
     :args->opts [:id]
