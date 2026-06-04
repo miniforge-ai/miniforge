@@ -537,15 +537,18 @@
 
 (defn- codex-args
   "Build CLI arguments for the Codex backend."
-  [{:keys [prompt model system]}]
-  (cond-> ["exec"
-           "--json"
-           "--sandbox=workspace-write"
-           "--skip-git-repo-check"]
-    true   (into ["-c" "approval_policy=never"])
-    model  (into ["-m" model])
-    system (into ["-c" (str "system_prompt=" (json/generate-string system))])
-    true   (conj prompt)))
+  [{:keys [prompt model system prompt-via]
+    :or {prompt-via :argv}}]
+  (let [stdin? (= prompt-via :stdin)]
+    (cond-> ["exec"
+             "--json"
+             "--sandbox=workspace-write"
+             "--skip-git-repo-check"]
+      true   (into ["-c" "approval_policy=never"])
+      model  (into ["-m" model])
+      system (into ["-c" (str "system_prompt=" (json/generate-string system))])
+      stdin? (conj "-")
+      (not stdin?) (conj prompt))))
 
 (defn- cursor-args
   "Build CLI arguments for the Cursor backend (binary `agent`).
@@ -615,9 +618,9 @@
            :requires-cli? true
            :stream-parser parse-codex-stream-line
            :args-fn codex-args
-           ;; Prompt delivery: argv. Codex CLI takes a positional prompt;
-           ;; flip to :stdin if its prompt envelope grows past ARG_MAX.
-           :prompt-via :argv}
+           ;; Prompt delivery: stdin. Codex supports `-` as the prompt
+           ;; placeholder; this keeps large synthesis prompts off argv.
+           :prompt-via :stdin}
 
    :ollama {:cmd "http"
             :streaming? true

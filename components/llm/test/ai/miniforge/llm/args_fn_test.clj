@@ -168,6 +168,13 @@
       (is (some #(= "--skip-git-repo-check" %) args))
       (is (= "fix bug" (last args))))))
 
+(deftest codex-args-stdin-test
+  (testing "stdin prompt delivery keeps prompt content out of argv"
+    (let [args ((private-fn 'codex-args)
+                {:prompt "fix bug" :prompt-via :stdin})]
+      (is (not (some #{"fix bug"} args)))
+      (is (= "-" (last args))))))
+
 (deftest codex-args-preflight-safe-config-test
   (testing "config overrides are safe before artifact MCP config exists"
     (let [args ((private-fn 'codex-args) {:prompt "p"})]
