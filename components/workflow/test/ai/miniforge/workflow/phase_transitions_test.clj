@@ -34,38 +34,26 @@
    [ai.miniforge.workflow.execution :as exec]
    [ai.miniforge.workflow.fsm :as workflow-fsm]))
 
-;; -------------------------------------------------------------------------- redirect-target
-
-(deftest redirect-target-returns-target-when-redirect-requested
-  (testing "redirect-target returns the target phase when transition-request is set"
-    (let [result (phase-result/request-redirect {:status :failed} :implement)]
-      (is (= :implement (#'exec/redirect-target result))
-          "redirect-target must extract the target from the transition-request"))))
-
-(deftest redirect-target-returns-nil-when-no-redirect
-  (testing "redirect-target returns nil on results that don't request redirect"
-    (is (nil? (#'exec/redirect-target {:status :success})))
-    (is (nil? (#'exec/redirect-target {:status :failed}))
-        "a bare :failed result with no transition-request must not look like a redirect")
-    (is (nil? (#'exec/redirect-target {:status :failed
-                                       :phase/transition-request
-                                       {:transition/type :transition/retry}}))
-        "non-redirect transition requests must NOT match")))
+;; Phase 4b removed `exec/redirect-target` and the
+;; `determine-phase-event-failure-with-redirect-target` test (which
+;; pinned the per-target `workflow.redirect/redirect-to-X` event
+;; keyword that the channel-A path used to emit). With handle-error
+;; now emitting `:phase/verdict :repair-requested` instead of
+;; `phase/request-redirect`, no production path produces a
+;; redirect-target marker — the FSM's guarded `:phase/fail` array
+;; reads the verdict instead. See
+;; `determine-phase-event-verdict-failure-emits-map-event` below
+;; for the superseding assertion.
 
 ;; -------------------------------------------------------------------------- determine-phase-event
 ;;
-;; Six branches in priority order. Test in priority order so a regression
+;; Branches in priority order. Test in priority order so a regression
 ;; that swaps two adjacent branches surfaces clearly.
 
 (deftest determine-phase-event-retrying-wins-over-success
-  (testing "retrying status produces :phase/retry — even if later branches would also match"
+  (testing "retrying status produces :phase/retry"
     (is (= :phase/retry
-           (exec/determine-phase-event {} {:status :retrying})))
-    ;; Retrying should win over a redirect signal too.
-    (is (= :phase/retry
-           (exec/determine-phase-event
-             {}
-             (phase-result/request-redirect {:status :retrying} :implement))))))
+           (exec/determine-phase-event {} {:status :retrying})))))
 
 (deftest determine-phase-event-already-done
   (testing ":already-implemented and :already-satisfied both produce :phase/already-done"
@@ -78,13 +66,6 @@
   (testing "a :completed result with no transition request produces :phase/succeed"
     (is (= :phase/succeed
            (exec/determine-phase-event {} {:status :completed})))))
-
-(deftest determine-phase-event-failure-with-redirect-target
-  (testing "a failed result that requested a redirect produces the redirect event for the target"
-    (let [result (phase-result/request-redirect {:status :failed} :implement)]
-      (is (= (workflow-fsm/redirect-event :implement)
-             (exec/determine-phase-event {} result))
-          "redirect-event keyword must be in the workflow.redirect/redirect-to-X namespace"))))
 
 (deftest determine-phase-event-failure-without-redirect-target
   (testing "a failed result with NO redirect target produces :phase/fail"
@@ -162,18 +143,13 @@
   (assoc ctx :execution/status :failed
              :test/transition-to-failed-called? true))
 
-(deftest apply-phase-transition-redirect-over-budget-transitions-to-failed
-  (testing "redirect event past max-redirects skips the FSM and flips to failed via transition-to-failed-fn"
-    (let [ctx (-> (ctx-at-plan-active)
-                  (assoc :execution/redirect-count exec/max-redirects))
-          redirect-event (workflow-fsm/redirect-event :implement)
-          out (exec/apply-phase-transition ctx redirect-event [] identity always-fail)]
-      (is (true? (:test/transition-to-failed-called? out))
-          "redirect-over-budget MUST route through transition-to-failed-fn — silent FSM advance was the regression")
-      (is (some #(= :max-redirects-exceeded (:type %)) (:execution/errors out))
-          ":max-redirects-exceeded error must land in :execution/errors")
-      (is (= :failed (:execution/status out))
-          "ctx status must be :failed after over-budget redirect"))))
+;; Phase 4b removed `apply-phase-transition-redirect-over-budget-
+;; transitions-to-failed`. The runner's parallel `is-redirect?` check
+;; that the test pinned was deleted — the FSM's
+;; `:budget/redirects-spent?` guard on the guarded `:phase/fail` array
+;; enforces the same `max-redirects` ceiling, and the verdict-routes
+;; integration tests in fsm_test.clj exercise it end-to-end with the
+;; real compiled machine.
 
 (deftest apply-phase-transition-state-changing-event-returns-next-ctx
   (testing "a valid event that moves the FSM forward returns the advanced ctx (no failure routing)"
@@ -222,15 +198,12 @@
 
 ;; -------------------------------------------------------------------------- end-to-end determine→apply
 
-(deftest determine-then-apply-redirect-chain-fails-at-max-budget
-  (testing "running determine-phase-event into apply-phase-transition over budget routes to failed"
-    (let [result (phase-result/request-redirect {:status :failed} :implement)
-          event (exec/determine-phase-event {} result)
-          ctx (-> (ctx-at-plan-active)
-                  (assoc :execution/redirect-count exec/max-redirects))
-          out (exec/apply-phase-transition ctx event [] identity always-fail)]
-      (is (true? (:test/transition-to-failed-called? out))
-          "end-to-end: redirect-requested + over-budget → :failed"))))
+;; Phase 4b removed `determine-then-apply-redirect-chain-fails-at-max-budget`.
+;; The runner's parallel max-budget check is gone; the same end-to-end
+;; assertion (over-budget redirect → terminal :failed) now lives in
+;; fsm_test.clj's per-phase verdict-routes integration tests, where it
+;; runs against the real compiled FSM with the guarded `:phase/fail`
+;; array's `:budget/redirects-spent?` guard doing the work.
 
 (deftest determine-then-apply-success-path-advances-fsm
   (testing "running determine then apply on a clean success result advances the FSM"

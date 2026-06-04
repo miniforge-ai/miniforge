@@ -227,7 +227,14 @@
         s0 (fsm/start-execution machine (fsm/initialize-execution machine))
         s1 (fsm/transition-execution machine s0 :phase/succeed)
         s2 (fsm/transition-execution machine s1 :phase/succeed)
-        s3 (fsm/transition-execution machine s2 (fsm/redirect-event :implement))
+        ;; Phase 4b: redirect now flows through the verdict-driven
+        ;; guarded `:phase/fail` array — non-terminal verdict +
+        ;; configured on-fail → on-fail target + counter bump via the
+        ;; `:redirect/inc-count` action. No more per-target
+        ;; redirect-to-X event keyword.
+        s3 (fsm/transition-execution machine s2
+                                     {:type :phase/fail
+                                      :phase/verdict :repair-requested})
         s4 (fsm/transition-execution machine s3 :pause)
         s5 (fsm/transition-execution machine s4 :resume)
         s6 (fsm/transition-execution machine s5 :phase/succeed)

@@ -245,8 +245,15 @@
    phase-software-factory interceptor used to repeat verbatim:
 
        within iteration budget                         → retry
-       past budget AND `:on-fail` set AND redirect?    → fail and redirect
+       past budget AND `:on-fail` set AND redirect?    → fail with verdict
        otherwise                                       → fail and propagate
+
+   Phase 4b: when the phase-level retry budget is exhausted AND
+   `redirect?` is true AND `:on-fail` is set, the handler attaches
+   `:phase/verdict :repair-requested` to the phase result instead of
+   calling `phase/fail-and-request-redirect`. The FSM's verdict-driven
+   guarded `:phase/fail` array (Phase 2b/3) handles routing from there
+   — single accounting site, same as the normal-flow path.
 
    Iteration count is read from `[:phase :iterations]`, the budget
    ceiling from `[:phase :budget :iterations]` (falling back to
@@ -277,8 +284,15 @@
            (assoc-in  [:phase :status]     :retrying))
 
        on-fail
-       (assoc ctx :phase (fail-and-request-redirect
-                          (:phase ctx) error-map on-fail))
+       ;; Phase 4b: emit verdict instead of request-redirect. The FSM's
+       ;; guarded `:phase/fail` array dispatches via the
+       ;; `:verdict/terminal?` guard (false for :repair-requested) and
+       ;; takes the on-fail branch with the `:redirect/inc-count`
+       ;; action — the SINGLE accounting site.
+       (-> ctx
+           (assoc :phase (fail-phase (:phase ctx) error-map))
+           (assoc-in [:phase :verdict] :repair-requested)
+           (assoc-in [:phase :result :output :phase/verdict] :repair-requested))
 
        :else
        (assoc ctx :phase (fail-phase (:phase ctx) error-map))))))

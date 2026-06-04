@@ -270,10 +270,11 @@
       (record-phase-artifacts phase-result)
       (track-phase-files phase-result)))
 
-(defn- redirect-target
-  [phase-result]
-  (when (phase/redirect-requested? phase-result)
-    (phase/transition-target phase-result)))
+;; Phase 4b removed `redirect-target`. With handle-error refactored
+;; to emit `:phase/verdict :repair-requested` (the last in-production
+;; caller of `phase/request-redirect`), no phase result carries a
+;; redirect-target marker anymore. `determine-phase-event` reads the
+;; verdict instead.
 
 (defn- phase-verdict
   "Read the `:phase/verdict` keyword from a phase result.
@@ -308,8 +309,7 @@
    that now emits a verdict; the flag bits are no longer set anywhere
    in production code."
   [_phase-config phase-result]
-  (let [target-phase (redirect-target phase-result)
-        verdict      (phase-verdict phase-result)]
+  (let [verdict (phase-verdict phase-result)]
     (cond
       (phase/retrying? phase-result)
       :phase/retry
@@ -321,15 +321,9 @@
       :phase/succeed
 
       ;; Failed phase with a verdict — send a map event so the FSM's
-      ;; guarded array reads it via `:verdict/terminal?`. Skip if a
-      ;; redirect was explicitly requested via the legacy
-      ;; request-redirect path (used by handle-error in some flows
-      ;; — Phase 4c migrates those to verdict too).
-      (and (phase/failed? phase-result) verdict (not target-phase))
+      ;; guarded array reads it via `:verdict/terminal?`.
+      (and (phase/failed? phase-result) verdict)
       {:type :phase/fail :phase/verdict verdict}
-
-      (and (phase/failed? phase-result) target-phase)
-      (workflow-fsm/redirect-event target-phase)
 
       (phase/failed? phase-result)
       :phase/fail
@@ -344,35 +338,27 @@
 (defn apply-phase-transition
   "Apply a phase-outcome event through the execution machine.
 
-   Returns updated context with refreshed machine projections or terminal failure."
-  [ctx event _pipeline _transition-to-completed-fn transition-to-failed-fn]
-  (let [redirect-count (get ctx :execution/redirect-count 0)
-        is-redirect? (workflow-fsm/redirect-event? event)]
-    (cond
-      ;; Redirect cycle limit exceeded
-      (and is-redirect? (>= redirect-count max-redirects))
-      (let [anom (max-redirects-exceeded-anomaly)]
-        (-> ctx
-            (update :execution/errors conj
-                    {:type :max-redirects-exceeded
-                     :message (messages/t :status/max-redirects-hit
-                                          {:max-redirects max-redirects})
-                     :anomaly anom})
-            (update :execution/response-chain
-                    response/add-failure :pipeline anom
-                    {:redirect-count redirect-count})
-            (transition-to-failed-fn)))
+   Phase 4b: dropped the parallel `is-redirect?` budget check. The
+   FSM's `:budget/redirects-spent?` guard on the guarded `:phase/fail`
+   array enforces the same `max-redirects` ceiling, and the
+   `:redirect/inc-count` action on the redirect branch is the SINGLE
+   accounting site that bumps the counter. With Phase 4b's verdict-
+   driven handle-error path, no event ever reaches this fn with the
+   former `workflow.event/redirect-to-*` shape that the runner check
+   keyed off.
 
-      :else
-      (let [prior-state (:execution/fsm-state ctx)
-            next-ctx (context/transition-execution ctx event)
-            state-changed? (not= prior-state (:execution/fsm-state next-ctx))]
-        (if (or state-changed? (= :phase/retry event))
-          next-ctx
-          (phase-transition-failure ctx
-                                    event
-                                    (invalid-phase-transition-anomaly event)
-                                    transition-to-failed-fn))))))
+   Returns updated context with refreshed machine projections or
+   terminal failure."
+  [ctx event _pipeline _transition-to-completed-fn transition-to-failed-fn]
+  (let [prior-state (:execution/fsm-state ctx)
+        next-ctx (context/transition-execution ctx event)
+        state-changed? (not= prior-state (:execution/fsm-state next-ctx))]
+    (if (or state-changed? (= :phase/retry event))
+      next-ctx
+      (phase-transition-failure ctx
+                                event
+                                (invalid-phase-transition-anomaly event)
+                                transition-to-failed-fn))))
 
 ;------------------------------------------------------------------------------ Layer 1.5: DAG integration helpers
 

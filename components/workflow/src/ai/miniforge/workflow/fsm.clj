@@ -57,9 +57,12 @@
 ;; FSM Definition using clj-statecharts
 ;; ============================================================================
 
-(def redirect-event-namespace
-  "Namespace used for redirect events in the compiled execution machine."
-  "workflow.event")
+;; Phase 4b removed `redirect-event-namespace`. The original
+;; per-target redirect events (`workflow.event/redirect-to-<phase>`)
+;; were the channel-A redirect mechanism the dogfood-class bug
+;; exploited. Phase 2b/3 replaced them with the verdict-driven
+;; guarded `:phase/fail` array; Phase 4b deletes the now-dead
+;; per-target event keywords.
 
 (def phase-state-prefix
   "Prefix used for active phase state identifiers."
@@ -106,11 +109,6 @@
   "Build the paused execution-machine state id for a pipeline phase."
   [index phase]
   (keyword (phase-state-name paused-phase-state-prefix index phase)))
-
-(defn redirect-event
-  "Build the event keyword used to redirect to a named phase."
-  [phase]
-  (keyword redirect-event-namespace (str "redirect-to-" (name phase))))
 
 (defn- increment-redirect-count
   [redirect-count]
@@ -182,33 +180,22 @@
   [phase-entries index]
   (some-> (get phase-entries index) :state-id))
 
-(defn- redirect-transition
-  [phase-entries {:keys [config]}]
-  (when-let [target-phase (:on-fail config)]
-    (when-let [target-index (first-phase-index phase-entries target-phase)]
-      {(redirect-event target-phase)
-       {:target (state-target phase-entries target-index)}})))
-
-(defn redirect-event?
-  "True when an event keyword represents a workflow phase redirect."
-  [event-key]
-  (= redirect-event-namespace (namespace event-key)))
-
-(defn- machine-transition-defined?
-  [machine state event-key]
-  (contains? (get-in machine [:states (current-state state) :on] {})
-             event-key))
+;; Phase 4b removed `redirect-transition` and `redirect-event?`.
+;; The verdict-driven guarded `:phase/fail` array (Phase 2b/3) is the
+;; only redirect mechanism now; budget accounting lives in the
+;; `:redirect/inc-count` action on the guarded array's redirect branch
+;; — the SINGLE accounting site the RFC's compile-time invariant will
+;; enforce in Phase 5.
 
 (defn transition-execution
-  "Apply an event to a compiled execution machine snapshot."
+  "Apply an event to a compiled execution machine snapshot.
+
+   Pure delegation to the underlying FSM. Phase 4b removed the parallel
+   `redirect-event?` namespace check that bumped `:redirect-count` for
+   channel-A redirects — the FSM action `:redirect/inc-count` on the
+   guarded `:phase/fail` array now handles every budget increment."
   [machine state event]
-  (let [event-key (if (keyword? event) event (:type event))
-        transition-defined? (machine-transition-defined? machine state event-key)
-        next-state (fsm/transition machine state event)]
-    (if (and transition-defined?
-             (redirect-event? event-key))
-      (fsm/update-context next-state update :redirect-count increment-redirect-count)
-      next-state)))
+  (fsm/transition machine state event))
 
 (defn- terminal-state-message
   [current-state]
@@ -300,16 +287,14 @@
     ;; code no longer sets the `:stagnated?` / `:needs-decomposition?`
     ;; flag bits the workaround read.
     [state-id
-     {:on (merge
-           {:phase/retry state-id
-            :phase/succeed success-target
-            :phase/already-done already-done-target
-            :phase/fail phase-fail-transition
-            :pause paused-state-id
-            :cancel :cancelled
-            :fail :failed
-            :complete :completed}
-           (redirect-transition phase-entries {:config config}))}]))
+     {:on {:phase/retry state-id
+           :phase/succeed success-target
+           :phase/already-done already-done-target
+           :phase/fail phase-fail-transition
+           :pause paused-state-id
+           :cancel :cancelled
+           :fail :failed
+           :complete :completed}}]))
 
 (defn- build-paused-state
   [{:keys [state-id paused-state-id]}]
