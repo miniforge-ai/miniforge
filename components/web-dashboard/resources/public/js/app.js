@@ -349,6 +349,7 @@ window.miniforge = {
       } else {
         addFilterChip(`${field}: ${value}`, field, value);
       }
+    }
     },
     setTextFilter(field, value) {
       // key is always text:<field> so only one text filter per field exists at a time
