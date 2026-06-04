@@ -161,6 +161,12 @@
                       :task/constraints (:constraints input)
                       :task/artifact artifact
                       :task/tests (build-verify-review-input verify-phase-result)}
+               ;; DAG sub-workflows carry per-task scope at `:files-in-scope`
+               ;; (set by `dag-orchestrator/task-sub-input`); pass it through so
+               ;; `agent.reviewer/effective-review-scope` can prefer it over the
+               ;; broader spec-level `:scope` nested in intent.
+               (seq (:files-in-scope input))
+               (assoc :task/files-in-scope (vec (:files-in-scope input)))
                formatted
                (assoc :task/knowledge-context formatted)
                behavior-addendum
