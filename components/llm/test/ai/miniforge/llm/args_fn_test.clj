@@ -163,6 +163,7 @@
       (is (some #(= "--json" %) args))
       ;; Explicit sandbox + approval-policy config replaces the deprecated
       ;; --full-auto alias.
+      (is (some #(= "--ignore-user-config" %) args))
       (is (some #(= "--sandbox=workspace-write" %) args))
       (is (some #(re-matches #"approval_policy=\"?never\"?" %) args))
       (is (some #(= "--skip-git-repo-check" %) args))

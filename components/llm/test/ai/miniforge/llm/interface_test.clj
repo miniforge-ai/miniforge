@@ -559,11 +559,19 @@
     (is (impl/rate-limited? "You've hit your limit · resets 3am (UTC)")))
 
   (testing "detects generic rate limit phrasing"
-    (is (impl/rate-limited? "rate limit exceeded")))
+    (is (impl/rate-limited? "rate limit exceeded"))
+    (is (impl/rate-limited? "backend rate limited"))
+    (is (impl/rate-limited? "HTTP 429 too many requests")))
 
   (testing "does not flag normal content"
     (is (not (impl/rate-limited? "(ns example.core)\n(defn hello [] \"world\")")))
     (is (not (impl/rate-limited? "Here is the implementation...")))
+    (is (not (impl/rate-limited?
+              (json/generate-string
+               {:claims [{:claim "WAF-based rate limiting on mobile auth endpoints remained in progress."
+                          :snippet "WAF-based rate limiting on mobile auth endpoints remains in progress"
+                          :confidence 1.0
+                          :tags ["security" "in-progress" "risk"]}]}))))
     (is (not (impl/rate-limited? nil)))))
 
 (deftest rate-limited-success-response-test
@@ -671,7 +679,14 @@
                                               {:type :stagnation :message "stalled" :elapsed-ms 1000}
                                               nil nil nil nil)]
       (is (not (:success resp)))
-      (is (= "{\"type\":\"system\"}" (get-in resp [:error :raw-stdout]))))))
+      (is (= "{\"type\":\"system\"}" (get-in resp [:error :raw-stdout])))))
+
+  (testing "raw stdout becomes the message when stderr and parsed content are blank"
+    (let [raw "{\"type\":\"error\",\"message\":\"model unavailable\"}"
+          resp (impl/streaming-error-response "" 1 "" raw nil nil nil nil nil)]
+      (is (not (:success resp)))
+      (is (= raw (get-in resp [:error :message])))
+      (is (= raw (get-in resp [:error :raw-stdout]))))))
 
 (deftest process-stream-lines-eof-is-not-timeout-test
   (testing "clean EOF with no lines does not synthesize a stream-idle timeout"

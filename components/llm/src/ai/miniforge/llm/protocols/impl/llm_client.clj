@@ -542,6 +542,7 @@
   (let [stdin? (= prompt-via :stdin)]
     (cond-> ["exec"
              "--json"
+             "--ignore-user-config"
              "--sandbox=workspace-write"
              "--skip-git-repo-check"]
       true   (into ["-c" "approval_policy=never"])
@@ -781,7 +782,8 @@
    Claude CLI returns exit 0 but emits a rate limit message as content."
   [content]
   (and (string? content)
-       (re-find #"(?i)you've hit your limit|rate limit|resets \d+[ap]m" content)))
+       (re-find #"(?i)you've hit your limit|too many requests|\b429\b|rate limit(?:ed| exceeded)?\b|resets \d+[ap]m"
+                content)))
 
 (defn success-response
   ([output exit-code]
@@ -1428,9 +1430,10 @@
    - :tool-call-count      — total number of tool invocations during the run
    - :final-message-preview — last 500 chars of accumulated content (post-mortem aid)"
   [content exit-code err-result raw-stdout timeout-info stop-reason num-turns tool-call-count final-message-preview]
-  (let [error-message (or err-result
-                          (when (str/blank? content) "Process failed with no output")
-                          "Process failed")
+  (let [error-message (or (not-empty (str/trim (or err-result "")))
+                          (when-not (str/blank? content) content)
+                          (not-empty (str/trim (or raw-stdout "")))
+                          "Process failed with no output")
         category (if timeout-info :anomalies/timeout :anomalies.agent/llm-error)
         error-type (if timeout-info "adaptive_timeout" "cli_error")]
     (cond-> (llm-error category error-type (str/trim error-message)
