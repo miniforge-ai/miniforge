@@ -227,46 +227,88 @@
       (is (= runner-test-verify (:execution/current-phase result)))
       (is (= 0 (:execution/redirect-count result))))))
 
+;; ---------------------------------------------------------------------------- DAG metric rollup regression
+;; Two sets of fixture metrics back the rollup tests below.
+
+;; success-path fixture: arbitrary but ergonomic numbers chosen to be visually
+;; distinct from any wall-clock or framework default so an off-by-one or wrong-
+;; key bug surfaces as an exact-value mismatch in the assertion output.
+(def ^:private dag-success-fixture-metrics
+  "Synthetic metrics injected into a successful DAG result. Values are
+   deliberately chosen to be non-zero, non-round in cost, and well below any
+   real wall-clock duration so they cannot collide with `stamp-wall-clock-
+   duration`'s output."
+  {:tokens      12345
+   :cost-usd    9.87
+   :duration-ms 60000})
+
+;; failure-path fixture: REAL numbers from the 2026-06-04
+;; `eliminate-requiring-resolve` dogfood (3h26m, 20-task DAG, 20/20 failed).
+;; Pinning to the observed values turns the test into a regression anchor for
+;; the specific cost-zero bug the PR fixes — if these don't round-trip, the
+;; rollup is broken on the same failure shape that originally surfaced it.
+(def ^:private dag-failure-fixture-tokens
+  "Total tokens observed across all 20 sub-workflows of the
+   2026-06-04 eliminate-requiring-resolve dogfood run."
+  516816)
+
+(def ^:private dag-failure-fixture-cost-usd
+  "Total cost (USD) observed across all 20 sub-workflows of the
+   2026-06-04 eliminate-requiring-resolve dogfood run. Pre-fix this surfaced
+   as `Cost: $0.0000` at the top of the run summary."
+  42.22608595)
+
+(def ^:private dag-failure-fixture-duration-ms
+  "Total summed sub-workflow duration from the 2026-06-04 dogfood. Note this
+   value is INTENTIONALLY overwritten by wall-clock stamping in
+   `transition-to-failed`, so it's pinned for completeness but not asserted."
+  48356404)
+
+(def ^:private dag-failure-fixture-metrics
+  {:tokens      dag-failure-fixture-tokens
+   :cost-usd    dag-failure-fixture-cost-usd
+   :duration-ms dag-failure-fixture-duration-ms})
+
+(def ^:private minimal-rollup-test-workflow
+  "Smallest pipeline that satisfies `create-context` for the rollup tests —
+   we only exercise the metric merge, not phase advancement."
+  {:workflow/id      :test
+   :workflow/version "1.0.0"
+   :workflow/pipeline [{:phase runner-test-plan}
+                       {:phase runner-test-done}]})
+
 (deftest apply-dag-success-rolls-dag-metrics-into-execution-test
   (testing "DAG sub-workflow tokens/cost/duration roll into :execution/metrics on success"
     ;; `apply-phase-transition` ignores its `pipeline` arg (see _pipeline in
     ;; the defn), so we pass nil rather than call `runner/build-pipeline`,
     ;; which would force the phase loader and trip the same classpath error
     ;; that affects the other pipeline-running tests in this file.
-    (let [workflow {:workflow/id :test
-                    :workflow/version "1.0.0"
-                    :workflow/pipeline [{:phase runner-test-plan}
-                                        {:phase runner-test-done}]}
-          context (ctx/create-context workflow {:task "Test"} {})
+    (let [context (ctx/create-context minimal-rollup-test-workflow {:task "Test"} {})
           dag-result {:artifacts []
                       :worktree-paths []
-                      :metrics {:tokens 12345
-                                :cost-usd 9.87
-                                :duration-ms 60000}}
+                      :metrics dag-success-fixture-metrics}
           result #_{:clj-kondo/ignore [:invalid-arity]}
                  (exec/apply-dag-success context dag-result nil
                                          ctx/transition-to-completed
                                          ctx/transition-to-failed)]
-      (is (= 12345 (get-in result [:execution/metrics :tokens])))
-      (is (= 9.87 (get-in result [:execution/metrics :cost-usd]))))))
+      (is (= (:tokens dag-success-fixture-metrics)
+             (get-in result [:execution/metrics :tokens])))
+      (is (= (:cost-usd dag-success-fixture-metrics)
+             (get-in result [:execution/metrics :cost-usd]))))))
 
 (deftest apply-dag-failure-rolls-dag-metrics-into-execution-test
   (testing "DAG sub-workflow spend rolls into :execution/metrics on failure too"
     ;; Without this rollup the run summary lies ($0.0000 on a real spend) —
     ;; tokens were spent whether or not the DAG succeeded.
-    (let [workflow {:workflow/id :test
-                    :workflow/version "1.0.0"
-                    :workflow/pipeline [{:phase runner-test-plan}
-                                        {:phase runner-test-done}]}
-          context (ctx/create-context workflow {:task "Test"} {})
+    (let [context (ctx/create-context minimal-rollup-test-workflow {:task "Test"} {})
           dag-result {:artifacts []
-                      :metrics {:tokens 516816
-                                :cost-usd 42.22608595
-                                :duration-ms 48356404}}
+                      :metrics dag-failure-fixture-metrics}
           result (exec/apply-dag-failure context dag-result ctx/transition-to-failed)]
       (is (= :failed (:execution/status result)))
-      (is (= 516816 (get-in result [:execution/metrics :tokens])))
-      (is (= 42.22608595 (get-in result [:execution/metrics :cost-usd])))
+      (is (= dag-failure-fixture-tokens
+             (get-in result [:execution/metrics :tokens])))
+      (is (= dag-failure-fixture-cost-usd
+             (get-in result [:execution/metrics :cost-usd])))
       ;; :duration-ms is intentionally overwritten by wall-clock stamping in
       ;; transition-to-failed (see context/stamp-wall-clock-duration). The
       ;; rollup still runs so mid-run reads stay consistent; just don't
