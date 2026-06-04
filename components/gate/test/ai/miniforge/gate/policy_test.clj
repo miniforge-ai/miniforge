@@ -73,3 +73,21 @@
   (testing "artifact with no decision and no metadata flag → :passed? false"
     (let [result (policy/check-review-approved {} {})]
       (is (false? (:passed? result))))))
+
+;; -------------------------------------------------------------------------- check-policy-pack exception path
+;; Regression: the catch branch previously returned {:passed? true …} — a
+;; fail-open bug that let every artifact through whenever the policy loader
+;; or evaluation crashed. Pin that it is now fail-closed and returns the
+;; full docstring-promised result shape.
+
+(deftest check-policy-pack-fails-closed-on-exception
+  (testing "any exception during evaluation blocks the artifact"
+    (with-redefs [clojure.core/requiring-resolve
+                  (fn [_sym] (throw (RuntimeException. "policy loader crashed")))]
+      (let [result (policy/check-policy-pack {:content "test"}
+                                             {:policy-packs ["some-pack"]})]
+        (is (false? (:passed? result))
+            "exception must not let the artifact through")
+        (is (= :policy-check-error (-> result :errors first :type)))
+        (is (empty? (:warnings result)))
+        (is (empty? (:approval-required result)))))))

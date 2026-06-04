@@ -269,7 +269,9 @@
     (catch Exception e
       {:passed? false
        :errors [{:type :policy-check-error
-                  :message (str "Policy check failed: " (ex-message e))}]})))
+                  :message (str "Policy check failed: " (ex-message e))}]
+       :warnings []
+       :approval-required []})))
 
 (defn repair-policy-pack
   "Attempt to repair policy violations.
