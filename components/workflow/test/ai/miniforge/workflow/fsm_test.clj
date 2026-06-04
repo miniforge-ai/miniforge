@@ -443,6 +443,174 @@
            returned #{} because (keep transition-target) discarded the
            vector"))))
 
+;------------------------------------------------------------------------------ Phase 5: structural invariants
+
+(defn- production-shape-workflow
+  "A workflow that includes all four work-loop guarded phases so the
+   structural-invariant tests can synthesize per-state mutations
+   (extra :redirect/inc-count action, removed default branch, etc.)
+   against a realistic compile target."
+  []
+  {:workflow/id :phase5-structural-test
+   :workflow/pipeline [{:phase :plan}
+                       {:phase :implement :on-fail :plan}
+                       {:phase :verify    :on-fail :implement}
+                       {:phase :review    :on-fail :implement}
+                       {:phase :release   :on-fail :implement}
+                       {:phase :done}]})
+
+(deftest structural-invariants-clean-on-production-workflow-test
+  (testing "the production-shape workflow (every guarded phase) emits a
+            machine that passes ALL three Phase 5 structural invariants.
+            Phase 5 is locking IN the post-Phase-4 shape — the baseline
+            must validate."
+    (let [result (fsm/validate-execution-machine (production-shape-workflow))]
+      (is (:valid? result)
+          (str "production workflow must validate; errors: " (:errors result)))
+      (is (empty? (filter (comp #{:guarded-fail-missing-default
+                                  :multiple-redirect-counting-actions
+                                  :budget-guard-misordered}
+                                :error)
+                          (:errors result)))
+          "no structural-invariant errors on the production shape"))))
+
+(deftest structural-invariant-guarded-fail-missing-default-test
+  (testing "if a state's guarded :phase/fail array has no default
+            (no-guard) branch, the structural-invariant aggregator
+            surfaces a :guarded-fail-missing-default error so the
+            regression is caught at workflow validation time, not at
+            the next dogfood.
+
+            clj-statecharts picks the FIRST matching guard in document
+            order; without a default a transition that fails every
+            guard would be silently dropped."
+    (let [bad-states
+          ;; Every entry has a `:guard`. clj-statecharts picks the
+          ;; first matching guard in document order; if every entry
+          ;; specifies a guard and the runtime event matches none of
+          ;; them, the transition is silently dropped. The structural
+          ;; invariant catches this by requiring AT LEAST ONE entry
+          ;; without a `:guard` slot — the catch-all.
+          {:phase-0-review
+           {:on {:phase/fail [{:target :failed :guard :verdict/terminal?}
+                              {:target :failed :guard :budget/redirects-spent?}
+                              {:target :phase-1-implement
+                               :guard   :config/on-fail-set?
+                               :actions [:redirect/inc-count]}
+                              ;; NO catch-all entry — every branch
+                              ;; conditional, so a non-matching event
+                              ;; would slip through.
+                              ]}}}
+          errs (#'fsm/structural-invariant-errors bad-states)]
+      (is (some #(= :guarded-fail-missing-default (:error %)) errs)
+          "missing-default error must surface")
+      (let [err (first (filter #(= :guarded-fail-missing-default (:error %)) errs))]
+        (is (= :phase-0-review (:state err))
+            "error names the offending state"))))
+
+  (testing "end-to-end via validate-execution-machine: a workflow that
+            produces a default-less guarded array is invalid. The
+            structural-invariant errors flow through the same
+            :errors vector the existing validator surfaces."
+    ;; Synthesize the bad-states map and inject it via with-redefs of
+    ;; build-raw-states so validate-execution-machine wires it through
+    ;; the real error-aggregation path (not just the inner helper).
+    (let [base-workflow {:workflow/id :phase5-missing-default-e2e
+                         :workflow/pipeline [{:phase :plan}
+                                             {:phase :review :on-fail :plan}
+                                             {:phase :done}]}
+          original-build-raw @#'fsm/build-raw-states
+          strip-default      (fn [build]
+                               (let [states (:states build)
+                                     review-id (some #(when (= :review (-> (val %) (get-in [:on :phase/fail])
+                                                                            (as-> t (when (sequential? t) :unused))))
+                                                        (key %))
+                                                     states)
+                                     ;; Find any guarded :phase/fail state and strip default
+                                     fixed-states
+                                     (into {}
+                                           (map (fn [[sid scfg]]
+                                                  (let [t (get-in scfg [:on :phase/fail])]
+                                                    (if (sequential? t)
+                                                      [sid (assoc-in scfg [:on :phase/fail]
+                                                                     (vec (remove #(and (map? %)
+                                                                                        (not (contains? % :guard)))
+                                                                                  t)))]
+                                                      [sid scfg]))))
+                                           states)]
+                                 (assoc build :states fixed-states)))]
+      (with-redefs [fsm/build-raw-states (fn [wf] (strip-default (original-build-raw wf)))]
+        (let [result (fsm/validate-execution-machine base-workflow)]
+          (is (not (:valid? result))
+              "workflow with a default-less guarded array must validate as invalid")
+          (is (some #(= :guarded-fail-missing-default (:error %)) (:errors result))
+              "the structural error flows through :errors"))))))
+
+(deftest structural-invariant-multiple-redirect-actions-test
+  (testing "if a single state's guarded :phase/fail array lists
+            :redirect/inc-count on more than one entry, the validator
+            surfaces a :multiple-redirect-counting-actions error.
+            Locks out double-counting (channel-A's regression vector)."
+    (let [bad-states
+          {:phase-0-review
+           {:on {:phase/fail [{:target :failed
+                               :guard :verdict/terminal?}
+                              ;; TWO entries with the redirect action
+                              {:target :phase-1-implement
+                               :actions [:redirect/inc-count]}
+                              {:target :phase-1-implement
+                               :actions [:redirect/inc-count :review/record-fingerprint]}
+                              {:target :failed}]}}}
+          errs (#'fsm/structural-invariant-errors bad-states)]
+      (is (some #(= :multiple-redirect-counting-actions (:error %)) errs)
+          "multi-redirect error must surface")
+      (let [err (first (filter #(= :multiple-redirect-counting-actions (:error %)) errs))]
+        (is (= :phase-0-review (:state err))
+            "error names the offending state")
+        (is (= [1 2] (:entry-indices err))
+            "error lists the indices of the offending entries")))))
+
+(deftest structural-invariant-budget-guard-misordered-test
+  (testing "if the redirect branch precedes the :budget/redirects-spent?
+            guard in document order, the budget check would never fire
+            (clj-statecharts picks the first matching branch). Validator
+            surfaces a :budget-guard-misordered error."
+    (let [bad-states
+          {:phase-0-review
+           {:on {:phase/fail [{:target :failed :guard :verdict/terminal?}
+                              ;; redirect FIRST — wrong order
+                              {:target :phase-1-implement
+                               :actions [:redirect/inc-count]}
+                              ;; budget check AFTER, would never fire
+                              {:target :failed :guard :budget/redirects-spent?}
+                              {:target :failed}]}}}
+          errs (#'fsm/structural-invariant-errors bad-states)]
+      (is (some #(= :budget-guard-misordered (:error %)) errs)
+          "budget-misordered error must surface")
+      (let [err (first (filter #(= :budget-guard-misordered (:error %)) errs))]
+        (is (= :phase-0-review (:state err)))
+        (is (< (:redirect-index err) (:budget-guard-index err))
+            "the error data names the redirect-before-budget mismatch"))))
+
+  (testing "a redirect branch with NO :budget/redirects-spent? guard
+            anywhere in the array surfaces :budget-guard-missing
+            (distinct from :budget-guard-misordered so the diagnostic
+            message names the actual problem — Copilot caught the
+            single-error-keyword shape was confusing)."
+    (let [bad-states
+          {:phase-0-review
+           {:on {:phase/fail [{:target :failed :guard :verdict/terminal?}
+                              ;; No budget-check guard anywhere; just redirect
+                              {:target :phase-1-implement
+                               :actions [:redirect/inc-count]}
+                              {:target :failed}]}}}
+          errs (#'fsm/structural-invariant-errors bad-states)]
+      (is (some #(= :budget-guard-missing (:error %)) errs)
+          ":budget-guard-missing (not :budget-guard-misordered) when no
+           budget guard is present at all")
+      (is (not (some #(= :budget-guard-misordered (:error %)) errs))
+          "missing and misordered are distinct error keywords"))))
+
 (deftest compiled-execution-machine-reachability-test
   (let [workflow {:workflow/id :test
                   :workflow/pipeline [{:phase :plan}

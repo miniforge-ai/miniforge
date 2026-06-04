@@ -55,6 +55,14 @@
   "Action value must be a function; got {value} (class {class}) under key {action-key}"
   :actions/unregistered-at-resolve
   "Action {action} survived validation but is not registered at resolve time"
+  :structural/guarded-fail-missing-default
+  "State {state}: guarded :phase/fail array has no default (no-guard) branch — a failed transition with no matching guard would be silently dropped"
+  :structural/multiple-redirect-counting-actions
+  "State {state}: guarded :phase/fail array has {count} :redirect/inc-count action sites; at most one is allowed per array (else the counter double-bumps on the same transition)"
+  :structural/budget-guard-misordered
+  "State {state}: redirect branch (index {redirect-index}) precedes :budget/redirects-spent? guard (index {budget-index}) in document order — the budget check would never fire"
+  :structural/budget-guard-missing
+  "State {state}: guarded :phase/fail array has a :redirect/inc-count action (index {redirect-index}) but no :budget/redirects-spent? guard — the redirect ceiling would never fire"
   :status/missing-workflow-id "Workflow must have :workflow/id"
   :status/invalid-workflow-registration
   "Workflow {workflow-id} failed registration validation"
