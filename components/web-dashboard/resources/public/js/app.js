@@ -337,6 +337,50 @@ window.miniforge = {
     discoverRepos: fleetDiscoverRepos,
     syncPrs: fleetSyncPrs,
     discoverAndSync: fleetDiscoverAndSync
+  },
+  filters: {
+    addFilter(field, op, value, _scope) {
+      addFilterChip(`${field} ${op} ${value}`, field, value);
+    },
+    toggleFilter(field, value, _scope) {
+      const filterKey = `${field}:${value}`;
+      if (activeFilters.has(filterKey)) {
+        removeFilterChip(filterKey);
+      } else {
+        addFilterChip(`${field}: ${value}`, field, value);
+      }
+    },
+    setTextFilter(field, value) {
+      // key is always text:<field> so only one text filter per field exists at a time
+      const existingKey = `text:${field}`;
+      if (activeFilters.has(existingKey)) {
+        removeFilterChip(existingKey);
+      }
+      if (value && value.trim()) {
+        const trimmed = value.trim();
+        // HTML-escape user input before it reaches addFilterChip's innerHTML label
+        const escaped = trimmed.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        addFilterChip(`${field}: "${escaped}"`, 'text', field);
+      }
+    },
+    clearFilters(_scope) {
+      Array.from(activeFilters.keys()).forEach(key => removeFilterChip(key));
+    },
+    shareCurrentView() {
+      if (navigator.clipboard) {
+        navigator.clipboard.writeText(window.location.href)
+          .then(() => showToast('Link copied to clipboard', 'info', 2000))
+          .catch(() => {});
+      }
+    },
+    toggleCloudFilter(el) {
+      const filterKey = 'cloud:enabled';
+      if (el && el.checked) {
+        addFilterChip('Cloud only', 'cloud', 'enabled');
+      } else {
+        removeFilterChip(filterKey);
+      }
+    }
   }
 };
 
