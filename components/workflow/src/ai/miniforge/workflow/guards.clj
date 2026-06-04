@@ -173,11 +173,18 @@
         :when g]
     {:state state-id :event event-key :guard g}))
 
+(defn- state-entry->guard-refs
+  "Pipeline helper: from a `[state-id state-config]` tuple, return the
+   guard-ref location records for that state. Parallels actions.clj's
+   `state-entry->action-refs`."
+  [[state-id state-config]]
+  (state-guard-refs-with-location state-id state-config))
+
 (defn guard-references-with-locations
   "Return every guard reference with its source `{:state :event}` tuple."
   [compiled-states]
   (->> compiled-states
-       (mapcat (fn [[state-id config]] (state-guard-refs-with-location state-id config)))
+       (mapcat state-entry->guard-refs)
        vec))
 
 ;------------------------------------------------------------------------------ Layer 2
@@ -197,7 +204,7 @@
   [compiled-states]
   (let [known (registered-keys)]
     (->> (guard-references-with-locations compiled-states)
-         (remove (fn [{:keys [guard]}] (contains? known guard)))
+         (remove (comp known :guard))
          vec)))
 
 (defn validate-guard-references
@@ -246,21 +253,27 @@
                                     transition)
     :else                    transition))
 
+(defn- resolve-event-transition
+  "Resolve a single `[event-key transition]` map-entry into a vector
+   pair with the transition's keyword guards substituted."
+  [[event-key transition]]
+  [event-key (resolve-guards-in-transition transition)])
+
+(defn- resolve-state-guards
+  "Resolve every keyword-form `:guard` reference within a single
+   `[state-id state-config]` pair, returning a `[state-id new-config]`
+   tuple suitable for `into {}`."
+  [[state-id state-config]]
+  (let [resolved-on (into {} (map resolve-event-transition) (get state-config :on {}))]
+    [state-id (assoc state-config :on resolved-on)]))
+
 (defn resolve-guard-keywords
   "Walk `compiled-states` and substitute every keyword-form `:guard`
    reference with its registered fn. Idempotent — entries with no
    keyword refs pass through. Validator should have run first to ensure
    coverage."
   [compiled-states]
-  (into {}
-        (map (fn [[state-id state-config]]
-               (let [on (get state-config :on {})
-                     resolved-on (into {}
-                                       (map (fn [[event-key t]]
-                                              [event-key (resolve-guards-in-transition t)]))
-                                       on)]
-                 [state-id (assoc state-config :on resolved-on)])))
-        compiled-states))
+  (into {} (map resolve-state-guards) compiled-states))
 
 ;------------------------------------------------------------------------------ Rich comment
 
