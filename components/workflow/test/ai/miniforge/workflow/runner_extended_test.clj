@@ -227,6 +227,53 @@
       (is (= runner-test-verify (:execution/current-phase result)))
       (is (= 0 (:execution/redirect-count result))))))
 
+(deftest apply-dag-success-rolls-dag-metrics-into-execution-test
+  (testing "DAG sub-workflow tokens/cost/duration roll into :execution/metrics on success"
+    (let [workflow {:workflow/id :test
+                    :workflow/version "1.0.0"
+                    :workflow/pipeline [{:phase runner-test-plan}
+                                        {:phase runner-test-implement}
+                                        {:phase runner-test-verify}
+                                        {:phase runner-test-done}]}
+          pipeline (runner/build-pipeline workflow)
+          context (ctx/create-context workflow {:task "Test"} {})
+          dag-result {:artifacts []
+                      :worktree-paths []
+                      :metrics {:tokens 12345
+                                :cost-usd 9.87
+                                :duration-ms 60000}}
+          result #_{:clj-kondo/ignore [:invalid-arity]}
+                 (exec/apply-dag-success context dag-result pipeline
+                                         ctx/transition-to-completed
+                                         ctx/transition-to-failed)]
+      (is (= 12345 (get-in result [:execution/metrics :tokens])))
+      (is (= 9.87 (get-in result [:execution/metrics :cost-usd])))
+      (is (= 60000 (get-in result [:execution/metrics :duration-ms]))))))
+
+(deftest apply-dag-failure-rolls-dag-metrics-into-execution-test
+  (testing "DAG sub-workflow spend rolls into :execution/metrics on failure too"
+    ;; Without this rollup the run summary lies ($0.0000 on a real spend) —
+    ;; tokens were spent whether or not the DAG succeeded.
+    (let [workflow {:workflow/id :test
+                    :workflow/version "1.0.0"
+                    :workflow/pipeline [{:phase runner-test-plan}
+                                        {:phase runner-test-done}]}
+          context (ctx/create-context workflow {:task "Test"} {})
+          dag-result {:artifacts []
+                      :metrics {:tokens 516816
+                                :cost-usd 42.22608595
+                                :duration-ms 48356404}}
+          result (exec/apply-dag-failure context dag-result ctx/transition-to-failed)]
+      (is (= :failed (:execution/status result)))
+      (is (= 516816 (get-in result [:execution/metrics :tokens])))
+      (is (= 42.22608595 (get-in result [:execution/metrics :cost-usd])))
+      ;; :duration-ms is intentionally overwritten by wall-clock stamping in
+      ;; transition-to-failed (see context/stamp-wall-clock-duration). The
+      ;; rollup still runs so mid-run reads stay consistent; just don't
+      ;; assert against the DAG-supplied value here.
+      (is (= dag-result (:execution/dag-result result))
+          "dag-result remains attached for downstream consumers"))))
+
 (deftest execute-phase-step-uses-machine-state-over-phase-index-test
   (testing "standard execution selects the active phase from the machine snapshot"
     (let [workflow {:workflow/id :test

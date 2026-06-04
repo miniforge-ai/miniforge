@@ -557,6 +557,19 @@
               (io/copy src dst)))))
       (catch Exception _e nil))))
 
+(defn- roll-dag-metrics-into-execution
+  "Accumulate DAG sub-workflow tokens / cost / duration into top-line
+   `:execution/metrics`. Without this, sub-workflow spend stays buried in
+   `:execution/dag-result` and the run summary lies (`Cost: $0.0000` on a
+   real spend). Applied on BOTH success and failure paths — tokens were
+   spent either way."
+  [ctx dag-result]
+  (let [{:keys [tokens cost-usd duration-ms]} (:metrics dag-result)]
+    (-> ctx
+        (update-in [:execution/metrics :tokens]      (fnil + 0)   (or tokens 0))
+        (update-in [:execution/metrics :cost-usd]    (fnil + 0.0) (or cost-usd 0.0))
+        (update-in [:execution/metrics :duration-ms] (fnil + 0)   (or duration-ms 0)))))
+
 (defn apply-dag-success
   "Apply a successful DAG result to the execution context.
    Merges artifact provenance, copies sub-worktree file changes into the
@@ -586,7 +599,8 @@
                          (update :execution/artifacts into artifacts)
                          (assoc :execution/dag-result dag-result)
                          (assoc-in [:execution/phase-results :implement]
-                                   synthesized-implement-result))
+                                   synthesized-implement-result)
+                         (roll-dag-metrics-into-execution dag-result))
         ctx-after-plan
         (apply-phase-transition ctx-with-dag
                                 :phase/succeed
@@ -607,6 +621,7 @@
   (transition-to-failed-fn
    (-> ctx
        (assoc :execution/dag-result dag-result)
+       (roll-dag-metrics-into-execution dag-result)
        (update :execution/errors conj
                {:type :dag-execution-failed
                 :dag-result dag-result}))))
