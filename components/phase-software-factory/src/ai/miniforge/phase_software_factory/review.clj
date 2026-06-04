@@ -399,6 +399,7 @@
       (assoc-in [:metrics :review :duration-ms] duration-ms)
       (assoc-in [:metrics :review :repair-cycles] (dec iterations))
       (update-in [:execution/metrics :tokens] (fnil + 0) (:tokens metrics 0))
+      (update-in [:execution/metrics :cost-usd] (fnil + 0.0) (:cost-usd metrics 0.0))
       (update-in [:execution/metrics :duration-ms] (fnil + 0) (:duration-ms metrics 0))
       (record-fingerprint current-fp)))
 

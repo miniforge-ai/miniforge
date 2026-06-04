@@ -495,6 +495,7 @@
                           (assoc-in [:metrics :release :pr-info] pr-info))
                         (update-in [:execution :phases-completed] (fnil conj []) :release)
                         (update-in [:execution/metrics :tokens] (fnil + 0) (:tokens metrics 0))
+                        (update-in [:execution/metrics :cost-usd] (fnil + 0.0) (:cost-usd metrics 0.0))
                         (update-in [:execution/metrics :duration-ms] (fnil + 0) (:duration-ms metrics 0)))]
     (doto (cond-> updated-ctx
             (phase/retrying? (:phase updated-ctx))
