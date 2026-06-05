@@ -1253,6 +1253,63 @@
       (is (= ["line1" "line2"] @seen)
           "subprocess saw stdin content split by line"))))
 
+(deftest stream-exec-fn-network-drop-returns-network-drop-timeout-test
+  ;; PR-B integration test: when the network-monitor's probe-fn reports
+  ;; sustained failure, `stream-exec-fn` must (a) kill the subprocess
+  ;; so the consumer loop unblocks and (b) surface the network-drop
+  ;; reason as the result's `:timeout` envelope. PR-C will key off the
+  ;; `:type :network-drop` to schedule the auto-resume.
+  (testing "sustained probe failure surfaces a :network-drop timeout result"
+    ;; Long-running subprocess that produces no output — without the
+    ;; network monitor, the consumer would wait until progress-monitor's
+    ;; stagnation cutoff (2-3min). With the monitor wired and a stub
+    ;; probe-fn returning false, the monitor fires within ~30ms (10ms
+    ;; interval × 3 strikes) and forces stream-exec-fn to return.
+    (let [handler (fn [_line] nil)
+          monitor (pm/create-progress-monitor {:min-activity-interval-ms 1
+                                               :stagnation-threshold-ms  120000
+                                               :max-total-ms             120000})
+          result  (impl/stream-exec-fn
+                    ["sleep" "30"]
+                    handler
+                    {:progress-monitor monitor
+                     :backend-key      :claude
+                     :network-monitor-opts
+                     {:probe-interval-ms 10
+                      :failure-threshold 3
+                      :probe-fn          (constantly false)}})
+          timeout (:timeout result)]
+      (is (some? timeout)
+          "result must carry a :timeout envelope when the monitor fires")
+      (is (= :network-drop (:type timeout)))
+      (is (= :claude (:backend-key timeout)))
+      (is (re-find #"Network drop" (:message timeout))
+          ":message identifies the drop class for downstream log readers"))))
+
+(deftest stream-exec-fn-omits-network-monitor-when-no-backend-key-test
+  ;; Backwards compat: legacy callers (synthetic-stream tests, the
+  ;; `:echo` test backend) supply no `:backend-key`. The network
+  ;; monitor must stay dormant so they keep working unchanged.
+  (testing "without :backend-key, no probe traffic is generated"
+    (let [probe-calls (atom 0)
+          handler (fn [_line] nil)
+          monitor (pm/create-progress-monitor {:min-activity-interval-ms 1})
+          result  (impl/stream-exec-fn
+                    ["echo" "hello"]
+                    handler
+                    {:progress-monitor monitor
+                     ;; No :backend-key. Even if the test caller mistakenly
+                     ;; supplies network-monitor-opts (e.g. via a stale
+                     ;; fixture), the monitor must not start.
+                     :network-monitor-opts
+                     {:probe-fn (fn [_backend-key]
+                                  (swap! probe-calls inc)
+                                  false)}})]
+      (is (zero? @probe-calls)
+          "probe-fn must not be called when :backend-key is absent")
+      (is (nil? (:timeout result))
+          "process completed without timeout"))))
+
 ;------------------------------------------------------------------------------ Layer 6
 ;; Rich tool-event chunks — :tool-call-id/:tool-input on tool_use,
 ;; :tool-result chunks from tool_result content blocks

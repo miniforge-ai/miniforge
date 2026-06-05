@@ -28,6 +28,7 @@
    [ai.miniforge.logging.interface :as log]
    [ai.miniforge.llm.cost :as cost]
    [ai.miniforge.llm.messages :as msg]
+   [ai.miniforge.llm.network-monitor :as nnm]
    [ai.miniforge.llm.progress-monitor :as pm]
    [ai.miniforge.response.interface :as response]
    [slingshot.slingshot :refer [throw+ try+]])
@@ -1204,10 +1205,45 @@
         ceiling    (max 1 (dec stagnation))]
     (min ceiling (max keepalive-min-interval-ms target))))
 
+(defn- network-drop-timeout
+  "Shape the network-monitor's `:on-drop` diagnostic into the same
+   `{:type :message :elapsed-ms ...}` envelope `pm/check-timeout`
+   returns, so the existing `timeout-result` path handles it
+   identically. The PR-C auto-resumer keys on `:type :network-drop` to
+   know it should resume from the last persisted checkpoint."
+  [{:keys [backend-key consecutive-failures failure-threshold probe-interval-ms]
+    :as   diag}]
+  {:type           :network-drop
+   :backend-key    backend-key
+   :elapsed-ms     (* consecutive-failures probe-interval-ms)
+   :message        (format "Network drop: %d consecutive probes failed for %s"
+                           consecutive-failures (name backend-key))
+   :stats          (select-keys diag
+                                [:consecutive-failures :failure-threshold
+                                 :probe-interval-ms])})
+
 (defn stream-exec-fn
+  "Run `cmd` as a streaming subprocess, dispatching each output line to
+   `on-line`.
+
+   Options:
+   - `:progress-monitor`  — caller-supplied progress monitor; defaults
+                            to a fresh `default-progress-monitor`.
+   - `:workdir`, `:stdin` — passed through to `start-stream-process!`.
+   - `:backend-key`       — when set, starts the network-drop monitor
+                            against the corresponding provider endpoint
+                            (PR-B). Disabled when omitted so legacy
+                            callers / synthetic-stream tests are
+                            unaffected.
+   - `:network-monitor-opts` — overrides for `start-network-monitor!`
+                               (probe-interval-ms, failure-threshold,
+                               probe-fn). Tests inject `:probe-fn` here
+                               to drive the monitor deterministically
+                               without real network I/O."
   ([cmd on-line]
    (stream-exec-fn cmd on-line {}))
-  ([cmd on-line {:keys [progress-monitor workdir stdin]}]
+  ([cmd on-line {:keys [progress-monitor workdir stdin backend-key
+                        network-monitor-opts]}]
    (let [monitor (or progress-monitor (default-progress-monitor))
          stream-process (start-stream-process! cmd {:workdir workdir
                                                     :stdin stdin})
@@ -1225,21 +1261,58 @@
          ;; reader is alive; max-total-ms remains the wedge backstop.
          stop-keepalive! (pm/start-keepalive! monitor
                                               (keepalive-interval-ms monitor))
+         ;; Network-drop monitor — independent of the keepalive. PR-B
+         ;; of the network-resilience stack. Probes the provider every
+         ;; `default-probe-interval-ms` (10s) and fires once after
+         ;; `default-failure-threshold` (3) consecutive failures.
+         ;; on-drop: stamps the network-drop reason into the shared
+         ;; atom and forcibly destroys the subprocess so the reader
+         ;; loop exits immediately (the agent is hung on socket I/O
+         ;; that will never recover without process restart).
+         ;; Disabled when no :backend-key is provided so legacy
+         ;; callers (tests with synthetic streams, the `:echo` test
+         ;; backend) keep working unchanged.
+         network-drop-reason (atom nil)
+         stop-network-monitor!
+         (when backend-key
+           (nnm/start-network-monitor!
+             (merge {:backend-key backend-key
+                     :on-drop     (fn [diag]
+                                    (compare-and-set! network-drop-reason nil
+                                                      (network-drop-timeout diag))
+                                    ;; Kill the subprocess so the
+                                    ;; consumer's reader sees EOF and
+                                    ;; the loop exits.
+                                    ;; .destroyForcibly is the same
+                                    ;; call stop-stream-process! makes;
+                                    ;; safe to double-tap.
+                                    (try (.destroyForcibly process)
+                                         (catch Exception _ nil)))}
+                    network-monitor-opts)))
          {:keys [lines timeout]}
          (try
            (process-stream-lines out-reader monitor on-line)
            (finally
-             (stop-keepalive!)))
+             (stop-keepalive!)
+             (when stop-network-monitor! (stop-network-monitor!))))
+         ;; A network-drop signal (if any) supersedes whatever
+         ;; pm/check-timeout returned — the subprocess was killed by
+         ;; the network monitor, so `process-stream-lines` likely
+         ;; observed a stream-idle as a knock-on effect. Surface the
+         ;; root cause for the workflow / PR-C auto-resumer.
+         effective-timeout (or @network-drop-reason timeout)
          ;; Stream ended with a timeout reason (stream-idle,
-         ;; stagnation, or total-max) — the subprocess is hung or
-         ;; silent. Kill it so `deref` returns immediately instead of
-         ;; waiting 10 min for a process that will not exit.
-         join-timeout (if timeout (post-kill-join-timeout-ms) (process-join-timeout-ms))
+         ;; stagnation, total-max, or network-drop) — the subprocess
+         ;; is hung or silent. Kill it so `deref` returns immediately
+         ;; instead of waiting 10 min for a process that will not exit.
+         join-timeout (if effective-timeout
+                        (post-kill-join-timeout-ms)
+                        (process-join-timeout-ms))
          result (stop-stream-process! stream-process
-                                      (boolean timeout)
+                                      (boolean effective-timeout)
                                       join-timeout)]
-     (if timeout
-       (timeout-result lines timeout)
+     (if effective-timeout
+       (timeout-result lines effective-timeout)
        (success-result lines result)))))
 
 ;------------------------------------------------------------------------------ Layer 2
