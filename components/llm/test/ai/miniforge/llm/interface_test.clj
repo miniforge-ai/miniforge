@@ -919,7 +919,7 @@
         "claude must default to stdin to avoid POSIX ARG_MAX overflow")))
 
 (deftest cli-backends-declare-safe-prompt-delivery-test
-  (testing "codex and claude use stdin; other CLI backends remain argv"
+  (testing "codex uses stdin; other non-Claude CLI backends remain argv"
     (is (= :stdin (:prompt-via (get impl/backends :codex))))
     (is (= :argv (:prompt-via (get impl/backends :cursor))))
     (is (= :argv (:prompt-via (get impl/backends :opencode))))

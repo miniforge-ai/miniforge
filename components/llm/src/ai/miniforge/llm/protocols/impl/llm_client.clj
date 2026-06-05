@@ -538,7 +538,7 @@
 (defn- codex-args
   "Build CLI arguments for the Codex backend."
   [{:keys [prompt model system prompt-via]
-    :or {prompt-via :argv}}]
+    :or {prompt-via :stdin}}]
   (let [stdin? (= prompt-via :stdin)]
     (cond-> ["exec"
              "--json"
