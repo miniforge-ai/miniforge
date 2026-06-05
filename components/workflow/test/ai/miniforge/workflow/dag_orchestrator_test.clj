@@ -281,6 +281,40 @@
              (get-in opts [:dag/merge-anomaly :anomaly/category]))
           "leading-dash branch returns branch-name-invalid before any git invocation"))))
 
+(deftest task-sub-opts-multi-dep-rejects-all-invalid-ref-shapes-test
+  ;; Coverage extension after Copilot review on PR #1048: the
+  ;; strengthened `valid-ref-name?` rejects more than just leading-dash
+  ;; (revision operators, whitespace, ref-format-forbidden sequences,
+  ;; empty string). Pin each rejection class so the predicate cannot
+  ;; quietly weaken back to letting e.g. `"HEAD~1"` through to
+  ;; `git rev-parse`.
+  (testing "structurally invalid ref shapes each trigger branch-name-invalid"
+    (doseq [[label bad-branch]
+            [["empty string"            ""]
+             ["leading dash (flag risk)" "-flag-injection"]
+             ["whitespace"               "feat branch"]
+             ["tilde (revision op)"      "HEAD~1"]
+             ["caret (revision op)"      "HEAD^"]
+             ["colon (refspec sep)"      "refs/heads:foo"]
+             ["question mark glob"       "feat?"]
+             ["asterisk glob"            "feat*"]
+             ["open bracket"             "feat["]
+             ["close bracket"            "feat]"]
+             ["backslash"                "feat\\bad"]
+             ["double dot range"         "main..feat"]
+             ["at-brace reflog syntax"   "main@{1}"]
+             ["double slash"             "feat//inner"]]]
+      (let [task-def {:task/id id-c :task/description "C" :task/deps #{id-a id-b}}
+            ctx (registry-context {id-a {:branch bad-branch}
+                                   id-b {:branch "task-b"}}
+                                  "main")
+            opts (dag-orch/task-sub-opts ctx task-def)]
+        (is (not (contains? opts :branch))
+            (str label ": invalid branch must not produce a usable :branch"))
+        (is (= :anomalies/dag-multi-parent-branch-name-invalid
+               (get-in opts [:dag/merge-anomaly :anomaly/category]))
+            (str label ": surfaces branch-name-invalid before git invocation"))))))
+
 ;------------------------------------------------------------------------------ Layer 3
 ;; v2 multi-parent: forest gate is dropped (informational logging only).
 ;; Diamond plans run end-to-end via merge-parent-branches!. With no
