@@ -143,7 +143,7 @@
     removeBtn.className = 'filter-remove';
     removeBtn.textContent = '×';
     removeBtn.title = 'Remove filter';
-    removeBtn.onclick = () => runtime.callApi('removeFilter', clause['filter/id'], scope, clause.value);
+    removeBtn.addEventListener('click', () => runtime.callApi('removeFilter', clause['filter/id'], scope, clause.value));
 
     chip.appendChild(label);
     chip.appendChild(menu);

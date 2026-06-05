@@ -79,12 +79,6 @@
     return JSON.parse(JSON.stringify(value));
   };
 
-  runtime.escapeJSString = function escapeJSString(value) {
-    return String(value)
-      .replace(/\\/g, '\\\\')
-      .replace(/'/g, "\\'");
-  };
-
   runtime.callApi = function callApi(name) {
     const fn = runtime.api[name];
     if (typeof fn !== 'function') {
