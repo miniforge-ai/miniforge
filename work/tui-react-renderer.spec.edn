@@ -6,6 +6,13 @@
 {:name "tui-react-renderer"
  :version "0.1.0"
 
+ ;; Required by the reviewer's scope-bound verdict (see
+ ;; components/agent/src/ai/miniforge/agent/reviewer/scope.clj). Derived
+ ;; from :key-files below — both TUI bricks the renderer overhaul touches.
+ :spec/intent {:type :feature
+               :scope ["components/tui-engine/src"
+                       "components/tui-views/src"]}
+
  :description
  "Adopt React-style virtual widget tree diffing and direct-write rendering
   for the TUI engine. Eliminates redundant buffer allocation and achieves

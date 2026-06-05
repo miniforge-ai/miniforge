@@ -27,6 +27,14 @@
 
 {:spec/title "Meta-agent intervention on repair-loop temporal stagnation"
 
+ ;; Required by the reviewer's scope-bound verdict (see
+ ;; components/agent/src/ai/miniforge/agent/reviewer/scope.clj). The legacy
+ ;; :spec/scope map below carries human-readable in/out-of-scope prose; this
+ ;; is the path-vector the reviewer uses to partition findings.
+ :spec/intent {:type :feature
+               :scope ["components/progress-detector/src"
+                       "components/agent/src"]}
+
  :spec/description
  "Detect repair-loop temporal stagnation via a fuzzy file×severity signal
   (today's strict-equality detector misses real loops because LLM-generated

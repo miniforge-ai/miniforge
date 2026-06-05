@@ -3,6 +3,14 @@
  :type :feature
  :priority :medium
 
+ ;; Required by the reviewer's scope-bound verdict (see
+ ;; components/agent/src/ai/miniforge/agent/reviewer/scope.clj). Without
+ ;; :scope the reviewer raises a missing-scope anomaly at dispatch time —
+ ;; per PR #1039's structural backstop against scope creep.
+ :spec/intent {:type :feature
+               :scope ["components/spec-parser/src"
+                       "components/policy-pack/src"]}
+
  :spec/description
  "The spec validator currently hardcodes allowed :type values (:feature, :bugfix,
   :refactor, :test, :docs). PMs want control over naming — 'enhancement' vs 'feature',

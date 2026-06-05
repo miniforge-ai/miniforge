@@ -118,11 +118,16 @@
                                         :warnings [(loop/make-error :warning warning-message)]))))
 
 (def sample-artifact
+  ;; `:task/scope` carries the broad fixture scope so the reviewer's
+  ;; required-scope contract (PR #1039) doesn't trip tests that aren't
+  ;; about scope per se. Scope-specific tests below override or remove
+  ;; this when they need to exercise scope behavior explicitly.
   {:artifact/id (random-uuid)
    :artifact/type :code
    :artifact/content {:code/files [{:path "src/example.clj"
                                     :content "(ns example)\n(defn hello [] \"world\")"
-                                    :action :create}]}})
+                                    :action :create}]}
+   :task/scope ["src" "components" "bases"]})
 
 (defn- review-gate-feedback
   ([] (review-gate-feedback :unknown 0))
@@ -1102,43 +1107,11 @@
 ;; The reviewer prompt and helper resolve a per-task scope so adjacent-file
 ;; findings can't drive the verdict on tightly-scoped refactors. The 2026-06-04
 ;; eliminate-requiring-resolve dogfood failed 20/20 tasks because the reviewer
-;; held every diff to the FULL standards bar across all changed files; pin the
-;; new scope plumbing so a future "simplification" can't quietly drop it.
-
-(deftest effective-review-scope-priority-test
-  (testing "task/scope wins over task/files-in-scope and intent/scope"
-    (is (= ["explicit/path.clj"]
-           (reviewer/effective-review-scope
-             {:task/scope ["explicit/path.clj"]
-              :task/files-in-scope ["dag/path.clj"]
-              :task/intent {:scope ["intent/path.clj"]}}))))
-
-  (testing "task/files-in-scope wins over intent/scope when task/scope absent"
-    (is (= ["dag/per-task.clj"]
-           (reviewer/effective-review-scope
-             {:task/files-in-scope ["dag/per-task.clj"]
-              :task/intent {:scope ["broad/spec-level.clj"]}}))))
-
-  (testing "intent/scope is the final fallback"
-    (is (= ["broad/spec-level/src"]
-           (reviewer/effective-review-scope
-             {:task/intent {:type :refactor
-                            :scope ["broad/spec-level/src"]}}))))
-
-  (testing "nil when no scope signal is present (legacy behavior)"
-    (is (nil? (reviewer/effective-review-scope {:task/intent "free-form prose"})))
-    (is (nil? (reviewer/effective-review-scope {})))
-    (is (nil? (reviewer/effective-review-scope {:task/intent {:type :feature}}))))
-
-  (testing "blank and non-string entries are filtered out"
-    (is (= ["good/path.clj"]
-           (reviewer/effective-review-scope
-             {:task/scope ["good/path.clj" "" "   " nil 42]}))))
-
-  (testing "duplicates within the winning source are collapsed"
-    (is (= ["a.clj" "b.clj"]
-           (reviewer/effective-review-scope
-             {:task/scope ["a.clj" "a.clj" "b.clj" "a.clj"]})))))
+;; held every diff to the FULL standards bar across all changed files.
+;;
+;; Pure-helper coverage moved to `ai.miniforge.agent.reviewer.scope-test`
+;; (PR #1039 decomposition). Kept here: the reviewer-side wiring tests —
+;; prompt rendering and the end-to-end `core/invoke` integration.
 
 (deftest build-review-prompt-renders-scope-section-test
   (testing "Scope section appears with bulleted paths when scope is resolved"
@@ -1153,13 +1126,13 @@
       (is (re-find #":review/out-of-scope-observations" prompt)
           "must instruct the LLM where to put out-of-scope findings")))
 
-  (testing "Scope section is omitted when no scope signal is present"
-    (let [prompt (reviewer/build-review-prompt
+  (testing "build-review-prompt raises when no scope signal is present"
+    ;; PR #1039: missing scope is a programmer error, not a quiet fallback.
+    (is (thrown? IllegalArgumentException
+                 (reviewer/build-review-prompt
                    {:task/title "Test"
                     :task/intent "free-form prose"
-                    :task/artifact {:code/files []}})]
-      (is (not (re-find #"## Scope" prompt))
-          "no Scope section when scope is nil"))))
+                    :task/artifact {:code/files []}})))))
 
 (deftest sanitize-review-issues-test
   (testing "valid canonical issue maps pass through"
@@ -1184,3 +1157,41 @@
   (testing "nil and non-collection inputs return empty vec"
     (is (= [] (reviewer/sanitize-review-issues nil)))
     (is (= [] (reviewer/sanitize-review-issues [])))))
+
+(def ^:private scope-test-review-content
+  ;; Two blocking findings: one in scope (components/foo/src/a.clj), one
+  ;; adjacent-file noise (components/baz/src/b.clj). With the post-LLM
+  ;; filter active, only the in-scope finding should drive the verdict;
+  ;; the adjacent one should land in :review/out-of-scope-observations.
+  (str "```clojure\n"
+       "{:review/decision :changes-requested\n"
+       " :review/issues [{:severity :blocking\n"
+       "                  :file \"components/foo/src/a.clj\"\n"
+       "                  :description \"in-scope blocker\"}\n"
+       "                 {:severity :blocking\n"
+       "                  :file \"components/baz/src/b.clj\"\n"
+       "                  :description \"adjacent-file blocker\"}]\n"
+       " :review/summary \"mixed\"}\n"
+       "```"))
+
+(deftest test-reviewer-filters-out-of-scope-issues-before-verdict
+  (testing "LLM findings outside the task scope are moved to observations and do not block"
+    (with-redefs [model/resolve-llm-client-for-role (fn [_role client] client)
+                  llm/chat (fn [_client _prompt _opts]
+                             (mock-llm-response scope-test-review-content))
+                  llm/success? :success?
+                  llm/get-content :content]
+      (let [reviewer (reviewer/create-reviewer {:llm-backend ::mock-backend
+                                                :gates []})
+            input    (assoc sample-artifact
+                            :task/scope ["components/foo/src"])
+            result   (core/invoke reviewer {} input)
+            review   (:artifact result)
+            issues   (vec (:review/issues review))
+            out      (vec (:review/out-of-scope-observations review))]
+        (is (= 1 (count issues))
+            "only the in-scope blocker remains as a verdict-driving issue")
+        (is (= "in-scope blocker" (:description (first issues))))
+        (is (= 1 (count out))
+            "the adjacent-file blocker is preserved as an advisory observation")
+        (is (= "adjacent-file blocker" (:description (first out))))))))
