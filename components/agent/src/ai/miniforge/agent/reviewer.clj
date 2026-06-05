@@ -399,6 +399,43 @@
         (clean-scope-paths (:task/files-in-scope input))
         (when (map? intent) (clean-scope-paths (:scope intent))))))
 
+(defn- normalize-scope-entry
+  "Strip trailing slashes so a directory prefix matches `dir/file.clj` cleanly
+   without a false-positive on `dir-suffix/x.clj`."
+  [s]
+  (str/replace s #"/+$" ""))
+
+(defn in-scope-issue?
+  "True when a `ReviewIssue`'s `:file` falls inside `scope`.
+
+   - `scope == nil`  → true (no filtering; legacy behavior).
+   - `:file` blank   → true (file-level concern with no path attribution;
+                       conservatively kept so the LLM can still surface a
+                       real concern when it didn't name a file).
+   - Otherwise       → at least one scope entry equals the file or is a
+                       parent directory of it (entry + `/` is a prefix of
+                       the file path)."
+  [scope issue]
+  (let [file (some-> (:file issue) str str/trim not-empty)]
+    (cond
+      (nil? scope) true
+      (nil? file)  true
+      :else (boolean
+              (some (fn [entry]
+                      (let [trimmed (normalize-scope-entry entry)]
+                        (or (= file trimmed)
+                            (str/starts-with? file (str trimmed "/")))))
+                    scope)))))
+
+(defn partition-issues-by-scope
+  "Split `issues` against `scope` and return
+   `{:in-scope [...] :out-of-scope [...]}`. When `scope` is nil every
+   issue is in-scope (no filtering)."
+  [scope issues]
+  (let [{in true out false} (group-by #(in-scope-issue? scope %) issues)]
+    {:in-scope     (vec in)
+     :out-of-scope (vec out)}))
+
 (defn build-review-prompt
   "Construct the user prompt for LLM review from task data."
   [input]
@@ -964,11 +1001,30 @@
                                            timeout-only-review? nil
                                            parse-failed? :rejected
                                            llm-review (normalize-llm-decision (:review/decision llm-review)))
-                    initial-llm-issues    (get llm-review :review/issues [])
+                    ;; Resolve the task's scope once; partitioning happens
+                    ;; below at both the initial-parse and enumeration-retry
+                    ;; sites. nil means no filtering (legacy specs without
+                    ;; :scope continue to review every file).
+                    review-scope (effective-review-scope input)
+
+                    initial-llm-issues-raw (get llm-review :review/issues [])
+                    {initial-llm-issues          :in-scope
+                     initial-issues-filtered-out :out-of-scope}
+                    (partition-issues-by-scope review-scope initial-llm-issues-raw)
+
                     initial-llm-strengths (get llm-review :review/strengths [])
                     initial-llm-summary   (:review/summary llm-review)
-                    initial-llm-out-of-scope (sanitize-review-issues
-                                               (get llm-review :review/out-of-scope-observations))
+                    initial-llm-out-of-scope (into
+                                               (sanitize-review-issues
+                                                 (get llm-review :review/out-of-scope-observations))
+                                               initial-issues-filtered-out)
+                    _ (when (seq initial-issues-filtered-out)
+                        (log/info logger :reviewer
+                                  :reviewer/scope-filter-applied
+                                  {:data {:scope             review-scope
+                                          :filtered-count    (count initial-issues-filtered-out)
+                                          :kept-count        (count initial-llm-issues)
+                                          :retry-path        :initial}}))
 
                     ;; ENUMERATION VALIDATOR: a rejection without enumerated
                     ;; :blocking findings is malformed — the implementer
@@ -999,8 +1055,21 @@
                     llm-decision  (if recovered-review
                                     (normalize-llm-decision (:review/decision recovered-review))
                                     initial-llm-decision)
+                    recovered-llm-issues-raw (when recovered-review
+                                               (get recovered-review :review/issues []))
+                    {recovered-llm-issues          :in-scope
+                     recovered-issues-filtered-out :out-of-scope}
+                    (partition-issues-by-scope review-scope (or recovered-llm-issues-raw []))
+                    _ (when (and recovered-review
+                                 (seq recovered-issues-filtered-out))
+                        (log/info logger :reviewer
+                                  :reviewer/scope-filter-applied
+                                  {:data {:scope          review-scope
+                                          :filtered-count (count recovered-issues-filtered-out)
+                                          :kept-count     (count recovered-llm-issues)
+                                          :retry-path     :recovered}}))
                     llm-issues    (if recovered-review
-                                    (get recovered-review :review/issues [])
+                                    recovered-llm-issues
                                     initial-llm-issues)
                     llm-strengths (if recovered-review
                                     (get recovered-review :review/strengths [])
@@ -1009,8 +1078,10 @@
                                     (:review/summary recovered-review)
                                     initial-llm-summary)
                     llm-out-of-scope (if recovered-review
-                                       (sanitize-review-issues
-                                         (get recovered-review :review/out-of-scope-observations))
+                                       (into
+                                         (sanitize-review-issues
+                                           (get recovered-review :review/out-of-scope-observations))
+                                         recovered-issues-filtered-out)
                                        initial-llm-out-of-scope)
 
                     ;; Merge decisions: gates can override LLM

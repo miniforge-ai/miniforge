@@ -1184,3 +1184,120 @@
   (testing "nil and non-collection inputs return empty vec"
     (is (= [] (reviewer/sanitize-review-issues nil)))
     (is (= [] (reviewer/sanitize-review-issues [])))))
+
+;------------------------------------------------------------------------------ Scope filter tests (PR-B backstop)
+;; PR-A told the LLM to put out-of-scope findings in
+;; :review/out-of-scope-observations; this is the structural backstop. If
+;; prompt drift quietly reintroduces scope creep (the 2026-06-04 dogfood
+;; pattern: 20/20 tasks failed on adjacent-file findings), the partitioner
+;; still moves out-of-scope :review/issues entries to advisory before they
+;; can drive the verdict.
+
+(def ^:private sample-scope
+  ["components/foo/src" "components/bar/src" "bases/cli/src/main.clj"])
+
+(deftest in-scope-issue?-test
+  (testing "directory prefix match"
+    (is (reviewer/in-scope-issue? sample-scope
+                                  {:severity :blocking
+                                   :file "components/foo/src/inner.clj"
+                                   :description "x"})))
+
+  (testing "exact file match"
+    (is (reviewer/in-scope-issue? sample-scope
+                                  {:severity :blocking
+                                   :file "bases/cli/src/main.clj"
+                                   :description "x"})))
+
+  (testing "boundary check — similar prefix is NOT a match"
+    ;; Would be a false positive without the trailing-`/` normalization;
+    ;; "components/foo" is NOT a parent of "components/foobar/x.clj".
+    (is (not (reviewer/in-scope-issue? sample-scope
+                                       {:severity :blocking
+                                        :file "components/foobar/x.clj"
+                                        :description "x"}))))
+
+  (testing "trailing slash in scope entry doesn't affect matching"
+    (is (reviewer/in-scope-issue? ["components/foo/src/"]
+                                  {:severity :blocking
+                                   :file "components/foo/src/inner.clj"
+                                   :description "x"})))
+
+  (testing "out-of-scope file is rejected"
+    (is (not (reviewer/in-scope-issue? sample-scope
+                                       {:severity :blocking
+                                        :file "components/baz/src/x.clj"
+                                        :description "x"}))))
+
+  (testing "nil/blank :file is conservatively in-scope (file-level concern)"
+    (is (reviewer/in-scope-issue? sample-scope {:severity :blocking
+                                                :description "x"}))
+    (is (reviewer/in-scope-issue? sample-scope {:severity :blocking
+                                                :file nil
+                                                :description "x"}))
+    (is (reviewer/in-scope-issue? sample-scope {:severity :blocking
+                                                :file "  "
+                                                :description "x"})))
+
+  (testing "nil scope means no filtering (legacy behavior)"
+    (is (reviewer/in-scope-issue? nil {:severity :blocking
+                                       :file "any/path.clj"
+                                       :description "x"}))))
+
+(deftest partition-issues-by-scope-test
+  (testing "partitioned in-scope and out-of-scope vectors"
+    (let [issues [{:severity :blocking :file "components/foo/src/a.clj" :description "in"}
+                  {:severity :warning  :file "components/baz/src/b.clj" :description "out"}
+                  {:severity :blocking :file "bases/cli/src/main.clj"   :description "in"}
+                  {:severity :nit      :file "components/quux/x.clj"    :description "out"}]
+          {:keys [in-scope out-of-scope]}
+          (reviewer/partition-issues-by-scope sample-scope issues)]
+      (is (= 2 (count in-scope)))
+      (is (= 2 (count out-of-scope)))
+      (is (every? #(re-matches #"in" (:description %)) in-scope))
+      (is (every? #(re-matches #"out" (:description %)) out-of-scope))))
+
+  (testing "nil scope routes everything to :in-scope"
+    (let [issues [{:severity :blocking :file "anywhere/x.clj" :description "x"}]
+          {:keys [in-scope out-of-scope]}
+          (reviewer/partition-issues-by-scope nil issues)]
+      (is (= 1 (count in-scope)))
+      (is (= 0 (count out-of-scope))))))
+
+(def ^:private scope-test-review-content
+  ;; Two blocking findings: one in scope (components/foo/src/a.clj), one
+  ;; adjacent-file noise (components/baz/src/b.clj). With the post-LLM
+  ;; filter active, only the in-scope finding should drive the verdict;
+  ;; the adjacent one should land in :review/out-of-scope-observations.
+  (str "```clojure\n"
+       "{:review/decision :changes-requested\n"
+       " :review/issues [{:severity :blocking\n"
+       "                  :file \"components/foo/src/a.clj\"\n"
+       "                  :description \"in-scope blocker\"}\n"
+       "                 {:severity :blocking\n"
+       "                  :file \"components/baz/src/b.clj\"\n"
+       "                  :description \"adjacent-file blocker\"}]\n"
+       " :review/summary \"mixed\"}\n"
+       "```"))
+
+(deftest test-reviewer-filters-out-of-scope-issues-before-verdict
+  (testing "LLM findings outside the task scope are moved to observations and do not block"
+    (with-redefs [model/resolve-llm-client-for-role (fn [_role client] client)
+                  llm/chat (fn [_client _prompt _opts]
+                             (mock-llm-response scope-test-review-content))
+                  llm/success? :success?
+                  llm/get-content :content]
+      (let [reviewer (reviewer/create-reviewer {:llm-backend ::mock-backend
+                                                :gates []})
+            input    (assoc sample-artifact
+                            :task/scope ["components/foo/src"])
+            result   (core/invoke reviewer {} input)
+            review   (:artifact result)
+            issues   (vec (:review/issues review))
+            out      (vec (:review/out-of-scope-observations review))]
+        (is (= 1 (count issues))
+            "only the in-scope blocker remains as a verdict-driving issue")
+        (is (= "in-scope blocker" (:description (first issues))))
+        (is (= 1 (count out))
+            "the adjacent-file blocker is preserved as an advisory observation")
+        (is (= "adjacent-file blocker" (:description (first out))))))))
