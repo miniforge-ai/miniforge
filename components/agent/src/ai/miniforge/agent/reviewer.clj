@@ -83,6 +83,12 @@
    [:review/warnings {:optional true} [:vector :string]]
    [:review/recommendations {:optional true} [:vector :string]]
    [:review/issues {:optional true} [:vector ReviewIssue]]
+   ;; Findings outside the task's :scope. Advisory only — these MUST NOT
+   ;; appear in :review/issues and do NOT drive the verdict. Carried on
+   ;; the artifact so the implementer's redirect feedback (and any
+   ;; downstream evidence consumer) can still see what the reviewer
+   ;; observed in adjacent code.
+   [:review/out-of-scope-observations {:optional true} [:vector ReviewIssue]]
    [:review/strengths {:optional true} [:vector :string]]
    [:review/created-at {:optional true} inst?]])
 
@@ -362,6 +368,37 @@
     :else
     (pr-str artifact)))
 
+(defn- clean-scope-paths
+  "Drop blank and non-string entries, trim whitespace, dedupe."
+  [paths]
+  (->> paths
+       (keep #(when (string? %) (not-empty (str/trim %))))
+       distinct
+       vec
+       not-empty))
+
+(defn effective-review-scope
+  "Resolve the effective scope vector for a review task.
+
+   Strict priority — uses the most specific signal available and ignores
+   broader ones underneath it. Order:
+
+   1. `:task/scope` — set explicitly by the dispatch layer for this task.
+   2. `:task/files-in-scope` — a DAG sub-task's per-task scope from the
+      planner (`dag-orchestrator/task-sub-input`).
+   3. `(:scope task/intent)` — the spec-level scope, when intent is an
+      EDN map carrying it.
+
+   Merging across levels would dilute per-task narrowness with the broader
+   spec scope, which defeats the purpose. Returns a deduped vector of
+   non-blank strings, or nil when no scope signal is present (legacy
+   behavior: review every file)."
+  [input]
+  (let [intent (:task/intent input)]
+    (or (clean-scope-paths (:task/scope input))
+        (clean-scope-paths (:task/files-in-scope input))
+        (when (map? intent) (clean-scope-paths (:scope intent))))))
+
 (defn build-review-prompt
   "Construct the user prompt for LLM review from task data."
   [input]
@@ -371,6 +408,7 @@
         intent (or (:task/intent input) "")
         constraints (or (:task/constraints input) "")
         tests (:task/tests input)
+        scope (effective-review-scope input)
         artifact-text (format-artifact-for-review artifact)]
     (str "Review the following code implementation.\n\n"
          (when (seq title)
@@ -379,6 +417,16 @@
            (str "## Description\n\n" description "\n\n"))
          (when (and intent (not (str/blank? (str intent))))
            (str "## Intent\n\n" (if (string? intent) intent (pr-str intent)) "\n\n"))
+         (when scope
+           (str "## Scope\n\n"
+                "Findings inside these paths/prefixes are in-scope; report them in\n"
+                "`:review/issues` with the appropriate severity\n"
+                "(`:blocking` / `:warning` / `:nit`). Normal severity rules apply —\n"
+                "only `:blocking` issues actually block the verdict.\n\n"
+                "Findings outside the scope are out-of-scope — report them in\n"
+                "`:review/out-of-scope-observations`, NOT in `:review/issues`.\n\n"
+                (str/join "\n" (map #(str "- " %) scope))
+                "\n\n"))
          (when (and constraints (not (str/blank? (str constraints))))
            (str "## Constraints\n\n" (if (string? constraints) constraints (pr-str constraints)) "\n\n"))
          "## Code to Review\n\n"
@@ -396,6 +444,24 @@
   (and (map? issue)
        (every? review-issue-keys (keys issue))
        (m/validate ReviewIssue issue)))
+
+(defn sanitize-review-issues
+  "Filter an LLM-supplied issue collection down to the entries that match
+   the canonical `ReviewIssue` shape.
+
+   Returns a vector — empty when input is nil, not a collection, or every
+   entry is malformed. Use at every point where unvalidated LLM output
+   would otherwise reach `ReviewArtifact`'s malli check (the schema
+   rejects the whole artifact on a single bad issue map, which would
+   silently fail the entire review). The pattern came out of the
+   `:review/issues` parse-validator (`valid-review-issues?`); this helper
+   exists so additional issue-shaped fields (currently
+   `:review/out-of-scope-observations`) don't reinvent the same filter at
+   every call site."
+  [issues]
+  (->> issues
+       (filter valid-review-issue-map?)
+       vec))
 
 (defn- valid-review-issues?
   "True when parsed LLM review issues are absent or structurally canonical."
@@ -583,7 +649,7 @@
 (defn build-review-artifact
   "Build the review artifact from gate results, LLM feedback, and decision."
   [gate-feedbacks decision blocking-issues warnings artifact-id counts
-   & {:keys [issues strengths summary]}]
+   & {:keys [issues strengths summary out-of-scope-observations]}]
   (cond-> {:review/id (random-uuid)
            :review/decision decision
            :review/gate-results gate-feedbacks
@@ -597,7 +663,9 @@
            :review/recommendations (generate-recommendations gate-feedbacks)
            :review/created-at (java.util.Date.)}
     (seq issues) (assoc :review/issues issues)
-    (seq strengths) (assoc :review/strengths strengths)))
+    (seq strengths) (assoc :review/strengths strengths)
+    (seq out-of-scope-observations)
+    (assoc :review/out-of-scope-observations out-of-scope-observations)))
 
 (defn build-review-result
   "Build the final result map with metrics."
@@ -899,6 +967,8 @@
                     initial-llm-issues    (get llm-review :review/issues [])
                     initial-llm-strengths (get llm-review :review/strengths [])
                     initial-llm-summary   (:review/summary llm-review)
+                    initial-llm-out-of-scope (sanitize-review-issues
+                                               (get llm-review :review/out-of-scope-observations))
 
                     ;; ENUMERATION VALIDATOR: a rejection without enumerated
                     ;; :blocking findings is malformed — the implementer
@@ -938,6 +1008,10 @@
                     llm-summary   (if recovered-review
                                     (:review/summary recovered-review)
                                     initial-llm-summary)
+                    llm-out-of-scope (if recovered-review
+                                       (sanitize-review-issues
+                                         (get recovered-review :review/out-of-scope-observations))
+                                       initial-llm-out-of-scope)
 
                     ;; Merge decisions: gates can override LLM
                     final-decision (if llm-decision
@@ -966,7 +1040,8 @@
                                     artifact-id counts
                                     :issues llm-issues
                                     :strengths llm-strengths
-                                    :summary summary)
+                                    :summary summary
+                                    :out-of-scope-observations llm-out-of-scope)
                              (seq llm-recs) (update :review/recommendations
                                                     (fn [existing] (into (or existing []) llm-recs))))
 

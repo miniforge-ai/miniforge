@@ -1097,3 +1097,90 @@
                                         :review/issues []})))
     (is (false? (well-formed-recovery? {:review/decision :looks-good
                                         :review/issues []})))))
+
+;------------------------------------------------------------------------------ Scope-boundary tests
+;; The reviewer prompt and helper resolve a per-task scope so adjacent-file
+;; findings can't drive the verdict on tightly-scoped refactors. The 2026-06-04
+;; eliminate-requiring-resolve dogfood failed 20/20 tasks because the reviewer
+;; held every diff to the FULL standards bar across all changed files; pin the
+;; new scope plumbing so a future "simplification" can't quietly drop it.
+
+(deftest effective-review-scope-priority-test
+  (testing "task/scope wins over task/files-in-scope and intent/scope"
+    (is (= ["explicit/path.clj"]
+           (reviewer/effective-review-scope
+             {:task/scope ["explicit/path.clj"]
+              :task/files-in-scope ["dag/path.clj"]
+              :task/intent {:scope ["intent/path.clj"]}}))))
+
+  (testing "task/files-in-scope wins over intent/scope when task/scope absent"
+    (is (= ["dag/per-task.clj"]
+           (reviewer/effective-review-scope
+             {:task/files-in-scope ["dag/per-task.clj"]
+              :task/intent {:scope ["broad/spec-level.clj"]}}))))
+
+  (testing "intent/scope is the final fallback"
+    (is (= ["broad/spec-level/src"]
+           (reviewer/effective-review-scope
+             {:task/intent {:type :refactor
+                            :scope ["broad/spec-level/src"]}}))))
+
+  (testing "nil when no scope signal is present (legacy behavior)"
+    (is (nil? (reviewer/effective-review-scope {:task/intent "free-form prose"})))
+    (is (nil? (reviewer/effective-review-scope {})))
+    (is (nil? (reviewer/effective-review-scope {:task/intent {:type :feature}}))))
+
+  (testing "blank and non-string entries are filtered out"
+    (is (= ["good/path.clj"]
+           (reviewer/effective-review-scope
+             {:task/scope ["good/path.clj" "" "   " nil 42]}))))
+
+  (testing "duplicates within the winning source are collapsed"
+    (is (= ["a.clj" "b.clj"]
+           (reviewer/effective-review-scope
+             {:task/scope ["a.clj" "a.clj" "b.clj" "a.clj"]})))))
+
+(deftest build-review-prompt-renders-scope-section-test
+  (testing "Scope section appears with bulleted paths when scope is resolved"
+    (let [prompt (reviewer/build-review-prompt
+                   {:task/title "Test"
+                    :task/intent {:type :refactor
+                                  :scope ["components/foo/src" "components/bar/src"]}
+                    :task/artifact {:code/files []}})]
+      (is (re-find #"## Scope" prompt))
+      (is (re-find #"- components/foo/src" prompt))
+      (is (re-find #"- components/bar/src" prompt))
+      (is (re-find #":review/out-of-scope-observations" prompt)
+          "must instruct the LLM where to put out-of-scope findings")))
+
+  (testing "Scope section is omitted when no scope signal is present"
+    (let [prompt (reviewer/build-review-prompt
+                   {:task/title "Test"
+                    :task/intent "free-form prose"
+                    :task/artifact {:code/files []}})]
+      (is (not (re-find #"## Scope" prompt))
+          "no Scope section when scope is nil"))))
+
+(deftest sanitize-review-issues-test
+  (testing "valid canonical issue maps pass through"
+    (is (= [{:severity :blocking :description "x"}]
+           (reviewer/sanitize-review-issues
+             [{:severity :blocking :description "x"}]))))
+
+  (testing "malformed entries are dropped, valid ones kept"
+    ;; Without the sanitizer, a single bad entry would fail malli
+    ;; validation on the whole ReviewArtifact (see ReviewIssue schema's
+    ;; docstring on the 2026-05-16 :rejected-on-nil-line incident).
+    (let [issues [{:severity :blocking :description "good"}
+                  {:severity :not-an-enum :description "bad severity"}
+                  {:severity :warning :description "good 2"}
+                  {:extra-key "extras get rejected too" :severity :nit :description "x"}
+                  "string instead of map"
+                  nil]]
+      (is (= [{:severity :blocking :description "good"}
+              {:severity :warning :description "good 2"}]
+             (reviewer/sanitize-review-issues issues)))))
+
+  (testing "nil and non-collection inputs return empty vec"
+    (is (= [] (reviewer/sanitize-review-issues nil)))
+    (is (= [] (reviewer/sanitize-review-issues [])))))
