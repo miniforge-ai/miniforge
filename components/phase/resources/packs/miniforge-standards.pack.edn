@@ -636,7 +636,7 @@
         #:rule{:title
                "Use ALWAYS when asked to CREATE A RULE or UPDATE A RULE or taught a lesson from the user that should be retained as a new rule",
                :agent-behavior
-               "```mdc\n---\ndewey: \"NNN\"\ndescription: ACTION when TRIGGER to OUTCOME\n# Activation: include at least one; both are allowed together.\nalwaysApply: true           # inject into every prompt regardless of file context\n# globs:\n#   - \"src/**/*.clj\"        # scope to matching files (combine with alwaysApply if needed)\n---",
+               "```mdc\n---\ndewey: \"NNN\"\ndescription: ACTION when TRIGGER to OUTCOME\n# Activation: include at least one; both are allowed together.\nalwaysApply: true           # inject into every prompt regardless of file context\n# globs:\n#   - \"src/**/*.clj\"        # scope to matching files (combine with alwaysApply if needed)\n---\n```", 
                :enforcement
                {:action :audit,
                 :message
