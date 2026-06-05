@@ -44,36 +44,58 @@
             [clojure.string :as str]))
 
 ;------------------------------------------------------------------------------ Layer 0
+;; Gate identity resolution
+;;
+;; Loop gate records (SyntaxGate / LintGate / TestGate / PolicyGate /
+;; CustomGate) store their identifier in the plain `:id` field and their
+;; type in the plain `:type-kw` field (CustomGate only — the others hard-
+;; code their type at construction and pass it via loop/pass-result). The
+;; gate map only carries `:gate/id` / `:gate/type` in forward-compat code
+;; paths. Resolving from `(:gate/id gate)` alone surfaces every Loop
+;; built-in as `:unknown` (2026-05-18 dogfood :failing-gate-ids
+;; regression), so the resolution chain MUST also consult the plain
+;; record fields.
+;;
+;; `gate-result->feedback` adds the result's `:gate/id` / `:gate/type` as
+;; the highest-priority sources (those are populated by `loop/pass-result`
+;; / `loop/fail-result` and are authoritative). The pre-execution sites
+;; (`run-single-gate` start log, `create-exception-feedback`) have no
+;; result yet, so the chain starts at the gate.
+
+(defn- gate-id-from-gate
+  "Resolve a gate's id from the gate record alone (no result available).
+
+   Used at the pre-execution sites — the `run-single-gate` start-log and
+   `create-exception-feedback` — that fire before or instead of
+   `loop/pass-result`/`loop/fail-result`. Returns `:unknown` only when
+   neither `:gate/id` (forward-compat) nor `:id` (the plain field on
+   every shipping gate record) is set."
+  [gate]
+  (or (:gate/id gate) (:id gate) :unknown))
+
+(defn- gate-type-from-gate
+  "Resolve a gate's type from the gate record alone (no result available).
+
+   Mirrors `gate-id-from-gate`. Only `CustomGate` carries `:type-kw` on
+   the record; the other gate records pass their type through results
+   only, so falling through to `:unknown` is the right answer at the
+   pre-execution sites."
+  [gate]
+  (or (:gate/type gate) (:type-kw gate) :unknown))
+
+;------------------------------------------------------------------------------ Layer 1
 ;; Gate result → feedback conversion
 
 (defn gate-result->feedback
   "Convert a loop gate result to reviewer feedback format.
 
-   Gate identity resolution order:
-     1. `:gate/id`   on the result   (populated by `loop/pass-result`
-                                      and `loop/fail-result`)
-     2. `:gate/id`   on the gate     (rare — not set by current records,
-                                      kept for forward-compat)
-     3. `:id`        on the gate     (the plain field on SyntaxGate /
-                                      LintGate / TestGate / PolicyGate /
-                                      CustomGate records)
-     4. `:unknown`   final fallback
-
-   Gate-type resolution differs slightly. Only `CustomGate` carries a
-   `type-kw` field on the record itself; the other gate records hard-
-   code their type at construction (e.g. `SyntaxGate` always passes
-   `:syntax` into the result via `loop/pass-result`). So:
-     1. `:gate/type` on the result
-     2. `:gate/type` on the gate
-     3. `:type-kw`   on the gate     (CustomGate only)
-     4. `:unknown`
-
-   Before this two-step resolution every failing gate surfaced as
-   `:unknown` in the `:failing-gate-ids` diagnostic and the 2026-05-18
-   dogfood couldn't tell which gate flipped its LLM verdict."
+   Gate identity prefers the result's `:gate/id` (authoritative — set by
+   `loop/pass-result`/`loop/fail-result`), then falls through to
+   `gate-id-from-gate` for the pre-result fallback chain. Same shape for
+   `:gate/type`."
   [gate result]
-  (let [gate-id   (or (:gate/id result) (:gate/id gate) (:id gate) :unknown)
-        gate-type (or (:gate/type result) (:gate/type gate) (:type-kw gate) :unknown)
+  (let [gate-id   (or (:gate/id result)   (gate-id-from-gate gate))
+        gate-type (or (:gate/type result) (gate-type-from-gate gate))
         passed?   (:gate/passed? result true)
         errors    (:gate/errors result [])
         warnings  (:gate/warnings result [])]
@@ -85,17 +107,26 @@
      :duration-ms (get result :gate/duration-ms 0)}))
 
 (defn create-exception-feedback
-  "Create error feedback when gate throws exception."
-  [gate idx exception duration]
-  {:gate-id (or (:gate/id gate) (keyword (str "gate-" idx)))
-   :gate-type :unknown
-   :passed? false
-   :errors [{:type :gate-exception
-             :message (msg/t :reviewer.gates/exception
-                             {:cause (ex-message exception)})}]
-   :duration-ms duration})
+  "Create error feedback when a gate throws.
 
-;------------------------------------------------------------------------------ Layer 1
+   `:gate-id` uses `gate-id-from-gate` so a crashed SyntaxGate / LintGate
+   / PolicyGate surfaces its real identifier in artifacts and logs
+   instead of falling back to the synthetic `:gate-N` name. The
+   synthetic name is only used when the gate map has neither `:gate/id`
+   nor `:id` (test scaffolding)."
+  [gate idx exception duration]
+  (let [resolved (gate-id-from-gate gate)]
+    {:gate-id (if (= :unknown resolved)
+                (keyword (str "gate-" idx))
+                resolved)
+     :gate-type :unknown
+     :passed? false
+     :errors [{:type :gate-exception
+               :message (msg/t :reviewer.gates/exception
+                               {:cause (ex-message exception)})}]
+     :duration-ms duration}))
+
+;------------------------------------------------------------------------------ Layer 2
 ;; Gate execution
 
 (defn run-single-gate
@@ -103,7 +134,7 @@
    Handles exceptions gracefully."
   [gate idx artifact context logger]
   (let [gate-start (System/currentTimeMillis)
-        gate-id (:gate/id gate :unknown)]
+        gate-id (gate-id-from-gate gate)]
     (log/debug logger :reviewer :reviewer/gate-start
                {:data {:gate-idx idx :gate-id gate-id}})
     (try
@@ -133,7 +164,7 @@
                       (run-single-gate gate idx artifact context logger)))
        vec))
 
-;------------------------------------------------------------------------------ Layer 2
+;------------------------------------------------------------------------------ Layer 3
 ;; Custom gates
 
 (defn implementation-handoff-gate
@@ -164,7 +195,7 @@
          (loop/fail-result :implementation-handoff :policy errors)
          (loop/pass-result :implementation-handoff :policy))))))
 
-;------------------------------------------------------------------------------ Layer 3
+;------------------------------------------------------------------------------ Layer 4
 ;; Error classification + decision
 
 (def ^:private advisory-gate-types
@@ -264,7 +295,7 @@
     :else
     llm-decision))
 
-;------------------------------------------------------------------------------ Layer 4
+;------------------------------------------------------------------------------ Layer 5
 ;; Summaries + counts
 
 (defn calculate-gate-counts

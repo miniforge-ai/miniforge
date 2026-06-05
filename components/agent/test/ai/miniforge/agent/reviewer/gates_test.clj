@@ -192,6 +192,32 @@
     (is (not-any? #(re-find #"->" %) (filter #(re-find #"policy" %) recs))
         "no `->` when the error has no :fix-suggestion")))
 
+;------------------------------------------------------------------------------ Pre-execution gate-id resolution
+;; The Loop gate records (SyntaxGate / LintGate / TestGate / PolicyGate)
+;; expose their identifier in the plain `:id` field, not `:gate/id`.
+;; Pre-execution sites (`create-exception-feedback`, `run-single-gate`
+;; start log) need to mirror the result-side resolution chain or built-in
+;; gates surface as `:unknown` in artifacts / logs.
+
+(deftest create-exception-feedback-resolves-real-gate-id-test
+  (testing "SyntaxGate (and other Loop records) surface their plain :id"
+    (let [gate (loop/syntax-gate)
+          fb   (gates/create-exception-feedback gate 0 (RuntimeException. "x") 1)]
+      (is (= :syntax-check (:gate-id fb))
+          "real gate :id must NOT collapse to :gate-0")))
+
+  (testing "CustomGate's :id wins over the synthetic :gate-<idx> fallback"
+    (let [gate (loop/custom-gate :my-custom :policy
+                 (fn [_ _] (loop/pass-result :my-custom :policy)))
+          fb   (gates/create-exception-feedback gate 7 (RuntimeException. "x") 1)]
+      (is (= :my-custom (:gate-id fb)))))
+
+  (testing "test-scaffolding map with no :id / :gate/id falls through to :gate-<idx>"
+    (let [fb (gates/create-exception-feedback {:not-a-record true}
+                                              3 (RuntimeException. "x") 1)]
+      (is (= :gate-3 (:gate-id fb))
+          "synthetic name only used when neither :gate/id nor :id resolved"))))
+
 ;------------------------------------------------------------------------------ Localized custom-gate errors
 
 (deftest implementation-handoff-gate-localizes-errors-test
