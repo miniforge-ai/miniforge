@@ -1,0 +1,42 @@
+{:llm/messages
+ {;; System-locale diagnostics. These are operator/developer-facing and
+  ;; should remain stable for tests, logs, and anomaly inspection.
+  :streaming-error.system/no-output
+  "Process failed with no output"
+
+  ;; System-locale test fixtures for rate-limit classifier regressions.
+  :rate-limit-test.system/claude-limit-la
+  "You've hit your limit - resets 7pm (America/Los_Angeles)"
+
+  :rate-limit-test.system/claude-limit-utc
+  "You've hit your limit - resets 3am (UTC)"
+
+  :rate-limit-test.system/generic-exceeded
+  "rate limit exceeded"
+
+  :rate-limit-test.system/generic-limited
+  "backend rate limited"
+
+  :rate-limit-test.system/http-429
+  "HTTP 429 too many requests"
+
+  :rate-limit-test.system/clojure-content
+  "(ns example.core)\n(defn hello [] \"world\")"
+
+  :rate-limit-test.system/normal-implementation
+  "Here is the implementation..."
+
+  :rate-limit-test.system/waf-claim
+  "WAF-based rate limiting on mobile auth endpoints remained in progress."
+
+  :rate-limit-test.system/waf-snippet
+  "WAF-based rate limiting on mobile auth endpoints remains in progress"
+
+  :rate-limit-test.system/security-tag
+  "security"
+
+  :rate-limit-test.system/in-progress-tag
+  "in-progress"
+
+  :rate-limit-test.system/risk-tag
+  "risk"}}

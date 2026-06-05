@@ -158,15 +158,23 @@
 
 (deftest codex-args-minimal-test
   (testing "minimal prompt produces exec with explicit sandbox + approval flags"
-    (let [args ((private-fn 'codex-args) {:prompt "fix bug"})]
+    (let [args ((private-fn 'codex-args) {:prompt "fix bug"
+                                          :prompt-via :argv})]
       (is (= "exec" (first args)))
       (is (some #(= "--json" %) args))
       ;; Explicit sandbox + approval-policy config replaces the deprecated
       ;; --full-auto alias.
+      (is (some #(= "--ignore-user-config" %) args))
       (is (some #(= "--sandbox=workspace-write" %) args))
       (is (some #(re-matches #"approval_policy=\"?never\"?" %) args))
       (is (some #(= "--skip-git-repo-check" %) args))
       (is (= "fix bug" (last args))))))
+
+(deftest codex-args-defaults-to-stdin-test
+  (testing "default prompt delivery follows the backend stdin shape"
+    (let [args ((private-fn 'codex-args) {:prompt "fix bug"})]
+      (is (not (some #{"fix bug"} args)))
+      (is (= "-" (last args))))))
 
 (deftest codex-args-stdin-test
   (testing "stdin prompt delivery keeps prompt content out of argv"
