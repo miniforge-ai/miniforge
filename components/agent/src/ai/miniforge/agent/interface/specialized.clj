@@ -24,6 +24,7 @@
    [ai.miniforge.agent.planner :as planner]
    [ai.miniforge.agent.releaser :as releaser]
    [ai.miniforge.agent.reviewer :as reviewer]
+   [ai.miniforge.agent.reviewer.issues :as reviewer-issues]
    [ai.miniforge.agent.tester :as tester]
    [ai.miniforge.agent.protocols.records.specialized :as specialized-records]
    [ai.miniforge.progress-detector.interface :as progress-detector]))
@@ -62,9 +63,9 @@
 (def TestArtifact tester/TestArtifact)
 (def TestFile tester/TestFile)
 (def Coverage tester/Coverage)
-(def ReviewArtifact reviewer/ReviewArtifact)
-(def ReviewIssue reviewer/ReviewIssue)
-(def GateFeedback reviewer/GateFeedback)
+(def ReviewArtifact reviewer-issues/ReviewArtifact)
+(def ReviewIssue reviewer-issues/ReviewIssue)
+(def GateFeedback reviewer-issues/GateFeedback)
 (def ReleaseArtifact releaser/ReleaseArtifact)
 
 (def plan-summary planner/plan-summary)

@@ -1077,18 +1077,7 @@
         (is (nil? (recover-review-enumeration
                    :stub-client {} nil "orig" "prior")))))))
 
-(deftest normalize-llm-decision-preserves-conditionally-approved
-  (testing "normalize-llm-decision preserves :conditionally-approved (the
-            ReviewArtifact schema allows it, and collapsing it to
-            :changes-requested misclassifies a conditional approval as a
-            rejection — defeating the enumeration validator + retry self-
-            correction)"
-    (is (= :conditionally-approved
-           (reviewer/normalize-llm-decision :conditionally-approved)))
-    ;; Round-trip the other valid enums for completeness.
-    (is (= :approved          (reviewer/normalize-llm-decision :approved)))
-    (is (= :rejected          (reviewer/normalize-llm-decision :rejected)))
-    (is (= :changes-requested (reviewer/normalize-llm-decision :changes-requested)))))
+;; normalize-llm-decision tests moved to reviewer/issues_test.clj (PR-C).
 
 (deftest well-formed-recovery-rejects-unknown-decision-keyword
   (testing "an invalid :review/decision (typo / nil / unknown) is NOT
@@ -1134,29 +1123,7 @@
                     :task/intent "free-form prose"
                     :task/artifact {:code/files []}})))))
 
-(deftest sanitize-review-issues-test
-  (testing "valid canonical issue maps pass through"
-    (is (= [{:severity :blocking :description "x"}]
-           (reviewer/sanitize-review-issues
-             [{:severity :blocking :description "x"}]))))
-
-  (testing "malformed entries are dropped, valid ones kept"
-    ;; Without the sanitizer, a single bad entry would fail malli
-    ;; validation on the whole ReviewArtifact (see ReviewIssue schema's
-    ;; docstring on the 2026-05-16 :rejected-on-nil-line incident).
-    (let [issues [{:severity :blocking :description "good"}
-                  {:severity :not-an-enum :description "bad severity"}
-                  {:severity :warning :description "good 2"}
-                  {:extra-key "extras get rejected too" :severity :nit :description "x"}
-                  "string instead of map"
-                  nil]]
-      (is (= [{:severity :blocking :description "good"}
-              {:severity :warning :description "good 2"}]
-             (reviewer/sanitize-review-issues issues)))))
-
-  (testing "nil and non-collection inputs return empty vec"
-    (is (= [] (reviewer/sanitize-review-issues nil)))
-    (is (= [] (reviewer/sanitize-review-issues [])))))
+;; sanitize-review-issues tests moved to reviewer/issues_test.clj (PR-C).
 
 (def ^:private scope-test-review-content
   ;; Two blocking findings: one in scope (components/foo/src/a.clj), one

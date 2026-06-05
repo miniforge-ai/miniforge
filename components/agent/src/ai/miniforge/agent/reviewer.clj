@@ -24,6 +24,7 @@
    [ai.miniforge.agent.model :as model]
    [ai.miniforge.agent.prompts :as prompts]
    [ai.miniforge.agent.result-boundary :as result-boundary]
+   [ai.miniforge.agent.reviewer.issues :as issues]
    [ai.miniforge.agent.reviewer.scope :as scope]
    [ai.miniforge.agent.role-config :as role-config]
    [ai.miniforge.agent.specialized :as specialized]
@@ -35,63 +36,8 @@
    [clojure.edn :as edn]
    [malli.core :as m]))
 
-;------------------------------------------------------------------------------ Layer 0
-;; Reviewer-specific schemas
-
-(def GateFeedback
-  "Schema for feedback from a single gate."
-  [:map
-   [:gate-id keyword?]
-   [:gate-type keyword?]
-   [:passed? boolean?]
-   [:errors {:optional true} [:vector :any]]
-   [:warnings {:optional true} [:vector :any]]
-   [:duration-ms {:optional true} [:int {:min 0}]]])
-
-(def ReviewIssue
-  "Schema for a single review issue from LLM analysis.
-
-   Optional fields are wrapped in `:maybe` because the LLM frequently
-   emits explicit `nil` for fields that don't apply to a given issue
-   (e.g. `:line nil` on a file-level concern). Bare `{:optional true}`
-   only permits the key to be absent, not present-but-nil — a strict
-   read of the schema would silently reject an otherwise-fine review
-   and cascade through `parse-review-response` → `llm-review = nil`
-   → `llm-decision = :rejected`, flipping a real :approved verdict
-   into a rejected one. The 2026-05-16 event-log-tool-visibility
-   dogfood shipped a verifier-pass + LLM-:approved build that the
-   gate refused for exactly this reason; the root-cause trace lives
-   in `docs/pull-requests/2026-05-16-fix-reviewer-issue-schema-nil-tolerance.md`."
-  [:map
-   [:severity [:enum :blocking :warning :nit]]
-   [:file {:optional true} [:maybe [:string {:min 1}]]]
-   [:line {:optional true} [:maybe [:int {:min 1}]]]
-   [:description [:string {:min 1}]]
-   [:suggestion {:optional true} [:maybe [:string {:min 1}]]]])
-
-(def ReviewArtifact
-  "Schema for the reviewer's output."
-  [:map
-   [:review/id uuid?]
-   [:review/decision [:enum :approved :rejected :conditionally-approved :changes-requested]]
-   [:review/gate-results [:vector GateFeedback]]
-   [:review/summary [:string {:min 1}]]
-   [:review/artifact-id {:optional true} uuid?]
-   [:review/gates-passed [:int {:min 0}]]
-   [:review/gates-failed [:int {:min 0}]]
-   [:review/gates-total [:int {:min 0}]]
-   [:review/blocking-issues {:optional true} [:vector :string]]
-   [:review/warnings {:optional true} [:vector :string]]
-   [:review/recommendations {:optional true} [:vector :string]]
-   [:review/issues {:optional true} [:vector ReviewIssue]]
-   ;; Findings outside the task's :scope. Advisory only — these MUST NOT
-   ;; appear in :review/issues and do NOT drive the verdict. Carried on
-   ;; the artifact so the implementer's redirect feedback (and any
-   ;; downstream evidence consumer) can still see what the reviewer
-   ;; observed in adjacent code.
-   [:review/out-of-scope-observations {:optional true} [:vector ReviewIssue]]
-   [:review/strengths {:optional true} [:vector :string]]
-   [:review/created-at {:optional true} inst?]])
+;; Schemas (GateFeedback, ReviewIssue, ReviewArtifact) moved to
+;; ai.miniforge.agent.reviewer.issues (PR-C decomposition).
 
 ;; System prompt - loaded from resources/prompts/reviewer.edn
 (def reviewer-system-prompt
@@ -116,10 +62,6 @@
    the EDN; this constant only protects against malformed prompt
    resources."
   20)
-
-(def ^:private review-issue-keys
-  "Canonical keys accepted in LLM review issue maps."
-  #{:severity :file :line :description :suggestion})
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Gate running and feedback
@@ -410,40 +352,8 @@
                 (if (string? tests) tests (pr-str tests))))
          "\n\nOutput your review as a Clojure map inside a ```clojure code block.")))
 
-(defn- valid-review-issue-map?
-  "True when an LLM-supplied issue has the canonical ReviewIssue shape.
-   Malli map schemas are intentionally open, so reject extra keys here to
-   catch EDN that parsed only because quoted prose was read as symbols."
-  [issue]
-  (and (map? issue)
-       (every? review-issue-keys (keys issue))
-       (m/validate ReviewIssue issue)))
-
-(defn sanitize-review-issues
-  "Filter an LLM-supplied issue collection down to the entries that match
-   the canonical `ReviewIssue` shape.
-
-   Returns a vector — empty when input is nil, not a collection, or every
-   entry is malformed. Use at every point where unvalidated LLM output
-   would otherwise reach `ReviewArtifact`'s malli check (the schema
-   rejects the whole artifact on a single bad issue map, which would
-   silently fail the entire review). The pattern came out of the
-   `:review/issues` parse-validator (`valid-review-issues?`); this helper
-   exists so additional issue-shaped fields (currently
-   `:review/out-of-scope-observations`) don't reinvent the same filter at
-   every call site."
-  [issues]
-  (->> issues
-       (filter valid-review-issue-map?)
-       vec))
-
-(defn- valid-review-issues?
-  "True when parsed LLM review issues are absent or structurally canonical."
-  [parsed]
-  (let [issues (find parsed :review/issues)]
-    (or (nil? issues)
-        (and (vector? (val issues))
-             (every? valid-review-issue-map? (val issues))))))
+;; Issue-shape validation / sanitization / decision normalization / issue-text
+;; extraction moved to ai.miniforge.agent.reviewer.issues (PR-C decomposition).
 
 (defn parse-review-response
   "Parse the LLM response to extract review feedback.
@@ -454,40 +364,10 @@
                    (edn/read-string (second match))
                    (edn/read-string response-content))]
       (when (and (map? parsed)
-                 (valid-review-issues? parsed))
+                 (issues/valid-review-issues? parsed))
         parsed))
     (catch Exception _
       nil)))
-
-(defn normalize-llm-decision
-  "Map LLM decision keywords to ReviewArtifact-compatible decisions.
-   Preserves every variant the ReviewArtifact schema allows — collapsing
-   `:conditionally-approved` to `:changes-requested` (a rejection-class
-   decision) would misclassify a legitimate conditional approval as a
-   rejection and defeat the enumeration validator + the retry's permitted
-   self-correction to conditionally-approved."
-  [decision]
-  (case decision
-    :approved               :approved
-    :rejected               :rejected
-    :changes-requested      :changes-requested
-    :conditionally-approved :conditionally-approved
-    ;; default
-    :changes-requested))
-
-(defn llm-issues->blocking-strings
-  "Extract blocking issue descriptions from LLM issues."
-  [issues]
-  (->> issues
-       (filter #(= :blocking (:severity %)))
-       (mapv :description)))
-
-(defn llm-issues->warning-strings
-  "Extract warning descriptions from LLM issues."
-  [issues]
-  (->> issues
-       (filter #(= :warning (:severity %)))
-       (mapv :description)))
 
 (def ^:private unparseable-review-message
   "Blocking issue used when the reviewer LLM returns content that cannot be parsed
@@ -552,10 +432,10 @@
 (defn validate-review-artifact
   "Validate a review artifact against the schema."
   [artifact]
-  (let [schema-valid? (m/validate ReviewArtifact artifact)]
+  (let [schema-valid? (m/validate issues/ReviewArtifact artifact)]
     (if-not schema-valid?
       {:valid? false
-       :errors (schema/explain ReviewArtifact artifact)}
+       :errors (schema/explain issues/ReviewArtifact artifact)}
       ;; Additional validations
       (let [passed (:review/gates-passed artifact)
             failed (:review/gates-failed artifact)
@@ -749,25 +629,8 @@
 ;; list. The reviewer doesn't use artifact-session/worktree-promotion, so the
 ;; retry is a direct LLM call (not the session-wrapped run-recovery-session).
 
-(def ^:private rejection-decisions
-  "Decisions that mean 'rejected — needs work'. Mirrors review.clj's
-   `blocking-decisions`; defined locally to avoid a cross-component require."
-  #{:rejected :changes-requested})
-
-(def ^:private valid-decisions
-  "The full set of `:review/decision` keywords the ReviewArtifact schema
-   allows (see `ReviewArtifact` ~L75). `parse-review-response` does not itself
-   validate the decision enum, so the enumeration-retry validator must — an
-   unexpected decision (`:approve` typo, `nil`, etc.) would otherwise slip
-   past `well-formed-recovery?` as 'non-rejection' and get collapsed
-   downstream to `:changes-requested`, re-introducing the exact malformed
-   rejection the validator exists to prevent."
-  #{:approved :rejected :conditionally-approved :changes-requested})
-
-(defn- review-has-blocking?
-  "True when `issues` contains at least one entry with :severity :blocking."
-  [issues]
-  (boolean (some #(= :blocking (:severity %)) issues)))
+;; Decision enums + `review-has-blocking?` moved to
+;; ai.miniforge.agent.reviewer.issues (PR-C decomposition).
 
 (defn- enumeration-retry?
   "True when the LLM's review decision is a rejection but it enumerated NO
@@ -775,8 +638,8 @@
    either — a malformed rejection the implementer cannot act on. The validator
    rejects this review and demands a re-enumeration."
   [llm-decision llm-issues gate-blocking]
-  (and (contains? rejection-decisions llm-decision)
-       (not (review-has-blocking? llm-issues))
+  (and (contains? issues/rejection-decisions llm-decision)
+       (not (issues/review-has-blocking? llm-issues))
        (empty? gate-blocking)))
 
 (defn- enumeration-retry-prompt
@@ -806,9 +669,9 @@
   ;; would slip past as "non-rejection" and get collapsed downstream to
   ;; :changes-requested — defeating the whole validator.
   (let [dec (:review/decision re-review)]
-    (and (contains? valid-decisions dec)
-         (or (not (contains? rejection-decisions dec))
-             (review-has-blocking? (get re-review :review/issues []))))))
+    (and (contains? issues/valid-decisions dec)
+         (or (not (contains? issues/rejection-decisions dec))
+             (issues/review-has-blocking? (get re-review :review/issues []))))))
 
 (defn- recover-review-enumeration
   "Run ONE bounded enumeration-retry turn and return the re-parsed
@@ -937,7 +800,7 @@
                     initial-llm-decision (cond
                                            timeout-only-review? nil
                                            parse-failed? :rejected
-                                           llm-review (normalize-llm-decision (:review/decision llm-review)))
+                                           llm-review (issues/normalize-llm-decision (:review/decision llm-review)))
                     ;; Resolve the task's scope once; partitioning happens
                     ;; below at both the initial-parse and enumeration-retry
                     ;; sites. Required — `effective-review-scope` raises if
@@ -952,7 +815,7 @@
                     initial-llm-strengths (get llm-review :review/strengths [])
                     initial-llm-summary   (:review/summary llm-review)
                     initial-llm-out-of-scope (into
-                                               (sanitize-review-issues
+                                               (issues/sanitize-review-issues
                                                  (get llm-review :review/out-of-scope-observations))
                                                initial-issues-filtered-out)
                     _ (when (seq initial-issues-filtered-out)
@@ -991,7 +854,7 @@
                     ;; :approved).
                     parse-failed? (and parse-failed? (nil? recovered-review))
                     llm-decision  (if recovered-review
-                                    (normalize-llm-decision (:review/decision recovered-review))
+                                    (issues/normalize-llm-decision (:review/decision recovered-review))
                                     initial-llm-decision)
                     recovered-llm-issues-raw (when recovered-review
                                                (get recovered-review :review/issues []))
@@ -1018,7 +881,7 @@
                                     initial-llm-summary)
                     llm-out-of-scope (if recovered-review
                                        (into
-                                         (sanitize-review-issues
+                                         (issues/sanitize-review-issues
                                            (get recovered-review :review/out-of-scope-observations))
                                          recovered-issues-filtered-out)
                                        initial-llm-out-of-scope)
@@ -1030,13 +893,13 @@
 
                     ;; Merge issues from both sources
                     all-blocking (cond-> (into (vec (:blocking-issues gate-result))
-                                               (llm-issues->blocking-strings llm-issues))
+                                               (issues/llm-issues->blocking-strings llm-issues))
                                    parse-failed?
                                    (conj parse-failure-message)
                                    timeout-only-review?
                                    (conj timeout-failure-message))
                     all-warnings (into (vec (:warnings gate-result))
-                                       (llm-issues->warning-strings llm-issues))
+                                       (issues/llm-issues->warning-strings llm-issues))
 
                     ;; Merge recommendations
                     llm-recs (llm-issues->recommendations llm-issues)
