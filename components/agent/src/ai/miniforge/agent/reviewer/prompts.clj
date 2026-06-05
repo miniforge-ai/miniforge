@@ -107,9 +107,9 @@
         review-scope (scope/effective-review-scope input)
         artifact-text (format-artifact-for-review artifact)]
     (str "Review the following code implementation.\n\n"
-         (when (seq title)
+         (when-not (str/blank? title)
            (str "## Task: " title "\n\n"))
-         (when (seq description)
+         (when-not (str/blank? description)
            (str "## Description\n\n" description "\n\n"))
          (when (and intent (not (str/blank? (str intent))))
            (str "## Intent\n\n" (if (string? intent) intent (pr-str intent)) "\n\n"))

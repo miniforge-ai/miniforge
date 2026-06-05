@@ -88,7 +88,23 @@
       (is (not (re-find #"## Constraints"  prompt))))
     (testing "core sections are still present"
       (is (re-find #"## Scope"          prompt))
-      (is (re-find #"## Code to Review" prompt)))))
+      (is (re-find #"## Code to Review" prompt))))
+
+  (testing "whitespace-only title / description are treated as blank (no empty section header)"
+    ;; Regression: pre-fix `(when (seq title))` rendered "## Task: " for
+    ;; a whitespace-only title because non-empty strings are truthy under
+    ;; `seq`. All four optional sections now use str/blank? for parity.
+    (let [prompt (reviewer-prompts/build-review-prompt
+                   {:task/title "   "
+                    :task/description "\t\n  "
+                    :task/intent "   "
+                    :task/constraints "  \n"
+                    :task/scope ["src"]
+                    :task/artifact {:code/files []}})]
+      (is (not (re-find #"## Task:"       prompt)))
+      (is (not (re-find #"## Description" prompt)))
+      (is (not (re-find #"## Intent"      prompt)))
+      (is (not (re-find #"## Constraints" prompt))))))
 
 (deftest build-review-prompt-includes-tests-section-test
   (let [prompt (reviewer-prompts/build-review-prompt
