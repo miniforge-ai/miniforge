@@ -419,8 +419,11 @@
            (str "## Intent\n\n" (if (string? intent) intent (pr-str intent)) "\n\n"))
          (when scope
            (str "## Scope\n\n"
-                "Findings inside these paths/prefixes are in-scope and block approval.\n"
-                "Findings outside are out-of-scope — report them in\n"
+                "Findings inside these paths/prefixes are in-scope; report them in\n"
+                "`:review/issues` with the appropriate severity\n"
+                "(`:blocking` / `:warning` / `:nit`). Normal severity rules apply —\n"
+                "only `:blocking` issues actually block the verdict.\n\n"
+                "Findings outside the scope are out-of-scope — report them in\n"
                 "`:review/out-of-scope-observations`, NOT in `:review/issues`.\n\n"
                 (str/join "\n" (map #(str "- " %) scope))
                 "\n\n"))
@@ -441,6 +444,24 @@
   (and (map? issue)
        (every? review-issue-keys (keys issue))
        (m/validate ReviewIssue issue)))
+
+(defn sanitize-review-issues
+  "Filter an LLM-supplied issue collection down to the entries that match
+   the canonical `ReviewIssue` shape.
+
+   Returns a vector — empty when input is nil, not a collection, or every
+   entry is malformed. Use at every point where unvalidated LLM output
+   would otherwise reach `ReviewArtifact`'s malli check (the schema
+   rejects the whole artifact on a single bad issue map, which would
+   silently fail the entire review). The pattern came out of the
+   `:review/issues` parse-validator (`valid-review-issues?`); this helper
+   exists so additional issue-shaped fields (currently
+   `:review/out-of-scope-observations`) don't reinvent the same filter at
+   every call site."
+  [issues]
+  (->> issues
+       (filter valid-review-issue-map?)
+       vec))
 
 (defn- valid-review-issues?
   "True when parsed LLM review issues are absent or structurally canonical."
@@ -946,7 +967,8 @@
                     initial-llm-issues    (get llm-review :review/issues [])
                     initial-llm-strengths (get llm-review :review/strengths [])
                     initial-llm-summary   (:review/summary llm-review)
-                    initial-llm-out-of-scope (get llm-review :review/out-of-scope-observations [])
+                    initial-llm-out-of-scope (sanitize-review-issues
+                                               (get llm-review :review/out-of-scope-observations))
 
                     ;; ENUMERATION VALIDATOR: a rejection without enumerated
                     ;; :blocking findings is malformed — the implementer
@@ -987,7 +1009,8 @@
                                     (:review/summary recovered-review)
                                     initial-llm-summary)
                     llm-out-of-scope (if recovered-review
-                                       (get recovered-review :review/out-of-scope-observations [])
+                                       (sanitize-review-issues
+                                         (get recovered-review :review/out-of-scope-observations))
                                        initial-llm-out-of-scope)
 
                     ;; Merge decisions: gates can override LLM

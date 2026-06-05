@@ -1160,3 +1160,27 @@
                     :task/artifact {:code/files []}})]
       (is (not (re-find #"## Scope" prompt))
           "no Scope section when scope is nil"))))
+
+(deftest sanitize-review-issues-test
+  (testing "valid canonical issue maps pass through"
+    (is (= [{:severity :blocking :description "x"}]
+           (reviewer/sanitize-review-issues
+             [{:severity :blocking :description "x"}]))))
+
+  (testing "malformed entries are dropped, valid ones kept"
+    ;; Without the sanitizer, a single bad entry would fail malli
+    ;; validation on the whole ReviewArtifact (see ReviewIssue schema's
+    ;; docstring on the 2026-05-16 :rejected-on-nil-line incident).
+    (let [issues [{:severity :blocking :description "good"}
+                  {:severity :not-an-enum :description "bad severity"}
+                  {:severity :warning :description "good 2"}
+                  {:extra-key "extras get rejected too" :severity :nit :description "x"}
+                  "string instead of map"
+                  nil]]
+      (is (= [{:severity :blocking :description "good"}
+              {:severity :warning :description "good 2"}]
+             (reviewer/sanitize-review-issues issues)))))
+
+  (testing "nil and non-collection inputs return empty vec"
+    (is (= [] (reviewer/sanitize-review-issues nil)))
+    (is (= [] (reviewer/sanitize-review-issues [])))))
