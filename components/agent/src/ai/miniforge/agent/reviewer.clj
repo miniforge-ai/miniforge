@@ -22,10 +22,10 @@
    Falls back to gate-only review when no LLM backend is available."
   (:require
    [ai.miniforge.agent.model :as model]
-   [ai.miniforge.agent.prompts :as prompts]
    [ai.miniforge.agent.result-boundary :as result-boundary]
    [ai.miniforge.agent.reviewer.gates :as gates]
    [ai.miniforge.agent.reviewer.issues :as issues]
+   [ai.miniforge.agent.reviewer.prompts :as reviewer-prompts]
    [ai.miniforge.agent.reviewer.scope :as scope]
    [ai.miniforge.agent.role-config :as role-config]
    [ai.miniforge.agent.specialized :as specialized]
@@ -40,97 +40,22 @@
 ;; Schemas (GateFeedback, ReviewIssue, ReviewArtifact) moved to
 ;; ai.miniforge.agent.reviewer.issues (PR-C decomposition).
 
-;; System prompt - loaded from resources/prompts/reviewer.edn
-(def reviewer-system-prompt
-  "System prompt for the reviewer agent."
-  (delay (prompts/load-prompt :reviewer)))
-
-(def ^:private reviewer-prompt-data
-  "Full prompt data map for the reviewer agent.
-   Exposes knobs like :prompt/progress-monitor that gate stream supervision."
-  (delay (prompts/load-prompt-data :reviewer)))
-
-(defn- create-reviewer-progress-monitor
-  "Reviewer main-turn progress monitor. Thresholds live in
-   resources/prompts/reviewer.edn (:prompt/progress-monitor). Falls
-   back to the framework default when the EDN omits the block."
-  []
-  (prompts/load-progress-monitor @reviewer-prompt-data
-                                 :prompt/progress-monitor))
-
-(def ^:private default-reviewer-max-turns
-  "Fallback when reviewer.edn omits :prompt/max-turns. Authority is
-   the EDN; this constant only protects against malformed prompt
-   resources."
-  20)
+;; Prompt loading, progress monitor, and per-call prompt assembly
+;; (build-review-prompt, format-artifact-for-review, enumeration-retry-prompt)
+;; moved to ai.miniforge.agent.reviewer.prompts (PR-E decomposition).
 
 ;; Gate plumbing, error classification, deterministic decision, summary,
 ;; and gate counts moved to ai.miniforge.agent.reviewer.gates (PR-D
 ;; decomposition). reviewer.clj orchestrates them via the `gates/` alias.
 
 ;------------------------------------------------------------------------------ Layer 2
-;; LLM review: prompt building and response parsing
+;; LLM review: response parsing
 
-(defn format-artifact-for-review
-  "Format a code artifact into a readable string for the LLM prompt."
-  [artifact]
-  (cond
-    ;; CodeArtifact with :code/files
-    (:code/files artifact)
-    (str/join "\n\n"
-              (map (fn [{:keys [path content action]}]
-                     (str "### " path " (" (name (or action :unknown)) ")\n"
-                          "```\n" content "\n```"))
-                   (:code/files artifact)))
-
-    ;; Plain string
-    (string? artifact)
-    artifact
-
-    ;; Fallback
-    :else
-    (pr-str artifact)))
+;; build-review-prompt + format-artifact-for-review moved to
+;; ai.miniforge.agent.reviewer.prompts (PR-E decomposition).
 
 ;; Scope resolution + partitioning moved to ai.miniforge.agent.reviewer.scope
-;; (PR #1039 decomposition). The reviewer module references the helpers
-;; through the `scope` alias.
-
-(defn build-review-prompt
-  "Construct the user prompt for LLM review from task data."
-  [input]
-  (let [artifact (or (:task/artifact input) input)
-        description (or (:task/description input) "")
-        title (or (:task/title input) "")
-        intent (or (:task/intent input) "")
-        constraints (or (:task/constraints input) "")
-        tests (:task/tests input)
-        review-scope (scope/effective-review-scope input)
-        artifact-text (format-artifact-for-review artifact)]
-    (str "Review the following code implementation.\n\n"
-         (when (seq title)
-           (str "## Task: " title "\n\n"))
-         (when (seq description)
-           (str "## Description\n\n" description "\n\n"))
-         (when (and intent (not (str/blank? (str intent))))
-           (str "## Intent\n\n" (if (string? intent) intent (pr-str intent)) "\n\n"))
-         (when review-scope
-           (str "## Scope\n\n"
-                "Findings inside these paths/prefixes are in-scope; report them in\n"
-                "`:review/issues` with the appropriate severity\n"
-                "(`:blocking` / `:warning` / `:nit`). Normal severity rules apply —\n"
-                "only `:blocking` issues actually block the verdict.\n\n"
-                "Findings outside the scope are out-of-scope — report them in\n"
-                "`:review/out-of-scope-observations`, NOT in `:review/issues`.\n\n"
-                (str/join "\n" (map #(str "- " %) review-scope))
-                "\n\n"))
-         (when (and constraints (not (str/blank? (str constraints))))
-           (str "## Constraints\n\n" (if (string? constraints) constraints (pr-str constraints)) "\n\n"))
-         "## Code to Review\n\n"
-         artifact-text
-         (when tests
-           (str "\n\n## Test Results\n\n"
-                (if (string? tests) tests (pr-str tests))))
-         "\n\nOutput your review as a Clojure map inside a ```clojure code block.")))
+;; (PR #1039 decomposition).
 
 ;; Issue-shape validation / sanitization / decision normalization / issue-text
 ;; extraction moved to ai.miniforge.agent.reviewer.issues (PR-C decomposition).
@@ -402,17 +327,7 @@
        (not (issues/review-has-blocking? llm-issues))
        (empty? gate-blocking)))
 
-(defn- enumeration-retry-prompt
-  "Build the enumeration-retry prompt: the ORIGINAL review user-prompt (so the
-   retry has the same artifact/diff evidence the first call had — `llm/chat`
-   is single-turn with no history) followed by the retry instruction with the
-   prior malformed output for reference."
-  [user-prompt prior-content]
-  (str user-prompt
-       "\n\n---\n\n"
-       (prompts/render-template
-        (get @reviewer-prompt-data :prompt/enumeration-retry-template)
-        {:prior-content prior-content})))
+;; enumeration-retry-prompt moved to reviewer.prompts (PR-E).
 
 (defn- well-formed-recovery?
   "True when a re-reviewed ReviewArtifact resolves the malformed-rejection
@@ -440,9 +355,9 @@
    a malformed rejection — in which case the original raw rejection stands
    as-is."
   [llm-client base-opts on-chunk user-prompt prior-content]
-  (let [retry-prompt (enumeration-retry-prompt user-prompt prior-content)
+  (let [retry-prompt (reviewer-prompts/enumeration-retry-prompt user-prompt prior-content)
         retry-opts   (assoc base-opts :max-turns
-                            (get @reviewer-prompt-data
+                            (get @reviewer-prompts/reviewer-prompt-data
                                  :prompt/enumeration-retry-max-turns 6))
         response     (if on-chunk
                        (llm/chat-stream llm-client retry-prompt on-chunk retry-opts)
@@ -487,7 +402,7 @@
         config {:strict (get opts :strict false)}]
     (specialized/create-base-agent
      {:role :reviewer
-      :system-prompt @reviewer-system-prompt
+      :system-prompt @reviewer-prompts/reviewer-system-prompt
       :config review-config
       :logger logger
 
@@ -512,17 +427,17 @@
 
           (if llm-client
             ;; LLM + gates review
-            (let [user-prompt (build-review-prompt input)
-                  monitor (create-reviewer-progress-monitor)
-                  max-turns (get @reviewer-prompt-data
+            (let [user-prompt (reviewer-prompts/build-review-prompt input)
+                  monitor (reviewer-prompts/create-reviewer-progress-monitor)
+                  max-turns (get @reviewer-prompts/reviewer-prompt-data
                                  :prompt/max-turns
-                                 default-reviewer-max-turns)
+                                 reviewer-prompts/default-reviewer-max-turns)
                   ;; Mirror implementer's build-effective-system-prompt:
                   ;; append the phase-filtered standards addendum so the
                   ;; reviewer sees the rules it should be checking
                   ;; against. Empty string when no addendum is present
                   ;; (legacy callers / no rules apply to :review).
-                  effective-system (str @reviewer-system-prompt
+                  effective-system (str @reviewer-prompts/reviewer-system-prompt
                                         (get input :task/behavior-addendum ""))
                   base-opts (cond-> {:system effective-system
                                      :max-turns max-turns}

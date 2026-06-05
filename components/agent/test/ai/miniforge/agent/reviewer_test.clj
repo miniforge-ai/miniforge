@@ -1004,27 +1004,8 @@
 ;; (PR #1039 decomposition). Kept here: the reviewer-side wiring tests —
 ;; prompt rendering and the end-to-end `core/invoke` integration.
 
-(deftest build-review-prompt-renders-scope-section-test
-  (testing "Scope section appears with bulleted paths when scope is resolved"
-    (let [prompt (reviewer/build-review-prompt
-                   {:task/title "Test"
-                    :task/intent {:type :refactor
-                                  :scope ["components/foo/src" "components/bar/src"]}
-                    :task/artifact {:code/files []}})]
-      (is (re-find #"## Scope" prompt))
-      (is (re-find #"- components/foo/src" prompt))
-      (is (re-find #"- components/bar/src" prompt))
-      (is (re-find #":review/out-of-scope-observations" prompt)
-          "must instruct the LLM where to put out-of-scope findings")))
-
-  (testing "build-review-prompt raises when no scope signal is present"
-    ;; PR #1039: missing scope is a programmer error, not a quiet fallback.
-    (is (thrown? IllegalArgumentException
-                 (reviewer/build-review-prompt
-                   {:task/title "Test"
-                    :task/intent "free-form prose"
-                    :task/artifact {:code/files []}})))))
-
+;; build-review-prompt + format-artifact-for-review tests moved to
+;; reviewer/prompts_test.clj (PR-E).
 ;; sanitize-review-issues tests moved to reviewer/issues_test.clj (PR-C).
 
 (def ^:private scope-test-review-content
