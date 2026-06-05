@@ -336,13 +336,15 @@
   "no-run-id")
 
 (defn- valid-ref-name?
-  "True when `s` is safe to pass as a git refspec: non-empty, no leading
-   dash (which git may misparse as a flag), and no embedded whitespace."
+  "True when `s` is a structurally legal git ref name per git-check-ref-format(1):
+   non-empty, no leading dash (flag risk), no whitespace, and none of the
+   characters or sequences that git treats as revision operators or prohibits
+   in ref names (~, ^, :, ?, *, [, ], \\, .., @{, //)."
   [s]
   (and (string? s)
        (pos? (count s))
        (not (str/starts-with? s "-"))
-       (not (re-find #"\s" s))))
+       (not (re-find #"[\s~\^:\?\*\[\]\\]|\.\.|@\{|//" s))))
 
 ;; Anomaly factories ---------------------------------------------------
 ;; Each factory takes the minimum data needed and produces the canonical
@@ -1048,7 +1050,9 @@
      parents) — callers branch on these for observability but the
      `:branch` is uniformly the right value to use as the sub-workflow
      base.
-   - An anomaly map — `:dag-multi-parent-conflict`,
+   - An anomaly map — `:dag-multi-parent-branch-name-invalid` (branch name
+     structurally invalid before git is invoked),
+     `:dag-multi-parent-conflict`,
      `:dag-multi-parent-unrelated-histories`,
      `:dag-multi-parent-branch-unresolvable`,
      `:dag-multi-parent-strategy-unsupported`,

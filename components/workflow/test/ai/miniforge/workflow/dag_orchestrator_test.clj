@@ -264,6 +264,23 @@
           "branch-unresolvable is the right category — branches don't exist in
            the test repo, so rev-parse fails before any merge is attempted"))))
 
+(deftest task-sub-opts-multi-dep-rejects-invalid-branch-name-test
+  (testing "Multi-parent task: a parent whose registered branch starts with '-'
+            is rejected before git is invoked, surfacing a typed
+            :anomalies/dag-multi-parent-branch-name-invalid anomaly."
+    (let [task-def {:task/id id-c :task/description "C" :task/deps #{id-a id-b}}
+          ctx (registry-context {id-a {:branch "-flag-injection"}
+                                 id-b {:branch "task-b"}}
+                                "main")
+          opts (dag-orch/task-sub-opts ctx task-def)]
+      (is (not (contains? opts :branch))
+          "invalid branch name must not produce a usable :branch")
+      (is (some? (:dag/merge-anomaly opts))
+          "anomaly is surfaced for run-mini-workflow to short-circuit on")
+      (is (= :anomalies/dag-multi-parent-branch-name-invalid
+             (get-in opts [:dag/merge-anomaly :anomaly/category]))
+          "leading-dash branch returns branch-name-invalid before any git invocation"))))
+
 ;------------------------------------------------------------------------------ Layer 3
 ;; v2 multi-parent: forest gate is dropped (informational logging only).
 ;; Diamond plans run end-to-end via merge-parent-branches!. With no
