@@ -210,8 +210,8 @@
     (is (false? (boolean (llm-response/enumeration-retry?
                            :rejected
                            [{:severity :blocking :description "real issue"}]
-                           []))))
-    "the implementer has a concrete blocker to fix")
+                           [])))
+        "the implementer has a concrete blocker to fix"))
 
   (testing "rejection backed by deterministic gate blocker → does NOT fire"
     (is (false? (boolean (llm-response/enumeration-retry?
