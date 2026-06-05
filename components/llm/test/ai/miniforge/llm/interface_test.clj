@@ -702,6 +702,44 @@
       (is (= [] (:lines result)))
       (is (nil? (:timeout result))))))
 
+(deftest process-stream-lines-clean-shutdown-prints-no-stderr-test
+  ;; Regression: pre-fix the daemon's `(catch Exception e ...)` caught
+  ;; the InterruptedException raised by `stop-stream-reader!`'s interrupt,
+  ;; then tried to enqueue a `stream-read-failure` anomaly via `.put` —
+  ;; which itself raised IE because the thread's interrupt flag was still
+  ;; set, bubbling the second IE to the JVM default handler and printing
+  ;; an ugly stack trace to stderr. The 2026-06-04 dogfood surfaced 18 of
+  ;; these across 20 sub-tasks (pure noise, zero workflow impact).
+  ;;
+  ;; The fix: dedicated `(catch InterruptedException _)` for the clean
+  ;; shutdown + inner try/catch around the anomaly enqueue.
+  (testing "an early consumer exit + reader interrupt does not print to stderr"
+    (let [writer (java.io.PipedWriter.)
+          reader (java.io.BufferedReader. (java.io.PipedReader. writer))
+          monitor (pm/create-progress-monitor
+                   {:stagnation-threshold-ms 1000
+                    :max-total-ms 1000
+                    :min-activity-interval-ms 1})
+          stderr-capture (java.io.ByteArrayOutputStream.)
+          original-err System/err]
+      (try
+        (System/setErr (java.io.PrintStream. stderr-capture true "UTF-8"))
+        (with-redefs [pm/check-timeout (constantly
+                                        {:type :stagnation
+                                         :message "test stagnation"
+                                         :elapsed-ms 1})]
+          ;; consumer exits immediately on the first poll → finally fires
+          ;; stop-stream-reader! → reader is interrupted while blocked
+          (impl/process-stream-lines reader monitor (fn [_] nil)))
+        ;; Wait briefly for the daemon thread to finish its cleanup path.
+        (Thread/sleep 100)
+        (let [captured (str stderr-capture)]
+          (is (not (re-find #"InterruptedException" captured))
+              "clean shutdown must not leak an IE stack trace to stderr"))
+        (finally
+          (System/setErr original-err)
+          (.close writer))))))
+
 (deftest process-stream-lines-honors-progress-monitor-while-waiting-for-output-test
   (testing "progress-monitor timeout can fire while stdout is idle and still open"
     (let [writer (java.io.PipedWriter.)

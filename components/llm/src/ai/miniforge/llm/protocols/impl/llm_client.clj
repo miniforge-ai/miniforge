@@ -880,14 +880,44 @@
     thread))
 
 (defn- start-stream-reader!
+  "Start the daemon that drains `out-reader` into `line-queue`.
+
+   Three exit shapes:
+   1. EOF — `read-stream-loop!` enqueues the eof sentinel and returns; thread
+      exits cleanly.
+   2. Clean shutdown via `stop-stream-reader!` — the consumer
+      (`process-stream-lines`) has stopped polling, so `stop-stream-reader!`
+      closes the reader and calls `.interrupt`. The reader is blocked in
+      either `.readLine` or `.put` and unblocks via `InterruptedException`.
+      Silent catch: the consumer already left the queue; no anomaly to
+      publish.
+   3. Real read error — surface as a `stream-read-failure` anomaly so the
+      consumer sees it. The inner try/catch around the anomaly enqueue
+      guards against a sticky-interrupt race during cleanup (the thread's
+      interrupt flag is still set from case 2, so `.put` here can throw IE
+      too — swallow it; the consumer is already gone).
+
+   Pre-fix, case 2 was caught by the generic `(catch Exception e ...)` which
+   then called `enqueue-stream-line!` → `.put` → a second IE that bubbled out
+   of the runnable to the JVM default exception handler and printed an ugly
+   stack trace to stderr. The 2026-06-04 eliminate-requiring-resolve dogfood
+   surfaced 18 of these IEs across 20 sub-tasks — pure log noise, zero
+   workflow impact, but enough to look like a real bug in post-run triage."
   [out-reader line-queue]
   (daemon-thread!
    "llm-stream-reader"
    (fn []
      (try
        (read-stream-loop! out-reader line-queue)
+       (catch InterruptedException _
+         ;; clean shutdown — consumer already exited; nothing to report
+         nil)
        (catch Exception e
-         (enqueue-stream-line! line-queue (stream-read-failure e)))))))
+         (try
+           (enqueue-stream-line! line-queue (stream-read-failure e))
+           (catch InterruptedException _
+             ;; the stop-stream-reader! interrupt raced this catch
+             nil)))))))
 
 (defn- stop-stream-reader!
   [^Thread reader-thread out-reader]
