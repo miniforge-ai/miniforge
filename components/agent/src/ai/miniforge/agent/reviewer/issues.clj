@@ -196,3 +196,19 @@
   (->> issues
        (filter #(= :warning (:severity %)))
        (mapv :description)))
+
+(defn llm-issues->recommendations
+  "Render LLM issues that carry a `:suggestion` into single-line
+   recommendation strings.
+
+   Format: `[file] description -> suggestion` (file segment omitted when
+   `:file` is absent). Issues with no `:suggestion` are dropped — they're
+   already captured as blocking/warning strings via the siblings above,
+   and a recommendation without a remediation is just noise on the
+   final artifact."
+  [issues]
+  (->> issues
+       (filter :suggestion)
+       (mapv (fn [{:keys [file description suggestion]}]
+               (str (when file (str "[" file "] "))
+                    description " -> " suggestion)))))
