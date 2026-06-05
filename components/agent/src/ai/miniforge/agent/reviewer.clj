@@ -23,6 +23,7 @@
   (:require
    [ai.miniforge.agent.model :as model]
    [ai.miniforge.agent.result-boundary :as result-boundary]
+   [ai.miniforge.agent.reviewer.artifact :as artifact]
    [ai.miniforge.agent.reviewer.gates :as gates]
    [ai.miniforge.agent.reviewer.issues :as issues]
    [ai.miniforge.agent.reviewer.llm-response :as llm-response]
@@ -30,11 +31,9 @@
    [ai.miniforge.agent.reviewer.scope :as scope]
    [ai.miniforge.agent.role-config :as role-config]
    [ai.miniforge.agent.specialized :as specialized]
-   [ai.miniforge.schema.interface :as schema]
    [ai.miniforge.logging.interface :as log]
    [ai.miniforge.llm.interface :as llm]
-   [ai.miniforge.loop.interface :as loop]
-   [malli.core :as m]))
+   [ai.miniforge.loop.interface :as loop]))
 
 ;; Schemas (GateFeedback, ReviewIssue, ReviewArtifact) moved to
 ;; ai.miniforge.agent.reviewer.issues (PR-C decomposition).
@@ -65,177 +64,9 @@
 ;; llm-issues->recommendations moved to reviewer.issues (PR-F) — same
 ;; shape as its blocking/warning siblings already there.
 
-;------------------------------------------------------------------------------ Layer 3
-;; Review validation and repair
-
-(defn validate-review-artifact
-  "Validate a review artifact against the schema."
-  [artifact]
-  (let [schema-valid? (m/validate issues/ReviewArtifact artifact)]
-    (if-not schema-valid?
-      {:valid? false
-       :errors (schema/explain issues/ReviewArtifact artifact)}
-      ;; Additional validations
-      (let [passed (:review/gates-passed artifact)
-            failed (:review/gates-failed artifact)
-            total (:review/gates-total artifact)]
-        (if (not= total (+ passed failed))
-          {:valid? false
-           :errors {:gates "Gate counts don't add up"}}
-          {:valid? true :errors nil})))))
-
-(defn repair-review-artifact
-  "Attempt to repair a review artifact."
-  [artifact _errors _context]
-  (let [repaired (atom artifact)]
-    ;; Fix missing ID
-    (when-not (:review/id @repaired)
-      (swap! repaired assoc :review/id (random-uuid)))
-
-    ;; Fix missing decision
-    (when-not (:review/decision @repaired)
-      (swap! repaired assoc :review/decision :rejected))
-
-    ;; Fix missing gate results
-    (when-not (:review/gate-results @repaired)
-      (swap! repaired assoc :review/gate-results []))
-
-    ;; Recalculate gate counts
-    (let [results (:review/gate-results @repaired)
-          passed (count (filter :passed? results))
-          failed (count (filter (complement :passed?) results))
-          total (count results)]
-      (swap! repaired assoc
-             :review/gates-passed passed
-             :review/gates-failed failed
-             :review/gates-total total))
-
-    ;; Fix missing summary
-    (when-not (:review/summary @repaired)
-      (swap! repaired assoc :review/summary
-             (gates/generate-summary (:review/decision @repaired)
-                               (:review/gate-results @repaired))))
-
-    {:status :success
-     :output @repaired}))
-
-;------------------------------------------------------------------------------ Layer 4
-;; Public API - Helper functions
-
-(defn extract-artifact-and-id
-  "Extract artifact and its ID from input."
-  [input]
-  (let [artifact (or (:task/artifact input) (:artifact input) input)
-        artifact-id (or (:artifact/id artifact)
-                        (:code/id artifact)
-                        (random-uuid))]
-    [artifact artifact-id]))
-
-;; calculate-gate-counts moved to reviewer.gates (PR-D).
-
-(defn build-review-artifact
-  "Build the review artifact from gate results, LLM feedback, and decision."
-  [gate-feedbacks decision blocking-issues warnings artifact-id counts
-   & {:keys [issues strengths summary out-of-scope-observations]}]
-  (cond-> {:review/id (random-uuid)
-           :review/decision decision
-           :review/gate-results gate-feedbacks
-           :review/summary (or summary (gates/generate-summary decision gate-feedbacks))
-           :review/artifact-id artifact-id
-           :review/gates-passed (:passed counts)
-           :review/gates-failed (:failed counts)
-           :review/gates-total (:total counts)
-           :review/blocking-issues blocking-issues
-           :review/warnings warnings
-           :review/recommendations (gates/generate-recommendations gate-feedbacks)
-           :review/created-at (java.util.Date.)}
-    (seq issues) (assoc :review/issues issues)
-    (seq strengths) (assoc :review/strengths strengths)
-    (seq out-of-scope-observations)
-    (assoc :review/out-of-scope-observations out-of-scope-observations)))
-
-(defn build-review-result
-  "Build the final result map with metrics."
-  [review counts duration tokens & {:keys [cost-usd]}]
-  {:status :success
-   :output review
-   :artifact review
-   :metrics (cond-> {:decision (:review/decision review)
-                     :gates-passed (:passed counts)
-                     :gates-failed (:failed counts)
-                     :gates-total (:total counts)
-                     :duration-ms duration
-                     :tokens tokens}
-              cost-usd (assoc :cost-usd cost-usd))})
-
-;; merge-gate-overrides moved to reviewer.gates (PR-D).
-
-;------------------------------------------------------------------------------ Layer 4b
-;; Phase lifecycle telemetry
-
-(defn enter-review
-  "Emit a phase-started telemetry event when entering the review phase.
-
-   Called at the very beginning of a review invocation to mark phase entry.
-   `data` is a map of contextual information about the review about to begin
-   (e.g. :artifact-id, :gate-count, :llm?).
-
-   Example:
-     (enter-review logger {:artifact-id artifact-id
-                           :gate-count (count gates)
-                           :llm? (boolean llm-client)})"
-  [logger data]
-  (log/info logger :reviewer :reviewer/phase-started {:data data}))
-
-(defn leave-review
-  "Emit a phase-completed telemetry event when leaving the review phase.
-
-   Called just before returning from a review invocation to mark phase exit.
-   `data` must include :review/decision; additional fields (e.g. :duration-ms,
-   :gates-passed, :gates-failed) are recommended for observability.
-
-   Example:
-     (leave-review logger {:review/decision :approved
-                           :duration-ms 120
-                           :gates-passed 3
-                           :gates-failed 0})"
-  [logger data]
-  (log/info logger :reviewer :reviewer/phase-completed {:data data}))
-
-(defn- timeout-only-error-result
-  "Normalize the reviewer exit path when the LLM only reports its own timeout.
-
-   This preserves backend timeout metadata, emits the standard phase-completed
-   telemetry, and reports the deterministic gate outcome instead of converting
-   the backend failure into a bogus code-review rejection."
-  [logger normalized llm-review gate-result counts duration tokens cost-usd timeout-failure-message]
-  (log/warn logger :reviewer :reviewer/backend-timeout-only
-            {:data {:llm-decision (:review/decision llm-review)
-                    :gate-decision (:decision gate-result)
-                    :blocking-issues (:review/blocking-issues llm-review)
-                    :duration-ms duration}})
-  (leave-review logger {:review/decision (:decision gate-result)
-                        :duration-ms duration
-                        :gates-passed (:passed counts)
-                        :gates-failed (:failed counts)
-                        :llm? true
-                        :status :error
-                        :error-code :reviewer/backend-timeout})
-  (assoc
-   (result-boundary/error-response
-    normalized
-    timeout-failure-message
-    {:data (merge (or (some-> normalized :llm-error :data) {})
-                  {:code :reviewer/backend-timeout
-                   :blocking-issues (:review/blocking-issues llm-review)})})
-   :metrics
-   (cond-> {:decision (:decision gate-result)
-            :gates-passed (:passed counts)
-            :gates-failed (:failed counts)
-            :gates-total (:total counts)
-            :duration-ms duration
-            :tokens tokens}
-     cost-usd (assoc :cost-usd cost-usd))))
+;; Artifact extraction, builders, validators, lifecycle telemetry, and the
+;; backend-timeout-only error exit moved to ai.miniforge.agent.reviewer.artifact
+;; (PR-G decomposition).
 
 ;------------------------------------------------------------------------------ Layer 5
 ;; Agent creation
@@ -288,11 +119,11 @@
                           :reviewer
                           (get opts :llm-backend (:llm-backend context)))
               on-chunk (:on-chunk context)
-              [artifact artifact-id] (extract-artifact-and-id input)
+              [artifact artifact-id] (artifact/extract-artifact-and-id input)
               start-time (System/currentTimeMillis)]
 
           ;; Phase lifecycle: mark review entry
-          (enter-review logger {:artifact-id artifact-id
+          (artifact/enter-review logger {:artifact-id artifact-id
                                 :gate-count (count gates)
                                 :llm? (boolean llm-client)})
 
@@ -459,7 +290,7 @@
                     summary (or llm-summary
                                 (gates/generate-summary final-decision gate-feedbacks))
 
-                    review (cond-> (build-review-artifact
+                    review (cond-> (artifact/build-review-artifact
                                     gate-feedbacks final-decision all-blocking all-warnings
                                     artifact-id counts
                                     :issues llm-issues
@@ -472,7 +303,7 @@
                     duration (- (System/currentTimeMillis) start-time)]
 
                 (if timeout-only-review?
-                  (timeout-only-error-result
+                  (artifact/timeout-only-error-result
                    logger normalized llm-review gate-result counts duration tokens cost-usd
                    timeout-failure-message)
                   (do
@@ -508,19 +339,19 @@
                                           :artifact-id artifact-id}})))
 
                     ;; Phase lifecycle: mark review exit with decision
-                    (leave-review logger {:review/decision final-decision
+                    (artifact/leave-review logger {:review/decision final-decision
                                           :duration-ms duration
                                           :gates-passed (:passed counts)
                                           :gates-failed (:failed counts)
                                           :llm? true})
 
-                    (build-review-result review counts duration tokens :cost-usd cost-usd)))))
+                    (artifact/build-review-result review counts duration tokens :cost-usd cost-usd)))))
 
             ;; No LLM — gate-only fallback
             (let [gate-feedbacks (gates/run-gates-on-artifact gates artifact context logger)
                   {:keys [decision blocking-issues warnings]} (gates/make-review-decision gate-feedbacks config)
                   counts (gates/calculate-gate-counts gate-feedbacks)
-                  review (build-review-artifact gate-feedbacks decision blocking-issues warnings artifact-id counts)
+                  review (artifact/build-review-artifact gate-feedbacks decision blocking-issues warnings artifact-id counts)
                   duration (- (System/currentTimeMillis) start-time)]
 
               (log/info logger :reviewer :reviewer/review-complete
@@ -531,74 +362,23 @@
                                 :mode :gate-only}})
 
               ;; Phase lifecycle: mark review exit with decision
-              (leave-review logger {:review/decision decision
+              (artifact/leave-review logger {:review/decision decision
                                     :duration-ms duration
                                     :gates-passed (:passed counts)
                                     :gates-failed (:failed counts)
                                     :llm? false})
 
-              (build-review-result review counts duration 0)))))
+              (artifact/build-review-result review counts duration 0)))))
 
-      :validate-fn validate-review-artifact
+      :validate-fn artifact/validate-review-artifact
 
-      :repair-fn repair-review-artifact})))
+      :repair-fn artifact/repair-review-artifact})))
 
-(defn review-summary
-  "Get a summary of a review artifact for logging/display."
-  [artifact]
-  {:id (:review/id artifact)
-   :decision (:review/decision artifact)
-   :gates-passed (:review/gates-passed artifact)
-   :gates-failed (:review/gates-failed artifact)
-   :gates-total (:review/gates-total artifact)
-   :blocking-issues-count (count (:review/blocking-issues artifact))
-   :warnings-count (count (:review/warnings artifact))
-   :llm-issues-count (count (:review/issues artifact))})
-
-(defn approved?
-  "Check if a review artifact represents approval."
-  [artifact]
-  (= :approved (:review/decision artifact)))
-
-(defn rejected?
-  "Check if a review artifact represents rejection."
-  [artifact]
-  (= :rejected (:review/decision artifact)))
-
-(defn conditionally-approved?
-  "Check if a review artifact is conditionally approved."
-  [artifact]
-  (= :conditionally-approved (:review/decision artifact)))
-
-(defn changes-requested?
-  "Check if a review artifact has changes requested."
-  [artifact]
-  (= :changes-requested (:review/decision artifact)))
-
-(defn get-blocking-issues
-  "Extract blocking issues from review artifact."
-  [artifact]
-  (:review/blocking-issues artifact []))
-
-(defn get-warnings
-  "Extract warnings from review artifact."
-  [artifact]
-  (:review/warnings artifact []))
-
-(defn get-recommendations
-  "Extract recommendations from review artifact."
-  [artifact]
-  (:review/recommendations artifact []))
-
-(defn get-issues
-  "Extract LLM review issues from review artifact."
-  [artifact]
-  (:review/issues artifact []))
-
-(defn get-strengths
-  "Extract strengths noted by the LLM from review artifact."
-  [artifact]
-  (:review/strengths artifact []))
+;; Public-API accessors (review-summary, approved?, rejected?,
+;; conditionally-approved?, changes-requested?, get-blocking-issues,
+;; get-warnings, get-recommendations, get-issues, get-strengths) moved to
+;; ai.miniforge.agent.reviewer.artifact (PR-G decomposition).
+;; Downstream consumers reach them via agent.interface.specialized.
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
@@ -631,7 +411,7 @@
   #_(get-recommendations (:artifact result))
 
   ;; Validate a review artifact
-  (validate-review-artifact
+  (artifact/validate-review-artifact
    {:review/id (random-uuid)
     :review/decision :approved
     :review/gate-results []

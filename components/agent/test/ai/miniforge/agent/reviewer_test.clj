@@ -22,6 +22,7 @@
    [clojure.test :refer [deftest testing is]]
    [ai.miniforge.agent.model :as model]
    [ai.miniforge.agent.reviewer :as reviewer]
+   [ai.miniforge.agent.reviewer.artifact :as r-artifact]
    [ai.miniforge.agent.core :as core]
    [ai.miniforge.logging.interface :as log]
    [ai.miniforge.llm.interface :as llm]
@@ -225,7 +226,7 @@
         (is (empty? (:review/blocking-issues review))
             "Should have no blocking issues")
 
-        (is (reviewer/approved? review)
+        (is (r-artifact/approved? review)
             "approved? helper should return true")))))
 
 (deftest test-reviewer-invoke-some-fail
@@ -249,10 +250,10 @@
         (is (= 1 (:review/gates-failed review))
             "Should have 1 failed gate")
 
-        (is (not (reviewer/approved? review))
+        (is (not (r-artifact/approved? review))
             "approved? should return false")
 
-        (is (reviewer/conditionally-approved? review)
+        (is (r-artifact/conditionally-approved? review)
             "conditionally-approved? should return true")))))
 
 (deftest test-reviewer-invoke-strict-mode
@@ -266,7 +267,7 @@
       (is (= :rejected (:review/decision review))
           "Should be rejected in strict mode")
 
-      (is (reviewer/rejected? review)
+      (is (r-artifact/rejected? review)
           "rejected? helper should return true")
 
       (is (seq (:review/blocking-issues review))
@@ -586,92 +587,11 @@
         (is (nil? override-entry)
             "no warn when LLM and gates agree — keeps the signal high-value")))))
 
-;------------------------------------------------------------------------------ Schema validation tests
+;; Schema validation tests moved to reviewer/artifact_test.clj (PR-G).
 
-(deftest test-validate-review-artifact
-  (testing "Validate valid review artifact"
-    (let [review {:review/id (random-uuid)
-                  :review/decision :approved
-                  :review/gate-results []
-                  :review/summary "All checks passed"
-                  :review/gates-passed 3
-                  :review/gates-failed 0
-                  :review/gates-total 3}
-          validation (reviewer/validate-review-artifact review)]
-      (is (:valid? validation)
-          "Valid review should pass validation")))
-
-  (testing "Validate invalid review artifact - missing required fields"
-    (let [review {:review/decision :approved}
-          validation (reviewer/validate-review-artifact review)]
-      (is (not (:valid? validation))
-          "Review missing required fields should fail validation")))
-
-  (testing "Validate invalid review artifact - gate counts don't add up"
-    (let [review {:review/id (random-uuid)
-                  :review/decision :approved
-                  :review/gate-results []
-                  :review/summary "Test"
-                  :review/gates-passed 2
-                  :review/gates-failed 0
-                  :review/gates-total 5}  ; 2 + 0 ≠ 5
-          validation (reviewer/validate-review-artifact review)]
-      (is (not (:valid? validation))
-          "Review with incorrect gate counts should fail validation"))))
-
-;------------------------------------------------------------------------------ Helper function tests
-
-(deftest test-review-summary
-  (testing "Get review summary"
-    (let [review {:review/id (random-uuid)
-                  :review/decision :approved
-                  :review/gates-passed 3
-                  :review/gates-failed 0
-                  :review/gates-total 3
-                  :review/blocking-issues []
-                  :review/warnings []}
-          summary (reviewer/review-summary review)]
-      (is (= :approved (:decision summary)))
-      (is (= 3 (:gates-passed summary)))
-      (is (= 0 (:gates-failed summary)))
-      (is (= 0 (:blocking-issues-count summary)))
-      (is (= 0 (:warnings-count summary))))))
-
-(deftest test-decision-helpers
-  (testing "Decision helper functions"
-    (let [approved {:review/decision :approved}
-          rejected {:review/decision :rejected}
-          conditional {:review/decision :conditionally-approved}]
-
-      (is (reviewer/approved? approved))
-      (is (not (reviewer/approved? rejected)))
-      (is (not (reviewer/approved? conditional)))
-
-      (is (reviewer/rejected? rejected))
-      (is (not (reviewer/rejected? approved)))
-      (is (not (reviewer/rejected? conditional)))
-
-      (is (reviewer/conditionally-approved? conditional))
-      (is (not (reviewer/conditionally-approved? approved)))
-      (is (not (reviewer/conditionally-approved? rejected))))))
-
-(deftest test-get-blocking-issues
-  (testing "Extract blocking issues"
-    (let [review {:review/blocking-issues ["Issue 1" "Issue 2"]}]
-      (is (= ["Issue 1" "Issue 2"] (reviewer/get-blocking-issues review)))
-      (is (empty? (reviewer/get-blocking-issues {}))))))
-
-(deftest test-get-warnings
-  (testing "Extract warnings"
-    (let [review {:review/warnings ["Warning 1" "Warning 2"]}]
-      (is (= ["Warning 1" "Warning 2"] (reviewer/get-warnings review)))
-      (is (empty? (reviewer/get-warnings {}))))))
-
-(deftest test-get-recommendations
-  (testing "Extract recommendations"
-    (let [review {:review/recommendations ["Fix A" "Fix B"]}]
-      (is (= ["Fix A" "Fix B"] (reviewer/get-recommendations review)))
-      (is (empty? (reviewer/get-recommendations {}))))))
+;; review-summary, decision predicates, and get-* accessor tests moved to
+;; reviewer/artifact_test.clj (PR-G).
+;; test-validate-review-artifact also moved (it covers artifact/validate-).
 
 ;------------------------------------------------------------------------------ Integration tests
 
