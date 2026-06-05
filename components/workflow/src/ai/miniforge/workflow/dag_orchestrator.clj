@@ -335,11 +335,32 @@
    The merge ref namespace requires a non-nil run-id segment."
   "no-run-id")
 
+(defn- valid-ref-name?
+  "True when `s` is a structurally legal git ref name per git-check-ref-format(1):
+   non-empty, no leading dash (flag risk), no whitespace, and none of the
+   characters or sequences that git treats as revision operators or prohibits
+   in ref names (~, ^, :, ?, *, [, ], \\, .., @{, //)."
+  [s]
+  (and (string? s)
+       (pos? (count s))
+       (not (str/starts-with? s "-"))
+       (not (re-find #"[\s~\^:\?\*\[\]\\]|\.\.|@\{|//" s))))
+
 ;; Anomaly factories ---------------------------------------------------
 ;; Each factory takes the minimum data needed and produces the canonical
 ;; anomaly shape (`:anomaly/category` + `:anomaly/message` + rich data
 ;; under `:merge/*` and `:git/*` keys). All messages route through the
 ;; workflow message catalog.
+
+(defn- branch-name-invalid-anomaly
+  "Anomaly: a parent's branch name is structurally invalid — empty,
+   starts with `-` (git flag risk), or contains whitespace. Rejected
+   before reaching git so git never receives a potentially malformed
+   refspec."
+  [parent]
+  {:anomaly/category :anomalies/dag-multi-parent-branch-name-invalid
+   :anomaly/message  (messages/t :dag.merge/branch-name-invalid)
+   :merge/parent     parent})
 
 (defn- branch-unresolvable-anomaly
   "Anomaly: a parent's registered branch could not be rev-parsed in
@@ -529,11 +550,13 @@
   (loop [remaining parents
          out (transient [])]
     (if-let [p (first remaining)]
-      (let [r (run-git host-repo "rev-parse" "--verify" (str (:branch p) "^{commit}"))]
-        (if (zero? (:exit r))
-          (recur (rest remaining)
-                 (conj! out (assoc p :commit-sha (str/trim (:out r)))))
-          (branch-unresolvable-anomaly p r)))
+      (if-not (valid-ref-name? (:branch p))
+        (branch-name-invalid-anomaly p)
+        (let [r (run-git host-repo "rev-parse" "--verify" (str (:branch p) "^{commit}"))]
+          (if (zero? (:exit r))
+            (recur (rest remaining)
+                   (conj! out (assoc p :commit-sha (str/trim (:out r)))))
+            (branch-unresolvable-anomaly p r))))
       {:parents (persistent! out)})))
 
 (defn- ancestor-of?
@@ -1027,7 +1050,9 @@
      parents) — callers branch on these for observability but the
      `:branch` is uniformly the right value to use as the sub-workflow
      base.
-   - An anomaly map — `:dag-multi-parent-conflict`,
+   - An anomaly map — `:dag-multi-parent-branch-name-invalid` (branch name
+     structurally invalid before git is invoked),
+     `:dag-multi-parent-conflict`,
      `:dag-multi-parent-unrelated-histories`,
      `:dag-multi-parent-branch-unresolvable`,
      `:dag-multi-parent-strategy-unsupported`,
