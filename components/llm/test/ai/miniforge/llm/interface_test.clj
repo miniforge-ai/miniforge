@@ -20,6 +20,7 @@
   (:require [clojure.test :as test :refer [deftest testing is]]
             [clojure.string :as str]
             [ai.miniforge.llm.interface :as llm]
+            [ai.miniforge.llm.messages :as msg]
             [ai.miniforge.llm.protocols.records.llm-client]
             [ai.miniforge.llm.protocols.impl.llm-client :as impl]
             [ai.miniforge.llm.progress-monitor :as pm]
@@ -555,23 +556,25 @@
 
 (deftest rate-limited?-test
   (testing "detects Claude CLI rate limit message"
-    (is (impl/rate-limited? "You've hit your limit · resets 7pm (America/Los_Angeles)"))
-    (is (impl/rate-limited? "You've hit your limit · resets 3am (UTC)")))
+    (is (impl/rate-limited? (msg/t :rate-limit-test.system/claude-limit-la)))
+    (is (impl/rate-limited? (msg/t :rate-limit-test.system/claude-limit-utc))))
 
   (testing "detects generic rate limit phrasing"
-    (is (impl/rate-limited? "rate limit exceeded"))
-    (is (impl/rate-limited? "backend rate limited"))
-    (is (impl/rate-limited? "HTTP 429 too many requests")))
+    (is (impl/rate-limited? (msg/t :rate-limit-test.system/generic-exceeded)))
+    (is (impl/rate-limited? (msg/t :rate-limit-test.system/generic-limited)))
+    (is (impl/rate-limited? (msg/t :rate-limit-test.system/http-429))))
 
   (testing "does not flag normal content"
-    (is (not (impl/rate-limited? "(ns example.core)\n(defn hello [] \"world\")")))
-    (is (not (impl/rate-limited? "Here is the implementation...")))
+    (is (not (impl/rate-limited? (msg/t :rate-limit-test.system/clojure-content))))
+    (is (not (impl/rate-limited? (msg/t :rate-limit-test.system/normal-implementation))))
     (is (not (impl/rate-limited?
               (json/generate-string
-               {:claims [{:claim "WAF-based rate limiting on mobile auth endpoints remained in progress."
-                          :snippet "WAF-based rate limiting on mobile auth endpoints remains in progress"
+               {:claims [{:claim (msg/t :rate-limit-test.system/waf-claim)
+                          :snippet (msg/t :rate-limit-test.system/waf-snippet)
                           :confidence 1.0
-                          :tags ["security" "in-progress" "risk"]}]}))))
+                          :tags [(msg/t :rate-limit-test.system/security-tag)
+                                 (msg/t :rate-limit-test.system/in-progress-tag)
+                                 (msg/t :rate-limit-test.system/risk-tag)]}]}))))
     (is (not (impl/rate-limited? nil)))))
 
 (deftest rate-limited-success-response-test

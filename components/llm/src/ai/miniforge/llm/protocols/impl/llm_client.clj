@@ -27,6 +27,7 @@
    [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.logging.interface :as log]
    [ai.miniforge.llm.cost :as cost]
+   [ai.miniforge.llm.messages :as msg]
    [ai.miniforge.llm.progress-monitor :as pm]
    [ai.miniforge.response.interface :as response]
    [slingshot.slingshot :refer [throw+ try+]])
@@ -1433,7 +1434,7 @@
   (let [error-message (or (not-empty (str/trim (or err-result "")))
                           (when-not (str/blank? content) content)
                           (not-empty (str/trim (or raw-stdout "")))
-                          "Process failed with no output")
+                          (msg/t :streaming-error.system/no-output))
         category (if timeout-info :anomalies/timeout :anomalies.agent/llm-error)
         error-type (if timeout-info "adaptive_timeout" "cli_error")]
     (cond-> (llm-error category error-type (str/trim error-message)
