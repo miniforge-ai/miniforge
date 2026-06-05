@@ -10,4 +10,35 @@
   ;; Emitted whenever the structural filter moves a finding out of
   ;; :review/issues because its :file fell outside the task scope.
   :reviewer.scope/filter-applied
-  "Reviewer scope filter moved {filtered-count} finding(s) out of :review/issues; {kept-count} remain in-scope."}}
+  "Reviewer scope filter moved {filtered-count} finding(s) out of :review/issues; {kept-count} remain in-scope."
+
+  ;; Reviewer gates — human-readable review summaries surfaced to operators
+  ;; and embedded in :review/summary on the artifact. {total}/{passed}/{failed}
+  ;; are gate counts; {decision} is the LLM-sourced decision name.
+  :reviewer.gates/summary-approved
+  "Review approved: All {total} gates passed"
+
+  :reviewer.gates/summary-rejected
+  "Review rejected: {failed}/{total} gates failed with blocking issues"
+
+  :reviewer.gates/summary-conditionally-approved
+  "Conditionally approved: {passed}/{total} gates passed, {failed} non-blocking issues"
+
+  :reviewer.gates/summary-default
+  "Review complete: {decision} ({total} gates evaluated)"
+
+  ;; Reviewer gates — degraded implement handoff (artifact recovered after
+  ;; an implementer-side failure).
+  :reviewer.gates/degraded-handoff
+  "Implement handoff is degraded: the artifact was recovered after an implementer-side failure"
+
+  ;; Reviewer gates — scope deviations (artifact wrote files outside the
+  ;; task's declared scope). {paths} is a comma-joined list of out-of-scope
+  ;; file paths.
+  :reviewer.gates/scope-deviations
+  "Artifact includes out-of-scope writes: {paths}"
+
+  ;; Reviewer gates — gate-execution exception. {cause} is the underlying
+  ;; exception message; used as the :message on a fail-closed feedback entry.
+  :reviewer.gates/exception
+  "Gate execution failed: {cause}"}}
