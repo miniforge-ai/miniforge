@@ -116,9 +116,9 @@ function addFilterChip(label, type, value) {
   const removeBtn = document.createElement('button');
   removeBtn.className = 'filter-remove';
   removeBtn.title = 'Remove filter';
+  removeBtn.setAttribute('aria-label', 'Remove filter');
   removeBtn.textContent = '×';
   removeBtn.addEventListener('click', () => removeFilterChip(filterKey));
-  chip.appendChild(removeBtn);
 
   filterChipsContainer.appendChild(chip);
 
