@@ -58,6 +58,14 @@
                   params)
        template))))
 
+(defn all
+  "Return the full message map from a catalog delay.
+
+   Useful for bulk export — e.g. hydrating a browser-side translator
+   with the same catalog the server uses."
+  [catalog]
+  (or @catalog {}))
+
 (defn create-translator
   "Create a translator function for a specific component's message catalog.
 

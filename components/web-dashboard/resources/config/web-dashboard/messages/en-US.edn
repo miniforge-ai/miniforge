@@ -139,4 +139,56 @@
   :status/failed-label         "Failed"
 
   ;; table headers
-  :table/status-header         "Status"}}
+  :table/status-header         "Status"
+
+  ;; shared bool/unknown labels (used by JS chip rendering + workflow events)
+  :value/yes                   "Yes"
+  :value/no                    "No"
+  :value/unknown               "unknown"
+  :value/unknown-error         "unknown error"
+
+  ;; websocket status labels (browser updateConnectionStatus)
+  :ws/status-connected         "Connected"
+  :ws/status-disconnected      "Disconnected"
+  :ws/status-reconnecting      "Reconnecting..."
+  :ws/status-error             "Error"
+
+  ;; toast notifications — fleet + control plane
+  :toast/command-sent          "Command sent: {command}"
+  :toast/command-failed        "Failed to send command: {error}"
+  :toast/error-with-detail     "Error: {detail}"
+  :toast/sync-error            "Sync error: {detail}"
+  :toast/repo-added            "Added: {repo}"
+  :toast/repo-existing         "Already configured: {repo}"
+  :toast/discover-done         "Discovered {discovered} repos, added {added}."
+  :toast/sync-done             "Synced repos: {synced}, tracked PRs: {tracked}"
+  :toast/discover-and-sync-done "Discovery and PR sync completed."
+  :toast/link-copied           "Link copied to clipboard"
+  :toast/workflow-started      "Workflow started: {name}"
+  :toast/workflow-completed    "Workflow completed"
+  :toast/workflow-failed       "Workflow failed: {reason}"
+  :toast/phase-started         "Phase started: {phase}"
+  :toast/phase-completed       "Phase completed: {phase}"
+
+  ;; fleet error fallbacks (api response missing :error/:message)
+  :fleet/error-add-repo        "Unable to add repo"
+  :fleet/error-discover        "Repository discovery failed"
+  :fleet/error-sync            "Sync failed for {count} repo(s)"
+  :fleet/error-sync-fallback   "Unable to synchronize PRs"
+
+  ;; browser prompts
+  :prompt/repo-input           "Repository (owner/name):"
+  :prompt/discover-owner       "Owner/org (leave blank for current user):"
+  :prompt/copy-which-pane      "Copy to which pane?\n{options}"
+
+  ;; filter chip — labels + menu
+  :filter/remove-title         "Remove filter"
+  :filter/cloud-only-label     "Cloud only"
+  :filter/menu-pin-global      "📌 Pin to Global"
+  :filter/menu-make-local      "📍 Make Pane-Local"
+  :filter/menu-copy            "📋 Copy to Pane"
+  :filter/menu-remove          "🗑️ Remove"
+  :filter/copied-to-pane       "Filter copied to {pane}"
+  :filter/chip-label-op        "{field} {op} {value}"
+  :filter/chip-label-value     "{field}: {value}"
+  :filter/chip-label-text      "{field}: \"{value}\""}}
