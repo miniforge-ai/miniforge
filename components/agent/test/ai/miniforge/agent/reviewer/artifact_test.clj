@@ -60,10 +60,23 @@
     (let [inner {:artifact/id #uuid "00000000-0000-0000-0000-000000000001"}
           [a id] (artifact/extract-artifact-and-id {:task/artifact inner})]
       (is (= inner a))
-      (is (= #uuid "00000000-0000-0000-0000-000000000001" id)))
-    (let [inner {:code/id "code-1"}
+      (is (= #uuid "00000000-0000-0000-0000-000000000001" id))))
+
+  (testing ":code/id wins over a synthetic uuid when it's already a uuid"
+    (let [inner {:code/id #uuid "00000000-0000-0000-0000-000000000002"}
           [_ id] (artifact/extract-artifact-and-id {:artifact inner})]
-      (is (= "code-1" id))))
+      (is (= #uuid "00000000-0000-0000-0000-000000000002" id))))
+
+  (testing "non-uuid :code/id (e.g. a string) is coerced to a fresh uuid"
+    ;; :review/artifact-id is schema-typed `uuid?` on ReviewArtifact —
+    ;; passing a string straight through would silently fail the malli
+    ;; check downstream. Pin the boundary so test scaffolding using
+    ;; string ids (or production input from a non-curated artifact)
+    ;; can't break the artifact validator.
+    (let [[_ id] (artifact/extract-artifact-and-id {:artifact {:code/id "code-1"}})]
+      (is (uuid? id) ":code/id \"code-1\" must NOT pass through as a string"))
+    (let [[_ id] (artifact/extract-artifact-and-id {:artifact {:artifact/id 42}})]
+      (is (uuid? id) "any non-uuid :artifact/id is replaced with a fresh uuid")))
 
   (testing "synthesizes an id when neither :artifact/id nor :code/id is present"
     (let [[_ id] (artifact/extract-artifact-and-id {})]

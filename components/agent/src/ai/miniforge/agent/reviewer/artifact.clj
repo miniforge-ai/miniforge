@@ -50,12 +50,24 @@
 ;; Artifact extraction + ID
 
 (defn extract-artifact-and-id
-  "Extract artifact and its ID from input."
+  "Extract `[artifact artifact-id]` from review input.
+
+   Resolves `:task/artifact` → `:artifact` → the raw input itself for the
+   artifact, then prefers `:artifact/id` → `:code/id` for the id. Anything
+   resolved that isn't already a `uuid?` is replaced with a fresh
+   `random-uuid`.
+
+   The UUID coercion matters: `:review/artifact-id` is schema-typed
+   `uuid?` on `ReviewArtifact` (see
+   `ai.miniforge.agent.reviewer.issues/ReviewArtifact`), so a non-UUID id
+   here would silently fail the malli check downstream and either churn
+   through `repair-review-artifact` or land as an invalid artifact. Test
+   scaffolding routinely uses string ids like `\"code-1\"`; promoting to
+   a UUID is the boundary that keeps those harmless."
   [input]
   (let [artifact (or (:task/artifact input) (:artifact input) input)
-        artifact-id (or (:artifact/id artifact)
-                        (:code/id artifact)
-                        (random-uuid))]
+        resolved (or (:artifact/id artifact) (:code/id artifact))
+        artifact-id (if (uuid? resolved) resolved (random-uuid))]
     [artifact artifact-id]))
 
 ;------------------------------------------------------------------------------ Layer 1
