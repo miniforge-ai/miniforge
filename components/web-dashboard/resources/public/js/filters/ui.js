@@ -95,19 +95,49 @@
     label.className = 'filter-label';
     label.textContent = formatFilterLabel(clause);
 
+    const filterId = clause['filter/id'];
+    const filterValue = clause.value;
+
     const menu = document.createElement('div');
     menu.className = 'filter-chip-menu';
 
-    const encodedValue = runtime.escapeJSString(clause.value);
-    menu.innerHTML = `
-      <button class="filter-chip-menu-btn" onclick="event.stopPropagation(); this.nextElementSibling.classList.toggle('show')">⋮</button>
-      <div class="filter-chip-menu-items">
-        ${scope === 'local' ? '<button onclick="window.miniforge.filters.promoteToGlobal(\'' + clause['filter/id'] + '\')">📌 Pin to Global</button>' : ''}
-        ${scope === 'global' ? '<button onclick="window.miniforge.filters.demoteToLocal(\'' + clause['filter/id'] + '\')">📍 Make Pane-Local</button>' : ''}
-        <button onclick="window.miniforge.filters.showCopyMenu(\'' + clause['filter/id'] + '\')">📋 Copy to Pane</button>
-        <button onclick="window.miniforge.filters.removeFilter(\'' + clause['filter/id'] + '\', '\'' + scope + '\', '\'' + encodedValue + '\')">🗑️ Remove</button>
-      </div>
-    `;
+    const items = document.createElement('div');
+    items.className = 'filter-chip-menu-items';
+
+    const toggleBtn = document.createElement('button');
+    toggleBtn.className = 'filter-chip-menu-btn';
+    toggleBtn.textContent = '⋮';
+    toggleBtn.addEventListener('click', (event) => {
+      event.stopPropagation();
+      items.classList.toggle('show');
+    });
+
+    if (scope === 'local') {
+      const pinBtn = document.createElement('button');
+      pinBtn.textContent = '📌 Pin to Global';
+      pinBtn.addEventListener('click', () => window.miniforge.filters.promoteToGlobal(filterId));
+      items.appendChild(pinBtn);
+    }
+
+    if (scope === 'global') {
+      const makeLocalBtn = document.createElement('button');
+      makeLocalBtn.textContent = '📍 Make Pane-Local';
+      makeLocalBtn.addEventListener('click', () => window.miniforge.filters.demoteToLocal(filterId));
+      items.appendChild(makeLocalBtn);
+    }
+
+    const copyBtn = document.createElement('button');
+    copyBtn.textContent = '📋 Copy to Pane';
+    copyBtn.addEventListener('click', () => window.miniforge.filters.showCopyMenu(filterId));
+    items.appendChild(copyBtn);
+
+    const removeMenuBtn = document.createElement('button');
+    removeMenuBtn.textContent = '🗑️ Remove';
+    removeMenuBtn.addEventListener('click', () => window.miniforge.filters.removeFilter(filterId, scope, filterValue));
+    items.appendChild(removeMenuBtn);
+
+    menu.appendChild(toggleBtn);
+    menu.appendChild(items);
 
     const removeBtn = document.createElement('button');
     removeBtn.className = 'filter-remove';
