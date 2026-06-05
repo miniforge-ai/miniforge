@@ -702,6 +702,79 @@
       (is (= [] (:lines result)))
       (is (nil? (:timeout result))))))
 
+(def ^:private start-stream-reader! #'impl/start-stream-reader!)
+(def ^:private stop-stream-reader!  #'impl/stop-stream-reader!)
+
+(defn- wait-until-blocked
+  "Spin-wait until `^Thread t` reaches a parked/blocked thread state
+   (WAITING/TIMED_WAITING/BLOCKED). Used by the clean-shutdown regression
+   test to confirm the reader is actually blocked on `.put` BEFORE we
+   call `stop-stream-reader!`, so the interrupt is guaranteed to fire
+   the InterruptedException path (the bug under test). Returns true if
+   the thread reached the target state inside `timeout-ms`, false on
+   give-up."
+  [^Thread t timeout-ms]
+  (let [deadline (+ (System/currentTimeMillis) timeout-ms)
+        target   #{Thread$State/WAITING Thread$State/TIMED_WAITING Thread$State/BLOCKED}]
+    (loop []
+      (cond
+        (contains? target (.getState t)) true
+        (>= (System/currentTimeMillis) deadline) false
+        :else (do (Thread/sleep 5) (recur))))))
+
+(deftest start-stream-reader!-clean-shutdown-prints-no-stderr-test
+  ;; Regression: pre-fix the daemon's `(catch Exception e ...)` caught
+  ;; the InterruptedException raised by `stop-stream-reader!`'s
+  ;; interrupt, then tried to enqueue a `stream-read-failure` anomaly
+  ;; via `.put` — which itself raised IE because the thread's interrupt
+  ;; flag was still set, bubbling the second IE to the JVM default
+  ;; handler and printing an ugly stack trace to stderr. The 2026-06-04
+  ;; dogfood surfaced 18 of these across 20 sub-tasks (pure noise, zero
+  ;; workflow impact).
+  ;;
+  ;; The fix: dedicated `(catch InterruptedException _)` for the clean
+  ;; shutdown + inner try/catch around the anomaly enqueue.
+  ;;
+  ;; The test exercises `start-stream-reader!` / `stop-stream-reader!`
+  ;; directly with a CAPACITY-1 queue so the reader's second `.put`
+  ;; blocks deterministically (no `Thread/sleep`-based race). With the
+  ;; queue full, the reader is guaranteed to be parked on `.put` when
+  ;; `stop-stream-reader!` interrupts it.
+  (testing "interrupting a reader blocked on a full queue does not print to stderr"
+    (let [;; Bounded queue, capacity 1. Pre-filled so the reader's first
+          ;; put blocks immediately.
+          line-queue (java.util.concurrent.LinkedBlockingQueue. 1)
+          _          (.put line-queue "filler")
+          ;; PipedWriter/Reader with one line of content so the reader
+          ;; has something to read and try to enqueue.
+          writer (java.io.PipedWriter.)
+          reader (java.io.BufferedReader. (java.io.PipedReader. writer))
+          _ (.write writer "first-line\n")
+          _ (.flush writer)
+          stderr-capture (java.io.ByteArrayOutputStream.)
+          original-err System/err
+          captured-print-stream (java.io.PrintStream. stderr-capture true "UTF-8")]
+      (try
+        (System/setErr captured-print-stream)
+        (let [reader-thread (start-stream-reader! reader line-queue)]
+          (try
+            (is (wait-until-blocked reader-thread 1000)
+                "reader must reach a blocked state on .put before the interrupt fires")
+            (stop-stream-reader! reader-thread reader)
+            (finally
+              (.join reader-thread 1000))))
+        ;; Read with the same charset the PrintStream wrote.
+        (let [captured (.toString stderr-capture "UTF-8")]
+          (is (not (re-find #"InterruptedException" captured))
+              "clean shutdown must not leak an IE stack trace to stderr"))
+        (finally
+          (System/setErr original-err)
+          ;; Close the redirected stream — flushes any buffered bytes and
+          ;; releases the underlying ByteArrayOutputStream from the
+          ;; PrintStream's writer lock.
+          (.close captured-print-stream)
+          (.close writer))))))
+
 (deftest process-stream-lines-honors-progress-monitor-while-waiting-for-output-test
   (testing "progress-monitor timeout can fire while stdout is idle and still open"
     (let [writer (java.io.PipedWriter.)
