@@ -1,0 +1,13 @@
+{:agent/messages
+ {;; Reviewer scope-bound verdict — missing scope at dispatch time.
+  ;; Raised when no scope signal can be resolved from the review task; spec
+  ;; authors must declare `:spec/intent {:scope [...]}` or callers must
+  ;; supply per-task scope. See PR #1039 + reviewer/scope.clj.
+  :reviewer.scope/missing
+  "Reviewer requires a non-empty :scope on the review task; none resolved from :task/scope, :task/files-in-scope, or (:scope :task/intent)."
+
+  ;; Reviewer scope-bound verdict — telemetry event description.
+  ;; Emitted whenever the structural filter moves a finding out of
+  ;; :review/issues because its :file fell outside the task scope.
+  :reviewer.scope/filter-applied
+  "Reviewer scope filter moved {filtered-count} finding(s) out of :review/issues; {kept-count} remain in-scope."}}

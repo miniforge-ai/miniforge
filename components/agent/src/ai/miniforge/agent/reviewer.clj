@@ -24,6 +24,7 @@
    [ai.miniforge.agent.model :as model]
    [ai.miniforge.agent.prompts :as prompts]
    [ai.miniforge.agent.result-boundary :as result-boundary]
+   [ai.miniforge.agent.reviewer.scope :as scope]
    [ai.miniforge.agent.role-config :as role-config]
    [ai.miniforge.agent.specialized :as specialized]
    [ai.miniforge.schema.interface :as schema]
@@ -368,73 +369,9 @@
     :else
     (pr-str artifact)))
 
-(defn- clean-scope-paths
-  "Drop blank and non-string entries, trim whitespace, dedupe."
-  [paths]
-  (->> paths
-       (keep #(when (string? %) (not-empty (str/trim %))))
-       distinct
-       vec
-       not-empty))
-
-(defn effective-review-scope
-  "Resolve the effective scope vector for a review task.
-
-   Strict priority — uses the most specific signal available and ignores
-   broader ones underneath it. Order:
-
-   1. `:task/scope` — set explicitly by the dispatch layer for this task.
-   2. `:task/files-in-scope` — a DAG sub-task's per-task scope from the
-      planner (`dag-orchestrator/task-sub-input`).
-   3. `(:scope task/intent)` — the spec-level scope, when intent is an
-      EDN map carrying it.
-
-   Merging across levels would dilute per-task narrowness with the broader
-   spec scope, which defeats the purpose. Returns a deduped vector of
-   non-blank strings, or nil when no scope signal is present (legacy
-   behavior: review every file)."
-  [input]
-  (let [intent (:task/intent input)]
-    (or (clean-scope-paths (:task/scope input))
-        (clean-scope-paths (:task/files-in-scope input))
-        (when (map? intent) (clean-scope-paths (:scope intent))))))
-
-(defn- normalize-scope-entry
-  "Strip trailing slashes so a directory prefix matches `dir/file.clj` cleanly
-   without a false-positive on `dir-suffix/x.clj`."
-  [s]
-  (str/replace s #"/+$" ""))
-
-(defn in-scope-issue?
-  "True when a `ReviewIssue`'s `:file` falls inside `scope`.
-
-   - `scope == nil`  → true (no filtering; legacy behavior).
-   - `:file` blank   → true (file-level concern with no path attribution;
-                       conservatively kept so the LLM can still surface a
-                       real concern when it didn't name a file).
-   - Otherwise       → at least one scope entry equals the file or is a
-                       parent directory of it (entry + `/` is a prefix of
-                       the file path)."
-  [scope issue]
-  (let [file (some-> (:file issue) str str/trim not-empty)]
-    (cond
-      (nil? scope) true
-      (nil? file)  true
-      :else (boolean
-              (some (fn [entry]
-                      (let [trimmed (normalize-scope-entry entry)]
-                        (or (= file trimmed)
-                            (str/starts-with? file (str trimmed "/")))))
-                    scope)))))
-
-(defn partition-issues-by-scope
-  "Split `issues` against `scope` and return
-   `{:in-scope [...] :out-of-scope [...]}`. When `scope` is nil every
-   issue is in-scope (no filtering)."
-  [scope issues]
-  (let [{in true out false} (group-by #(in-scope-issue? scope %) issues)]
-    {:in-scope     (vec in)
-     :out-of-scope (vec out)}))
+;; Scope resolution + partitioning moved to ai.miniforge.agent.reviewer.scope
+;; (PR #1039 decomposition). The reviewer module references the helpers
+;; through the `scope` alias.
 
 (defn build-review-prompt
   "Construct the user prompt for LLM review from task data."
@@ -445,7 +382,7 @@
         intent (or (:task/intent input) "")
         constraints (or (:task/constraints input) "")
         tests (:task/tests input)
-        scope (effective-review-scope input)
+        review-scope (scope/effective-review-scope input)
         artifact-text (format-artifact-for-review artifact)]
     (str "Review the following code implementation.\n\n"
          (when (seq title)
@@ -454,7 +391,7 @@
            (str "## Description\n\n" description "\n\n"))
          (when (and intent (not (str/blank? (str intent))))
            (str "## Intent\n\n" (if (string? intent) intent (pr-str intent)) "\n\n"))
-         (when scope
+         (when review-scope
            (str "## Scope\n\n"
                 "Findings inside these paths/prefixes are in-scope; report them in\n"
                 "`:review/issues` with the appropriate severity\n"
@@ -462,7 +399,7 @@
                 "only `:blocking` issues actually block the verdict.\n\n"
                 "Findings outside the scope are out-of-scope — report them in\n"
                 "`:review/out-of-scope-observations`, NOT in `:review/issues`.\n\n"
-                (str/join "\n" (map #(str "- " %) scope))
+                (str/join "\n" (map #(str "- " %) review-scope))
                 "\n\n"))
          (when (and constraints (not (str/blank? (str constraints))))
            (str "## Constraints\n\n" (if (string? constraints) constraints (pr-str constraints)) "\n\n"))
@@ -1003,14 +940,14 @@
                                            llm-review (normalize-llm-decision (:review/decision llm-review)))
                     ;; Resolve the task's scope once; partitioning happens
                     ;; below at both the initial-parse and enumeration-retry
-                    ;; sites. nil means no filtering (legacy specs without
-                    ;; :scope continue to review every file).
-                    review-scope (effective-review-scope input)
+                    ;; sites. Required — `effective-review-scope` raises if
+                    ;; no scope can be resolved (PR #1039).
+                    review-scope (scope/effective-review-scope input)
 
                     initial-llm-issues-raw (get llm-review :review/issues [])
                     {initial-llm-issues          :in-scope
                      initial-issues-filtered-out :out-of-scope}
-                    (partition-issues-by-scope review-scope initial-llm-issues-raw)
+                    (scope/partition-issues-by-scope review-scope initial-llm-issues-raw)
 
                     initial-llm-strengths (get llm-review :review/strengths [])
                     initial-llm-summary   (:review/summary llm-review)
@@ -1021,10 +958,11 @@
                     _ (when (seq initial-issues-filtered-out)
                         (log/info logger :reviewer
                                   :reviewer/scope-filter-applied
-                                  {:data {:scope             review-scope
-                                          :filtered-count    (count initial-issues-filtered-out)
-                                          :kept-count        (count initial-llm-issues)
-                                          :retry-path        :initial}}))
+                                  (scope/filter-applied-event
+                                    {:scope          review-scope
+                                     :filtered-count (count initial-issues-filtered-out)
+                                     :kept-count     (count initial-llm-issues)
+                                     :retry-path     :initial})))
 
                     ;; ENUMERATION VALIDATOR: a rejection without enumerated
                     ;; :blocking findings is malformed — the implementer
@@ -1059,15 +997,16 @@
                                                (get recovered-review :review/issues []))
                     {recovered-llm-issues          :in-scope
                      recovered-issues-filtered-out :out-of-scope}
-                    (partition-issues-by-scope review-scope (or recovered-llm-issues-raw []))
+                    (scope/partition-issues-by-scope review-scope (or recovered-llm-issues-raw []))
                     _ (when (and recovered-review
                                  (seq recovered-issues-filtered-out))
                         (log/info logger :reviewer
                                   :reviewer/scope-filter-applied
-                                  {:data {:scope          review-scope
-                                          :filtered-count (count recovered-issues-filtered-out)
-                                          :kept-count     (count recovered-llm-issues)
-                                          :retry-path     :recovered}}))
+                                  (scope/filter-applied-event
+                                    {:scope          review-scope
+                                     :filtered-count (count recovered-issues-filtered-out)
+                                     :kept-count     (count recovered-llm-issues)
+                                     :retry-path     :recovered})))
                     llm-issues    (if recovered-review
                                     recovered-llm-issues
                                     initial-llm-issues)

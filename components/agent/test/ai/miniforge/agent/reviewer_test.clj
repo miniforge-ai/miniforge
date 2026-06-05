@@ -118,11 +118,16 @@
                                         :warnings [(loop/make-error :warning warning-message)]))))
 
 (def sample-artifact
+  ;; `:task/scope` carries the broad fixture scope so the reviewer's
+  ;; required-scope contract (PR #1039) doesn't trip tests that aren't
+  ;; about scope per se. Scope-specific tests below override or remove
+  ;; this when they need to exercise scope behavior explicitly.
   {:artifact/id (random-uuid)
    :artifact/type :code
    :artifact/content {:code/files [{:path "src/example.clj"
                                     :content "(ns example)\n(defn hello [] \"world\")"
-                                    :action :create}]}})
+                                    :action :create}]}
+   :task/scope ["src" "components" "bases"]})
 
 (defn- review-gate-feedback
   ([] (review-gate-feedback :unknown 0))
@@ -1102,43 +1107,11 @@
 ;; The reviewer prompt and helper resolve a per-task scope so adjacent-file
 ;; findings can't drive the verdict on tightly-scoped refactors. The 2026-06-04
 ;; eliminate-requiring-resolve dogfood failed 20/20 tasks because the reviewer
-;; held every diff to the FULL standards bar across all changed files; pin the
-;; new scope plumbing so a future "simplification" can't quietly drop it.
-
-(deftest effective-review-scope-priority-test
-  (testing "task/scope wins over task/files-in-scope and intent/scope"
-    (is (= ["explicit/path.clj"]
-           (reviewer/effective-review-scope
-             {:task/scope ["explicit/path.clj"]
-              :task/files-in-scope ["dag/path.clj"]
-              :task/intent {:scope ["intent/path.clj"]}}))))
-
-  (testing "task/files-in-scope wins over intent/scope when task/scope absent"
-    (is (= ["dag/per-task.clj"]
-           (reviewer/effective-review-scope
-             {:task/files-in-scope ["dag/per-task.clj"]
-              :task/intent {:scope ["broad/spec-level.clj"]}}))))
-
-  (testing "intent/scope is the final fallback"
-    (is (= ["broad/spec-level/src"]
-           (reviewer/effective-review-scope
-             {:task/intent {:type :refactor
-                            :scope ["broad/spec-level/src"]}}))))
-
-  (testing "nil when no scope signal is present (legacy behavior)"
-    (is (nil? (reviewer/effective-review-scope {:task/intent "free-form prose"})))
-    (is (nil? (reviewer/effective-review-scope {})))
-    (is (nil? (reviewer/effective-review-scope {:task/intent {:type :feature}}))))
-
-  (testing "blank and non-string entries are filtered out"
-    (is (= ["good/path.clj"]
-           (reviewer/effective-review-scope
-             {:task/scope ["good/path.clj" "" "   " nil 42]}))))
-
-  (testing "duplicates within the winning source are collapsed"
-    (is (= ["a.clj" "b.clj"]
-           (reviewer/effective-review-scope
-             {:task/scope ["a.clj" "a.clj" "b.clj" "a.clj"]})))))
+;; held every diff to the FULL standards bar across all changed files.
+;;
+;; Pure-helper coverage moved to `ai.miniforge.agent.reviewer.scope-test`
+;; (PR #1039 decomposition). Kept here: the reviewer-side wiring tests —
+;; prompt rendering and the end-to-end `core/invoke` integration.
 
 (deftest build-review-prompt-renders-scope-section-test
   (testing "Scope section appears with bulleted paths when scope is resolved"
@@ -1153,13 +1126,13 @@
       (is (re-find #":review/out-of-scope-observations" prompt)
           "must instruct the LLM where to put out-of-scope findings")))
 
-  (testing "Scope section is omitted when no scope signal is present"
-    (let [prompt (reviewer/build-review-prompt
+  (testing "build-review-prompt raises when no scope signal is present"
+    ;; PR #1039: missing scope is a programmer error, not a quiet fallback.
+    (is (thrown? IllegalArgumentException
+                 (reviewer/build-review-prompt
                    {:task/title "Test"
                     :task/intent "free-form prose"
-                    :task/artifact {:code/files []}})]
-      (is (not (re-find #"## Scope" prompt))
-          "no Scope section when scope is nil"))))
+                    :task/artifact {:code/files []}})))))
 
 (deftest sanitize-review-issues-test
   (testing "valid canonical issue maps pass through"
@@ -1184,85 +1157,6 @@
   (testing "nil and non-collection inputs return empty vec"
     (is (= [] (reviewer/sanitize-review-issues nil)))
     (is (= [] (reviewer/sanitize-review-issues [])))))
-
-;------------------------------------------------------------------------------ Scope filter tests (PR-B backstop)
-;; PR-A told the LLM to put out-of-scope findings in
-;; :review/out-of-scope-observations; this is the structural backstop. If
-;; prompt drift quietly reintroduces scope creep (the 2026-06-04 dogfood
-;; pattern: 20/20 tasks failed on adjacent-file findings), the partitioner
-;; still moves out-of-scope :review/issues entries to advisory before they
-;; can drive the verdict.
-
-(def ^:private sample-scope
-  ["components/foo/src" "components/bar/src" "bases/cli/src/main.clj"])
-
-(deftest in-scope-issue?-test
-  (testing "directory prefix match"
-    (is (reviewer/in-scope-issue? sample-scope
-                                  {:severity :blocking
-                                   :file "components/foo/src/inner.clj"
-                                   :description "x"})))
-
-  (testing "exact file match"
-    (is (reviewer/in-scope-issue? sample-scope
-                                  {:severity :blocking
-                                   :file "bases/cli/src/main.clj"
-                                   :description "x"})))
-
-  (testing "boundary check — similar prefix is NOT a match"
-    ;; Would be a false positive without the trailing-`/` normalization;
-    ;; "components/foo" is NOT a parent of "components/foobar/x.clj".
-    (is (not (reviewer/in-scope-issue? sample-scope
-                                       {:severity :blocking
-                                        :file "components/foobar/x.clj"
-                                        :description "x"}))))
-
-  (testing "trailing slash in scope entry doesn't affect matching"
-    (is (reviewer/in-scope-issue? ["components/foo/src/"]
-                                  {:severity :blocking
-                                   :file "components/foo/src/inner.clj"
-                                   :description "x"})))
-
-  (testing "out-of-scope file is rejected"
-    (is (not (reviewer/in-scope-issue? sample-scope
-                                       {:severity :blocking
-                                        :file "components/baz/src/x.clj"
-                                        :description "x"}))))
-
-  (testing "nil/blank :file is conservatively in-scope (file-level concern)"
-    (is (reviewer/in-scope-issue? sample-scope {:severity :blocking
-                                                :description "x"}))
-    (is (reviewer/in-scope-issue? sample-scope {:severity :blocking
-                                                :file nil
-                                                :description "x"}))
-    (is (reviewer/in-scope-issue? sample-scope {:severity :blocking
-                                                :file "  "
-                                                :description "x"})))
-
-  (testing "nil scope means no filtering (legacy behavior)"
-    (is (reviewer/in-scope-issue? nil {:severity :blocking
-                                       :file "any/path.clj"
-                                       :description "x"}))))
-
-(deftest partition-issues-by-scope-test
-  (testing "partitioned in-scope and out-of-scope vectors"
-    (let [issues [{:severity :blocking :file "components/foo/src/a.clj" :description "in"}
-                  {:severity :warning  :file "components/baz/src/b.clj" :description "out"}
-                  {:severity :blocking :file "bases/cli/src/main.clj"   :description "in"}
-                  {:severity :nit      :file "components/quux/x.clj"    :description "out"}]
-          {:keys [in-scope out-of-scope]}
-          (reviewer/partition-issues-by-scope sample-scope issues)]
-      (is (= 2 (count in-scope)))
-      (is (= 2 (count out-of-scope)))
-      (is (every? #(re-matches #"in" (:description %)) in-scope))
-      (is (every? #(re-matches #"out" (:description %)) out-of-scope))))
-
-  (testing "nil scope routes everything to :in-scope"
-    (let [issues [{:severity :blocking :file "anywhere/x.clj" :description "x"}]
-          {:keys [in-scope out-of-scope]}
-          (reviewer/partition-issues-by-scope nil issues)]
-      (is (= 1 (count in-scope)))
-      (is (= 0 (count out-of-scope))))))
 
 (def ^:private scope-test-review-content
   ;; Two blocking findings: one in scope (components/foo/src/a.clj), one
