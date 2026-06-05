@@ -25,6 +25,7 @@
    [ai.miniforge.agent.result-boundary :as result-boundary]
    [ai.miniforge.agent.reviewer.gates :as gates]
    [ai.miniforge.agent.reviewer.issues :as issues]
+   [ai.miniforge.agent.reviewer.llm-response :as llm-response]
    [ai.miniforge.agent.reviewer.prompts :as reviewer-prompts]
    [ai.miniforge.agent.reviewer.scope :as scope]
    [ai.miniforge.agent.role-config :as role-config]
@@ -33,8 +34,6 @@
    [ai.miniforge.logging.interface :as log]
    [ai.miniforge.llm.interface :as llm]
    [ai.miniforge.loop.interface :as loop]
-   [clojure.string :as str]
-   [clojure.edn :as edn]
    [malli.core :as m]))
 
 ;; Schemas (GateFeedback, ReviewIssue, ReviewArtifact) moved to
@@ -60,76 +59,11 @@
 ;; Issue-shape validation / sanitization / decision normalization / issue-text
 ;; extraction moved to ai.miniforge.agent.reviewer.issues (PR-C decomposition).
 
-(defn parse-review-response
-  "Parse the LLM response to extract review feedback.
-   Handles EDN in code blocks and plain EDN."
-  [response-content]
-  (try
-    (let [parsed (if-let [match (re-find #"```(?:clojure|edn)?\s*\n([\s\S]*?)\n```" response-content)]
-                   (edn/read-string (second match))
-                   (edn/read-string response-content))]
-      (when (and (map? parsed)
-                 (issues/valid-review-issues? parsed))
-        parsed))
-    (catch Exception _
-      nil)))
-
-(def ^:private unparseable-review-message
-  "Blocking issue used when the reviewer LLM returns content that cannot be parsed
-   into the canonical review artifact shape."
-  "Reviewer LLM output could not be parsed into a review artifact")
-
-(defn- review-failure-message
-  "Derive the blocking issue recorded when the reviewer LLM response cannot
-   be converted into a canonical review artifact."
-  [response content]
-  (let [content-present? (not (str/blank? (or content "")))
-        llm-error (llm/get-error response)]
-    (cond
-      content-present? unparseable-review-message
-      (string? (:message llm-error)) (:message llm-error)
-      :else "Reviewer LLM invocation failed before producing a review artifact")))
-
-(defn- backend-failure-message
-  "Derive the backend failure message when the reviewer LLM response parsed,
-   but the underlying invocation still failed."
-  [response llm-review]
-  (if-let [message (:message (llm/get-error response))]
-    message
-    (or (first (:review/blocking-issues llm-review))
-        "Reviewer LLM invocation failed after producing a review artifact")))
-
-(defn- backend-timeout-issue?
-  [message]
-  (boolean
-   (and (string? message)
-        (re-find #"(?i)(adaptive timeout|stagnation timeout|timed out|stream-idle|timeout)"
-                 message))))
-
-(defn- timeout-only-review?
-  "True when a parsed review artifact is just reflecting the reviewer backend's
-   own timeout rather than providing actionable code-review findings."
-  [llm-review gate-result]
-  (let [blocking-issues (vec (:review/blocking-issues llm-review))
-        recommendations (vec (:review/recommendations llm-review))
-        issues (vec (:review/issues llm-review))
-        negative-decision? (contains? #{:rejected :changes-requested}
-                                      (:review/decision llm-review))]
-    (and negative-decision?
-         (= :approved (:decision gate-result))
-         (seq blocking-issues)
-         (empty? recommendations)
-         (empty? issues)
-         (every? backend-timeout-issue? blocking-issues))))
-
-(defn llm-issues->recommendations
-  "Extract suggestions from LLM issues as recommendations."
-  [issues]
-  (->> issues
-       (filter :suggestion)
-       (mapv (fn [{:keys [file description suggestion]}]
-               (str (when file (str "[" file "] "))
-                    description " -> " suggestion)))))
+;; LLM-response parsing, failure-message resolution, backend-timeout
+;; detection, and enumeration-retry validator/recovery moved to
+;; ai.miniforge.agent.reviewer.llm-response (PR-F decomposition).
+;; llm-issues->recommendations moved to reviewer.issues (PR-F) — same
+;; shape as its blocking/warning siblings already there.
 
 ;------------------------------------------------------------------------------ Layer 3
 ;; Review validation and repair
@@ -306,67 +240,9 @@
 ;------------------------------------------------------------------------------ Layer 5
 ;; Agent creation
 
-;;----------------------------------------------------------------------------- Enumeration-retry validator
-;; A rejection without enumerated :blocking findings is malformed (the
-;; implementer cannot act on it). Mirrors the planner/implementer
-;; submission-recovery pattern but for the reviewer's *output shape* — re-runs
-;; the reviewer once with an enumeration-retry prompt that demands the inline
-;; list. The reviewer doesn't use artifact-session/worktree-promotion, so the
-;; retry is a direct LLM call (not the session-wrapped run-recovery-session).
-
-;; Decision enums + `review-has-blocking?` moved to
-;; ai.miniforge.agent.reviewer.issues (PR-C decomposition).
-
-(defn- enumeration-retry?
-  "True when the LLM's review decision is a rejection but it enumerated NO
-   :blocking findings AND the deterministic gates have no blocking issues
-   either — a malformed rejection the implementer cannot act on. The validator
-   rejects this review and demands a re-enumeration."
-  [llm-decision llm-issues gate-blocking]
-  (and (contains? issues/rejection-decisions llm-decision)
-       (not (issues/review-has-blocking? llm-issues))
-       (empty? gate-blocking)))
-
-;; enumeration-retry-prompt moved to reviewer.prompts (PR-E).
-
-(defn- well-formed-recovery?
-  "True when a re-reviewed ReviewArtifact resolves the malformed-rejection
-   case: either it now enumerates :blocking findings, OR it correctly
-   concludes :approved / :conditionally-approved (the retry template
-   explicitly allows that — discarding it would leave the original malformed
-   rejection in place and re-introduce the churn the validator exists to
-   eliminate)."
-  [re-review]
-  ;; The raw `:review/decision` is read directly (not re-normalized) to keep
-  ;; this insulated from future `normalize-llm-decision` changes — but we
-  ;; MUST validate it is one of the ReviewArtifact enums first
-  ;; (`parse-review-response` doesn't check), otherwise a typo or nil decision
-  ;; would slip past as "non-rejection" and get collapsed downstream to
-  ;; :changes-requested — defeating the whole validator.
-  (let [dec (:review/decision re-review)]
-    (and (contains? issues/valid-decisions dec)
-         (or (not (contains? issues/rejection-decisions dec))
-             (issues/review-has-blocking? (get re-review :review/issues []))))))
-
-(defn- recover-review-enumeration
-  "Run ONE bounded enumeration-retry turn and return the re-parsed
-   ReviewArtifact when the recovery is well-formed (enumerates blockers OR
-   corrects to a non-rejection decision), or nil when recovery ALSO produced
-   a malformed rejection — in which case the original raw rejection stands
-   as-is."
-  [llm-client base-opts on-chunk user-prompt prior-content]
-  (let [retry-prompt (reviewer-prompts/enumeration-retry-prompt user-prompt prior-content)
-        retry-opts   (assoc base-opts :max-turns
-                            (get @reviewer-prompts/reviewer-prompt-data
-                                 :prompt/enumeration-retry-max-turns 6))
-        response     (if on-chunk
-                       (llm/chat-stream llm-client retry-prompt on-chunk retry-opts)
-                       (llm/chat llm-client retry-prompt retry-opts))
-        normalized   (result-boundary/normalize-llm-result
-                      {:response response :parse-response parse-review-response})
-        re-review    (:parsed-content normalized)]
-    (when (and re-review (well-formed-recovery? re-review))
-      re-review)))
+;; Enumeration-retry validator + well-formed-recovery? +
+;; recover-review-enumeration moved to ai.miniforge.agent.reviewer.llm-response
+;; (PR-F decomposition).
 
 (defn create-reviewer
   "Create a Reviewer agent with optional configuration overrides.
@@ -448,7 +324,7 @@
                              (llm/chat llm-client user-prompt base-opts))
                   normalized (result-boundary/normalize-llm-result
                               {:response response
-                               :parse-response parse-review-response})
+                               :parse-response llm-response/parse-review-response})
                   content (:content normalized)
                   tokens (:tokens normalized)
                   cost-usd (:cost-usd normalized)]
@@ -460,14 +336,14 @@
 
               (let [;; Parse LLM review
                     llm-review (:parsed-content normalized)
-                    parse-failure-message (review-failure-message response content)
+                    parse-failure-message (llm-response/review-failure-message response content)
                     parse-failed? (nil? llm-review)
                     ;; Run deterministic gates
                     gate-feedbacks (gates/run-gates-on-artifact gates artifact context logger)
                     gate-result (gates/make-review-decision gate-feedbacks config)
                     counts (gates/calculate-gate-counts gate-feedbacks)
-                    timeout-failure-message (backend-failure-message response llm-review)
-                    timeout-only-review? (timeout-only-review? llm-review gate-result)
+                    timeout-failure-message (llm-response/backend-failure-message response llm-review)
+                    timeout-only-review? (llm-response/timeout-only-review? llm-review gate-result)
                     ;; "initial" = the first-call decision/issues fed into the
                     ;; enumeration validator. Named to contrast with
                     ;; `recovered-review` below; these are already normalized,
@@ -510,7 +386,7 @@
                     ;; enumeration-retry prompt; use the recovered review iff
                     ;; it now lists blockers OR corrects to a non-rejection.
                     ;; Otherwise the initial rejection stands as-is.
-                    recovered-review (when (enumeration-retry?
+                    recovered-review (when (llm-response/enumeration-retry?
                                             initial-llm-decision initial-llm-issues
                                             (:blocking-issues gate-result))
                                        (log/info logger :reviewer
@@ -518,7 +394,7 @@
                                                  {:data {:initial-decision    initial-llm-decision
                                                          :initial-issue-count (count initial-llm-issues)
                                                          :gate-blocking-count (count (:blocking-issues gate-result))}})
-                                       (recover-review-enumeration
+                                       (llm-response/recover-review-enumeration
                                         llm-client base-opts on-chunk
                                         user-prompt content))
                     ;; When recovery succeeds, the first call's parse failure
@@ -577,7 +453,7 @@
                                        (issues/llm-issues->warning-strings llm-issues))
 
                     ;; Merge recommendations
-                    llm-recs (llm-issues->recommendations llm-issues)
+                    llm-recs (issues/llm-issues->recommendations llm-issues)
 
                     ;; Build summary
                     summary (or llm-summary

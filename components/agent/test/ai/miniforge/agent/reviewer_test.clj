@@ -337,32 +337,8 @@
         (is (= parseable-backend-failure-token-count
                (get-in result [:metrics :tokens])))))))
 
-(deftest test-reviewer-rejects-structurally-corrupt-llm-issues
-  (testing "valid EDN with malformed issue maps is treated as unparseable"
-    (is (nil? (reviewer/parse-review-response malformed-review-issue-content)))))
-
-(deftest test-reviewer-accepts-issues-with-nil-line
-  ;; Reproduces the 2026-05-16 event-log-tool-visibility dogfood
-  ;; gate-vs-verdict mismatch: the LLM emitted :line nil on a
-  ;; file-level issue. The schema's pre-fix shape
-  ;; (`{:optional true} [:int {:min 1}]`) silently rejected the issue,
-  ;; parser returned nil, parse-failed? flipped llm-decision to
-  ;; :rejected, and the :review-approved gate correctly rejected a
-  ;; decision that should have been :approved. With :line wrapped in
-  ;; :maybe, explicit nil now round-trips through the parser.
-  (testing "issue with :line nil parses with :review/decision intact"
-    (let [parsed (reviewer/parse-review-response approved-with-nil-line-content)]
-      (is (some? parsed) "parser must not return nil for a nil-line issue")
-      (is (= :approved (:review/decision parsed)))
-      (is (= 2 (count (:review/issues parsed))))
-      (is (nil? (:line (first (:review/issues parsed))))
-          ":line nil must round-trip through the parser, not get dropped"))))
-
-(deftest test-reviewer-accepts-issues-with-all-optional-fields-nil
-  (testing "issue with :file nil, :line nil, :suggestion nil parses cleanly"
-    (let [parsed (reviewer/parse-review-response approved-with-nil-optional-fields-content)]
-      (is (some? parsed))
-      (is (= :approved (:review/decision parsed))))))
+;; parse-review-response tests (incl. malformed-issue, nil-line, all-nil-
+;; optional) moved to reviewer/llm_response_test.clj (PR-F).
 
 (deftest test-reviewer-timeout-only-parseable-failure-is-agent-error
   (testing "timeout-only parsed review failures do not become rejected code-review artifacts"
@@ -886,113 +862,9 @@
             ;; assertion is just that we didn't NPE or get nil.
             (is (pos? (count system-prompt)))))))))
 
-;;----------------------------------------------------------------------------- Enumeration-retry validator
-
-(def ^:private enumeration-retry? #'reviewer/enumeration-retry?)
-
-(deftest enumeration-retry-fires-on-rejection-without-blockers
-  (testing "a :rejected (or :changes-requested) decision with NO :blocking
-            findings inline AND no gate blockers is malformed — the validator
-            triggers a re-enumeration"
-    (is (true? (boolean (enumeration-retry? :rejected           [] []))))
-    (is (true? (boolean (enumeration-retry? :changes-requested  [] []))))
-    (is (true? (boolean (enumeration-retry? :rejected
-                                            [{:severity :warning :description "nit"}]
-                                            []))))))
-
-(deftest enumeration-retry-no-fire-when-blockers-enumerated
-  (testing "a rejection with an inline :blocking finding is well-formed"
-    (is (false? (boolean (enumeration-retry?
-                          :rejected
-                          [{:severity :blocking :description "real issue"}]
-                          []))))))
-
-(deftest enumeration-retry-no-fire-when-gate-blocks
-  (testing "a rejection backed by a deterministic gate blocker is well-formed
-            (the implementer has something concrete to fix)"
-    (is (false? (boolean (enumeration-retry?
-                          :rejected [] ["gate-blocking-issue"]))))))
-
-(deftest enumeration-retry-no-fire-on-non-rejection
-  (testing ":approved / :conditionally-approved never trigger the validator"
-    (is (false? (boolean (enumeration-retry? :approved [] []))))
-    (is (false? (boolean (enumeration-retry? :conditionally-approved [] []))))))
-
-;;----------------------------------------------------------------------------- well-formed-recovery? + recover-review-enumeration
-
-(def ^:private well-formed-recovery? #'reviewer/well-formed-recovery?)
-(def ^:private recover-review-enumeration #'reviewer/recover-review-enumeration)
-
-(deftest well-formed-recovery-accepts-approval-correction
-  (testing ":approved / :conditionally-approved from the retry are well-formed
-            — the retry template explicitly permits self-correction, and
-            DISCARDING those would leave the original malformed rejection
-            in place (the exact churn the validator exists to eliminate)"
-    (is (true? (well-formed-recovery? {:review/decision :approved
-                                       :review/issues []})))
-    (is (true? (well-formed-recovery? {:review/decision :conditionally-approved
-                                       :review/issues [{:severity :nit
-                                                        :description "trivial"}]})))))
-
-(deftest well-formed-recovery-accepts-enumerated-rejection
-  (is (true? (well-formed-recovery?
-              {:review/decision :rejected
-               :review/issues   [{:severity :blocking :description "real issue"}]}))))
-
-(deftest well-formed-recovery-rejects-rejection-without-blockers
-  (is (false? (well-formed-recovery?
-               {:review/decision :rejected :review/issues []}))))
-
-(deftest recover-review-enumeration-returns-approval-correction-test
-  (testing "when the retry corrects to :approved, recovery returns it
-            (regression guard: previously it required :blocking and
-            silently dropped approvals)"
-    (let [calls (atom 0)
-          stub  "```clojure\n{:review/decision :approved
-                              :review/summary \"clean on re-review\"
-                              :review/issues []}\n```"]
-      (with-redefs [llm/chat (fn [_client _prompt _opts]
-                               (swap! calls inc)
-                               {:success true :content stub})]
-        (let [recovered (recover-review-enumeration
-                         :stub-client {} nil "orig user prompt" "prior malformed content")]
-          (is (= 1 @calls) "exactly one retry LLM call")
-          (is (= :approved (:review/decision recovered))))))))
-
-(deftest recover-review-enumeration-returns-enumerated-rejection-test
-  (testing "when the retry enumerates :blocking findings, recovery returns it"
-    (let [stub "```clojure\n{:review/decision :rejected
-                             :review/issues [{:severity :blocking :description \"x\"}]}\n```"]
-      (with-redefs [llm/chat (fn [_client _prompt _opts]
-                               {:success true :content stub})]
-        (let [recovered (recover-review-enumeration
-                         :stub-client {} nil "orig" "prior")]
-          (is (= :rejected (:review/decision recovered)))
-          (is (= 1 (count (:review/issues recovered)))))))))
-
-(deftest recover-review-enumeration-returns-nil-on-still-malformed-test
-  (testing "when the retry ALSO returns a rejection with no blockers,
-            recovery returns nil (the raw rejection stands as-is, logged)"
-    (let [stub "```clojure\n{:review/decision :rejected :review/issues []}\n```"]
-      (with-redefs [llm/chat (fn [_client _prompt _opts]
-                               {:success true :content stub})]
-        (is (nil? (recover-review-enumeration
-                   :stub-client {} nil "orig" "prior")))))))
-
+;; Enumeration-retry validator, well-formed-recovery?, recover-review-
+;; enumeration tests moved to reviewer/llm_response_test.clj (PR-F).
 ;; normalize-llm-decision tests moved to reviewer/issues_test.clj (PR-C).
-
-(deftest well-formed-recovery-rejects-unknown-decision-keyword
-  (testing "an invalid :review/decision (typo / nil / unknown) is NOT
-            well-formed — parse-review-response doesn't validate the enum,
-            so the validator must, otherwise downstream normalize-llm-decision
-            would collapse the bogus value to :changes-requested and
-            reintroduce the malformed-rejection outcome"
-    (is (false? (well-formed-recovery? {:review/decision :approve  ; typo
-                                        :review/issues []})))
-    (is (false? (well-formed-recovery? {:review/decision nil
-                                        :review/issues []})))
-    (is (false? (well-formed-recovery? {:review/decision :looks-good
-                                        :review/issues []})))))
 
 ;------------------------------------------------------------------------------ Scope-boundary tests
 ;; The reviewer prompt and helper resolve a per-task scope so adjacent-file

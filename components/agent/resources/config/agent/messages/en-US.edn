@@ -41,4 +41,21 @@
   ;; Reviewer gates — gate-execution exception. {cause} is the underlying
   ;; exception message; used as the :message on a fail-closed feedback entry.
   :reviewer.gates/exception
-  "Gate execution failed: {cause}"}}
+  "Gate execution failed: {cause}"
+
+  ;; Reviewer LLM-response — the LLM returned content but it could not be
+  ;; parsed into the canonical ReviewArtifact shape. Surfaces as a blocking
+  ;; issue on the resulting review.
+  :reviewer.llm-response/unparseable
+  "Reviewer LLM output could not be parsed into a review artifact"
+
+  ;; Reviewer LLM-response — the LLM invocation itself failed before any
+  ;; content reached the parser (network error, missing API key, etc.).
+  :reviewer.llm-response/invocation-failed-pre-parse
+  "Reviewer LLM invocation failed before producing a review artifact"
+
+  ;; Reviewer LLM-response — the LLM produced parseable content but the
+  ;; underlying invocation still flagged failure (used as a fallback when
+  ;; no other error message and no inline :review/blocking-issues exist).
+  :reviewer.llm-response/invocation-failed-post-parse
+  "Reviewer LLM invocation failed after producing a review artifact"}}
