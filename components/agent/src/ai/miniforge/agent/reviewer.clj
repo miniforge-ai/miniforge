@@ -24,6 +24,7 @@
    [ai.miniforge.agent.model :as model]
    [ai.miniforge.agent.prompts :as prompts]
    [ai.miniforge.agent.result-boundary :as result-boundary]
+   [ai.miniforge.agent.reviewer.gates :as gates]
    [ai.miniforge.agent.reviewer.issues :as issues]
    [ai.miniforge.agent.reviewer.scope :as scope]
    [ai.miniforge.agent.role-config :as role-config]
@@ -63,230 +64,9 @@
    resources."
   20)
 
-;------------------------------------------------------------------------------ Layer 1
-;; Gate running and feedback
-
-(defn gate-result->feedback
-  "Convert a loop gate result to reviewer feedback format.
-
-   Gate identity resolution order:
-     1. `:gate/id`   on the result   (populated by `loop/pass-result`
-                                      and `loop/fail-result`)
-     2. `:gate/id`   on the gate     (rare — not set by current records,
-                                      kept for forward-compat)
-     3. `:id`        on the gate     (the plain field on SyntaxGate /
-                                      LintGate / TestGate / PolicyGate /
-                                      CustomGate records)
-     4. `:unknown`   final fallback
-
-   Gate-type resolution differs slightly. Only `CustomGate` carries a
-   `type-kw` field on the record itself; the other gate records hard-
-   code their type at construction (e.g. `SyntaxGate` always passes
-   `:syntax` into the result via `loop/pass-result`). So:
-     1. `:gate/type` on the result
-     2. `:gate/type` on the gate
-     3. `:type-kw`   on the gate     (CustomGate only)
-     4. `:unknown`
-
-   Before this two-step resolution every failing gate surfaced as
-   `:unknown` in the `:failing-gate-ids` diagnostic and the 2026-05-18
-   dogfood couldn't tell which gate flipped its LLM verdict."
-  [gate result]
-  (let [gate-id   (or (:gate/id result) (:gate/id gate) (:id gate) :unknown)
-        gate-type (or (:gate/type result) (:gate/type gate) (:type-kw gate) :unknown)
-        passed?   (:gate/passed? result true)
-        errors    (:gate/errors result [])
-        warnings  (:gate/warnings result [])]
-    {:gate-id gate-id
-     :gate-type gate-type
-     :passed? passed?
-     :errors errors
-     :warnings warnings
-     :duration-ms (get result :gate/duration-ms 0)}))
-
-(defn create-exception-feedback
-  "Create error feedback when gate throws exception."
-  [gate idx exception duration]
-  {:gate-id (or (:gate/id gate) (keyword (str "gate-" idx)))
-   :gate-type :unknown
-   :passed? false
-   :errors [{:type :gate-exception
-             :message (str "Gate execution failed: " (ex-message exception))}]
-   :duration-ms duration})
-
-(defn run-single-gate
-  "Run a single gate and return feedback with timing.
-   Handles exceptions gracefully."
-  [gate idx artifact context logger]
-  (let [gate-start (System/currentTimeMillis)
-        gate-id (:gate/id gate :unknown)]
-    (log/debug logger :reviewer :reviewer/gate-start
-               {:data {:gate-idx idx :gate-id gate-id}})
-    (try
-      (let [result (loop/check-gate gate artifact context)
-            duration (- (System/currentTimeMillis) gate-start)
-            feedback (gate-result->feedback gate result)]
-        (log/info logger :reviewer :reviewer/gate-complete
-                  {:data {:gate-id (:gate-id feedback)
-                          :passed? (:passed? feedback)
-                          :duration-ms duration}})
-        (assoc feedback :duration-ms duration))
-      (catch Exception e
-        (let [duration (- (System/currentTimeMillis) gate-start)]
-          (log/error logger :reviewer :reviewer/gate-error
-                     {:data {:gate-idx idx
-                             :error (ex-message e)}})
-          (create-exception-feedback gate idx e duration))))))
-
-(defn run-gates-on-artifact
-  "Run all gates on the artifact and collect results.
-   Returns vector of GateFeedback maps."
-  [gates artifact context logger]
-  (log/info logger :reviewer :reviewer/running-gates
-            {:data {:gate-count (count gates)}})
-  (->> gates
-       (map-indexed (fn [idx gate]
-                      (run-single-gate gate idx artifact context logger)))
-       vec))
-
-(defn implementation-handoff-gate
-  "Reject degraded implement handoffs before semantic review.
-
-   This catches environment-model cases where implement recovered a code artifact
-   from disk after an agent-side failure, or where the curator flagged
-   out-of-scope writes. Both are strong signals that review must not silently
-   approve the handoff."
-  []
-  (loop/custom-gate
-   :implementation-handoff
-   :policy
-   (fn [artifact _context]
-     (let [degraded? (true? (:code/degraded-handoff? artifact))
-           scope-deviations (vec (:code/scope-deviations artifact))
-           errors (cond-> []
-                    degraded?
-                    (conj (loop/make-error
-                           :degraded-implement-handoff
-                           "Implement handoff is degraded: the artifact was recovered after an implementer-side failure"))
-                    (seq scope-deviations)
-                    (conj (loop/make-error
-                           :scope-deviations
-                           (str "Artifact includes out-of-scope writes: "
-                                (str/join ", " scope-deviations)))))]
-       (if (seq errors)
-         (loop/fail-result :implementation-handoff :policy errors)
-         (loop/pass-result :implementation-handoff :policy))))))
-
-(def ^:private advisory-gate-types
-  "Internal gate types whose failure is advisory — it must NOT override an
-   LLM :approved verdict. Only :lint qualifies: a style/formatting failure on
-   a build that already passed verify is not a ship-blocker, and treating it
-   as one flipped verify-passed, LLM-:approved builds to :rejected, capping
-   every dogfood spec at the :review-approved gate (observed 2026-05-24,
-   workflow adhoc-807481487).
-
-   Every other gate type blocks by default — fail-safe. That deliberately
-   includes unresolved `:unknown` and gate-execution exceptions
-   (`create-exception-feedback` produces `:unknown` errors with no
-   `:severity`): a gate that crashed must block review, never silently
-   approve."
-  #{:lint})
-
-(defn- error-blocking?
-  "An internal-gate error is non-blocking only when it explicitly declares a
-   non-:blocking severity, or — absent an explicit severity — comes from an
-   advisory gate type. Everything else blocks (fail-safe), so an unresolved
-   `:unknown` gate type or a gate crash cannot pass review open."
-  [gate-type error]
-  (if-let [severity (:severity error)]
-    (= :blocking severity)
-    (not (contains? advisory-gate-types gate-type))))
-
-(defn extract-blocking-issues
-  "Extract blocking errors from failed gates, honoring per-error severity and
-   gate type (see `error-blocking?`). Errors from advisory gates such as
-   :lint no longer force a rejection of an otherwise-approved review."
-  [failed-gates]
-  (->> failed-gates
-       (mapcat (fn [{:keys [gate-type errors]}]
-                 (filter #(error-blocking? gate-type %) errors)))
-       vec))
-
-(defn extract-warning-messages
-  "Extract warning messages from all gates."
-  [gate-feedbacks]
-  (->> gate-feedbacks
-       (mapcat :warnings)
-       (map :message)
-       vec))
-
-(defn extract-error-messages
-  "Extract error messages from failed gates."
-  [failed-gates]
-  (->> failed-gates
-       (mapcat :errors)
-       (map :message)
-       vec))
-
-(defn decide-on-failures
-  "Determine decision when there are gate failures."
-  [failed-gates blocking-issues config]
-  (if (seq blocking-issues)
-    {:decision :rejected
-     :blocking-issues (mapv :message blocking-issues)
-     :warnings []}
-    {:decision (if (:strict config false) :rejected :conditionally-approved)
-     :blocking-issues (if (:strict config)
-                        (extract-error-messages failed-gates)
-                        [])
-     :warnings (extract-error-messages failed-gates)}))
-
-(defn make-review-decision
-  "Determine review decision based on gate results."
-  [gate-feedbacks config]
-  (let [failed (filter (complement :passed?) gate-feedbacks)
-        failed-count (count failed)]
-    (if (zero? failed-count)
-      {:decision :approved
-       :blocking-issues []
-       :warnings (extract-warning-messages gate-feedbacks)}
-      (let [blocking-issues (extract-blocking-issues failed)]
-        (decide-on-failures failed blocking-issues config)))))
-
-(defn generate-summary
-  "Generate human-readable summary of review."
-  [decision gate-feedbacks]
-  (let [passed (filter :passed? gate-feedbacks)
-        failed (filter (complement :passed?) gate-feedbacks)
-        total (count gate-feedbacks)]
-    (case decision
-      :approved
-      (format "Review approved: All %d gates passed" total)
-
-      :rejected
-      (format "Review rejected: %d/%d gates failed with blocking issues"
-              (count failed) total)
-
-      :conditionally-approved
-      (format "Conditionally approved: %d/%d gates passed, %d non-blocking issues"
-              (count passed) total (count failed))
-
-      ;; default for :changes-requested or other LLM-sourced decisions
-      (format "Review complete: %s (%d gates evaluated)" (name decision) total))))
-
-(defn generate-recommendations
-  "Generate recommendations based on gate results."
-  [gate-feedbacks]
-  (->> gate-feedbacks
-       (filter (complement :passed?))
-       (mapcat (fn [feedback]
-                 (map (fn [error]
-                        (str "[" (name (:gate-id feedback)) "] "
-                             (:message error)
-                             (when-let [fix (:fix-suggestion error)]
-                               (str " -> " fix))))
-                      (:errors feedback))))
-       vec))
+;; Gate plumbing, error classification, deterministic decision, summary,
+;; and gate counts moved to ai.miniforge.agent.reviewer.gates (PR-D
+;; decomposition). reviewer.clj orchestrates them via the `gates/` alias.
 
 ;------------------------------------------------------------------------------ Layer 2
 ;; LLM review: prompt building and response parsing
@@ -474,7 +254,7 @@
     ;; Fix missing summary
     (when-not (:review/summary @repaired)
       (swap! repaired assoc :review/summary
-             (generate-summary (:review/decision @repaired)
+             (gates/generate-summary (:review/decision @repaired)
                                (:review/gate-results @repaired))))
 
     {:status :success
@@ -492,13 +272,7 @@
                         (random-uuid))]
     [artifact artifact-id]))
 
-(defn calculate-gate-counts
-  "Calculate passed, failed, and total gate counts."
-  [gate-feedbacks]
-  (let [passed (count (filter :passed? gate-feedbacks))
-        failed (count (filter (complement :passed?) gate-feedbacks))
-        total (count gate-feedbacks)]
-    {:passed passed :failed failed :total total}))
+;; calculate-gate-counts moved to reviewer.gates (PR-D).
 
 (defn build-review-artifact
   "Build the review artifact from gate results, LLM feedback, and decision."
@@ -507,14 +281,14 @@
   (cond-> {:review/id (random-uuid)
            :review/decision decision
            :review/gate-results gate-feedbacks
-           :review/summary (or summary (generate-summary decision gate-feedbacks))
+           :review/summary (or summary (gates/generate-summary decision gate-feedbacks))
            :review/artifact-id artifact-id
            :review/gates-passed (:passed counts)
            :review/gates-failed (:failed counts)
            :review/gates-total (:total counts)
            :review/blocking-issues blocking-issues
            :review/warnings warnings
-           :review/recommendations (generate-recommendations gate-feedbacks)
+           :review/recommendations (gates/generate-recommendations gate-feedbacks)
            :review/created-at (java.util.Date.)}
     (seq issues) (assoc :review/issues issues)
     (seq strengths) (assoc :review/strengths strengths)
@@ -535,21 +309,7 @@
                      :tokens tokens}
               cost-usd (assoc :cost-usd cost-usd))})
 
-(defn merge-gate-overrides
-  "If gates failed, override the LLM decision accordingly."
-  [llm-decision gate-decision config]
-  (cond
-    ;; Gate rejection always wins
-    (= :rejected gate-decision)
-    :rejected
-
-    ;; Gate conditional-approval downgrades LLM approval
-    (and (= :approved llm-decision) (= :conditionally-approved gate-decision))
-    (if (:strict config) :rejected :conditionally-approved)
-
-    ;; Otherwise use LLM decision
-    :else
-    llm-decision))
+;; merge-gate-overrides moved to reviewer.gates (PR-D).
 
 ;------------------------------------------------------------------------------ Layer 4b
 ;; Phase lifecycle telemetry
@@ -717,7 +477,7 @@
   (let [logger (or (:logger opts)
                    (log/create-logger {:min-level :info :output (fn [_])}))
         default-gates [(loop/syntax-gate)
-                       (implementation-handoff-gate)
+                       (gates/implementation-handoff-gate)
                        (loop/lint-gate)
                        (loop/policy-gate :security {:policies [:no-secrets]})]
         gates (get opts :gates default-gates)
@@ -788,9 +548,9 @@
                     parse-failure-message (review-failure-message response content)
                     parse-failed? (nil? llm-review)
                     ;; Run deterministic gates
-                    gate-feedbacks (run-gates-on-artifact gates artifact context logger)
-                    gate-result (make-review-decision gate-feedbacks config)
-                    counts (calculate-gate-counts gate-feedbacks)
+                    gate-feedbacks (gates/run-gates-on-artifact gates artifact context logger)
+                    gate-result (gates/make-review-decision gate-feedbacks config)
+                    counts (gates/calculate-gate-counts gate-feedbacks)
                     timeout-failure-message (backend-failure-message response llm-review)
                     timeout-only-review? (timeout-only-review? llm-review gate-result)
                     ;; "initial" = the first-call decision/issues fed into the
@@ -888,7 +648,7 @@
 
                     ;; Merge decisions: gates can override LLM
                     final-decision (if llm-decision
-                                     (merge-gate-overrides llm-decision (:decision gate-result) config)
+                                     (gates/merge-gate-overrides llm-decision (:decision gate-result) config)
                                      (:decision gate-result))
 
                     ;; Merge issues from both sources
@@ -906,7 +666,7 @@
 
                     ;; Build summary
                     summary (or llm-summary
-                                (generate-summary final-decision gate-feedbacks))
+                                (gates/generate-summary final-decision gate-feedbacks))
 
                     review (cond-> (build-review-artifact
                                     gate-feedbacks final-decision all-blocking all-warnings
@@ -966,9 +726,9 @@
                     (build-review-result review counts duration tokens :cost-usd cost-usd)))))
 
             ;; No LLM — gate-only fallback
-            (let [gate-feedbacks (run-gates-on-artifact gates artifact context logger)
-                  {:keys [decision blocking-issues warnings]} (make-review-decision gate-feedbacks config)
-                  counts (calculate-gate-counts gate-feedbacks)
+            (let [gate-feedbacks (gates/run-gates-on-artifact gates artifact context logger)
+                  {:keys [decision blocking-issues warnings]} (gates/make-review-decision gate-feedbacks config)
+                  counts (gates/calculate-gate-counts gate-feedbacks)
                   review (build-review-artifact gate-feedbacks decision blocking-issues warnings artifact-id counts)
                   duration (- (System/currentTimeMillis) start-time)]
 
