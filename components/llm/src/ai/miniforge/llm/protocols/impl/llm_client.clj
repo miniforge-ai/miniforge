@@ -887,10 +887,12 @@
       exits cleanly.
    2. Clean shutdown via `stop-stream-reader!` — the consumer
       (`process-stream-lines`) has stopped polling, so `stop-stream-reader!`
-      closes the reader and calls `.interrupt`. The reader may be blocked in
-      either `.readLine` (unblocks due to close/EOF or an IOException) or `.put`
-      (unblocks via `InterruptedException`).
-      publish.
+      closes the reader and calls `.interrupt`. `BufferedReader.readLine`
+      is NOT interruptible, so a reader blocked there unblocks via the
+      `.close` (the read returns nil or throws `IOException`). A reader
+      blocked in `.put` on a full queue unblocks via the `.interrupt` and
+      raises `InterruptedException`. Both cases land in the same silent
+      catch: the consumer already left the queue; no anomaly to publish.
    3. Real read error — surface as a `stream-read-failure` anomaly so the
       consumer sees it. The inner try/catch around the anomaly enqueue
       guards against a sticky-interrupt race during cleanup (the thread's
