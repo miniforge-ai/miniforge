@@ -108,6 +108,7 @@
   :env/restore-failed       "Workspace restore failed: {error}"
 
   ;; v2 multi-parent merge (DAG orchestrator) — anomaly + log messages
+  :dag.merge/branch-name-invalid      "Parent branch name is structurally invalid (empty, leading dash, or whitespace)"
   :dag.merge/branch-unresolvable     "Parent branch could not be resolved to a commit"
   :dag.merge/unrelated-histories     "Parents share no common ancestor — refusing to merge"
   :dag.merge/strategy-unsupported    "Merge strategy {strategy} is not supported in this stage"
