@@ -24,6 +24,7 @@
    [ai.miniforge.agent.planner :as planner]
    [ai.miniforge.agent.releaser :as releaser]
    [ai.miniforge.agent.reviewer :as reviewer]
+   [ai.miniforge.agent.reviewer.artifact :as reviewer-artifact]
    [ai.miniforge.agent.reviewer.issues :as reviewer-issues]
    [ai.miniforge.agent.tester :as tester]
    [ai.miniforge.agent.protocols.records.specialized :as specialized-records]
@@ -79,17 +80,17 @@
 (def coverage-meets-threshold? tester/coverage-meets-threshold?)
 (def tests-by-path tester/tests-by-path)
 (def validate-test-artifact tester/validate-test-artifact)
-(def review-summary reviewer/review-summary)
-(def approved? reviewer/approved?)
-(def rejected? reviewer/rejected?)
-(def conditionally-approved? reviewer/conditionally-approved?)
-(def get-blocking-issues reviewer/get-blocking-issues)
-(def get-review-warnings reviewer/get-warnings)
-(def get-recommendations reviewer/get-recommendations)
-(def changes-requested? reviewer/changes-requested?)
-(def get-review-issues reviewer/get-issues)
-(def get-review-strengths reviewer/get-strengths)
-(def validate-review-artifact reviewer/validate-review-artifact)
+(def review-summary reviewer-artifact/review-summary)
+(def approved? reviewer-artifact/approved?)
+(def rejected? reviewer-artifact/rejected?)
+(def conditionally-approved? reviewer-artifact/conditionally-approved?)
+(def get-blocking-issues reviewer-artifact/get-blocking-issues)
+(def get-review-warnings reviewer-artifact/get-warnings)
+(def get-recommendations reviewer-artifact/get-recommendations)
+(def changes-requested? reviewer-artifact/changes-requested?)
+(def get-review-issues reviewer-artifact/get-issues)
+(def get-review-strengths reviewer-artifact/get-strengths)
+(def validate-review-artifact reviewer-artifact/validate-review-artifact)
 ;; Repair-loop fingerprint helpers — moved to
 ;; components/progress-detector/.../detectors/repair-loop in Stage 2.
 ;; These re-exports stay for backward compatibility; phase-software-factory
