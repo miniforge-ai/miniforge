@@ -107,10 +107,18 @@ function addFilterChip(label, type, value) {
   const chip = document.createElement('div');
   chip.className = 'filter-chip';
   chip.setAttribute('data-filter-key', filterKey);
-  chip.innerHTML = `
-    <span class="filter-label">${label}</span>
-    <button class="filter-remove" onclick="window.miniforge.removeFilterChip('${filterKey}')" title="Remove filter">×</button>
-  `;
+
+  const labelEl = document.createElement('span');
+  labelEl.className = 'filter-label';
+  labelEl.textContent = label;
+  chip.appendChild(labelEl);
+
+  const removeBtn = document.createElement('button');
+  removeBtn.className = 'filter-remove';
+  removeBtn.title = 'Remove filter';
+  removeBtn.textContent = '×';
+  removeBtn.addEventListener('click', () => removeFilterChip(filterKey));
+  chip.appendChild(removeBtn);
 
   filterChipsContainer.appendChild(chip);
 
@@ -358,9 +366,7 @@ window.miniforge = {
       }
       if (value && value.trim()) {
         const trimmed = value.trim();
-        // HTML-escape user input before it reaches addFilterChip's innerHTML label
-        const escaped = trimmed.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-        addFilterChip(`${field}: "${escaped}"`, 'text', field);
+        addFilterChip(`${field}: "${trimmed}"`, 'text', field);
       }
     },
     clearFilters(_scope) {
