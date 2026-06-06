@@ -289,3 +289,24 @@
   "Extract strengths noted by the LLM from review artifact."
   [artifact]
   (:review/strengths artifact []))
+
+(defn rejection-warnings-only?
+  "True when the review is a rejection driven exclusively by warnings (no
+   real blocking defects).
+
+   Returns true iff ALL three conditions hold:
+   1. `:review/decision` is a rejection-class decision
+      (`issues/rejection-decisions` — `:rejected` or `:changes-requested`).
+   2. `:review/blocking-issues` is empty (no hard blockers).
+   3. `:review/warnings` is non-empty (there are warning-level nits).
+
+   This is the cause-classification primitive that `leave-review` (and
+   downstream phase logic) needs to distinguish a genuine-defect rejection
+   from nit-churn: a rejection where every complaint is advisory-only
+   warrants a different response (e.g. skip-redirect) versus one where at
+   least one true blocker exists."
+  [artifact]
+  (boolean
+   (and (contains? issues/rejection-decisions (:review/decision artifact))
+        (empty? (get artifact :review/blocking-issues []))
+        (seq (get artifact :review/warnings [])))))
