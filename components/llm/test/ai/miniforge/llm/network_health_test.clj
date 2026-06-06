@@ -17,11 +17,13 @@
 ;; limitations under the License.
 
 (ns ai.miniforge.llm.network-health-test
-  "Tests for `ai.miniforge.llm.network-health` — the connectivity probe
-   primitive that PR-B will schedule alongside the progress monitor."
+  "Tests for `ai.miniforge.llm.network-health` — the URL-driven
+   connectivity probe primitive that PR-B will schedule alongside the
+   progress monitor."
   (:require
    [clojure.test :refer [deftest is testing]]
-   [ai.miniforge.llm.network-health :as nh]))
+   [ai.miniforge.llm.network-health :as nh]
+   [ai.miniforge.llm.protocols.impl.llm-client :as impl]))
 
 ;------------------------------------------------------------------------------ Factories
 
@@ -38,106 +40,157 @@
       (swap! capture assoc :last-request request-map))
     (delay response)))
 
-;------------------------------------------------------------------------------ endpoint-for
+(defn- throwing-http-client
+  "Build an http-client stub that throws `ex` synchronously (mirroring
+   http-kit's documented dual-mode behavior where connection failures
+   can surface as a *thrown* exception rather than an `:error` map)."
+  [ex]
+  (fn [_request-map]
+    (throw ex)))
 
-(deftest endpoint-for-test
+(defn- throwing-on-deref-http-client
+  "Build an http-client stub that returns a deref-able whose `@` throws.
+   http-kit can also surface failures this way for callers that drop
+   into Java-thread land."
+  [ex]
+  (fn [_request-map]
+    (reify clojure.lang.IDeref
+      (deref [_] (throw ex)))))
+
+;------------------------------------------------------------------------------ Probe-endpoint resolution (lives in llm-client/backends)
+
+(deftest probe-endpoint-for-test
+  ;; Co-located with the rest of each backend's config in
+  ;; `llm-client/backends` — comment review on PR #1051 moved the
+  ;; lookup out of network-health so the probe primitive stays
+  ;; URL-driven and backend-agnostic.
   (testing "known backends resolve to provider-specific URLs"
-    (is (= "https://api.anthropic.com/" (nh/endpoint-for :claude)))
-    (is (= "https://api.openai.com/"     (nh/endpoint-for :codex)))
-    (is (= "https://api2.cursor.sh/"     (nh/endpoint-for :cursor)))
-    (is (= "http://localhost:11434/api/version" (nh/endpoint-for :ollama)))
-    (is (= "https://api.anthropic.com/" (nh/endpoint-for :opencode))
+    (is (= "https://api.anthropic.com/" (impl/probe-endpoint-for :claude)))
+    (is (= "https://api.openai.com/"    (impl/probe-endpoint-for :codex)))
+    (is (= "https://api2.cursor.sh/"    (impl/probe-endpoint-for :cursor)))
+    (is (= "http://localhost:11434/api/version"
+           (impl/probe-endpoint-for :ollama)))
+    (is (= "https://api.anthropic.com/" (impl/probe-endpoint-for :opencode))
         "OpenCode defaults to Anthropic — the typical provider routing"))
 
   (testing "unknown backend falls through to the generic connectivity URL"
-    (is (= nh/generic-connectivity-probe-url
-           (nh/endpoint-for :unrecognized-backend)))
-    (is (= nh/generic-connectivity-probe-url
-           (nh/endpoint-for nil))
+    (is (= "https://1.1.1.1/" (impl/probe-endpoint-for :unrecognized-backend)))
+    (is (= "https://1.1.1.1/" (impl/probe-endpoint-for nil))
         "nil backend key still resolves to the generic fallback")))
 
-;------------------------------------------------------------------------------ network-healthy?
+;------------------------------------------------------------------------------ network-healthy? (URL-driven)
 
 (deftest network-healthy?-treats-any-http-response-as-up-test
   ;; Connectivity is about TCP/TLS reach + an HTTP exchange; any status
   ;; code proves the network completed a round trip. 4xx is the common
   ;; case for an unauthenticated HEAD on api.anthropic.com (returns 405
-  ;; method-not-allowed), and 5xx still proves connectivity — only an
-  ;; absent response means the network is gone.
-  (testing "2xx response → healthy"
-    (is (nh/network-healthy?
-          :claude
-          {:http-client (stub-http-client {:status 200 :body ""})})))
+  ;; method-not-allowed), and 5xx still proves connectivity.
+  (let [test-url "https://api.example.com/"]
+    (testing "2xx response → healthy"
+      (is (nh/network-healthy?
+            test-url
+            {:http-client (stub-http-client {:status 200 :body ""})})))
 
-  (testing "4xx response → healthy (server reachable, just rejected the request)"
-    (is (nh/network-healthy?
-          :claude
-          {:http-client (stub-http-client {:status 405 :body "Method Not Allowed"})}))
-    (is (nh/network-healthy?
-          :claude
-          {:http-client (stub-http-client {:status 401 :body "Unauthorized"})})))
+    (testing "4xx response → healthy (server reachable, just rejected the request)"
+      (is (nh/network-healthy?
+            test-url
+            {:http-client (stub-http-client {:status 405 :body "Method Not Allowed"})}))
+      (is (nh/network-healthy?
+            test-url
+            {:http-client (stub-http-client {:status 401 :body "Unauthorized"})})))
 
-  (testing "5xx response → healthy (provider degraded but network is up)"
-    (is (nh/network-healthy?
-          :claude
-          {:http-client (stub-http-client {:status 503 :body "Service Unavailable"})})))
+    (testing "5xx response → healthy (provider degraded but network is up)"
+      (is (nh/network-healthy?
+            test-url
+            {:http-client (stub-http-client {:status 503 :body "Service Unavailable"})})))
 
-  (testing "3xx redirect response → healthy"
-    (is (nh/network-healthy?
-          :claude
-          {:http-client (stub-http-client {:status 301 :body ""
-                                           :headers {"Location" "https://elsewhere"}})}))))
+    (testing "3xx redirect response → healthy"
+      (is (nh/network-healthy?
+            test-url
+            {:http-client (stub-http-client {:status 301 :body ""
+                                             :headers {"Location" "https://elsewhere"}})})))))
 
 (deftest network-healthy?-treats-connection-failure-as-down-test
-  (testing ":error key (connection refused, DNS failure, etc.) → false"
-    (is (false? (nh/network-healthy?
-                  :claude
-                  {:http-client (stub-http-client
-                                  {:error (java.net.ConnectException. "Connection refused")})}))))
+  (let [test-url "https://api.example.com/"]
+    (testing ":error key (connection refused, DNS failure, etc.) → false"
+      (is (false? (nh/network-healthy?
+                    test-url
+                    {:http-client (stub-http-client
+                                    {:error (java.net.ConnectException. "Connection refused")})}))))
 
-  (testing "unknown-host exception → false"
-    (is (false? (nh/network-healthy?
-                  :claude
-                  {:http-client (stub-http-client
-                                  {:error (java.net.UnknownHostException. "no such host")})}))))
+    (testing "unknown-host exception → false"
+      (is (false? (nh/network-healthy?
+                    test-url
+                    {:http-client (stub-http-client
+                                    {:error (java.net.UnknownHostException. "no such host")})}))))
 
-  (testing "timeout exception → false"
-    (is (false? (nh/network-healthy?
-                  :claude
-                  {:http-client (stub-http-client
-                                  {:error (java.net.SocketTimeoutException. "timeout")})}))))
+    (testing "timeout exception → false"
+      (is (false? (nh/network-healthy?
+                    test-url
+                    {:http-client (stub-http-client
+                                    {:error (java.net.SocketTimeoutException. "timeout")})}))))
 
-  (testing "response missing :status field → false"
-    (is (false? (nh/network-healthy?
-                  :claude
-                  {:http-client (stub-http-client {:body "anomalous"})}))))
+    (testing "response missing :status field → false"
+      (is (false? (nh/network-healthy?
+                    test-url
+                    {:http-client (stub-http-client {:body "anomalous"})}))))
 
-  (testing "non-map response → false"
-    (is (false? (nh/network-healthy?
-                  :claude
-                  {:http-client (stub-http-client nil)})))
-    (is (false? (nh/network-healthy?
-                  :claude
-                  {:http-client (stub-http-client "not-a-map")})))))
+    (testing "non-map response → false"
+      (is (false? (nh/network-healthy?
+                    test-url
+                    {:http-client (stub-http-client nil)})))
+      (is (false? (nh/network-healthy?
+                    test-url
+                    {:http-client (stub-http-client "not-a-map")}))))))
+
+(deftest network-healthy?-treats-thrown-exception-as-down-test
+  ;; Regression for PR #1051 comment review: http-kit can surface
+  ;; connection failures as a *thrown* exception rather than an
+  ;; `:error` map. The probe must catch both shapes — otherwise it
+  ;; would throw and the PR-B scheduler loop's `(try ... (catch ...))`
+  ;; would have to absorb the failure shape network-health was
+  ;; supposed to encapsulate.
+  (let [test-url "https://api.example.com/"]
+    (testing "synchronous exception from the http-client → false"
+      (is (false? (nh/network-healthy?
+                    test-url
+                    {:http-client (throwing-http-client
+                                    (java.net.ConnectException. "Connection refused"))}))))
+
+    (testing "exception on @deref → false"
+      (is (false? (nh/network-healthy?
+                    test-url
+                    {:http-client (throwing-on-deref-http-client
+                                    (java.net.SocketTimeoutException. "timeout"))}))))
+
+    (testing "RuntimeException from either path → false (defensive)"
+      (is (false? (nh/network-healthy?
+                    test-url
+                    {:http-client (throwing-http-client
+                                    (RuntimeException. "DNS resolver crash"))})))
+      (is (false? (nh/network-healthy?
+                    test-url
+                    {:http-client (throwing-on-deref-http-client
+                                    (RuntimeException. "wat"))}))))))
 
 ;------------------------------------------------------------------------------ Request shape
 
 (deftest network-healthy?-sends-head-request-test
-  (testing "probe uses HEAD method against the resolved endpoint"
+  (testing "probe uses HEAD method against the URL it was given"
     (let [capture (atom {})]
       (nh/network-healthy?
-        :claude
+        "https://api.anthropic.com/"
         {:http-client (stub-http-client {:status 200} :capture capture)})
       (is (= :head (get-in @capture [:last-request :method])))
       (is (= "https://api.anthropic.com/"
              (get-in @capture [:last-request :url]))
-          "request URL matches the provider-specific endpoint"))))
+          "URL is the one the caller passed in — no internal mapping"))))
 
 (deftest network-healthy?-default-timeout-test
   (testing "default-probe-timeout-ms is propagated to the http-client"
     (let [capture (atom {})]
       (nh/network-healthy?
-        :claude
+        "https://api.example.com/"
         {:http-client (stub-http-client {:status 200} :capture capture)})
       (is (= nh/default-probe-timeout-ms
              (get-in @capture [:last-request :timeout]))))))
@@ -146,16 +199,7 @@
   (testing ":timeout-ms in opts overrides the default"
     (let [capture (atom {})]
       (nh/network-healthy?
-        :claude
+        "https://api.example.com/"
         {:timeout-ms  500
          :http-client (stub-http-client {:status 200} :capture capture)})
       (is (= 500 (get-in @capture [:last-request :timeout]))))))
-
-(deftest network-healthy?-unknown-backend-probes-fallback-test
-  (testing "unknown backend probes the generic connectivity URL"
-    (let [capture (atom {})]
-      (nh/network-healthy?
-        :brand-new-backend
-        {:http-client (stub-http-client {:status 200} :capture capture)})
-      (is (= nh/generic-connectivity-probe-url
-             (get-in @capture [:last-request :url]))))))

@@ -17,20 +17,23 @@
 ;; limitations under the License.
 
 (ns ai.miniforge.llm.network-health
-  "Provider-specific network health probe.
+  "URL-driven network connectivity probe.
 
-   Detects connectivity loss to the upstream LLM provider before the
+   Detects connectivity loss to an upstream HTTP endpoint before the
    per-phase progress monitor's stagnation timer would (2-3 minutes of
    dead air). The 2026-06-04 eliminate-requiring-resolve dogfood post-
-   mortem identified network drops as an undetected failure mode — the
+   mortem identified network drops as an undetected failure mode — a
    CLI agent waits on socket I/O indefinitely when its provider goes
    away, looking identical to a model 'thinking' until the slow
    stagnation cutoff fires.
 
-   This ns provides the detection primitive. PR-B will schedule it
-   alongside the progress monitor and emit a `:workflow/network-drop`
-   event on a confirmed drop; PR-C will auto-resume the workflow from
-   the last persisted checkpoint."
+   This namespace is intentionally backend-agnostic. The caller (e.g.
+   `stream-exec-fn` in PR-B) resolves the provider-specific probe URL
+   from its backend config (`backends/probe-endpoint-for`) and passes
+   that URL here. Keeping endpoint resolution out of this ns avoids a
+   require cycle with `llm-client` (which carries the backend config
+   and itself depends on the network monitor that schedules this
+   probe)."
   (:require [org.httpkit.client :as http]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -42,39 +45,6 @@
    provider responds in <500ms; a 3s ceiling tolerates a slow CDN edge
    without making the probe itself a stagnation source."
   3000)
-
-(def ^:const generic-connectivity-probe-url
-  "Fallback probe URL when a backend has no provider-specific endpoint
-   wired up (e.g. test backends, or future backends added without a
-   probe-endpoints entry). Cloudflare's public DNS endpoint is a
-   well-known low-latency connectivity check that does not bias the
-   result toward any single LLM provider."
-  "https://1.1.1.1/")
-
-(def probe-endpoints
-  "Probe URL keyed by `:llm/backend`. Each URL is a stable endpoint at
-   the provider's edge that responds to a HEAD with anything (200, 405,
-   even 4xx) — we only care that the connection completed, not the
-   response status, so any HTTP response proves connectivity.
-
-   For backends without a provider-controlled endpoint (`:echo`, future
-   custom backends), callers fall through to
-   `generic-connectivity-probe-url`."
-  {:claude   "https://api.anthropic.com/"
-   :codex    "https://api.openai.com/"
-   :opencode "https://api.anthropic.com/"           ; OpenCode's typical
-                                                    ; default provider; tunable
-                                                    ; per-deployment in PR-B.
-   :cursor   "https://api2.cursor.sh/"
-   :ollama   "http://localhost:11434/api/version"
-   :echo     generic-connectivity-probe-url})
-
-(defn endpoint-for
-  "Resolve the probe URL for `backend-key`. Returns the provider-
-   specific URL when known, the generic Cloudflare DNS connectivity
-   check otherwise."
-  [backend-key]
-  (get probe-endpoints backend-key generic-connectivity-probe-url))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Probe primitive
@@ -90,15 +60,21 @@
                 (pos-int? (:status response)))))
 
 (defn network-healthy?
-  "Probe the network path to `backend-key`'s upstream provider.
+  "Probe `probe-url` for a live HTTP response and return true/false.
 
    Returns true when the probe receives an HTTP response within
    `:timeout-ms` (any status code counts — a 4xx still proves the
-   network reached the server). Returns false on connection failure
-   (DNS, unreachable host, refused connection) or probe timeout.
+   network reached the server). Returns false on any failure mode:
+   - http-kit's response carries `:error` (DNS failure, connection
+     refused, timeout, etc.).
+   - The request map promise is missing `:status` for any reason.
+   - The http call itself throws or the `@` deref throws (http-kit can
+     surface failures via either channel; both must be treated as
+     `down` so the probe stays safe to call from the PR-B scheduler
+     loop).
 
    Options (`opts`):
-   - `:timeout-ms` — per-probe deadline; defaults to
+   - `:timeout-ms`  — per-probe deadline; defaults to
      `default-probe-timeout-ms`.
    - `:http-client` — override for tests; expects an http-kit-shaped
      function `(fn [request-map] (promise/deref-able))`. Defaults to
@@ -106,17 +82,22 @@
 
    The function intentionally has no side effects beyond the HTTP
    request — no logging, no event emission, no telemetry. PR-B layers
-   those on top so the primitive stays cheap to call from the
-   scheduler loop."
-  ([backend-key]
-   (network-healthy? backend-key {}))
-  ([backend-key {:keys [timeout-ms http-client]
-                 :or   {timeout-ms  default-probe-timeout-ms
-                        http-client http/request}}]
-   (let [endpoint (endpoint-for backend-key)
-         response @(http-client
-                    {:url     endpoint
-                     :method  :head
-                     :timeout timeout-ms
-                     :as      :text})]
-     (response-proves-connectivity? response))))
+   those on top so the primitive stays cheap to call."
+  ([probe-url]
+   (network-healthy? probe-url {}))
+  ([probe-url {:keys [timeout-ms http-client]
+               :or   {timeout-ms  default-probe-timeout-ms
+                      http-client http/request}}]
+   (try
+     (let [response @(http-client
+                       {:url     probe-url
+                        :method  :head
+                        :timeout timeout-ms
+                        :as      :text})]
+       (response-proves-connectivity? response))
+     (catch Exception _
+       ;; http-kit can also surface connection failures as a thrown
+       ;; exception (see `llm_client/http-post-request` comments).
+       ;; Swallow both shapes here so the scheduler loop never crashes
+       ;; on a probe.
+       false))))

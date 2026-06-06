@@ -599,6 +599,17 @@
   [{:keys [prompt]}]
   [prompt])
 
+;; `:probe-endpoint` on each backend entry is the stable provider edge
+;; URL that the network-monitor (PR-B) probes via
+;; `network-health/network-healthy?`. We only care that the connection
+;; completed, not the response status — a 4xx is the typical case (HEAD
+;; against api.anthropic.com unauthenticated returns 405). Backends
+;; without a provider-controlled endpoint (`:echo`) get the generic
+;; Cloudflare DNS connectivity URL so the monitor still has something
+;; to probe.
+(def ^:private generic-connectivity-probe-url
+  "https://1.1.1.1/")
+
 (def backends
   {:claude {:cmd "claude"
             :streaming? true
@@ -611,7 +622,8 @@
             ;; spec text + existing-files context regularly pushes argv
             ;; past POSIX ARG_MAX. Claude CLI supports --input-format text
             ;; to read the user prompt from stdin; we use that instead.
-            :prompt-via :stdin}
+            :prompt-via :stdin
+            :probe-endpoint "https://api.anthropic.com/"}
 
    :codex {:cmd "codex"
            :streaming? true
@@ -622,7 +634,8 @@
            :args-fn codex-args
            ;; Prompt delivery: stdin. Codex supports `-` as the prompt
            ;; placeholder; this keeps large synthesis prompts off argv.
-           :prompt-via :stdin}
+           :prompt-via :stdin
+           :probe-endpoint "https://api.openai.com/"}
 
    :ollama {:cmd "http"
             :streaming? true
@@ -631,7 +644,8 @@
             :requires-cli? false
             :api-endpoint "http://localhost:11434/api/chat"
             :default-model "codellama"
-            :models ["codellama" "llama2" "mistral"]}
+            :models ["codellama" "llama2" "mistral"]
+            :probe-endpoint "http://localhost:11434/api/version"}
 
    :cursor {:cmd "agent"
             :streaming? false
@@ -639,7 +653,8 @@
             :provider "Cursor"
             :requires-cli? true
             :args-fn cursor-args
-            :prompt-via :argv}
+            :prompt-via :argv
+            :probe-endpoint "https://api2.cursor.sh/"}
 
    :opencode {:cmd "opencode"
               :streaming? false
@@ -650,7 +665,9 @@
               ;; environment, or project .env/config. Miniforge should not
               ;; read provider-specific keys on this path.
               :args-fn opencode-args
-              :prompt-via :argv}
+              :prompt-via :argv
+              ;; OpenCode's typical default provider; tunable per-deployment.
+              :probe-endpoint "https://api.anthropic.com/"}
 
    :echo {:cmd "echo"
           :streaming? false
@@ -658,7 +675,22 @@
           :provider "Test"
           :requires-cli? false
           :args-fn echo-args
-          :prompt-via :argv}})
+          :prompt-via :argv
+          :probe-endpoint generic-connectivity-probe-url}})
+
+(defn probe-endpoint-for
+  "Resolve the network-health probe URL for `backend-key`. Returns the
+   backend entry's `:probe-endpoint` when set, the generic Cloudflare
+   DNS connectivity URL otherwise (covers unknown backends and any
+   future entry added without an explicit endpoint).
+
+   The caller (e.g. `stream-exec-fn` in PR-B) resolves the URL here and
+   passes it to `network-health/network-healthy?` directly, keeping
+   that namespace endpoint-agnostic and free of backend-config
+   dependencies."
+  [backend-key]
+  (or (get-in backends [backend-key :probe-endpoint])
+      generic-connectivity-probe-url))
 
 (defn build-messages-prompt [messages]
   (->> messages
