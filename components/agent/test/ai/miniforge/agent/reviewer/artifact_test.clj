@@ -257,11 +257,9 @@
                     :review/warnings)]
       (is (not (artifact/rejection-warnings-only? r)))))
 
-  (testing "false when both blockers and warnings are absent"
+  (testing "false when warnings are nil"
     (is (not (artifact/rejection-warnings-only?
-              (canonical-review :decision :rejected
-                                :blocking-issues []
-                                :warnings [])))))
+              (canonical-review :decision :rejected :blocking-issues [] :warnings nil)))))
 
   (testing "false for a completely empty artifact (no :review/decision key)"
     ;; An artifact with no decision cannot be in rejection-decisions — the
