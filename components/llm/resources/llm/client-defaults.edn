@@ -13,8 +13,14 @@
   ;; silent on stdout for 180-300s after the initial system+rate_limit
   ;; pair (next line is the first assistant chunk). 180s used to fire
   ;; before the model could emit anything (event-log-tool-visibility
-  ;; dogfood, 2026-05-04). 360s gives long planner first turns room.
-  :line-timeout-ms 360000
+  ;; dogfood, 2026-05-04). The 2026-06-06 review-redirect-convergence
+  ;; dogfood (`adhoc-2073513324`) hit 360s on the reviewer's larger
+  ;; prompt — full review.clj + tests + spec + standards pack — and
+  ;; killed the call before any verdict landed. Raised to 420s to give
+  ;; the reviewer's longer first turn the same margin the implementer
+  ;; relies on; the watchdog backstop floats up alongside it (see
+  ;; `default-gap-threshold-ms` in agent/stream_watchdog.clj).
+  :line-timeout-ms 420000
   :process-join-timeout-ms 600000
   :post-kill-join-timeout-ms 5000
   :poll-interval-ms 250}}

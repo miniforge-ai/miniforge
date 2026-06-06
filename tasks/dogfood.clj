@@ -77,6 +77,31 @@
            (str (fs/home) "/.miniforge"))
        "/config.edn"))
 
+(defn- miniforge-home []
+  (or (System/getenv "MINIFORGE_HOME")
+      (str (fs/home) "/.miniforge")))
+
+(defn- stream-dump-path
+  "Per-run timestamped path the LLM client tees every stream line to.
+
+   The 2026-06-06 review-redirect-convergence dogfood (`adhoc-
+   2073513324`) hit reviewer-LLM stream-idles whose root cause was
+   ambiguous between (a) the provider going genuinely silent on the
+   wire and (b) the Claude CLI stream parser dropping tokens during
+   long output. Capturing every line the LLM client sees on stdin lets
+   the next post-mortem distinguish the two — if the dump grows during
+   the silent gap it's parser drift; if it doesn't it's provider
+   silence.
+
+   Single append-mode file per run; all phase agents share it (the
+   reviewer's section is the one of interest after a stream-idle).
+   Path printed before the run so the operator can tail it live."
+  []
+  (let [ts (.format (java.time.format.DateTimeFormatter/ofPattern
+                     "yyyyMMdd-HHmmss")
+                    (java.time.LocalDateTime/now))]
+    (str (miniforge-home) "/stream-dumps/dogfood-" ts ".log")))
+
 (defn- read-edn-file [path]
   (when (fs/exists? path)
     (try
@@ -150,14 +175,18 @@
   [& args]
   (let [{:keys [spec-path github-auth checks backend]}
         (prerequisite-status args)
-        command (if (= :gh-auth (:source github-auth))
-                  (str "env GITHUB_TOKEN=$(gh auth token) bb miniforge run "
-                       spec-path)
-                  (str "bb miniforge run " spec-path))]
+        dump-path (stream-dump-path)
+        env-prefix (cond-> ""
+                     (= :gh-auth (:source github-auth))
+                     (str "env GITHUB_TOKEN=$(gh auth token) ")
+                     :always
+                     (str "MF_STREAM_DUMP=" dump-path " "))
+        command (str env-prefix "bb miniforge run " spec-path)]
     (println "🤖 Dogfood dry run")
     (println "  spec:" spec-path)
     (println "  backend:" (if backend (name backend) "none"))
     (println "  github-auth:" (or (some-> github-auth :source name) "none"))
+    (println "  stream-dump:" dump-path)
     (println)
     (println "Command:")
     (println command)
@@ -183,10 +212,17 @@
   (let [{:keys [spec-path github-auth checks]}
         (prerequisite-status args)]
     (if (every? val checks)
-      (let [proc (p/process (cond-> {:out :inherit
-                                     :err :inherit}
-                              (:token github-auth)
-                              (assoc :extra-env {"GITHUB_TOKEN" (:token github-auth)}))
+      (let [dump-path (stream-dump-path)
+            ;; LLM client (`open-stream-dump-writer`) opens the path
+            ;; in append mode but does NOT create parent dirs.
+            _ (fs/create-dirs (fs/parent dump-path))
+            _ (println "📼 stream dump:" dump-path)
+            extra-env (cond-> {"MF_STREAM_DUMP" dump-path}
+                        (:token github-auth)
+                        (assoc "GITHUB_TOKEN" (:token github-auth)))
+            proc (p/process {:out :inherit
+                             :err :inherit
+                             :extra-env extra-env}
                             "bb" "miniforge" "run" spec-path)
             {:keys [exit]} @proc]
         (System/exit exit))

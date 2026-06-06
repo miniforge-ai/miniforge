@@ -133,9 +133,14 @@
                   :agent/per-backend-gap-thresholds  {:claude-code 120000}}]
       (is (= 60000 (sut/resolve-gap-threshold config :other-backend))))))
 
-(deftest resolve-gap-threshold-default-constant-is-420s
-  (testing "default constant is 420 000 ms — a backstop above the 360 000 ms LLM idle timeout"
-    (is (= 420000 sut/default-gap-threshold-ms))))
+(deftest resolve-gap-threshold-default-constant-is-480s
+  (testing "default constant is 480 000 ms — a backstop above the 420 000 ms LLM
+            idle timeout (LLM idle bumped 360→420 2026-06-06 per the
+            review-redirect-convergence dogfood, `adhoc-2073513324`).
+            INVARIANT: gap >= idle, with the 60s margin preserving the
+            ordering — idle terminal fires first, watchdog catches only
+            wedged consumer threads."
+    (is (= 480000 sut/default-gap-threshold-ms))))
 
 ;; ---------------------------------------------------------------------------
 ;; create-watchdog structure
