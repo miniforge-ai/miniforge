@@ -216,3 +216,49 @@
       (is (= ["fix a"]   (artifact/get-recommendations r)))
       (is (= [{:severity :nit :description "x"}] (artifact/get-issues r)))
       (is (= ["good API"] (artifact/get-strengths r))))))
+
+;------------------------------------------------------------------------------ rejection-warnings-only?
+
+(deftest rejection-warnings-only-test
+  (testing "true when rejection-class + no blockers + warnings present"
+    (is (artifact/rejection-warnings-only?
+         (canonical-review :decision :rejected
+                           :blocking-issues []
+                           :warnings ["style warning"])))
+    (is (artifact/rejection-warnings-only?
+         (canonical-review :decision :changes-requested
+                           :blocking-issues []
+                           :warnings ["trailing whitespace"]))))
+
+  (testing "false when the decision is approval-class"
+    (is (not (artifact/rejection-warnings-only?
+              (canonical-review :decision :approved
+                                :blocking-issues []
+                                :warnings ["advisory nit"]))))
+    (is (not (artifact/rejection-warnings-only?
+              (canonical-review :decision :conditionally-approved
+                                :blocking-issues []
+                                :warnings ["advisory nit"])))))
+
+  (testing "false when blocking issues are present alongside warnings"
+    (is (not (artifact/rejection-warnings-only?
+              (canonical-review :decision :rejected
+                                :blocking-issues ["real defect"]
+                                :warnings ["advisory nit"])))))
+
+  (testing "false when warnings are absent (empty)"
+    (is (not (artifact/rejection-warnings-only?
+              (canonical-review :decision :rejected
+                                :blocking-issues []
+                                :warnings [])))))
+
+  (testing "false when warnings key is missing entirely"
+    (let [r (dissoc (canonical-review :decision :rejected :blocking-issues [])
+                    :review/warnings)]
+      (is (not (artifact/rejection-warnings-only? r)))))
+
+  (testing "false when both blockers and warnings are absent"
+    (is (not (artifact/rejection-warnings-only?
+              (canonical-review :decision :rejected
+                                :blocking-issues []
+                                :warnings []))))))
