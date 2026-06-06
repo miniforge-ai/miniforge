@@ -68,6 +68,89 @@
              (:code/files payload)))
       (is (= "clojure" (:code/language payload))))))
 
+;------------------------------------------------------------------------------ LLM-timeout classification
+
+(deftest llm-timeout-type-extracts-canonical-keyword
+  (testing "reads [:llm-error :timeout :type] from the normalized boundary"
+    (is (= :stream-idle
+           (sut/llm-timeout-type
+             {:llm-error {:type "adaptive_timeout"
+                          :message "Adaptive timeout: No stream output for 360000ms (type: stream-idle, ...)"
+                          :timeout {:type :stream-idle
+                                    :elapsed-ms 360087
+                                    :message "No stream output for 360000ms"
+                                    :stats {:lines-read 0}}}})))
+
+    (is (= :network-drop
+           (sut/llm-timeout-type
+             {:llm-error {:type "adaptive_timeout"
+                          :timeout {:type :network-drop
+                                    :backend-key :claude
+                                    :elapsed-ms 30000}}})))
+
+    (is (= :stagnation
+           (sut/llm-timeout-type
+             {:llm-error {:timeout {:type :stagnation :elapsed-ms 180000}}})))
+
+    (is (= :hard-limit
+           (sut/llm-timeout-type
+             {:llm-error {:timeout {:type :hard-limit :elapsed-ms 600000}}}))))
+
+  (testing "returns nil for non-error / no-timeout normalized maps"
+    (is (nil? (sut/llm-timeout-type {:llm-error nil})))
+    (is (nil? (sut/llm-timeout-type {:llm-error {:type "cli_error" :message "Stderr"}}))
+        "an LLM error without a :timeout envelope has no timeout-type")
+    (is (nil? (sut/llm-timeout-type {}))
+        "boundary with no :llm-error at all returns nil"))
+
+  (testing "missing :type inside :timeout returns nil — does not crash on partial maps"
+    (is (nil? (sut/llm-timeout-type
+                {:llm-error {:timeout {:elapsed-ms 1000}}})))))
+
+(deftest stream-idle-error?-identifies-stream-idle-timeouts
+  ;; The 2026-06-05 dogfood (`adhoc-944448986`) reviewer-LLM stream-idle'd
+  ;; at 360s; the framework synthesized a false `:rejected` because the
+  ;; reviewer's parsed-review-based `timeout-only-review?` couldn't see
+  ;; the boundary-level error. This boundary-level predicate is the
+  ;; missing piece — fires on the production shape.
+  (testing "production stream-idle shape"
+    (is (true? (sut/stream-idle-error?
+                 {:llm-error {:type "adaptive_timeout"
+                              :message "Adaptive timeout: No stream output for 360000ms (type: stream-idle, elapsed: 360087ms)"
+                              :timeout {:type :stream-idle
+                                        :elapsed-ms 360087}}}))))
+
+  (testing "other timeout types do NOT match — symmetry with network-drop / stagnation / hard-limit"
+    (is (false? (sut/stream-idle-error?
+                  {:llm-error {:timeout {:type :network-drop :elapsed-ms 30000}}})))
+    (is (false? (sut/stream-idle-error?
+                  {:llm-error {:timeout {:type :stagnation :elapsed-ms 180000}}})))
+    (is (false? (sut/stream-idle-error?
+                  {:llm-error {:timeout {:type :hard-limit :elapsed-ms 600000}}}))))
+
+  (testing "non-timeout errors and missing-error normalized maps do NOT match"
+    (is (false? (sut/stream-idle-error? {:llm-error nil})))
+    (is (false? (sut/stream-idle-error? {:llm-error {:type "cli_error"}})))
+    (is (false? (sut/stream-idle-error? {})))))
+
+(deftest network-drop-error?-identifies-network-drop-timeouts
+  ;; Symmetry-only coverage — the network-drop verdict is produced by
+  ;; PR-B of the network-resilience stack (#1053); this boundary helper
+  ;; exists so future cross-phase consumers can branch on the canonical
+  ;; timeout taxonomy without each phase rolling its own get-in.
+  (testing "production network-drop shape"
+    (is (true? (sut/network-drop-error?
+                 {:llm-error {:type "adaptive_timeout"
+                              :timeout {:type :network-drop
+                                        :backend-key :claude
+                                        :elapsed-ms 30000}}}))))
+
+  (testing "other timeout types do NOT match"
+    (is (false? (sut/network-drop-error?
+                  {:llm-error {:timeout {:type :stream-idle :elapsed-ms 360000}}})))
+    (is (false? (sut/network-drop-error?
+                  {:llm-error {:timeout {:type :stagnation :elapsed-ms 180000}}})))))
+
 (deftest error-response-preserves-backend-error-shape
   (testing "error-response carries raw backend data and response metadata through"
     (let [normalized {:llm-error {:message "Adaptive timeout"

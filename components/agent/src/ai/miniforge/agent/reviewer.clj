@@ -175,12 +175,29 @@
                     counts (gates/calculate-gate-counts gate-feedbacks)
                     timeout-failure-message (llm-response/backend-failure-message response llm-review)
                     timeout-only-review? (llm-response/timeout-only-review? llm-review gate-result)
+                    ;; `timeout-only-review?` only fires when the LLM
+                    ;; parsed a `:rejected` whose `:review/blocking-
+                    ;; issues` are all timeout-shaped — it cannot fire
+                    ;; when the LLM call itself errored, because
+                    ;; `llm-review` is nil and every condition in the
+                    ;; predicate reads from it. The 2026-06-05 dogfood
+                    ;; (workflow adhoc-944448986) reviewer stream-idle'd
+                    ;; at 360s with no parsed response; the framework
+                    ;; promoted the timeout text into `:review/blocking-
+                    ;; issues` via the parse-failed branch and synthesized
+                    ;; a false `:rejected`. Adding the boundary-level
+                    ;; stream-idle check covers that path so a real
+                    ;; infra timeout takes the `timeout-only-error-result`
+                    ;; exit instead of masquerading as a code-review
+                    ;; rejection.
+                    backend-stream-idle? (result-boundary/stream-idle-error? normalized)
+                    backend-timeout? (or timeout-only-review? backend-stream-idle?)
                     ;; "initial" = the first-call decision/issues fed into the
                     ;; enumeration validator. Named to contrast with
                     ;; `recovered-review` below; these are already normalized,
                     ;; not literally "raw".
                     initial-llm-decision (cond
-                                           timeout-only-review? nil
+                                           backend-timeout? nil
                                            parse-failed? :rejected
                                            llm-review (issues/normalize-llm-decision (:review/decision llm-review)))
                     ;; Resolve the task's scope once; partitioning happens
@@ -273,10 +290,17 @@
                                      (gates/merge-gate-overrides llm-decision (:decision gate-result) config)
                                      (:decision gate-result))
 
-                    ;; Merge issues from both sources
+                    ;; Merge issues from both sources. `parse-failed?`
+                    ;; gates the parse-failure-message append so a
+                    ;; backend-timeout (taking the early exit below)
+                    ;; does NOT carry the timeout text into the
+                    ;; artifact's blocking-issues — it would otherwise
+                    ;; mislead downstream consumers into treating an
+                    ;; infra timeout as a code-review defect, the exact
+                    ;; pathology the 2026-06-05 dogfood revealed.
                     all-blocking (cond-> (into (vec (:blocking-issues gate-result))
                                                (issues/llm-issues->blocking-strings llm-issues))
-                                   parse-failed?
+                                   (and parse-failed? (not backend-timeout?))
                                    (conj parse-failure-message)
                                    timeout-only-review?
                                    (conj timeout-failure-message))
@@ -302,7 +326,7 @@
 
                     duration (- (System/currentTimeMillis) start-time)]
 
-                (if timeout-only-review?
+                (if backend-timeout?
                   (artifact/timeout-only-error-result
                    logger normalized llm-review gate-result counts duration tokens cost-usd
                    timeout-failure-message)
@@ -325,6 +349,7 @@
                                         :llm-decision llm-decision
                                         :llm-parse-failed? parse-failed?
                                         :timeout-only-review? timeout-only-review?
+                                        :backend-stream-idle? backend-stream-idle?
                                         :gates-passed (:passed counts)
                                         :gates-failed (:failed counts)
                                         :failing-gate-ids failing-gate-ids

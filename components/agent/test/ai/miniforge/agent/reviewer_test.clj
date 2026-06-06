@@ -177,6 +177,21 @@
             :message message}
      data (assoc :data data))))
 
+(defn- stream-idle-llm-error
+  "Build the LLM-error shape `streaming-error-response` produces when the
+   stream-idle adaptive timeout fires — the same shape `llm/get-error`
+   surfaces. The 2026-06-05 dogfood (`adhoc-944448986`) hit exactly
+   this path on the reviewer LLM call."
+  [elapsed-ms]
+  (let [message (str "Adaptive timeout: No stream output for " elapsed-ms
+                     "ms (type: stream-idle, elapsed: " elapsed-ms "ms)")]
+    {:type backend-timeout-type
+     :message message
+     :timeout {:type :stream-idle
+               :message (str "No stream output for " elapsed-ms "ms")
+               :elapsed-ms elapsed-ms
+               :stats {:lines-read 0}}}))
+
 ;------------------------------------------------------------------------------ Core functionality tests
 
 (deftest test-create-reviewer
@@ -389,6 +404,46 @@
                (get-in result [:error :data :code])))
         (is (= timeout-success-wrapper-token-count
                (get-in result [:metrics :tokens])))))))
+
+(deftest test-reviewer-boundary-stream-idle-is-agent-error
+  ;; The 2026-06-05 dogfood (`adhoc-944448986`) shape: the reviewer LLM
+  ;; stream-idle'd at 360s and returned NO parsed review (parse-failed),
+  ;; only the LLM-error's `:timeout {:type :stream-idle}`. The OLD
+  ;; `timeout-only-review?` predicate read from the parsed review map
+  ;; and so could not fire — the framework then promoted the timeout
+  ;; text into `:review/blocking-issues` via the parse-failed branch
+  ;; and synthesized a false `:rejected`, which the `:review-approved`
+  ;; gate (correctly given the verdict it received) failed.
+  ;;
+  ;; With the boundary-level `result-boundary/stream-idle-error?`
+  ;; check wired in, the reviewer must take the `:reviewer/backend-
+  ;; timeout` exit — the same path the parseable variants already
+  ;; take — instead of producing a false rejection.
+  (testing "stream-idle on the LLM-call boundary (no parsed review) → :reviewer/backend-timeout"
+    (let [stream-idle-elapsed-ms 360087
+          err (stream-idle-llm-error stream-idle-elapsed-ms)]
+      (with-redefs [model/resolve-llm-client-for-role (fn [_role client] client)
+                    llm/chat (fn [_client _prompt _opts]
+                               (mock-llm-response ""
+                                                  :success? false
+                                                  :tokens timeout-review-token-count
+                                                  :error err))
+                    llm/success? :success?
+                    llm/get-content :content
+                    llm/get-error :error]
+        (let [reviewer (reviewer/create-reviewer {:llm-backend ::mock-backend
+                                                  :gates []})
+              result (core/invoke reviewer {} sample-artifact)]
+          (is (= :error (:status result))
+              "Stream-idle must surface as an agent-level error, not a synthetic :rejected review")
+          (is (= :reviewer/backend-timeout
+                 (get-in result [:error :data :code]))
+              "Error code must be :reviewer/backend-timeout — distinguishes infra timeout from real defect")
+          (is (= (:message err)
+                 (get-in result [:error :message]))
+              "Error message preserves the adaptive-timeout text verbatim for operator post-mortem")
+          (is (= timeout-review-token-count
+                 (get-in result [:metrics :tokens]))))))))
 
 (deftest test-reviewer-timeout-only-shape-does-not-hide-real-gate-failures
   (testing "timeout-only classification requires the deterministic gates to approve"
