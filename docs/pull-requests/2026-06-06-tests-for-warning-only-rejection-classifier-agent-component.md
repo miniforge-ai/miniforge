@@ -15,6 +15,8 @@ Tests for warning-only rejection classifier (agent component).
 
 ## Files Changed
 
+- `components/agent/src/ai/miniforge/agent/reviewer/artifact.clj` (modify)
+- `components/agent/src/ai/miniforge/agent/interface/specialized.clj` (modify)
 - `components/agent/test/ai/miniforge/agent/reviewer/artifact_test.clj` (modify)
 
 ## Test Results
