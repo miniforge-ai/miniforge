@@ -500,6 +500,42 @@
              (when (string? (:output result)) (:output result))])
       (suspicious-short-termination? result)))
 
+(defn- network-drop-in-result?
+  "True when the agent result carries a network-drop signal from
+   PR-B's `network-monitor`. Three locations may carry it:
+
+   1. `[:error :data :timeout :type]` — the canonical agent result
+      shape. `streaming-error-response` builds an llm-error map with
+      `:timeout` on the `:error`; `result-boundary/error-response`
+      then merges that map into `[:error :data]` via `response/error`.
+      This is the path the implement phase actually sees from a
+      production network-drop.
+   2. `[:timeout :type]` — back-compat for raw exec-result maps that
+      bypass the result-boundary wrapping (test harnesses, direct
+      stream-exec-fn captures).
+   3. `[:error :message]` text containing the formatted
+      `Adaptive timeout: ... (type: network-drop, ...)` produced by
+      `format-timeout-error` — defensive fallback for paths that
+      surface the timeout via the error channel as a plain string.
+
+   The message-channel regex anchors on the explicit `type:
+   network-drop` marker emitted by `format-timeout-error` so an
+   unrelated message that happens to mention 'network drop' in prose
+   does not trip the predicate.
+
+   Distinct from `rate-limit-in-result?` — the network monitor detects
+   raw TCP/TLS reachability loss (no provider response at all), while
+   rate-limit detection keys off provider-emitted 429/quota messages.
+   The two anomalies want different recovery strategies: rate-limit
+   pauses + waits; network-drop retries from the last persisted
+   checkpoint (PR-C of the network-resilience stack)."
+  [result]
+  (or (= :network-drop (get-in result [:error :data :timeout :type]))
+      (= :network-drop (get-in result [:timeout :type]))
+      (let [msg (get-in result [:error :message])]
+        (and (string? msg)
+             (re-find #"(?i)type:\s*network-drop" msg)))))
+
 (defn- extract-error-message
   "Extract the most relevant error message from an agent result."
   [result default-msg]
@@ -573,6 +609,14 @@
         result (get-in ctx [:phase :result])
         agent-status (:status result)
         rate-limited? (and (= :error agent-status) (rate-limit-in-result? result))
+        ;; PR-C of network-resilience stack: PR-B's network-monitor
+        ;; flagged a sustained provider outage. Recovery is the
+        ;; opposite of rate-limited — burn an iteration to retry from
+        ;; the persisted checkpoint rather than pause/wait, since the
+        ;; subprocess is already dead and the LLM call's state was
+        ;; mid-stream when the drop hit.
+        network-dropped? (and (= :error agent-status)
+                              (network-drop-in-result? result))
         gate-failed? (= :failed (:phase/status (get-in ctx [:phase])))
         ;; Curator's empty-diff verdict: the implementer wrote no files to the
         ;; environment. Retrying with the same prompt won't change that — the
@@ -606,6 +650,14 @@
                        (= :already-implemented agent-status) :already-implemented
                        ;; Rate limit: fail immediately, don't burn retry budget
                        rate-limited? :failed
+                       ;; Network drop: retriable from the last persisted
+                       ;; checkpoint. Route through determine-phase-status
+                       ;; so the iteration budget caps the retry count —
+                       ;; after max-iterations consecutive network-drop
+                       ;; failures the verdict below escalates to
+                       ;; :implement/network-dropped (terminal).
+                       network-dropped? (phase/determine-phase-status
+                                          effective-status iterations max-iterations)
                        ;; Curator said no files — terminal, no retry.
                        curator-empty-diff? :failed
                        :else (phase/determine-phase-status
@@ -636,6 +688,15 @@
 
                   rate-limited?
                   :implement/rate-limited
+
+                  ;; Network drop: only escalates to terminal verdict
+                  ;; when phase-status above resolved to :failed (i.e.
+                  ;; the iteration budget was exhausted). While
+                  ;; phase-status is :retrying the verdict cond returns
+                  ;; nil per the (not= :failed phase-status) clause
+                  ;; above and the FSM keeps cycling implement.
+                  network-dropped?
+                  :implement/network-dropped
 
                   curator-empty-diff?
                   :implement/empty-diff

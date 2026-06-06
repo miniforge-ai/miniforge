@@ -416,6 +416,16 @@
                    :phase/verdict :implement/already-implemented-invalid}
               after (fsm/transition-execution machine at-implement evt)]
           (is (= :failed (fsm/execution-status machine after)))))
+      (testing ":implement/network-dropped terminates straight to :failed
+                (PR-C of network-resilience: iteration budget exhausted
+                retrying from checkpoint; another redirect would just
+                hit the same dead network on the next probe cycle)"
+        (let [evt {:type :phase/fail :phase/verdict :implement/network-dropped}
+              after (fsm/transition-execution machine at-implement evt)]
+          (is (= :failed (fsm/execution-status machine after))
+              "implement network-drop after retry exhaustion MUST NOT
+               redirect — operator surfaces for manual resume once
+               connectivity is restored")))
       (testing ":repair-requested follows on-fail (here :plan) + counter"
         (let [evt {:type :phase/fail :phase/verdict :repair-requested}
               after (fsm/transition-execution machine at-implement evt)]

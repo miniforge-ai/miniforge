@@ -652,6 +652,108 @@
                   :data {:code :curator/no-files-written}}
           :metrics {:duration-ms 4567}}))))
 
+;------------------------------------------------------------------------------ Network-drop classifier (PR-C of network-resilience stack)
+;; Tests for `network-drop-in-result?` — private, accessed via #'. PR-B's
+;; network-monitor emits the verdict in three locations the classifier
+;; matches against: the canonical agent result shape produced by
+;; `result-boundary/error-response` (`[:error :data :timeout :type]`),
+;; the raw exec-result shape (`[:timeout :type]`) for test harnesses,
+;; and the formatted-error-message channel.
+
+(defn- network-drop? [result]
+  (#'implement/network-drop-in-result? result))
+
+(deftest network-drop-classifier-matches-canonical-agent-result-shape-test
+  ;; Production path: `streaming-error-response` builds an llm-error
+  ;; map with `:timeout` on the `:error`; `result-boundary/error-
+  ;; response` merges that into `[:error :data]` via `response/error`.
+  ;; This is the shape the implement phase actually sees from a real
+  ;; network-drop, so it's the primary classifier target.
+  (testing "[:error :data :timeout :type] = :network-drop → true"
+    (is (network-drop?
+          {:status :error
+           :error {:message "Adaptive timeout: Network drop: 3 consecutive probes failed for claude (type: network-drop, elapsed: 30000ms)"
+                   :data {:type "adaptive_timeout"
+                          :stderr ""
+                          :stdout ""
+                          :timeout {:type :network-drop
+                                    :backend-key :claude
+                                    :elapsed-ms 30000
+                                    :message "Network drop: 3 consecutive probes failed for claude"}}}}))))
+
+(deftest network-drop-classifier-matches-raw-timeout-shape-test
+  ;; Back-compat for raw stream-exec-fn results that haven't been
+  ;; wrapped by result-boundary/error-response yet (test harnesses,
+  ;; direct exec-result captures). Production rarely takes this path.
+  (testing "raw top-level [:timeout :type] = :network-drop → true"
+    (is (network-drop? {:timeout {:type :network-drop
+                                  :backend-key :claude
+                                  :elapsed-ms 30000
+                                  :message "Network drop: 3 consecutive probes failed for claude"}}))))
+
+(deftest network-drop-classifier-matches-formatted-error-message-test
+  (testing "[:error :message] carrying the formatted Adaptive timeout text → true"
+    ;; format-timeout-error produces:
+    ;;   "Adaptive timeout: <message> (type: <type-keyword>, elapsed: <n>ms)"
+    (is (network-drop?
+          {:error {:message "Adaptive timeout: Network drop: 3 consecutive probes failed for claude (type: network-drop, elapsed: 30000ms)"}})))
+
+  (testing "case-insensitive match on the explicit `type:` marker"
+    ;; Anchored on the documented format-timeout-error fragment so a
+    ;; conversational message that happens to mention 'network drop'
+    ;; in prose does NOT trip the classifier.
+    (is (network-drop? {:error {:message "TYPE: NETWORK-DROP at provider"}}))
+    (is (network-drop?
+          {:error {:message "...adaptive timeout (type:network-drop, elapsed:...)"}}))))
+
+(deftest network-drop-classifier-ignores-unrelated-results-test
+  (testing "successful or non-network errors must NOT classify as network-drop"
+    (is (not (network-drop? {:status :success :output "ok"})))
+    (is (not (network-drop? {:status :error :error {:message "Rate limit exceeded"}})))
+    (is (not (network-drop? {:status :error :error {:message "Syntax error at line 5"}})))
+    (is (not (network-drop? {:timeout {:type :stagnation :elapsed-ms 180000}}))
+        "stagnation timeout is a distinct envelope — different recovery strategy")
+    (is (not (network-drop? {:timeout {:type :hard-limit :elapsed-ms 600000}})))
+    (is (not (network-drop? {:timeout {:type :stream-idle :elapsed-ms 120000}})))
+    (is (not (network-drop?
+               {:error {:data {:timeout {:type :stagnation :elapsed-ms 180000}}}}))
+        "nested stagnation envelope is also distinct"))
+
+  (testing "prose mentions of 'network drop' without the type marker do NOT match"
+    ;; Regression for tightened regex — only the explicit
+    ;; `type: network-drop` marker emitted by format-timeout-error
+    ;; should trip the classifier, not the bare phrase.
+    (is (not (network-drop?
+               {:error {:message "Network Drop detected on upstream connection"}})))
+    (is (not (network-drop?
+               {:error {:message "Network drop: please retry shortly"}}))))
+
+  (testing "empty / missing structures classify cleanly as false"
+    (is (not (network-drop? {:error {:message nil}})))
+    (is (not (network-drop? {})))))
+
+(deftest network-drop-classifier-distinct-from-rate-limit-test
+  ;; Both classifiers exist because the two anomalies want different
+  ;; recovery strategies: rate-limit pauses + waits; network-drop
+  ;; retries from the last persisted checkpoint. Confirm a real
+  ;; network-drop result does NOT also classify as rate-limit (and vice
+  ;; versa) — otherwise the two branches would race in the leave-
+  ;; implement cond. Uses the canonical [:error :data :timeout] shape
+  ;; the implement phase actually receives, not the raw top-level form.
+  (let [network-result {:status :error
+                        :error {:message "Adaptive timeout: Network drop: 3 consecutive probes failed for claude (type: network-drop, elapsed: 30000ms)"
+                                :data {:type "adaptive_timeout"
+                                       :timeout {:type :network-drop
+                                                 :backend-key :claude
+                                                 :elapsed-ms 30000}}}}
+        rate-limit-result {:error {:message "HTTP 429 rate limit exceeded"}}]
+    (is (network-drop? network-result))
+    (is (not (rate-limit? network-result))
+        "network-drop must NOT trip the rate-limit classifier")
+    (is (rate-limit? rate-limit-result))
+    (is (not (network-drop? rate-limit-result))
+        "rate-limit must NOT trip the network-drop classifier")))
+
 (deftest rate-limit-classifier-does-not-flag-legitimate-curator-failures-test
   (testing "curator no-files after a full-length attempt is a real task failure"
     ;; If the implementer ran for the full ~11 min and still wrote nothing,

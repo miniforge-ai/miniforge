@@ -77,7 +77,14 @@
     ;;                   stale claim
     :implement/rate-limited
     :implement/empty-diff
-    :implement/already-implemented-invalid})
+    :implement/already-implemented-invalid
+    ;; PR-C of network-resilience stack: the implement phase exhausted
+    ;; its iteration budget retrying from the persisted checkpoint
+    ;; after PR-B's network-monitor detected sustained provider
+    ;; outages. Retrying again would just hit the same dead network on
+    ;; the next probe cycle. Terminal — operator surfaces the workflow
+    ;; for manual resume once connectivity is restored.
+    :implement/network-dropped})
 
 (defn verdict-terminal?
   "Guard: true when the failing-phase event carries a terminal verdict.
