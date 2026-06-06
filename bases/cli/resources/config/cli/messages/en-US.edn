@@ -163,6 +163,8 @@
   :tui/start-failed "Failed to start TUI: {error}"
   :tui/proper-terminal-note "Note: The TUI requires a proper terminal environment."
   :tui/proper-terminal-advice "Try running from Terminal.app or iTerm2, not from an IDE."
+  :tui/brew-install-cmd "  brew install {package}"
+  :tui/web-cmd "  {command}"
   :workflow-runner/header "{display-name} Workflow Runner"
   :workflow-runner/workflow "  Workflow: {workflow-id}"
   :workflow-runner/version "  Version:  {version}"

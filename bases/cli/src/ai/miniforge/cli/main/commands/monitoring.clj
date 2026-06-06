@@ -134,10 +134,10 @@
       (if-let [tui-package (app-config/tui-package)]
         (do
           (println (messages/t :tui/install-package))
-          (println (str "  brew install " tui-package))
+          (println (messages/t :tui/brew-install-cmd {:package tui-package}))
           (println)
           (println (messages/t :tui/use-web))
-          (println (str "  " (app-config/command-string "web"))))
+          (println (messages/t :tui/web-cmd {:command (app-config/command-string "web")})))
         (println (messages/t :tui/no-standalone-package
                              {:command (app-config/command-string "web")})))
       (exit! 1))
