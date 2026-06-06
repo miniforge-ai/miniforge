@@ -502,15 +502,26 @@
 
 (defn- network-drop-in-result?
   "True when the agent result carries a network-drop signal from
-   PR-B's `network-monitor`. Two equivalent locations may carry it:
+   PR-B's `network-monitor`. Three locations may carry it:
 
-   1. `[:timeout :type]` — the raw timeout-reason envelope from
-      `llm-client/timeout-result`, when the LLM call returned the
-      monitor's verdict directly.
-   2. `[:error :message]` text containing the formatted
+   1. `[:error :data :timeout :type]` — the canonical agent result
+      shape. `streaming-error-response` builds an llm-error map with
+      `:timeout` on the `:error`; `result-boundary/error-response`
+      then merges that map into `[:error :data]` via `response/error`.
+      This is the path the implement phase actually sees from a
+      production network-drop.
+   2. `[:timeout :type]` — back-compat for raw exec-result maps that
+      bypass the result-boundary wrapping (test harnesses, direct
+      stream-exec-fn captures).
+   3. `[:error :message]` text containing the formatted
       `Adaptive timeout: ... (type: network-drop, ...)` produced by
-      `format-timeout-error` — for code paths that surface the
-      timeout via the error channel.
+      `format-timeout-error` — defensive fallback for paths that
+      surface the timeout via the error channel as a plain string.
+
+   The message-channel regex anchors on the explicit `type:
+   network-drop` marker emitted by `format-timeout-error` so an
+   unrelated message that happens to mention 'network drop' in prose
+   does not trip the predicate.
 
    Distinct from `rate-limit-in-result?` — the network monitor detects
    raw TCP/TLS reachability loss (no provider response at all), while
@@ -519,10 +530,11 @@
    pauses + waits; network-drop retries from the last persisted
    checkpoint (PR-C of the network-resilience stack)."
   [result]
-  (or (= :network-drop (get-in result [:timeout :type]))
+  (or (= :network-drop (get-in result [:error :data :timeout :type]))
+      (= :network-drop (get-in result [:timeout :type]))
       (let [msg (get-in result [:error :message])]
         (and (string? msg)
-             (re-find #"(?i)type:\s*network-drop|network drop" msg)))))
+             (re-find #"(?i)type:\s*network-drop" msg)))))
 
 (defn- extract-error-message
   "Extract the most relevant error message from an agent result."
