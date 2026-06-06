@@ -169,6 +169,14 @@
       (do (println "\n⚠️  Fix issues above before dogfooding")
           (System/exit 1)))))
 
+(defn- shell-single-quote
+  "Single-quote a path for shell use: any literal `'` becomes `'\\''`
+   and the whole value is wrapped. Round-trips spaces, parens, and the
+   characters bash treats as metacharacters without surprising the
+   operator when they copy/paste the dry-run command."
+  [s]
+  (str "'" (str/replace s "'" "'\\''") "'"))
+
 (defn dry-run
   "Show the exact command that dogfood would execute.
    Usage: bb dogfood:dry-run [spec-path]"
@@ -176,12 +184,25 @@
   (let [{:keys [spec-path github-auth checks backend]}
         (prerequisite-status args)
         dump-path (stream-dump-path)
+        ;; The LLM client opens the dump path in append mode but does
+        ;; not create the parent dir; the printed command must match
+        ;; the `run` fn's behavior (which calls `fs/create-dirs`
+        ;; before launching) or a copy/paste would throw on the first
+        ;; `open-stream-dump-writer` call.
+        mkdir-prefix (str "mkdir -p "
+                          (shell-single-quote (str (fs/parent dump-path)))
+                          " && ")
         env-prefix (cond-> ""
                      (= :gh-auth (:source github-auth))
                      (str "env GITHUB_TOKEN=$(gh auth token) ")
                      :always
-                     (str "MF_STREAM_DUMP=" dump-path " "))
-        command (str env-prefix "bb miniforge run " spec-path)]
+                     (str "MF_STREAM_DUMP="
+                          (shell-single-quote dump-path)
+                          " "))
+        command (str mkdir-prefix
+                     env-prefix
+                     "bb miniforge run "
+                     (shell-single-quote spec-path))]
     (println "🤖 Dogfood dry run")
     (println "  spec:" spec-path)
     (println "  backend:" (if backend (name backend) "none"))
