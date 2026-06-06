@@ -46,22 +46,25 @@
   (log/create-logger {:min-level :info :output :edn}))
 
 (def ^:const default-gap-threshold-ms
-  "Default stream-gap threshold in milliseconds (420 seconds).
+  "Default stream-gap threshold in milliseconds (480 seconds).
 
    INVARIANT: this MUST stay >= the LLM client's stream-line-timeout-ms
-   (currently 360 000 ms; see components/llm/resources/llm/client-defaults.edn).
+   (currently 420 000 ms; see components/llm/resources/llm/client-defaults.edn).
    The watchdog and that idle timeout watch the SAME signal — agent stdout
    activity — so the watchdog is a BACKSTOP for a wedged consumer thread, not a
    primary stall detector. When it is shorter than the idle timeout it FALSE-
    FIRES on legitimate model silence: Opus on a large first-turn prompt goes
-   silent on stdout for 180-300s by design, which the 360 000 ms idle timeout
-   deliberately tolerates. The old 90 000 ms default killed those legitimate
-   turns every iteration, and (pre-#988) the workflow retried forever — a 17h
-   overnight token burn. 420 000 = 360 000 idle + 60 000 margin, so the clean
-   in-stream idle timeout (which yields a resumable :stream-idle terminal)
-   fires first and the watchdog only catches the case the idle timeout cannot:
-   the stream consumer loop itself wedged."
-  420000)
+   silent on stdout for 180-300s by design, which the idle timeout deliberately
+   tolerates. The old 90 000 ms default killed those legitimate turns every
+   iteration, and (pre-#988) the workflow retried forever — a 17h overnight
+   token burn. 480 000 = 420 000 idle + 60 000 margin, so the clean in-stream
+   idle timeout (which yields a resumable :stream-idle terminal) fires first
+   and the watchdog only catches the case the idle timeout cannot: the stream
+   consumer loop itself wedged. The idle timeout was raised from 360s to 420s
+   2026-06-06 (review-redirect-convergence dogfood, `adhoc-2073513324`) to
+   give the reviewer's longer first-turn prompt the same margin the
+   implementer enjoys; this constant floats up alongside it."
+  480000)
 
 (def ^:const default-check-interval-ms
   "Default watchdog check interval in milliseconds (5 seconds)."
@@ -73,18 +76,18 @@
    Precedence (highest wins):
      1. Backend-specific entry in :agent/per-backend-gap-thresholds
      2. Global :agent/stream-gap-threshold-ms in config
-     3. `default-gap-threshold-ms` (420 000 ms)
+     3. `default-gap-threshold-ms` (480 000 ms)
 
    In production/real runs an override MUST honor the same invariant as
    `default-gap-threshold-ms`: keep it >= the LLM client's
-   stream-line-timeout-ms (360 000 ms) so the watchdog stays a backstop and
+   stream-line-timeout-ms (420 000 ms) so the watchdog stays a backstop and
    does not false-fire on legitimate model silence. (Tests deliberately set
    tiny sub-threshold values — e.g. 1 ms — to force a fast stall; that is an
    intentional exception, not a real-run configuration.)
 
    Example config:
-     {:agent/stream-gap-threshold-ms 420000
-      :agent/per-backend-gap-thresholds {:claude-code 480000}}"
+     {:agent/stream-gap-threshold-ms 480000
+      :agent/per-backend-gap-thresholds {:claude-code 540000}}"
   [config backend]
   (let [base      (get config :agent/stream-gap-threshold-ms default-gap-threshold-ms)
         overrides (get config :agent/per-backend-gap-thresholds {})]
@@ -208,7 +211,7 @@
   "Create and start a stream-gap watchdog.
 
    Options map:
-     :threshold-ms      — gap in ms before the kill fires (default 420 000)
+     :threshold-ms      — gap in ms before the kill fires (default 480 000)
      :check-interval-ms — how often to check for a stall (default 5 000)
      :phase-id          — keyword or string identifying the current phase
      :backend           — keyword identifying the agent backend (e.g. :claude-code)
