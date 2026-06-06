@@ -73,7 +73,7 @@
       (when (= 200 status)
         (json/parse-string (slurp (.getInputStream conn)) true)))
     (catch Exception e
-      (println (display/style (messages/t :cp/http-error {:message (ex-message e)}) :foreground :red))
+      (display/print-error (messages/t :cp/http-error {:message (ex-message e)}))
       nil)))
 
 (defn- http-post
