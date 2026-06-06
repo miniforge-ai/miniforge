@@ -16,8 +16,6 @@
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
 
-;; Copyright 2025-2026 Christopher Lester. Licensed under Apache 2.0.
-
 (ns ai.miniforge.reliability.messages
   "Component-level message catalog for reliability.
    Delegates to the shared messages component."
