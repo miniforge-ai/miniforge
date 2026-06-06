@@ -770,7 +770,6 @@
   :cp/terminate-usage          "Usage: miniforge control-plane terminate <agent-id>"
   :cp/terminate-success        "Agent terminated."
   :cp/terminate-failed         "Failed to terminate agent."
-
   ;; control-plane CLI color scheme (keyword values, not strings)
   :cp/status-colors  {:running :blue :blocked :yellow :failed :red
                        :unreachable :red :completed :green}
