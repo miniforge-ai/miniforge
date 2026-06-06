@@ -261,4 +261,14 @@
     (is (not (artifact/rejection-warnings-only?
               (canonical-review :decision :rejected
                                 :blocking-issues []
-                                :warnings []))))))
+                                :warnings [])))))
+
+  (testing "false for a completely empty artifact (no :review/decision key)"
+    ;; An artifact with no decision cannot be in rejection-decisions — the
+    ;; predicate must short-circuit safely rather than throw on a bare map.
+    (is (not (artifact/rejection-warnings-only? {}))))
+
+  (testing "false for nil artifact"
+    ;; Callers may pass a nil review artifact when a previous phase failed
+    ;; to produce output.  The predicate must return false, not throw.
+    (is (not (artifact/rejection-warnings-only? nil)))))
