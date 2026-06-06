@@ -17,7 +17,20 @@
    Delegates to the shared messages component."
   (:require [ai.miniforge.messages.interface :as messages]))
 
-(def t
+(def ^:private catalog
+  (messages/load-catalog "config/web-dashboard/messages/en-US.edn"
+                         :web-dashboard/messages))
+
+(defn t
   "Look up a web-dashboard message by key, with optional param substitution."
-  (messages/create-translator "config/web-dashboard/messages/en-US.edn"
-                              :web-dashboard/messages))
+  ([k] (messages/t catalog k))
+  ([k params] (messages/t catalog k params)))
+
+(defn all-as-json-map
+  "Return the full catalog with keyword keys flattened to ns/name strings,
+   suitable for direct JSON serialization into window.MINIFORGE_MESSAGES."
+  []
+  (into {}
+        (map (fn [[k v]]
+               [(subs (str k) 1) v]))
+        (messages/all catalog)))

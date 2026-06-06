@@ -35,6 +35,15 @@
   ([catalog k] (core/t catalog k))
   ([catalog k params] (core/t catalog k params)))
 
+(defn all
+  "Return the full message map from a loaded catalog.
+
+   Used by callers that need to bulk-export every key/value pair —
+   e.g. serializing the catalog into a browser-side translator at
+   page-render time."
+  [catalog]
+  (core/all catalog))
+
 (defn create-translator
   "Create a `t` function bound to a specific component's message catalog.
 
