@@ -224,7 +224,7 @@
     (is (artifact/rejection-warnings-only?
          (canonical-review :decision :rejected
                            :blocking-issues []
-                           :warnings ["style nit"])))
+                           :warnings ["style warning"])))
     (is (artifact/rejection-warnings-only?
          (canonical-review :decision :changes-requested
                            :blocking-issues []
