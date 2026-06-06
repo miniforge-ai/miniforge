@@ -21,13 +21,19 @@
     return key;
   }
 
+  function stringify(value) {
+    // Mirror Clojure's (str nil) → "" so missing params don't render as
+    // the literal "null" / "undefined".
+    return value == null ? '' : String(value);
+  }
+
   function substitute(template, params) {
     if (typeof template !== 'string' || !params) {
       return template;
     }
     return template.replace(PLACEHOLDER, function (match, name) {
       return Object.prototype.hasOwnProperty.call(params, name)
-        ? String(params[name])
+        ? stringify(params[name])
         : match;
     });
   }
