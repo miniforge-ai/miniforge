@@ -295,6 +295,19 @@
         (let [evt {:type :phase/fail :phase/verdict :exhausted}
               after (fsm/transition-execution machine at-review evt)]
           (is (= :failed (fsm/execution-status machine after)))))
+      (testing ":review/backend-timeout terminates straight to :failed
+                — companion to :implement/network-dropped, fires when the
+                reviewer LLM hit its adaptive timeout (stream-idle /
+                stagnation / hard-limit) with no real verdict produced.
+                Distinct from :exhausted (LLM HAD a verdict the gate
+                couldn't approve) and from :rejected (real defect)."
+        (let [evt {:type :phase/fail :phase/verdict :review/backend-timeout}
+              after (fsm/transition-execution machine at-review evt)]
+          (is (= :failed (fsm/execution-status machine after))
+              "terminal verdict bypasses :on-fail :implement
+               — an infra timeout must not redirect into another
+               implement cycle that would just hit the same dead
+               provider on the next review pass")))
       (testing ":phase/verdict :repair-requested follows on-fail to :implement"
         (let [evt {:type :phase/fail :phase/verdict :repair-requested}
               after (fsm/transition-execution machine at-review evt)]

@@ -252,6 +252,23 @@
                :review/cycle-count review-cycle-count
                :review/fingerprint-history (vec fingerprint-history)})))
 
+(defn- attach-backend-timeout-anomaly
+  "PR-B of phase-timeout stack: attach the backend-timeout anomaly to the
+   phase result so the workflow runner / evidence bundle can surface that
+   the reviewer LLM hit its adaptive timeout — the same pattern
+   `attach-stagnated-anomaly` and `attach-needs-decomposition-anomaly`
+   use for their terminal verdicts. Pulls the timeout message verbatim
+   from the agent's error result so operators see the actual
+   `stream-idle` / `stagnation` / etc. detail in post-mortem."
+  [ctx]
+  (let [agent-error-message (get-in ctx [:phase :result :error :message])
+        msg (or agent-error-message
+                (messages/t :review/backend-timeout))]
+    (assoc-in ctx [:phase :error]
+              {:message msg
+               :anomaly/category :anomalies.review/backend-timeout
+               :anomaly/message  msg})))
+
 (defn- attach-repair-handoff
   "Phase 2b: attach repair feedback + a typed handoff so the implementer
    can pick up the work. Does NOT call `phase/request-redirect` anymore
@@ -326,27 +343,47 @@
    `:phase/fail` array reads it via `:verdict/terminal?` to decide
    between on-fail redirect and terminal `:failed`.
 
-     :approved            — reviewer green-lit; `:phase/succeed` event
-     :repair-requested    — actionable feedback + within budget;
-                            FSM may redirect via on-fail
-     :stagnated           — same blocking fingerprint as prior cycle;
-                            FSM terminates
-     :needs-decomposition — N non-stagnated rejections; FSM terminates
-                            with the decomposition signal
-     :exhausted           — reviewer blocked but no actionable
-                            feedback or over phase-level budget;
-                            FSM terminates"
-  #{:approved :repair-requested :stagnated :needs-decomposition :exhausted})
+     :approved              — reviewer green-lit; `:phase/succeed` event
+     :repair-requested      — actionable feedback + within budget;
+                              FSM may redirect via on-fail
+     :stagnated             — same blocking fingerprint as prior cycle;
+                              FSM terminates
+     :needs-decomposition   — N non-stagnated rejections; FSM terminates
+                              with the decomposition signal
+     :exhausted             — reviewer blocked but no actionable
+                              feedback or over phase-level budget;
+                              FSM terminates
+     :review/backend-timeout — the reviewer LLM call hit its adaptive
+                              timeout (stream-idle / stagnation / etc.)
+                              with no real verdict produced. PR-A
+                              (#1058) wired the agent to take the
+                              `:reviewer/backend-timeout` error exit
+                              instead of synthesizing a false
+                              `:rejected`; this verdict surfaces that
+                              infra failure to the FSM. Terminal —
+                              auto-resume composition (with the
+                              network-resilience PR-C, #1054) lives in
+                              a follow-up PR."
+  #{:approved :repair-requested :stagnated :needs-decomposition :exhausted
+    :review/backend-timeout})
 
 (defn- compute-verdict
   "Pick the verdict that should flow on the phase result. Mirrors the
    former `compute-decision` semantics one-for-one — `:stagnated` and
    `:needs-decomposition` keep their priority over `:repair-requested`;
    a reviewer-blocked failure with no actionable feedback collapses to
-   `:exhausted`."
-  [{:keys [reviewer-blocked? stagnated? needs-decomposition? within-budget?
-           actionable-feedback?]}]
+   `:exhausted`.
+
+   `:review/backend-timeout` takes priority over every code-review
+   verdict: when the reviewer LLM never produced a real verdict (PR-A
+   wiring), there is no `:rejected` to interpret as repair-requested
+   or exhausted. The infra failure must be reported as itself."
+  [{:keys [backend-timeout? reviewer-blocked? stagnated? needs-decomposition?
+           within-budget? actionable-feedback?]}]
   (cond
+    backend-timeout?
+    :review/backend-timeout
+
     stagnated?
     :stagnated
 
@@ -391,6 +428,9 @@
 
     :exhausted
     updated-ctx
+
+    :review/backend-timeout
+    (attach-backend-timeout-anomaly updated-ctx)
 
     :approved
     (mark-completed updated-ctx)))
@@ -451,6 +491,17 @@
         max-iterations    (get-in ctx [:phase :budget :iterations]
                                   (get-in default-config [:budget :iterations]))
         gate-failed?      (= :failed (:phase/status (get-in ctx [:phase])))
+        ;; PR-A (#1058) makes the reviewer agent take the
+        ;; `:reviewer/backend-timeout` error exit on an LLM-call
+        ;; stream-idle (or stagnation / hard-limit / generic timeout)
+        ;; instead of synthesizing a false `:rejected`. Detect that
+        ;; error code here and route to the `:review/backend-timeout`
+        ;; verdict — terminal, distinct from `:exhausted` — so the FSM
+        ;; can treat an infra timeout differently from a real
+        ;; non-actionable rejection (the auto-resume composition with
+        ;; the network-resilience PR-C lives in a follow-up PR).
+        backend-timeout?  (= :reviewer/backend-timeout
+                             (get-in result [:error :data :code]))
         reviewer-blocked? (contains? blocking-decisions review-decision)
         prior-history     (get-in ctx [:execution :review-fingerprints] [])
         current-fp        (agent/review-fingerprint review-artifact)
@@ -472,7 +523,8 @@
         needs-decomposition? (compute-needs-decomposition?
                               reviewer-blocked? stagnated?
                               review-cycle-count max-no-progress-attempts)
-        verdict           (compute-verdict {:reviewer-blocked?    reviewer-blocked?
+        verdict           (compute-verdict {:backend-timeout?     backend-timeout?
+                                            :reviewer-blocked?    reviewer-blocked?
                                             :stagnated?           stagnated?
                                             :needs-decomposition? needs-decomposition?
                                             :within-budget?       within-budget?
