@@ -294,11 +294,10 @@
   "True when the review is a rejection driven exclusively by warnings (no
    real blocking defects).
 
-   Returns true iff ALL three conditions hold:
-   1. `:review/decision` is a rejection-class decision
-      (`issues/rejection-decisions` — `:rejected` or `:changes-requested`).
+   Returns true iff all three conditions hold:
+   1. `:review/decision` is a rejection-class decision (`issues/rejection-decisions`).
    2. `:review/blocking-issues` is empty (no hard blockers).
-   3. `:review/warnings` is non-empty (there are warning-level nits).
+   3. `:review/warnings` is non-empty (there are advisory warnings).
 
    This is the cause-classification primitive that `leave-review` (and
    downstream phase logic) needs to distinguish a genuine-defect rejection
