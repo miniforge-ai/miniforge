@@ -177,7 +177,7 @@
                        (or (some-> (:bundle/id bundle) str) (.getName f))
                        (.getName f))]
           (println (messages/t :evidence/bundle-entry
-                               {:id          (display/style id :foreground :bold)
+                                {:id          (display/style id :bold true)
                                 :workflow-id (if (and bundle (:bundle/workflow-id bundle))
                                                (str (:bundle/workflow-id bundle))
                                                "—")
