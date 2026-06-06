@@ -73,7 +73,7 @@
       (when (= 200 status)
         (json/parse-string (slurp (.getInputStream conn)) true)))
     (catch Exception e
-      (println (display/style (str "Error: " (ex-message e)) :foreground :red))
+      (println (display/style (messages/t :cp/http-error {:message (ex-message e)}) :foreground :red))
       nil)))
 
 (defn- http-post
@@ -94,7 +94,7 @@
         (when (<= 200 status 299)
           (json/parse-string (slurp (.getInputStream conn)) true))))
     (catch Exception e
-      (println (display/style (str "Error: " (ex-message e)) :foreground :red))
+      (println (display/style (messages/t :cp/http-error {:message (ex-message e)}) :foreground :red))
       nil)))
 
 (defn- with-dashboard
