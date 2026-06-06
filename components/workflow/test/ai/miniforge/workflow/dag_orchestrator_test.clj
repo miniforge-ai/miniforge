@@ -185,6 +185,25 @@
     {:dag/branch-registry reg
      :execution/opts {:branch default-branch}}))
 
+(defn- make-task-def
+  "Build a task-def map for `task-sub-opts` tests.
+   `:task/deps` defaults to #{} for root (no-dependency) tasks."
+  ([id description] (make-task-def id description #{}))
+  ([id description deps]
+   {:task/id          id
+    :task/description description
+    :task/deps        deps}))
+
+(defn- make-plan-task
+  "Build a plan-task map for `execute-plan-as-dag` tests.
+   `:task/type` is always `:implement`; `:task/dependencies` defaults to []."
+  ([id description] (make-plan-task id description []))
+  ([id description dependencies]
+   {:task/id           id
+    :task/description  description
+    :task/type         :implement
+    :task/dependencies dependencies}))
+
 (deftest task-sub-opts-no-registry-resolves-to-default-test
   (testing "absent :dag/branch-registry on context is treated as an empty
             registry — `:branch` still resolves deterministically.
@@ -200,7 +219,7 @@
             ALWAYS set. With no registry and no `:execution/opts :branch`
             on context, the resolver falls back to 'main' — the same
             value `default-spec-branch` produces."
-    (let [task-def {:task/id id-a :task/description "A" :task/deps #{}}
+    (let [task-def (make-task-def id-a "A")
           opts (dag-orch/task-sub-opts {} task-def)]
       (is (= "main" (:branch opts))
           "no registry + no spec branch on context → default 'main'"))))
@@ -211,7 +230,7 @@
             acquire-environment is explicit about the fork point — even
             for roots we want to be deterministic, not 'whatever main is
             now'."
-    (let [task-def {:task/id id-a :task/description "A" :task/deps #{}}
+    (let [task-def (make-task-def id-a "A")
           ctx (registry-context {} "feat/spec")
           opts (dag-orch/task-sub-opts ctx task-def)]
       (is (= "feat/spec" (:branch opts))
@@ -221,7 +240,7 @@
   (testing "single dep registered: base = the dep's persisted branch.
             This is the whole point of the chaining feature — the
             downstream sub-workflow sees its parent's work on disk."
-    (let [task-def {:task/id id-b :task/description "B" :task/deps #{id-a}}
+    (let [task-def (make-task-def id-b "B" #{id-a})
           ctx (registry-context {id-a {:branch "task-a"}} "main")
           opts (dag-orch/task-sub-opts ctx task-def)]
       (is (= "task-a" (:branch opts))
@@ -232,7 +251,7 @@
             Defensive: scheduler shouldn't allow this in practice (deps
             run first) but failing-soft beats blocking when the prior
             task crashed before persisting."
-    (let [task-def {:task/id id-b :task/description "B" :task/deps #{id-a}}
+    (let [task-def (make-task-def id-b "B" #{id-a})
           ctx (registry-context {} "main")
           opts (dag-orch/task-sub-opts ctx task-def)]
       (is (= "main" (:branch opts))
@@ -248,7 +267,7 @@
             should not silently fall through to a default branch on the
             multi-parent path. (Stage 2 will replace this anomaly path
             with the resolution sub-workflow.)"
-    (let [task-def {:task/id id-c :task/description "C" :task/deps #{id-a id-b}}
+    (let [task-def (make-task-def id-c "C" #{id-a id-b})
           ctx (registry-context {id-a {:branch "task-a-not-in-test-repo"}
                                  id-b {:branch "task-b-not-in-test-repo"}}
                                 "main")
@@ -268,7 +287,7 @@
   (testing "Multi-parent task: a parent whose registered branch starts with '-'
             is rejected before git is invoked, surfacing a typed
             :anomalies/dag-multi-parent-branch-name-invalid anomaly."
-    (let [task-def {:task/id id-c :task/description "C" :task/deps #{id-a id-b}}
+    (let [task-def (make-task-def id-c "C" #{id-a id-b})
           ctx (registry-context {id-a {:branch "-flag-injection"}
                                  id-b {:branch "task-b"}}
                                 "main")
@@ -304,7 +323,7 @@
              ["double dot range"         "main..feat"]
              ["at-brace reflog syntax"   "main@{1}"]
              ["double slash"             "feat//inner"]]]
-      (let [task-def {:task/id id-c :task/description "C" :task/deps #{id-a id-b}}
+      (let [task-def (make-task-def id-c "C" #{id-a id-b})
             ctx (registry-context {id-a {:branch bad-branch}
                                    id-b {:branch "task-b"}}
                                   "main")
@@ -328,10 +347,8 @@
     (let [[logger _] (log/collecting-logger)
           plan {:plan/id (random-uuid)
                 :plan/name "linear"
-                :plan/tasks [{:task/id id-a :task/description "A"
-                              :task/type :implement :task/dependencies []}
-                             {:task/id id-b :task/description "B"
-                              :task/type :implement :task/dependencies [id-a]}]}
+                :plan/tasks [(make-plan-task id-a "A")
+                             (make-plan-task id-b "B" [id-a])]}
           result (dag-orch/execute-plan-as-dag plan {:logger logger})]
       (is (:success? result) "forest plan should run to success")
       (is (= 2 (:tasks-completed result))))))
@@ -348,14 +365,10 @@
     (let [[logger entries] (log/collecting-logger)
           plan {:plan/id (random-uuid)
                 :plan/name "diamond"
-                :plan/tasks [{:task/id id-a :task/description "A"
-                              :task/type :implement :task/dependencies []}
-                             {:task/id id-b :task/description "B"
-                              :task/type :implement :task/dependencies [id-a]}
-                             {:task/id id-c :task/description "C"
-                              :task/type :implement :task/dependencies [id-a]}
-                             {:task/id id-d :task/description "D"
-                              :task/type :implement :task/dependencies [id-b id-c]}]}
+                :plan/tasks [(make-plan-task id-a "A")
+                             (make-plan-task id-b "B" [id-a])
+                             (make-plan-task id-c "C" [id-a])
+                             (make-plan-task id-d "D" [id-b id-c])]}
           result (dag-orch/execute-plan-as-dag plan {:logger logger})]
       (is (:success? result)
           "v2 runs diamond plans end-to-end")
@@ -455,9 +468,7 @@
           context         {:execution/run-pipeline-fn (fn [_sw _in _opts] stub-result)
                            :execution/workflow {:workflow/pipeline []}
                            :execution/opts {:branch "main"}}
-          task-def        {:task/id id-a
-                           :task/description "Test multi-iter task"
-                           :task/deps #{}}
+          task-def        (make-task-def id-a "Test multi-iter task")
           wf-result       (dag-orch/run-mini-workflow task-def context)]
       (is (:success? wf-result)
           "phase/succeeded? recognizes :execution/status :completed")
@@ -479,9 +490,7 @@
           context       {:execution/run-pipeline-fn (fn [_sw _in _opts] stub-result)
                          :execution/workflow {:workflow/pipeline []}
                          :execution/opts {:branch "main"}}
-          task-def      {:task/id id-a
-                         :task/description "Happy path task"
-                         :task/deps #{}}
+          task-def      (make-task-def id-a "Happy path task")
           wf-result     (dag-orch/run-mini-workflow task-def context)]
       (is (:success? wf-result))
       (is (= only-artifact (:artifact wf-result))
