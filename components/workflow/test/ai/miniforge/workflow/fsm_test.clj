@@ -439,6 +439,18 @@
               "implement network-drop after retry exhaustion MUST NOT
                redirect — operator surfaces for manual resume once
                connectivity is restored")))
+      (testing ":implement/backend-timeout terminates straight to :failed
+                (PR-C of phase-timeout stack: implementer LLM call
+                exhausted iteration budget retrying after consecutive
+                stream-idle / stagnation / hard-limit timeouts.
+                Companion to :review/backend-timeout — same shape,
+                applied to the implement phase)"
+        (let [evt {:type :phase/fail :phase/verdict :implement/backend-timeout}
+              after (fsm/transition-execution machine at-implement evt)]
+          (is (= :failed (fsm/execution-status machine after))
+              "implement backend-timeout after retry exhaustion MUST
+               NOT redirect — retrying would just hit the same slow
+               provider on the next pass")))
       (testing ":repair-requested follows on-fail (here :plan) + counter"
         (let [evt {:type :phase/fail :phase/verdict :repair-requested}
               after (fsm/transition-execution machine at-implement evt)]

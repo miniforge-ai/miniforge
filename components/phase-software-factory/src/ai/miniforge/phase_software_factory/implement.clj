@@ -536,6 +536,38 @@
         (and (string? msg)
              (re-find #"(?i)type:\s*network-drop" msg)))))
 
+(defn- backend-timeout-in-result?
+  "True when the agent result carries an adaptive-timeout signal that
+   is NOT `:network-drop` — i.e. the LLM call hit a stream-idle,
+   stagnation, or hard-limit timeout. Mirrors
+   `network-drop-in-result?`'s three-location path priority so the
+   two timeout families stay symmetrically shaped (matching the
+   2026-06-06 phase-timeout PR-A primitives in result-boundary).
+
+   The 2026-06-05 dogfood (`adhoc-944448986`) revealed the gap: the
+   reviewer LLM stream-idle'd at 360s and the workflow had no
+   per-phase verdict to distinguish that infra timeout from a real
+   defect. PR-A/B fixed the review-phase side; this is the implement-
+   phase parity.
+
+   Distinct from `network-drop-in-result?` — the network monitor
+   detects TCP/TLS reachability loss; this catches the cases where
+   the provider stayed connected but stopped producing output (or
+   ran past a hard wall-clock cutoff). The two arms never both fire
+   on the same result because the `:type` is mutually exclusive.
+
+   Distinct from `rate-limit-in-result?` — that keys off provider-
+   emitted 429/quota messages; this keys off the LLM client's own
+   adaptive-timeout taxonomy."
+  [result]
+  (let [timeout-types #{:stream-idle :stagnation :hard-limit}
+        boundary-type (or (get-in result [:error :data :timeout :type])
+                          (get-in result [:timeout :type]))]
+    (or (contains? timeout-types boundary-type)
+        (let [msg (get-in result [:error :message])]
+          (and (string? msg)
+               (re-find #"(?i)type:\s*(stream-idle|stagnation|hard-limit)" msg))))))
+
 (defn- extract-error-message
   "Extract the most relevant error message from an agent result."
   [result default-msg]
@@ -617,6 +649,16 @@
         ;; mid-stream when the drop hit.
         network-dropped? (and (= :error agent-status)
                               (network-drop-in-result? result))
+        ;; PR-C of phase-timeout stack: companion to network-dropped?.
+        ;; Stream-idle / stagnation / hard-limit timeouts from the
+        ;; implementer LLM call. Retriable from the persisted
+        ;; checkpoint up to the iteration budget (same recovery shape
+        ;; as network-dropped); after budget exhaustion the verdict
+        ;; below escalates to `:implement/backend-timeout` terminal.
+        ;; Two arms never both fire on the same result — the
+        ;; underlying `:timeout :type` is mutually exclusive.
+        backend-timeout? (and (= :error agent-status)
+                              (backend-timeout-in-result? result))
         gate-failed? (= :failed (:phase/status (get-in ctx [:phase])))
         ;; Curator's empty-diff verdict: the implementer wrote no files to the
         ;; environment. Retrying with the same prompt won't change that — the
@@ -658,6 +700,15 @@
                        ;; :implement/network-dropped (terminal).
                        network-dropped? (phase/determine-phase-status
                                           effective-status iterations max-iterations)
+                       ;; Backend timeout (stream-idle / stagnation /
+                       ;; hard-limit): retriable within the iteration
+                       ;; budget — same shape as network-dropped.
+                       ;; Provider may be transiently slow; retry from
+                       ;; the persisted checkpoint. After
+                       ;; max-iterations the verdict below escalates
+                       ;; to `:implement/backend-timeout` terminal.
+                       backend-timeout? (phase/determine-phase-status
+                                          effective-status iterations max-iterations)
                        ;; Curator said no files — terminal, no retry.
                        curator-empty-diff? :failed
                        :else (phase/determine-phase-status
@@ -697,6 +748,18 @@
                   ;; above and the FSM keeps cycling implement.
                   network-dropped?
                   :implement/network-dropped
+
+                  ;; Backend timeout (PR-C of phase-timeout stack):
+                  ;; companion to network-dropped — same iteration-
+                  ;; budget retry shape, fires when the implementer's
+                  ;; LLM call hit stream-idle / stagnation / hard-limit
+                  ;; for max-iterations consecutive cycles. Terminal:
+                  ;; retrying would just hit the same slow provider
+                  ;; on the next pass. The FSM's `:verdict/terminal?`
+                  ;; guard routes this straight to `:failed` without
+                  ;; the on-fail :implement loop re-firing.
+                  backend-timeout?
+                  :implement/backend-timeout
 
                   curator-empty-diff?
                   :implement/empty-diff
