@@ -252,6 +252,23 @@
                :review/cycle-count review-cycle-count
                :review/fingerprint-history (vec fingerprint-history)})))
 
+(defn- attach-backend-timeout-anomaly
+  "PR-B of phase-timeout stack: attach the backend-timeout anomaly to the
+   phase result so the workflow runner / evidence bundle can surface that
+   the reviewer LLM hit its adaptive timeout — the same pattern
+   `attach-stagnated-anomaly` and `attach-needs-decomposition-anomaly`
+   use for their terminal verdicts. Pulls the timeout message verbatim
+   from the agent's error result so operators see the actual
+   `stream-idle` / `stagnation` / etc. detail in post-mortem."
+  [ctx]
+  (let [agent-error-message (get-in ctx [:phase :result :error :message])
+        msg (or agent-error-message
+                (messages/t :review/backend-timeout))]
+    (assoc-in ctx [:phase :error]
+              {:message msg
+               :anomaly/category :anomalies.review/backend-timeout
+               :anomaly/message  msg})))
+
 (defn- attach-repair-handoff
   "Phase 2b: attach repair feedback + a typed handoff so the implementer
    can pick up the work. Does NOT call `phase/request-redirect` anymore
@@ -411,6 +428,9 @@
 
     :exhausted
     updated-ctx
+
+    :review/backend-timeout
+    (attach-backend-timeout-anomaly updated-ctx)
 
     :approved
     (mark-completed updated-ctx)))

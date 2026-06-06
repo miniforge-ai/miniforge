@@ -549,3 +549,30 @@
       (is (contains? verdicts :stagnated))
       (is (contains? verdicts :needs-decomposition))
       (is (contains? verdicts :repair-requested)))))
+
+(deftest backend-timeout-apply-verdict-attaches-anomaly-without-throwing
+  ;; PR #1059 review (Copilot): `apply-verdict` is a `case` with no
+  ;; default arm. Adding `:review/backend-timeout` to the verdicts set
+  ;; without a matching clause would raise IllegalArgumentException at
+  ;; the first production stream-idle. This test pins both the no-
+  ;; throw contract AND the anomaly-attached side-effect that mirrors
+  ;; the stagnated / needs-decomposition pattern.
+  (testing "leave-review on backend-timeout produces a context (no IllegalArgumentException)
+            and attaches the :anomalies.review/backend-timeout sub-anomaly
+            to [:phase :error] for the evidence bundle"
+    (let [final-ctx (simulate-leave-review-backend-timeout-context 1 2)
+          phase-error (get-in final-ctx [:phase :error])]
+      (is (some? phase-error)
+          ":phase :error is set — case clause fired the anomaly-attach side effect")
+      (is (= :anomalies.review/backend-timeout
+             (:anomaly/category phase-error))
+          "anomaly category matches the verdict — parallels :anomalies.review/stagnation
+           and :anomalies.review/needs-decomposition")
+      (is (string? (:anomaly/message phase-error))
+          "anomaly message is a string — pulled from the agent error message
+           or the catalog fallback")
+      (is (= (get-in final-ctx [:phase :result :error :message])
+             (:message phase-error))
+          "anomaly :message preserves the actual adaptive-timeout text the
+           operator needs (stream-idle / stagnation / etc.) — not just a
+           generic catalog string"))))
