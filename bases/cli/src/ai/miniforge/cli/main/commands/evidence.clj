@@ -176,11 +176,14 @@
               id     (if bundle
                        (or (some-> (:bundle/id bundle) str) (.getName f))
                        (.getName f))]
-          (println (str "  " (display/style id :foreground :bold)
-                        (when (and bundle (:bundle/workflow-id bundle))
-                          (str "  wf:" (:bundle/workflow-id bundle)))
-                        (when (and bundle (:bundle/status bundle))
-                          (str "  (" (:bundle/status bundle) ")"))))))
+          (println (messages/t :evidence/bundle-entry
+                                {:id          (display/style id :bold true)
+                                :workflow-id (if (and bundle (:bundle/workflow-id bundle))
+                                               (str (:bundle/workflow-id bundle))
+                                               "—")
+                                :status      (if (and bundle (:bundle/status bundle))
+                                               (str (:bundle/status bundle))
+                                               "—")}))))
       (do
         (println (messages/t :evidence/none))
         (println (messages/t :evidence/evidence-dir {:dir (evidence-dir)}))))))
