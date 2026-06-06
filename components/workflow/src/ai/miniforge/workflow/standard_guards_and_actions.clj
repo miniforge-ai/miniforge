@@ -84,7 +84,19 @@
     ;; outages. Retrying again would just hit the same dead network on
     ;; the next probe cycle. Terminal — operator surfaces the workflow
     ;; for manual resume once connectivity is restored.
-    :implement/network-dropped})
+    :implement/network-dropped
+    ;; PR-B of phase-timeout stack (companion to network-resilience):
+    ;; the reviewer LLM call hit its adaptive timeout (stream-idle /
+    ;; stagnation / hard-limit / generic) with no real verdict
+    ;; produced. PR-A (#1058) made the reviewer agent take the
+    ;; `:reviewer/backend-timeout` error exit instead of synthesizing
+    ;; a false `:rejected`; this verdict surfaces that to the FSM.
+    ;; Distinct from `:exhausted` — `:exhausted` means the reviewer
+    ;; HAD a verdict the gate couldn't approve, this means the
+    ;; reviewer never produced one. Currently terminal; the cross-
+    ;; phase auto-resume composition (single retry from the persisted
+    ;; checkpoint, then terminate) lives in a follow-up PR.
+    :review/backend-timeout})
 
 (defn verdict-terminal?
   "Guard: true when the failing-phase event carries a terminal verdict.

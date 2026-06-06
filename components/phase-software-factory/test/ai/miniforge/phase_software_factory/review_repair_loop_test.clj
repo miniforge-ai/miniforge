@@ -26,7 +26,7 @@
    [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.phase.interface :as phase]
    [ai.miniforge.phase.loader :as loader]
-   [ai.miniforge.phase-software-factory.review]
+   [ai.miniforge.phase-software-factory.review :as review]
    [ai.miniforge.phase-software-factory.implement]))
 
 (def phase-test-config-resource
@@ -468,3 +468,111 @@
           "below cap, no decomposition verdict")
       (is (= :repair-requested (:verdict phase))
           "below cap with progress + actionable feedback = :repair-requested"))))
+
+;; ============================================================================
+;; Backend-timeout verdict — companion to PR-A (#1058)
+;;
+;; PR-A wires the reviewer agent to take a `:reviewer/backend-timeout`
+;; error exit when the LLM call itself stream-idle'd (or stagnation /
+;; hard-limit / generic timeout). PR-B's `compute-verdict` arm here
+;; translates that error code into a `:review/backend-timeout` verdict
+;; — terminal in the FSM's `terminal-verdicts` set — so an infra
+;; timeout no longer cascade-fails the workflow through the
+;; `:exhausted` / on-fail-implement path that would just hit the same
+;; dead provider on the next pass.
+;; ============================================================================
+
+(defn- simulate-leave-review-backend-timeout-context
+  "Simulate the leave-review logic when the reviewer agent returned a
+   `:reviewer/backend-timeout` error result (the PR-A exit shape).
+
+   The result mirrors what `artifact/timeout-only-error-result` wires
+   through `result-boundary/error-response`: `:status :error` at the
+   top of the result, the error data carries `:code :reviewer/backend-
+   timeout`, no `:output` artifact."
+  [iterations max-iterations]
+  (let [result {:status :error
+                :error {:message "Adaptive timeout: No stream output for 360000ms (type: stream-idle, elapsed: 360087ms)"
+                        :data {:code :reviewer/backend-timeout
+                               :blocking-issues ["Adaptive timeout: No stream output for 360000ms (type: stream-idle, elapsed: 360087ms)"]}}
+                :metrics {:tokens 9 :duration-ms 360087}}
+        ctx {:phase {:started-at (- (System/currentTimeMillis) 360087)
+                     :iterations iterations
+                     :budget {:iterations max-iterations}
+                     :result result}
+             :phase-config {:phase :review}
+             :execution/phase-results {}
+             :execution/input {:description "test task"}
+             :execution/metrics {}}
+        interceptor (phase/get-phase-interceptor {:phase :review})
+        leave-fn (:leave interceptor)]
+    (leave-fn ctx)))
+
+(deftest backend-timeout-result-emits-review-backend-timeout-verdict
+  ;; 2026-06-05 dogfood (workflow adhoc-944448986) repro: reviewer LLM
+  ;; stream-idle'd at 360s; PR-A makes the reviewer return the
+  ;; backend-timeout error code instead of synthesizing a false
+  ;; `:rejected`. PR-B converts that error code into the verdict the
+  ;; FSM reads to take the terminal branch.
+  (testing "reviewer-agent :reviewer/backend-timeout error → :review/backend-timeout verdict"
+    (let [final-ctx (simulate-leave-review-backend-timeout-context 1 2)
+          phase (:phase final-ctx)]
+      (is (= :review/backend-timeout (:verdict phase))
+          ":verdict slot exposes the canonical backend-timeout signal")
+      (is (= :review/backend-timeout
+             (get-in phase [:result :output :phase/verdict]))
+          "FSM-readable :phase/verdict carries the same verdict
+           — `determine-phase-event` plumbs this into the
+           `:verdict/terminal?` guard")))
+
+  (testing "backend-timeout verdict takes priority over the within-budget repair branch
+            — the LLM call NEVER produced a real verdict, so there's
+            nothing to repair; redirecting to implement would just hit
+            the same dead provider on the next review pass"
+    (let [final-ctx (simulate-leave-review-backend-timeout-context 1 4)
+          phase (:phase final-ctx)]
+      (is (= :review/backend-timeout (:verdict phase))
+          "even with iterations < max, backend-timeout pre-empts :repair-requested")
+      (is (not= :repair-requested (:verdict phase))))))
+
+(deftest backend-timeout-verdict-is-in-the-canonical-verdict-set
+  (testing "compute-verdict's verdict tag set declares :review/backend-timeout
+            — the FSM's terminal-verdicts wiring + `:verdict/terminal?`
+            guard look up the verdict by exact keyword match, so the
+            tag-set must enumerate it. Coverage here pins the public
+            surface so a rename can't silently slip past."
+    ;; Read the private var via the var; the resolved value is the set.
+    (let [verdicts @#'review/verdicts]
+      (is (contains? verdicts :review/backend-timeout))
+      (is (contains? verdicts :approved))
+      (is (contains? verdicts :exhausted))
+      (is (contains? verdicts :stagnated))
+      (is (contains? verdicts :needs-decomposition))
+      (is (contains? verdicts :repair-requested)))))
+
+(deftest backend-timeout-apply-verdict-attaches-anomaly-without-throwing
+  ;; PR #1059 review (Copilot): `apply-verdict` is a `case` with no
+  ;; default arm. Adding `:review/backend-timeout` to the verdicts set
+  ;; without a matching clause would raise IllegalArgumentException at
+  ;; the first production stream-idle. This test pins both the no-
+  ;; throw contract AND the anomaly-attached side-effect that mirrors
+  ;; the stagnated / needs-decomposition pattern.
+  (testing "leave-review on backend-timeout produces a context (no IllegalArgumentException)
+            and attaches the :anomalies.review/backend-timeout sub-anomaly
+            to [:phase :error] for the evidence bundle"
+    (let [final-ctx (simulate-leave-review-backend-timeout-context 1 2)
+          phase-error (get-in final-ctx [:phase :error])]
+      (is (some? phase-error)
+          ":phase :error is set — case clause fired the anomaly-attach side effect")
+      (is (= :anomalies.review/backend-timeout
+             (:anomaly/category phase-error))
+          "anomaly category matches the verdict — parallels :anomalies.review/stagnation
+           and :anomalies.review/needs-decomposition")
+      (is (string? (:anomaly/message phase-error))
+          "anomaly message is a string — pulled from the agent error message
+           or the catalog fallback")
+      (is (= (get-in final-ctx [:phase :result :error :message])
+             (:message phase-error))
+          "anomaly :message preserves the actual adaptive-timeout text the
+           operator needs (stream-idle / stagnation / etc.) — not just a
+           generic catalog string"))))

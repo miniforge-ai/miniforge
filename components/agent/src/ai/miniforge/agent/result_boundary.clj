@@ -75,6 +75,64 @@
   [{:keys [structured-artifact parsed-content derived-artifact]}]
   (or structured-artifact parsed-content derived-artifact))
 
+;------------------------------------------------------------------------------ LLM-timeout classification
+;;
+;; `llm-client/timeout-result` packs an adaptive-timeout reason into the
+;; LLM-error's `:timeout` field. The `:type` keyword inside that field is
+;; the canonical taxonomy: `:stream-idle`, `:stagnation`, `:hard-limit`,
+;; `:network-drop` (PR-B of network-resilience).
+;;
+;; The reviewer's existing `timeout-only-review?` reads from the PARSED
+;; review map, which is nil whenever the LLM call itself errored (no
+;; response to parse). The 2026-06-05 dogfood (workflow `adhoc-944448986`)
+;; failed at exactly that path — reviewer-LLM stream-idle'd at 360s, no
+;; parsed review, the framework's parse-failed branch promoted the
+;; timeout text into `:review/blocking-issues` and synthesized a false
+;; `:rejected`. These helpers detect the same condition at the BOUNDARY
+;; level (the normalized result), so callers can branch on infra timeouts
+;; even when the parser produced nothing.
+
+(defn llm-timeout-type
+  "Return the timeout-type keyword from a normalized boundary, or nil if
+   the response carries no timeout envelope.
+
+   The LLM-client's `streaming-error-response` packs the timeout reason
+   produced by `stream-idle-timeout` / `stagnation-timeout` / etc. into
+   the error's `:timeout` field; this helper just pulls the canonical
+   `:type` keyword out of it.
+
+   Reads `(:llm-error normalized)` (the map produced by `llm/get-error`)
+   for `[:timeout :type]`. Returns nil for non-error responses, for
+   error responses without a `:timeout` envelope, and for normalized
+   maps where `:llm-error` is missing entirely."
+  [normalized]
+  (get-in normalized [:llm-error :timeout :type]))
+
+(defn stream-idle-error?
+  "True when the normalized boundary carries an LLM-client adaptive
+   timeout of `:type :stream-idle` — i.e. the provider connected but
+   stopped producing stream output for the configured idle threshold.
+
+   Distinct from `network-drop-error?` (TCP/TLS reachability lost) and
+   from a real LLM rejection (parsed content with `:rejected` verdict).
+   Callers should treat this as an INFRA failure — retry from the
+   last persisted checkpoint, do not promote into the artifact's
+   blocking-issues / repair-request channel."
+  [normalized]
+  (= :stream-idle (llm-timeout-type normalized)))
+
+(defn network-drop-error?
+  "True when the normalized boundary carries an LLM-client adaptive
+   timeout of `:type :network-drop` — the connectivity-lost verdict
+   emitted by PR-B's network-monitor after `failure-threshold`
+   consecutive probe failures.
+
+   Distinct from `stream-idle-error?` (provider connected, no tokens)
+   and from a real LLM rejection. Callers should retry from the last
+   persisted checkpoint once connectivity is restored."
+  [normalized]
+  (= :network-drop (llm-timeout-type normalized)))
+
 (defn error-response
   "Build a failure response that preserves the backend error shape plus
    common response metadata for post-mortem."

@@ -188,35 +188,43 @@
 
    This preserves backend timeout metadata, emits the standard phase-completed
    telemetry, and reports the deterministic gate outcome instead of converting
-   the backend failure into a bogus code-review rejection."
+   the backend failure into a bogus code-review rejection.
+
+   `llm-review` may be nil — PR-A of the phase-timeout stack added a
+   boundary-level stream-idle path where the LLM call errors before
+   producing any parseable review. The defaulted vector keeps the
+   `:blocking-issues` field a vector across both invocation shapes so
+   downstream telemetry / error consumers that pattern-match on
+   sequential data don't see a surprise nil from the new path."
   [logger normalized llm-review gate-result counts duration tokens cost-usd timeout-failure-message]
-  (log/warn logger :reviewer :reviewer/backend-timeout-only
-            {:data {:llm-decision (:review/decision llm-review)
-                    :gate-decision (:decision gate-result)
-                    :blocking-issues (:review/blocking-issues llm-review)
-                    :duration-ms duration}})
-  (leave-review logger {:review/decision (:decision gate-result)
-                        :duration-ms duration
-                        :gates-passed (:passed counts)
-                        :gates-failed (:failed counts)
-                        :llm? true
-                        :status :error
-                        :error-code :reviewer/backend-timeout})
-  (assoc
-   (result-boundary/error-response
-    normalized
-    timeout-failure-message
-    {:data (merge (or (some-> normalized :llm-error :data) {})
-                  {:code :reviewer/backend-timeout
-                   :blocking-issues (:review/blocking-issues llm-review)})})
-   :metrics
-   (cond-> {:decision (:decision gate-result)
-            :gates-passed (:passed counts)
-            :gates-failed (:failed counts)
-            :gates-total (:total counts)
-            :duration-ms duration
-            :tokens tokens}
-     cost-usd (assoc :cost-usd cost-usd))))
+  (let [blocking-issues (vec (:review/blocking-issues llm-review))]
+    (log/warn logger :reviewer :reviewer/backend-timeout-only
+              {:data {:llm-decision (:review/decision llm-review)
+                      :gate-decision (:decision gate-result)
+                      :blocking-issues blocking-issues
+                      :duration-ms duration}})
+    (leave-review logger {:review/decision (:decision gate-result)
+                          :duration-ms duration
+                          :gates-passed (:passed counts)
+                          :gates-failed (:failed counts)
+                          :llm? true
+                          :status :error
+                          :error-code :reviewer/backend-timeout})
+    (assoc
+     (result-boundary/error-response
+      normalized
+      timeout-failure-message
+      {:data (merge (or (some-> normalized :llm-error :data) {})
+                    {:code :reviewer/backend-timeout
+                     :blocking-issues blocking-issues})})
+     :metrics
+     (cond-> {:decision (:decision gate-result)
+              :gates-passed (:passed counts)
+              :gates-failed (:failed counts)
+              :gates-total (:total counts)
+              :duration-ms duration
+              :tokens tokens}
+       cost-usd (assoc :cost-usd cost-usd)))))
 
 ;------------------------------------------------------------------------------ Layer 4
 ;; Public-API accessors
