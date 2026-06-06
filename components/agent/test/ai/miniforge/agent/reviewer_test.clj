@@ -443,7 +443,16 @@
                  (get-in result [:error :message]))
               "Error message preserves the adaptive-timeout text verbatim for operator post-mortem")
           (is (= timeout-review-token-count
-                 (get-in result [:metrics :tokens]))))))))
+                 (get-in result [:metrics :tokens])))
+          (is (= []
+                 (get-in result [:error :data :blocking-issues]))
+              "blocking-issues defaults to an empty vector — never nil — when the
+               boundary-stream-idle path fires with no parsed review. Downstream
+               consumers that pattern-match on sequential data (count, seq, into)
+               must not see a surprise nil from the new path.")
+          (is (vector? (get-in result [:error :data :blocking-issues]))
+              "vector shape preserved end-to-end — pinned because PR #1058 review
+               flagged the original implementation returning nil here."))))))
 
 (deftest test-reviewer-timeout-only-shape-does-not-hide-real-gate-failures
   (testing "timeout-only classification requires the deterministic gates to approve"
