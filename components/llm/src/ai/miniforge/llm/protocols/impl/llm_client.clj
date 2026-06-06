@@ -1275,8 +1275,16 @@
          network-drop-reason (atom nil)
          stop-network-monitor!
          (when backend-key
+           ;; Caller opts merged FIRST so the integration-owned
+           ;; :backend-key, :probe-url, and :on-drop always win — a
+           ;; test fixture that mistakenly carries those keys can't
+           ;; clobber the monitor's correctness contract. Test-only
+           ;; knobs (:probe-interval-ms, :failure-threshold, :probe-fn)
+           ;; still flow through.
            (nnm/start-network-monitor!
-             (merge {:backend-key backend-key
+             (merge network-monitor-opts
+                    {:backend-key backend-key
+                     :probe-url   (probe-endpoint-for backend-key)
                      :on-drop     (fn [diag]
                                     (compare-and-set! network-drop-reason nil
                                                       (network-drop-timeout diag))
@@ -1287,8 +1295,7 @@
                                     ;; call stop-stream-process! makes;
                                     ;; safe to double-tap.
                                     (try (.destroyForcibly process)
-                                         (catch Exception _ nil)))}
-                    network-monitor-opts)))
+                                         (catch Exception _ nil)))})))
          {:keys [lines timeout]}
          (try
            (process-stream-lines out-reader monitor on-line)

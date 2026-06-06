@@ -35,7 +35,7 @@
   [script]
   (let [idx (atom 0)
         coerce {:up true :down false true true false false}]
-    (fn [_backend-key]
+    (fn [_probe-url]
       (let [i @idx
             v (get script i (last script))]
         (swap! idx inc)
@@ -68,7 +68,8 @@
   (testing "every probe returns :up → on-drop never called"
     (let [record (atom {:calls []})
           stop!  (nm/start-network-monitor!
-                   {:backend-key       :claude
+                   {:probe-url         "https://test.example.com/"
+                    :backend-key       :claude
                     :probe-interval-ms fast-probe-interval-ms
                     :failure-threshold fast-failure-threshold
                     :probe-fn          (scripted-probe [:up :up :up :up :up :up])
@@ -90,7 +91,8 @@
           ;; The first down increments to 1. The up resets to 0. Each
           ;; subsequent down increments anew; never reaches 3.
           stop! (nm/start-network-monitor!
-                  {:backend-key       :claude
+                  {:probe-url         "https://test.example.com/"
+                    :backend-key       :claude
                    :probe-interval-ms fast-probe-interval-ms
                    :failure-threshold fast-failure-threshold
                    :probe-fn          (scripted-probe
@@ -110,7 +112,8 @@
     (let [record (atom {:calls []})
           latch  (promise)
           stop!  (nm/start-network-monitor!
-                   {:backend-key       :claude
+                   {:probe-url         "https://test.example.com/"
+                    :backend-key       :claude
                     :probe-interval-ms fast-probe-interval-ms
                     :failure-threshold fast-failure-threshold
                     :probe-fn          (scripted-probe [:down :down :down
@@ -135,7 +138,8 @@
     (let [record (atom {:calls []})
           latch  (promise)
           stop!  (nm/start-network-monitor!
-                   {:backend-key       :codex
+                   {:probe-url         "https://test.example.com/"
+                    :backend-key       :codex
                     :probe-interval-ms fast-probe-interval-ms
                     :failure-threshold fast-failure-threshold
                     :probe-fn          (scripted-probe [:down :down :down])
@@ -144,6 +148,9 @@
         (wait-for-fire-or-timeout latch (* fast-probe-interval-ms 50))
         (let [diag (first (:calls @record))]
           (is (= :codex                  (:backend-key diag)))
+          (is (= "https://test.example.com/" (:probe-url diag))
+              ":probe-url is echoed back so downstream logs identify
+               which endpoint went away")
           (is (= fast-failure-threshold  (:failure-threshold diag)))
           (is (= fast-failure-threshold  (:consecutive-failures diag))
               "diagnostic records the actual failure count at fire time")
@@ -160,10 +167,11 @@
   (testing "exception thrown from probe-fn → counted as a failure"
     (let [record (atom {:calls []})
           latch  (promise)
-          throwing-probe (fn [_backend-key]
+          throwing-probe (fn [_probe-url]
                            (throw (RuntimeException. "DNS failure")))
           stop!  (nm/start-network-monitor!
-                   {:backend-key       :claude
+                   {:probe-url         "https://test.example.com/"
+                    :backend-key       :claude
                     :probe-interval-ms fast-probe-interval-ms
                     :failure-threshold fast-failure-threshold
                     :probe-fn          throwing-probe
@@ -182,7 +190,8 @@
   (testing "stop! invoked before the threshold is reached → on-drop never fires"
     (let [record (atom {:calls []})
           stop!  (nm/start-network-monitor!
-                   {:backend-key       :claude
+                   {:probe-url         "https://test.example.com/"
+                    :backend-key       :claude
                     :probe-interval-ms fast-probe-interval-ms
                     :failure-threshold fast-failure-threshold
                     :probe-fn          (scripted-probe [:down :down :down])
@@ -197,7 +206,8 @@
 (deftest stop!-is-idempotent-test
   (testing "calling stop! twice is a no-op the second time"
     (let [stop! (nm/start-network-monitor!
-                  {:backend-key       :claude
+                  {:probe-url         "https://test.example.com/"
+                    :backend-key       :claude
                    :probe-interval-ms fast-probe-interval-ms
                    :failure-threshold fast-failure-threshold
                    :probe-fn          (scripted-probe [:up])
@@ -208,26 +218,38 @@
 
 ;------------------------------------------------------------------------------ Argument validation
 
-(deftest start-monitor-rejects-missing-backend-key-test
+(deftest start-monitor-rejects-missing-probe-url-test
   (is (thrown? AssertionError
                (nm/start-network-monitor!
-                 {:probe-interval-ms fast-probe-interval-ms
+                 {:backend-key       :claude
+                  :probe-interval-ms fast-probe-interval-ms
                   :failure-threshold fast-failure-threshold
                   :probe-fn          (scripted-probe [:up])
                   :on-drop           (fn [_] nil)}))
-      "no backend-key → assertion failure (programmer error per rule 005)"))
+      "no probe-url → assertion failure (programmer error per rule 005)")
+  (is (thrown? AssertionError
+               (nm/start-network-monitor!
+                 {:probe-url         ""
+                  :backend-key       :claude
+                  :probe-interval-ms fast-probe-interval-ms
+                  :failure-threshold fast-failure-threshold
+                  :probe-fn          (scripted-probe [:up])
+                  :on-drop           (fn [_] nil)}))
+      "empty :probe-url is not a usable URL"))
 
 (deftest start-monitor-rejects-non-positive-interval-test
   (is (thrown? AssertionError
                (nm/start-network-monitor!
-                 {:backend-key       :claude
+                 {:probe-url         "https://test.example.com/"
+                    :backend-key       :claude
                   :probe-interval-ms 0
                   :failure-threshold fast-failure-threshold
                   :probe-fn          (scripted-probe [:up])
                   :on-drop           (fn [_] nil)})))
   (is (thrown? AssertionError
                (nm/start-network-monitor!
-                 {:backend-key       :claude
+                 {:probe-url         "https://test.example.com/"
+                    :backend-key       :claude
                   :probe-interval-ms -1
                   :failure-threshold fast-failure-threshold
                   :probe-fn          (scripted-probe [:up])
@@ -236,14 +258,16 @@
 (deftest start-monitor-rejects-non-positive-threshold-test
   (is (thrown? AssertionError
                (nm/start-network-monitor!
-                 {:backend-key       :claude
+                 {:probe-url         "https://test.example.com/"
+                    :backend-key       :claude
                   :probe-interval-ms fast-probe-interval-ms
                   :failure-threshold 0
                   :probe-fn          (scripted-probe [:up])
                   :on-drop           (fn [_] nil)})))
   (is (thrown? AssertionError
                (nm/start-network-monitor!
-                 {:backend-key       :claude
+                 {:probe-url         "https://test.example.com/"
+                    :backend-key       :claude
                   :probe-interval-ms fast-probe-interval-ms
                   :failure-threshold -2
                   :probe-fn          (scripted-probe [:up])
@@ -252,8 +276,94 @@
 (deftest start-monitor-rejects-non-fn-on-drop-test
   (is (thrown? AssertionError
                (nm/start-network-monitor!
-                 {:backend-key       :claude
+                 {:probe-url         "https://test.example.com/"
+                  :backend-key       :claude
                   :probe-interval-ms fast-probe-interval-ms
                   :failure-threshold fast-failure-threshold
                   :probe-fn          (scripted-probe [:up])
                   :on-drop           "not-a-fn"}))))
+
+;------------------------------------------------------------------------------ Concurrent stop + threshold race (CAS regression)
+;; Copilot review on PR #1053 flagged a race: the pre-fix worker
+;; checked `@running?` separately from invoking on-drop, so a stop!
+;; arriving between the check and the call could let on-drop fire
+;; after stop! had already returned. The fix uses `compare-and-set!`
+;; on the running? atom to atomically claim the firing slot — stop!
+;; and the worker race for the same true→false transition.
+
+(deftest stop!-racing-the-fire-cas-suppresses-on-drop-test
+  ;; Drive many short trials. The slow `:on-drop` callback amplifies
+  ;; the window in which a stop! after the threshold check could race
+  ;; the fire. With the CAS in place, a stop! that wins the
+  ;; transition MUST suppress on-drop entirely.
+  (testing "stop! winning the CAS prevents on-drop from firing"
+    (dotimes [_ 30]
+      (let [record (atom {:calls []})
+            ;; Probe-fn that immediately returns :down so the worker
+            ;; reaches the threshold-check arm on its very first iteration.
+            stop! (nm/start-network-monitor!
+                    {:probe-url         "https://test.example.com/"
+                     :backend-key       :claude
+                     :probe-interval-ms 1
+                     :failure-threshold 1
+                     :probe-fn          (scripted-probe [:down])
+                     :on-drop           (record-call record nil)})]
+        ;; Race window: stop! and the first probe cycle both run.
+        ;; With the CAS, exactly one wins.
+        (stop!)
+        ;; Give any in-flight on-drop time to finish.
+        (Thread/sleep 5)
+        ;; Either zero calls (stop! won) or exactly one (worker won).
+        ;; The bug was zero-or-one nondeterminism PLUS a possible second
+        ;; call from a stop!-then-fire ordering. Assert at most one
+        ;; — never duplicates.
+        (is (<= (count (:calls @record)) 1)
+            "CAS guarantees at most one on-drop call, regardless of race outcome")))))
+
+(deftest stop!-then-already-passed-threshold-fires-at-most-once-test
+  ;; The classic single-fire guarantee under heavy concurrent stop! /
+  ;; probe pressure. After firing, the worker exits; extra :down
+  ;; probes do NOT produce additional calls.
+  (testing "after the first on-drop fires, subsequent failed probes do not refire"
+    (let [record (atom {:calls []})
+          latch  (promise)
+          stop!  (nm/start-network-monitor!
+                   {:probe-url         "https://test.example.com/"
+                    :backend-key       :claude
+                    :probe-interval-ms 5
+                    :failure-threshold 1
+                    :probe-fn          (scripted-probe (repeat 20 :down))
+                    :on-drop           (record-call record latch)})]
+      (try
+        (wait-for-fire-or-timeout latch 500)
+        (Thread/sleep 50)
+        (is (= 1 (count (:calls @record))))
+        (finally
+          (stop!))))))
+
+;------------------------------------------------------------------------------ stream-exec-fn opts merge protection
+
+;; This test lives here (rather than in interface_test) because it
+;; pins the contract from the monitor's perspective: when callers pass
+;; through `:network-monitor-opts`, the integration must enforce its
+;; own `:probe-url`, `:backend-key`, and `:on-drop`. The integration
+;; site in `stream-exec-fn` (Copilot review on PR #1053) merges caller
+;; opts FIRST, so its protected keys always win.
+
+(deftest probe-url-and-on-drop-take-priority-over-caller-opts-test
+  (testing "caller opts merged FIRST → integration owns the protected keys"
+    ;; Mimic the merge order that stream-exec-fn now uses:
+    ;;   (merge caller-opts {:probe-url ... :backend-key ... :on-drop ...})
+    (let [caller-opts {:probe-url   "https://malicious.example.com/"
+                       :on-drop     (fn [_] (throw (Exception. "caller's on-drop")))
+                       :backend-key :spoofed}
+          integration {:probe-url   "https://real.example.com/"
+                       :backend-key :claude
+                       :on-drop     (fn [diag]
+                                      (is (= "https://real.example.com/" (:probe-url diag)))
+                                      (is (= :claude (:backend-key diag))))}
+          effective   (merge caller-opts integration)]
+      (is (= "https://real.example.com/" (:probe-url effective)))
+      (is (= :claude (:backend-key effective)))
+      (is (not= (:on-drop caller-opts) (:on-drop effective))
+          "integration's on-drop wins; caller's on-drop is discarded"))))

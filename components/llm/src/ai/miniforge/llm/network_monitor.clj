@@ -66,24 +66,33 @@
 ;; Scheduler
 
 (defn- run-monitor-loop!
-  "Inner worker loop. Polls `network-healthy?` every `probe-interval-ms`;
+  "Inner worker loop. Polls `probe-fn` every `probe-interval-ms`;
    tracks consecutive failures. On `failure-threshold` consecutive
-   failures, calls `on-drop` with diagnostic data and exits the loop
-   (single-fire). On a healthy probe, resets the counter — a brief blip
+   failures, atomically claims the firing slot via `compare-and-set!`
+   on the shared `running?` atom, calls `on-drop`, and exits.
+
+   The CAS is the single-fire latch — `stop!` and the worker race for
+   the false→true (wait, true→false) transition; whichever wins gets
+   to do its job. A healthy probe resets the counter so a brief blip
    does not push the workflow toward a network-drop verdict."
-  [{:keys [running? backend-key probe-interval-ms failure-threshold
+  [{:keys [running? probe-url backend-key probe-interval-ms failure-threshold
            probe-fn on-drop]}]
   (loop [consecutive-failures 0]
     (when @running?
       (Thread/sleep ^long probe-interval-ms)
       (when @running?
-        (let [healthy? (try (probe-fn backend-key)
+        (let [healthy? (try (probe-fn probe-url)
                             (catch Exception _ false))
               next-failures (if healthy? 0 (inc consecutive-failures))]
           (cond
             (>= next-failures failure-threshold)
-            (when @running?
+            ;; CAS the running? atom from true → false. If we win, no
+            ;; concurrent stop! call has run yet (or we beat it), so
+            ;; fire on-drop. If we lose, stop! already flipped to
+            ;; false and the worker exits silently.
+            (when (compare-and-set! running? true false)
               (on-drop {:backend-key          backend-key
+                        :probe-url            probe-url
                         :consecutive-failures next-failures
                         :failure-threshold    failure-threshold
                         :probe-interval-ms    probe-interval-ms}))
@@ -92,36 +101,51 @@
             (recur next-failures)))))))
 
 (defn start-network-monitor!
-  "Spawn a daemon thread that probes `backend-key`'s upstream every
+  "Spawn a daemon thread that probes `:probe-url` every
    `:probe-interval-ms` ms and fires `:on-drop` after
    `:failure-threshold` consecutive failures (single-fire).
 
    ## Options
 
-   - `:backend-key`         — the `:llm/backend` keyword (required).
+   - `:probe-url`           — the upstream URL to HEAD (required).
+                              Callers typically resolve via
+                              `llm-client/probe-endpoint-for`.
+   - `:backend-key`         — diagnostic only; included in the
+                              `:on-drop` payload so downstream
+                              consumers know which backend went away.
    - `:probe-interval-ms`   — defaults to `default-probe-interval-ms`.
    - `:failure-threshold`   — defaults to `default-failure-threshold`.
                               Must be a positive integer.
-   - `:on-drop`             — `(fn [diagnostic-map])` called once when
-                              the threshold trips. The map carries
-                              `:backend-key`, `:consecutive-failures`,
-                              `:failure-threshold`, `:probe-interval-ms`.
+   - `:on-drop`             — `(fn [diagnostic-map])` called at most
+                              once when the threshold trips. The map
+                              carries `:backend-key`, `:probe-url`,
+                              `:consecutive-failures`,
+                              `:failure-threshold`,
+                              `:probe-interval-ms`.
    - `:probe-fn`            — override for tests; defaults to
                               `network-health/network-healthy?`. Must
-                              accept `(fn [backend-key])` and return
+                              accept `(fn [probe-url])` and return
                               truthy/falsey.
 
    ## Returns
 
-   A zero-arity stop-fn. Calling it interrupts the worker thread and
-   waits up to `monitor-stop-join-ms` for it to exit, so callers can
-   rely on no further `:on-drop` calls landing once stop! returns."
-  [{:keys [backend-key probe-interval-ms failure-threshold on-drop probe-fn]
+   A zero-arity stop-fn. Calling it flips the shared `running?` atom
+   to false, interrupts the worker thread, and waits up to
+   `monitor-stop-join-ms` for it to exit. Because firing `on-drop`
+   uses a `compare-and-set!` on the same atom, `stop!` and the
+   worker race for the single transition — `stop!` wins → no
+   `on-drop` ever fires; worker wins → `on-drop` runs once and the
+   worker exits. After `stop!` returns, any in-flight `on-drop` call
+   that already won the CAS may still be executing (the bounded join
+   does not wait for it to return); callers should make `on-drop`
+   idempotent or otherwise tolerate the trailing call. Matches the
+   semantics of `progress-monitor/start-keepalive!`."
+  [{:keys [probe-url backend-key probe-interval-ms failure-threshold on-drop probe-fn]
     :or   {probe-interval-ms default-probe-interval-ms
            failure-threshold default-failure-threshold
            probe-fn          nh/network-healthy?}}]
-  (assert (some? backend-key)
-          "start-network-monitor! requires a :backend-key")
+  (assert (and (string? probe-url) (seq probe-url))
+          "start-network-monitor! requires a non-blank :probe-url string")
   (assert (and (integer? probe-interval-ms) (pos? probe-interval-ms))
           "probe-interval-ms must be a positive integer")
   (assert (and (integer? failure-threshold) (pos? failure-threshold))
@@ -134,6 +158,7 @@
                      (try
                        (run-monitor-loop!
                          {:running?          running?
+                          :probe-url         probe-url
                           :backend-key       backend-key
                           :probe-interval-ms probe-interval-ms
                           :failure-threshold failure-threshold
