@@ -19,7 +19,8 @@
   ;; killed the call before any verdict landed. Raised to 420s to give
   ;; the reviewer's longer first turn the same margin the implementer
   ;; relies on; the watchdog backstop floats up alongside it (see
-  ;; `default-gap-threshold-ms` in agent/stream_watchdog.clj).
+  ;; `default-gap-threshold-ms` in components/agent/src/ai/miniforge/agent/stream_watchdog.clj).
+
   :line-timeout-ms 420000
   :process-join-timeout-ms 600000
   :post-kill-join-timeout-ms 5000
