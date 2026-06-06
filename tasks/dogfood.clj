@@ -98,7 +98,7 @@
    Path printed before the run so the operator can tail it live."
   []
   (let [ts (.format (java.time.format.DateTimeFormatter/ofPattern
-                     "yyyyMMdd-HHmmss")
+                     "yyyyMMdd-HHmmss-SSS")
                     (java.time.LocalDateTime/now))]
     (str (miniforge-home) "/stream-dumps/dogfood-" ts ".log")))
 
