@@ -754,6 +754,109 @@
     (is (not (network-drop? rate-limit-result))
         "rate-limit must NOT trip the network-drop classifier")))
 
+;------------------------------------------------------------------------------ Backend-timeout classifier (PR-C of phase-timeout stack)
+;; Companion to the network-drop classifier — same three-location path
+;; priority but matches the implementer's `:stream-idle` / `:stagnation`
+;; / `:hard-limit` adaptive-timeout types. The two arms are mutually
+;; exclusive on `:timeout :type` so they never both fire on the same
+;; result.
+
+(defn- backend-timeout? [result]
+  (#'implement/backend-timeout-in-result? result))
+
+(deftest backend-timeout-classifier-matches-stream-idle-canonical-shape-test
+  ;; The 2026-06-05 dogfood (`adhoc-944448986`) revealed this exact
+  ;; production shape on the reviewer side; PR-C wires the implement-
+  ;; phase equivalent.
+  (testing "[:error :data :timeout :type] = :stream-idle → true"
+    (is (backend-timeout?
+          {:status :error
+           :error {:message "Adaptive timeout: No stream output for 360000ms (type: stream-idle, elapsed: 360087ms)"
+                   :data {:type "adaptive_timeout"
+                          :timeout {:type :stream-idle
+                                    :elapsed-ms 360087}}}}))))
+
+(deftest backend-timeout-classifier-matches-stagnation-canonical-shape-test
+  (testing "[:error :data :timeout :type] = :stagnation → true"
+    (is (backend-timeout?
+          {:status :error
+           :error {:data {:timeout {:type :stagnation
+                                    :elapsed-ms 180000}}}}))))
+
+(deftest backend-timeout-classifier-matches-hard-limit-canonical-shape-test
+  (testing "[:error :data :timeout :type] = :hard-limit → true"
+    (is (backend-timeout?
+          {:status :error
+           :error {:data {:timeout {:type :hard-limit
+                                    :elapsed-ms 600000}}}}))))
+
+(deftest backend-timeout-classifier-matches-raw-timeout-shape-test
+  (testing "raw top-level [:timeout :type] for back-compat / test harnesses"
+    (is (backend-timeout? {:timeout {:type :stream-idle :elapsed-ms 360000}}))
+    (is (backend-timeout? {:timeout {:type :stagnation  :elapsed-ms 180000}}))
+    (is (backend-timeout? {:timeout {:type :hard-limit  :elapsed-ms 600000}}))))
+
+(deftest backend-timeout-classifier-matches-formatted-error-message-test
+  (testing "[:error :message] carrying the explicit `type:` marker"
+    (is (backend-timeout?
+          {:error {:message "Adaptive timeout: No stream output for 360000ms (type: stream-idle, elapsed: 360087ms)"}}))
+    (is (backend-timeout?
+          {:error {:message "Adaptive timeout: stagnation timeout (type: stagnation, elapsed: 180000ms)"}}))
+    (is (backend-timeout?
+          {:error {:message "Adaptive timeout: hard-limit hit (type: hard-limit, elapsed: 600000ms)"}})))
+
+  (testing "case-insensitive match on the type marker"
+    (is (backend-timeout? {:error {:message "TYPE: STREAM-IDLE at provider"}}))
+    (is (backend-timeout? {:error {:message "...type:Hard-Limit..."}}))))
+
+(deftest backend-timeout-classifier-ignores-unrelated-results-test
+  (testing "successful or non-timeout errors must NOT classify"
+    (is (not (backend-timeout? {:status :success :output "ok"})))
+    (is (not (backend-timeout? {:status :error :error {:message "Rate limit exceeded"}})))
+    (is (not (backend-timeout? {:status :error :error {:message "Syntax error at line 5"}})))
+    (is (not (backend-timeout? {})))
+    (is (not (backend-timeout? {:error {:message nil}}))))
+
+  (testing "network-drop is a DISTINCT envelope — must NOT classify as backend-timeout"
+    ;; The two arms are mutually exclusive on `:timeout :type`; this
+    ;; is the contract `leave-implement` relies on so the cond chain
+    ;; can't accidentally route a network-drop through the backend-
+    ;; timeout branch (or vice versa).
+    (is (not (backend-timeout? {:timeout {:type :network-drop :elapsed-ms 30000}})))
+    (is (not (backend-timeout?
+               {:error {:data {:timeout {:type :network-drop :elapsed-ms 30000}}}})))
+    (is (not (backend-timeout?
+               {:error {:message "Adaptive timeout: (type: network-drop, elapsed: 30000ms)"}}))))
+
+  (testing "prose mentions without the type marker do NOT match"
+    (is (not (backend-timeout? {:error {:message "Stream idle on UI subscription"}})))
+    (is (not (backend-timeout? {:error {:message "Provider stagnation across regions"}})))))
+
+(deftest backend-timeout-classifier-distinct-from-network-drop-and-rate-limit-test
+  ;; Three classifiers feed three distinct verdicts:
+  ;; - backend-timeout      → :implement/backend-timeout (retriable + terminal)
+  ;; - network-drop         → :implement/network-dropped (retriable + terminal)
+  ;; - rate-limit           → :implement/rate-limited    (immediate terminal)
+  ;; The leave-implement cond chain depends on no two firing on the
+  ;; same result.
+  (let [stream-idle-result {:status :error
+                            :error {:data {:timeout {:type :stream-idle :elapsed-ms 360000}}}}
+        network-drop-result {:status :error
+                             :error {:data {:timeout {:type :network-drop :elapsed-ms 30000}}}}
+        rate-limit-result {:error {:message "HTTP 429 rate limit exceeded"}}]
+    (testing "stream-idle classifies as backend-timeout only"
+      (is (backend-timeout? stream-idle-result))
+      (is (not (network-drop? stream-idle-result)))
+      (is (not (rate-limit? stream-idle-result))))
+    (testing "network-drop classifies as network-drop only"
+      (is (network-drop? network-drop-result))
+      (is (not (backend-timeout? network-drop-result)))
+      (is (not (rate-limit? network-drop-result))))
+    (testing "rate-limit classifies as rate-limit only"
+      (is (rate-limit? rate-limit-result))
+      (is (not (backend-timeout? rate-limit-result)))
+      (is (not (network-drop? rate-limit-result))))))
+
 (deftest rate-limit-classifier-does-not-flag-legitimate-curator-failures-test
   (testing "curator no-files after a full-length attempt is a real task failure"
     ;; If the implementer ran for the full ~11 min and still wrote nothing,

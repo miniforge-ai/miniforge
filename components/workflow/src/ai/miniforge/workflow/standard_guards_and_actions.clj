@@ -93,10 +93,16 @@
     ;; a false `:rejected`; this verdict surfaces that to the FSM.
     ;; Distinct from `:exhausted` — `:exhausted` means the reviewer
     ;; HAD a verdict the gate couldn't approve, this means the
-    ;; reviewer never produced one. Currently terminal; the cross-
-    ;; phase auto-resume composition (single retry from the persisted
-    ;; checkpoint, then terminate) lives in a follow-up PR.
-    :review/backend-timeout})
+    ;; reviewer never produced one.
+    :review/backend-timeout
+    ;; PR-C of phase-timeout stack (companion to PR-B + network-
+    ;; resilience PR-C): the implementer LLM call exhausted its
+    ;; iteration budget retrying from the persisted checkpoint after
+    ;; consecutive stream-idle / stagnation / hard-limit timeouts.
+    ;; Same recovery shape as `:implement/network-dropped` — retriable
+    ;; up to the budget, then terminal. Retrying again would just hit
+    ;; the same slow provider on the next pass.
+    :implement/backend-timeout})
 
 (defn verdict-terminal?
   "Guard: true when the failing-phase event carries a terminal verdict.
