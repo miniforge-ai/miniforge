@@ -35,3 +35,11 @@
   (testing "t falls back to key name for missing keys"
     (let [catalog (delay {})]
       (is (= "missing-key" (messages/t catalog :missing-key))))))
+
+(deftest all-returns-full-catalog
+  (testing "all returns the full deref'd catalog map"
+    (let [catalog (delay {:a "alpha" :b "beta"})]
+      (is (= {:a "alpha" :b "beta"} (messages/all catalog)))))
+
+  (testing "all returns empty map for missing/nil catalog"
+    (is (= {} (messages/all (delay nil))))))

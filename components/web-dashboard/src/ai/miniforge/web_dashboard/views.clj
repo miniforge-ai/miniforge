@@ -18,7 +18,10 @@
    Tableau-inspired dense visualization with terminal aesthetic.
    No build step required - pure server-side rendering."
   (:require
+   [cheshire.core :as json]
+   [clojure.string :as str]
    [hiccup.page :as page]
+   [hiccup.util :as hutil]
    [ai.miniforge.web-dashboard.messages :as messages]
    [ai.miniforge.web-dashboard.views.dashboard :as dashboard]
    [ai.miniforge.web-dashboard.views.fleet :as fleet]
@@ -40,6 +43,9 @@
 (def ^:private htmx-ws-script-path
   "/js/htmx-ws.js")
 
+(def ^:private i18n-script-path
+  "/js/i18n.js")
+
 (def ^:private app-script-path
   "/js/app.js")
 
@@ -50,6 +56,19 @@
    "/js/filters/apply.js"
    "/js/filters/ui.js"
    "/js/filters/init.js"])
+
+(defn- messages-hydration-script
+  "Serialize the loaded message catalog into an inline <script> block so
+   the browser-side translator has the same strings the server uses.
+
+   Locale today is en-US only. When a second locale lands, this is the
+   place to negotiate Accept-Language → catalog → emit."
+  []
+  (let [payload (json/generate-string (messages/all-as-json-map))
+        ;; Standard JSON-in-HTML escape: prevent the JSON from terminating
+        ;; the <script> early if a string value ever contains `</`.
+        safe (str/replace payload "</" "<\\/")]
+    [:script (hutil/raw-string (str "window.MINIFORGE_MESSAGES = " safe ";"))]))
 
 (def ^:private sidebar-nav-items
   [{:pane :dashboard     :href "/"              :label-key :layout/nav-dashboard}
@@ -77,6 +96,8 @@
    [:meta {:name "viewport" :content "width=device-width, initial-scale=1"}]
    [:title (messages/t :layout/page-title {:title title})]
    [:link {:rel "stylesheet" :href stylesheet-path}]
+   (messages-hydration-script)
+   [:script {:src i18n-script-path}]
    [:script {:src htmx-script-path}]
    [:script {:src htmx-ws-script-path}]])
 

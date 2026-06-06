@@ -115,8 +115,9 @@ function addFilterChip(label, type, value) {
 
   const removeBtn = document.createElement('button');
   removeBtn.className = 'filter-remove';
-  removeBtn.title = 'Remove filter';
-  removeBtn.setAttribute('aria-label', 'Remove filter');
+  const removeLabel = window.miniforge.t('filter/remove-title');
+  removeBtn.title = removeLabel;
+  removeBtn.setAttribute('aria-label', removeLabel);
   removeBtn.textContent = '×';
   removeBtn.addEventListener('click', () => removeFilterChip(filterKey));
 
@@ -161,11 +162,11 @@ function postWorkflowCommand(workflowId, command) {
   })
   .then(r => r.json())
   .then(data => {
-    showToast('Command sent: ' + command, 'info', 3000);
+    showToast(window.miniforge.t('toast/command-sent', { command }), 'info', 3000);
     console.log('Command queued:', data);
   })
   .catch(err => {
-    showToast('Failed to send command: ' + err.message, 'error');
+    showToast(window.miniforge.t('toast/command-failed', { error: err.message }), 'error');
     console.error('Error sending command:', err);
   });
 }
@@ -253,40 +254,47 @@ function apiErrorMessage(res, fallback) {
   return (res && (res.error || res.message)) || fallback;
 }
 
+function toastError(detail) {
+  showToast(window.miniforge.t('toast/error-with-detail', { detail }), 'error');
+}
+
 function fleetAddRepo() {
-  const repo = prompt('Repository (owner/name):');
+  const repo = prompt(window.miniforge.t('prompt/repo-input'));
   if (!repo) return;
 
   postJson('/api/fleet/repos/add?repo=' + encodeURIComponent(repo))
     .then((res) => {
       if (res.success) {
-        const prefix = res['added?'] ? 'Added: ' : 'Already configured: ';
-        showToast(prefix + (res.repo || repo), 'success');
+        const messageKey = res['added?'] ? 'toast/repo-added' : 'toast/repo-existing';
+        showToast(window.miniforge.t(messageKey, { repo: res.repo || repo }), 'success');
         dispatchRefresh();
         return;
       }
-      showToast('Error: ' + apiErrorMessage(res, 'Unable to add repo'), 'error');
+      toastError(apiErrorMessage(res, window.miniforge.t('fleet/error-add-repo')));
     })
-    .catch((err) => showToast('Error: ' + err.message, 'error'));
+    .catch((err) => toastError(err.message));
 }
 
 function fleetDiscoverRepos() {
-  const owner = prompt('Owner/org (leave blank for current user):', '') || '';
+  const owner = prompt(window.miniforge.t('prompt/discover-owner'), '') || '';
   const suffix = owner.trim() ? ('?owner=' + encodeURIComponent(owner.trim())) : '';
 
   postJson('/api/fleet/repos/discover' + suffix)
     .then((res) => {
       if (res.success) {
         showToast(
-          'Discovered ' + (res.discovered || 0) + ' repos, added ' + (res.added || 0) + '.',
+          window.miniforge.t('toast/discover-done', {
+            discovered: res.discovered || 0,
+            added: res.added || 0
+          }),
           'success'
         );
         dispatchRefresh();
         return;
       }
-      showToast('Error: ' + apiErrorMessage(res, 'Repository discovery failed'), 'error');
+      toastError(apiErrorMessage(res, window.miniforge.t('fleet/error-discover')));
     })
-    .catch((err) => showToast('Error: ' + err.message, 'error'));
+    .catch((err) => toastError(err.message));
 }
 
 function fleetSyncPrs() {
@@ -295,37 +303,39 @@ function fleetSyncPrs() {
       if (res.success) {
         const summary = res.summary || {};
         showToast(
-          'Synced repos: ' + (res.synced || 0) + ', tracked PRs: ' + (summary['tracked-prs'] || 0),
+          window.miniforge.t('toast/sync-done', {
+            synced: res.synced || 0,
+            tracked: summary['tracked-prs'] || 0
+          }),
           'success'
         );
       } else {
-        showToast(
-          'Error: ' + apiErrorMessage(res, 'Sync failed for ' + (res.failed || 0) + ' repo(s)'),
-          'error'
-        );
+        const fallback = window.miniforge.t('fleet/error-sync', { count: res.failed || 0 });
+        toastError(apiErrorMessage(res, fallback));
       }
       dispatchRefresh();
     })
-    .catch((err) => showToast('Error: ' + err.message, 'error'));
+    .catch((err) => toastError(err.message));
 }
 
 function fleetDiscoverAndSync() {
   postJson('/api/fleet/repos/discover')
     .then((res) => {
       if (!res.success) {
-        throw new Error(apiErrorMessage(res, 'Discovery failed'));
+        throw new Error(apiErrorMessage(res, window.miniforge.t('fleet/error-discover')));
       }
       return postJson('/api/fleet/prs/sync');
     })
     .then((syncRes) => {
       if (syncRes.success) {
-        showToast('Discovery and PR sync completed.', 'success');
+        showToast(window.miniforge.t('toast/discover-and-sync-done'), 'success');
       } else {
-        showToast('Sync error: ' + apiErrorMessage(syncRes, 'Unable to synchronize PRs'), 'error');
+        const detail = apiErrorMessage(syncRes, window.miniforge.t('fleet/error-sync-fallback'));
+        showToast(window.miniforge.t('toast/sync-error', { detail }), 'error');
       }
       dispatchRefresh();
     })
-    .catch((err) => showToast('Error: ' + err.message, 'error'));
+    .catch((err) => toastError(err.message));
 }
 
 // Export functions for global use
@@ -348,14 +358,14 @@ window.miniforge = {
   },
   filters: {
     addFilter(field, op, value, _scope) {
-      addFilterChip(`${field} ${op} ${value}`, field, value);
+      addFilterChip(window.miniforge.t('filter/chip-label-op', { field, op, value }), field, value);
     },
     toggleFilter(field, value, _scope) {
       const filterKey = `${field}:${value}`;
       if (activeFilters.has(filterKey)) {
         removeFilterChip(filterKey);
       } else {
-        addFilterChip(`${field}: ${value}`, field, value);
+        addFilterChip(window.miniforge.t('filter/chip-label-value', { field, value }), field, value);
       }
     },
     setTextFilter(field, value) {
@@ -366,7 +376,7 @@ window.miniforge = {
       }
       if (value && value.trim()) {
         const trimmed = value.trim();
-        addFilterChip(`${field}: "${trimmed}"`, 'text', field);
+        addFilterChip(window.miniforge.t('filter/chip-label-text', { field, value: trimmed }), 'text', field);
       }
     },
     clearFilters(_scope) {
@@ -375,14 +385,14 @@ window.miniforge = {
     shareCurrentView() {
       if (navigator.clipboard) {
         navigator.clipboard.writeText(window.location.href)
-          .then(() => showToast('Link copied to clipboard', 'info', 2000))
+          .then(() => showToast(window.miniforge.t('toast/link-copied'), 'info', 2000))
           .catch(() => {});
       }
     },
     toggleCloudFilter(el) {
       const filterKey = 'cloud:enabled';
       if (el && el.checked) {
-        addFilterChip('Cloud only', 'cloud', 'enabled');
+        addFilterChip(window.miniforge.t('filter/cloud-only-label'), 'cloud', 'enabled');
       } else {
         removeFilterChip(filterKey);
       }
@@ -467,13 +477,15 @@ function updateConnectionStatus(status) {
 
   const statusText = document.getElementById('ws-text');
   if (statusText) {
-    const statusLabels = {
-      connected: 'Connected',
-      disconnected: 'Disconnected',
-      reconnecting: 'Reconnecting...',
-      error: 'Error'
+    const statusKeys = {
+      connected: 'ws/status-connected',
+      disconnected: 'ws/status-disconnected',
+      reconnecting: 'ws/status-reconnecting',
+      error: 'ws/status-error'
     };
-    statusText.textContent = statusLabels[status] || status;
+    statusText.textContent = statusKeys[status]
+      ? window.miniforge.t(statusKeys[status])
+      : status;
   }
 }
 
@@ -646,28 +658,35 @@ function handleWorkflowEvent(event) {
   }
 
   switch (eventType) {
-    case 'workflow/started':
-      showToast('Workflow started: ' + (event['workflow/spec']?.name || 'unknown'), 'info');
+    case 'workflow/started': {
+      var startedName = event['workflow/spec']?.name || window.miniforge.t('value/unknown');
+      showToast(window.miniforge.t('toast/workflow-started', { name: startedName }), 'info');
       break;
+    }
 
-    case 'workflow/phase-started':
-      showToast('Phase started: ' + (event['workflow/phase'] || 'unknown'), 'info');
+    case 'workflow/phase-started': {
+      var startedPhase = event['workflow/phase'] || window.miniforge.t('value/unknown');
+      showToast(window.miniforge.t('toast/phase-started', { phase: startedPhase }), 'info');
       break;
+    }
 
     case 'workflow/phase-completed': {
       var outcome = event['phase/outcome'] || 'completed';
       var toastType = outcome === 'success' ? 'success' : 'warning';
-      showToast('Phase completed: ' + (event['workflow/phase'] || 'unknown'), toastType);
+      var completedPhase = event['workflow/phase'] || window.miniforge.t('value/unknown');
+      showToast(window.miniforge.t('toast/phase-completed', { phase: completedPhase }), toastType);
       break;
     }
 
     case 'workflow/completed':
-      showToast('Workflow completed', 'success');
+      showToast(window.miniforge.t('toast/workflow-completed'), 'success');
       break;
 
-    case 'workflow/failed':
-      showToast('Workflow failed: ' + (event['workflow/failure-reason'] || 'unknown error'), 'error', 8000);
+    case 'workflow/failed': {
+      var failureReason = event['workflow/failure-reason'] || window.miniforge.t('value/unknown-error');
+      showToast(window.miniforge.t('toast/workflow-failed', { reason: failureReason }), 'error', 8000);
       break;
+    }
 
     case 'agent/started':
     case 'agent/completed':

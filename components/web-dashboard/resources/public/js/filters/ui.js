@@ -75,14 +75,21 @@
     };
 
     if (typeof value === 'boolean') {
-      return `${id}: ${value ? 'Yes' : 'No'}`;
+      const yesNo = window.miniforge.t(value ? 'value/yes' : 'value/no');
+      return window.miniforge.t('filter/chip-label-value', { field: id, value: yesNo });
     }
 
     if (Array.isArray(value)) {
-      return `${id}: ${value.map(normalizeDisplay).join(', ')}`;
+      return window.miniforge.t('filter/chip-label-value', {
+        field: id,
+        value: value.map(normalizeDisplay).join(', ')
+      });
     }
 
-    return `${id}: ${normalizeDisplay(value)}`;
+    return window.miniforge.t('filter/chip-label-value', {
+      field: id,
+      value: normalizeDisplay(value)
+    });
   }
 
   function createFilterChip(clause, scope) {
@@ -114,25 +121,25 @@
 
     if (scope === 'local') {
       const pinBtn = document.createElement('button');
-      pinBtn.textContent = '📌 Pin to Global';
+      pinBtn.textContent = window.miniforge.t('filter/menu-pin-global');
       pinBtn.addEventListener('click', () => window.miniforge.filters.promoteToGlobal(filterId));
       items.appendChild(pinBtn);
     }
 
     if (scope === 'global') {
       const makeLocalBtn = document.createElement('button');
-      makeLocalBtn.textContent = '📍 Make Pane-Local';
+      makeLocalBtn.textContent = window.miniforge.t('filter/menu-make-local');
       makeLocalBtn.addEventListener('click', () => window.miniforge.filters.demoteToLocal(filterId));
       items.appendChild(makeLocalBtn);
     }
 
     const copyBtn = document.createElement('button');
-    copyBtn.textContent = '📋 Copy to Pane';
+    copyBtn.textContent = window.miniforge.t('filter/menu-copy');
     copyBtn.addEventListener('click', () => window.miniforge.filters.showCopyMenu(filterId));
     items.appendChild(copyBtn);
 
     const removeMenuBtn = document.createElement('button');
-    removeMenuBtn.textContent = '🗑️ Remove';
+    removeMenuBtn.textContent = window.miniforge.t('filter/menu-remove');
     removeMenuBtn.addEventListener('click', () => window.miniforge.filters.removeFilter(filterId, scope, filterValue));
     items.appendChild(removeMenuBtn);
 
@@ -142,7 +149,9 @@
     const removeBtn = document.createElement('button');
     removeBtn.className = 'filter-remove';
     removeBtn.textContent = '×';
-    removeBtn.title = 'Remove filter';
+    const removeLabel = window.miniforge.t('filter/remove-title');
+    removeBtn.title = removeLabel;
+    removeBtn.setAttribute('aria-label', removeLabel);
     removeBtn.addEventListener('click', () => runtime.callApi('removeFilter', clause['filter/id'], scope, clause.value));
 
     chip.appendChild(label);
@@ -177,10 +186,8 @@
   function showCopyMenu(filterId) {
     const panes = runtime.DEFAULT_PANES.filter((pane) => pane !== runtime.currentPane);
 
-    const menu = prompt(
-      'Copy to which pane?\n' + panes.map((pane, idx) => `${idx + 1}. ${pane}`).join('\n'),
-      '1'
-    );
+    const options = panes.map((pane, idx) => `${idx + 1}. ${pane}`).join('\n');
+    const menu = prompt(window.miniforge.t('prompt/copy-which-pane', { options }), '1');
 
     if (!menu) {
       return;
@@ -189,7 +196,7 @@
     const idx = parseInt(menu, 10) - 1;
     if (idx >= 0 && idx < panes.length) {
       runtime.callApi('copyToPane', filterId, panes[idx]);
-      alert(`Filter copied to ${panes[idx]}`);
+      alert(window.miniforge.t('filter/copied-to-pane', { pane: panes[idx] }));
     }
   }
 
