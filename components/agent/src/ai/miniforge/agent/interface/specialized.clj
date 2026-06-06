@@ -91,6 +91,7 @@
 (def get-review-issues reviewer-artifact/get-issues)
 (def get-review-strengths reviewer-artifact/get-strengths)
 (def validate-review-artifact reviewer-artifact/validate-review-artifact)
+(def rejection-warnings-only? reviewer-artifact/rejection-warnings-only?)
 ;; Repair-loop fingerprint helpers — moved to
 ;; components/progress-detector/.../detectors/repair-loop in Stage 2.
 ;; These re-exports stay for backward compatibility; phase-software-factory
