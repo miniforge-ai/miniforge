@@ -468,9 +468,7 @@
           context         {:execution/run-pipeline-fn (fn [_sw _in _opts] stub-result)
                            :execution/workflow {:workflow/pipeline []}
                            :execution/opts {:branch "main"}}
-          task-def        {:task/id id-a
-                           :task/description "Test multi-iter task"
-                           :task/deps #{}}
+          task-def        (make-task-def id-a "Test multi-iter task")
           wf-result       (dag-orch/run-mini-workflow task-def context)]
       (is (:success? wf-result)
           "phase/succeeded? recognizes :execution/status :completed")
@@ -492,9 +490,7 @@
           context       {:execution/run-pipeline-fn (fn [_sw _in _opts] stub-result)
                          :execution/workflow {:workflow/pipeline []}
                          :execution/opts {:branch "main"}}
-          task-def      {:task/id id-a
-                         :task/description "Happy path task"
-                         :task/deps #{}}
+          task-def      (make-task-def id-a "Happy path task")
           wf-result     (dag-orch/run-mini-workflow task-def context)]
       (is (:success? wf-result))
       (is (= only-artifact (:artifact wf-result))
