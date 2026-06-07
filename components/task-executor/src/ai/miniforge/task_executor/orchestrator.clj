@@ -29,23 +29,6 @@
             [ai.miniforge.logging.interface :as log]))
 
 (defn create-run-context
-  "Create shared context for a DAG run.
-
-  Args:
-    run-atom: Atom containing DAG run state
-    config: Configuration map with:
-      :workflow-id - Workflow identifier
-      :executor - IEnvironmentExecutor instance
-      :llm-backend - LLM backend for code generation
-      :logger - Logger instance
-      :event-stream - Event stream for observability
-      :max-iterations - Max inner loop iterations
-      :max-parallel - Max parallel tasks
-      :github-token - GitHub API token
-      :budget - Budget constraints
-      :lock-pool - Optional lock pool (created if not provided)
-
-  Returns: Run context map for task execution"
   [run-atom config]
   (let [lock-pool (or (:lock-pool config)
                       (dag/create-lock-pool
@@ -88,19 +71,6 @@
                                 {:dependency-id task-id})))))
 
 (defn make-execute-task-fn
-  "Create execute-task-fn callback for DAG scheduler.
-
-  The returned function:
-  - Looks up full task definition from run-atom
-  - Launches runner/execute-task in a future
-  - Tracks futures for graceful shutdown
-  - Catches exceptions and marks task as failed
-  - Cascades failures to dependent tasks
-
-  Args:
-    run-context: Shared run context (from create-run-context)
-
-  Returns: Function (fn [task-id context] -> future)"
   [run-context]
   (let [{:keys [run-atom logger]} run-context
         ;; Atom to track active futures
@@ -154,18 +124,6 @@
             task-future))))))
 
 (defn create-orchestrated-scheduler-context
-  "Create scheduler context with execute-task-fn wired in.
-
-  Convenience function that combines:
-  - create-run-context
-  - make-execute-task-fn
-  - Scheduler context assembly
-
-  Args:
-    run-atom: Atom containing DAG run state
-    config: Configuration map
-
-  Returns: Scheduler context map with :execute-task-fn"
   [run-atom config]
   (let [run-context (create-run-context run-atom config)
         execute-task-fn (make-execute-task-fn run-context)]
@@ -175,30 +133,6 @@
      :config config}))
 
 (defn execute-dag!
-  "Top-level convenience function to execute a DAG with task execution integrated.
-
-  Steps:
-  1. Initialize DAG run-atom
-  2. Create orchestrated scheduler context
-  3. Run scheduler loop until completion
-  4. Return final run state
-
-  Args:
-    dag-id: DAG identifier
-    task-defs: Sequence of maps with :task/id and :task/deps
-    config: Configuration map (see create-run-context)
-
-  Returns: Final run-atom state
-
-  Example:
-    (execute-dag! \"dag-123\"
-                  [{:task/id \"task-1\" :task/deps #{}}
-                   {:task/id \"task-2\" :task/deps #{\"task-1\"}}]
-                  {:workflow-id \"wf-123\"
-                   :executor my-executor
-                   :llm-backend my-backend
-                   :logger my-logger
-                   :max-parallel 4})"
   [dag-id task-defs config]
   (let [{:keys [logger budget state-profile state-profile-provider]} config
         ;; Initialize DAG using dag-executor's function

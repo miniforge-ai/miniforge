@@ -34,14 +34,6 @@
             [ai.miniforge.spec-parser.interface :as spec-parser]))
 
 (defn create-task-context
-  "Assemble context for a task execution.
-
-  Args:
-    task-id: Task identifier
-    task: Task definition map
-    run-context: Shared run context with executor, config, etc.
-
-  Returns: Context map for task execution"
   [task-id task run-context]
   (let [{:keys [workflow-id executor config logger event-stream]} run-context
         {:keys [max-iterations llm-backend github-token]} config]
@@ -264,25 +256,6 @@
     (dag/update-metrics! run-atom task-id metrics)))
 
 (defn execute-task
-  "Execute a single task through its full lifecycle.
-
-  Steps:
-  0. Validate spec (fail fast — no resources acquired on bad spec)
-  1. Acquire resources (worktree + environment)
-  2. Generate code artifact (inner loop)
-  3. Create PR lifecycle controller
-  4. Run blocking PR lifecycle (open → CI → review → merge)
-  5. Update metrics
-  6. Clean up resources (in finally)
-
-  Args:
-    task-id: Task identifier string
-    task: Task definition map
-    run-context: Shared context with executor, config, logger, etc.
-
-  Returns: Result map with :ok? and :value or :error
-
-  Throws: None - catches all exceptions and marks task as failed"
   [task-id task run-context]
   (let [{:keys [run-atom executor logger lock-pool config]} run-context
         task-context (create-task-context task-id task run-context)
