@@ -509,7 +509,7 @@
   zettel/zettel->markdown)
 
 (def markdown->zettel
-  "Parse a Markdown file with YAML frontmatter into a zettel.
+  "Parse Markdown content (a string) with YAML frontmatter into a zettel.
    Returns nil if parsing fails."
   zettel/markdown->zettel)
 
