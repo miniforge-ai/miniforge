@@ -24,7 +24,32 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Listener management
 
-(def register-listener! listeners/register-listener!)
-(def deregister-listener! listeners/deregister-listener!)
-(def list-listeners listeners/list-listeners)
-(def submit-annotation! listeners/submit-annotation!)
+(def register-listener!
+  "Register a listener on the stream with a capability level (:observe,
+   :advise, or :control), wrapping its callback with capability-based
+   and user filters and emitting :listener/attached. Returns the new
+   listener-id (UUID). Throws an :anomalies/incorrect anomaly when the
+   capability is invalid. listener-spec keys: :listener/type,
+   :listener/capability, :listener/identity, :listener/filters,
+   :listener/callback, :listener/options."
+  listeners/register-listener!)
+
+(def deregister-listener!
+  "Unsubscribe a listener by id, drop its metadata, and emit
+   :listener/detached. Returns true when the listener existed, or nil
+   when no listener matched the id."
+  listeners/deregister-listener!)
+
+(def list-listeners
+  "Return a sequence of registered listener metadata maps for the
+   stream (empty when none registered)."
+  listeners/list-listeners)
+
+(def submit-annotation!
+  "Submit an advisory annotation from a listener; requires :advise or
+   :control capability. Emits and returns the :annotation/created event
+   map. Throws an :anomalies/not-found anomaly when the listener is
+   unknown, or :anomalies/forbidden when its capability is
+   insufficient. annotation keys: :annotation/type, :annotation/content,
+   :annotation/workflow-id."
+  listeners/submit-annotation!)
