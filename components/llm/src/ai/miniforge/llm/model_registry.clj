@@ -61,6 +61,18 @@
   [model-key]
   (get model-registry model-key))
 
+(defn context-window-for-model-id
+  "Context window (max input tokens) for a backend model-id string
+   (e.g. \"claude-opus-4-6\"), or nil when the model-id is not in the
+   catalog. Looks up by the entry's :model-id rather than the catalog key,
+   because the runtime threads the provider model-id string, not the
+   catalog keyword."
+  [model-id]
+  (some (fn [[_k v]]
+          (when (= model-id (:model-id v))
+            (get-in v [:capabilities :context-window])))
+        model-registry))
+
 (defn get-models-by-capability
   "Get models meeting or exceeding a capability level.
    Example: (get-models-by-capability :reasoning :excellent)

@@ -28,6 +28,7 @@
    [ai.miniforge.logging.interface :as log]
    [ai.miniforge.llm.cost :as cost]
    [ai.miniforge.llm.messages :as msg]
+   [ai.miniforge.llm.model-registry :as model-registry]
    [ai.miniforge.llm.network-monitor :as nnm]
    [ai.miniforge.llm.progress-monitor :as pm]
    [ai.miniforge.response.interface :as response]
@@ -190,11 +191,18 @@
 (defn- parsed-usage
   [usage]
   (let [input-tokens (:input_tokens usage)
-        output-tokens (:output_tokens usage)]
-    (when (or (number? input-tokens)
-              (number? output-tokens))
-      {:input-tokens input-tokens
-       :output-tokens output-tokens})))
+        output-tokens (:output_tokens usage)
+        ;; A large prompt lands mostly under cache_creation_input_tokens
+        ;; (input_tokens itself can be tiny), so capture the cache fields
+        ;; too — they're what `total-input-tokens` needs to measure the
+        ;; real input size against the context window.
+        cache-creation (:cache_creation_input_tokens usage)
+        cache-read (:cache_read_input_tokens usage)]
+    (when (some number? [input-tokens output-tokens cache-creation cache-read])
+      (cond-> {:input-tokens input-tokens
+               :output-tokens output-tokens}
+        (number? cache-creation) (assoc :cache-creation-input-tokens cache-creation)
+        (number? cache-read)     (assoc :cache-read-input-tokens cache-read)))))
 
 (defn parse-claude-stream-line
   "Parse a line from Claude CLI streaming output.
@@ -1592,19 +1600,30 @@
    cli_error, and the submission-retry then died at its 120s hard cap.)"
   "context_overflow")
 
-(def ^:private context-overflow-markers
-  "Lower-cased substrings the agent CLIs emit when the prompt exceeds the
-   model's context window. Matched case-insensitively against the error
-   message."
-  ["prompt is too long"])
+(defn total-input-tokens
+  "Total input tokens the model actually consumed for a turn:
+   prompt + cache-creation + cache-read. The CLI reports the bulk of a
+   large prompt under cache_creation_input_tokens (`:input-tokens` itself
+   can be a handful), so summing all three is the only faithful measure of
+   input size to compare against the context window."
+  [usage]
+  (+ (or (:input-tokens usage) 0)
+     (or (:cache-creation-input-tokens usage) 0)
+     (or (:cache-read-input-tokens usage) 0)))
 
-(defn context-overflow-error?
-  "True when `message` indicates the prompt exceeded the model's context
-   window — an unrecoverable terminal condition (see
-   `context-overflow-error-type`)."
-  [message]
-  (let [m (str/lower-case (or message ""))]
-    (boolean (some #(str/includes? m %) context-overflow-markers))))
+(defn context-overflow-by-usage?
+  "True when a turn's total input tokens met or exceeded the model's
+   context window — the structured, locale- and backend-independent signal
+   that the prompt overflowed (see `context-overflow-error-type`). Replaces
+   matching the backend's human-readable 'prompt is too long' text, which
+   is localized product output and phrased differently per backend.
+
+   `context-window` is the model's max input tokens (nil when the model is
+   not in the catalog, in which case overflow can't be asserted here)."
+  [usage context-window]
+  (boolean (and context-window
+                (pos? (total-input-tokens usage))
+                (>= (total-input-tokens usage) context-window))))
 
 (defn streaming-error-response
   "Build a streaming error response with diagnostic metadata.
@@ -1613,8 +1632,14 @@
    - :stop-reason          — last observed stop reason before failure
    - :num-turns            — number of conversation turns consumed
    - :tool-call-count      — total number of tool invocations during the run
-   - :final-message-preview — last 500 chars of accumulated content (post-mortem aid)"
-  [content exit-code err-result raw-stdout timeout-info stop-reason num-turns tool-call-count final-message-preview]
+   - :final-message-preview — last 500 chars of accumulated content (post-mortem aid)
+
+   `usage` and `context-window` drive structured context-overflow
+   classification: when the turn's total input tokens reached the model's
+   window, the error is typed `context_overflow` (terminal, non-retryable)
+   instead of a generic recoverable `cli_error`."
+  [content exit-code err-result raw-stdout timeout-info stop-reason num-turns
+   tool-call-count final-message-preview usage context-window]
   (let [error-message (or (not-empty (str/trim (or err-result "")))
                           (when-not (str/blank? content) content)
                           (not-empty (str/trim (or raw-stdout "")))
@@ -1622,7 +1647,7 @@
         category (if timeout-info :anomalies/timeout :anomalies.agent/llm-error)
         error-type (cond
                      timeout-info "adaptive_timeout"
-                     (context-overflow-error? error-message) context-overflow-error-type
+                     (context-overflow-by-usage? usage context-window) context-overflow-error-type
                      :else "cli_error")]
     (cond-> (llm-error category error-type (str/trim error-message)
                        {:exit-code exit-code
@@ -1739,7 +1764,9 @@
             (cond-> (streaming-error-response final-content exit-code (:err result)
                                               diagnostic-content
                                               timeout-info stop-reason num-turns
-                                              tool-call-count final-message-preview)
+                                              tool-call-count final-message-preview
+                                              usage
+                                              (model-registry/context-window-for-model-id model))
               session-id (assoc :session-id session-id))))))))
 
 (defn complete-stream-impl [client request on-chunk]
