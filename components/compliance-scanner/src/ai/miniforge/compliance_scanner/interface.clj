@@ -37,22 +37,70 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Schema re-exports
 
-(def Violation   schema/Violation)
-(def ScanResult  schema/ScanResult)
-(def PlanTask    schema/PlanTask)
-(def Plan        schema/Plan)
-(def PlanSummary schema/PlanSummary)
+(def Violation
+  "Malli schema (a `[:map ...]` vector) for a single detected rule breach.
+   Keys: :rule/id (keyword), :rule/category (non-empty string),
+   :rule/title (string), :file (string), :line (int), :current (string),
+   :suggested (string or nil), :auto-fixable? (boolean), :rationale (string)."
+  schema/Violation)
+(def ScanResult
+  "Malli schema (a `[:map ...]` vector) for the output of the scan phase.
+   Keys: :violations (vector of Violation), :rules-scanned (vector of
+   keywords), :files-scanned (int), :scan-duration-ms (int)."
+  schema/ScanResult)
+(def PlanTask
+  "Malli schema (a `[:map ...]` vector) for one DAG task node in a Plan.
+   Keys: :task/id (uuid), :task/deps (set of uuids), :task/file (string),
+   :task/rule-id (keyword), :task/violations (vector of Violation)."
+  schema/PlanTask)
+(def Plan
+  "Malli schema (a `[:map ...]` vector) for the full remediation plan.
+   Keys: :dag-tasks (vector of PlanTask), :work-spec (string),
+   :summary (PlanSummary)."
+  schema/Plan)
+(def PlanSummary
+  "Malli schema (a `[:map ...]` vector) of aggregate plan counts.
+   Keys: :total-violations, :auto-fixable, :needs-review, :files-affected,
+   :rules-violated (all ints)."
+  schema/PlanSummary)
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Factory re-exports
 
-(def ->violation factory/->violation)
-(def ->scan-result factory/->scan-result)
-(def ->plan-summary factory/->plan-summary)
-(def ->plan-task factory/->plan-task)
-(def ->plan factory/->plan)
-(def ->delta-report factory/->delta-report)
-(def DeltaReport schema/DeltaReport)
+(def ->violation
+  "Construct a Violation map from positional args:
+   [rule-id rule-category title file line current suggested auto-fixable?
+   rationale]. Pure; returns the map."
+  factory/->violation)
+(def ->scan-result
+  "Construct a ScanResult map from positional args:
+   [violations rules-scanned files-scanned scan-duration-ms]. Pure;
+   returns the map."
+  factory/->scan-result)
+(def ->plan-summary
+  "Derive a PlanSummary map from a collection of violations by counting
+   totals, auto-fixable, needs-review, distinct files, and distinct rules.
+   Pure; returns the map."
+  factory/->plan-summary)
+(def ->plan-task
+  "Construct a PlanTask map from positional args:
+   [id deps file rule-id violations]. Pure; returns the map."
+  factory/->plan-task)
+(def ->plan
+  "Construct a Plan map from positional args:
+   [dag-tasks work-spec summary]. Pure; returns the map."
+  factory/->plan)
+(def ->delta-report
+  "Construct a DeltaReport map from positional args:
+   [repo-path standards-path scan-timestamp summary violations]. Pure;
+   returns the map."
+  factory/->delta-report)
+(def DeltaReport
+  "Malli schema (a `[:map ...]` vector) for the delta report written to
+   disk. Keys: :repo-path (string), :standards-path (string),
+   :scan-timestamp (string), :summary (PlanSummary), :violations (vector
+   of Violation)."
+  schema/DeltaReport)
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Built-in linter re-exports

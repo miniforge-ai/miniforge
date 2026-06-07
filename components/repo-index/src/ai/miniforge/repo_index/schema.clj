@@ -25,7 +25,6 @@
 ;; File Record
 
 (def FileRecord
-  "Schema for a single file entry in the repo index."
   [:map
    [:path [:string {:min 1}]]
    [:blob-sha [:string {:min 7}]]
@@ -38,7 +37,6 @@
 ;; Repo Index
 
 (def RepoIndex
-  "Schema for the complete repo index."
   [:map
    [:tree-sha [:string {:min 7}]]
    [:repo-root [:string {:min 1}]]
@@ -52,7 +50,6 @@
 ;; Repo Map Slice
 
 (def RepoMapEntry
-  "Schema for a single entry in the repo map."
   [:map
    [:path [:string {:min 1}]]
    [:lang [:maybe :string]]
@@ -60,7 +57,6 @@
    [:size :int]])
 
 (def RepoMapSlice
-  "Schema for a token-budgeted repo map slice."
   [:map
    [:tree-sha [:string {:min 7}]]
    [:entries [:vector RepoMapEntry]]
@@ -73,14 +69,12 @@
 ;; Search Hit
 
 (def Snippet
-  "Schema for a search result snippet."
   [:map
    [:start-line :int]
    [:end-line :int]
    [:text [:string {:min 0}]]])
 
 (def SearchHit
-  "Schema for a single search result."
   [:map
    [:path [:string {:min 1}]]
    [:score :double]

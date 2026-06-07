@@ -41,8 +41,6 @@
    :file-content      file-content})
 
 (defn build-judge-prompt
-  "Build system + user prompts for LLM-as-judge analysis.
-   Returns {:system string :user string}."
   [rule file-path file-content]
   (let [templates @judge-templates
         bindings  (rule->prompt-bindings rule file-path file-content)]
@@ -91,17 +89,6 @@
   (mapv #(raw->violation rule file-path %) raw-violations))
 
 (defn analyze-file
-  "Analyze a single file against a behavioral rule using the LLM.
-
-   Arguments:
-   - llm-client — LLM client from ai.miniforge.llm.interface
-   - complete-fn — Function to call LLM: (fn [client request]) -> response
-   - rule — Policy pack rule with :rule/knowledge-content
-   - file-path — Path to the file
-   - file-content — File content string
-
-   Returns:
-   - Vector of canonical violation maps"
   [llm-client complete-fn rule file-path file-content]
   (let [{:keys [system user]} (build-judge-prompt rule file-path file-content)
         response (complete-fn llm-client
@@ -170,16 +157,6 @@
   300000)
 
 (defn analyze-rule
-  "Analyze all matching files against a single behavioral rule.
-
-   Arguments:
-   - llm-client — LLM client
-   - complete-fn — LLM completion function
-   - repo-path — Repository root path
-   - rule — Behavioral rule with :rule/knowledge-content
-
-   Returns:
-   - {:rule/id keyword :violations [...] :files-analyzed int :duration-ms int :status keyword}"
   [llm-client complete-fn repo-path rule]
   (let [start-ms (System/currentTimeMillis)
         files    (select-files-for-rule repo-path rule)
@@ -215,19 +192,6 @@
          :error        (.getMessage e)}))))
 
 (defn analyze-rules-parallel
-  "Analyze all behavioral rules in parallel with per-rule timeouts.
-
-   Arguments:
-   - llm-client — LLM client
-   - complete-fn — LLM completion function
-   - repo-path — Repository root path
-   - rules — Vector of behavioral rules
-   - opts — Options map:
-     :timeout-ms — Per-rule timeout (default 120000)
-     :max-parallel — Max concurrent rules (default 4)
-
-   Returns:
-   - Vector of per-rule result maps"
   [llm-client complete-fn repo-path rules opts]
   (let [timeout-ms   (get opts :timeout-ms default-rule-timeout-ms)
         max-parallel (get opts :max-parallel 4)

@@ -206,7 +206,6 @@
          (assoc :reason reason))))))
 
 (defn terminate?
-  "Convenience predicate over a `handle` decision map."
   [decision]
   (= :terminate (:action decision)))
 

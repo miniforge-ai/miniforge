@@ -25,7 +25,6 @@
 ;; Violation — one detected instance of a rule breach
 
 (def Violation
-  "Schema for a single detected violation."
   [:map
    [:rule/id       :keyword]
    [:rule/category [:string {:min 1}]]
@@ -41,7 +40,6 @@
 ;; ScanResult — output of the scan phase
 
 (def ScanResult
-  "Schema for the result of scanning a repository."
   [:map
    [:violations       [:vector Violation]]
    [:rules-scanned    [:vector :keyword]]
@@ -52,7 +50,6 @@
 ;; PlanTask — one DAG task node
 
 (def PlanTask
-  "Schema for a single task in the remediation plan DAG."
   [:map
    [:task/id         uuid?]
    [:task/deps       [:set uuid?]]
@@ -64,7 +61,6 @@
 ;; PlanSummary — aggregate counts
 
 (def PlanSummary
-  "Schema for plan summary statistics."
   [:map
    [:total-violations :int]
    [:auto-fixable     :int]
@@ -76,7 +72,6 @@
 ;; Plan — output of the plan phase
 
 (def Plan
-  "Schema for the full remediation plan."
   [:map
    [:dag-tasks [:vector PlanTask]]
    [:work-spec :string]
@@ -86,7 +81,6 @@
 ;; DeltaReport — final serialisable output
 
 (def DeltaReport
-  "Schema for the delta report written to disk."
   [:map
    [:repo-path       :string]
    [:standards-path  :string]

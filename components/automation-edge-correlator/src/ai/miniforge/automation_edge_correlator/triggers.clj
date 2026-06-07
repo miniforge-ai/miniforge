@@ -51,12 +51,5 @@
    :gate/failed                            :gate-fired})
 
 (defn classify-trigger
-  "Classify an event-stream event into a RoutingTriggerKind keyword.
-
-   Accepts any map with a `:type` key (the standard event-stream envelope
-   shape). Returns the matching RoutingTriggerKind keyword, or `nil` if the
-   event type is not a routing trigger.
-
-   Pure function. No side effects. No state."
   [event]
   (get trigger-table (:type event)))

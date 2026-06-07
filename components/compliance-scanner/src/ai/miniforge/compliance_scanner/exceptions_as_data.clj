@@ -45,7 +45,6 @@
 ;; Rule identity
 
 (def rule-id
-  "Stable ID for the exceptions-as-data linter rule."
   :std/exceptions-as-data)
 
 (def rule-category

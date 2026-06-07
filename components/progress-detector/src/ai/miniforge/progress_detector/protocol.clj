@@ -100,8 +100,6 @@
         (update :window-size inc))))
 
 (defn null-detector
-  "Return a NullDetector that never flags any anomaly.
-   Useful as a no-op placeholder and for composing detector pipelines."
   []
   (->NullDetector))
 

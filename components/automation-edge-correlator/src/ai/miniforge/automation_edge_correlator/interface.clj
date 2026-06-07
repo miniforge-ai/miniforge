@@ -38,18 +38,61 @@
 ;; would invite downstream callers to depend on its exact key set, turning
 ;; later consolidation into a breaking change.
 
-(def AutomationEdge          schema/AutomationEdge)
-(def routing-trigger-kinds   schema/routing-trigger-kinds)
-(def automation-edge-statuses schema/automation-edge-statuses)
+(def AutomationEdge
+  "Malli schema (vector `[:map ...]` form) for the AutomationEdge wire shape
+   emitted as `:supervisory/automation-edge-upserted`. Open map: additional
+   keys pass validation. Mirrors the Rust `AutomationEdge` struct one-to-one;
+   `:edge/id` is a deterministic UUIDv5 idempotency key derived from
+   `:edge/trigger-event-id`. Use with `malli.core` to validate or explain
+   edge envelopes at the boundary."
+  schema/AutomationEdge)
+
+(def routing-trigger-kinds
+  "Vector of keywords — every recognised RoutingTriggerKind value
+   (`:pr-merged`, `:review-comments-arrived`, `:ci-failed`,
+   `:standards-review-arrived`, `:workflow-completed`, `:gate-fired`).
+   Ordered for deterministic malli error messages; matches the Rust enum."
+  schema/routing-trigger-kinds)
+
+(def automation-edge-statuses
+  "Vector of keywords — every recognised AutomationEdge status value
+   (`:observed`, `:handled`, `:failed`, `:needs-operator`, `:suppressed`).
+   Ordered for determinism; matches the Rust enum."
+  schema/automation-edge-statuses)
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Trigger classification
 
-(def classify-trigger triggers/classify-trigger)
+(def classify-trigger
+  "Classify an event-stream event into a RoutingTriggerKind keyword.
+
+   Args: a map carrying a `:type` key (standard event-stream envelope shape).
+   Returns the matching RoutingTriggerKind keyword (one of
+   `routing-trigger-kinds`), or `nil` when the event type is not a routing
+   trigger. Pure — no side effects, no state."
+  triggers/classify-trigger)
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Lifecycle — the only surface the rest of the workspace should touch.
 
-(def start!  core/start!)
-(def stop!   core/stop!)
-(def attach! core/attach!)
+(def start!
+  "Start a correlator handle: subscribe to its stream, replay the published
+   prefix, drain events that arrived during replay, then start the periodic
+   expire ticker. Args: the handle returned by `create`/`attach!`. Returns
+   the same handle. Idempotent — a second call on a started handle is a no-op.
+   Side effects: stream subscription, edge emission on replay, scheduler
+   thread."
+  core/start!)
+
+(def stop!
+  "Stop a correlator handle: unsubscribe from the stream and cancel the
+   expire ticker. Args: a handle. Returns the same handle. Idempotent.
+   Retains the in-memory pure state so post-shutdown queries still read the
+   edge indices."
+  core/stop!)
+
+(def attach!
+  "Convenience constructor: `create` + `start!` in one step. Args: a `stream`,
+   and an optional `deps` map (`:clock`, `:config`). Returns a started handle
+   subscribed to `stream`. The test/wiring injection point."
+  core/attach!)

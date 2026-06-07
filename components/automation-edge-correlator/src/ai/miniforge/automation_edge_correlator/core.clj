@@ -455,9 +455,6 @@
     handle))
 
 (defn stop!
-  "Unsubscribe from the stream and cancel the expire ticker. Idempotent.
-   Retains the in-memory pure state so post-shutdown queries can still
-   read the edge indices."
   [handle]
   (let [{:keys [stream subscribed? ^ScheduledExecutorService scheduler]} @handle]
     (when subscribed?
