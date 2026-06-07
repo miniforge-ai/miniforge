@@ -50,7 +50,20 @@
   (testing "mcp-config adds --mcp-config flag"
     (let [args ((private-fn 'claude-args) {:prompt "p" :mcp-config "/tmp/mcp.json"})]
       (is (some #(= "--mcp-config" %) args))
-      (is (some #(= "/tmp/mcp.json" %) args)))))
+      (is (some #(= "/tmp/mcp.json" %) args))))
+
+  (testing "mcp-config also adds --strict-mcp-config so host MCP config does not leak"
+    (let [args ((private-fn 'claude-args) {:prompt "p" :mcp-config "/tmp/mcp.json"})]
+      (is (some #(= "--strict-mcp-config" %) args))
+      (is (= ["--mcp-config" "/tmp/mcp.json" "--strict-mcp-config"]
+             (->> args
+                  (drop-while #(not= "--mcp-config" %))
+                  (take 3)))
+          "--strict-mcp-config immediately follows the --mcp-config path")))
+
+  (testing "no mcp-config means no --strict-mcp-config"
+    (let [args ((private-fn 'claude-args) {:prompt "p"})]
+      (is (not (some #(= "--strict-mcp-config" %) args))))))
 
 (deftest claude-args-allowed-tools-test
   (testing "mcp maps format as mcp__<server>__<tool>, joined with commas"

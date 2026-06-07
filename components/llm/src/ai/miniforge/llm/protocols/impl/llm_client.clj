@@ -526,7 +526,20 @@
       streaming?                   (conj "--verbose")
       stdin?                       (conj claude-input-format-flag
                                          claude-input-format-stdin)
-      mcp-config                   (into ["--mcp-config" mcp-config])
+      ;; --strict-mcp-config: only load the MCP servers from our
+      ;; --mcp-config, ignoring the host's user/project MCP config. On
+      ;; the local worktree executor the agent CLI otherwise inherits the
+      ;; operator's personal ~/.claude MCP servers (e.g. Gmail / Calendar
+      ;; / Drive), whose tool schemas bloat the agent's fixed context
+      ;; overhead. On 2026-06-07 that leakage pushed the planner's
+      ;; first-turn prompt past the 200k window — a single ToolSearch
+      ;; result tipped it over and the CLI returned "Prompt is too long"
+      ;; (plan phase, review-redirect-convergence dogfood adhoc-2135293220).
+      ;; The container executor is already isolated from host config; this
+      ;; brings the local runner to parity for the MCP vector. Mirrors the
+      ;; codex builder's --ignore-user-config.
+      mcp-config                   (into ["--mcp-config" mcp-config
+                                          "--strict-mcp-config"])
       (seq mcp-allowed-tools)      (into ["--allowedTools" (claude-mcp-allowlist-string mcp-allowed-tools)])
       (seq disallowed-tools)       (into ["--disallowedTools" (str/join "," disallowed-tools)])
       (:settings-path supervision) (into ["--settings" (:settings-path supervision)])
