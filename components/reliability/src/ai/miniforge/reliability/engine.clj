@@ -226,12 +226,10 @@
      :recommendation recommendation}))
 
 (defn current-state
-  "Get the current reliability state."
   [engine]
   @(:state engine))
 
 (defn current-mode
-  "Get the current degradation mode recommendation."
   [engine]
   (:mode @(:state engine)))
 

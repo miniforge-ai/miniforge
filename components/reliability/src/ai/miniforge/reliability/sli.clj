@@ -76,8 +76,6 @@
 ;; SLI-1: Workflow Success Rate
 
 (defn compute-workflow-success-rate
-  "Fraction of workflows completing successfully or with explicit escalation.
-   Computation: count(completed + escalated) / count(terminal)"
   [workflow-metrics window]
   (let [windowed (filter-by-window workflow-metrics window)
         terminal (filter terminal-workflow? windowed)
@@ -94,7 +92,6 @@
   (get-in metric [:metrics :duration-ms]))
 
 (defn compute-phase-latency
-  "Wall-clock duration per phase type. Returns {:p50 :p95 :p99} in ms."
   [phase-metrics window]
   (let [windowed (filter-by-window phase-metrics window)
         durations (->> windowed
@@ -110,8 +107,6 @@
 ;; SLI-3: Inner Loop Convergence Rate
 
 (defn compute-inner-loop-convergence
-  "Fraction of inner loops that converge within retry budget.
-   Takes phase metrics where :iterations and :success? are tracked."
   [phase-metrics window]
   (let [windowed (filter-by-window phase-metrics window)
         with-loops (filter :iterations windowed)
@@ -123,8 +118,6 @@
 ;; SLI-4: Gate Pass Rate
 
 (defn compute-gate-pass-rate
-  "Fraction of gate evaluations that pass on first attempt.
-   Takes gate events with :passed? field."
   [gate-metrics window]
   (let [windowed (filter-by-window gate-metrics window)
         total (count windowed)
@@ -135,7 +128,6 @@
 ;; SLI-5: Tool Invocation Success Rate
 
 (defn compute-tool-success-rate
-  "Fraction of tool invocations that return success."
   [tool-metrics window]
   (let [windowed (filter-by-window tool-metrics window)
         total (count windowed)
@@ -146,9 +138,6 @@
 ;; SLI-6: Failure Class Distribution
 
 (defn compute-failure-distribution
-  "Percentage of failures per :failure/class.
-   Returns map of {failure-class -> fraction}.
-   The :failure.class/unknown rate is the key meta-reliability indicator."
   [failure-events window]
   (let [windowed (filter-by-window failure-events window)
         total (count windowed)]
@@ -162,8 +151,6 @@
              (into {}))))))
 
 (defn compute-unknown-failure-rate
-  "Convenience: extract the :failure.class/unknown rate from distribution.
-   A high unknown rate signals insufficient failure instrumentation."
   [failure-events window]
   (get (compute-failure-distribution failure-events window)
        :failure.class/unknown
@@ -173,7 +160,6 @@
 ;; SLI-7: Context Staleness Rate
 
 (defn compute-context-staleness-rate
-  "Fraction of Context Packs that trigger staleness detection."
   [context-metrics window]
   (let [windowed (filter-by-window context-metrics window)
         total (count windowed)
@@ -184,19 +170,6 @@
 ;; Aggregate SLI computation
 
 (defn compute-all-slis
-  "Compute all SLIs from collected metrics.
-
-   Arguments:
-     metrics - map with keys:
-       :workflow-metrics  - vector of workflow metric records
-       :phase-metrics     - vector of phase metric records
-       :gate-metrics      - vector of gate evaluation records
-       :tool-metrics      - vector of tool invocation records
-       :failure-events    - vector of failure events with :failure/class
-       :context-metrics   - vector of context pack records
-     window - :1h | :7d | :30d
-
-   Returns: vector of SLI result maps."
   [metrics window]
   (let [{:keys [workflow-metrics phase-metrics gate-metrics
                 tool-metrics failure-events context-metrics]} metrics]

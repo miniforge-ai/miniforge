@@ -121,8 +121,6 @@
   (merge (base-entry incident) entry))
 
 (defn dependency-incident?
-  "Returns true when the classified incident belongs in dependency-health
-   projection."
   [incident]
   (failure-classifier/dependency-failure? incident))
 
@@ -228,7 +226,6 @@
              recoveries))))
 
 (defn project-health
-  "Project rolling dependency state into canonical dependency-health entities."
   ([dependency-state]
    (project-health dependency-state default-config))
   ([dependency-state config]
