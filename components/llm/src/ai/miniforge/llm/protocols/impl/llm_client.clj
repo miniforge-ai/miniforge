@@ -1642,19 +1642,11 @@
   4)
 
 (defn prompt-size-telemetry
-  "Pre-flight size gauge for the assembled agent prompt, computed from the
-   system + user prompt BEFORE the request is sent — so it is captured even
-   when the call is rejected with a context-overflow (where `:usage` never
-   arrives). `:estimated-input-tokens` is a coarse chars/4 estimate to
-   gauge headroom against the model's context window. It rounds UP (ceil):
-   as a headroom gauge, truncating would under-report a near-boundary
-   prompt and make an imminent overflow look further off than it is.
-
-   Motivated by the 2026-06-07 review-redirect-convergence dogfood, where
-   the planner's first turn silently ran up against the 200k window and
-   only surfaced as 'Prompt is too long' after the fact — miniforge
-   recorded completion tokens but never the input size, so the overflow
-   was a surprise."
+  "Pre-flight size gauge over the assembled system + user prompt, computed
+   BEFORE dispatch so it survives a context-overflow rejection (where
+   `:usage` never arrives). `:estimated-input-tokens` is a coarse chars/4
+   estimate, rounded UP so a near-boundary prompt isn't under-reported.
+   See N12 §3."
   [system prompt]
   (let [system-chars (count (or system ""))
         user-chars   (count (or prompt ""))
