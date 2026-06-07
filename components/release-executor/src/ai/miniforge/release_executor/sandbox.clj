@@ -34,15 +34,36 @@
 ;; Helpers
 
 (defn assert-safe-container-path!
-  "Assert that `path` contains no `..` segments that could escape the container
-   working directory.  The check is lexical because `path` targets the container
-   filesystem — host-side normalization cannot be applied.
-   Throws ex-info with {:type :path-traversal :path path} on violation."
+  "Assert that `path` is safe to interpolate into a single-quoted shell argument
+   and cannot escape the container working directory.
+
+   Two classes of attack are blocked:
+
+   1. Path traversal -- any `..` segment (lexical check; host-side
+      normalization cannot be applied to a container path).
+
+   2. Shell injection -- any character that terminates a POSIX single-quoted
+      string or introduces a shell metacharacter that survives quoting:
+      single-quote, backslash, backtick, $, !, space, tab, newline, NUL,
+      and the glob/redirect set (; | & > < ( ) { } * ? [ ] # ~).
+
+   Throws ex-info with {:type :path-traversal} or {:type :shell-injection}
+   on violation."
   [path]
-  (when (re-find #"(^|[/\\])\.\.([/\\]|$)" (str path))
-    (throw (ex-info "Path traversal rejected: sandbox path contains .. segment"
-                    {:type :path-traversal
-                     :path (str path)}))))
+  (let [s (str path)]
+    (when (or (str/starts-with? s "/")
+              (re-find #"^[A-Za-z]:" s))
+      (throw (ex-info "Path traversal rejected: sandbox path must be relative"
+                      {:type :path-traversal
+                       :path s})))
+    (when (re-find #"(^|[/\\])\.\.([/\\]|$)" s)
+      (throw (ex-info "Path traversal rejected: sandbox path contains .. segment"
+                      {:type :path-traversal
+                       :path s})))
+    (when (re-find #"['\\`$! \t\n\r\x00;|&><(){}*?\[\]#~]" s)
+      (throw (ex-info "Shell injection rejected: sandbox path contains unsafe character"
+                      {:type :shell-injection
+                       :path s})))))
 
 (defn exec!
   "Execute a command in the sandbox environment.
