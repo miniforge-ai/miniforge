@@ -86,12 +86,10 @@
 ;; Validation
 
 (defn valid-taxonomy?
-  "Check if value conforms to the Taxonomy schema."
   [value]
   (m/validate Taxonomy value))
 
 (defn validate-taxonomy
-  "Validate a taxonomy artifact. Returns {:valid? bool :errors map-or-nil}."
   [value]
   (if (m/validate Taxonomy value)
     {:valid? true :errors nil}
@@ -150,8 +148,6 @@
 ;; Lookup helpers
 
 (defn category-by-id
-  "Look up a category by its keyword ID in a loaded taxonomy.
-   Returns the TaxonomyCategory map, or nil."
   [taxonomy category-id]
   (some (fn [cat]
           (when (= category-id (:category/id cat))
@@ -159,8 +155,6 @@
         (:taxonomy/categories taxonomy)))
 
 (defn resolve-alias
-  "Resolve an alias keyword to a category ID.
-   Returns the target keyword, or the input if no alias matches."
   [taxonomy alias-kw]
   (or (some (fn [a]
               (when (= alias-kw (:alias/name a))
@@ -169,15 +163,11 @@
       alias-kw))
 
 (defn category-title
-  "Get the display title for a category ID, resolving aliases.
-   Returns the title string, or nil if not found."
   [taxonomy category-id]
   (let [resolved (resolve-alias taxonomy category-id)]
     (:category/title (category-by-id taxonomy resolved))))
 
 (defn category-order
-  "Get the sort order for a category ID, resolving aliases.
-   Returns the order integer, or Integer/MAX_VALUE if not found."
   [taxonomy category-id]
   (let [resolved (resolve-alias taxonomy category-id)]
     (or (:category/order (category-by-id taxonomy resolved))

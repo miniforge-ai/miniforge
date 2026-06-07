@@ -21,9 +21,37 @@
   (:require
    [ai.miniforge.policy-pack.intent :as intent]))
 
-(def intent-types intent/intent-types)
-(def infer-intent intent/infer-intent)
-(def intent-matches? intent/intent-matches?)
-(def semantic-intent-check intent/semantic-intent-check)
-(def parse-terraform-plan-counts intent/parse-terraform-plan-counts)
-(def parse-k8s-diff-counts intent/parse-k8s-diff-counts)
+(def intent-types
+  "Set of valid intent keywords
+   `#{:import :create :update :destroy :refactor :migrate}`."
+  intent/intent-types)
+
+(def infer-intent
+  "Infer the intent keyword from resource change counts.
+   (infer-intent {:creates :updates :destroys}) returns one of
+   :refactor/:create/:update/:destroy/:migrate, or :mixed when no clear pattern."
+  intent/infer-intent)
+
+(def intent-matches?
+  "Validate that a declared intent matches actual resource change counts.
+   (intent-matches? declared counts) returns {:passed? true} when consistent,
+   else {:passed? false :violations [...]}. Unknown intents pass by default."
+  intent/intent-matches?)
+
+(def semantic-intent-check
+  "Full semantic intent check (N4 §4).
+   (semantic-intent-check declared-intent counts) returns
+   {:passed? bool :violations [...] :inferred-intent keyword :metadata {...}}."
+  intent/semantic-intent-check)
+
+(def parse-terraform-plan-counts
+  "Parse terraform plan output into resource change counts.
+   (parse-terraform-plan-counts plan-output) returns
+   {:creates int :updates int :destroys int}."
+  intent/parse-terraform-plan-counts)
+
+(def parse-k8s-diff-counts
+  "Parse kubectl diff output into resource change counts.
+   (parse-k8s-diff-counts diff-output) returns
+   {:creates int :updates int :destroys int}."
+  intent/parse-k8s-diff-counts)

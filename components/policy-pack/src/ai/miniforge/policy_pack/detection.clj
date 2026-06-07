@@ -546,19 +546,16 @@
 ;; Violation classification helpers
 
 (defn blocking-violations
-  "Filter violations that should block progress (:hard-halt enforcement)."
   [violations]
   (filter #(= :hard-halt (get-in % [:rule :rule/enforcement :action]))
           violations))
 
 (defn approval-required-violations
-  "Filter violations that require approval."
   [violations]
   (filter #(= :require-approval (get-in % [:rule :rule/enforcement :action]))
           violations))
 
 (defn warning-violations
-  "Filter violations that are warnings only."
   [violations]
   (filter #(= :warn (get-in % [:rule :rule/enforcement :action]))
           violations))
@@ -570,7 +567,6 @@
           violations))
 
 (defn violation->error
-  "Convert a violation to a gate error map."
   [{:keys [rule violation]}]
   {:code (:rule/id rule)
    :message (:message violation)
@@ -580,7 +576,6 @@
    :remediation (get-in rule [:rule/enforcement :remediation])})
 
 (defn violation->warning
-  "Convert a violation to a gate warning map."
   [{:keys [rule violation]}]
   {:code (:rule/id rule)
    :message (:message violation)

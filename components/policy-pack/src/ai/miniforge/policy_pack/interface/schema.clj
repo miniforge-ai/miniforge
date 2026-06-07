@@ -24,16 +24,71 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Schema and validation re-exports
 
-(def Rule schema/Rule)
-(def PackManifest schema/PackManifest)
-(def RuleSeverity schema/RuleSeverity)
-(def RuleEnforcement schema/RuleEnforcement)
-(def RuleApplicability schema/RuleApplicability)
-(def RuleDetection schema/RuleDetection)
-(def rule-severities schema/rule-severities)
-(def enforcement-actions schema/enforcement-actions)
-(def detection-types schema/detection-types)
-(def valid-rule? schema/valid-rule?)
-(def validate-rule schema/validate-rule)
-(def valid-pack? schema/valid-pack?)
-(def validate-pack schema/validate-pack)
+(def Rule
+  "Malli schema (a `[:map ...]` vector) for an individual policy rule —
+   identity, applicability, detection, enforcement, and optional knowledge,
+   remediation, and example fields."
+  schema/Rule)
+
+(def PackManifest
+  "Malli schema (a `[:map ...]` vector) for a policy pack manifest — a
+   versioned collection of rules with identity, trust/authority, taxonomy
+   reference, dependencies, overrides, categories, and timestamps."
+  schema/PackManifest)
+
+(def RuleSeverity
+  "Malli enum schema (`[:enum :critical :major :minor :info]`) for a rule's
+   severity level."
+  schema/RuleSeverity)
+
+(def RuleEnforcement
+  "Malli enum schema (`[:enum :hard-halt :require-approval :warn :audit]`) for
+   a rule's enforcement action."
+  schema/RuleEnforcement)
+
+(def RuleApplicability
+  "Malli schema (a `[:map ...]` vector) for when a rule applies — optional
+   task-types, file-globs, resource-patterns, repo-types, and phases."
+  schema/RuleApplicability)
+
+(def RuleDetection
+  "Malli schema (a `[:map ...]` vector) for how to detect violations —
+   required :type plus optional pattern(s), context-lines, custom-fn,
+   capability, mode, and email-pattern."
+  schema/RuleDetection)
+
+(def rule-severities
+  "Vector of severity keywords `[:critical :major :minor :info]`, ordered most
+   to least severe."
+  schema/rule-severities)
+
+(def enforcement-actions
+  "Vector of enforcement keywords `[:hard-halt :require-approval :warn :audit]`,
+   ordered strictest to most lenient."
+  schema/enforcement-actions)
+
+(def detection-types
+  "Vector of detection-type keywords
+   `[:plan-output :diff-analysis :state-comparison :content-scan :ast-analysis
+   :custom :capability]`."
+  schema/detection-types)
+
+(def valid-rule?
+  "Predicate. Returns true when the value validates against the Rule schema,
+   false otherwise."
+  schema/valid-rule?)
+
+(def validate-rule
+  "Validate a rule against the Rule schema. Returns {:valid? bool :errors
+   map-or-nil} (humanized Malli errors when invalid)."
+  schema/validate-rule)
+
+(def valid-pack?
+  "Predicate. Returns true when the value validates against the PackManifest
+   schema, false otherwise."
+  schema/valid-pack?)
+
+(def validate-pack
+  "Validate a pack manifest against the PackManifest schema. Returns
+   {:valid? bool :errors map-or-nil} (humanized Malli errors when invalid)."
+  schema/validate-pack)

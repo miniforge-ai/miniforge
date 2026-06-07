@@ -21,10 +21,6 @@
   (:require
    [ai.miniforge.policy-pack.external :as external]))
 
-(def evaluate-external-pr
-  "Evaluate an external PR diff against policy packs in read-only mode."
-  external/evaluate-external-pr)
+(def evaluate-external-pr external/evaluate-external-pr)
 
-(def parse-pr-diff
-  "Parse a unified diff into artifact-like inputs for external evaluation."
-  external/parse-pr-diff)
+(def parse-pr-diff external/parse-pr-diff)
