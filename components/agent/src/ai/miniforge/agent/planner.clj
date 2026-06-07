@@ -41,7 +41,6 @@
 ;; Planner-specific schemas
 
 (def PlanTask
-  "Schema for a task in the plan."
   [:map
    [:task/id uuid?]
    [:task/description [:string {:min 1}]]
@@ -62,7 +61,6 @@
     [:enum :git-merge :sequential-merge]]])
 
 (def Plan
-  "Schema for the planner's output."
   [:map
    [:plan/id uuid?]
    [:plan/name [:string {:min 1}]]
@@ -88,7 +86,6 @@
 ;; Planner functions
 
 (defn validate-plan
-  "Validate a plan against the Plan schema and check for structural issues."
   [plan]
   (let [schema-valid? (m/validate Plan plan)]
     (if-not schema-valid?
@@ -738,7 +735,6 @@
       :repair-fn repair-plan})))
 
 (defn plan-summary
-  "Get a summary of a plan for logging/display."
   [plan]
   {:id (:plan/id plan)
    :name (:plan/name plan)
@@ -747,8 +743,6 @@
    :risk-count (count (:plan/risks plan))})
 
 (defn task-dependency-order
-  "Return tasks in dependency order (topological sort).
-   Tasks with no dependencies come first."
   [plan]
   (let [tasks (:plan/tasks plan)
         task-map (into {} (map (juxt :task/id identity) tasks))

@@ -29,9 +29,35 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Supervision runtime operations
 
-(def create-progress-monitor-agent progress-monitor/create-progress-monitor-agent)
-(def create-supervision-coordinator meta-coord/create-coordinator)
-(def check-all-supervisors meta-coord/check-all-agents)
-(def reset-all-supervisors! meta-coord/reset-all-agents!)
-(def get-supervision-check-history meta-coord/get-check-history)
-(def get-supervisor-stats meta-coord/get-agent-stats)
+(def create-progress-monitor-agent
+  "Create a Progress Monitor supervisor agent. Arg (optional): options map
+   (:check-interval-ms :priority :stagnation-threshold-ms :max-total-ms).
+   Returns a meta-agent suitable for a supervision coordinator."
+  progress-monitor/create-progress-monitor-agent)
+
+(def create-supervision-coordinator
+  "Create a supervision coordinator over a set of supervisor agents. Arg:
+   vector of meta-agent instances. Returns a MetaCoordinator record."
+  meta-coord/create-coordinator)
+
+(def check-all-supervisors
+  "Run due health checks across all enabled supervisors. Args: coordinator,
+   workflow-state. Returns {:status :healthy|:warning|:halt :checks [...]}
+   with :halt-reason/:halting-agent when status is :halt."
+  meta-coord/check-all-agents)
+
+(def reset-all-supervisors!
+  "Reset all supervisor agent state (on workflow restart). Arg: coordinator.
+   Returns the coordinator."
+  meta-coord/reset-all-agents!)
+
+(def get-supervision-check-history
+  "Return recent supervisor health-check history. Args: coordinator, optional
+   {:limit :agent-id :status}. Returns a sequence of check-record maps."
+  meta-coord/get-check-history)
+
+(def get-supervisor-stats
+  "Return per-supervisor statistics. Arg: coordinator. Returns
+   {:agents [{:id :name :checks-run :last-check :last-status
+              :halt-count :warning-count ...}]}."
+  meta-coord/get-agent-stats)

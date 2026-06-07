@@ -36,8 +36,6 @@
     metadata (assoc :memory/metadata metadata)))
 
 (defn estimate-tokens
-  "Estimate token count for a message.
-   Uses rough heuristic: ~4 chars per token for English text."
   [content]
   (if (string? content)
     (max 1 (int (/ (count content) 4)))

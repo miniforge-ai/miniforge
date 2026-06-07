@@ -110,9 +110,6 @@
 ;; Helper Functions
 
 (defn send-clarification-request
-  "Send a clarification request to another agent.
-
-   Convenience function for common message type."
   [agent-messaging to-agent content]
   (p/send-message agent-messaging
                   {:type :clarification-request
@@ -120,9 +117,6 @@
                    :content content}))
 
 (defn send-concern
-  "Send a concern to another agent.
-
-   Convenience function for common message type."
   [agent-messaging to-agent content]
   (p/send-message agent-messaging
                   {:type :concern
@@ -130,9 +124,6 @@
                    :content content}))
 
 (defn send-suggestion
-  "Send a suggestion to another agent.
-
-   Convenience function for common message type."
   [agent-messaging to-agent content]
   (p/send-message agent-messaging
                   {:type :suggestion
@@ -153,21 +144,18 @@
   (filter #(= (:message/type %) message-type) messages))
 
 (defn get-clarification-requests
-  "Get all clarification requests received."
   [agent-messaging]
   (filter-messages-by-type
    (p/receive-messages agent-messaging)
    :clarification-request))
 
 (defn get-concerns
-  "Get all concerns received."
   [agent-messaging]
   (filter-messages-by-type
    (p/receive-messages agent-messaging)
    :concern))
 
 (defn get-suggestions
-  "Get all suggestions received."
   [agent-messaging]
   (filter-messages-by-type
    (p/receive-messages agent-messaging)

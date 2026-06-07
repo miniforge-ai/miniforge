@@ -29,16 +29,57 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Messaging operations
 
-(def create-message-router msg-records/create-message-router)
-(def create-agent-messaging msg-records/create-agent-messaging)
-(def send-clarification-request msg-records/send-clarification-request)
-(def send-concern msg-records/send-concern)
-(def send-suggestion msg-records/send-suggestion)
-(def get-clarification-requests msg-records/get-clarification-requests)
-(def get-concerns msg-records/get-concerns)
-(def get-suggestions msg-records/get-suggestions)
-(def Message msg-impl/Message)
-(def MessageType msg-impl/MessageType)
+(def create-message-router
+  "Create a message router. No args. Returns a MessageRouter record backed by
+   atoms for per-workflow messages and per-agent inboxes."
+  msg-records/create-message-router)
+
+(def create-agent-messaging
+  "Create messaging capability for an agent. Args: agent-id (keyword),
+   instance-id (uuid), workflow-id (uuid), router, optional event-stream.
+   Returns an AgentMessaging record (an InterAgentMessaging)."
+  msg-records/create-agent-messaging)
+
+(def send-clarification-request
+  "Send a :clarification-request to another agent. Args: agent-messaging,
+   to-agent (keyword), content (string). Returns {:message map :event map}."
+  msg-records/send-clarification-request)
+
+(def send-concern
+  "Send a :concern to another agent. Args: agent-messaging, to-agent
+   (keyword), content (string). Returns {:message map :event map}."
+  msg-records/send-concern)
+
+(def send-suggestion
+  "Send a :suggestion to another agent. Args: agent-messaging, to-agent
+   (keyword), content (string). Returns {:message map :event map}."
+  msg-records/send-suggestion)
+
+(def get-clarification-requests
+  "Return received messages of type :clarification-request. Arg:
+   agent-messaging. Returns a sequence of message maps."
+  msg-records/get-clarification-requests)
+
+(def get-concerns
+  "Return received messages of type :concern. Arg: agent-messaging.
+   Returns a sequence of message maps."
+  msg-records/get-concerns)
+
+(def get-suggestions
+  "Return received messages of type :suggestion. Arg: agent-messaging.
+   Returns a sequence of message maps."
+  msg-records/get-suggestions)
+
+(def Message
+  "Malli schema (a [:map ...] vector) for an inter-agent message, per N1
+   §6.2.2. Required keys include :message/id :message/type :message/from-agent
+   :message/to-agent :message/workflow-id :message/content :message/timestamp."
+  msg-impl/Message)
+
+(def MessageType
+  "Malli schema (a [:enum ...] vector) of valid message types:
+   :clarification-request :clarification-response :concern :suggestion."
+  msg-impl/MessageType)
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Messaging operations (thin pass-throughs)
@@ -50,6 +91,8 @@
   (msg-proto/send-message agent-messaging message-data))
 
 (defn receive-messages
+  "Return all messages received by this agent. Arg: agent-messaging.
+   Returns a sequence of message maps."
   [agent-messaging]
   (msg-proto/receive-messages agent-messaging))
 
@@ -64,17 +107,24 @@
   (msg-proto/route-message router message))
 
 (defn get-messages-for-agent
+  "Return messages for a specific agent in a workflow. Args: router, agent-id,
+   workflow-id. Returns a sequence of message maps (the agent's inbox)."
   [router agent-id workflow-id]
   (msg-proto/get-messages-for-agent router agent-id workflow-id))
 
 (defn get-messages-by-workflow
+  "Return all messages in a workflow, ordered by timestamp. Args: router,
+   workflow-id. Returns a sequence of message maps."
   [router workflow-id]
   (msg-proto/get-messages-by-workflow router workflow-id))
 
 (defn clear-workflow-messages
+  "Clear all messages for a workflow. Args: router, workflow-id. Returns nil."
   [router workflow-id]
   (msg-proto/clear-messages router workflow-id))
 
 (defn validate-message
+  "Validate a message map against the Message schema. Arg: message.
+   Returns {:valid? boolean :errors [...]}."
   [message]
   (msg-impl/validate-message-impl message))

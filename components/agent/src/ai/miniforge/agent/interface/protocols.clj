@@ -27,16 +27,65 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Protocol and configuration re-exports
 
-(def Agent agent-proto/Agent)
-(def AgentLifecycle agent-proto/AgentLifecycle)
-(def AgentExecutor agent-proto/AgentExecutor)
-(def LLMBackend agent-proto/LLMBackend)
-(def Memory mem-proto/Memory)
-(def MemoryStore mem-proto/MemoryStore)
-(def InterAgentMessaging msg-proto/InterAgentMessaging)
-(def MessageRouter msg-proto/MessageRouter)
-(def MessageValidator msg-proto/MessageValidator)
+(def Agent
+  "Protocol: agent behavior and lifecycle. Methods invoke/validate/repair.
+   Implement to define a custom agent that processes tasks into
+   artifacts/decisions/signals."
+  agent-proto/Agent)
 
-(def default-role-configs core/default-role-configs)
-(def role-capabilities core/role-capabilities)
-(def role-system-prompts core/role-system-prompts)
+(def AgentLifecycle
+  "Protocol: agent lifecycle management (init/status/shutdown/abort).
+   Implement to control how an agent is initialized and torn down."
+  agent-proto/AgentLifecycle)
+
+(def AgentExecutor
+  "Protocol: runs an agent on a task through the full
+   init->invoke->validate->repair->complete lifecycle. Implement to
+   customize execution orchestration."
+  agent-proto/AgentExecutor)
+
+(def LLMBackend
+  "Protocol: LLM interaction (single method complete). Implement to swap
+   or mock the language-model backend."
+  agent-proto/LLMBackend)
+
+(def Memory
+  "Protocol: agent memory storage and retrieval (add-message, get-messages,
+   get-window, clear-messages, get-metadata). Implement for a custom store."
+  mem-proto/Memory)
+
+(def MemoryStore
+  "Protocol: managing multiple agent memories (get/save/delete/list).
+   Implement to back memory persistence with a custom store."
+  mem-proto/MemoryStore)
+
+(def InterAgentMessaging
+  "Protocol: send/receive/respond messages between agents during execution.
+   Implement to customize how an agent exchanges messages."
+  msg-proto/InterAgentMessaging)
+
+(def MessageRouter
+  "Protocol: routes and queues messages between agents
+   (route-message, get-messages-for-agent, get-messages-by-workflow,
+   clear-messages). Implement for a custom delivery mechanism."
+  msg-proto/MessageRouter)
+
+(def MessageValidator
+  "Protocol: validates message structure against schema (validate-message).
+   Implement to plug in custom message validation."
+  msg-proto/MessageValidator)
+
+(def default-role-configs
+  "Map of agent role keyword -> default config map. Each config carries
+   static fields (temperature, max-tokens, budget) from
+   role-defaults.edn plus a dynamically selected :model."
+  core/default-role-configs)
+
+(def role-capabilities
+  "Map of agent role keyword -> set of capability keywords
+   (e.g. :planner -> #{:plan :decompose :estimate})."
+  core/role-capabilities)
+
+(def role-system-prompts
+  "Map of agent role keyword -> system-prompt string for that role."
+  core/role-system-prompts)

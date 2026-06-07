@@ -74,7 +74,6 @@
 ;; Validation + repair
 
 (defn validate-review-artifact
-  "Validate a review artifact against the schema."
   [artifact]
   (let [schema-valid? (m/validate issues/ReviewArtifact artifact)]
     (if-not schema-valid?
@@ -234,7 +233,6 @@
 ;; renames here don't ripple silently through the SDLC pipeline.
 
 (defn review-summary
-  "Get a summary of a review artifact for logging/display."
   [artifact]
   {:id (:review/id artifact)
    :decision (:review/decision artifact)
@@ -246,47 +244,38 @@
    :llm-issues-count (count (:review/issues artifact))})
 
 (defn approved?
-  "Check if a review artifact represents approval."
   [artifact]
   (= :approved (:review/decision artifact)))
 
 (defn rejected?
-  "Check if a review artifact represents rejection."
   [artifact]
   (= :rejected (:review/decision artifact)))
 
 (defn conditionally-approved?
-  "Check if a review artifact is conditionally approved."
   [artifact]
   (= :conditionally-approved (:review/decision artifact)))
 
 (defn changes-requested?
-  "Check if a review artifact has changes requested."
   [artifact]
   (= :changes-requested (:review/decision artifact)))
 
 (defn get-blocking-issues
-  "Extract blocking issues from review artifact."
   [artifact]
   (:review/blocking-issues artifact []))
 
 (defn get-warnings
-  "Extract warnings from review artifact."
   [artifact]
   (:review/warnings artifact []))
 
 (defn get-recommendations
-  "Extract recommendations from review artifact."
   [artifact]
   (:review/recommendations artifact []))
 
 (defn get-issues
-  "Extract LLM review issues from review artifact."
   [artifact]
   (:review/issues artifact []))
 
 (defn get-strengths
-  "Extract strengths noted by the LLM from review artifact."
   [artifact]
   (:review/strengths artifact []))
 

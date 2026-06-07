@@ -80,21 +80,17 @@
            metadata))))
 
 (defn add-system-message
-  "Add a system message to memory. Convenience function."
   [memory content]
   (p/add-message memory :system content {}))
 
 (defn add-user-message
-  "Add a user message to memory. Convenience function."
   [memory content]
   (p/add-message memory :user content {}))
 
 (defn add-assistant-message
-  "Add an assistant message to memory. Convenience function."
   [memory content & {:keys [tokens]}]
   (p/add-message memory :assistant content {:tokens tokens}))
 
 (defn create-memory-store
-  "Create an in-memory store for agent memories."
   []
   (->InMemoryStore (atom {})))

@@ -128,8 +128,6 @@
   (m/explainer Message))
 
 (defn validate-message-impl
-  "Validate message against schema.
-   Returns {:valid? boolean :errors [...]}"
   [message]
   (if (message-validator message)
     {:valid? true :errors []}
