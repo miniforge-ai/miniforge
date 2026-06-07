@@ -9,16 +9,38 @@
             [ai.miniforge.connector.validation :as validation]))
 
 ;; -- Handle registry (per-connector instance state) --
-(def create-handle-registry handles/create)
-(def get-handle handles/get-handle)
-(def store-handle! handles/store-handle!)
-(def remove-handle! handles/remove-handle!)
-(def touch-handle! handles/touch-handle!)
+(def create-handle-registry
+  "Create a new, empty handle registry. Returns an atom wrapping an empty map,
+   used by a connector to hold its per-instance handle->state entries."
+  handles/create)
+(def get-handle
+  "Look up handle state by handle id in `store`. Returns the stored state value,
+   or nil when the handle is not present."
+  handles/get-handle)
+(def store-handle!
+  "Associate handle id with `state` in `store`. Mutates the registry atom and
+   returns the new registry map."
+  handles/store-handle!)
+(def remove-handle!
+  "Remove `handle` and its state from `store`. Mutates the registry atom and
+   returns the new registry map (without the handle)."
+  handles/remove-handle!)
+(def touch-handle!
+  "Set `:last-request-at` for `handle` to the current epoch-millis. Mutates the
+   registry atom and returns the new registry map."
+  handles/touch-handle!)
 
 ;; -- Connector Protocol --
-(def Connector protocol/Connector)
-(def SourceConnector protocol/SourceConnector)
-(def SinkConnector protocol/SinkConnector)
+(def Connector
+  "Base connector protocol. Implementations must provide connect and close."
+  protocol/Connector)
+(def SourceConnector
+  "Source connector protocol for data extraction. Provides discover, extract,
+   and checkpoint."
+  protocol/SourceConnector)
+(def SinkConnector
+  "Sink connector protocol for data publication. Provides publish."
+  protocol/SinkConnector)
 
 ;; -- Protocol Method Delegates --
 (defn connect
@@ -52,8 +74,14 @@
   (protocol/publish connector handle schema-name records opts))
 
 ;; -- Connector Types --
-(def connector-types core/connector-types)
-(def connector-capabilities core/connector-capabilities)
+(def connector-types
+  "Set of valid connector type keywords (N2 §1): #{:source :sink :bidirectional}."
+  core/connector-types)
+(def connector-capabilities
+  "Set of valid connector capability keywords (N2 §1.4), e.g. :cap/discovery,
+   :cap/incremental, :cap/batch, :cap/upsert, :cap/transactions,
+   :cap/rate-limiting, :cap/pagination."
+  core/connector-capabilities)
 
 ;; -- Retry Policy Presets --
 (def retry-policies
@@ -98,7 +126,10 @@
   (state/record-batch state records-processed records-failed))
 
 ;; -- Cursor --
-(def cursor-types cursor/cursor-types)
+(def cursor-types
+  "Set of valid cursor type keywords (N2 §2.2.1):
+   #{:timestamp-watermark :offset :sequence-id :version-id}."
+  cursor/cursor-types)
 
 (defn create-cursor
   "Create a cursor of the given type with initial value."
@@ -116,22 +147,69 @@
   (cursor/validate-cursor cursor))
 
 ;; -- Result Factories --
-(def connect-result result/connect-result)
-(def close-result result/close-result)
-(def discover-result result/discover-result)
-(def extract-result result/extract-result)
-(def checkpoint-result result/checkpoint-result)
-(def publish-result result/publish-result)
+(def connect-result
+  "Build the Connector/connect result map from `handle`. Returns
+   {:connection/handle handle, :connector/status :connected,
+    :connection/opened-at Instant}."
+  result/connect-result)
+(def close-result
+  "Build the Connector/close result map. Takes no args. Returns
+   {:connector/status :closed, :connection/closed-at Instant}."
+  result/close-result)
+(def discover-result
+  "Build the SourceConnector/discover result map from `schemas` (a seq).
+   Returns {:schemas schemas, :discover/total-count (count schemas)}."
+  result/discover-result)
+(def extract-result
+  "Build the SourceConnector/extract result map from `records`, `cursor`, and
+   `has-more`. Returns {:records records, :extract/cursor cursor,
+   :extract/has-more has-more, :extract/row-count (count records),
+   :extract/completed-at Instant}."
+  result/extract-result)
+(def checkpoint-result
+  "Build the SourceConnector/checkpoint result map from `cursor-state`. Returns
+   {:checkpoint/id UUID, :checkpoint/created Instant,
+    :checkpoint/status :committed, :checkpoint/cursor cursor-state}."
+  result/checkpoint-result)
+(def publish-result
+  "Build the SinkConnector/publish result map from `records-written` and
+   `records-failed`. Returns {:publish/records-written records-written,
+   :publish/records-failed records-failed}."
+  result/publish-result)
 
 ;; -- Shared Validation Helpers --
 ;;
 ;; Anomaly-returning variants (preferred):
-(def require-handle  validation/require-handle)
-(def validate-auth   validation/validate-auth)
+(def require-handle
+  "Look up handle state in `store` by `handle`. Returns the stored state on
+   success; returns a `:not-found` anomaly map when the handle is unknown.
+   Optional 3rd arg `{:message string, :connector keyword}` customizes the
+   anomaly message and adds the connector to `:anomaly/data`."
+  validation/require-handle)
+(def validate-auth
+  "Validate credential reference `auth`. Returns nil when `auth` is nil or
+   validation succeeds; returns an `:invalid-input` anomaly map when validation
+   fails. Optional 2nd arg `{:message string, :connector keyword}` customizes
+   the anomaly message and adds the connector to `:anomaly/data`."
+  validation/validate-auth)
 ;; Throwing variants (deprecated; kept for incremental per-connector migration):
-(def require-handle! validation/require-handle!)
-(def validate-auth!  validation/validate-auth!)
+(def require-handle!
+  "Look up handle state in `store` by `handle`. Returns the stored state, or
+   throws ex-info (:anomalies/not-found) when the handle is unknown.
+   DEPRECATED: prefer require-handle, which returns an anomaly instead."
+  validation/require-handle!)
+(def validate-auth!
+  "Validate credential reference `auth`. Returns nil on success (or when `auth`
+   is nil); throws ex-info (:anomalies/incorrect) on validation failure.
+   DEPRECATED: prefer validate-auth, which returns an anomaly instead."
+  validation/validate-auth!)
 
 ;; Throwing-with-localized-message helper (used at the connector boundary
 ;; until all callers are migrated to the anomaly-returning variant):
-(def validate-auth-or-throw! validation/validate-auth-or-throw!)
+(def validate-auth-or-throw!
+  "Validate `auth`; on success return nil, on failure throw ex-info
+   (:anomalies/incorrect) carrying a localized message and `{:errors [...]}`
+   ex-data. Args: `auth` (credential ref or nil), `translator` (a messages/t
+   function `(fn [key params])` bound to the connector's catalog), and
+   `message-key` (catalog key whose template interpolates `{errors}`)."
+  validation/validate-auth-or-throw!)
