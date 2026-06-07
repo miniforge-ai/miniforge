@@ -249,7 +249,7 @@ compression and MUST NOT be assumed to.
 
 ---
 
-## 8. Boundary Compressibility Classification (Informative-normative)
+## 8. Boundary Compressibility Classification (Conformance: SHOULD)
 
 The compressibility of a boundary is a function of how controlled and
 schema-bound it is. Implementations SHOULD convert open boundaries into
