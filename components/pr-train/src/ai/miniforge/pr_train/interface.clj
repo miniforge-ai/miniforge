@@ -30,27 +30,72 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Protocol and schema re-exports
 
-(def PRTrainManager core/PRTrainManager)
+(def PRTrainManager
+  "Protocol governing PR train management: lifecycle, state sync, queries,
+   merge actions, rollback, and evidence generation. Implemented by the
+   in-memory manager returned from create-manager."
+  core/PRTrainManager)
 
 ;; Schema re-exports
-(def TrainPR schema/TrainPR)
-(def PRTrain schema/PRTrain)
-(def EvidenceBundle schema/EvidenceBundle)
-(def GateResult schema/GateResult)
-(def TaskIntent schema/TaskIntent)
-(def Progress schema/Progress)
-(def RollbackPlan schema/RollbackPlan)
+(def TrainPR
+  "Malli :map schema for an individual PR within a train (repo, number, url,
+   branch, title, status, merge-order, depends-on/blocks vectors, ci-status,
+   optional gate-results, intent, and Tier 2 governance fields)."
+  schema/TrainPR)
+(def PRTrain
+  "Malli :map schema for a complete PR train: identity, status, the :train/prs
+   vector, computed aggregate state (blocking-prs, ready-to-merge, progress),
+   optional rollback plan and evidence reference, and timestamps."
+  schema/PRTrain)
+(def EvidenceBundle
+  "Malli :map schema for a train's complete evidence bundle: id, train-id,
+   created-at, per-PR evidence vector, summary, and miniforge-version."
+  schema/EvidenceBundle)
+(def GateResult
+  "Malli :map schema for a single gate check result: gate id, type, passed?
+   boolean, and optional message, details, and timestamp."
+  schema/GateResult)
+(def TaskIntent
+  "Malli :map schema for semantic intent attached to a PR: intent type plus
+   optional invariants, forbidden-actions, and required-evidence vectors."
+  schema/TaskIntent)
+(def Progress
+  "Malli :map schema for a train progress summary: :total, :merged, :approved,
+   :pending, and :failed counts."
+  schema/Progress)
+(def RollbackPlan
+  "Malli :map schema for a train rollback plan: trigger, action, optional
+   checkpoint PR number, and the prs-to-revert vector."
+  schema/RollbackPlan)
 
 ;; Enum value sets
-(def pr-statuses schema/pr-statuses)
-(def train-statuses schema/train-statuses)
-(def ci-statuses schema/ci-statuses)
-(def rollback-triggers schema/rollback-triggers)
-(def evidence-types schema/evidence-types)
+(def pr-statuses
+  "Vector of the possible PR status keywords, ordered :draft through :failed."
+  schema/pr-statuses)
+(def train-statuses
+  "Vector of the possible train status keywords, ordered :drafting through
+   :abandoned."
+  schema/train-statuses)
+(def ci-statuses
+  "Vector of the possible CI status keywords: :pending :running :passed
+   :failed :skipped."
+  schema/ci-statuses)
+(def rollback-triggers
+  "Vector of the keywords that can trigger a rollback: :ci-failure
+   :gate-failure :manual :timeout."
+  schema/rollback-triggers)
+(def evidence-types
+  "Vector of the evidence artifact type keywords (e.g. :terraform-plan,
+   :ci-log, :gate-results, :approval-record)."
+  schema/evidence-types)
 
 ;; State machine re-exports
-(def train-transitions state/train-transitions)
-(def pr-transitions state/pr-transitions)
+(def train-transitions
+  "Map of train status keyword to the set of statuses it may transition to."
+  state/train-transitions)
+(def pr-transitions
+  "Map of PR status keyword to the set of statuses it may transition to."
+  state/pr-transitions)
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Manager creation

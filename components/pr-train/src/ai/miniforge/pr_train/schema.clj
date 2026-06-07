@@ -26,21 +26,17 @@
 ;; Enums and base types
 
 (def pr-statuses
-  "Possible states for a PR in a train."
   [:draft :open :reviewing :changes-requested
    :approved :merging :merged :closed :failed])
 
 (def train-statuses
-  "Possible states for a PR train."
   [:drafting :open :reviewing :merging
    :merged :failed :rolled-back :abandoned])
 
 (def ci-statuses
-  "CI status values."
   [:pending :running :passed :failed :skipped])
 
 (def rollback-triggers
-  "What can trigger a rollback."
   [:ci-failure :gate-failure :manual :timeout])
 
 (def rollback-actions
@@ -48,7 +44,6 @@
   [:revert-all :revert-to-checkpoint :pause])
 
 (def evidence-types
-  "Types of evidence artifacts."
   [:terraform-plan :atlantis-log :ci-log
    :gate-results :intent-validation :approval-record])
 
@@ -94,7 +89,6 @@
 ;; Gate result schema
 
 (def GateResult
-  "Schema for a gate check result."
   [:map {:registry registry}
    [:gate/id keyword?]
    [:gate/type keyword?]
@@ -117,7 +111,6 @@
      [:condition any?]]]])
 
 (def TaskIntent
-  "Schema for semantic intent attached to a PR."
   [:map {:registry registry}
    [:intent/type (into [:enum] intent-types)]
    [:intent/invariants {:optional true} [:vector Invariant]]
@@ -128,7 +121,6 @@
 ;; TrainPR schema
 
 (def TrainPR
-  "Schema for an individual PR in a train."
   [:map {:registry registry}
    [:pr/repo :pr/repo]
    [:pr/number :pr/number]
@@ -164,7 +156,6 @@
 ;; Progress schema
 
 (def Progress
-  "Schema for train progress summary."
   [:map {:registry registry}
    [:total pos-int?]
    [:merged :common/non-neg-int]
@@ -176,7 +167,6 @@
 ;; Rollback plan schema
 
 (def RollbackPlan
-  "Schema for train rollback configuration."
   [:map {:registry registry}
    [:trigger (into [:enum] rollback-triggers)]
    [:action (into [:enum] rollback-actions)]
@@ -187,7 +177,6 @@
 ;; PRTrain schema
 
 (def PRTrain
-  "Schema for a complete PR train."
   [:map {:registry registry}
    [:train/id :train/id]
    [:train/name :train/name]
@@ -240,7 +229,6 @@
    [:semantic-violations :common/non-neg-int]])
 
 (def EvidenceBundle
-  "Schema for the complete evidence bundle of a train."
   [:map {:registry registry}
    [:evidence/id :evidence/id]
    [:evidence/train-id :train/id]

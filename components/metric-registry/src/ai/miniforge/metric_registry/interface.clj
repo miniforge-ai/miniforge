@@ -12,29 +12,67 @@
    [clojure.java.io :as io]))
 
 ;; -- Schema re-exports --
-(def AcquisitionClass reg-schema/AcquisitionClass)
-(def ImplementationMode reg-schema/ImplementationMode)
-(def RefreshCadence reg-schema/RefreshCadence)
-(def RedistributionRisk reg-schema/RedistributionRisk)
-(def MetricDirection reg-schema/MetricDirection)
-(def MetricUnit reg-schema/MetricUnit)
-(def MetricEntry reg-schema/MetricEntry)
-(def MetricFamily reg-schema/MetricFamily)
-(def MetricRegistry reg-schema/MetricRegistry)
+(def AcquisitionClass
+  "Malli `[:enum ...]` schema for a metric's acquisition class (sourcing tier)."
+  reg-schema/AcquisitionClass)
+(def ImplementationMode
+  "Malli `[:enum ...]` schema for how a metric is implemented (pull/derive/vendor/deprecated)."
+  reg-schema/ImplementationMode)
+(def RefreshCadence
+  "Malli `[:enum ...]` schema for a metric's refresh cadence (realtime through annual)."
+  reg-schema/RefreshCadence)
+(def RedistributionRisk
+  "Malli `[:enum ...]` schema for a metric's redistribution-risk level (none/low/medium/high)."
+  reg-schema/RedistributionRisk)
+(def MetricDirection
+  "Malli `[:enum ...]` schema for a metric's directional polarity (normal/inverse)."
+  reg-schema/MetricDirection)
+(def MetricUnit
+  "Malli `[:enum ...]` schema for a metric's unit (percent/ratio/index/basis-points/count/usd/level)."
+  reg-schema/MetricUnit)
+(def MetricEntry
+  "Malli `[:map ...]` schema for one metric definition (id, name, sourcing, cadence, unit, etc.)."
+  reg-schema/MetricEntry)
+(def MetricFamily
+  "Malli `[:map ...]` schema for a named group of related metrics."
+  reg-schema/MetricFamily)
+(def MetricRegistry
+  "Malli `[:map ...]` schema for the complete registry (id, version, families, pipeline map)."
+  reg-schema/MetricRegistry)
 
 ;; -- Enum value sets --
-(def acquisition-classes reg-schema/acquisition-classes)
-(def implementation-modes reg-schema/implementation-modes)
-(def refresh-cadences reg-schema/refresh-cadences)
-(def redistribution-risks reg-schema/redistribution-risks)
-(def metric-directions reg-schema/metric-directions)
-(def metric-units reg-schema/metric-units)
+(def acquisition-classes
+  "Vector of the four acquisition-class keywords, in taxonomy order."
+  reg-schema/acquisition-classes)
+(def implementation-modes
+  "Vector of the implementation-mode keywords."
+  reg-schema/implementation-modes)
+(def refresh-cadences
+  "Vector of the refresh-cadence keywords, ordered fastest to slowest."
+  reg-schema/refresh-cadences)
+(def redistribution-risks
+  "Vector of the redistribution-risk keywords ([:none :low :medium :high]), in ascending order of risk."
+  reg-schema/redistribution-risks)
+(def metric-directions
+  "Vector of the metric-direction keywords."
+  reg-schema/metric-directions)
+(def metric-units
+  "Vector of the metric-unit keywords."
+  reg-schema/metric-units)
 
 ;; -- Validation --
-(def valid-metric? reg-schema/valid-metric?)
-(def valid-family? reg-schema/valid-family?)
-(def valid-registry? reg-schema/valid-registry?)
-(def validate-registry reg-schema/validate-registry)
+(def valid-metric?
+  "Predicate: true if value conforms to the MetricEntry schema, false otherwise. Takes one metric value."
+  reg-schema/valid-metric?)
+(def valid-family?
+  "Predicate: true if value conforms to the MetricFamily schema, false otherwise. Takes one family value."
+  reg-schema/valid-family?)
+(def valid-registry?
+  "Predicate: true if value conforms to the MetricRegistry schema, false otherwise. Takes one registry value."
+  reg-schema/valid-registry?)
+(def validate-registry
+  "Validate a registry value against MetricRegistry. Returns {:valid? bool :errors map-or-nil}; never throws on invalid input."
+  reg-schema/validate-registry)
 
 ;; -- Loading --
 (defn load-registry
