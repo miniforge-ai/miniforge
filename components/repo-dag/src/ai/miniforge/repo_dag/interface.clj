@@ -42,7 +42,8 @@
   schema/RepoDag)
 (def WatchConfig
   "Malli `[:map ...]` schema for change-watch configuration: optional
-   label and path include/exclude vectors of strings."
+   `:labels-include`/`:labels-exclude` and `:paths-include`/`:paths-exclude`
+   vectors of strings."
   schema/WatchConfig)
 (def EdgeValidation
   "Malli `[:map ...]` schema for per-edge validation gates: require-ci-pass?,
