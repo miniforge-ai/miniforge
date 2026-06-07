@@ -46,7 +46,9 @@
    bundle but do not block the release gate.  This is the safe default: it
    avoids silent task-explosion while still making warnings visible.
    The active operational value lives in :review/warning-churn-policy
-   in resources/config/phase/defaults.edn."
+   in resources/config/phase/defaults.edn.
+   NOTE: consumed by the compute-verdict warning-churn branch — wired in the
+   follow-up PR 'feat/review-convergence-policy-wiring' (rule 008 deferral)."
   :accept-with-warnings)
 
 (def default-max-warning-only-cycles
@@ -56,15 +58,18 @@
    transient LLM false-positive, short enough that a genuinely warning-heavy
    PR does not loop all the way to max-redirects and exhaust its token budget.
    The active operational value lives in :review/max-warning-only-cycles
-   in resources/config/phase/defaults.edn."
+   in resources/config/phase/defaults.edn.
+   NOTE: consumed by leave-review warning-cycle cap — wired in the follow-up
+   PR 'feat/review-convergence-policy-wiring' (rule 008 deferral)."
   2)
 
 ;; Schema — validates review convergence config keys at config load time (rule 004).
 ;; Defined as a value; validation is a one-time side-effect below.
 (def ^:private ReviewConvergenceConfigSchema
   "Malli schema for the :review/warning-churn-policy and
-   :review/max-warning-only-cycles keys.  Closed map with only the
-   convergence keys; the rest of the phase config is validated elsewhere."
+   :review/max-warning-only-cycles keys.  Open map (no {:closed true}) —
+   callers must pass (select-keys cfg [...]) before validating to avoid
+   silently accepting extra keys from the full phase-config map."
   [:map
    [:review/warning-churn-policy
     {:default     default-warning-churn-policy
@@ -90,7 +95,8 @@
   (when (seq convergence-config)
     (when-not (m/validate ReviewConvergenceConfigSchema convergence-config)
       (throw (IllegalArgumentException.
-              (str "Invalid review convergence config in defaults.edn: "
+              (str (messages/ts :review/invalid-convergence-config)
+                   " "
                    (pr-str (m/explain ReviewConvergenceConfigSchema
                                        convergence-config))))))))
 

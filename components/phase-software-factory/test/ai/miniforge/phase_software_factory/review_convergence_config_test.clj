@@ -22,6 +22,7 @@
   (:require
    [clojure.test :refer [deftest is testing]]
    [malli.core :as m]
+   [ai.miniforge.phase-software-factory.messages :as messages]
    [ai.miniforge.phase-software-factory.review :as review]
    [ai.miniforge.phase-software-factory.phase-config :as phase-config]))
 
@@ -108,9 +109,24 @@
       (is (= review/default-max-warning-only-cycles
              (:review/max-warning-only-cycles cfg))))))
 
+;; System-locale message catalog tests
+
+(deftest test-system-catalog-has-invalid-convergence-config-key
+  (testing "system.edn exposes :review/invalid-convergence-config for startup errors"
+    (let [msg (messages/ts :review/invalid-convergence-config)]
+      (is (string? msg))
+      (is (pos? (count msg))))))
+
+(deftest test-system-message-is-not-raw-placeholder
+  (testing ":review/invalid-convergence-config is not the raw missing-key placeholder"
+    ;; If the key were absent, messages/t returns the keyword or a fallback sentinel.
+    ;; A real string value confirms the catalog is wired up correctly.
+    (is (not (keyword? (messages/ts :review/invalid-convergence-config))))))
+
 (comment
   ;; REPL smoke-test
   (valid? {:review/warning-churn-policy :accept-with-warnings
            :review/max-warning-only-cycles 2})   ;; => true
   (valid? {:review/warning-churn-policy :bad :review/max-warning-only-cycles 0}) ;; => false
-  (phase-config/defaults-for :review))
+  (phase-config/defaults-for :review)
+  (messages/ts :review/invalid-convergence-config))

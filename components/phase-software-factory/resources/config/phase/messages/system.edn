@@ -1,0 +1,4 @@
+{:phase/system
+ {;; Review phase — startup/config errors (system-locale; operator-facing only)
+  :review/invalid-convergence-config
+  "Invalid review convergence config in defaults.edn:"}}
