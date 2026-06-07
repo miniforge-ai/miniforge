@@ -51,11 +51,16 @@
    on violation."
   [path]
   (let [s (str path)]
+    (when (or (str/starts-with? s "/")
+              (re-find #"^[A-Za-z]:" s))
+      (throw (ex-info "Path traversal rejected: sandbox path must be relative"
+                      {:type :path-traversal
+                       :path s})))
     (when (re-find #"(^|[/\\])\.\.([/\\]|$)" s)
       (throw (ex-info "Path traversal rejected: sandbox path contains .. segment"
                       {:type :path-traversal
                        :path s})))
-    (when (re-find #"['\\`$! \t\n\r;|&><(){}*?\[\]#~]" s)
+    (when (re-find #"['\\`$! \t\n\r\x00;|&><(){}*?\[\]#~]" s)
       (throw (ex-info "Shell injection rejected: sandbox path contains unsafe character"
                       {:type :shell-injection
                        :path s})))))
