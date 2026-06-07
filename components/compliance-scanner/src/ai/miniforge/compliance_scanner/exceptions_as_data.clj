@@ -483,12 +483,22 @@
   "Return true iff the canonical path of `candidate` starts with the
    canonical path of `root` followed by the system file separator.
    Uses canonical paths to resolve symlinks and `..` segments before
-   the comparison, preventing path-traversal via relative-path inputs."
+   the comparison, preventing path-traversal via relative-path inputs.
+
+   Returns false (safe default) when .getCanonicalPath throws
+   IOException or SecurityException so the caller's exceptions-as-data
+   contract is preserved."
   [^java.io.File root ^java.io.File candidate]
-  (let [canonical-root      (.getCanonicalPath root)
-        canonical-candidate (.getCanonicalPath candidate)
-        prefix              (str canonical-root java.io.File/separator)]
-    (str/starts-with? canonical-candidate prefix)))
+  (try
+    (let [canonical-root      (.getCanonicalPath root)
+          canonical-candidate (.getCanonicalPath candidate)
+          sep                 java.io.File/separator
+          prefix              (if (str/ends-with? canonical-root sep)
+                                canonical-root
+                                (str canonical-root sep))]
+      (str/starts-with? canonical-candidate prefix))
+    (catch Exception _
+      false)))
 
 (defn analyze-file
   "Analyze a single file by absolute or relative path. Returns a vector
@@ -506,9 +516,9 @@
                     ;; treat as traversal attempt.
                     nil))]
     (if (or (nil? abs) (not (within-root? root abs)))
-      (do (.println System/err
-                    (str "[compliance-scanner] WARN path-traversal rejected: "
-                         relative-path " escapes repo-root " repo-root))
+      (do (binding [*out* *err*]
+            (println (str "[compliance-scanner] WARN path-traversal rejected: "
+                          relative-path " escapes repo-root " repo-root)))
           [])
       (if (.isFile abs)
         (let [content (try (slurp abs) (catch Exception _ nil))]

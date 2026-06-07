@@ -51,7 +51,12 @@
        ;; Supply an absolute path outside root directly as relative-path.
        ;; io/file ignores root when the second arg is absolute on most JVMs,
        ;; so canonical resolution must still catch this.
-       (let [result (exc/analyze-file root "/etc/passwd")]
+       ;; Use java.io.tmpdir so the path exists on all platforms (including
+       ;; Windows and minimal containers that lack /etc/passwd).
+       (let [outside-path (str (System/getProperty "java.io.tmpdir")
+                               java.io.File/separator
+                               "outside-the-repo-root-sentinel")
+             result       (exc/analyze-file root outside-path)]
          (is (= [] result)
              "analyze-file must return [] when path resolves outside repo-root"))))))
 
