@@ -32,7 +32,8 @@
    Transit store (Babashka compatible, via create-transit-store).
 
    Methods: save, load-artifact, query, link, close. See the sub-namespace
-   docstrings for each method's args, return shape, and failure mode."
+   protocol docstrings for each method's purpose and return shape (they do not
+   currently document argument contracts or failure modes)."
   p/ArtifactStore)
 
 (defn create-store

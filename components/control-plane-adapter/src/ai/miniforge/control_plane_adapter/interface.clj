@@ -90,8 +90,8 @@
   "Protocol fn (ControlPlaneAdapterLogs). Retrieve recent agent logs.
 
    Args: [this agent-record opts] where opts is
-   {:limit max-entries :since java.util.Date}. Returns: seq of
-   log-entry maps ([{:timestamp inst :level kw :message str}]),
+   {:limit max-entries :since java.util.Date}. Returns: a seq of
+   log-entry maps, each {:timestamp inst :level kw :message str},
    or nil when log retrieval is unsupported."
   proto/agent-logs)
 
