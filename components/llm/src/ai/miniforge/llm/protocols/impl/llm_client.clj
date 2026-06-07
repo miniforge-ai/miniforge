@@ -198,9 +198,15 @@
         ;; real input size against the context window.
         cache-creation (:cache_creation_input_tokens usage)
         cache-read (:cache_read_input_tokens usage)]
+    ;; Associate ONLY numeric fields so missing values stay absent. A
+    ;; present-but-nil key breaks downstream `(get usage :input-tokens 0)`
+    ;; defaulting (the default applies only when the key is ABSENT) — e.g.
+    ;; llm-success's `:tokens (+ (get usage :input-tokens 0) ...)` would NPE
+    ;; on a cache-only usage frame.
     (when (some number? [input-tokens output-tokens cache-creation cache-read])
-      (cond-> {:input-tokens input-tokens
-               :output-tokens output-tokens}
+      (cond-> {}
+        (number? input-tokens)   (assoc :input-tokens input-tokens)
+        (number? output-tokens)  (assoc :output-tokens output-tokens)
         (number? cache-creation) (assoc :cache-creation-input-tokens cache-creation)
         (number? cache-read)     (assoc :cache-read-input-tokens cache-read)))))
 
@@ -1637,28 +1643,35 @@
    `usage` and `context-window` drive structured context-overflow
    classification: when the turn's total input tokens reached the model's
    window, the error is typed `context_overflow` (terminal, non-retryable)
-   instead of a generic recoverable `cli_error`."
-  [content exit-code err-result raw-stdout timeout-info stop-reason num-turns
-   tool-call-count final-message-preview usage context-window]
-  (let [error-message (or (not-empty (str/trim (or err-result "")))
-                          (when-not (str/blank? content) content)
-                          (not-empty (str/trim (or raw-stdout "")))
-                          (msg/t :streaming-error.system/no-output))
-        category (if timeout-info :anomalies/timeout :anomalies.agent/llm-error)
-        error-type (cond
-                     timeout-info "adaptive_timeout"
-                     (context-overflow-by-usage? usage context-window) context-overflow-error-type
-                     :else "cli_error")]
-    (cond-> (llm-error category error-type (str/trim error-message)
-                       {:exit-code exit-code
-                        :stderr err-result
-                        :stdout content
-                        :raw-stdout raw-stdout
-                        :timeout timeout-info})
-      stop-reason                 (assoc :stop-reason stop-reason)
-      num-turns                   (assoc :num-turns num-turns)
-      (some? tool-call-count)     (assoc :tool-call-count tool-call-count)
-      (seq final-message-preview) (assoc :final-message-preview final-message-preview))))
+   instead of a generic recoverable `cli_error`. They are optional — the
+   9-arity form (used by diagnostic callers that don't have usage/window in
+   hand) simply skips overflow classification."
+  ([content exit-code err-result raw-stdout timeout-info stop-reason num-turns
+    tool-call-count final-message-preview]
+   (streaming-error-response content exit-code err-result raw-stdout timeout-info
+                             stop-reason num-turns tool-call-count
+                             final-message-preview nil nil))
+  ([content exit-code err-result raw-stdout timeout-info stop-reason num-turns
+    tool-call-count final-message-preview usage context-window]
+   (let [error-message (or (not-empty (str/trim (or err-result "")))
+                           (when-not (str/blank? content) content)
+                           (not-empty (str/trim (or raw-stdout "")))
+                           (msg/t :streaming-error.system/no-output))
+         category (if timeout-info :anomalies/timeout :anomalies.agent/llm-error)
+         error-type (cond
+                      timeout-info "adaptive_timeout"
+                      (context-overflow-by-usage? usage context-window) context-overflow-error-type
+                      :else "cli_error")]
+     (cond-> (llm-error category error-type (str/trim error-message)
+                        {:exit-code exit-code
+                         :stderr err-result
+                         :stdout content
+                         :raw-stdout raw-stdout
+                         :timeout timeout-info})
+       stop-reason                 (assoc :stop-reason stop-reason)
+       num-turns                   (assoc :num-turns num-turns)
+       (some? tool-call-count)     (assoc :tool-call-count tool-call-count)
+       (seq final-message-preview) (assoc :final-message-preview final-message-preview)))))
 
 (defn handle-streaming [client request on-chunk backend-config progress-monitor]
   (let [{:keys [logger config]} client
@@ -1766,7 +1779,12 @@
                                               timeout-info stop-reason num-turns
                                               tool-call-count final-message-preview
                                               usage
-                                              (model-registry/context-window-for-model-id model))
+                                              ;; effective model = the one actually invoked
+                                              ;; (request-with-model), which honors a per-request
+                                              ;; :model when config carries none — keeps overflow
+                                              ;; classification consistent with the real call.
+                                              (model-registry/context-window-for-model-id
+                                               (:model request-with-model)))
               session-id (assoc :session-id session-id))))))))
 
 (defn complete-stream-impl [client request on-chunk]

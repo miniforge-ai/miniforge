@@ -25,6 +25,9 @@
    [clojure.test :refer [deftest testing is]]
    [ai.miniforge.llm.protocols.impl.llm-client :as impl]))
 
+(defn- private-fn [sym]
+  (var-get (ns-resolve 'ai.miniforge.llm.protocols.impl.llm-client sym)))
+
 (deftest total-input-tokens-test
   (testing "sums prompt + cache-creation + cache-read; the real prompt size
             lives mostly in cache-creation, not :input-tokens"
@@ -69,4 +72,25 @@
                 "x" 0 nil "x"
                 {:type :stream-idle :elapsed-ms 1} nil nil 0 nil
                 {:input-tokens 3 :cache-creation-input-tokens 204279} 200000)]
-      (is (= "adaptive_timeout" (get-in resp [:error :type]))))))
+      (is (= "adaptive_timeout" (get-in resp [:error :type])))))
+
+  (testing "the 9-arg form (no usage/window) stays backward-compatible and
+            skips overflow classification"
+    (let [resp (impl/streaming-error-response
+                "" -1 "process died" "" nil nil nil 5 nil)]
+      (is (= "cli_error" (get-in resp [:error :type]))))))
+
+(deftest parsed-usage-omits-absent-fields-test
+  (testing "a cache-only usage frame produces NO nil :input-tokens key, so
+            downstream `(get usage :input-tokens 0)` defaulting still works
+            (would otherwise NPE in llm-success's :tokens sum)"
+    (let [parsed ((private-fn 'parsed-usage)
+                  {:cache_creation_input_tokens 204279})]
+      (is (= {:cache-creation-input-tokens 204279} parsed))
+      (is (not (contains? parsed :input-tokens)))
+      (is (= 0 (get parsed :input-tokens 0)))
+      (is (= 204279 (impl/total-input-tokens parsed)))))
+
+  (testing "nil when no numeric token field is present"
+    (is (nil? ((private-fn 'parsed-usage) {})))
+    (is (nil? ((private-fn 'parsed-usage) {:input_tokens nil})))))
