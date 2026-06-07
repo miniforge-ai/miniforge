@@ -496,7 +496,12 @@
     (and reviewer-blocked? warning-churn?)
     (case warning-churn-policy
       :accept-with-warnings :accept-with-warnings
-      :needs-decomposition  :needs-decomposition)
+      :needs-decomposition  :needs-decomposition
+      ;; Programmer-error guard — invalid policy should have been caught at config
+      ;; load by ReviewConvergenceConfigSchema; throw here makes the offending value
+      ;; visible rather than silently routing to an unrelated verdict branch (rule 005).
+      (throw (IllegalArgumentException.
+              (str "Unknown warning-churn-policy: " (pr-str warning-churn-policy)))))
 
     (and reviewer-blocked? within-budget? actionable-feedback?)
     :repair-requested
@@ -570,10 +575,14 @@
       (record-fingerprint current-fp)))
 
 (defn- review-feedback
-  "Extract feedback the implementer should consume on a repair redirect."
+  "Extract feedback the implementer should consume on a repair redirect.
+   Falls back to :review/warnings when no structured feedback or issues
+   are present — warnings ARE actionable feedback when there are no
+   blocking issues (the warning-churn repair path)."
   [result]
   (or (get-in result [:output :review/feedback])
-      (get-in result [:output :review/issues])))
+      (get-in result [:output :review/issues])
+      (not-empty (get-in result [:output :review/warnings]))))
 
 (defn- actionable-feedback?
   "True when review feedback gives implement something concrete to repair."
