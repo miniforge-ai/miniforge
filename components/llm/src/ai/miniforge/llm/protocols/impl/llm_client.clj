@@ -28,6 +28,7 @@
    [ai.miniforge.logging.interface :as log]
    [ai.miniforge.llm.cost :as cost]
    [ai.miniforge.llm.messages :as msg]
+   [ai.miniforge.llm.model-registry :as model-registry]
    [ai.miniforge.llm.network-monitor :as nnm]
    [ai.miniforge.llm.progress-monitor :as pm]
    [ai.miniforge.response.interface :as response]
@@ -189,12 +190,19 @@
 
 (defn- parsed-usage
   [usage]
+  ;; Capture cache fields: a large prompt lands mostly under cache-creation.
+  ;; Assoc only numeric fields — a present-but-nil key defeats downstream
+  ;; `(get usage :input-tokens 0)` defaulting (NPEs llm-success's :tokens sum).
   (let [input-tokens (:input_tokens usage)
-        output-tokens (:output_tokens usage)]
-    (when (or (number? input-tokens)
-              (number? output-tokens))
-      {:input-tokens input-tokens
-       :output-tokens output-tokens})))
+        output-tokens (:output_tokens usage)
+        cache-creation (:cache_creation_input_tokens usage)
+        cache-read (:cache_read_input_tokens usage)]
+    (when (some number? [input-tokens output-tokens cache-creation cache-read])
+      (cond-> {}
+        (number? input-tokens)   (assoc :input-tokens input-tokens)
+        (number? output-tokens)  (assoc :output-tokens output-tokens)
+        (number? cache-creation) (assoc :cache-creation-input-tokens cache-creation)
+        (number? cache-read)     (assoc :cache-read-input-tokens cache-read)))))
 
 (defn parse-claude-stream-line
   "Parse a line from Claude CLI streaming output.
@@ -1580,31 +1588,27 @@
        (nil? usage)))
 
 (def context-overflow-error-type
-  "Distinct error :type for a prompt that exceeded the model's context
-   window. Kept OUT of submission-recovery/recoverable-error-types: such a
-   turn produced no usable artifact (its stdout holds no plan) and a
-   submission-only retry cannot recover it — the retry re-sends an
-   over-budget prompt and, with nothing to convert, burns its whole budget
-   re-planning from scratch. Classifying it distinctly lets the phase fail
-   cleanly on the real overflow instead of firing a doomed retry.
-   (review-redirect-convergence dogfood adhoc-2135293220, 2026-06-07: the
-   planner's main turn overflowed, was misclassified as a recoverable
-   cli_error, and the submission-retry then died at its 120s hard cap.)"
+  "Error :type for a prompt that exceeded the model's context window.
+   Terminal: excluded from submission-recovery (the turn has no artifact to
+   recover and a retry just re-sends the over-budget prompt). See N12 §4."
   "context_overflow")
 
-(def ^:private context-overflow-markers
-  "Lower-cased substrings the agent CLIs emit when the prompt exceeds the
-   model's context window. Matched case-insensitively against the error
-   message."
-  ["prompt is too long"])
+(defn total-input-tokens
+  "prompt + cache-creation + cache-read tokens. Summed because a large
+   prompt lands mostly under cache-creation, not :input-tokens. See N12 §2."
+  [usage]
+  (+ (or (:input-tokens usage) 0)
+     (or (:cache-creation-input-tokens usage) 0)
+     (or (:cache-read-input-tokens usage) 0)))
 
-(defn context-overflow-error?
-  "True when `message` indicates the prompt exceeded the model's context
-   window — an unrecoverable terminal condition (see
-   `context-overflow-error-type`)."
-  [message]
-  (let [m (str/lower-case (or message ""))]
-    (boolean (some #(str/includes? m %) context-overflow-markers))))
+(defn context-overflow-by-usage?
+  "True when total input tokens >= the model's context window — the
+   structured, locale/backend-independent overflow signal (N12 §4).
+   `context-window` is nil for uncatalogued models → no assertion."
+  [usage context-window]
+  (boolean (and context-window
+                (pos? (total-input-tokens usage))
+                (>= (total-input-tokens usage) context-window))))
 
 (defn streaming-error-response
   "Build a streaming error response with diagnostic metadata.
@@ -1613,27 +1617,36 @@
    - :stop-reason          — last observed stop reason before failure
    - :num-turns            — number of conversation turns consumed
    - :tool-call-count      — total number of tool invocations during the run
-   - :final-message-preview — last 500 chars of accumulated content (post-mortem aid)"
-  [content exit-code err-result raw-stdout timeout-info stop-reason num-turns tool-call-count final-message-preview]
-  (let [error-message (or (not-empty (str/trim (or err-result "")))
-                          (when-not (str/blank? content) content)
-                          (not-empty (str/trim (or raw-stdout "")))
-                          (msg/t :streaming-error.system/no-output))
-        category (if timeout-info :anomalies/timeout :anomalies.agent/llm-error)
-        error-type (cond
-                     timeout-info "adaptive_timeout"
-                     (context-overflow-error? error-message) context-overflow-error-type
-                     :else "cli_error")]
-    (cond-> (llm-error category error-type (str/trim error-message)
-                       {:exit-code exit-code
-                        :stderr err-result
-                        :stdout content
-                        :raw-stdout raw-stdout
-                        :timeout timeout-info})
-      stop-reason                 (assoc :stop-reason stop-reason)
-      num-turns                   (assoc :num-turns num-turns)
-      (some? tool-call-count)     (assoc :tool-call-count tool-call-count)
-      (seq final-message-preview) (assoc :final-message-preview final-message-preview))))
+   - :final-message-preview — last 500 chars of accumulated content (post-mortem aid)
+
+   `usage` + `context-window` drive context-overflow classification (N12 §4);
+   optional — the 9-arity form skips it (for callers without them)."
+  ([content exit-code err-result raw-stdout timeout-info stop-reason num-turns
+    tool-call-count final-message-preview]
+   (streaming-error-response content exit-code err-result raw-stdout timeout-info
+                             stop-reason num-turns tool-call-count
+                             final-message-preview nil nil))
+  ([content exit-code err-result raw-stdout timeout-info stop-reason num-turns
+    tool-call-count final-message-preview usage context-window]
+   (let [error-message (or (not-empty (str/trim (or err-result "")))
+                           (when-not (str/blank? content) content)
+                           (not-empty (str/trim (or raw-stdout "")))
+                           (msg/t :streaming-error.system/no-output))
+         category (if timeout-info :anomalies/timeout :anomalies.agent/llm-error)
+         error-type (cond
+                      timeout-info "adaptive_timeout"
+                      (context-overflow-by-usage? usage context-window) context-overflow-error-type
+                      :else "cli_error")]
+     (cond-> (llm-error category error-type (str/trim error-message)
+                        {:exit-code exit-code
+                         :stderr err-result
+                         :stdout content
+                         :raw-stdout raw-stdout
+                         :timeout timeout-info})
+       stop-reason                 (assoc :stop-reason stop-reason)
+       num-turns                   (assoc :num-turns num-turns)
+       (some? tool-call-count)     (assoc :tool-call-count tool-call-count)
+       (seq final-message-preview) (assoc :final-message-preview final-message-preview)))))
 
 (def ^:private chars-per-token-estimate
   "Rough characters-per-token divisor for a pre-flight input-size estimate.
@@ -1763,7 +1776,11 @@
             (cond-> (streaming-error-response final-content exit-code (:err result)
                                               diagnostic-content
                                               timeout-info stop-reason num-turns
-                                              tool-call-count final-message-preview)
+                                              tool-call-count final-message-preview
+                                              usage
+                                              ;; effective model actually invoked (honors per-request :model)
+                                              (model-registry/context-window-for-model-id
+                                               (:model request-with-model)))
               session-id (assoc :session-id session-id))))))))
 
 (defn complete-stream-impl [client request on-chunk]

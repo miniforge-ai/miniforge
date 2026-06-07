@@ -111,6 +111,15 @@
       (is (some #{:gpt-5.3-codex} models))
       (is (some #{:gpt-5.2-codex} models)))))
 
+(deftest test-context-window-for-model-id
+  (testing "resolves the context window by provider model-id string"
+    (is (= 200000 (registry/context-window-for-model-id "claude-opus-4-6")))
+    (is (= 1000000 (registry/context-window-for-model-id "claude-opus-4-7"))))
+
+  (testing "unknown or nil model-id returns nil (overflow can't be asserted)"
+    (is (nil? (registry/context-window-for-model-id "no-such-model")))
+    (is (nil? (registry/context-window-for-model-id nil)))))
+
 (deftest test-get-local-models
   (testing "Get all local models"
     (let [models (registry/get-local-models)]
