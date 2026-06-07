@@ -292,10 +292,11 @@
 
 (defn- run-leave-review
   "Run leave-review against a custom ctx and return the resulting full ctx."
-  [{:keys [issues iterations max-iterations prior-fingerprints]
-    :or   {iterations          first-iteration
-           max-iterations      default-max-iterations
-           prior-fingerprints  []}}]
+  [{:keys [issues iterations max-iterations prior-fingerprints prior-blocking-counts]
+    :or   {iterations            first-iteration
+           max-iterations        default-max-iterations
+           prior-fingerprints    []
+           prior-blocking-counts []}}]
   (let [result {:output  {:review/decision :changes-requested
                           :review/issues issues}
                 :metrics {:tokens mock-token-count :duration-ms mock-duration-ms}}
@@ -304,7 +305,8 @@
                      :budget {:iterations max-iterations}
                      :result result}
              :phase-config {:phase :review}
-             :execution {:review-fingerprints prior-fingerprints}
+             :execution {:review-fingerprints prior-fingerprints
+                         :review-blocking-counts prior-blocking-counts}
              :execution/phase-results {}
              :execution/input {:description "test task"}
              :execution/metrics {}}
@@ -427,7 +429,8 @@
             under shipped config."
     (let [final-ctx (run-leave-review {:issues             [yet-another-blocking-issue]
                                        :iterations         third-iteration
-                                       :prior-fingerprints prior-distinct-fingerprints})
+                                       :prior-fingerprints prior-distinct-fingerprints
+                                       :prior-blocking-counts [1 1]}) ; flat 1→1→1 = 3 no-progress
           phase (:phase final-ctx)]
       (is (= :needs-decomposition (:verdict phase))
           "verdict :needs-decomposition surfaces on the phase map")
@@ -468,6 +471,75 @@
           "below cap, no decomposition verdict")
       (is (= :repair-requested (:verdict phase))
           "below cap with progress + actionable feedback = :repair-requested"))))
+
+(deftest needs-decomposition-fires-records-blocking-counts-test
+  (testing "the convergence-cap anomaly carries the blocking-count trend"
+    (let [final-ctx (run-leave-review {:issues             [yet-another-blocking-issue]
+                                       :iterations         third-iteration
+                                       :prior-fingerprints prior-distinct-fingerprints
+                                       :prior-blocking-counts [1 1]})
+          phase (:phase final-ctx)]
+      (is (= :needs-decomposition (:verdict phase))
+          "flat blocking count (1→1→1) at the cap = non-convergence")
+      (is (= [1 1 1] (get-in phase [:error :review/blocking-counts]))
+          "blocking-count history recorded in the anomaly"))))
+
+(deftest progressing-loop-not-decomposed-at-cap-test
+  (testing "a loop whose blocking count is SHRINKING is allowed past
+            max-no-progress-attempts — it is converging, just not in one
+            turn. This is the 2026-06-07b dogfood regression: a real
+            blocker fixed each pass, killed at 3 by the old flat cap."
+    (let [final-ctx (run-leave-review {:issues             [yet-another-blocking-issue] ; 1 blocking
+                                       :iterations         third-iteration
+                                       :prior-fingerprints prior-distinct-fingerprints  ; cycle 3 = cap
+                                       :prior-blocking-counts [3 2]})                    ; 3→2→1 shrinking
+          phase (:phase final-ctx)]
+      (is (not= :needs-decomposition (:verdict phase))
+          "shrinking blocking count is not declared needs-decomposition at the cap")
+      (is (= :repair-requested (:verdict phase))
+          "converging loop keeps redirecting to implement"))))
+
+(deftest progressing-loop-decomposed-at-absolute-ceiling-test
+  (testing "even a shrinking loop terminates at the absolute redirect ceiling
+            (default 6) — backstop against an unbounded slow decrement."
+    (let [five-priors (mapv (fn [i] {:review/fingerprint (keyword (str "fp" i))})
+                            (range 5))
+          final-ctx (run-leave-review {:issues             [yet-another-blocking-issue] ; 1 blocking
+                                       :iterations         third-iteration
+                                       :prior-fingerprints five-priors                  ; cycle 6 = ceiling
+                                       :prior-blocking-counts [6 5 4 3 2]})              ; still shrinking
+          phase (:phase final-ctx)]
+      (is (= :needs-decomposition (:verdict phase))
+          "absolute ceiling overrides progress"))))
+
+(deftest no-progress-streak-unit-test
+  (let [streak @#'review/no-progress-streak]
+    (testing "shrinking every cycle = 0 streak"
+      (is (= 0 (streak [3 2 1])))
+      (is (= 0 (streak [5 4]))))
+    (testing "one stall after progress = 1; flat throughout = full length"
+      (is (= 1 (streak [3 2 2])))
+      (is (= 3 (streak [1 1 1])))
+      (is (= 2 (streak [5 4 3 3 3]))))  ; trailing 3 3 3 → two no-progress steps after the last drop
+    (testing "growth counts as no-progress; single cycle = 1; empty = 0"
+      (is (= 3 (streak [1 1 2])))   ; no-prior, flat, growth — none shrank
+      (is (= 1 (streak [4])))
+      (is (= 0 (streak []))))))
+
+(deftest compute-needs-decomposition?-progress-aware-unit-test
+  (let [nd @#'review/compute-needs-decomposition?]
+    ;; args: blocked? stagnated? no-progress-streak cycle-count max-no-progress absolute-max
+    (testing "streak below the cap does not decompose (still converging)"
+      (is (false? (nd true false 0 3 3 6)))
+      (is (false? (nd true false 2 5 3 6))))
+    (testing "streak at the no-progress cap decomposes"
+      (is (true? (nd true false 3 3 3 6))))
+    (testing "absolute ceiling overrides a converging (low-streak) loop"
+      (is (true? (nd true false 0 6 3 6))))
+    (testing "stagnation pre-empts (handled elsewhere) — never decomposition"
+      (is (false? (nd true true 9 9 3 6))))
+    (testing "not blocked never decomposes"
+      (is (false? (nd false false 9 9 3 6))))))
 
 ;; ============================================================================
 ;; Backend-timeout verdict — companion to PR-A (#1058)
