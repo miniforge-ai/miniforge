@@ -136,6 +136,37 @@
   [ctx count]
   (assoc-in ctx [:execution :review-warning-only-cycles] count))
 
+(def ^:private terminal-review-verdicts
+  "Review verdicts that end the repair loop without redirecting to implement.
+   Only these four verdicts produce a :review/cause entry in the
+   phase-completed event payload so the evidence bundle and dashboard can
+   surface why the loop terminated rather than converging."
+  #{:accept-with-warnings :needs-decomposition :stagnated :exhausted})
+
+(defn- build-review-cause
+  "Build the :review/cause map for terminal review verdicts.
+   Returns nil for non-terminal verdicts (:repair-requested, :approved,
+   :review/backend-timeout).
+
+   Fields always present on a terminal verdict:
+     :cause/type                — :warning-churn or :blocking-defect
+     :review/warning-only-cycles — consecutive warning-only cycles completed
+     :review/total-cycles       — total review cycles in this task
+     :review/verdict            — the terminal verdict keyword
+
+   For :accept-with-warnings only:
+     :review/unresolved-warning-count — count of advisory warnings accepted
+                                        without resolution"
+  [verdict cause-map warning-only-count review-cycle-count review-artifact]
+  (when (contains? terminal-review-verdicts verdict)
+    (cond-> {:cause/type                (get cause-map :cause/type :blocking-defect)
+             :review/warning-only-cycles warning-only-count
+             :review/total-cycles       review-cycle-count
+             :review/verdict            verdict}
+      (= :accept-with-warnings verdict)
+      (assoc :review/unresolved-warning-count
+             (count (get review-artifact :review/warnings))))))
+
 ;------------------------------------------------------------------------------ Layer 1
 ;; Interceptor implementation
 
@@ -681,6 +712,8 @@
                                             :warning-churn-policy warning-churn-policy
                                             :within-budget?       within-budget?
                                             :actionable-feedback? (actionable-feedback? feedback)})
+        review-cause      (build-review-cause verdict cause-map warning-only-count
+                                              review-cycle-count review-artifact)
         updated-ctx       (cond-> (-> ctx
                                       (accumulate-base-ctx end-time duration-ms phase-status
                                                            metrics iterations current-fp)
@@ -698,7 +731,8 @@
       (merge {:outcome     (if (= :completed phase-status) :success :failure)
               :duration-ms duration-ms
               :tokens      (:tokens metrics 0)}
-             (phase-terminal/derive-termination-reason result nil)))
+             (phase-terminal/derive-termination-reason result nil)
+             (when review-cause {:review/cause review-cause})))
     next-ctx))
 
 (defn error-review
