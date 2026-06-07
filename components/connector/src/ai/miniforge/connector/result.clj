@@ -8,14 +8,12 @@
 ;; -- Connector lifecycle --
 
 (defn connect-result
-  "Build the map returned by Connector/connect."
   [handle]
   {:connection/handle    handle
    :connector/status     :connected
    :connection/opened-at (Instant/now)})
 
 (defn close-result
-  "Build the map returned by Connector/close."
   []
   {:connector/status     :closed
    :connection/closed-at (Instant/now)})
@@ -23,13 +21,11 @@
 ;; -- SourceConnector --
 
 (defn discover-result
-  "Build the map returned by SourceConnector/discover."
   [schemas]
   {:schemas              schemas
    :discover/total-count (count schemas)})
 
 (defn extract-result
-  "Build the map returned by SourceConnector/extract."
   [records cursor has-more]
   {:records              records
    :extract/cursor       cursor
@@ -38,7 +34,6 @@
    :extract/completed-at (Instant/now)})
 
 (defn checkpoint-result
-  "Build the map returned by SourceConnector/checkpoint."
   [cursor-state]
   {:checkpoint/id      (UUID/randomUUID)
    :checkpoint/created (Instant/now)
@@ -48,7 +43,6 @@
 ;; -- SinkConnector --
 
 (defn publish-result
-  "Build the map returned by SinkConnector/publish."
   [records-written records-failed]
   {:publish/records-written records-written
    :publish/records-failed  records-failed})

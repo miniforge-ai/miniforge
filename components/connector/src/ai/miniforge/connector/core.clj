@@ -4,11 +4,9 @@
            [java.time Instant]))
 
 (def connector-types
-  "N2 §1 connector types"
   #{:source :sink :bidirectional})
 
 (def connector-capabilities
-  "N2 §1.4 connector capabilities"
   #{:cap/discovery :cap/incremental :cap/batch :cap/upsert
     :cap/transactions :cap/rate-limiting :cap/pagination})
 

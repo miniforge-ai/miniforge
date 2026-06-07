@@ -3,7 +3,6 @@
   (:import [java.time Instant]))
 
 (def cursor-types
-  "N2 §2.2.1 cursor types"
   #{:timestamp-watermark :offset :sequence-id :version-id})
 
 (defn validate-cursor
