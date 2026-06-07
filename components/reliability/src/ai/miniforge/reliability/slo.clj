@@ -29,8 +29,6 @@
 ;; Configuration
 
 (def default-targets
-  "SLO targets loaded from config/reliability/slo-targets.edn.
-   nil means advisory-only (no enforcement for that tier)."
   (-> (io/resource "config/reliability/slo-targets.edn")
       slurp
       edn/read-string))
@@ -54,10 +52,6 @@
    (get-in targets [sli-name tier])))
 
 (defn check-slo
-  "Check whether an SLI result meets its SLO target.
-
-   Returns: {:breached? bool :sli/name :slo/target :slo/actual :slo/tier :slo/window}
-   Returns nil if the SLI has no target for this tier (advisory-only)."
   ([sli-result tier] (check-slo sli-result tier default-targets))
   ([sli-result tier targets]
    (let [{:keys [sli/name sli/value sli/window]} sli-result
@@ -74,8 +68,6 @@
           :slo/window window})))))
 
 (defn check-all-slos
-  "Check all SLI results against SLO targets for a given tier.
-   Returns only the results that have targets (excludes advisory-only)."
   ([sli-results tier] (check-all-slos sli-results tier default-targets))
   ([sli-results tier targets]
    (->> sli-results
@@ -89,7 +81,6 @@
   (:breached? slo-check))
 
 (defn breached-slos
-  "Filter to only the SLOs that are breached."
   [slo-checks]
   (filter breached? slo-checks))
 

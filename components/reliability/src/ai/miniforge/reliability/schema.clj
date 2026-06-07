@@ -23,7 +23,6 @@
 ;; Enums
 
 (def WorkflowTier
-  "Workflow tier determines SLO targets and degradation behavior."
   [:enum :best-effort :standard :critical])
 
 (def SliName

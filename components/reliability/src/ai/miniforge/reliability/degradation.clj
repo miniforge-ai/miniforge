@@ -99,11 +99,6 @@
   (merge default-config config))
 
 (defn create-manager
-  "Create a DegradationManager.
-
-   Arguments:
-     event-stream - event stream atom
-     config       - optional degradation policy overrides"
   [event-stream & [config]]
   (->DegradationManager
    (atom (fsm/initialize degradation-machine))
@@ -111,7 +106,6 @@
    (merge-manager-config config)))
 
 (defn current-mode
-  "Get the current degradation mode (:nominal, :degraded, or :safe-mode)."
   [manager]
   (fsm/current-state @(:fsm-state manager)))
 
@@ -318,12 +312,6 @@
       current))))
 
 (defn enter-safe-mode!
-  "Force entry to safe-mode. Works from any state.
-
-   Arguments:
-     manager - DegradationManager
-     trigger - keyword (:error-budget | :emergency-stop | :unknown-failures | :manual)
-     details - string with additional context"
   [manager trigger details]
   (let [current (current-mode manager)]
     (when (not= current :safe-mode)

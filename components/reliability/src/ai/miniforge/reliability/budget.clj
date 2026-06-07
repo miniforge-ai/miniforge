@@ -42,7 +42,6 @@
 ;; Factory
 
 (defn error-budget
-  "Factory: create an error budget map."
   ([remaining burn-rate]
    {:error-budget/remaining remaining
     :error-budget/burn-rate burn-rate})
@@ -58,19 +57,6 @@
 ;; Budget computation
 
 (defn compute-error-budget
-  "Compute error budget for an SLI over a window.
-
-   Arguments:
-     sli-value   - current SLI value (0.0-1.0)
-     slo-target  - SLO target for the tier
-     inverted?   - true if lower-is-better (e.g., SLI-6 unknown failure rate)
-
-   Returns:
-     {:error-budget/remaining double  ; 0.0-1.0 fraction of budget remaining
-      :error-budget/burn-rate double} ; current burn rate (1.0 = nominal)
-
-   When remaining is 0.0, the budget is exhausted.
-   Burn-rate > 1.0 means the budget is being consumed faster than it should."
   [sli-value slo-target inverted?]
   (let [[remaining burn-rate]
         (if inverted?
@@ -98,13 +84,10 @@
 ;; Predicates
 
 (defn budget-exhausted?
-  "Returns true if the error budget remaining is at or below zero."
   [budget]
   (<= (:error-budget/remaining budget) 0.0))
 
 (defn budget-critical?
-  "Returns true if the error budget remaining is below the threshold.
-   Default threshold: 0.25 (25% remaining)."
   ([budget] (budget-critical? budget default-critical-threshold))
   ([budget threshold]
    (< (:error-budget/remaining budget) threshold)))
