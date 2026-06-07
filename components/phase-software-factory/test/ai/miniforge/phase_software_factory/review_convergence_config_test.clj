@@ -113,15 +113,16 @@
 
 (deftest test-system-catalog-has-invalid-convergence-config-key
   (testing "system.edn exposes :review/invalid-convergence-config for startup errors"
-    (let [msg (messages/ts :review/invalid-convergence-config)]
+    ;; create-translator falls back to `(name k)` for a missing key, so a
+    ;; bare string/pos? check passes even when the catalog entry is absent.
+    ;; Assert the resolved message DIFFERS from that fallback to actually
+    ;; prove the resource is wired.
+    (let [msg      (messages/ts :review/invalid-convergence-config)
+          fallback (name :review/invalid-convergence-config)]
       (is (string? msg))
-      (is (pos? (count msg))))))
-
-(deftest test-system-message-is-not-raw-placeholder
-  (testing ":review/invalid-convergence-config is not the raw missing-key placeholder"
-    ;; If the key were absent, messages/t returns the keyword or a fallback sentinel.
-    ;; A real string value confirms the catalog is wired up correctly.
-    (is (not (keyword? (messages/ts :review/invalid-convergence-config))))))
+      (is (pos? (count msg)))
+      (is (not= fallback msg)
+          "message equals the (name k) fallback — catalog entry is missing"))))
 
 (comment
   ;; REPL smoke-test

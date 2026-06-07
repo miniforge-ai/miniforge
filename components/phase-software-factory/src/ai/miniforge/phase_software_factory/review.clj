@@ -84,17 +84,21 @@
 
 ;; Validate convergence config once at load — fail fast on a bad defaults.edn
 ;; rather than surfacing a ClassCastException deep inside the review phase.
-;; Only validates when the keys are present; absent keys fall back to constants.
-(let [convergence-config (select-keys default-config
-                                       [:review/warning-churn-policy
-                                        :review/max-warning-only-cycles])]
-  (when (seq convergence-config)
-    (when-not (m/validate ReviewConvergenceConfigSchema convergence-config)
-      (throw (IllegalArgumentException.
-              (str (messages/ts :review/invalid-convergence-config)
-                   " "
-                   (pr-str (m/explain ReviewConvergenceConfigSchema
-                                       convergence-config))))))))
+;; Merge the constant fallbacks UNDER whatever defaults.edn provides, then
+;; validate the complete map: a partial override (only one of the two keys)
+;; is filled in by the fallback instead of failing the schema's both-keys
+;; requirement, while an invalid VALUE for a provided key still throws.
+(let [convergence-config (merge {:review/warning-churn-policy    default-warning-churn-policy
+                                 :review/max-warning-only-cycles default-max-warning-only-cycles}
+                                (select-keys default-config
+                                             [:review/warning-churn-policy
+                                              :review/max-warning-only-cycles]))]
+  (when-not (m/validate ReviewConvergenceConfigSchema convergence-config)
+    (throw (IllegalArgumentException.
+            (str (messages/ts :review/invalid-convergence-config)
+                 " "
+                 (pr-str (m/explain ReviewConvergenceConfigSchema
+                                     convergence-config)))))))
 
 ;; Register defaults on load
 (phase/register-phase-defaults! :review default-config)
@@ -728,7 +732,11 @@
        (:knowledge-store ctx) :reviewer
        (get-in ctx [:execution/input :title]) feedback))
     (phase/emit-phase-completed! next-ctx :review
-      (merge {:outcome     (if (= :completed phase-status) :success :failure)
+      ;; Derive :outcome from the FINAL (verdict-corrected) status, not the
+      ;; pre-verdict `phase-status` local: apply-verdict promotes
+      ;; :accept-with-warnings to :completed, so reading the stale local would
+      ;; emit {:outcome :failure} for a success and mislead telemetry.
+      (merge {:outcome     (if (= :completed (get-in next-ctx [:phase :status])) :success :failure)
               :duration-ms duration-ms
               :tokens      (:tokens metrics 0)}
              (phase-terminal/derive-termination-reason result nil)
