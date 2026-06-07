@@ -122,10 +122,33 @@
   anomaly/anomaly?)
 
 ;; Progress-detector-local schemas (not duplicates of anomaly/*).
-(def Observation         schema/Observation)
-(def DetectorConfig      schema/DetectorConfig)
-(def ToolProfile         schema/ToolProfile)
-(def DetectorAnomalyData schema/DetectorAnomalyData)
+(def Observation
+  "Malli schema (a [:map …] vector) for a single tool-invocation event
+   fed into the detector reduce loop. Required keys: :tool/id (keyword),
+   :seq (int), :timestamp (inst). Optional: :tool/duration-ms,
+   :tool/input, :tool/output, :tool/error?, :resource/version-hash."
+  schema/Observation)
+
+(def DetectorConfig
+  "Malli schema (a [:map …] vector) for one per-detector configuration
+   overlay layer. Optional keys: :config/directive (one of :inherit
+   :disable :enable :tune) and :config/params (map of keyword→any)."
+  schema/DetectorConfig)
+
+(def ToolProfile
+  "Malli schema (a [:map …] vector) for a tool-profile registry entry.
+   Required: :tool/id (keyword), :determinism (one of schema/determinisms).
+   Optional: :anomaly/categories (set of keywords), :timeout-ms (int or
+   nil), :config (map of keyword→any)."
+  schema/ToolProfile)
+
+(def DetectorAnomalyData
+  "Malli schema (a [:map …] vector) for the map carried under an
+   anomaly's :anomaly/data. Required keys: :detector/kind (keyword),
+   :detector/version (string), :anomaly/class (:mechanical | :heuristic),
+   :anomaly/severity (:info | :warn | :error | :fatal), :anomaly/category
+   (keyword), :anomaly/evidence (bounded evidence map)."
+  schema/DetectorAnomalyData)
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Event-envelope normalizer
@@ -149,14 +172,39 @@
    the field."
   envelope/make-normalizer)
 
-(def valid-observation?            schema/valid-observation?)
-(def explain-observation           schema/explain-observation)
-(def valid-tool-profile?           schema/valid-tool-profile?)
-(def explain-tool-profile          schema/explain-tool-profile)
-(def valid-detector-config?        schema/valid-detector-config?)
-(def explain-detector-config       schema/explain-detector-config)
-(def valid-detector-anomaly-data?  schema/valid-detector-anomaly-data?)
-(def explain-detector-anomaly-data schema/explain-detector-anomaly-data)
+(def valid-observation?
+  "Predicate: return true if m satisfies the Observation schema, else false."
+  schema/valid-observation?)
+
+(def explain-observation
+  "Return a humanized error map if m fails Observation validation, else nil."
+  schema/explain-observation)
+
+(def valid-tool-profile?
+  "Predicate: return true if m satisfies the ToolProfile schema, else false."
+  schema/valid-tool-profile?)
+
+(def explain-tool-profile
+  "Return a humanized error map if m fails ToolProfile validation, else nil."
+  schema/explain-tool-profile)
+
+(def valid-detector-config?
+  "Predicate: return true if m satisfies the DetectorConfig schema, else false."
+  schema/valid-detector-config?)
+
+(def explain-detector-config
+  "Return a humanized error map if m fails DetectorConfig validation, else nil."
+  schema/explain-detector-config)
+
+(def valid-detector-anomaly-data?
+  "Predicate: return true if m satisfies the DetectorAnomalyData schema
+   (the shape carried under an anomaly's :anomaly/data), else false."
+  schema/valid-detector-anomaly-data?)
+
+(def explain-detector-anomaly-data
+  "Return a humanized error map if m fails DetectorAnomalyData validation,
+   else nil."
+  schema/explain-detector-anomaly-data)
 
 ;------------------------------------------------------------------------------ Layer 2
 ;; Tool-profile registration (no built-in profiles — components contribute)

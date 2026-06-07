@@ -28,7 +28,6 @@
 ;; Violation
 
 (defn ->violation
-  "Create a Violation map."
   [rule-id rule-category title file line current suggested auto-fixable? rationale]
   {:rule/id       rule-id
    :rule/category rule-category
@@ -44,7 +43,6 @@
 ;; ScanResult
 
 (defn ->scan-result
-  "Create a ScanResult map."
   [violations rules-scanned files-scanned scan-duration-ms]
   {:violations       violations
    :rules-scanned    rules-scanned
@@ -55,7 +53,6 @@
 ;; PlanSummary
 
 (defn ->plan-summary
-  "Create a PlanSummary map from a collection of violations."
   [violations]
   (let [auto-fixable (filter :auto-fixable? violations)
         needs-review (remove :auto-fixable? violations)
@@ -71,7 +68,6 @@
 ;; PlanTask
 
 (defn ->plan-task
-  "Create a PlanTask map."
   [id deps file rule-id violations]
   {:task/id         id
    :task/deps       deps
@@ -83,7 +79,6 @@
 ;; Plan
 
 (defn ->plan
-  "Create a Plan map."
   [dag-tasks work-spec summary]
   {:dag-tasks dag-tasks
    :work-spec work-spec
@@ -93,7 +88,6 @@
 ;; DeltaReport
 
 (defn ->delta-report
-  "Create a DeltaReport map."
   [repo-path standards-path scan-timestamp summary violations]
   {:repo-path      repo-path
    :standards-path standards-path

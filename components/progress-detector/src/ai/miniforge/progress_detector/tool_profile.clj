@@ -91,8 +91,6 @@
   (swap! registry-atom assoc (:tool/id profile) profile))
 
 (defn unregister!
-  "Remove the profile for `tool-id` from `registry-atom`.
-   Returns the new registry map."
   [registry-atom tool-id]
   (swap! registry-atom dissoc tool-id))
 
@@ -118,24 +116,18 @@
    (get (registry-value registry) tool-id)))
 
 (defn determinism-of
-  "Return the :determinism level for `tool-id`, or :unstable if unknown.
-
-   :unstable is the safe default — unknown tools are treated as heuristic
-   signals only, never as mechanical-eligible loops."
   ([tool-id]
    (determinism-of tool-id default-registry))
   ([tool-id registry]
    (get (lookup tool-id registry) :determinism :unstable)))
 
 (defn categories-of
-  "Return the set of anomaly categories for `tool-id`, or #{} if unknown."
   ([tool-id]
    (categories-of tool-id default-registry))
   ([tool-id registry]
    (get (lookup tool-id registry) :anomaly/categories #{})))
 
 (defn all-tool-ids
-  "Return sorted vector of all registered tool-id keywords."
   ([]
    (all-tool-ids default-registry))
   ([registry]

@@ -44,12 +44,41 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Schema re-exports
 
-(def FileRecord schema/FileRecord)
-(def RepoIndex schema/RepoIndex)
-(def RepoMapEntry schema/RepoMapEntry)
-(def RepoMapSlice schema/RepoMapSlice)
-(def SearchHit schema/SearchHit)
-(def Snippet schema/Snippet)
+(def FileRecord
+  "Malli schema (a [:map ...] vector) for a single file entry in the repo index.
+   Keys: :path (non-empty string), :blob-sha (string, min 7), :size (int),
+   :lines (int), :language (string or nil), :generated? (boolean)."
+  schema/FileRecord)
+
+(def RepoIndex
+  "Malli schema (a [:map ...] vector) for a complete repo index.
+   Keys: :tree-sha (string, min 7), :repo-root (non-empty string),
+   :files (vector of FileRecord), :file-count (int), :total-lines (int),
+   :languages (map of string->int), :indexed-at (inst)."
+  schema/RepoIndex)
+
+(def RepoMapEntry
+  "Malli schema (a [:map ...] vector) for a single entry in the repo map.
+   Keys: :path (non-empty string), :lang (string or nil), :lines (int),
+   :size (int)."
+  schema/RepoMapEntry)
+
+(def RepoMapSlice
+  "Malli schema (a [:map ...] vector) for a token-budgeted repo map slice.
+   Keys: :tree-sha (string, min 7), :entries (vector of RepoMapEntry),
+   :total-files (int), :shown-files (int), :truncated? (boolean),
+   :token-estimate (int)."
+  schema/RepoMapSlice)
+
+(def SearchHit
+  "Malli schema (a [:map ...] vector) for a single search result.
+   Keys: :path (non-empty string), :score (double), :snippets (vector of Snippet)."
+  schema/SearchHit)
+
+(def Snippet
+  "Malli schema (a [:map ...] vector) for a search result snippet.
+   Keys: :start-line (int), :end-line (int), :text (string)."
+  schema/Snippet)
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Index building

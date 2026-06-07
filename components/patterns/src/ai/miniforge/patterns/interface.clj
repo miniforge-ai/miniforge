@@ -27,17 +27,57 @@
   (:require [ai.miniforge.patterns.core :as core]))
 
 ;; Markdown / file-path extraction
-(def md-heading-file-path    core/md-heading-file-path)
-(def md-delimited-file-path  core/md-delimited-file-path)
-(def md-label-file-path      core/md-label-file-path)
-(def md-code-block           core/md-code-block)
+(def md-heading-file-path
+  "java.util.regex.Pattern matching a file path inside a markdown heading,
+   e.g. `### path/to/file.clj` (1-4 leading #, optional ` or * wrapping).
+   Capture group 1 holds the bare path. Use with re-find: returns
+   [whole-match path] vector on a hit, nil on no match."
+  core/md-heading-file-path)
+(def md-delimited-file-path
+  "java.util.regex.Pattern matching a file path wrapped in backticks or
+   bold/italic asterisks, e.g. `` `path/to/file.clj` `` or `**path/to/file.clj**`.
+   Capture group 1 holds the bare path. Use with re-find: returns
+   [whole-match path] vector on a hit, nil on no match."
+  core/md-delimited-file-path)
+(def md-label-file-path
+  "java.util.regex.Pattern (case-insensitive) matching a labelled file path,
+   e.g. `File: path/to/file.clj` or `Path: path/to/file.clj` (optional
+   backticks). Capture group 1 holds the bare path. Use with re-find:
+   returns [whole-match path] vector on a hit, nil on no match."
+  core/md-label-file-path)
+(def md-code-block
+  "java.util.regex.Pattern matching a fenced markdown code block:
+   ```lang\\ncontent```. Capture group 1 holds the optional language tag
+   (nil if absent), group 2 the block body. Use with re-find/re-seq:
+   returns [whole-match lang body] vectors, nil/empty on no match."
+  core/md-code-block)
 
 ;; File extensions
-(def file-extension          core/file-extension)
+(def file-extension
+  "java.util.regex.Pattern matching a trailing file extension, e.g. `.clj`.
+   Capture group 1 holds the extension without the dot. Use with re-find:
+   returns [whole-match ext] vector on a hit, nil on no match."
+  core/file-extension)
 
 ;; EDN / structured content
-(def edn-code-block          core/edn-code-block)
-(def inline-already-implemented core/inline-already-implemented)
+(def edn-code-block
+  "java.util.regex.Pattern matching a clojure/edn fenced code block
+   (lang tag clojure, edn, or absent). Capture group 1 holds the block
+   body. Use with re-find/re-seq: returns [whole-match body] vectors,
+   nil/empty on no match."
+  core/edn-code-block)
+(def inline-already-implemented
+  "java.util.regex.Pattern matching an inline
+   `{:status :already-implemented ...}` EDN map within free text. No capture
+   groups. Use with re-find: returns the matched substring on a hit, nil on
+   no match."
+  core/inline-already-implemented)
 
 ;; Rate-limit detection
-(def rate-limit              core/rate-limit)
+(def rate-limit
+  "Canonical java.util.regex.Pattern (case-insensitive) detecting
+   rate-limit / quota messages in LLM or API responses (e.g. \"rate limit\",
+   \"429\", \"quota exceeded\", \"resets 3pm\"). Use everywhere instead of
+   ad-hoc regexes. Use with re-find: returns the matched substring on a hit,
+   nil on no match."
+  core/rate-limit)
