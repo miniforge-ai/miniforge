@@ -110,13 +110,18 @@
   runtime/create-executor)
 (def execute
   "Run an agent on a task through the full lifecycle. Args: executor, agent,
-   task, context. Returns {:success bool :outputs [...] :metrics {...}}
-   and :error on failure."
+   task, context. Thin delegate to the AgentExecutor protocol: returns the
+   executor's result map, which is the agent's invoke result (commonly the
+   canonical {:status :success|:error :output ...}) merged with executor
+   metadata (:metrics :tool/invocations :agent-id :task-id :executed-at).
+   Exact keys depend on the agent and executor implementations."
   runtime/execute)
 (def invoke
   "Invoke an agent's main logic on a task, with supervisory projection
-   wrapping. Args: agent, task, context. Returns
-   {:success bool :outputs [...] :decisions [...] :signals [...] :metrics {...}}."
+   wrapping. Args: agent, task, context. Thin delegate to the Agent protocol's
+   invoke: returns the agent's result map (commonly the canonical
+   {:status :success|:error :output ...}, optionally augmented by the
+   supervisory projection). Exact keys depend on the agent implementation."
   runtime/invoke)
 (def validate
   "Check whether agent output meets requirements. Args: agent, output,
@@ -124,7 +129,9 @@
   runtime/validate)
 (def repair
   "Attempt to fix validation failures. Args: agent, output, errors, context.
-   Returns {:repaired output :changes [...] :success bool}."
+   Thin delegate to the Agent protocol's repair: returns the agent's repair
+   result map (commonly the canonical {:status :success|:error :output ...}).
+   Exact keys depend on the agent implementation."
   runtime/repair)
 (def init
   "Initialize an agent with configuration. Args: agent, config. Returns the

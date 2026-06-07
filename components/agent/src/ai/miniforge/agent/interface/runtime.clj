@@ -47,15 +47,20 @@
 
 (defn execute
   "Run an agent on a task through the full lifecycle. Args: executor, agent,
-   task, context. Returns {:success bool :outputs [...] :metrics {...}}
-   and :error on failure."
+   task, context. Thin delegate to the AgentExecutor protocol: returns the
+   executor's result map, which is the agent's invoke result (commonly the
+   canonical {:status :success|:error :output ...}) merged with executor
+   metadata (:metrics :tool/invocations :agent-id :task-id :executed-at).
+   Exact keys depend on the agent and executor implementations."
   [executor agent task context]
   (agent-proto/execute executor agent task context))
 
 (defn invoke
   "Invoke an agent's main logic on a task, with supervisory projection
-   wrapping. Args: agent, task, context. Returns
-   {:success bool :outputs [...] :decisions [...] :signals [...] :metrics {...}}."
+   wrapping. Args: agent, task, context. Thin delegate to the Agent protocol's
+   invoke: returns the agent's result map (commonly the canonical
+   {:status :success|:error :output ...}, optionally augmented by the
+   supervisory projection). Exact keys depend on the agent implementation."
   [agent task context]
   (supervisory-bridge/invoke-with-projection
    agent
@@ -71,7 +76,9 @@
 
 (defn repair
   "Attempt to fix validation failures. Args: agent, output, errors, context.
-   Returns {:repaired output :changes [...] :success bool}."
+   Thin delegate to the Agent protocol's repair: returns the agent's repair
+   result map (commonly the canonical {:status :success|:error :output ...}).
+   Exact keys depend on the agent implementation."
   [agent output errors context]
   (agent-proto/repair agent output errors context))
 
