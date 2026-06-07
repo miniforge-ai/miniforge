@@ -68,7 +68,10 @@
 
 (def create-workflow
   "Construct a new in-memory SimpleWorkflow instance (Workflow protocol).
-   No args. Returns the workflow object used as `this` in the lifecycle fns."
+   Args: [] or [config]. The optional config map is merged over the defaults
+   {:max-iterations-per-phase 5, :max-rollbacks 3, :timeout-per-phase-ms 600000};
+   omit it to use the defaults. Returns the workflow object used as `this` in
+   the lifecycle fns."
   runtime/create-workflow)
 
 (def add-observer
