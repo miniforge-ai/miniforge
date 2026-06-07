@@ -1,0 +1,102 @@
+# Triggered by miniforge-ai/miniforge-standards push to main via repository_dispatch.
+# Updates the standards submodule and recompiles the policy pack.
+# Requires no extra secrets beyond GITHUB_TOKEN.
+
+name: Bump Standards
+
+on:
+  repository_dispatch:
+    types: [standards-updated]
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: "Standards SHA to pin; leave blank for latest main"
+        required: false
+        type: string
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  bump:
+    name: Bump standards submodule and recompile policy pack
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+
+      - name: Install Clojure
+        uses: DeLaGuardo/setup-clojure@12.5
+        with:
+          cli: latest
+          bb: latest
+
+      - name: Cache Clojure dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.m2/repository
+            ~/.gitlibs
+          key: clojure-${{ runner.os }}-${{ hashFiles('deps.edn', '**/deps.edn') }}
+          restore-keys: |
+            clojure-${{ runner.os }}-
+
+      - name: Update standards submodule
+        run: |
+          git -C standards/miniforge fetch origin
+          git -C standards/miniforge checkout origin/main
+          git add standards/miniforge
+          NEW_SHA=$(git -C standards/miniforge rev-parse HEAD)
+          echo "NEW_SHA=$NEW_SHA" >> "$GITHUB_ENV"
+          echo "standards/miniforge updated to $NEW_SHA"
+
+      - name: Compile policy pack
+        run: bb standards:pack
+
+      - name: Verify compiled pack
+        run: |
+          PACK=components/phase/resources/packs/miniforge-standards.pack.edn
+          [ -f "$PACK" ] || { echo "ERROR: pack not found at $PACK"; exit 1; }
+          bb -e "(clojure.edn/read-string (slurp \"$PACK\"))" && echo "Pack is valid EDN"
+
+      - name: Open pull request
+        uses: peter-evans/create-pull-request@22a9089034f40e5a961c8808d113e2c98fb63676 # v7
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          branch: auto/bump-standards-${{ env.NEW_SHA }}
+          commit-message: |
+            chore(standards): bump standards/miniforge to ${{ env.NEW_SHA }}
+
+            Recompiled components/phase/resources/packs/miniforge-standards.pack.edn
+          title: "chore(standards): bump + recompile policy pack (${{ env.NEW_SHA }})"
+          body: |
+            ## Standards submodule bump
+
+            Triggered automatically by a push to `main` on [miniforge-ai/miniforge-standards](https://github.com/miniforge-ai/miniforge-standards) via `repository_dispatch`.
+
+            ### Changes
+
+            | File | Description |
+            |------|-------------|
+            | `standards/miniforge` | Submodule pointer advanced to `${{ env.NEW_SHA }}` |
+            | `components/phase/resources/packs/miniforge-standards.pack.edn` | Recompiled policy pack from updated standards |
+
+            ### How to review
+
+            1. Check the submodule diff to confirm the standards changes are expected.
+            2. Inspect the recompiled pack for any rule additions, removals, or severity changes.
+            3. Merge when satisfied — the branch will be deleted automatically on merge.
+          labels: automated,standards
+          delete-branch: true
