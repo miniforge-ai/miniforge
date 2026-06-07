@@ -26,15 +26,15 @@ def get_portfolio(portfolio_id: str) -> dict:
 
     # Guard 2: resolve and assert the resolved path stays inside _DATA_DIR
     target = (_DATA_DIR / f"{portfolio_id}.json").resolve()
-    if not str(target).startswith(str(_DATA_DIR.resolve())):
+    if not target.is_relative_to(_DATA_DIR.resolve()):
         raise ValueError(
             f"portfolio_id {portfolio_id!r} resolves outside data directory"
         )
 
     try:
-        return json.loads(target.read_text())
+        return json.loads(target.read_text(encoding="utf-8"))
     except FileNotFoundError:
-        raise FileNotFoundError(f"Portfolio not found: {portfolio_id!r}")
+        raise FileNotFoundError(f"Portfolio not found: {portfolio_id!r}") from None
 
 
 # VIOLATION: hardcoded API key pattern
