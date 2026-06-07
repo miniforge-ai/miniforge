@@ -145,12 +145,15 @@ function removeFilterChip(filterKey) {
 }
 
 function applyFilters() {
-  const filterAst = Array.from(activeFilters.values()).map(({ type, value }) => ({
+  const clauses = Array.from(activeFilters.values()).map(({ type, value }) => ({
     'filter/id': type,
+    op: '=',
     value: value
   }));
 
-  const filtersJson = filterAst.length > 0 ? JSON.stringify(filterAst) : null;
+  const filtersJson = clauses.length > 0
+    ? JSON.stringify({ op: 'and', clauses: clauses })
+    : null;
 
   document.querySelectorAll('[data-filter-refresh="true"]').forEach(function (el) {
     if (filtersJson) {
