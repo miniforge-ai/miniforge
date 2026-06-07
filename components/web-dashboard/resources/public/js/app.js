@@ -145,11 +145,24 @@ function removeFilterChip(filterKey) {
 }
 
 function applyFilters() {
-  // TODO: Implement actual filtering logic
-  // For now, just log the active filters
-  console.log('Active filters:', Array.from(activeFilters.entries()));
+  const filterAst = Array.from(activeFilters.values()).map(({ type, value }) => ({
+    'filter/id': type,
+    value: value
+  }));
 
-  // Trigger kanban board update
+  const filtersJson = filterAst.length > 0 ? JSON.stringify(filterAst) : null;
+
+  document.querySelectorAll('[data-filter-refresh="true"]').forEach(function (el) {
+    if (filtersJson) {
+      el.setAttribute('hx-vals', JSON.stringify({ filters: filtersJson }));
+    } else {
+      el.removeAttribute('hx-vals');
+    }
+    if (window.htmx) {
+      window.htmx.process(el);
+    }
+  });
+
   dispatchRefresh();
 }
 
