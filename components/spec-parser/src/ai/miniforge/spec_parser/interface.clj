@@ -30,9 +30,12 @@
 
 (def SpecPayload
   "Malli `[:map ...]` schema for a normalized spec payload — the canonical
-   :spec/* format the workflow engine consumes. Required keys :spec/title and
-   :spec/description; the rest carry normalize-spec defaults. Pass to
-   malli.core fns or `valid-spec-payload?`."
+   :spec/* format the workflow engine consumes. Required (non-optional) keys:
+   :spec/title, :spec/description, :spec/intent, :spec/constraints, :spec/tags,
+   :spec/workflow-version, :spec/raw-data — normalize-spec supplies defaults for
+   the ones the user omits. Remaining :spec/* keys (e.g. :spec/workflow-type,
+   :spec/acceptance-criteria, :spec/provenance) are optional. Pass to malli.core
+   fns or `valid-spec-payload?`."
   schema/SpecPayload)
 
 (def SpecInput

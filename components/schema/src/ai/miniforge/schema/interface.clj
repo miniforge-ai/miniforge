@@ -31,8 +31,9 @@
 ;; Schema re-exports (allow other components to reference schemas)
 
 (def Agent
-  "Malli schema (closed-ish `:map`) for an AI agent: `:agent/id` (uuid) and
-   `:agent/role` (enum) required; optional capabilities, memory, config.
+  "Malli schema (open `:map` — no `{:closed true}`, so extra keys are accepted)
+   for an AI agent: `:agent/id` (uuid) and `:agent/role` (enum) required;
+   optional capabilities, memory, config.
    Pass to [[valid?]]/[[validate]]/[[validate-anomaly]] to check agent maps."
   core/Agent)
 

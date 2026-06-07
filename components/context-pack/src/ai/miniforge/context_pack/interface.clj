@@ -60,10 +60,12 @@
   "Construct a BudgetAudit snapshot map.
 
    Args: phase (keyword), budget (int), tokens-used (int),
-   exhausted? (boolean), source-count (int).
+   exhausted? (boolean), source-count (int). `budget` and `tokens-used`
+   must be numeric — they feed arithmetic (`(- budget tokens-used)` and
+   `(/ tokens-used budget)`) that throws on nil or non-numeric input.
    Returns a BudgetAudit map; :tokens-remaining clamped at >= 0,
    :utilization is tokens-used/budget as a double (0.0 when budget
-   is non-positive). Total function, never throws."
+   is non-positive)."
   factory/->budget-audit)
 
 (def ->source
