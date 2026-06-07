@@ -226,6 +226,14 @@
    `:phase-config`)."
   3)
 
+(def ^:private default-absolute-max-redirect-attempts
+  "Hard ceiling on review→implement repair cycles, regardless of progress.
+   A loop whose blocking-issue count keeps shrinking (converging) is allowed
+   past `max-no-progress-attempts` — but never past this. Backstop against a
+   genuinely huge task that decrements one blocker per cycle indefinitely.
+   Default 6; configurable via `:phase :budget :absolute-max-redirect-attempts`."
+  6)
+
 (defn- attach-stagnated-anomaly
   "Phase 2b: attach the stagnation anomaly to the phase result so the
    workflow runner / evidence bundle can report what didn't move.
@@ -250,7 +258,11 @@
                :anomaly/category :anomalies.review/needs-decomposition
                :anomaly/message  msg
                :review/cycle-count review-cycle-count
-               :review/fingerprint-history (vec fingerprint-history)})))
+               :review/fingerprint-history (vec fingerprint-history)
+               ;; Blocking-count trend across cycles — shows whether this
+               ;; was a flat/growing non-convergence or a slow shrink that
+               ;; hit the absolute ceiling.
+               :review/blocking-counts (get-in ctx [:execution :review-blocking-counts] [])})))
 
 (defn- attach-backend-timeout-anomaly
   "PR-B of phase-timeout stack: attach the backend-timeout anomaly to the
@@ -298,6 +310,24 @@
   [ctx fingerprint]
   (update-in ctx [:execution :review-fingerprints] (fnil conj []) fingerprint))
 
+(defn- record-blocking-count
+  "Append this cycle's blocking-issue count to
+   [:execution :review-blocking-counts] — the convergence trend signal
+   (shrinking across cycles = making progress)."
+  [ctx blocking-count]
+  (update-in ctx [:execution :review-blocking-counts] (fnil conj []) blocking-count))
+
+(defn- count-blocking-issues
+  "Blocking-issue count for a review artifact, tolerant of both shapes:
+   the enumerated `:review/blocking-issues` list (real reviewer output) and
+   `:review/issues` filtered by `:severity :blocking`."
+  [review-artifact]
+  (let [enumerated (count (agent/get-blocking-issues review-artifact))]
+    (if (pos? enumerated)
+      enumerated
+      (count (filter #(= :blocking (:severity %))
+                     (:review/issues review-artifact))))))
+
 (defn- mark-completed
   "Mark the review phase as completed in the execution-level
    phases-completed list. Only called on the :complete branch."
@@ -312,21 +342,38 @@
   (and reviewer-blocked?
        (agent/review-stagnated? (peek prior-history) current-fp)))
 
+(defn- compute-making-progress?
+  "True when this cycle's blocking-issue count is strictly fewer than the
+   immediately prior cycle's — the repair loop is converging (blockers
+   shrinking) even though each pass still surfaces some new ones. Such a
+   loop should keep going, not be declared :needs-decomposition."
+  [reviewer-blocked? prior-counts current-count]
+  (boolean (and reviewer-blocked?
+                (seq prior-counts)
+                (< current-count (peek prior-counts)))))
+
 (defn- compute-needs-decomposition?
-  "True when the reviewer has rejected for `max-no-progress-attempts`
-   consecutive cycles WITHOUT stagnation firing — i.e. each pass found
-   different legitimate blockers but the loop is not converging.
+  "True when the reviewer keeps rejecting with NEW blockers (not stagnated)
+   and the loop is NOT converging — either it has stopped shrinking the
+   blocking set for `max-no-progress-attempts` cycles, OR it has hit the
+   absolute redirect ceiling.
+
+   A loop whose blocking count is still shrinking (`making-progress?`) is
+   allowed to continue up to `absolute-max-attempts`: it is converging, just
+   not in one turn. (Dogfood 2026-06-07b: a standards-dense task fixed a real
+   blocker each pass — strict progress — but the old flat cap killed it at 3
+   while it was still converging.)
 
    `review-cycle-count` is the TASK-LEVEL count of completed review attempts
-   (`(inc (count prior-history))` — prior fingerprints plus the current one).
-   The phase-local `[:phase :iterations]` counter is too narrow: it resets on
-   each phase entry, and the shipped review `:budget :iterations` is 2, so
-   `within-budget?` would short-circuit to `:exhausted` long before any
-   phase-iteration count could reach 3."
-  [reviewer-blocked? stagnated? review-cycle-count max-no-progress-attempts]
+   (`(inc (count prior-history))`). The phase-local `[:phase :iterations]`
+   counter resets on each phase entry, so it can't drive a task-wide cap."
+  [reviewer-blocked? stagnated? making-progress?
+   review-cycle-count max-no-progress-attempts absolute-max-attempts]
   (and reviewer-blocked?
        (not stagnated?)
-       (>= review-cycle-count max-no-progress-attempts)))
+       (or (>= review-cycle-count absolute-max-attempts)
+           (and (not making-progress?)
+                (>= review-cycle-count max-no-progress-attempts)))))
 
 (defn- compute-phase-status
   [reviewer-blocked? gate-failed?]
@@ -437,8 +484,9 @@
 
 (defn- accumulate-base-ctx
   "Apply the always-on context updates: phase metadata, metrics,
-   execution-level rollups, and the new fingerprint."
-  [ctx end-time duration-ms phase-status metrics iterations current-fp]
+   execution-level rollups, the new fingerprint, and the cycle's
+   blocking-issue count (convergence trend)."
+  [ctx end-time duration-ms phase-status metrics iterations current-fp current-blocking-count]
   (-> ctx
       (assoc-in [:phase :ended-at] end-time)
       (assoc-in [:phase :duration-ms] duration-ms)
@@ -449,7 +497,8 @@
       (update-in [:execution/metrics :tokens] (fnil + 0) (:tokens metrics 0))
       (update-in [:execution/metrics :cost-usd] (fnil + 0.0) (:cost-usd metrics 0.0))
       (update-in [:execution/metrics :duration-ms] (fnil + 0) (:duration-ms metrics 0))
-      (record-fingerprint current-fp)))
+      (record-fingerprint current-fp)
+      (record-blocking-count current-blocking-count)))
 
 (defn- review-feedback
   "Extract feedback the implementer should consume on a repair redirect."
@@ -509,20 +558,30 @@
         phase-status      (compute-phase-status reviewer-blocked? gate-failed?)
         within-budget?    (< iterations max-iterations)
         feedback          (review-feedback result)
-        ;; Convergence cap: terminate with :needs-decomposition after N
-        ;; consecutive non-stagnated review rejections (legit blockers that
-        ;; keep rotating) before exhausting max-iterations — a sharper signal
-        ;; for the meta-agent to split the task than a generic "exhausted".
+        ;; Convergence cap: terminate with :needs-decomposition when the
+        ;; loop keeps surfacing NEW legit blockers (non-stagnated) but is NOT
+        ;; converging — a sharper signal for the meta-agent to split the task
+        ;; than a generic "exhausted".
         max-no-progress-attempts (get-in ctx [:phase :budget :max-no-progress-attempts]
                                          default-max-no-progress-attempts)
+        absolute-max-attempts (get-in ctx [:phase :budget :absolute-max-redirect-attempts]
+                                      default-absolute-max-redirect-attempts)
         ;; Task-level review count: prior fingerprints already recorded + this
         ;; cycle. The phase-local :iterations counter resets per phase entry,
         ;; so it can never reach the shipped review :budget :iterations of 2;
         ;; the cap MUST key off the task-wide history or it stays dead code.
         review-cycle-count (inc (count prior-history))
+        ;; Convergence trend: blocking-issue count vs the prior cycle. A
+        ;; shrinking count means the repair loop is converging (just not in
+        ;; one turn) and should be allowed to continue up to the absolute
+        ;; ceiling rather than declared :needs-decomposition.
+        current-blocking-count (count-blocking-issues review-artifact)
+        prior-counts      (get-in ctx [:execution :review-blocking-counts] [])
+        making-progress?  (compute-making-progress? reviewer-blocked? prior-counts
+                                                    current-blocking-count)
         needs-decomposition? (compute-needs-decomposition?
-                              reviewer-blocked? stagnated?
-                              review-cycle-count max-no-progress-attempts)
+                              reviewer-blocked? stagnated? making-progress?
+                              review-cycle-count max-no-progress-attempts absolute-max-attempts)
         verdict           (compute-verdict {:backend-timeout?     backend-timeout?
                                             :reviewer-blocked?    reviewer-blocked?
                                             :stagnated?           stagnated?
@@ -531,7 +590,8 @@
                                             :actionable-feedback? (actionable-feedback? feedback)})
         updated-ctx       (-> ctx
                               (accumulate-base-ctx end-time duration-ms phase-status
-                                                   metrics iterations current-fp)
+                                                   metrics iterations current-fp
+                                                   current-blocking-count)
                               (attach-verdict verdict))
         next-ctx          (apply-verdict verdict updated-ctx feedback
                                          (conj prior-history current-fp)
