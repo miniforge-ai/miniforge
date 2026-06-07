@@ -357,3 +357,68 @@
               :error "signing failed"
               :output ""}
              result)))))
+
+;; ============================================================================
+;; assert-safe-container-path! / path-validation tests
+;; ============================================================================
+
+(deftest write-file-rejects-path-traversal-test
+  (testing "write-file! throws on path containing .. segment"
+    (let [[exec _cmds] (create-mock-executor)]
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                            #"Path traversal rejected"
+                            (sandbox/write-file! exec "env-1" "../etc/passwd" "evil"))))))
+
+(deftest write-file-rejects-embedded-traversal-test
+  (testing "write-file! throws on path with embedded .. segment"
+    (let [[exec _cmds] (create-mock-executor)]
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                            #"Path traversal rejected"
+                            (sandbox/write-file! exec "env-1" "src/../../etc/passwd" "evil"))))))
+
+(deftest write-file-rejects-single-quote-injection-test
+  (testing "write-file! throws on path containing single-quote (shell injection)"
+    (let [[exec _cmds] (create-mock-executor)]
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                            #"Shell injection rejected"
+                            (sandbox/write-file! exec "env-1" "src/a'.clj" "evil"))))))
+
+(deftest write-file-rejects-dollar-injection-test
+  (testing "write-file! throws on path containing $ (shell injection)"
+    (let [[exec _cmds] (create-mock-executor)]
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                            #"Shell injection rejected"
+                            (sandbox/write-file! exec "env-1" "src/$HOME/x.clj" "evil"))))))
+
+(deftest write-file-rejects-semicolon-injection-test
+  (testing "write-file! throws on path containing ; (shell injection)"
+    (let [[exec _cmds] (create-mock-executor)]
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                            #"Shell injection rejected"
+                            (sandbox/write-file! exec "env-1" "src/a;rm -rf /;b.clj" "evil"))))))
+
+(deftest delete-file-rejects-path-traversal-test
+  (testing "delete-file! throws on path containing .. segment"
+    (let [[exec _cmds] (create-mock-executor)]
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                            #"Path traversal rejected"
+                            (sandbox/delete-file! exec "env-1" "../etc/shadow"))))))
+
+(deftest delete-file-rejects-single-quote-injection-test
+  (testing "delete-file! throws on path containing single-quote (shell injection)"
+    (let [[exec _cmds] (create-mock-executor)]
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                            #"Shell injection rejected"
+                            (sandbox/delete-file! exec "env-1" "src/a' || rm -rf /;b.clj"))))))
+
+(deftest write-file-accepts-normal-paths-test
+  (testing "write-file! accepts well-formed relative source paths"
+    (let [[exec _cmds] (create-mock-executor)]
+      (is (:success? (sandbox/write-file! exec "env-1" "src/foo/bar.clj" "(ns foo.bar)"))))))
+
+(deftest write-file-accepts-deep-paths-test
+  (testing "write-file! accepts deep nested paths without traversal"
+    (let [[exec _cmds] (create-mock-executor)]
+      (is (:success? (sandbox/write-file! exec "env-1"
+                                          "components/my-comp/src/ai/company/my_comp/core.clj"
+                                          "(ns ai.company.my-comp.core)"))))))
