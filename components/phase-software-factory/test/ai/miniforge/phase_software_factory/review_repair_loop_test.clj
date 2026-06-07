@@ -429,7 +429,8 @@
             under shipped config."
     (let [final-ctx (run-leave-review {:issues             [yet-another-blocking-issue]
                                        :iterations         third-iteration
-                                       :prior-fingerprints prior-distinct-fingerprints})
+                                       :prior-fingerprints prior-distinct-fingerprints
+                                       :prior-blocking-counts [1 1]}) ; flat 1→1→1 = 3 no-progress
           phase (:phase final-ctx)]
       (is (= :needs-decomposition (:verdict phase))
           "verdict :needs-decomposition surfaces on the phase map")
@@ -511,30 +512,34 @@
       (is (= :needs-decomposition (:verdict phase))
           "absolute ceiling overrides progress"))))
 
-(deftest compute-making-progress?-unit-test
-  (let [mp @#'review/compute-making-progress?]
-    (testing "true when blocking count strictly decreased vs the prior cycle"
-      (is (true? (mp true [3 2] 1)))
-      (is (true? (mp true [5] 4))))
-    (testing "false when flat, growing, no prior, or not blocked"
-      (is (false? (mp true [2 2] 2)))
-      (is (false? (mp true [1 2] 3)))
-      (is (false? (mp true [] 1)))
-      (is (false? (mp false [3 2] 1))))))
+(deftest no-progress-streak-unit-test
+  (let [streak @#'review/no-progress-streak]
+    (testing "shrinking every cycle = 0 streak"
+      (is (= 0 (streak [3 2 1])))
+      (is (= 0 (streak [5 4]))))
+    (testing "one stall after progress = 1; flat throughout = full length"
+      (is (= 1 (streak [3 2 2])))
+      (is (= 3 (streak [1 1 1])))
+      (is (= 2 (streak [5 4 3 3 3]))))  ; trailing 3 3 3 → two no-progress steps after the last drop
+    (testing "growth counts as no-progress; single cycle = 1; empty = 0"
+      (is (= 3 (streak [1 1 2])))   ; no-prior, flat, growth — none shrank
+      (is (= 1 (streak [4])))
+      (is (= 0 (streak []))))))
 
 (deftest compute-needs-decomposition?-progress-aware-unit-test
   (let [nd @#'review/compute-needs-decomposition?]
-    ;; args: blocked? stagnated? making-progress? cycle-count max-no-progress absolute-max
-    (testing "at the no-progress cap, NOT decomposed while making progress"
-      (is (false? (nd true false true 3 3 6))))
-    (testing "at the no-progress cap, decomposed when not making progress"
-      (is (true? (nd true false false 3 3 6))))
-    (testing "absolute ceiling overrides progress"
-      (is (true? (nd true false true 6 3 6))))
-    (testing "below the cap never decomposes"
-      (is (false? (nd true false false 2 3 6))))
+    ;; args: blocked? stagnated? no-progress-streak cycle-count max-no-progress absolute-max
+    (testing "streak below the cap does not decompose (still converging)"
+      (is (false? (nd true false 0 3 3 6)))
+      (is (false? (nd true false 2 5 3 6))))
+    (testing "streak at the no-progress cap decomposes"
+      (is (true? (nd true false 3 3 3 6))))
+    (testing "absolute ceiling overrides a converging (low-streak) loop"
+      (is (true? (nd true false 0 6 3 6))))
     (testing "stagnation pre-empts (handled elsewhere) — never decomposition"
-      (is (false? (nd true true false 5 3 6))))))
+      (is (false? (nd true true 9 9 3 6))))
+    (testing "not blocked never decomposes"
+      (is (false? (nd false false 9 9 3 6))))))
 
 ;; ============================================================================
 ;; Backend-timeout verdict — companion to PR-A (#1058)

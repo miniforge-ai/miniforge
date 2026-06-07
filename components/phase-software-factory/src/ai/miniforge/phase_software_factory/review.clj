@@ -342,38 +342,43 @@
   (and reviewer-blocked?
        (agent/review-stagnated? (peek prior-history) current-fp)))
 
-(defn- compute-making-progress?
-  "True when this cycle's blocking-issue count is strictly fewer than the
-   immediately prior cycle's — the repair loop is converging (blockers
-   shrinking) even though each pass still surfaces some new ones. Such a
-   loop should keep going, not be declared :needs-decomposition."
-  [reviewer-blocked? prior-counts current-count]
-  (boolean (and reviewer-blocked?
-                (seq prior-counts)
-                (< current-count (peek prior-counts)))))
+(defn- no-progress-streak
+  "Consecutive trailing review cycles that did NOT strictly reduce the
+   blocking-issue count, given the full per-cycle count sequence (oldest
+   first, including the current cycle). A cycle counts as progress — and
+   resets the streak to 0 — only when its count is strictly less than the
+   immediately prior cycle's; the first cycle has no predecessor and counts
+   as no-progress.
+
+   Examples: [3 2 1] → 0 (each pass shrank); [3 2 2] → 1 (one stall after
+   progress); [1 1 1] → 3 (flat throughout)."
+  [counts]
+  (reduce (fn [streak [prev cur]]
+            (if (and prev (< cur prev)) 0 (inc streak)))
+          0
+          (map vector (cons nil counts) counts)))
 
 (defn- compute-needs-decomposition?
   "True when the reviewer keeps rejecting with NEW blockers (not stagnated)
-   and the loop is NOT converging — either it has stopped shrinking the
-   blocking set for `max-no-progress-attempts` cycles, OR it has hit the
-   absolute redirect ceiling.
+   and the loop is NOT converging — either the blocking count has failed to
+   shrink for `max-no-progress-attempts` CONSECUTIVE cycles, OR the task has
+   hit the absolute redirect ceiling.
 
-   A loop whose blocking count is still shrinking (`making-progress?`) is
-   allowed to continue up to `absolute-max-attempts`: it is converging, just
-   not in one turn. (Dogfood 2026-06-07b: a standards-dense task fixed a real
-   blocker each pass — strict progress — but the old flat cap killed it at 3
-   while it was still converging.)
+   A loop whose blocking count is still shrinking is allowed to continue up
+   to `absolute-max-attempts`: it is converging, just not in one turn.
+   (Dogfood 2026-06-07b: a standards-dense task fixed a real blocker each
+   pass — strict progress — but the old flat cap killed it at 3 while it was
+   still converging.)
 
-   `review-cycle-count` is the TASK-LEVEL count of completed review attempts
-   (`(inc (count prior-history))`). The phase-local `[:phase :iterations]`
-   counter resets on each phase entry, so it can't drive a task-wide cap."
-  [reviewer-blocked? stagnated? making-progress?
+   `no-progress-streak` is the consecutive trailing no-progress cycle count
+   (see `no-progress-streak`); `review-cycle-count` is the TASK-LEVEL attempt
+   count, used only for the absolute ceiling."
+  [reviewer-blocked? stagnated? no-progress-streak
    review-cycle-count max-no-progress-attempts absolute-max-attempts]
   (and reviewer-blocked?
        (not stagnated?)
        (or (>= review-cycle-count absolute-max-attempts)
-           (and (not making-progress?)
-                (>= review-cycle-count max-no-progress-attempts)))))
+           (>= no-progress-streak max-no-progress-attempts))))
 
 (defn- compute-phase-status
   [reviewer-blocked? gate-failed?]
@@ -571,16 +576,15 @@
         ;; so it can never reach the shipped review :budget :iterations of 2;
         ;; the cap MUST key off the task-wide history or it stays dead code.
         review-cycle-count (inc (count prior-history))
-        ;; Convergence trend: blocking-issue count vs the prior cycle. A
-        ;; shrinking count means the repair loop is converging (just not in
-        ;; one turn) and should be allowed to continue up to the absolute
-        ;; ceiling rather than declared :needs-decomposition.
+        ;; Convergence trend: blocking-issue count per cycle. While the count
+        ;; keeps shrinking the repair loop is converging (just not in one
+        ;; turn); decompose only after it stalls for max-no-progress-attempts
+        ;; consecutive cycles, or at the absolute ceiling.
         current-blocking-count (count-blocking-issues review-artifact)
         prior-counts      (get-in ctx [:execution :review-blocking-counts] [])
-        making-progress?  (compute-making-progress? reviewer-blocked? prior-counts
-                                                    current-blocking-count)
+        np-streak         (no-progress-streak (conj (vec prior-counts) current-blocking-count))
         needs-decomposition? (compute-needs-decomposition?
-                              reviewer-blocked? stagnated? making-progress?
+                              reviewer-blocked? stagnated? np-streak
                               review-cycle-count max-no-progress-attempts absolute-max-attempts)
         verdict           (compute-verdict {:backend-timeout?     backend-timeout?
                                             :reviewer-blocked?    reviewer-blocked?
