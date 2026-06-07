@@ -33,22 +33,22 @@
   spec/DecisionEpisode)
 
 (def source-kinds
-  "Set of known checkpoint producer categories."
+  "Vector of known checkpoint producer categories."
   spec/source-kinds)
 (def authority-kinds
-  "Set of authorities that may answer a checkpoint."
+  "Vector of authorities that may answer a checkpoint."
   spec/authority-kinds)
 (def checkpoint-statuses
-  "Set of checkpoint lifecycle states."
+  "Vector of checkpoint lifecycle states."
   spec/checkpoint-statuses)
 (def episode-statuses
-  "Set of episode lifecycle states."
+  "Vector of episode lifecycle states."
   spec/episode-statuses)
 (def response-types
-  "Set of structured supervision response actions."
+  "Vector of structured supervision response actions."
   spec/response-types)
 (def risk-tiers
-  "Set of risk tiers used for decision routing."
+  "Vector of risk tiers used for decision routing."
   spec/risk-tiers)
 (def ControlPlaneContext
   "Malli schema for control-plane decision checkpoint context."
@@ -67,7 +67,7 @@
   "True when `value` validates against `schema`. (schema value) -> boolean."
   spec/valid?)
 (def explain
-  "Humanized explanation of why `value` fails `schema`. (schema value) -> string."
+  "Humanized explanation of why `value` fails `schema`. (schema value) -> map|nil."
   spec/explain)
 (def validate
   "Return `value` if it validates against `schema`, else throw. (schema value) -> value."
