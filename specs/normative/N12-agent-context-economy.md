@@ -154,7 +154,7 @@ the first response. It MUST apply a degradation ladder, in order:
 5.1 **Assemble** the context normally.
 
 5.2 **Shed (MUST).** When the pre-flight gauge indicates the assembled
-prompt is over (or within a configured margin of) the window, the
+prompt is over (or within a configured margin, in estimated input tokens, of) the window, the
 implementation MUST reduce eagerly-inlined context — preferentially the
 largest, most reconstructible blocks (e.g. an explore phase's inlined
 file bodies) — and rely on the **query surface** (§6) for that content
