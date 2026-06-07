@@ -40,10 +40,37 @@
    :connector/maintainer   "data-foundry"})
 
 ;; Schema exports
-(def SarifViolation schema/SarifViolation)
-(def SarifConfig schema/SarifConfig)
+(def SarifViolation
+  "Malli schema (a `[:map ...]` vector) for a unified violation record,
+   normalized from both SARIF and CSV sources. Required keys:
+   :violation/id, :violation/rule-id, :violation/message (strings),
+   :violation/severity (one of :error/:warning/:note/:none),
+   :violation/location (a map of optional :file/:line/:column),
+   :violation/source-tool (string), :violation/raw (map)."
+  schema/SarifViolation)
 
-(defn validate-config [config] (schema/validate-config config))
-(defn validate-violation [v] (schema/validate-violation v))
-(defn violation-json-schema [] (schema/violation-json-schema))
-(defn config-json-schema [] (schema/config-json-schema))
+(def SarifConfig
+  "Malli schema (a `[:map ...]` vector) for the SARIF connector config.
+   Required key :sarif/source-path (string); optional :sarif/format
+   (:sarif/:csv/:auto) and :sarif/csv-columns (keyword->string map)."
+  schema/SarifConfig)
+
+(defn validate-config
+  "Validate a SARIF connector config map against SarifConfig.
+   Returns a map {:valid? boolean :errors map-or-nil}; :errors holds the
+   humanized Malli error map when invalid, nil when valid."
+  [config] (schema/validate-config config))
+
+(defn validate-violation
+  "Validate a single violation record against SarifViolation.
+   Returns a map {:valid? boolean :errors map-or-nil}; :errors holds the
+   humanized Malli error map when invalid, nil when valid."
+  [v] (schema/validate-violation v))
+
+(defn violation-json-schema
+  "Return the SarifViolation schema transformed to a JSON Schema map."
+  [] (schema/violation-json-schema))
+
+(defn config-json-schema
+  "Return the SarifConfig schema transformed to a JSON Schema map."
+  [] (schema/config-json-schema))

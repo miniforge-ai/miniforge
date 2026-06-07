@@ -49,7 +49,6 @@
    [:column {:optional true} [:maybe :int]]])
 
 (def SarifViolation
-  "Unified violation record — normalized from both SARIF and CSV sources."
   [:map
    [:violation/id :string]
    [:violation/rule-id :string]
@@ -60,7 +59,6 @@
    [:violation/raw :map]])
 
 (def SarifConfig
-  "Configuration for the SARIF connector."
   [:map
    [:sarif/source-path :string]
    [:sarif/format {:optional true} SourceFormat]
@@ -78,12 +76,10 @@
      :errors (me/humanize (m/explain schema value))}))
 
 (defn validate-config
-  "Validate a SARIF connector config map."
   [value]
   (validate SarifConfig value))
 
 (defn validate-violation
-  "Validate a single violation record."
   [value]
   (validate SarifViolation value))
 
@@ -91,11 +87,9 @@
 ;; JSON Schema export
 
 (defn violation-json-schema
-  "Return the SarifViolation schema as JSON Schema."
   []
   (json-schema/transform SarifViolation))
 
 (defn config-json-schema
-  "Return the SarifConfig schema as JSON Schema."
   []
   (json-schema/transform SarifConfig))

@@ -64,8 +64,6 @@
   (schema/success :body nil {:headers (:headers resp) :not-modified true}))
 
 (defn error-response
-  "Build a schema/failure from a non-success, non-304 response.
-   msgs map: {:rate-limited string :request-failed (fn [status err-str] string)}"
   [status resp msgs]
   (let [request-failed (:request-failed msgs)]
     (case (classify-error status)
@@ -77,9 +75,6 @@
 ;; Request execution and post-request helpers
 
 (defn do-request
-  "Execute an HTTP GET. Returns schema/success or schema/failure.
-   Supports ETag conditional requests via If-None-Match header.
-   error-fn: (fn [status resp] schema/failure) — supplies connector-specific messages."
   [url headers query-params error-fn]
   (let [resp   (http/get url {:headers      (etag/add-etag-header headers url)
                               :query-params query-params
@@ -106,7 +101,6 @@
   result)
 
 (defn next-url
-  "Extract the 'next' page URL from a response's Link header, or nil."
   [resp]
   (some-> (:headers resp)
           (get "link")
@@ -114,6 +108,5 @@
           page/link-header-next-url))
 
 (defn coerce-records
-  "Coerce a response body to a vector of records."
   [body]
   (if (sequential? body) (vec body) [body]))

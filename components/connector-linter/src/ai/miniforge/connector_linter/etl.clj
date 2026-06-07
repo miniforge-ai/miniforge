@@ -139,14 +139,6 @@
 ;; Apply mapping
 
 (defn apply-mapping
-  "Apply a mapping spec to raw linter output, producing canonical violations.
-
-   Arguments:
-   - mapping — Mapping spec from linter-mappings.edn
-   - output  — Raw linter output string
-
-   Returns:
-   - Vector of violation maps"
   [mapping output]
   (let [linter-id    (get mapping :mapping/id)
         fields       (get mapping :mapping/fields)
@@ -166,7 +158,6 @@
 (def ^:private mappings-resource "connector_linter/linter-mappings.edn")
 
 (def mappings
-  "All linter mappings loaded from classpath EDN."
   (delay
     (if-let [url (io/resource mappings-resource)]
       (let [raw (edn/read-string (slurp url))]
@@ -174,6 +165,5 @@
       {})))
 
 (defn get-mapping
-  "Look up a mapping by linter ID. Returns nil if not found."
   [linter-id]
   (get @mappings linter-id))
