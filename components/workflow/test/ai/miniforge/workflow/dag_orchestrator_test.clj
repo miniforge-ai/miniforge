@@ -246,6 +246,23 @@
       (is (= "task-a" (:branch opts))
           "single-dep base resolves to the dep's branch, NOT the spec branch"))))
 
+(deftest task-sub-opts-release-base-branch-mirrors-resolved-branch-test
+  (testing "the release PR base equals the resolved fork base, so a chained
+            task's PR STACKS on its parent (base = parent branch) while a
+            root task bases on the spec branch. Prevents the
+            chained-task-PRs-vs-main duplication."
+    (let [root  (dag-orch/task-sub-opts (registry-context {} "feat/spec")
+                                        (make-task-def id-a "A"))
+          child (dag-orch/task-sub-opts (registry-context {id-a {:branch "task-a"}} "main")
+                                        (make-task-def id-b "B" #{id-a}))]
+      (is (= "feat/spec" (:release/base-branch root))
+          "root task's PR bases on the spec branch (unchanged)")
+      (is (= (:branch root) (:release/base-branch root))
+          "release base mirrors the worktree fork base")
+      (is (= "task-a" (:release/base-branch child))
+          "chained task's PR bases on the parent's branch (stacked, not main)")
+      (is (= (:branch child) (:release/base-branch child))))))
+
 (deftest task-sub-opts-single-dep-unregistered-falls-back-test
   (testing "single dep not yet registered: fall back to default branch.
             Defensive: scheduler shouldn't allow this in practice (deps

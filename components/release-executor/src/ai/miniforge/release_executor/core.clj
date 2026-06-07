@@ -110,7 +110,10 @@
       (if (result/succeeded? result)
         (assoc state
                :branch (:branch result)
-               :base-branch (:base-branch result))
+               ;; An explicit override (chained DAG task's parent branch) wins
+               ;; over the detected default, so the PR stacks on the parent.
+               :base-branch (or (:base-branch-override state)
+                                (:base-branch result)))
         (fail state :branch-create-failed (:error result))))))
 
 (defn step-stage-dirty-files
@@ -645,6 +648,12 @@
                                :artifact-store (:artifact-store context)
                                :context context
                                :create-pr? (get context :create-pr? true)
+                               ;; Explicit PR base override (a dependency-chained
+                               ;; DAG task's parent branch). When present it wins
+                               ;; over the branch-creation default so the PR
+                               ;; stacks on the parent; diff/commits-ahead ranges
+                               ;; key off it too, yielding this task's own layer.
+                               :base-branch-override (:base-branch context)
                                :releaser (:releaser opts)
                                :task-description (get-in workflow-state [:workflow/spec :spec/description])
                                :code-artifacts (extract-code-artifacts workflow-artifacts)

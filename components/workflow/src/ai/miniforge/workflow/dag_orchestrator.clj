@@ -1166,6 +1166,11 @@
        (get-in context [:execution/opts :event-stream])
        (assoc :event-stream (get-in context [:execution/opts :event-stream]))
        resolved-branch (assoc :branch resolved-branch)
+       ;; Same resolved base drives the task's release PR base, so a
+       ;; dependency-chained task's PR STACKS on its parent's branch instead
+       ;; of opening against the default branch with a cumulative diff. Root
+       ;; tasks resolve to the spec branch → base unchanged.
+       resolved-branch (assoc :release/base-branch resolved-branch)
        merge-anomaly  (assoc :dag/merge-anomaly merge-anomaly)))))
 
 ;--- Layer 1: Mini-Workflow Execution

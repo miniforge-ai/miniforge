@@ -265,3 +265,30 @@
                   {:release-meta test-release-meta})]
       ;; The pipeline should succeed and create a PR
       (is (:success? result)))))
+
+;; ============================================================================
+;; Stacked-PR base: a chained DAG task's parent-branch override wins
+;; ============================================================================
+
+(def ^:private detects-main-branch
+  "Mock executor responses so detect-default-branch resolves to 'main'."
+  {"symbolic-ref" {:exit-code 0 :stdout "refs/remotes/origin/main\n" :stderr ""}})
+
+(deftest step-create-branch-prefers-base-branch-override
+  (testing "an explicit base-branch-override (chained DAG task's parent branch)
+            wins over the executor-detected default, so the PR stacks on the
+            parent and diff/commits-ahead range off it"
+    (let [[exec _] (create-mock-executor :responses detects-main-branch)
+          state    {:executor exec :environment-id "mock-env"
+                    :release-meta test-release-meta
+                    :base-branch-override "mf/parent-task"}
+          result   (core/step-create-branch state)]
+      (is (= "mf/parent-task" (:base-branch result))
+          "override wins over the detected 'main'")))
+
+  (testing "absent override → executor-detected default branch (root task / non-DAG)"
+    (let [[exec _] (create-mock-executor :responses detects-main-branch)
+          state    {:executor exec :environment-id "mock-env"
+                    :release-meta test-release-meta}
+          result   (core/step-create-branch state)]
+      (is (= "main" (:base-branch result))))))
