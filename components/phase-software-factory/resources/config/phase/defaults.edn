@@ -25,7 +25,17 @@
    :budget {:tokens 20000
             :iterations 2
             :time-seconds 180}
-   :model-hint :sonnet}
+   :model-hint :sonnet
+   ;; Convergence policy: what to do when the reviewer keeps emitting
+   ;; warnings but no blocking issues.  :accept-with-warnings lets the
+   ;; SDLC proceed (warnings recorded in the evidence bundle, not fatal).
+   ;; :needs-decomposition escalates to task-split instead.
+   :review/warning-churn-policy :accept-with-warnings
+   ;; Maximum consecutive warning-only rejection cycles before the churn
+   ;; policy fires.  2 allows one retry after the first warning round —
+   ;; enough to catch a transient LLM false-positive, short enough that
+   ;; a genuinely warning-heavy PR does not loop to max-redirects.
+   :review/max-warning-only-cycles 2}
 
   ;; Plan phase defaults.
   :plan

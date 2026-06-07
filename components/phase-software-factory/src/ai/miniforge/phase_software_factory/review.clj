@@ -33,14 +33,66 @@
    [ai.miniforge.agent.interface :as agent]
    [ai.miniforge.knowledge.interface :as knowledge]
    [ai.miniforge.response.interface :as response]
-   [clojure.string :as str]))
+   [clojure.string :as str]
+   [malli.core :as m]))
 
 ;------------------------------------------------------------------------------ Layer 0
+;; Named constants — fallback defaults used when config/phase/defaults.edn is absent
+
+(def default-warning-churn-policy
+  "Fallback policy applied when the reviewer emits only warnings (no blocking
+   issues) for :review/max-warning-only-cycles consecutive cycles.
+   :accept-with-warnings lets the SDLC proceed — warnings land in the evidence
+   bundle but do not block the release gate.  This is the safe default: it
+   avoids silent task-explosion while still making warnings visible.
+   The active operational value lives in :review/warning-churn-policy
+   in resources/config/phase/defaults.edn."
+  :accept-with-warnings)
+
+(def default-max-warning-only-cycles
+  "Fallback cap on consecutive warning-only review cycles before the churn
+   policy fires, used when config/phase/defaults.edn is absent.
+   2 allows one retry after the first warning round — enough to survive a
+   transient LLM false-positive, short enough that a genuinely warning-heavy
+   PR does not loop all the way to max-redirects and exhaust its token budget.
+   The active operational value lives in :review/max-warning-only-cycles
+   in resources/config/phase/defaults.edn."
+  2)
+
+;; Schema — validates review convergence config keys at config load time (rule 004).
+;; Defined as a value; validation is a one-time side-effect below.
+(def ^:private ReviewConvergenceConfigSchema
+  "Malli schema for the :review/warning-churn-policy and
+   :review/max-warning-only-cycles keys.  Closed map with only the
+   convergence keys; the rest of the phase config is validated elsewhere."
+  [:map
+   [:review/warning-churn-policy
+    {:default     default-warning-churn-policy
+     :description "Policy when max warning-only cycles are exhausted."}
+    [:enum :accept-with-warnings :needs-decomposition]]
+   [:review/max-warning-only-cycles
+    {:default     default-max-warning-only-cycles
+     :description "Max consecutive warning-only cycles before the churn policy fires."}
+    [:int {:min 1}]]])
+
 ;; Defaults
 
 (def default-config
   "Phase defaults loaded from config/phase/defaults.edn."
   (phase-config/defaults-for :review))
+
+;; Validate convergence config once at load — fail fast on a bad defaults.edn
+;; rather than surfacing a ClassCastException deep inside the review phase.
+;; Only validates when the keys are present; absent keys fall back to constants.
+(let [convergence-config (select-keys default-config
+                                       [:review/warning-churn-policy
+                                        :review/max-warning-only-cycles])]
+  (when (seq convergence-config)
+    (when-not (m/validate ReviewConvergenceConfigSchema convergence-config)
+      (throw (IllegalArgumentException.
+              (str "Invalid review convergence config in defaults.edn: "
+                   (pr-str (m/explain ReviewConvergenceConfigSchema
+                                       convergence-config))))))))
 
 ;; Register defaults on load
 (phase/register-phase-defaults! :review default-config)
