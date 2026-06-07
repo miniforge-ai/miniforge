@@ -181,9 +181,6 @@
   (select-keys result [:pack-id :path :error]))
 
 (defn load-all-packs
-  "Load all packs from a packs directory.
-
-   Returns {:loaded [...] :failed [...]}."
   [packs-dir]
   (let [discovered (discover-packs packs-dir)
         results (mapv load-discovered-pack discovered)

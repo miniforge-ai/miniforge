@@ -54,7 +54,6 @@
   (:approval-required-types @intervention-config))
 
 (def terminal-states
-  "Terminal intervention lifecycle states."
   (:terminal-states @intervention-config))
 
 (def default-target-type-by-intervention
@@ -71,7 +70,6 @@
   (set (keys default-target-type-by-intervention)))
 
 (def target-types
-  "Known target categories for v1 interventions."
   (set (vals default-target-type-by-intervention)))
 
 (def lifecycle-states
@@ -86,32 +84,26 @@
 ;; Construction and validation
 
 (defn approval-required?
-  "Return true when `intervention-type` defaults to a pending-human step."
   [intervention-type]
   (contains? approval-required-types intervention-type))
 
 (defn valid-type?
-  "Check if an intervention type is part of the bounded vocabulary."
   [intervention-type]
   (contains? intervention-types intervention-type))
 
 (defn valid-target-type?
-  "Check if a target type is recognized."
   [target-type]
   (contains? target-types target-type))
 
 (defn valid-state?
-  "Check if an intervention lifecycle state is valid."
   [state]
   (contains? lifecycle-states state))
 
 (defn terminal-state?
-  "Check if an intervention lifecycle state is terminal."
   [state]
   (contains? terminal-states state))
 
 (defn intervention-target-type
-  "Resolve the default target type for an intervention."
   [intervention-type]
   (get default-target-type-by-intervention intervention-type))
 
@@ -266,12 +258,10 @@
 ;; Lifecycle helpers
 
 (defn valid-transition?
-  "Check if an intervention lifecycle transition is valid."
   [current-state event]
   (contains? lifecycle-transitions [current-state event]))
 
 (defn next-state
-  "Resolve the next intervention lifecycle state."
   [current-state event]
   (get lifecycle-transitions [current-state event]))
 
@@ -316,17 +306,14 @@
                           (with-optional-intervention-attrs opts))}))))
 
 (defn start-approval
-  "Move an intervention into `:pending-human`."
   [intervention]
   (transition intervention :require-human))
 
 (defn approve
-  "Approve an intervention."
   [intervention]
   (transition intervention :approve))
 
 (defn reject
-  "Reject an intervention."
   ([intervention]
    (reject intervention nil))
   ([intervention reason]
@@ -338,28 +325,24 @@
   (transition intervention :dispatch))
 
 (defn apply-result
-  "Mark an intervention as applied."
   ([intervention]
    (apply-result intervention nil))
   ([intervention outcome]
    (transition intervention :apply (transition-opts :outcome outcome))))
 
 (defn verify
-  "Mark an intervention as verified."
   ([intervention]
    (verify intervention nil))
   ([intervention outcome]
    (transition intervention :verify (transition-opts :outcome outcome))))
 
 (defn fail
-  "Mark an intervention as failed."
   ([intervention]
    (fail intervention nil))
   ([intervention reason]
    (transition intervention :fail (transition-opts :reason reason))))
 
 (defn supported-target-types
-  "Return the configured target types for a given intervention type."
   [intervention-type]
   (let [target-type (intervention-target-type intervention-type)]
     (if target-type
@@ -367,6 +350,5 @@
       #{})))
 
 (defn bounded-vocabulary?
-  "Check if every requested intervention type is part of the bounded vocabulary."
   [types]
   (empty? (set/difference (set types) intervention-types)))

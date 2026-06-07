@@ -116,7 +116,6 @@
     #{:repeated-phase-failure :frequent-rollback :recurring-repair}))
 
 (defn create-pattern-detector
-  "Create a pattern detector."
   ([] (create-pattern-detector default-config))
   ([config] (->SimplePatternDetector config)))
 
@@ -190,7 +189,6 @@
     #{:repeated-phase-failure :frequent-rollback :recurring-repair}))
 
 (defn create-improvement-generator
-  "Create an improvement generator."
   []
   (->SimpleImprovementGenerator))
 
@@ -236,7 +234,6 @@
        :shadow-period-ms (* 24 60 60 1000)})))
 
 (defn create-governance
-  "Create a governance manager."
   ([] (create-governance default-config))
   ([config] (->SimpleGovernance config)))
 

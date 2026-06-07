@@ -39,15 +39,59 @@
 ;------------------------------------------------------------------------------ Layer 1
 ;; Lifecycle
 
-(def create  core/create)
-(def start!  core/start!)
-(def stop!   core/stop!)
-(def attach! core/attach!)
+(def create
+  "Build a fresh pr-scoring component instance bound to event stream `stream`.
+   Does not subscribe yet — call [[start!]] to begin consuming events.
+
+   Args: `stream`, and an optional opts map:
+     :scorer-fn           — 1-ary fn (pr-event → score-map or nil); defaults
+                            to [[default-scorer-fn]] (emits nothing)
+     :trigger-event-types — set of event-type keywords that trigger scoring;
+                            defaults to the EDN set at [[trigger-config-resource]]
+
+   Returns an atom holding the component state map
+   {:stream :scorer-fn :triggers :subscribed?}."
+  core/create)
+
+(def start!
+  "Subscribe the component to its stream so events begin flowing to the
+   scorer-fn. Idempotent — repeat calls are no-ops.
+   Args: `component` (the atom from [[create]]). Returns that same atom."
+  core/start!)
+
+(def stop!
+  "Unsubscribe the component from its stream. Idempotent — no-op if not
+   currently subscribed.
+   Args: `component` (the atom). Returns that same atom."
+  core/stop!)
+
+(def attach!
+  "Create + start in one step.
+   Args: `stream`, and an optional opts map (see [[create]]).
+   Returns the started component atom."
+  core/attach!)
 
 ;------------------------------------------------------------------------------ Layer 2
 ;; Extension points
 
-(def default-scorer-fn           core/default-scorer-fn)
-(def load-default-triggers       core/load-default-triggers)
-(def default-trigger-event-types core/default-trigger-event-types)
-(def trigger-config-resource     core/trigger-config-resource)
+(def default-scorer-fn
+  "Placeholder scorer used when no `:scorer-fn` is supplied to [[create]].
+   1-ary fn (pr-event → nil); always returns nil, so no `:pr/scored`
+   events are emitted. Replace with a real scorer at create time."
+  core/default-scorer-fn)
+
+(def load-default-triggers
+  "Read the default trigger-event-types set from the classpath resource at
+   [[trigger-config-resource]]. Takes no args. Returns a set of event-type
+   keywords. Throws ex-info if the resource is missing from the classpath."
+  core/load-default-triggers)
+
+(def default-trigger-event-types
+  "A delay wrapping the default trigger set (see [[load-default-triggers]]);
+   deref to obtain the set of event-type keywords. Delayed so the classpath
+   scan runs on first use rather than at namespace load."
+  core/default-trigger-event-types)
+
+(def trigger-config-resource
+  "String: classpath location of the default trigger-event-types EDN set."
+  core/trigger-config-resource)

@@ -8,15 +8,41 @@
    [ai.miniforge.pipeline-pack.registry :as registry]))
 
 ;; -- Schema re-exports --
-(def TrustLevel pack-schema/TrustLevel)
-(def AuthorityChannel pack-schema/AuthorityChannel)
-(def PipelinePackManifest pack-schema/PipelinePackManifest)
-(def trust-levels pack-schema/trust-levels)
-(def authority-channels pack-schema/authority-channels)
+(def TrustLevel
+  "Malli enum schema for a pack's trust level: [:enum :tainted :untrusted :trusted].
+   Use to validate or coerce :pack/trust-level."
+  pack-schema/TrustLevel)
+(def AuthorityChannel
+  "Malli enum schema for a pack's authority channel: [:enum :authority/data :authority/instruction].
+   :authority/data = data-only; :authority/instruction = code-bearing (requires :trusted)."
+  pack-schema/AuthorityChannel)
+(def PipelinePackManifest
+  "Malli :map schema for a pipeline pack manifest (pack.edn contents).
+   Required keys: :pack/id, :pack/name, :pack/version, :pack/description,
+   :pack/author, :pack/trust-level, :pack/authority, :pack/pipelines (vector),
+   :pack/envs (vector), :pack/created-at, :pack/updated-at. Optional:
+   :pack/metric-registry (string), :pack/connector-types (set of keywords),
+   :pack/extends (vector of {:pack-id string})."
+  pack-schema/PipelinePackManifest)
+(def trust-levels
+  "Vector of the legal trust-level keywords, in ascending trust order:
+   [:tainted :untrusted :trusted]."
+  pack-schema/trust-levels)
+(def authority-channels
+  "Vector of the legal authority-channel keywords:
+   [:authority/data :authority/instruction]."
+  pack-schema/authority-channels)
 
 ;; -- Validation --
-(def valid-manifest? pack-schema/valid-manifest?)
-(def validate-manifest pack-schema/validate-manifest)
+(def valid-manifest?
+  "Predicate. Returns true if the given value conforms to PipelinePackManifest,
+   else false. Takes a manifest map."
+  pack-schema/valid-manifest?)
+(def validate-manifest
+  "Validate a manifest map against PipelinePackManifest.
+   Returns {:valid? true :errors nil} on success, or
+   {:valid? false :errors <humanized-error-map>} on failure."
+  pack-schema/validate-manifest)
 
 ;; -- Loading --
 (defn load-pack

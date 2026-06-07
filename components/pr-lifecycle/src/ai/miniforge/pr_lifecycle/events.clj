@@ -72,7 +72,6 @@
    data))
 
 (defn pr-opened
-  "Create a PR opened event."
   [dag-id run-id task-id pr-id pr-url branch sha]
   (create-event :pr/opened
                 {:dag/id dag-id
@@ -84,7 +83,6 @@
                  :pr/sha sha}))
 
 (defn ci-passed
-  "Create a CI passed event."
   [dag-id run-id task-id pr-id sha]
   (create-event :pr/ci-passed
                 {:dag/id dag-id
@@ -94,7 +92,6 @@
                  :pr/sha sha}))
 
 (defn ci-failed
-  "Create a CI failed event."
   [dag-id run-id task-id pr-id sha logs]
   (create-event :pr/ci-failed
                 {:dag/id dag-id
@@ -105,7 +102,6 @@
                  :ci/logs logs}))
 
 (defn review-approved
-  "Create a review approved event."
   [dag-id run-id task-id pr-id approvers]
   (create-event :pr/review-approved
                 {:dag/id dag-id
@@ -115,7 +111,6 @@
                  :review/approvers approvers}))
 
 (defn review-changes-requested
-  "Create a changes requested event."
   [dag-id run-id task-id pr-id comments]
   (create-event :pr/review-changes-requested
                 {:dag/id dag-id
@@ -125,7 +120,6 @@
                  :review/comments comments}))
 
 (defn comment-actionable
-  "Create an actionable comment event."
   [dag-id run-id task-id pr-id comment-data]
   (create-event :pr/comment-actionable
                 {:dag/id dag-id
@@ -165,7 +159,6 @@
                  :close/reason reason}))
 
 (defn rebase-needed
-  "Create a rebase needed event."
   [dag-id run-id task-id pr-id base-sha]
   (create-event :pr/rebase-needed
                 {:dag/id dag-id
@@ -185,7 +178,6 @@
                  :conflict/files conflicting-files}))
 
 (defn fix-pushed
-  "Create a fix pushed event."
   [dag-id run-id task-id pr-id sha fix-type]
   (create-event :pr/fix-pushed
                 {:dag/id dag-id

@@ -9,7 +9,6 @@
 ;; Registry creation
 
 (defn create-registry
-  "Create a new empty pack registry."
   []
   (atom {}))
 
@@ -25,7 +24,6 @@
     registry))
 
 (defn unregister-pack!
-  "Remove a pack from the registry by id."
   [registry pack-id]
   (swap! registry dissoc pack-id)
   registry)
@@ -44,12 +42,10 @@
   (vec (vals @registry)))
 
 (defn list-pack-ids
-  "List all registered pack ids."
   [registry]
   (vec (keys @registry)))
 
 (defn pack-count
-  "Return number of registered packs."
   [registry]
   (count @registry))
 

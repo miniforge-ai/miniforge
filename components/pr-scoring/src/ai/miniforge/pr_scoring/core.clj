@@ -68,7 +68,6 @@
 ;; Trigger events — loaded from data
 
 (def trigger-config-resource
-  "Classpath location of the default trigger-event-types EDN set."
   "config/pr-scoring/triggers.edn")
 
 (defn load-default-triggers
@@ -83,8 +82,6 @@
                     {:resource trigger-config-resource}))))
 
 (def default-trigger-event-types
-  "Memoized default trigger set loaded from [[trigger-config-resource]].
-   Delayed so classpath scan happens on first use, not namespace load."
   (delay (load-default-triggers)))
 
 ;------------------------------------------------------------------------------ Layer 1

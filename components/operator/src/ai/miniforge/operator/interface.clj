@@ -27,18 +27,56 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Protocol re-exports
 
-(def Operator proto/Operator)
-(def PatternDetector proto/PatternDetector)
-(def ImprovementGenerator proto/ImprovementGenerator)
-(def Governance proto/Governance)
+(def Operator
+  "Protocol satisfied by the meta-agent: observe signals, analyze patterns,
+   propose/apply/reject improvements. Implement to provide an operator backend."
+  proto/Operator)
+
+(def PatternDetector
+  "Protocol satisfied by pattern detectors: turn a sequence of signals into a
+   sequence of detected patterns. Implement to provide custom detection."
+  proto/PatternDetector)
+
+(def ImprovementGenerator
+  "Protocol satisfied by improvement generators: turn detected patterns plus
+   context into a sequence of improvement proposals."
+  proto/ImprovementGenerator)
+
+(def Governance
+  "Protocol satisfied by governance backends: decide whether an improvement
+   needs human approval, may auto-apply, and resolve per-type approval policy."
+  proto/Governance)
 
 ;; Type definitions
-(def signal-types proto/signal-types)
-(def improvement-types proto/improvement-types)
-(def intervention-types intervention/intervention-types)
-(def intervention-target-types intervention/target-types)
-(def intervention-lifecycle-states intervention/lifecycle-states)
-(def intervention-terminal-states intervention/terminal-states)
+(def signal-types
+  "Set of keywords naming the signal types the operator can observe
+   (e.g. :workflow-complete, :workflow-failed, :phase-rollback)."
+  proto/signal-types)
+
+(def improvement-types
+  "Set of keywords naming the improvement types the operator can propose
+   (e.g. :prompt-change, :gate-adjustment, :policy-update)."
+  proto/improvement-types)
+
+(def intervention-types
+  "Set of keywords naming the bounded v1 supervisory intervention vocabulary
+   (e.g. :acknowledge, :retry, :cancel, :force-safe-mode)."
+  intervention/intervention-types)
+
+(def intervention-target-types
+  "Set of keywords naming the recognized intervention target categories
+   (e.g. :attention, :workflow, :policy-eval, :pr, :degradation, :supervision)."
+  intervention/target-types)
+
+(def intervention-lifecycle-states
+  "Set of keywords naming all valid intervention lifecycle states, including
+   the initial state, every transition endpoint, and the terminal states."
+  intervention/lifecycle-states)
+
+(def intervention-terminal-states
+  "Set of keywords naming the terminal intervention lifecycle states:
+   :rejected, :verified, :failed."
+  intervention/terminal-states)
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Operator creation

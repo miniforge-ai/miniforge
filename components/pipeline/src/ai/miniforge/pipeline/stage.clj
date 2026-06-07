@@ -15,7 +15,6 @@
   #{:extract :normalize :transform :aggregate :validate :enrich})
 
 (defn validate-stage
-  "Validate a stage definition against N3 §2.2."
   [{:stage/keys [id name family connector-ref input-datasets output-datasets dependencies]}]
   (let [errors
         (cond-> []
