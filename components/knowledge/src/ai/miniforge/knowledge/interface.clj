@@ -45,29 +45,94 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Schema re-exports
 
-(def Zettel schema/Zettel)
-(def ZettelSummary schema/ZettelSummary)
-(def Link schema/Link)
-(def LinkType schema/LinkType)
-(def ZettelType schema/ZettelType)
-(def Source schema/Source)
-(def SourceType schema/SourceType)
-(def KnowledgeQuery schema/KnowledgeQuery)
-(def AgentManifest schema/AgentManifest)
-(def LearningCapture schema/LearningCapture)
+(def Zettel
+  "Malli schema (a `[:map ...]`) for an atomic unit of knowledge.
+   Required keys: :zettel/id (uuid), :zettel/uid, :zettel/title,
+   :zettel/content, :zettel/type, :zettel/created (inst), :zettel/author.
+   Optional keys cover Dewey, tags, links, backlinks, source, modified,
+   revision identity (:zettel/revision-id, :zettel/digest), and Fleet
+   share intent (:fleet/*, :privacy/classification, :zettel/trust-level).
+   Use with `malli.core/validate` to check a zettel map."
+  schema/Zettel)
+(def ZettelSummary
+  "Malli schema (a `[:map ...]`) for a lightweight zettel reference used
+   in listings. Required keys: :zettel/id (uuid), :zettel/uid (string),
+   :zettel/title (string), :zettel/type. Optional: :zettel/dewey,
+   :zettel/tags."
+  schema/ZettelSummary)
+(def Link
+  "Malli schema (a `[:map ...]`) for a connection between zettels with
+   explicit rationale. Required keys: :link/target-id (uuid), :link/type
+   (a LinkType), :link/rationale (string, min 10 chars — must explain WHY).
+   Optional: :link/strength (double 0.0-1.0), :link/bidirectional? (bool)."
+  schema/Link)
+(def LinkType
+  "Malli schema — an `[:enum ...]` of link kinds between zettels:
+   :supports, :contradicts, :extends, :applies-to, :example-of,
+   :questions, :answers, :supersedes, :related."
+  schema/LinkType)
+(def ZettelType
+  "Malli schema — an `[:enum ...]` of knowledge-unit categories:
+   :rule, :concept, :learning, :example, :hub, :question, :decision."
+  schema/ZettelType)
+(def Source
+  "Malli schema (a `[:map ...]`) for zettel provenance. Required key:
+   :source/type (a SourceType). Optional: :source/agent (keyword),
+   :source/task-id (uuid), :source/context (string),
+   :source/confidence (double 0.0-1.0)."
+  schema/Source)
+(def SourceType
+  "Malli schema — an `[:enum ...]` of how knowledge was created:
+   :manual, :inner-loop, :meta-loop, :import, :migration."
+  schema/SourceType)
+(def KnowledgeQuery
+  "Malli schema (a `[:map ...]`) for a knowledge-retrieval query. All keys
+   optional: :agent-role, :task-type, :tags, :dewey-range (tuple),
+   :dewey-prefixes, :include-types, :exclude-types, :min-strength,
+   :related-to, :traverse-links?, :max-hops (1-5), :limit, :text-search."
+  schema/KnowledgeQuery)
+(def AgentManifest
+  "Malli schema (a `[:map ...]`) for an agent role's knowledge-injection
+   config. Required key: :agent-role (keyword). Optional: :dewey-prefixes,
+   :tags, :types, :hubs (hub UIDs), :always-include (UIDs), :max-zettels."
+  schema/AgentManifest)
+(def LearningCapture
+  "Malli schema (a `[:map ...]`) for input when capturing a new learning.
+   Required keys: :type (a SourceType), :title (string), :content (string).
+   Optional: :agent, :task-id, :tags, :dewey, :links, :confidence (0.0-1.0)."
+  schema/LearningCapture)
 ;; Fleet-share enums (added in #807). Surfaced through the interface
 ;; so downstream components reference them without reaching into
 ;; `knowledge.schema` directly (Polylith dependency rule).
-(def ShareScope     schema/ShareScope)
-(def Classification schema/Classification)
+(def ShareScope
+  "Malli schema — an `[:enum ...]` of audience scopes a zettel is intended
+   for when shared via Fleet: :org, :team, :repo, :workflow."
+  schema/ShareScope)
+(def Classification
+  "Malli schema — an `[:enum ...]` of privacy classifications (Fleet
+   Decision 8): :public-org, :internal, :restricted, :secret. Governs how
+   far a shared zettel may travel and the scanner's veto bar."
+  schema/Classification)
 ;; Per-revision trust enum (closes #836). Surfaced here so fleet's
 ;; producer-side share-learning gate can reference it without
 ;; reaching into `knowledge.schema` directly.
-(def TrustLevel     schema/TrustLevel)
+(def TrustLevel
+  "Malli schema — an `[:enum ...]` of per-revision trust values:
+   :untrusted (default) and :trusted (set only by promote-learning, reset
+   on any content rotation). Fleet's share-learning gate keys off this."
+  schema/TrustLevel)
 ;; Policy-pack rule lookup schemas. Callers may validate their own
 ;; inputs against PolicyQuery before passing to lookup-policy-rules.
-(def PolicyQuery    schema/PolicyQuery)
-(def PolicyResult   schema/PolicyResult)
+(def PolicyQuery
+  "Malli schema (a `[:map ...]`) for policy-pack rule lookup input. All
+   keys optional (omitting all returns every loaded :rule zettel); multiple
+   criteria are ANDed: :query (case-insensitive substring on title + body),
+   :tags (vector keyword; at-least-one match), :dewey-prefix (prefix string)."
+  schema/PolicyQuery)
+(def PolicyResult
+  "Malli schema (a `[:map ...]`) for a compact rule result from
+   lookup-policy-rules. Keys: :rule/title (string), :rule/content (string)."
+  schema/PolicyResult)
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Store creation
@@ -219,9 +284,9 @@
 
    Options:
    - :max-hops  - Maximum link traversal depth (default 1)
-   - :direction - :outgoing, :incoming, or :both
+   - :direction - :outgoing, :incoming, or :both (default :both)
 
-   Returns vector of related zettels."
+   Returns vector of related zettels sorted by hop distance."
   store/find-related)
 
 (def search
@@ -444,7 +509,8 @@
   zettel/zettel->markdown)
 
 (def markdown->zettel
-  "Parse a Markdown file with YAML frontmatter into a zettel."
+  "Parse Markdown content (a string) with YAML frontmatter into a zettel.
+   Returns nil if parsing fails."
   zettel/markdown->zettel)
 
 (def split-frontmatter
