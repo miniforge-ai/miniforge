@@ -52,7 +52,6 @@
 ;; Metric entry and family schemas
 
 (def MetricEntry
-  "Schema for an individual metric definition."
   [:map
    [:metric/id string?]
    [:metric/name string?]
@@ -68,7 +67,6 @@
    [:metric/series-id {:optional true} string?]])
 
 (def MetricFamily
-  "Schema for a group of related metrics."
   [:map
    [:family/id keyword?]
    [:family/name string?]
@@ -78,7 +76,6 @@
 ;; Registry schema
 
 (def MetricRegistry
-  "Schema for the complete metric registry."
   [:map
    [:registry/id string?]
    [:registry/version string?]

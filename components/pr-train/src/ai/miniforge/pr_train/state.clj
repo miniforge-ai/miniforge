@@ -40,7 +40,6 @@
    :abandoned   #{}})
 
 (def pr-transitions
-  "Valid PR status transitions."
   {:draft             #{:open :closed}
    :open              #{:reviewing :closed}
    :reviewing         #{:changes-requested :approved :closed}
