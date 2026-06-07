@@ -27,8 +27,30 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Protocol re-exports
 
-(def Workflow workflow-proto/Workflow)
-(def PhaseExecutor executor-proto/PhaseExecutor)
-(def WorkflowObserver observer-proto/WorkflowObserver)
-(def phases workflow-impl/phases)
-(def phase-transitions workflow-impl/phase-transitions)
+(def Workflow
+  "Protocol governing workflow execution: start/get-state/advance/rollback/
+   complete/fail. Main extensibility point for custom workflow
+   implementations."
+  workflow-proto/Workflow)
+
+(def PhaseExecutor
+  "Protocol for executing an individual SDLC phase: execute-phase/
+   can-execute?/get-phase-requirements. Extensibility point for custom
+   phase executors."
+  executor-proto/PhaseExecutor)
+
+(def WorkflowObserver
+  "Protocol for observing workflow events (phase start/complete/error,
+   workflow complete, rollback). Extensibility point for operator/
+   meta-loop integration."
+  observer-proto/WorkflowObserver)
+
+(def phases
+  "Ordered vector of SDLC phase keywords:
+   [:spec :plan :design :implement :verify :review :release :observe :done]."
+  workflow-impl/phases)
+
+(def phase-transitions
+  "Map of phase keyword -> set of allowed next-phase keywords. The empty
+   set for :done marks the terminal phase."
+  workflow-impl/phase-transitions)

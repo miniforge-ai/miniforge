@@ -25,11 +25,46 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Registry and schema helpers
 
-(def register-workflow! registry/register-workflow!)
-(def get-workflow registry/get-workflow)
-(def list-workflow-ids registry/list-workflow-ids)
-(def workflow-exists? registry/workflow-exists?)
-(def workflow-characteristics registry/workflow-characteristics)
-(def ensure-initialized! registry/ensure-initialized!)
-(def valid-recommendation? schemas/valid-recommendation?)
-(def explain-recommendation schemas/explain-recommendation)
+(def register-workflow!
+  "Validate and register a workflow definition. Args: [workflow]. Returns
+   the registered workflow; throws an anomaly when :workflow/id is missing
+   or validation fails."
+  registry/register-workflow!)
+
+(def get-workflow
+  "Fetch a registered workflow by id. Args: [workflow-id]. Returns the
+   workflow definition map, or nil when absent."
+  registry/get-workflow)
+
+(def list-workflow-ids
+  "List ids of all registered workflows. No args. Returns a seq of workflow
+   id keywords."
+  registry/list-workflow-ids)
+
+(def workflow-exists?
+  "Predicate: is a workflow id registered? Args: [workflow-id]. Returns
+   boolean."
+  registry/workflow-exists?)
+
+(def workflow-characteristics
+  "Derive selection characteristics from a workflow, validated against the
+   WorkflowCharacteristics schema. Args: [workflow]. Returns
+   {:id :version :name :description :phases :max-iterations :task-types
+   :complexity (:simple|:medium|:complex) :has-review :has-testing}; throws
+   an anomaly when the computed characteristics fail validation."
+  registry/workflow-characteristics)
+
+(def ensure-initialized!
+  "Idempotently load workflows from resources into the registry. No args.
+   Returns the count of workflows in the registry."
+  registry/ensure-initialized!)
+
+(def valid-recommendation?
+  "Predicate: does a value satisfy the WorkflowRecommendation schema? Args:
+   [value]. Returns boolean."
+  schemas/valid-recommendation?)
+
+(def explain-recommendation
+  "Humanize WorkflowRecommendation schema errors for a value. Args: [value].
+   Returns the humanized malli explanation, or nil when the value is valid."
+  schemas/explain-recommendation)

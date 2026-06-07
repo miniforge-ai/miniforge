@@ -86,22 +86,18 @@
 ;; Legacy-style helper API
 
 (defn valid-state?
-  "Check if a supervision state keyword is valid."
   [state]
   (contains? supervision-states state))
 
 (defn terminal-state?
-  "Check if a supervision state is terminal."
   [state]
   (contains? terminal-states state))
 
 (defn valid-transition?
-  "Check if a supervision transition is valid."
   [current-state event]
   (contains? supervision-transitions [current-state event]))
 
 (defn next-state
-  "Get the next state for a supervision transition."
   [current-state event]
   (get supervision-transitions [current-state event]))
 
@@ -145,22 +141,18 @@
         :state (fsm/current-state new-state-map)}))))
 
 (defn initialize
-  "Initialize supervision state."
   []
   (fsm/initialize supervision-machine))
 
 (defn transition-fsm
-  "Transition supervision state using the compiled shared FSM."
   [state event]
   (fsm/transition supervision-machine state event))
 
 (defn current-state
-  "Read the current supervision state keyword."
   [state]
   (fsm/current-state state))
 
 (defn is-final?
-  "Check if the compiled machine state is final."
   [state]
   (fsm/final? supervision-machine state))
 

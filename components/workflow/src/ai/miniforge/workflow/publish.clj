@@ -80,7 +80,6 @@
      :publication/output-dir (str output-dir)}))
 
 (defn publish!
-  "Publish a workflow output using the configured publisher."
   ([publisher publication]
    (publish! publisher publication nil))
   ([publisher publication logger]
