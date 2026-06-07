@@ -28,16 +28,13 @@
 ;; Enums and base types
 
 (def repo-types
-  "Types of repositories that can be modeled in the DAG."
   [:terraform-module :terraform-live :kubernetes
    :argocd :application :library :documentation])
 
 (def repo-layers
-  "Logical layers for repository categorization."
   [:foundations :infrastructure :platform :application :adapters])
 
 (def edge-constraints
-  "Constraint types for dependency edges."
   [:module-before-live      ; TF modules before live infra
    :infra-before-k8s        ; Infrastructure before K8s manifests
    :k8s-before-argocd       ; Manifests before ArgoCD apps
@@ -45,13 +42,11 @@
    :schema-before-impl])    ; Schema changes before implementations
 
 (def merge-orderings
-  "Merge ordering strategies for edges."
   [:sequential    ; Must merge in order
    :parallel-ok   ; Can merge in parallel if both ready
    :same-pr-train]) ; Must be in same PR train
 
 (def type->layer
-  "Default layer inference from repository type."
   {:terraform-module :foundations
    :terraform-live   :infrastructure
    :kubernetes       :platform
@@ -79,7 +74,6 @@
 ;; RepoNode and RepoEdge schemas
 
 (def WatchConfig
-  "Configuration for watching repository changes."
   [:map
    [:labels-include {:optional true} [:vector string?]]
    [:labels-exclude {:optional true} [:vector string?]]
@@ -99,7 +93,6 @@
    [:repo/watch-config {:optional true} WatchConfig]])
 
 (def EdgeValidation
-  "Validation configuration for an edge."
   [:map
    [:require-ci-pass? {:default true} boolean?]
    [:require-plan-clean? {:default false} boolean?]
@@ -153,22 +146,18 @@
 ;; Validation helpers
 
 (defn valid-repo-node?
-  "Check if a value is a valid RepoNode."
   [value]
   (m/validate RepoNode value))
 
 (defn valid-repo-edge?
-  "Check if a value is a valid RepoEdge."
   [value]
   (m/validate RepoEdge value))
 
 (defn valid-repo-dag?
-  "Check if a value is a valid RepoDag."
   [value]
   (m/validate RepoDag value))
 
 (defn infer-layer
-  "Infer the layer from repository type if not explicitly specified."
   [repo-type]
   (get type->layer repo-type :application))
 

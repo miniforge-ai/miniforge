@@ -33,27 +33,84 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Schema re-exports
 
-(def InnerLoopState schema/InnerLoopState)
-(def InnerLoopResult schema/InnerLoopResult)
-(def GateResult schema/GateResult)
-(def GateConfig schema/GateConfig)
-(def RepairAttempt schema/RepairAttempt)
-(def LoopMetrics schema/LoopMetrics)
-(def LoopBudget schema/LoopBudget)
-(def OuterLoopState schema/OuterLoopState)
+(def InnerLoopState
+  "Malli schema (a `[:map ...]` vector) for the inner loop state machine,
+   tracking the generate -> validate -> repair cycle. Use with malli.core
+   (m/validate, m/explain)."
+  schema/InnerLoopState)
+(def InnerLoopResult
+  "Malli schema (a `[:map ...]` vector) for the result of running an inner
+   loop to completion: :success, optional :artifact, :iterations, :metrics,
+   :termination. Use with malli.core."
+  schema/InnerLoopResult)
+(def GateResult
+  "Malli schema (a `[:map ...]` vector) for the result of running a
+   validation gate: :gate/id, :gate/type, :gate/passed?, optional
+   :gate/errors, :gate/warnings, :gate/duration-ms. Use with malli.core."
+  schema/GateResult)
+(def GateConfig
+  "Malli schema (a `[:map ...]` vector) for gate configuration: :gate/id,
+   :gate/type, optional :gate/enabled?, :gate/config, :gate/applies-to.
+   Use with malli.core."
+  schema/GateConfig)
+(def RepairAttempt
+  "Malli schema (a `[:map ...]` vector) for a single repair attempt:
+   :repair/id, :repair/strategy, :repair/iteration, :repair/errors,
+   :repair/success?, optional duration and tokens. Use with malli.core."
+  schema/RepairAttempt)
+(def LoopMetrics
+  "Malli schema (a `[:map ...]` vector) for loop execution metrics: optional
+   :tokens, :cost-usd, :duration-ms, :generate-calls, :repair-calls.
+   Use with malli.core."
+  schema/LoopMetrics)
+(def LoopBudget
+  "Malli schema (a `[:map ...]` vector) for loop execution budget
+   constraints: optional :max-tokens, :max-cost-usd, :max-duration-ms,
+   :max-iterations. Use with malli.core."
+  schema/LoopBudget)
+(def OuterLoopState
+  "Malli schema (a `[:map ...]` vector) for the outer loop state machine,
+   tracking the SDLC phases. Use with malli.core."
+  schema/OuterLoopState)
 
 ;; Enum values
-(def inner-loop-states schema/inner-loop-states)
-(def outer-loop-phases schema/outer-loop-phases)
-(def gate-types schema/gate-types)
-(def repair-strategies schema/repair-strategies)
-(def termination-reasons schema/termination-reasons)
+(def inner-loop-states
+  "Vector of the possible inner-loop state-machine state keywords, in order:
+   [:pending :generating :validating :repairing :complete :failed :escalated]."
+  schema/inner-loop-states)
+(def outer-loop-phases
+  "Vector of the outer-loop SDLC phase keywords, in order:
+   [:spec :plan :design :implement :verify :review :release :observe]."
+  schema/outer-loop-phases)
+(def gate-types
+  "Vector of the supported validation-gate type keywords:
+   [:syntax :lint :test :policy :custom]."
+  schema/gate-types)
+(def repair-strategies
+  "Vector of the available repair-strategy keywords:
+   [:llm-fix :retry :escalate]."
+  schema/repair-strategies)
+(def termination-reasons
+  "Vector of the loop-termination reason keywords:
+   [:gates-passed :max-iterations :budget-exhausted :timeout
+    :unrecoverable-error :manual-stop]."
+  schema/termination-reasons)
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Protocol re-exports
 
-(def Gate gate-proto/Gate)
-(def RepairStrategy repair-proto/RepairStrategy)
+(def Gate
+  "Protocol for validation gates. Implement to provide a custom gate;
+   methods: (check this artifact context), (gate-id this), (gate-type this),
+   (repair this artifact violations context). check returns a gate-result map
+   with :gate/passed? and :gate/errors."
+  gate-proto/Gate)
+(def RepairStrategy
+  "Protocol for artifact repair strategies. Implement to provide a custom
+   strategy; methods: (can-repair? this errors context) -> boolean, and
+   (repair this artifact errors context) -> map with :success?, :artifact or
+   :errors, :strategy, optional :tokens-used/:duration-ms."
+  repair-proto/RepairStrategy)
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Inner Loop API
@@ -416,8 +473,15 @@
 
 ;; Phase definitions
 
-(def phases outer/phases)
-(def phase-definitions outer/phase-definitions)
+(def phases
+  "Vector of the ordered outer-loop phase keywords:
+   [:spec :plan :design :implement :verify :review :release :observe]."
+  outer/phases)
+(def phase-definitions
+  "Map keyed by phase keyword to its metadata map (:phase/id,
+   :phase/description, :phase/agent, :phase/artifacts, :phase/requires).
+   Look up a single phase with get-phase-definition."
+  outer/phase-definitions)
 
 (defn get-phase-definition
   "Get the definition for a phase."

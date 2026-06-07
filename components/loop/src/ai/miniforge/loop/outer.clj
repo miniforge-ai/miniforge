@@ -35,7 +35,6 @@
 ;; Phase definitions
 
 (def phases
-  "Ordered sequence of outer loop phases."
   [:spec :plan :design :implement :verify :review :release :observe])
 
 (def ^:private initial-phase
@@ -47,7 +46,6 @@
   :observe)
 
 (def phase-definitions
-  "Phase metadata definitions."
   {:spec     {:phase/id :spec
               :phase/description (loop-messages/t :outer/spec-description)
               :phase/agent nil  ; No agent, external input

@@ -26,24 +26,67 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Schema re-exports
 
-(def RepoNode schema/RepoNode)
-(def RepoEdge schema/RepoEdge)
-(def RepoDag schema/RepoDag)
-(def WatchConfig schema/WatchConfig)
-(def EdgeValidation schema/EdgeValidation)
+(def RepoNode
+  "Malli `[:map ...]` schema for a repository node: its URL, name, type,
+   layer, default branch, and optional org and watch-config."
+  schema/RepoNode)
+(def RepoEdge
+  "Malli `[:map ...]` schema for a directed dependency edge between two repos
+   (`:edge/from` -> `:edge/to`) carrying a constraint, merge-ordering, and
+   optional validation config."
+  schema/RepoEdge)
+(def RepoDag
+  "Malli `[:map ...]` schema for a complete repository dependency graph:
+   id, name, optional description, vectors of repos and edges, and optional
+   computed topo-order and layers."
+  schema/RepoDag)
+(def WatchConfig
+  "Malli `[:map ...]` schema for change-watch configuration: optional
+   label and path include/exclude vectors of strings."
+  schema/WatchConfig)
+(def EdgeValidation
+  "Malli `[:map ...]` schema for per-edge validation gates: require-ci-pass?,
+   require-plan-clean?, and an optional custom-gate keyword."
+  schema/EdgeValidation)
 
 ;; Enum value sets for programmatic access
-(def repo-types schema/repo-types)
-(def repo-layers schema/repo-layers)
-(def edge-constraints schema/edge-constraints)
-(def merge-orderings schema/merge-orderings)
-(def type->layer schema/type->layer)
+(def repo-types
+  "Vector of the repository type keywords valid in the DAG
+   (e.g. :terraform-module, :kubernetes, :library)."
+  schema/repo-types)
+(def repo-layers
+  "Vector of the logical layer keywords for repositories
+   (:foundations :infrastructure :platform :application :adapters)."
+  schema/repo-layers)
+(def edge-constraints
+  "Vector of the dependency-edge constraint keywords
+   (e.g. :module-before-live, :schema-before-impl)."
+  schema/edge-constraints)
+(def merge-orderings
+  "Vector of the merge-ordering strategy keywords
+   (:sequential :parallel-ok :same-pr-train)."
+  schema/merge-orderings)
+(def type->layer
+  "Map of repository type keyword to its default layer keyword."
+  schema/type->layer)
 
 ;; Validation helpers
-(def valid-repo-node? schema/valid-repo-node?)
-(def valid-repo-edge? schema/valid-repo-edge?)
-(def valid-repo-dag? schema/valid-repo-dag?)
-(def infer-layer schema/infer-layer)
+(def valid-repo-node?
+  "Predicate: returns true if the value conforms to the RepoNode schema,
+   false otherwise."
+  schema/valid-repo-node?)
+(def valid-repo-edge?
+  "Predicate: returns true if the value conforms to the RepoEdge schema,
+   false otherwise."
+  schema/valid-repo-edge?)
+(def valid-repo-dag?
+  "Predicate: returns true if the value conforms to the RepoDag schema,
+   false otherwise."
+  schema/valid-repo-dag?)
+(def infer-layer
+  "Given a repository type keyword, returns its default layer keyword,
+   falling back to :application for unknown types."
+  schema/infer-layer)
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Manager lifecycle
