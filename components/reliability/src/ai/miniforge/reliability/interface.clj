@@ -130,9 +130,12 @@
   sli/compute-tool-success-rate)
 
 (def compute-failure-distribution
-  "SLI-6 (full). (failure-events window) -> map of {:failure/class -> fraction
-   double}. Returns {} when no failures fall in the window. The unknown-class
-   fraction is the key meta-reliability indicator. Pure."
+  "SLI-6 (full). (failure-events window) -> map keyed by each distinct
+   :failure/class VALUE found in the windowed events (e.g.
+   :failure.class/unknown), with that class's fraction (double) of all
+   in-window failures as the value. Returns {} when no failures fall in the
+   window. The unknown-class fraction is the key meta-reliability indicator.
+   Pure."
   sli/compute-failure-distribution)
 
 (def compute-unknown-failure-rate
