@@ -10,14 +10,12 @@
 ;------------------------------------------------------------------------------ Layer 0
 
 (def Source
-  "Schema for a source-tracking entry."
   [:map
    [:kind [:enum :repo-map :file :search]]
    [:path [:maybe [:string {:min 1}]]]
    [:tokens :int]])
 
 (def ContextPack
-  "Schema for a bounded context pack."
   [:map
    [:phase :keyword]
    [:budget :int]
@@ -29,7 +27,6 @@
    [:sources [:vector Source]]])
 
 (def BudgetAudit
-  "Schema for a budget audit snapshot."
   [:map
    [:phase :keyword]
    [:budget :int]

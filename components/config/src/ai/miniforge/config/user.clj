@@ -34,14 +34,11 @@
 ;; Constants and utilities
 
 (defn miniforge-home
-  "Return the miniforge home directory.
-   Resolution: MINIFORGE_HOME env > ~/.miniforge"
   []
   (or (System/getenv "MINIFORGE_HOME")
       (str (System/getProperty "user.home") "/.miniforge")))
 
 (def default-user-config-path
-  "Default location for user config file."
   (str (miniforge-home) "/config.edn"))
 
 (def ^:private default-config-resource-path
@@ -78,7 +75,6 @@
       {}))
 
 (def default-config
-  "Default configuration values loaded from resources/config/default-user-config.edn"
   (load-default-config))
 
 (defn read-edn-file
@@ -100,7 +96,6 @@
 ;; Repo-level configuration
 
 (def repo-config-dir-name
-  "Directory name for repo-level miniforge configuration."
   ".miniforge")
 
 (defn repo-config-path
@@ -300,7 +295,6 @@
 ;; Config saving and initialization
 
 (defn save-user-config
-  "Save user configuration to file."
   ([config] (save-user-config config default-user-config-path))
   ([config path]
    (write-edn-file path config)
@@ -329,7 +323,6 @@
      (save-user-config updated-config path))))
 
 (defn reset-user-config
-  "Reset user config to defaults."
   ([] (reset-user-config default-user-config-path))
   ([path]
    (save-user-config default-config path)))

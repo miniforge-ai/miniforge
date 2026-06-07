@@ -29,24 +29,20 @@
 ;; Enums and base types
 
 (def intent-types
-  "Valid spec intent types."
   [:refactor :feature :bugfix :general :chore :docs :test :performance])
 
 (def source-formats
-  "Supported spec file formats."
   [:yaml :edn :json :markdown])
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Composite schemas
 
 (def SpecIntent
-  "Schema for spec intent — what kind of work this is."
   [:map
    [:type (into [:enum] intent-types)]
    [:scope {:optional true} [:vector :string]]])
 
 (def PlanTask
-  "Schema for an individual task within :spec/plan-tasks."
   [:map
    [:task/id [:or :keyword :uuid]]
    [:task/description :string]
@@ -54,13 +50,11 @@
    [:task/dependencies {:optional true} [:vector [:or :keyword :uuid]]]])
 
 (def CodeArtifact
-  "Schema for a code artifact reference."
   [:map
    [:code/id [:or :string :uuid]]
    [:code/files {:optional true} [:vector :string]]])
 
 (def SpecProvenance
-  "Schema for spec source provenance metadata."
   [:map
    [:source-file :string]
    [:source-format (into [:enum] source-formats)]

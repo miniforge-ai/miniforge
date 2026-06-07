@@ -27,7 +27,6 @@
 ;; Base types and registries
 
 (def agent-roles
-  "Canonical agent roles ordered by implementation priority."
   [:planner :architect :implementer :tester :reviewer :sre :security :release :historian :operator])
 
 (def meta-agent-roles
@@ -35,23 +34,18 @@
   [:progress-monitor :test-quality :conflict-detector :resource-manager :evidence-collector])
 
 (def task-types
-  "Types of tasks that can be assigned to agents."
   [:plan :design :implement :test :review :deploy])
 
 (def task-statuses
-  "Possible states for a task."
   [:pending :running :completed :failed :blocked])
 
 (def artifact-types
-  "Types of artifacts produced by the system."
   [:spec :plan :adr :code :test :review :manifest :image :telemetry :incident])
 
 (def workflow-phases
-  "Phases in the outer loop SDLC cycle."
   [:plan :design :implement :verify :review :release :observe])
 
 (def workflow-statuses
-  "Possible states for a workflow."
   [:pending :running :paused :completed :failed :cancelled])
 
 (def registry

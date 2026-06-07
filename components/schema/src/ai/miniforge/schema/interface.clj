@@ -30,43 +30,174 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Schema re-exports (allow other components to reference schemas)
 
-(def Agent core/Agent)
-(def Task core/Task)
-(def Artifact core/Artifact)
-(def Workflow core/Workflow)
-(def TaskConstraints core/TaskConstraints)
-(def TaskResult core/TaskResult)
-(def ArtifactOrigin core/ArtifactOrigin)
-(def WorkflowBudget core/WorkflowBudget)
+(def Agent
+  "Malli schema (open `:map` — no `{:closed true}`, so extra keys are accepted)
+   for an AI agent: `:agent/id` (uuid) and `:agent/role` (enum) required;
+   optional capabilities, memory, config.
+   Pass to [[valid?]]/[[validate]]/[[validate-anomaly]] to check agent maps."
+  core/Agent)
 
-(def LogEntry logging/LogEntry)
-(def Scenario logging/Scenario)
+(def Task
+  "Malli `:map` schema for a unit of work: `:task/id`, `:task/type`,
+   `:task/status` required; optional agent, io artifacts, parent/children,
+   constraints, result. Use with the validation fns."
+  core/Task)
+
+(def Artifact
+  "Malli `:map` schema for a versioned work product with provenance:
+   `:artifact/id`, `:artifact/type`, `:artifact/version` required; optional
+   content, origin, lineage, metadata, created-at."
+  core/Artifact)
+
+(def Workflow
+  "Malli `:map` schema for an outer-loop SDLC delivery instance:
+   `:workflow/id` and `:workflow/status` required; optional name, phase,
+   priority, checkpoint, budget/consumed, spec-id, meta-agents."
+  core/Workflow)
+
+(def TaskConstraints
+  "Malli `:map` schema for task execution constraints: optional budget
+   (tokens/cost-usd/duration-ms), deadline, policies, max-iterations.
+   Embedded under `:task/constraints` in [[Task]]."
+  core/TaskConstraints)
+
+(def TaskResult
+  "Malli `:map` schema for task execution result: required `:outcome`
+   (`:success`/`:failure`/`:escalated`); optional error, signals, metrics.
+   Embedded under `:task/result` in [[Task]]."
+  core/TaskResult)
+
+(def ArtifactOrigin
+  "Malli `:map` schema for artifact provenance: optional `:intent-id`,
+   `:agent-id`, `:task-id`. Embedded under `:artifact/origin` in [[Artifact]]."
+  core/ArtifactOrigin)
+
+(def WorkflowBudget
+  "Malli `:map` schema for a workflow budget allocation: optional `:tokens`,
+   `:cost-usd`, `:duration-ms`. Used for both `:workflow/budget` and
+   `:workflow/consumed` in [[Workflow]]."
+  core/WorkflowBudget)
+
+(def LogEntry
+  "Malli `:map` schema for a structured EDN log entry. Required: `:log/id`,
+   `:log/timestamp`, `:log/level`, `:log/category`, `:log/event`. Optional:
+   message, context (`:ctx/*`), scenario, data, tracing, perf metrics."
+  logging/LogEntry)
+
+(def Scenario
+  "Malli `:map` schema for a test scenario definition: `:scenario/id`,
+   `:scenario/name`, `:scenario/created-at`, `:scenario/status` required;
+   optional tags, created-by, config, expected."
+  logging/Scenario)
 
 ;; Supervisory entity schemas
-(def WorkflowRun supervisory/WorkflowRun)
-(def PolicyEvaluation supervisory/PolicyEvaluation)
-(def PolicyViolation supervisory/PolicyViolation)
-(def AttentionItem supervisory/AttentionItem)
-(def Waiver supervisory/Waiver)
-(def EvidenceBundle supervisory/EvidenceBundle)
+(def WorkflowRun
+  "Malli open `:map` schema for a supervisory workflow run: `:workflow/id`,
+   `:workflow/key`, `:workflow/status`, `:workflow/phase`,
+   `:workflow/started-at` required. Extra keys pass through."
+  supervisory/WorkflowRun)
+
+(def PolicyEvaluation
+  "Malli open `:map` schema for a policy evaluation result: `:eval/id`,
+   `:eval/pr-id`, `:eval/result`, `:eval/rules-applied`, `:eval/evaluated-at`
+   required. Extra keys pass through."
+  supervisory/PolicyEvaluation)
+
+(def PolicyViolation
+  "Malli open `:map` schema for a single policy violation: `:violation/id`,
+   `:violation/eval-id`, `:violation/rule`, `:violation/category`,
+   `:violation/severity` required. Extra keys pass through."
+  supervisory/PolicyViolation)
+
+(def AttentionItem
+  "Malli open `:map` schema for an item needing human oversight:
+   `:attention/id`, `:attention/severity`, `:attention/summary`,
+   `:attention/source-type`, `:attention/source-id` required. Extra keys pass."
+  supervisory/AttentionItem)
+
+(def Waiver
+  "Malli open `:map` schema for a human waiver of a violation: `:waiver/id`,
+   `:waiver/eval-id`, `:waiver/actor`, `:waiver/reason`, `:waiver/created-at`
+   required. Extra keys pass through."
+  supervisory/Waiver)
+
+(def EvidenceBundle
+  "Malli open `:map` schema for evidence collected during a workflow:
+   `:evidence/id`, `:evidence/workflow-id`, `:evidence/entries` required.
+   Extra keys pass through."
+  supervisory/EvidenceBundle)
 
 ;; Enum value sets for programmatic access
-(def agent-roles core/agent-roles)
-(def task-types core/task-types)
-(def task-statuses core/task-statuses)
-(def artifact-types core/artifact-types)
-(def workflow-phases core/workflow-phases)
-(def workflow-statuses core/workflow-statuses)
-(def log-levels logging/log-levels)
-(def log-categories logging/log-categories)
-(def all-events logging/all-events)
-(def scenario-tags logging/scenario-tags)
+(def agent-roles
+  "Vector of canonical agent role keywords, ordered by implementation priority
+   (`:planner`, `:architect`, `:implementer`, ...)."
+  core/agent-roles)
+
+(def task-types
+  "Vector of task-type keywords (`:plan`, `:design`, `:implement`, `:test`,
+   `:review`, `:deploy`)."
+  core/task-types)
+
+(def task-statuses
+  "Vector of task-status keywords (`:pending`, `:running`, `:completed`,
+   `:failed`, `:blocked`)."
+  core/task-statuses)
+
+(def artifact-types
+  "Vector of artifact-type keywords (`:spec`, `:plan`, `:adr`, `:code`,
+   `:test`, `:review`, `:manifest`, `:image`, `:telemetry`, `:incident`)."
+  core/artifact-types)
+
+(def workflow-phases
+  "Vector of outer-loop SDLC phase keywords (`:plan`, `:design`, `:implement`,
+   `:verify`, `:review`, `:release`, `:observe`)."
+  core/workflow-phases)
+
+(def workflow-statuses
+  "Vector of workflow-status keywords (`:pending`, `:running`, `:paused`,
+   `:completed`, `:failed`, `:cancelled`)."
+  core/workflow-statuses)
+
+(def log-levels
+  "Vector of log severity keywords, most to least verbose (`:trace`, `:debug`,
+   `:info`, `:warn`, `:error`, `:fatal`)."
+  logging/log-levels)
+
+(def log-categories
+  "Vector of log category keywords (`:agent`, `:loop`, `:policy`, `:artifact`,
+   `:system`)."
+  logging/log-categories)
+
+(def all-events
+  "Vector of all known log-event keywords across the agent, loop, policy,
+   artifact, and system taxonomies."
+  logging/all-events)
+
+(def scenario-tags
+  "Vector of standard scenario-test tag keywords (`:canary`, `:shadow`,
+   `:regression`, ...)."
+  logging/scenario-tags)
 
 ;; Supervisory enum value sets
-(def eval-results supervisory/eval-results)
-(def violation-categories supervisory/violation-categories)
-(def violation-severities supervisory/violation-severities)
-(def attention-source-types supervisory/attention-source-types)
+(def eval-results
+  "Vector of policy-evaluation outcome keywords (`:pass`, `:fail`, `:warn`,
+   `:skip`)."
+  supervisory/eval-results)
+
+(def violation-categories
+  "Vector of policy-violation category keywords (`:style`, `:security`,
+   `:testing`, `:documentation`, `:architecture`, `:process`, `:budget`)."
+  supervisory/violation-categories)
+
+(def violation-severities
+  "Vector of severity keywords for violations and attention items (`:info`,
+   `:low`, `:medium`, `:high`, `:critical`)."
+  supervisory/violation-severities)
+
+(def attention-source-types
+  "Vector of source-type keywords that can raise attention items (`:workflow`,
+   `:policy`, `:agent`, `:system`, `:human`)."
+  supervisory/attention-source-types)
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Validation functions

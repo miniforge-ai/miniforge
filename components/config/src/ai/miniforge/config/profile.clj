@@ -43,7 +43,6 @@
 ;; Schema and path
 
 (def profile-path
-  "Default location for user profile."
   (str (user/miniforge-home) "/profile.edn"))
 
 

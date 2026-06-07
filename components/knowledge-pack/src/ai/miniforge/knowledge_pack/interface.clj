@@ -55,17 +55,98 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Schema re-exports.
 
-(def ZettelRef     schema-impl/ZettelRef)
-(def KnowledgePack schema-impl/KnowledgePack)
+(def ZettelRef
+  "Malli schema (`[:map {:closed false}]`) for the canonical
+   Decision-6 content-addressed reference to a zettel revision: the
+   `(:zettel/id, :zettel/revision-id, :zettel/digest)` triple. `id`
+   and `revision-id` are `uuid?`; `digest` is a 64-char lowercase
+   hex string. Pack manifests reference zettels only via this triple
+   so trust attaches to an immutable revision, never the mutable
+   logical id."
+  schema-impl/ZettelRef)
+
+(def KnowledgePack
+  "Malli schema (`[:map {:closed false}]`) for a knowledge-pack
+   manifest: a curated, content-addressed collection of zettel
+   revisions. Required keys: `:pack/id` (uuid), `:pack/uid`,
+   `:pack/title`, `:pack/version` (non-empty strings),
+   `:pack/zettels` (vector of `ZettelRef`, may be empty),
+   `:pack/created` (inst), `:pack/author` (string). Revision-keyed
+   identity (`:pack/revision-id` uuid, `:pack/digest` hex) and
+   Fleet-share fields (`:pack/description`, `:pack/dependencies`,
+   `:fleet/shareable`, `:fleet/share-scope`,
+   `:privacy/classification`, `:fleet/oss-version`, `:pack/modified`)
+   are optional; the constructors stamp the derived identity fields."
+  schema-impl/KnowledgePack)
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Operation re-exports.
 
-(def build-pack             pack-impl/build-pack)
-(def update-pack            pack-impl/update-pack)
-(def add-zettel             pack-impl/add-zettel)
-(def remove-zettel          pack-impl/remove-zettel)
-(def zettel->ref            pack-impl/zettel->ref)
-(def compute-digest         pack-impl/compute-digest)
-(def revision-id-from-digest pack-impl/revision-id-from-digest)
-(def verify-pack            verify-impl/verify-pack)
+(def build-pack
+  "Construct a fresh content-addressed pack manifest.
+   `(build-pack uid title version zettels & opts)`. `uid` / `title` /
+   `version` are strings; `zettels` is a sequence of zettel MAPS (not
+   triples) — each is projected via `zettel->ref`. Optional kwargs:
+   `:description`, `:author` (default \"user\"), `:dependencies`,
+   `:fleet/shareable`, `:fleet/share-scope`, `:privacy/classification`,
+   `:fleet/oss-version`. Returns a pack map with `:pack/digest` +
+   `:pack/revision-id` stamped automatically. Throws (via
+   `zettel->ref`) if any zettel lacks the required reference fields."
+  pack-impl/build-pack)
+
+(def update-pack
+  "Apply `changes` to a pack and re-stamp its revision identity.
+   `(update-pack pack changes)` -> updated pack map. Caller-supplied
+   `:pack/digest` / `:pack/revision-id` in `changes` are dropped;
+   `:pack/modified` is set; the result is re-stamped. Idempotent on
+   unchanged content (same content -> same digest -> same
+   revision-id); rotates the revision only when a content-bearing
+   field changes (`:pack/uid` / `:pack/title` / `:pack/version` /
+   `:pack/description` / `:pack/zettels` / `:pack/dependencies`)."
+  pack-impl/update-pack)
+
+(def add-zettel
+  "Append a zettel reference to a pack's manifest.
+   `(add-zettel pack zettel)` -> updated pack map. `zettel` is a
+   zettel MAP (projected via `zettel->ref`); the pack revision
+   rotates via `update-pack`. Throws if `zettel` lacks the required
+   reference fields."
+  pack-impl/add-zettel)
+
+(def remove-zettel
+  "Remove every reference to `zettel-id` from a pack's manifest.
+   `(remove-zettel pack zettel-id)` -> updated pack map. The revision
+   rotates only if a reference was actually removed."
+  pack-impl/remove-zettel)
+
+(def zettel->ref
+  "Pure projection from a zettel map to its content-addressed
+   reference triple. `(zettel->ref zettel)` -> `{:zettel/id
+   :zettel/revision-id :zettel/digest}`. Throws `ex-info` if any of
+   the three fields is missing (legacy zettels must be backfilled via
+   `knowledge.zettel/update-zettel` first)."
+  pack-impl/zettel->ref)
+
+(def compute-digest
+  "Pure: SHA-256 hex string of the pack's canonical-EDN content
+   projection. `(compute-digest pack)` -> 64-char hex string. Stable
+   across map-key reorderings and non-content metadata changes;
+   rotates when a content-bearing field changes."
+  pack-impl/compute-digest)
+
+(def revision-id-from-digest
+  "Pure: derive a stable UUID from a digest hex string.
+   `(revision-id-from-digest digest)` -> `java.util.UUID`. Two packs
+   with identical content projections land on the same revision-id."
+  pack-impl/revision-id-from-digest)
+
+(def verify-pack
+  "Verify a pack against a zettel store.
+   `(verify-pack pack lookup-fn)` where `lookup-fn` is
+   `(fn [zettel-id revision-id] -> zettel-map | nil)`. Returns a map
+   `{:valid? boolean, :pack/discrepancy (map | nil),
+   :ref/discrepancies vector}`. `:valid?` is true iff the
+   manifest-level discrepancy is nil AND the per-ref discrepancy
+   vector is empty; per-ref problems are accumulated, not
+   short-circuited."
+  verify-impl/verify-pack)

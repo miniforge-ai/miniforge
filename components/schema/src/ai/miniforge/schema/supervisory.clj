@@ -19,19 +19,15 @@
 ;; Enums for supervisory entities
 
 (def eval-results
-  "Possible outcomes of a policy evaluation."
   [:pass :fail :warn :skip])
 
 (def violation-categories
-  "Categories of policy violations."
   [:style :security :testing :documentation :architecture :process :budget])
 
 (def violation-severities
-  "Severity levels for violations and attention items."
   [:info :low :medium :high :critical])
 
 (def attention-source-types
-  "Source types that can generate attention items."
   [:workflow :policy :agent :system :human])
 
 ;------------------------------------------------------------------------------ Layer 0a

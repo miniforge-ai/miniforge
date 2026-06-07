@@ -31,9 +31,24 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Protocol re-exports
 
-(def EvidenceBundle p/EvidenceBundle)
-(def ProvenanceTracer p/ProvenanceTracer)
-(def SemanticValidator p/SemanticValidator)
+(def EvidenceBundle
+  "Protocol for creating, storing, and querying evidence bundles.
+   Methods: create-bundle, get-bundle, get-bundle-by-workflow,
+   query-bundles, validate-bundle, export-bundle.
+   Implemented by the manager returned from create-evidence-manager."
+  p/EvidenceBundle)
+
+(def ProvenanceTracer
+  "Protocol for tracing artifact provenance chains.
+   Methods: query-provenance, trace-artifact-chain, query-intent-mismatches.
+   Implemented by the manager returned from create-evidence-manager."
+  p/ProvenanceTracer)
+
+(def SemanticValidator
+  "Protocol for semantic intent validation.
+   Methods: validate-intent, analyze-terraform-plan, analyze-kubernetes-manifest.
+   Implemented by the manager returned from create-evidence-manager."
+  p/SemanticValidator)
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Evidence Bundle Manager Creation

@@ -28,16 +28,55 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Schema re-exports
 
-(def SpecPayload schema/SpecPayload)
-(def SpecInput schema/SpecInput)
-(def SpecIntent schema/SpecIntent)
-(def SpecProvenance schema/SpecProvenance)
-(def PlanTask schema/PlanTask)
-(def CodeArtifact schema/CodeArtifact)
+(def SpecPayload
+  "Malli `[:map ...]` schema for a normalized spec payload — the canonical
+   :spec/* format the workflow engine consumes. Required (non-optional) keys:
+   :spec/title, :spec/description, :spec/intent, :spec/constraints, :spec/tags,
+   :spec/workflow-version, :spec/raw-data — normalize-spec supplies defaults for
+   the ones the user omits. Remaining :spec/* keys (e.g. :spec/workflow-type,
+   :spec/acceptance-criteria, :spec/provenance) are optional. Pass to malli.core
+   fns or `valid-spec-payload?`."
+  schema/SpecPayload)
+
+(def SpecInput
+  "Malli `[:map ...]` schema for raw user spec input in :spec/* format,
+   before normalization. Required keys :spec/title and :spec/description;
+   all other :spec/* keys plus :workflow/type and :workflow/version are
+   optional. Pass to malli.core fns or `valid-spec-input?`."
+  schema/SpecInput)
+
+(def SpecIntent
+  "Malli `[:map ...]` schema for :spec/intent — the kind of work. Requires
+   :type (one of `intent-types`); optional :scope is a vector of strings."
+  schema/SpecIntent)
+
+(def SpecProvenance
+  "Malli `[:map ...]` schema for :spec/provenance source metadata: requires
+   :source-file (string), :source-format (one of `source-formats`),
+   :loaded-at (inst), :file-size (int). Attached by `parse-spec-file`."
+  schema/SpecProvenance)
+
+(def PlanTask
+  "Malli `[:map ...]` schema for one task within :spec/plan-tasks. Requires
+   :task/id (keyword or uuid) and :task/description (string); optional
+   :task/type (keyword) and :task/dependencies (vector of keyword/uuid)."
+  schema/PlanTask)
+
+(def CodeArtifact
+  "Malli `[:map ...]` schema for a code artifact reference. Requires
+   :code/id (string or uuid); optional :code/files is a vector of strings."
+  schema/CodeArtifact)
 
 ;; Enum values
-(def intent-types schema/intent-types)
-(def source-formats schema/source-formats)
+(def intent-types
+  "Vector of valid :spec/intent :type keywords:
+   [:refactor :feature :bugfix :general :chore :docs :test :performance]."
+  schema/intent-types)
+
+(def source-formats
+  "Vector of supported spec file format keywords:
+   [:yaml :edn :json :markdown]."
+  schema/source-formats)
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Parsing
