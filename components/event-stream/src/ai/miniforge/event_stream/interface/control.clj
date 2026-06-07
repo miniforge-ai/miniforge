@@ -24,8 +24,45 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Control actions
 
-(def create-control-action control/create-control-action)
-(def authorize-action control/authorize-action)
-(def execute-control-action! control/execute-control-action!)
-(def requires-approval? control/requires-approval?)
-(def execute-control-action-with-approval! control/execute-control-action-with-approval!)
+(def create-control-action
+  "Build a structured control-action map from an action-type keyword
+   (:pause, :resume, :retry, :rollback, :cancel, :quarantine,
+   :adjust-budget, :emergency-stop, :gate-override, ...), a target map
+   ({:target-type :workflow|:agent|:fleet :target-id ...}), and a
+   requester map ({:principal :role :listener-id}). Returns a map with
+   :action/id, :action/type, :action/target, :action/requester,
+   :action/status :pending, :action/created-at, plus optional
+   :action/justification and :action/parameters."
+  control/create-control-action)
+
+(def authorize-action
+  "Check RBAC authorization for a control action against role
+   definitions. Returns {:authorized? true :reason string} when the
+   role permits the action on the target category, else {:authorized?
+   false :reason string :anomaly map} (unknown role / unknown target
+   type / forbidden action)."
+  control/authorize-action)
+
+(def execute-control-action!
+  "Authorize then execute a control action. Emits
+   :control-action/requested before and :control-action/executed after.
+   On RBAC denial returns {:status :denied :reason string :anomaly map}
+   and runs no execution-fn. On authorization, runs execution-fn and
+   returns its result wrapped via response/success, or
+   response/failure on a thrown exception."
+  control/execute-control-action!)
+
+(def requires-approval?
+  "Return true when the given action-type keyword requires multi-party
+   approval (:gate-override or :budget-escalation), else false."
+  control/requires-approval?)
+
+(def execute-control-action-with-approval!
+  "Execute a control action, gating on approval first. When the action
+   type requires approval, creates an approval request, emits
+   :approval/requested, and returns {:status :awaiting-approval
+   :approval/id ... :approval/required-signers ... :approval/quorum
+   ...}. Otherwise delegates to execute-control-action! and returns its
+   result map. approval-opts: :required-signers, :quorum,
+   :approval-manager."
+  control/execute-control-action-with-approval!)

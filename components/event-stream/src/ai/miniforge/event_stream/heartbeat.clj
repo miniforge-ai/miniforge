@@ -83,8 +83,6 @@
                           :error (ex-message e)}})))))
 
 (defn start-heartbeat!
-  "Start :workflow/phase-heartbeat emission for phase-id.
-   opts: {:interval-ms long}. Returns an opaque stop handle."
   ([event-stream workflow-id phase-id]
    (start-heartbeat! event-stream workflow-id phase-id {}))
   ([event-stream workflow-id phase-id opts]
@@ -130,11 +128,6 @@
         :heartbeat/seq-num    seq-num}))))
 
 (defn stop-heartbeat!
-  "Stop a heartbeat scheduler returned by start-heartbeat!. Nil-safe.
-
-   Cancels the periodic ScheduledFuture directly (does NOT interrupt
-   an in-flight tick by default — pass `:may-interrupt? true` to
-   escalate), then shuts down the backing executor."
   ([handle]
    (stop-heartbeat! handle {}))
   ([handle {:keys [may-interrupt?] :or {may-interrupt? false}}]
