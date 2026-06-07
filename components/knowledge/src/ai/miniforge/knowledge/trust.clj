@@ -68,17 +68,6 @@
 ;; Pack trust schema
 
 (defn make-pack-ref
-  "Create a pack reference with trust information.
-
-   Arguments:
-   - pack-id       - Unique identifier for the pack
-   - trust-level   - :trusted, :untrusted, or :tainted
-   - authority     - :authority/instruction or :authority/data
-
-   Options:
-   - :dependencies - Vector of pack-ids this pack depends on
-
-   Returns pack reference map."
   [pack-id trust-level authority & {:keys [dependencies]}]
   {:pack-id pack-id
    :trust-level trust-level
@@ -123,15 +112,6 @@
       (schema/valid))))
 
 (defn compute-inherited-trust-level
-  "Rule 2: Trust level inheritance.
-
-   When pack A includes content from pack B, the combined content
-   MUST be assigned the lower trust level.
-
-   Arguments:
-   - pack-refs - Collection of pack references being combined
-
-   Returns the lowest trust level from all packs."
   [pack-refs]
   (let [levels (map :trust-level pack-refs)]
     (lowest-trust-level levels)))
@@ -259,20 +239,6 @@
     error))
 
 (defn validate-transitive-trust
-  "Validate all transitive trust rules for a pack graph.
-
-   Checks:
-   1. Instruction authority is not transitive
-   2. Trust level inheritance is correct
-   3. Cross-trust references are valid (no cycles, missing deps)
-   4. Tainted content is isolated from instruction authority
-
-   Arguments:
-   - pack-graph - Map of pack-id -> pack-ref
-
-   Returns:
-   - {:valid? true :packs [...]} if all rules pass
-   - {:valid? false :errors [...]} if any rule fails"
   [pack-graph]
   ;; Rule 3: Validate cross-trust references first (graph structure)
   (let [graph-validation (validate-cross-trust-references pack-graph)]

@@ -168,17 +168,6 @@
    files))
 
 (defn load-rules-from-directory
-  "Load all .mdc rule files from a directory into the knowledge store.
-
-   Arguments:
-   - knowledge-store - KnowledgeStore instance
-   - rules-dir       - Path to .cursor/rules directory (string or File)
-
-   Returns:
-   - {:loaded int :failed int :zettels [zettel...]}
-
-   Example:
-     (load-rules-from-directory store \".cursor/rules\")"
   [knowledge-store rules-dir]
   (let [rules-root (io/file rules-dir)
         mdc-files (find-mdc-files rules-root)
@@ -189,17 +178,6 @@
         (assoc :zettels (:items result)))))
 
 (defn load-project-docs
-  "Load project documentation files (agents.md, claude.md, etc.) into knowledge store.
-
-   Arguments:
-   - knowledge-store - KnowledgeStore instance
-   - project-root    - Path to project root directory (string or File)
-
-   Returns:
-   - {:loaded int :failed int :files [string...]}
-
-   Example:
-     (load-project-docs store \".\")"
   [knowledge-store project-root]
   (let [root (io/file project-root)
         doc-files ["agents.md" "claude.md" ".clauderc" "claude_instructions.md"]

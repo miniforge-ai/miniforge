@@ -241,13 +241,11 @@
     (assoc stamped :zettel/trust-level next-trust)))
 
 (defn zettel-summary
-  "Extract a lightweight summary from a zettel."
   [zettel]
   (select-keys zettel [:zettel/id :zettel/uid :zettel/title
                        :zettel/type :zettel/dewey :zettel/tags]))
 
 (defn validate-zettel
-  "Validate a zettel against the schema."
   [zettel]
   (if (m/validate schema/Zettel zettel)
     {:valid? true :errors nil}
@@ -257,20 +255,6 @@
 ;; Link management
 
 (defn create-link
-  "Create a link to another zettel.
-
-   Arguments:
-   - target-id  - UUID of the target zettel
-   - type       - Link type keyword
-   - rationale  - Explanation of why this connection exists (required!)
-
-   Options:
-   - :strength        - Relevance weight 0.0-1.0
-   - :bidirectional?  - Whether to create backlink
-
-   Example:
-     (create-link target-uuid :extends
-                  'Adds namespace details to the base Clojure rule')"
   [target-id type rationale & {:keys [strength bidirectional?]}]
   (cond-> {:link/target-id target-id
            :link/type type
@@ -279,7 +263,6 @@
     (some? bidirectional?) (assoc :link/bidirectional? bidirectional?)))
 
 (defn add-link
-  "Add a link to a zettel."
   [zettel link]
   (let [links (get zettel :zettel/links [])]
     (-> zettel
@@ -287,7 +270,6 @@
         (assoc :zettel/modified (java.util.Date.)))))
 
 (defn remove-link
-  "Remove a link by target ID."
   [zettel target-id]
   (let [links (get zettel :zettel/links [])]
     (-> zettel
@@ -310,8 +292,6 @@
                   (get-links zettel :incoming))))
 
 (defn compute-backlinks
-  "Given a collection of zettels, compute backlinks for each.
-   Returns map of zettel-id -> [source-ids...]"
   [zettels]
   (reduce
    (fn [acc zettel]
@@ -348,7 +328,6 @@
     (yaml/generate-string meta :dumper-options {:flow-style :block})))
 
 (defn zettel->markdown
-  "Serialize a zettel to Markdown with YAML frontmatter."
   [zettel]
   (str "---\n"
        (format-frontmatter zettel)
@@ -390,8 +369,6 @@
         (catch Exception _e2 nil)))))
 
 (defn markdown->zettel
-  "Parse a Markdown file with YAML frontmatter into a zettel.
-   Returns nil if parsing fails."
   [markdown-str]
   (when-let [matches (re-find #"(?s)^---\n(.+?)\n---\n\n?(.*)$" markdown-str)]
     (let [[_ frontmatter-str content] matches

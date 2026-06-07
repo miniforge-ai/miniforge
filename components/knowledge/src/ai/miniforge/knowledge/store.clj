@@ -123,14 +123,6 @@
       (vec limited))))
 
 (defn create-store
-  "Create an in-memory knowledge store.
-
-   Options:
-   - :logger - Logger instance for structured logging
-
-   Example:
-     (create-store)
-     (create-store {:logger my-logger})"
   [& [{:keys [logger]}]]
   (->InMemoryStore
    (atom {})
@@ -243,18 +235,6 @@
       (vec limited))))
 
 (defn create-file-backed-store
-  "Create a file-backed persistent knowledge store.
-
-   On startup, scans the directory and loads all .edn files into
-   in-memory indices for fast querying. Writes are atomic (temp + rename).
-
-   Options:
-   - :path   - Base directory (default: ~/.miniforge/knowledge)
-   - :logger - Logger instance
-
-   Example:
-     (create-file-backed-store)
-     (create-file-backed-store {:path \"/repo/.miniforge/knowledge\"})"
   [& [{:keys [path logger]}]]
   (let [base-path (expand-path (or path (str (config/miniforge-home) "/knowledge")))
         _ (ensure-directory base-path)
@@ -273,13 +253,6 @@
 ;; Query operations
 
 (defn find-related
-  "Find zettels related to a given zettel through links.
-
-   Options:
-   - :max-hops - Maximum link traversal depth (default 1)
-   - :direction - :outgoing, :incoming, or :both (default :both)
-
-   Returns vector of related zettels sorted by hop distance."
   [store zettel-or-id & {:keys [max-hops direction] :or {max-hops 1 direction :both}}]
   (let [start-zettel (if (map? zettel-or-id)
                        zettel-or-id
@@ -307,8 +280,6 @@
                    (into results new-zettels))))))))
 
 (defn search
-  "Full-text search across zettel titles and content.
-   Returns matching zettels with basic relevance scoring."
   [store text]
   (let [terms (str/split (str/lower-case text) #"\s+")
         score-fn (fn [zettel]
@@ -361,7 +332,6 @@
     :max-zettels 15}})
 
 (defn get-agent-manifest
-  "Get the knowledge injection manifest for an agent role."
   [role]
   (get default-agent-manifests role
        {:agent-role role :types [:rule] :max-zettels 10}))
@@ -465,16 +435,6 @@
      :manifest manifest-entries}))
 
 (defn inject-knowledge
-  "Retrieve relevant knowledge for an agent based on role and context.
-
-   Arguments:
-   - store      - Knowledge store
-   - agent-role - Agent role keyword
-   - context    - Optional map with :task-type, :tags, etc.
-
-   Returns vector of zettels relevant to the agent.
-
-   See also: inject-knowledge-with-manifest for zettels + selection manifest."
   [store agent-role & [context]]
   (:zettels (inject-knowledge-with-manifest store agent-role context)))
 
@@ -494,13 +454,6 @@
        "\n"))
 
 (defn format-for-prompt
-  "Format a collection of zettels as a markdown knowledge block for LLM context.
-
-   Arguments:
-   - zettels - Collection of zettels to format
-   - role    - Agent role keyword (for header)
-
-   Returns markdown string, or nil if no zettels."
   [zettels role]
   (when (seq zettels)
     (str (messages/t :prompt/header {:role (name role)})
