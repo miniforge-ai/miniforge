@@ -700,15 +700,15 @@
 (deftest assemble-within-budget-test
   (testing "uncatalogued model (nil window) → never sheds, files stay inlined"
     (let [r (assemble-within-budget "do the thing" [(big-file 100)]
-                                    "system" "no-such-model")]
+                                    "system" "no-such-model" 0)]
       (is (false? (:shed? r)))
       (is (false? (:over-after-shed? r)))
       (is (str/includes? (:user-prompt r) "big.clj"))))
 
-  (testing "a small prompt under the window is not shed"
+  (testing "a small prompt under the window is not shed (reserve 0)"
     ;; codellama-34b → 16384-token window; a tiny prompt fits
     (let [r (assemble-within-budget "do the thing" [(big-file 100)]
-                                    "system" "codellama-34b")]
+                                    "system" "codellama-34b" 0)]
       (is (false? (:shed? r)))
       (is (str/includes? (:user-prompt r) "big.clj"))))
 
@@ -716,7 +716,7 @@
             path + context_read hint stay, and the prompt now fits"
     ;; ~300k chars of file content >> 16384 tokens; spec+system alone fits
     (let [r (assemble-within-budget "do the thing" [(big-file 300000)]
-                                    "system" "codellama-34b")]
+                                    "system" "codellama-34b" 0)]
       (is (true? (:shed? r)))
       (is (false? (:over-after-shed? r)))
       (is (= 1 (:file-count r)))
@@ -729,9 +729,22 @@
       ;; ...and keeps the already-satisfied evidence-bundle instructions
       (is (str/includes? (:user-prompt r) ":already-satisfied"))))
 
+  (testing "the reserve fires the shed earlier: a prompt that fits the full
+            window sheds once the reserve drops the effective window below it"
+    ;; ~20k chars (~5k tokens) fits the 16384 window with reserve 0, but a
+    ;; 13000-token reserve → effective ~3384 → shed fires. This is the
+    ;; 2026-06-07 fix: reserve headroom for the unmeasured CLI baseline.
+    (let [files [(big-file 20000)]
+          no-reserve (assemble-within-budget "do it" files "system" "codellama-34b" 0)
+          reserved   (assemble-within-budget "do it" files "system" "codellama-34b" 13000)]
+      (is (false? (:shed? no-reserve)))
+      (is (true? (:shed? reserved)))
+      (is (= 13000 (:reserve reserved)))
+      (is (= (- 16384 13000) (:effective-window reserved)))))
+
   (testing "irreducible overflow (huge spec, no files) → over-after-shed?, no shed"
     (let [r (assemble-within-budget (apply str (repeat 300000 \y)) []
-                                    "system" "codellama-34b")]
+                                    "system" "codellama-34b" 0)]
       (is (false? (:shed? r)))
       (is (true? (:over-after-shed? r))))))
 

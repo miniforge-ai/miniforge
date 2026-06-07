@@ -29,6 +29,7 @@
    [ai.miniforge.agent.specialized :as specialized]
    [ai.miniforge.agent.submission-recovery :as submission-recovery]
    [ai.miniforge.anomaly.interface :as anomaly]
+   [ai.miniforge.event-stream.interface :as es]
    [ai.miniforge.schema.interface :as schema]
    [ai.miniforge.logging.interface :as log]
    [ai.miniforge.llm.interface :as llm]
@@ -202,17 +203,25 @@
    the context MCP cache (seeded separately in invoke-planner-session), so
    the agent keeps a query surface, and the section's already-satisfied
    evidence-bundle instructions are preserved. Returns
-   {:user-prompt :shed? :over-after-shed? :window :est-full :est-final
-    :file-count}; :over-after-shed? marks an irreducible overflow."
-  [spec-text existing-files effective-system model]
-  (let [window   (llm/context-window-for-model-id model)
-        est      (fn [user] (:estimated-input-tokens
-                             (llm/prompt-size-telemetry effective-system user)))
-        full     (build-user-prompt spec-text existing-files)
-        est-full (est full)
-        base     {:window window :est-full est-full :file-count (count existing-files)}]
+   {:user-prompt :shed? :over-after-shed? :window :reserve :effective-window
+    :est-full :est-final :file-count}; :over-after-shed? marks an
+    irreducible overflow.
+
+   `reserve` is headroom kept below the real window: the estimate covers
+   only miniforge's assembled prompt, while the agent CLI adds its own
+   unmeasured baseline (system prompt, tools, host plugins/skills) on top.
+   The shed/bail fire against `effective-window = window - reserve`."
+  [spec-text existing-files effective-system model reserve]
+  (let [window     (llm/context-window-for-model-id model)
+        effective  (when window (max 0 (- window reserve)))
+        est        (fn [user] (:estimated-input-tokens
+                               (llm/prompt-size-telemetry effective-system user)))
+        full       (build-user-prompt spec-text existing-files)
+        est-full   (est full)
+        base       {:window window :reserve reserve :effective-window effective
+                    :est-full est-full :file-count (count existing-files)}]
     (cond
-      (or (nil? window) (< est-full window))
+      (or (nil? effective) (< est-full effective))
       (merge base {:user-prompt full :shed? false :over-after-shed? false :est-final est-full})
 
       (empty? existing-files)            ; nothing left to shed — irreducibly over
@@ -222,7 +231,31 @@
       (let [shed (build-user-prompt spec-text existing-files format-existing-files-manifest)
             est-shed (est shed)]
         (merge base {:user-prompt shed :shed? true
-                     :over-after-shed? (>= est-shed window) :est-final est-shed})))))
+                     :over-after-shed? (>= est-shed effective) :est-final est-shed})))))
+
+(defn- emit-prompt-size!
+  "Emit an :agent/prompt-size workflow event recording the planner's
+   pre-flight budget (N12 §3) so estimate-vs-window is visible/queryable —
+   the logger isn't surfaced in headless runs. Safe no-op without a stream."
+  [context budget]
+  (when-let [stream (or (:event-stream context) (:execution/event-stream context))]
+    (when-let [wf-id (or (:execution/id context) (:workflow/id context))]
+      (try
+        (es/publish!
+         stream
+         (-> (es/create-envelope stream :agent/prompt-size wf-id
+                                 (str "planner prompt ~" (:est-full budget)
+                                      " est tokens / window " (:window budget)
+                                      (when (:shed? budget) " (shed to manifest)")))
+             (assoc :agent/id :planner
+                    :prompt/estimated-input-tokens (:est-full budget)
+                    :prompt/context-window (:window budget)
+                    :prompt/reserve (:reserve budget)
+                    :prompt/effective-window (:effective-window budget)
+                    :prompt/shed? (:shed? budget)
+                    :prompt/estimated-after-shed (:est-final budget)
+                    :prompt/file-count (:file-count budget))))
+        (catch Exception _ nil)))))
 
 (defn spec->text
   "Convert a spec to text for the LLM."
@@ -668,9 +701,11 @@
               existing-files (:task/existing-files input)
               effective-system (str @planner-system-prompt
                                     (get input :task/behavior-addendum ""))
-              budget (assemble-within-budget spec-text existing-files
-                                             effective-system (:model config))
+              budget (assemble-within-budget
+                      spec-text existing-files effective-system (:model config)
+                      (get @planner-prompt-data :prompt/context-window-reserve-tokens 50000))
               user-prompt (:user-prompt budget)]
+          (emit-prompt-size! context budget)
           (when (:shed? budget)
             (log/info logger :planner :planner/context-shed
                       {:data {:file-count (:file-count budget)

@@ -31,6 +31,16 @@
   :max-total-ms                600000
   :min-activity-interval-ms    3000}
 
+ ;; Headroom reserved below the model's context window when deciding whether
+ ;; to shed the inlined existing-files section (N12 §5). The shed/bail
+ ;; estimate covers only miniforge's assembled prompt (system + user); the
+ ;; agent CLI adds its own baseline on top (system prompt, tool schemas,
+ ;; host plugins/skills) that we can't measure. This reserve fires the shed
+ ;; before that unmeasured baseline pushes the true total over the window.
+ ;; 2026-06-07 review-redirect-convergence dogfood: miniforge prompt was
+ ;; <200k so the shed didn't fire, but actual input hit 215k and overflowed.
+ :prompt/context-window-reserve-tokens 50000
+
  ;; Submission-retry runs after the main planner turn already produced
  ;; useful prose but failed to land the plan as `.miniforge/plan.edn`.
  ;; Caps and turn budget are tight on purpose: the only legitimate work
