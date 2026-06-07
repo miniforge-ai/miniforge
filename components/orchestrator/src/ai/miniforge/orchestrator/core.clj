@@ -287,16 +287,7 @@
 
 (defn create-control-plane
   "Create a control plane (orchestrator) with all components.
-
-   Arguments:
-   - llm-backend      - LLM backend for agent execution
-   - knowledge-store  - Knowledge store for injection/learning
-   - artifact-store   - Artifact store for results
-
-   Options:
-   - :config   - Override default configuration
-   - :logger   - Logger instance
-   - :operator - Operator instance for meta-loop integration"
+   See ai.miniforge.orchestrator.interface for the full argument/option contract."
   [llm-backend knowledge-store artifact-store & [{:keys [config logger operator]}]]
   (let [merged-config (merge default-config config)
         router (create-router merged-config)

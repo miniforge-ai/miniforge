@@ -31,39 +31,139 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Schemas (re-exports)
 
-(def Spec             schema/Spec)
-(def WorkflowRun      schema/WorkflowRun)
-(def AgentSession     schema/AgentSession)
-(def PrFleetEntry     schema/PrFleetEntry)
-(def PolicyEvaluation schema/PolicyEvaluation)
-(def PolicyViolation  schema/PolicyViolation)
-(def AttentionItem    schema/AttentionItem)
-(def InterventionRequest schema/InterventionRequest)
+(def Spec
+  "Malli `[:map ...]` schema (open) for a long-lived Spec — the operator's
+   top-level unit of work that owns N WorkflowRuns over its lifetime
+   (N5-delta-3 §3.1, §5.1)."
+  schema/Spec)
+
+(def WorkflowRun
+  "Malli `[:map ...]` schema (open) for a WorkflowRun — one concrete
+   execution instance of a workflow (N5-delta-1 §3.1)."
+  schema/WorkflowRun)
+
+(def AgentSession
+  "Malli `[:map ...]` schema (open) for an AgentSession — an external or
+   internal agent observable to the supervisory plane (N5-delta-1 §3.3)."
+  schema/AgentSession)
+
+(def PrFleetEntry
+  "Malli `[:map ...]` schema (open) for a PrFleetEntry — a pull request in
+   the supervisory PR fleet view, with optional pre-computed readiness/risk/
+   policy/recommendation scores (N5-delta-2)."
+  schema/PrFleetEntry)
+
+(def PolicyEvaluation
+  "Malli `[:map ...]` schema (open) for a PolicyEvaluation — an immutable
+   record of a completed policy evaluation (N5-delta-1 §3.1)."
+  schema/PolicyEvaluation)
+
+(def PolicyViolation
+  "Malli `[:map ...]` schema (open) for a PolicyViolation — a single rule
+   failure within a PolicyEvaluation (N5-delta-1 §3.1)."
+  schema/PolicyViolation)
+
+(def AttentionItem
+  "Malli `[:map ...]` schema (open) for an AttentionItem — a derived
+   supervisory signal (N5-delta-1 §3.1 + §5)."
+  schema/AttentionItem)
+
+(def InterventionRequest
+  "Malli `[:map ...]` schema (open) for an InterventionRequest — a bounded
+   supervisory control request (N5 supervisory delta §3.1)."
+  schema/InterventionRequest)
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Lifecycle
 
-(def create  core/create)
-(def start!  core/start!)
-(def stop!   core/stop!)
-(def attach! core/attach!)
-(def attached? core/attached?)
-(def ensure-attached! core/ensure-attached!)
+(def create
+  "Build a fresh supervisory-state component instance bound to `stream`.
+   Returns an atom holding the component state; does not subscribe yet —
+   call `start!` to begin consuming events."
+  core/create)
+
+(def start!
+  "Subscribe the component to its stream so it begins materializing the
+   entity table from live events. Idempotent — repeat calls are no-ops.
+   Returns the component. No startup replay of the event log."
+  core/start!)
+
+(def stop!
+  "Unsubscribe the component from its stream. The entity table is retained
+   so it stays queryable post-shutdown. Returns the component."
+  core/stop!)
+
+(def attach!
+  "Create a component bound to `stream` and start it in one step
+   (create + start!). Returns the started component."
+  core/attach!)
+
+(def attached?
+  "True when supervisory-state is already subscribed to `stream`; false
+   otherwise. Returns boolean."
+  core/attached?)
+
+(def ensure-attached!
+  "Attach supervisory-state to `stream` exactly once, synchronized per
+   stream so concurrent callers cannot double-attach. Returns a new
+   component when an attachment is created; otherwise nil."
+  core/ensure-attached!)
 
 ;------------------------------------------------------------------------------ Layer 2
 ;; Query API (reads only; consumers should prefer subscribing to
 ;; `:supervisory/*-upserted` events on the event stream)
 
-(def table         core/table)
-(def specs         core/specs)
-(def workflows     core/workflows)
-(def agents        core/agents)
-(def prs           core/prs)
-(def policy-evals  core/policy-evals)
-(def attention     core/attention)
-(def tasks         core/tasks)
-(def decisions     core/decisions)
-(def interventions core/interventions)
+(def table
+  "Current entity table snapshot for `component` (pure read). Returns the
+   EntityTable map: keys `:specs :workflows :agents :prs :policy-evals
+   :attention :tasks :decisions :interventions :dependencies`, each a map
+   of id -> entity."
+  core/table)
+
+(def specs
+  "All Spec entities in `component`. Returns a seq of Spec maps (empty when
+   none)."
+  core/specs)
+
+(def workflows
+  "All WorkflowRun entities in `component`. Returns a seq of WorkflowRun
+   maps (empty when none)."
+  core/workflows)
+
+(def agents
+  "All AgentSession entities in `component`. Returns a seq of AgentSession
+   maps (empty when none)."
+  core/agents)
+
+(def prs
+  "All PrFleetEntry entities in `component`. Returns a seq of PrFleetEntry
+   maps (empty when none)."
+  core/prs)
+
+(def policy-evals
+  "All PolicyEvaluation entities in `component`. Returns a seq of
+   PolicyEvaluation maps (empty when none)."
+  core/policy-evals)
+
+(def attention
+  "All derived AttentionItem entities in `component`. Returns a seq of
+   AttentionItem maps (empty when none)."
+  core/attention)
+
+(def tasks
+  "All TaskNode entities in `component`. Returns a seq of TaskNode maps
+   (empty when none)."
+  core/tasks)
+
+(def decisions
+  "All DecisionCard entities in `component`. Returns a seq of DecisionCard
+   maps (empty when none)."
+  core/decisions)
+
+(def interventions
+  "All InterventionRequest entities in `component`. Returns a seq of
+   InterventionRequest maps (empty when none)."
+  core/interventions)
 
 (comment
   (require '[ai.miniforge.event-stream.interface :as es])

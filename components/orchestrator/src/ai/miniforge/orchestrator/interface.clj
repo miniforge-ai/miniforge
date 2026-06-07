@@ -26,10 +26,37 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Protocol re-exports
 
-(def Orchestrator proto/Orchestrator)
-(def TaskRouter proto/TaskRouter)
-(def BudgetManager proto/BudgetManager)
-(def KnowledgeCoordinator proto/KnowledgeCoordinator)
+(def Orchestrator
+  "Protocol satisfied by control-plane instances.
+
+   Defines the workflow lifecycle contract: execute-workflow,
+   get-workflow-status, cancel-workflow, get-workflow-results,
+   pause-workflow, resume-workflow. Re-exported so callers can
+   extend or check satisfies? against the published contract."
+  proto/Orchestrator)
+
+(def TaskRouter
+  "Protocol satisfied by task-router instances.
+
+   Defines route-task and can-handle?, mapping task types to agent
+   roles. Re-exported for extension and satisfies? checks."
+  proto/TaskRouter)
+
+(def BudgetManager
+  "Protocol satisfied by budget-manager instances.
+
+   Defines track-usage, check-budget, and set-budget for tracking
+   and enforcing per-workflow resource budgets. Re-exported for
+   extension and satisfies? checks."
+  proto/BudgetManager)
+
+(def KnowledgeCoordinator
+  "Protocol satisfied by knowledge-coordinator instances.
+
+   Defines inject-for-agent, capture-execution-learning, and
+   should-promote-learning? for knowledge injection and learning
+   capture. Re-exported for extension and satisfies? checks."
+  proto/KnowledgeCoordinator)
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Orchestrator creation

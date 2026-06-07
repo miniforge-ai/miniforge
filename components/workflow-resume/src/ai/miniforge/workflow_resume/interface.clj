@@ -41,20 +41,105 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Pure extractors
 
-(def completed?                  core/completed?)
-(def failed?                     core/failed?)
-(def paused?                     core/paused?)
-(def extract-completed-dag-tasks core/extract-completed-dag-tasks)
-(def extract-completed-dag-artifacts core/extract-completed-dag-artifacts)
-(def extract-workspace-checkpoints core/extract-workspace-checkpoints)
-(def extract-dag-pause-info      core/extract-dag-pause-info)
-(def extract-completed-phases    core/extract-completed-phases)
-(def extract-phase-results       core/extract-phase-results)
-(def find-workflow-spec          core/find-workflow-spec)
+(def completed?
+  "True when a reconstructed workflow context completed successfully.
+   Arg: the context map from `reconstruct-context`. Returns boolean."
+  core/completed?)
+
+(def failed?
+  "True when a reconstructed workflow context has failed.
+   Arg: the context map from `reconstruct-context`. Returns boolean."
+  core/failed?)
+
+(def paused?
+  "True when a reconstructed workflow context reflects a paused DAG.
+   Arg: the context map from `reconstruct-context`. Returns boolean."
+  core/paused?)
+
+(def extract-completed-dag-tasks
+  "Task IDs that finished successfully as `:dag/task-completed` events.
+   Arg: a sequence of events. Returns a set of task-id values."
+  core/extract-completed-dag-tasks)
+
+(def extract-completed-dag-artifacts
+  "Artifacts recorded on successful `:dag/task-completed` events.
+   Arg: a sequence of events. Returns a vector of artifact maps
+   (empty when none)."
+  core/extract-completed-dag-artifacts)
+
+(def extract-workspace-checkpoints
+  "Workspace persistence records emitted at phase boundaries, used so a
+   failed repair loop can resume from the last persisted branch/bundle
+   rather than the spec base. Arg: a sequence of events. Returns a vector
+   of checkpoint maps {:branch :bundle-path :commit-sha :persist-tier
+   :env-id :phase :timestamp}; only records with a :branch and at least
+   one of :bundle-path/:commit-sha are kept (empty when none)."
+  core/extract-workspace-checkpoints)
+
+(def extract-dag-pause-info
+  "Completed task IDs + pause reason from the last `:dag/paused` event.
+   Arg: a sequence of events. Returns {:completed-task-ids set
+   :pause-reason keyword-or-nil}, or nil when no pause event exists."
+  core/extract-dag-pause-info)
+
+(def extract-completed-phases
+  "Phase names (keywords) that completed with `:success` outcome.
+   Arg: a sequence of events. Returns a vector of phase keywords in
+   event order."
+  core/extract-completed-phases)
+
+(def extract-phase-results
+  "Per-phase outcome/duration/timestamp from `:workflow/phase-completed`
+   events. Arg: a sequence of events. Returns a map from phase keyword to
+   {:outcome :duration-ms :timestamp} (empty when none)."
+  core/extract-phase-results)
+
+(def find-workflow-spec
+  "The workflow spec recorded on the first `:workflow/started` event.
+   Arg: a sequence of events. Returns the spec value, or nil if the run
+   never emitted one."
+  core/find-workflow-spec)
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; High-level APIs
 
-(def reconstruct-context       core/reconstruct-context)
-(def trim-pipeline             core/trim-pipeline)
-(def resolve-workflow-identity core/resolve-workflow-identity)
+(def reconstruct-context
+  "Build a complete resume-context map from a workflow id's events.
+
+   Args:
+   - `events-dir`  — base directory (e.g. `~/.miniforge/events`)
+   - `workflow-id` — UUID string of the original run
+
+   Returns a map: {:phase-results map :completed-phases vector-of-keywords
+   :workflow-spec :workflow-id :completed? bool :failed? bool
+   :event-count int :completed-dag-tasks set :completed-dag-artifacts vector
+   :workspace-checkpoint :dag-paused? bool :dag-pause-reason keyword-or-nil
+   :machine-snapshot :checkpoint-manifest}.
+
+   Throws `:anomalies/not-found` when no valid events exist for the
+   workflow. Throws on invalid input args. Events failing shape
+   validation (missing/non-keyword `:event/type`) are dropped silently."
+  core/reconstruct-context)
+
+(def trim-pipeline
+  "Drop the already-completed leading phases from a workflow's pipeline.
+
+   Args: a workflow map with `:workflow/pipeline` and a collection of
+   completed phase keywords. Returns the workflow with only the leading
+   completed-phase prefix removed (completed phases after the first
+   incomplete phase are preserved). Throws on invalid input args."
+  core/trim-pipeline)
+
+(def resolve-workflow-identity
+  "Resolve `{:workflow-type keyword :workflow-version string}` for a
+   resume run.
+
+   Args:
+   - `reconstructed` — context map from `reconstruct-context`
+   - `fallback-fn`   — 0-arity returning a type keyword or nil
+
+   Preference for type: keyword-valid id from the recorded spec, then the
+   machine-snapshot `:execution/workflow-id` (unless a synthetic DAG-task
+   key), then `fallback-fn`. Throws `:anomalies/not-found` if no source
+   yields a loadable type; throws on invalid input args."
+  core/resolve-workflow-identity)

@@ -47,22 +47,18 @@
 ;; Pure extractors over an event sequence
 
 (defn completed?
-  "True when a reconstructed workflow context has completed successfully."
   [reconstructed]
   (true? (:completed? reconstructed)))
 
 (defn failed?
-  "True when a reconstructed workflow context has failed."
   [reconstructed]
   (true? (:failed? reconstructed)))
 
 (defn paused?
-  "True when a reconstructed workflow context reflects a paused DAG."
   [reconstructed]
   (true? (:dag-paused? reconstructed)))
 
 (defn extract-completed-dag-tasks
-  "Task IDs that finished successfully as `:dag/task-completed` events."
   [events]
   (->> events
        (filter #(= :dag/task-completed (:event/type %)))
@@ -70,7 +66,6 @@
        set))
 
 (defn extract-completed-dag-artifacts
-  "Artifacts recorded on successful `:dag/task-completed` events."
   [events]
   (->> events
        (filter #(= :dag/task-completed (:event/type %)))
@@ -103,7 +98,6 @@
        vec))
 
 (defn extract-dag-pause-info
-  "Find the last `:dag/paused` event and extract completed task IDs + reason."
   [events]
   (when-let [pause-event (->> events
                               (filter #(= :dag/paused (:event/type %)))
@@ -112,7 +106,6 @@
      :pause-reason (:dag/pause-reason pause-event)}))
 
 (defn extract-completed-phases
-  "Phase names (keywords) that completed with `:success` outcome."
   [events]
   (->> events
        (filter #(= :workflow/phase-completed (:event/type %)))
@@ -120,8 +113,6 @@
        (mapv :workflow/phase)))
 
 (defn extract-phase-results
-  "Map from phase keyword to outcome/duration/timestamp, built from
-   `:workflow/phase-completed` events."
   [events]
   (->> events
        (filter #(= :workflow/phase-completed (:event/type %)))
@@ -133,8 +124,6 @@
                {})))
 
 (defn find-workflow-spec
-  "The workflow spec recorded on the first `:workflow/started` event,
-   or nil if the run never emitted one."
   [events]
   (->> events
        (filter #(= :workflow/started (:event/type %)))

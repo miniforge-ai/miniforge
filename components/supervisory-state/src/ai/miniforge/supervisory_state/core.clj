@@ -72,8 +72,6 @@
 ;; Lifecycle
 
 (defn create
-  "Build a fresh supervisory-state component instance bound to `stream`.
-   Does not subscribe yet — call `start!` to begin consuming events."
   [stream]
   (atom {:table  schema/empty-table
          :stream stream
@@ -109,8 +107,6 @@
     component))
 
 (defn stop!
-  "Unsubscribe from the stream. The entity table is retained so it can be
-   queried post-shutdown."
   [component]
   (let [{:keys [stream subscribed?]} @component]
     (when subscribed?
@@ -128,7 +124,6 @@
   (start! (create stream)))
 
 (defn attached?
-  "True when supervisory-state is already subscribed to `stream`."
   [stream]
   (contains? (:subscribers @stream) subscriber-id))
 
@@ -148,7 +143,6 @@
 ;; Query API
 
 (defn table
-  "Current entity table snapshot (pure read)."
   [component]
   (:table @component))
 

@@ -98,15 +98,72 @@
   events/events-for-pr)
 
 ;; Event constructors
-(def pr-opened events/pr-opened)
-(def ci-passed events/ci-passed)
-(def ci-failed events/ci-failed)
-(def review-approved events/review-approved)
-(def review-changes-requested events/review-changes-requested)
-(def comment-actionable events/comment-actionable)
-(def merged events/merged)
-(def rebase-needed events/rebase-needed)
-(def fix-pushed events/fix-pushed)
+(def pr-opened
+  "Build a `:pr/opened` event map.
+   Args: [dag-id run-id task-id pr-id pr-url branch sha].
+   Returns an event map with `:event/id` `:event/type :pr/opened`
+   `:event/timestamp` plus `:dag/id :run/id :task/id :pr/id :pr/url
+   :pr/branch :pr/sha`. Pure constructor — never throws."
+  events/pr-opened)
+
+(def ci-passed
+  "Build a `:pr/ci-passed` event map.
+   Args: [dag-id run-id task-id pr-id sha]. Returns an event map with
+   `:event/type :pr/ci-passed` plus `:dag/id :run/id :task/id :pr/id
+   :pr/sha`. Pure constructor."
+  events/ci-passed)
+
+(def ci-failed
+  "Build a `:pr/ci-failed` event map.
+   Args: [dag-id run-id task-id pr-id sha logs]. Returns an event map
+   with `:event/type :pr/ci-failed` plus `:dag/id :run/id :task/id
+   :pr/id :pr/sha :ci/logs`. Pure constructor."
+  events/ci-failed)
+
+(def review-approved
+  "Build a `:pr/review-approved` event map.
+   Args: [dag-id run-id task-id pr-id approvers]. Returns an event map
+   with `:event/type :pr/review-approved` plus `:dag/id :run/id
+   :task/id :pr/id :review/approvers`. Pure constructor."
+  events/review-approved)
+
+(def review-changes-requested
+  "Build a `:pr/review-changes-requested` event map.
+   Args: [dag-id run-id task-id pr-id comments]. Returns an event map
+   with `:event/type :pr/review-changes-requested` plus `:dag/id
+   :run/id :task/id :pr/id :review/comments`. Pure constructor."
+  events/review-changes-requested)
+
+(def comment-actionable
+  "Build a `:pr/comment-actionable` event map.
+   Args: [dag-id run-id task-id pr-id comment-data]. Returns an event
+   map with `:event/type :pr/comment-actionable` plus `:dag/id :run/id
+   :task/id :pr/id :comment`. Pure constructor."
+  events/comment-actionable)
+
+(def merged
+  "Build a `:pr/merged` event map.
+   Arities: [dag-id run-id task-id pr-id merge-sha] (labels default to
+   an empty set) and [... merge-sha labels] where `labels` is a
+   coll of GitHub label-name strings, coerced to a set. Returns an
+   event map with `:event/type :pr/merged` plus `:dag/id :run/id
+   :task/id :pr/id :pr/merge-sha :pr/labels`. Pure constructor."
+  events/merged)
+
+(def rebase-needed
+  "Build a `:pr/rebase-needed` event map.
+   Args: [dag-id run-id task-id pr-id base-sha]. Returns an event map
+   with `:event/type :pr/rebase-needed` plus `:dag/id :run/id :task/id
+   :pr/id :pr/base-sha`. Pure constructor."
+  events/rebase-needed)
+
+(def fix-pushed
+  "Build a `:pr/fix-pushed` event map.
+   Args: [dag-id run-id task-id pr-id sha fix-type] where `fix-type`
+   is one of `:ci-fix` `:review-fix` `:conflict-fix`. Returns an event
+   map with `:event/type :pr/fix-pushed` plus `:dag/id :run/id
+   :task/id :pr/id :pr/sha :fix/type`. Pure constructor."
+  events/fix-pushed)
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Comment triage

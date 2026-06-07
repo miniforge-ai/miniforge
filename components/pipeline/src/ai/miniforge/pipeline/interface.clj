@@ -4,10 +4,17 @@
             [ai.miniforge.pipeline.dag :as dag]))
 
 ;; -- Stage Families --
-(def stage-families stage/stage-families)
+(def stage-families
+  "Set of valid stage-family keywords (N3 §2.2): #{:ingest :extract :normalize
+   :transform :aggregate :validate :enrich :publish}. Used to validate
+   :stage/family on stage definitions."
+  stage/stage-families)
 
 ;; -- Execution Modes --
-(def execution-modes core/execution-modes)
+(def execution-modes
+  "Set of valid pipeline execution-mode keywords (N3 §3): #{:full-refresh
+   :incremental :backfill :reprocess}. Used to validate :pipeline/mode."
+  core/execution-modes)
 
 ;; -- Pipeline CRUD --
 (defn create-pipeline

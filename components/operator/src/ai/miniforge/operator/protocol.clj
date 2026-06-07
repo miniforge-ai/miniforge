@@ -29,7 +29,6 @@
 ;; Signal types
 
 (def signal-types
-  "Types of signals the operator can observe."
   #{:workflow-complete
     :workflow-failed
     :phase-rollback
@@ -40,7 +39,6 @@
     :quality-regression})
 
 (def improvement-types
-  "Types of improvements the operator can propose."
   #{:prompt-change
     :gate-adjustment
     :policy-update
