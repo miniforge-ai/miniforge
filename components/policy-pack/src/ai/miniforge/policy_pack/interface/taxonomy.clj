@@ -32,7 +32,7 @@
 
 (def TaxonomyCategory
   "Malli schema (a `[:map ...]` vector) for a single taxonomy category —
-   :category/id, :code, :title, optional :parent, and an integer :order."
+   :category/id, :category/code, :category/title, optional :category/parent, and an integer :category/order."
   taxonomy/TaxonomyCategory)
 
 (def TaxonomyAlias

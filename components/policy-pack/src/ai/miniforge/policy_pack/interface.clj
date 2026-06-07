@@ -369,7 +369,7 @@
 (def halt-enforcement
   "Build a hard-halt enforcement config map. (halt-enforcement message) or
    (halt-enforcement message {:remediation s}) returns
-   {:action :hard-halt :message ... :remediation?}."
+   {:action :hard-halt :message ... :remediation} (:remediation present only when supplied)."
   builders/halt-enforcement)
 
 (def approval-enforcement
