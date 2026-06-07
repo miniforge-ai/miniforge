@@ -29,13 +29,6 @@
             [clojure.string :as str]))
 
 (defn format-task-prompt
-  "Format a task description and context into a prompt for the agent.
-
-  Args:
-    task: Task map with :description, :files, :dependencies, etc.
-    context: Context map with :worktree-path, :base-commit, etc.
-
-  Returns: String prompt for the LLM"
   [task context]
   (let [{:keys [description files dependencies acceptance-criteria]} task
         {:keys [worktree-path base-commit]} context]
@@ -55,33 +48,6 @@
          "- Base commit: " base-commit "\n")))
 
 (defn create-generate-fn
-  "Create a generate-fn closure for use with the inner loop and PR lifecycle.
-
-  Args:
-    llm-backend: Agent backend instance (e.g., from agent/create-backend)
-    opts: Options map with:
-      :logger - Logger instance
-      :event-stream - Event stream for observability
-      :workflow-id - Workflow identifier for event correlation
-      :max-iterations - Max inner loop iterations (default 10)
-
-  Returns: Function (fn [task context] -> {:artifact map :tokens int})
-
-  The returned function wraps loop/run-simple and can be used for:
-  - Initial code generation (runner/execute-task)
-  - Fix loops (PR controller's :generate-fn option)
-
-  Example:
-    (def gen-fn (create-generate-fn my-backend
-                  {:logger logger
-                   :max-iterations 15
-                   :workflow-id \"dag-run-123\"}))
-
-    (gen-fn {:task/id \"task-1\"
-             :task/type :implement
-             :description \"Add feature X\"}
-            {:worktree-path \"/tmp/wt-1\"
-             :base-commit \"abc123\"})"
   [llm-backend & {:keys [logger event-stream workflow-id max-iterations]}]
   (fn [task context]
     (let [task-map (if (map? task)
