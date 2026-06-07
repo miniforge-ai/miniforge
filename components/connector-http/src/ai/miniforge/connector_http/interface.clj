@@ -43,14 +43,16 @@
 (def after-cursor?
   "Predicate (fn [timestamp-fn cursor record] boolean): true if the record's
    timestamp is strictly after the cursor's :cursor/value watermark. timestamp-fn
-   extracts an ISO-8601 string (or nil) from a record. Returns true when cursor is
-   nil (no prior watermark)."
+   extracts an ISO-8601 string (or nil) from a record. Returns true whenever the
+   cursor carries no parseable :cursor/value timestamp — i.e. a nil cursor, a
+   missing :cursor/value, or a blank/malformed one (no prior watermark)."
   cursors/after-cursor?)
 (def last-record-cursor
   "(fn [resource-def records] cursor-map-or-nil): build a :timestamp-watermark
    cursor map {:cursor/type :timestamp-watermark :cursor/value iso-string} from the
-   last record's :updated_at or :created_at. Returns nil when records is empty or
-   the resource-def :cursor-type is not :timestamp-watermark."
+   last record's :updated_at or :created_at. :cursor/value may be nil when the last
+   record carries neither :updated_at nor :created_at. Returns nil when records is
+   empty or the resource-def :cursor-type is not :timestamp-watermark."
   cursors/last-record-cursor)
 (def max-timestamp-cursor
   "(fn [timestamp-fn records] cursor-map-or-nil): build a :timestamp-watermark
@@ -100,9 +102,10 @@
 ;; -- Rate-limit utilities --
 (def acquire-permit!
   "(fn [handles-atom handle opts] nil): side-effecting. Inspect the handle's stored
-   rate-limit state and block (via a non-blocking scheduled delay, capped at 60s)
-   when remaining requests fall below the threshold. opts: {:threshold long}
-   overrides the default (10). Returns nil."
+   rate-limit state and, when remaining requests fall below the threshold, block the
+   calling thread until the rate limit resets (capped at 60s) by deref-ing a promise
+   that a task scheduled on a ScheduledExecutorService delivers. opts: {:threshold
+   long} overrides the default (10). Returns nil."
   rate-limit/acquire-permit!)
 (def parse-rate-headers
   "(fn [headers mapping] info-map-or-nil): extract rate-limit info from response
