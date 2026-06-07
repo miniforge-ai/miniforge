@@ -55,7 +55,9 @@ jobs:
 
       - name: Update standards submodule
         run: |
-          git submodule update --remote --merge standards/miniforge
+          git -C standards/miniforge fetch origin
+          git -C standards/miniforge checkout origin/main
+          git add standards/miniforge
           NEW_SHA=$(git -C standards/miniforge rev-parse HEAD)
           echo "NEW_SHA=$NEW_SHA" >> "$GITHUB_ENV"
           echo "standards/miniforge updated to $NEW_SHA"
@@ -70,7 +72,7 @@ jobs:
           bb -e "(clojure.edn/read-string (slurp \"$PACK\"))" && echo "Pack is valid EDN"
 
       - name: Open pull request
-        uses: peter-evans/create-pull-request@v6
+        uses: peter-evans/create-pull-request@22a9089034f40e5a961c8808d113e2c98fb63676 # v7
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           branch: auto/bump-standards-${{ env.NEW_SHA }}
