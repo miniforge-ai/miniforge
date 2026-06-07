@@ -51,7 +51,7 @@
   "Vector of the refresh-cadence keywords, ordered fastest to slowest."
   reg-schema/refresh-cadences)
 (def redistribution-risks
-  "Vector of the redistribution-risk keywords, ordered low to high."
+  "Vector of the redistribution-risk keywords ([:none :low :medium :high]), in ascending order of risk."
   reg-schema/redistribution-risks)
 (def metric-directions
   "Vector of the metric-direction keywords."
