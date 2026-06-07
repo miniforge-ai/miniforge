@@ -23,7 +23,18 @@
    [ai.miniforge.artifact.interface.protocols.artifact-store :as p]))
 
 ;; Re-export protocol for public API
-(def ArtifactStore p/ArtifactStore)
+(def ArtifactStore
+  "Protocol contract for pluggable artifact stores (extensibility point).
+
+   Re-exported from ai.miniforge.artifact.interface.protocols.artifact-store.
+   Implement this protocol to back artifacts with a custom store; the bundled
+   implementations are the Datalevin store (JVM, via create-store) and the
+   Transit store (Babashka compatible, via create-transit-store).
+
+   Methods: save, load-artifact, query, link, close. See the sub-namespace
+   protocol docstrings for each method's purpose and return shape (they do not
+   currently document argument contracts or failure modes)."
+  p/ArtifactStore)
 
 (defn create-store
   "Create a Datalevin-based artifact store (JVM only).

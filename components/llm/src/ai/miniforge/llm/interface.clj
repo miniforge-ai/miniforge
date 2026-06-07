@@ -36,7 +36,15 @@
   impl/backends)
 
 ;; Re-export protocol for public API
-(def LLMClient p/LLMClient)
+(def LLMClient
+  "Protocol clients implement for LLM interaction; the public extensibility
+   point for custom backends. Methods: complete* [this request] -> result
+   map ({:success true :content :usage} or {:success false :error :anomaly});
+   complete-stream* [this request on-chunk] -> same result map, invoking
+   on-chunk per parsed stream chunk/event (text deltas, which may span
+   multiple tokens, plus tool-use and heartbeat events); get-config [this]
+   -> the client's config map."
+  p/LLMClient)
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Client creation

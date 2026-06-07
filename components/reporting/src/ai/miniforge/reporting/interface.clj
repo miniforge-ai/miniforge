@@ -30,7 +30,15 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Protocol re-exports
 
-(def ReportingService proto/ReportingService)
+(def ReportingService
+  "Protocol satisfied by reporting service instances.
+
+   Defines the monitoring/aggregation contract: get-system-status,
+   get-workflow-list, get-workflow-detail, get-meta-loop-status,
+   subscribe, unsubscribe, poll-events. Use with satisfies?/extend
+   or as the dispatch target for the interface fns below. Instances
+   are produced by create-reporting-service."
+  proto/ReportingService)
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Service creation

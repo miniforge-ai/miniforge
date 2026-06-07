@@ -266,19 +266,6 @@
 ;; Constructor
 
 (defn create-reporting-service
-  "Create a reporting service.
-
-   Options:
-   - :workflow-component - Workflow component instance
-   - :orchestrator-component - Orchestrator component instance
-   - :operator-component - Operator component instance
-   - :artifact-store - Artifact store instance
-   - :logger - Logger instance
-
-   Example:
-     (create-reporting-service {:workflow-component wf
-                                :operator-component op
-                                :logger logger})"
   ([] (create-reporting-service {}))
   ([{:keys [workflow-component
             orchestrator-component
