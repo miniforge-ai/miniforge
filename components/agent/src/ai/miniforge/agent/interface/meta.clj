@@ -26,12 +26,38 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Meta-agent operations
 
-(def create-progress-monitor-agent progress-monitor/create-progress-monitor-agent)
-(def create-meta-coordinator meta-coord/create-coordinator)
-(def check-all-meta-agents meta-coord/check-all-agents)
-(def reset-all-meta-agents! meta-coord/reset-all-agents!)
-(def get-meta-check-history meta-coord/get-check-history)
-(def get-meta-agent-stats meta-coord/get-agent-stats)
+(def create-progress-monitor-agent
+  "Create a Progress Monitor meta-agent. Arg (optional): options map
+   (:check-interval-ms :priority :stagnation-threshold-ms :max-total-ms).
+   Returns a meta-agent suitable for a meta coordinator."
+  progress-monitor/create-progress-monitor-agent)
+
+(def create-meta-coordinator
+  "Create a meta-agent coordinator over a set of meta-agents. Arg: vector of
+   meta-agent instances. Returns a MetaCoordinator record."
+  meta-coord/create-coordinator)
+
+(def check-all-meta-agents
+  "Run due health checks across all enabled meta-agents. Args: coordinator,
+   workflow-state. Returns {:status :healthy|:warning|:halt :checks [...]}
+   with :halt-reason/:halting-agent when status is :halt."
+  meta-coord/check-all-agents)
+
+(def reset-all-meta-agents!
+  "Reset all meta-agent state (on workflow restart). Arg: coordinator.
+   Returns the coordinator."
+  meta-coord/reset-all-agents!)
+
+(def get-meta-check-history
+  "Return recent meta-agent health-check history. Args: coordinator, optional
+   {:limit :agent-id :status}. Returns a sequence of check-record maps."
+  meta-coord/get-check-history)
+
+(def get-meta-agent-stats
+  "Return per-meta-agent statistics. Arg: coordinator. Returns
+   {:agents [{:id :name :checks-run :last-check :last-status
+              :halt-count :warning-count ...}]}."
+  meta-coord/get-agent-stats)
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Learning layer — meta-loop cycle (N1 §3.3)

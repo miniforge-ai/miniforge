@@ -69,7 +69,6 @@
   (->FunctionalAgent role config system-prompt invoke-fn validate-fn repair-fn logger))
 
 (defn make-validator
-  "Create a validation function from a Malli schema."
   [malli-schema]
   (fn [output]
     (if (schema/valid? malli-schema output)

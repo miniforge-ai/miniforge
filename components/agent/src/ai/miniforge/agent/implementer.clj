@@ -44,14 +44,12 @@
 ;; Implementer-specific schemas
 
 (def CodeFile
-  "Schema for a code file in the output."
   [:map
    [:path [:string {:min 1}]]
    [:content [:string {:min 0}]]
    [:action [:enum :create :modify :delete]]])
 
 (def CodeArtifact
-  "Schema for the implementer's output."
   [:map
    [:code/id uuid?]
    [:code/files [:vector CodeFile]]
@@ -102,7 +100,6 @@
        (filter #(> (val %) 1))))
 
 (defn validate-code-artifact
-  "Validate a code artifact against the schema and check for issues."
   [artifact]
   (if-not (m/validate CodeArtifact artifact)
     (schema/invalid (schema/explain CodeArtifact artifact)
@@ -891,7 +888,6 @@
       :repair-fn repair-code-artifact})))
 
 (defn code-summary
-  "Get a summary of a code artifact for logging/display."
   [artifact]
   {:id (:code/id artifact)
    :file-count (count (:code/files artifact))
@@ -901,12 +897,10 @@
    :dependencies-added (count (:code/dependencies-added artifact []))})
 
 (defn files-by-action
-  "Group files by their action type."
   [artifact]
   (group-by :action (:code/files artifact)))
 
 (defn total-lines
-  "Count total lines of code in the artifact."
   [artifact]
   (->> (:code/files artifact)
        (remove #(= :delete (:action %)))

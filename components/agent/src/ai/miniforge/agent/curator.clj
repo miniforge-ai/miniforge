@@ -77,7 +77,6 @@
 ;; literals with these keys outside of build-curated-artifact.
 
 (def FileEntry
-  "A single file entry in the code artifact."
   [:map
    [:path [:string {:min 1}]]
    [:content :string]
@@ -99,7 +98,6 @@
    [:code/curator-source [:enum :deterministic :hybrid]]])
 
 (defn validate-curated-artifact
-  "Validate a CuratedArtifact, returning schema/valid or schema/invalid."
   [artifact]
   (if (m/validate CuratedArtifact artifact)
     (schema/valid)

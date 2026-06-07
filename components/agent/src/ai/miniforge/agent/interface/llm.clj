@@ -25,6 +25,18 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Utility helpers
 
-(def estimate-tokens mem-impl/estimate-tokens)
-(def estimate-cost core/estimate-cost)
-(def create-mock-llm core/create-mock-llm)
+(def estimate-tokens
+  "Estimate token count for message content. Arg: content (any). Returns an
+   int: for strings, max(1, chars/4); 100 for non-string content."
+  mem-impl/estimate-tokens)
+
+(def estimate-cost
+  "Estimate cost in USD for token usage. Args: input-tokens, output-tokens,
+   model (string). Returns a double; unknown/unpriced models return 0.0."
+  core/estimate-cost)
+
+(def create-mock-llm
+  "Create a mock LLMBackend record for testing. Arg (optional): a single
+   response map or a sequence of them; defaults to a canned response.
+   Returns a value satisfying the LLMBackend protocol."
+  core/create-mock-llm)

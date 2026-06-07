@@ -40,7 +40,6 @@
 ;; Releaser-specific schemas
 
 (def ReleaseArtifact
-  "Schema for the releaser's output."
   [:map
    [:release/id uuid?]
    [:release/branch-name [:string {:min 1 :max 100}]]
@@ -61,7 +60,6 @@
 ;; Releaser functions
 
 (defn validate-release-artifact
-  "Validate a release artifact against the schema and check for issues."
   [artifact]
   (let [schema-valid? (m/validate ReleaseArtifact artifact)]
     (if-not schema-valid?
@@ -283,7 +281,6 @@
       :repair-fn repair-release-artifact})))
 
 (defn release-summary
-  "Get a summary of a release artifact for logging/display."
   [artifact]
   {:id (:release/id artifact)
    :branch (:release/branch-name artifact)

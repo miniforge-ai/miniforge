@@ -24,5 +24,18 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Task classification
 
-(def classify-task classifier/classify-task)
-(def get-task-characteristics classifier/get-task-characteristics)
+(def classify-task
+  "Classify a task to pick an optimal model type.
+   Arg: task map with optional :phase :agent-type :description :title and
+   sizing/privacy/cost hints. Returns a map
+   {:type keyword :confidence double :reason string
+    :alternative-types [keyword] :all-reasons [string]}; never nil
+   (defaults to :execution-focused at 0.5 confidence)."
+  classifier/classify-task)
+
+(def get-task-characteristics
+  "Extract the features used during classification, for debugging/transparency.
+   Arg: task map. Returns a map
+   {:phase :agent-type :keywords #{kw} :context-size int
+    :privacy-required truthy-or-nil :cost-constrained truthy-or-nil}."
+  classifier/get-task-characteristics)

@@ -35,7 +35,6 @@
 ;; Schemas
 
 (def GateFeedback
-  "Schema for feedback from a single gate."
   [:map
    [:gate-id keyword?]
    [:gate-type keyword?]
@@ -66,7 +65,6 @@
    [:suggestion {:optional true} [:maybe [:string {:min 1}]]]])
 
 (def ReviewArtifact
-  "Schema for the reviewer's output."
   [:map
    [:review/id uuid?]
    [:review/decision [:enum :approved :rejected :conditionally-approved :changes-requested]]

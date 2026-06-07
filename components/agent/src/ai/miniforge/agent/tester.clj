@@ -39,20 +39,17 @@
 ;; Tester-specific schemas
 
 (def TestFile
-  "Schema for a test file."
   [:map
    [:path [:string {:min 1}]]
    [:content [:string {:min 1}]]])
 
 (def Coverage
-  "Schema for test coverage information."
   [:map
    [:lines {:optional true} [:double {:min 0.0 :max 100.0}]]
    [:branches {:optional true} [:double {:min 0.0 :max 100.0}]]
    [:functions {:optional true} [:double {:min 0.0 :max 100.0}]]])
 
 (def TestArtifact
-  "Schema for the tester's output."
   [:map
    [:test/id uuid?]
    [:test/files [:vector TestFile]]
@@ -84,7 +81,6 @@
 ;; Tester functions
 
 (defn validate-test-artifact
-  "Validate a test artifact against the schema and check for issues."
   [artifact]
   (let [schema-valid? (m/validate TestArtifact artifact)]
     (if-not schema-valid?
@@ -435,7 +431,6 @@
       :repair-fn repair-test-artifact})))
 
 (defn test-summary
-  "Get a summary of a test artifact for logging/display."
   [artifact]
   {:id (:test/id artifact)
    :file-count (count (:test/files artifact))
@@ -446,7 +441,6 @@
    :coverage (:test/coverage artifact)})
 
 (defn coverage-meets-threshold?
-  "Check if coverage meets the specified thresholds."
   [artifact & {:keys [lines branches functions]
                :or {lines 80.0 branches 70.0 functions 80.0}}]
   (let [coverage (:test/coverage artifact {})]
@@ -455,7 +449,6 @@
          (>= (get coverage :functions 0) functions))))
 
 (defn tests-by-path
-  "Get a map of test file paths to their content."
   [artifact]
   (into {} (map (juxt :path :content) (:test/files artifact))))
 
