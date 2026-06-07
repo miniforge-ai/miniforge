@@ -479,17 +479,43 @@
                ;; the linter is a human-review gate, not a mechanical fix.
                :auto-fixable-default false))))
 
+(defn- within-root?
+  "Return true iff the canonical path of `candidate` starts with the
+   canonical path of `root` followed by the system file separator.
+   Uses canonical paths to resolve symlinks and `..` segments before
+   the comparison, preventing path-traversal via relative-path inputs."
+  [^java.io.File root ^java.io.File candidate]
+  (let [canonical-root      (.getCanonicalPath root)
+        canonical-candidate (.getCanonicalPath candidate)
+        prefix              (str canonical-root java.io.File/separator)]
+    (str/starts-with? canonical-candidate prefix)))
+
 (defn analyze-file
   "Analyze a single file by absolute or relative path. Returns a vector
-   of public Violation maps."
+   of public Violation maps.
+
+   Returns an empty vector without reading the file when `relative-path`
+   escapes `repo-root` — this prevents path-traversal attacks via inputs
+   such as \"../../../etc/passwd\" or absolute paths like \"/etc/passwd\".
+   Canonical paths resolve symlinks and `..` segments before comparison."
   [repo-root relative-path]
-  (let [abs (io/file repo-root relative-path)]
-    (if (.isFile abs)
-      (let [content (try (slurp abs) (catch Exception _ nil))]
-        (if content
-          (mapv format-violation (:violations (analyze-content relative-path content)))
-          []))
-      [])))
+  (let [root (io/file repo-root)
+        abs  (try (io/file root relative-path)
+                  (catch IllegalArgumentException _
+                    ;; clojure.java.io/file rejects absolute second arguments;
+                    ;; treat as traversal attempt.
+                    nil))]
+    (if (or (nil? abs) (not (within-root? root abs)))
+      (do (.println System/err
+                    (str "[compliance-scanner] WARN path-traversal rejected: "
+                         relative-path " escapes repo-root " repo-root))
+          [])
+      (if (.isFile abs)
+        (let [content (try (slurp abs) (catch Exception _ nil))]
+          (if content
+            (mapv format-violation (:violations (analyze-content relative-path content)))
+            []))
+        []))))
 
 (defn scan-repo
   "Scan a repository for exceptions-as-data violations.
