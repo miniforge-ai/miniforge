@@ -40,21 +40,84 @@
    :connector/maintainer   "data-foundry"})
 
 ;; -- Cursor utilities (shared by HTTP-based source connectors) --
-(def after-cursor?        cursors/after-cursor?)
-(def last-record-cursor   cursors/last-record-cursor)
-(def max-timestamp-cursor cursors/max-timestamp-cursor)
-(def sort-by-timestamp    cursors/sort-by-timestamp)
-(def parse-timestamp      cursors/parse-timestamp)
+(def after-cursor?
+  "Predicate (fn [timestamp-fn cursor record] boolean): true if the record's
+   timestamp is strictly after the cursor's :cursor/value watermark. timestamp-fn
+   extracts an ISO-8601 string (or nil) from a record. Returns true when cursor is
+   nil (no prior watermark)."
+  cursors/after-cursor?)
+(def last-record-cursor
+  "(fn [resource-def records] cursor-map-or-nil): build a :timestamp-watermark
+   cursor map {:cursor/type :timestamp-watermark :cursor/value iso-string} from the
+   last record's :updated_at or :created_at. Returns nil when records is empty or
+   the resource-def :cursor-type is not :timestamp-watermark."
+  cursors/last-record-cursor)
+(def max-timestamp-cursor
+  "(fn [timestamp-fn records] cursor-map-or-nil): build a :timestamp-watermark
+   cursor map {:cursor/type :timestamp-watermark :cursor/value iso-string} from the
+   maximum timestamp across records. timestamp-fn extracts an ISO-8601 string (or
+   nil) per record. Returns nil when records is empty or none carry a timestamp."
+  cursors/max-timestamp-cursor)
+(def sort-by-timestamp
+  "(fn [timestamp-fn records] sorted-seq): sort records ascending by timestamp.
+   timestamp-fn extracts an ISO-8601 string (or nil) per record; records with nil
+   timestamps sort first."
+  cursors/sort-by-timestamp)
+(def parse-timestamp
+  "(fn [value] Instant-or-nil): parse an ISO-8601 timestamp string to a
+   java.time.Instant. Returns nil when value is nil, non-string, or blank; throws
+   on a malformed non-blank string."
+  cursors/parse-timestamp)
 
 ;; -- Request utilities (shared by HTTP-based source connectors) --
-(def coerce-records    request/coerce-records)
-(def do-request        request/do-request)
-(def error-response    request/error-response)
-(def next-url          request/next-url)
-(def throw-on-failure! request/throw-on-failure!)
+(def coerce-records
+  "(fn [body] vector): coerce a parsed response body to a vector of records. A
+   sequential body is returned as a vector; any other value is wrapped in a
+   single-element vector."
+  request/coerce-records)
+(def do-request
+  "(fn [url headers query-params error-fn] result): execute an HTTP GET, applying
+   ETag conditional-request handling (If-None-Match). Returns a schema/success
+   (2xx or 304 Not Modified) or schema/failure. error-fn (fn [status resp] failure)
+   supplies connector-specific error messages for non-success, non-304 responses."
+  request/do-request)
+(def error-response
+  "(fn [status resp msgs] failure): build a schema/failure from a non-success,
+   non-304 response. msgs map: {:rate-limited string :request-failed (fn [status
+   err-str] string)}. The :error-type in failure metadata is :rate-limited (429),
+   :transient (5xx), or :permanent (other 4xx)."
+  request/error-response)
+(def next-url
+  "(fn [resp] string-or-nil): extract the 'next' page URL from the response's Link
+   header. Returns nil when no Link header or no next relation is present."
+  request/next-url)
+(def throw-on-failure!
+  "(fn [result] result): return result unchanged on success; on failure throw an
+   ExceptionInfo carrying :anomaly/category :anomalies/unavailable and the legacy
+   :error-type key in ex-data."
+  request/throw-on-failure!)
 
 ;; -- Rate-limit utilities --
-(def acquire-permit!     rate-limit/acquire-permit!)
-(def parse-rate-headers  rate-limit/parse-rate-headers)
-(def time-based-acquire! rate-limit/time-based-acquire!)
-(def update-rate-state!  rate-limit/update-rate-state!)
+(def acquire-permit!
+  "(fn [handles-atom handle opts] nil): side-effecting. Inspect the handle's stored
+   rate-limit state and block (via a non-blocking scheduled delay, capped at 60s)
+   when remaining requests fall below the threshold. opts: {:threshold long}
+   overrides the default (10). Returns nil."
+  rate-limit/acquire-permit!)
+(def parse-rate-headers
+  "(fn [headers mapping] info-map-or-nil): extract rate-limit info from response
+   headers. mapping: {:remaining header :reset header :limit header}. Returns
+   {:remaining long :reset-epoch long :limit long-or-nil}, or nil when the
+   remaining/reset headers are absent or unparseable."
+  rate-limit/parse-rate-headers)
+(def time-based-acquire!
+  "(fn [rps last-request-ms] epoch-ms): side-effecting. Sleep if needed to honor an
+   rps (requests-per-second) limit given the prior request's epoch-millis (0 or nil
+   means no prior request). Returns the current epoch-millis for use as the next
+   last-request-at."
+  rate-limit/time-based-acquire!)
+(def update-rate-state!
+  "(fn [handles-atom handle rate-info] state-or-nil): side-effecting. Store
+   rate-info under [handle :rate-limit] in the handles atom via swap!. No-op
+   returning nil when rate-info is nil."
+  rate-limit/update-rate-state!)

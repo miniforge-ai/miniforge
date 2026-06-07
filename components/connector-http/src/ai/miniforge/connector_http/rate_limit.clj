@@ -33,9 +33,6 @@
     (try (Long/parseLong (str v)) (catch NumberFormatException _ nil))))
 
 (defn parse-rate-headers
-  "Extract rate limit info from response headers using a provider mapping.
-   mapping: {:remaining \"x-ratelimit-remaining\" :reset \"x-ratelimit-reset\" :limit \"x-ratelimit-limit\"}
-   Returns: {:remaining long :reset-epoch long :limit long} or nil if headers absent."
   [headers mapping]
   (let [remaining (parse-long-header headers (:remaining mapping))
         reset-at  (parse-long-header headers (:reset mapping))
@@ -49,7 +46,6 @@
 ;; State management
 
 (defn update-rate-state!
-  "Store rate limit info in a handle's atom state."
   [handles-atom handle rate-info]
   (when rate-info
     (swap! handles-atom assoc-in [handle :rate-limit] rate-info)))
@@ -70,9 +66,6 @@
   10)
 
 (defn acquire-permit!
-  "Check rate limit state and wait if remaining is below threshold.
-   Uses a ScheduledExecutorService for non-blocking delay.
-   opts: {:threshold long} — override the default remaining threshold."
   [handles-atom handle opts]
   (when-let [rate-info (get-in @handles-atom [handle :rate-limit])]
     (let [remaining (:remaining rate-info)
@@ -91,9 +84,6 @@
 ;; Time-based (interval) rate limiting
 
 (defn time-based-acquire!
-  "Sleep if needed to enforce a requests-per-second limit.
-   Takes rps (number) and last-request-ms (epoch millis; 0 or nil means no prior request).
-   Returns current epoch-ms for use as the new last-request-at timestamp."
   [rps last-request-ms]
   (let [min-interval-ms (/ 1000.0 rps)
         elapsed         (- (System/currentTimeMillis) (or last-request-ms 0))]

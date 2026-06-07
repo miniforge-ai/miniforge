@@ -20,7 +20,6 @@
 ;; No in-namespace dependencies.
 
 (defn linter-available?
-  "Check if a linter CLI is available on PATH."
   [check-cmd]
   (try
     (zero? (:exit (process/sh {:cmd check-cmd :continue true
@@ -49,8 +48,6 @@
 ;; Composes Layer 0.
 
 (defn run-linter
-  "Run a single linter and parse output via ETL mapping.
-   Returns {:tech keyword :violations [...] :available? bool :duration-ms int}."
   [repo-path tech-id linter-config]
   (let [{:keys [command args parser check-cmd]} linter-config
         available? (linter-available? (or check-cmd [command "--version"]))
@@ -73,8 +70,6 @@
 ;; helpers (`lintable-tech`, `linter-available?`, `run-subprocess`).
 
 (defn run-all
-  "Run linters for all detected technologies.
-   Returns {:linter-results [...] :violations [...] :total-violations int :total-duration-ms int}."
   [repo-path fingerprints detected-techs]
   (let [lintable (filter #(lintable-tech detected-techs %) fingerprints)
         results  (mapv (fn [fp]
@@ -87,8 +82,6 @@
      :total-duration-ms (reduce + 0 (map :duration-ms results))}))
 
 (defn run-fixes
-  "Run linter fix commands for detected technologies.
-   Returns {:fixed [...]}."
   [repo-path fingerprints detected-techs]
   (let [fixable (->> fingerprints
                      (filter #(lintable-tech detected-techs %))
