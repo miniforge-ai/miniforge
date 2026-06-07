@@ -691,8 +691,7 @@
 ;------------------------------------------------------------------------------ Layer 6
 ;; Context-budget shedding (N12 §5)
 
-(def ^:private assemble-within-budget
-  (var-get (ns-resolve 'ai.miniforge.agent.planner 'assemble-within-budget)))
+(def ^:private assemble-within-budget #'planner/assemble-within-budget)
 
 (defn- big-file [chars]
   {:path "components/agent/src/ai/miniforge/agent/big.clj"
@@ -713,8 +712,8 @@
       (is (false? (:shed? r)))
       (is (str/includes? (:user-prompt r) "big.clj"))))
 
-  (testing "files that blow the window are shed; the inlined section drops but
-            the prompt now fits (files stay reachable via the context cache)"
+  (testing "files that blow the window shed to a manifest: bodies drop, the
+            path + context_read hint stay, and the prompt now fits"
     ;; ~300k chars of file content >> 16384 tokens; spec+system alone fits
     (let [r (assemble-within-budget "do the thing" [(big-file 300000)]
                                     "system" "codellama-34b")]
@@ -722,7 +721,13 @@
       (is (false? (:over-after-shed? r)))
       (is (= 1 (:file-count r)))
       (is (< (:est-final r) (:est-full r)))
-      (is (not (str/includes? (:user-prompt r) "big.clj")))))
+      ;; manifest keeps the path + the query-surface hint...
+      (is (str/includes? (:user-prompt r) "big.clj"))
+      (is (str/includes? (:user-prompt r) "context_read"))
+      ;; ...but not the inlined body
+      (is (not (str/includes? (:user-prompt r) (apply str (repeat 5000 \x)))))
+      ;; ...and keeps the already-satisfied evidence-bundle instructions
+      (is (str/includes? (:user-prompt r) ":already-satisfied"))))
 
   (testing "irreducible overflow (huge spec, no files) → over-after-shed?, no shed"
     (let [r (assemble-within-budget (apply str (repeat 300000 \y)) []

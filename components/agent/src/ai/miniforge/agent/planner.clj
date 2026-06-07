@@ -158,30 +158,50 @@
   "Shared `{{key}}` template renderer (single source in the prompts ns)."
   prompts/render-template)
 
+(defn format-existing-files-manifest
+  "Compact manifest of in-scope files for the shed path (N12 §6): paths and
+   size only, not bodies. Keeps the planner aware the files exist and tells
+   it to fetch them on demand via context_read."
+  [files]
+  (when (seq files)
+    (str "_Bodies omitted to fit the context window — fetch any on demand "
+         "with `context_read`:_\n"
+         (->> files
+              (map (fn [{:keys [path lines content]}]
+                     (str "- " path
+                          (cond lines   (str " (" lines " lines)")
+                                content (str " (" (count content) " chars)")
+                                :else   ""))))
+              (str/join "\n")))))
+
 (defn- existing-files-section
-  "Build the planner-prompt section that previews existing in-scope
-   files. Returns the empty string when no files are present."
-  [existing-files]
-  (if (seq existing-files)
-    (render-template (get @planner-prompt-data :prompt/existing-files-template)
-                     {:files-list (format-existing-files existing-files)})
-    ""))
+  "Build the planner-prompt section that previews existing in-scope files.
+   `files-list-fn` renders the file list — full bodies by default, a
+   manifest on the shed path. Empty string when no files are present."
+  ([existing-files] (existing-files-section existing-files format-existing-files))
+  ([existing-files files-list-fn]
+   (if (seq existing-files)
+     (render-template (get @planner-prompt-data :prompt/existing-files-template)
+                      {:files-list (files-list-fn existing-files)})
+     "")))
 
 (defn- build-user-prompt
-  "Render the planner user-turn prompt from the spec text and any
-   existing in-scope files. Template lives in
-   resources/prompts/planner.edn (:prompt/user-template)."
-  [spec-text existing-files]
-  (render-template (get @planner-prompt-data :prompt/user-template)
-                   {:spec-text              spec-text
-                    :existing-files-section (existing-files-section existing-files)}))
+  "Render the planner user-turn prompt from the spec text and any existing
+   in-scope files. `files-list-fn` selects body inlining (default) vs a
+   manifest. Template lives in planner.edn (:prompt/user-template)."
+  ([spec-text existing-files] (build-user-prompt spec-text existing-files format-existing-files))
+  ([spec-text existing-files files-list-fn]
+   (render-template (get @planner-prompt-data :prompt/user-template)
+                    {:spec-text              spec-text
+                     :existing-files-section (existing-files-section existing-files files-list-fn)})))
 
 (defn- assemble-within-budget
   "Assemble the planner user-prompt within the model's context window
-   (N12 §5). If the prompt would overflow, shed the eagerly-inlined
-   existing-files section — the files stay reachable via the context MCP
-   cache (seeded separately in invoke-planner-session), so the agent keeps
-   a query surface. Returns
+   (N12 §5). If the prompt would overflow, shed the eagerly-inlined file
+   bodies down to a manifest (paths only) — the bodies stay reachable via
+   the context MCP cache (seeded separately in invoke-planner-session), so
+   the agent keeps a query surface, and the section's already-satisfied
+   evidence-bundle instructions are preserved. Returns
    {:user-prompt :shed? :over-after-shed? :window :est-full :est-final
     :file-count}; :over-after-shed? marks an irreducible overflow."
   [spec-text existing-files effective-system model]
@@ -199,7 +219,7 @@
       (merge base {:user-prompt full :shed? false :over-after-shed? true :est-final est-full})
 
       :else
-      (let [shed (build-user-prompt spec-text nil)
+      (let [shed (build-user-prompt spec-text existing-files format-existing-files-manifest)
             est-shed (est shed)]
         (merge base {:user-prompt shed :shed? true
                      :over-after-shed? (>= est-shed window) :est-final est-shed})))))
@@ -662,7 +682,9 @@
           (when (:over-after-shed? budget)
             (response/throw-anomaly!
              :anomalies.agent/invoke-failed
-             "Planner prompt exceeds the model's context window even after shedding inlined files"
+             (if (:shed? budget)
+               "Planner prompt exceeds the model's context window even after shedding inlined file bodies to a manifest"
+               "Planner prompt (spec + system) exceeds the model's context window; no inlined files to shed")
              {:context-overflow true
               :estimated-tokens (:est-final budget)
               :context-window (:window budget)
