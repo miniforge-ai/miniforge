@@ -50,3 +50,12 @@
                           {:success false :error {:stdout "" :type "cli_error"}} nil nil ""))))
     (is (false? (boolean (sut/submission-retry?
                           {:success false :error {:stdout "x" :type "other"}} nil nil ""))))))
+
+(deftest no-fire-on-context-overflow
+  (testing "a context_overflow error never retries even with stdout — its stdout
+            holds no artifact and a retry re-sends an over-budget prompt"
+    (is (false? (boolean (sut/submission-retry?
+                          {:success false
+                           :error {:stdout "Need to explore the components..."
+                                   :type "context_overflow"}}
+                          nil nil ""))))))

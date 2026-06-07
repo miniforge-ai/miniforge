@@ -41,7 +41,12 @@
 
 (def ^:private recoverable-error-types
   "Backend error classes whose stdout still holds the agent's work, so a
-   submission-only retry can recover it."
+   submission-only retry can recover it.
+
+   Deliberately EXCLUDES `llm/context-overflow-error-type`
+   (\"context_overflow\"): a prompt that exceeded the model's context
+   window left no artifact to recover, and a retry re-sends an over-budget
+   prompt — so it must terminate, not retry (see that var's docstring)."
   #{"adaptive_timeout" "cli_error"})
 
 (defn submission-retry?

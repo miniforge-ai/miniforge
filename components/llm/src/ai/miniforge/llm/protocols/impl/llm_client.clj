@@ -1579,6 +1579,33 @@
        (zero? tool-call-count)
        (nil? usage)))
 
+(def context-overflow-error-type
+  "Distinct error :type for a prompt that exceeded the model's context
+   window. Kept OUT of submission-recovery/recoverable-error-types: such a
+   turn produced no usable artifact (its stdout holds no plan) and a
+   submission-only retry cannot recover it — the retry re-sends an
+   over-budget prompt and, with nothing to convert, burns its whole budget
+   re-planning from scratch. Classifying it distinctly lets the phase fail
+   cleanly on the real overflow instead of firing a doomed retry.
+   (review-redirect-convergence dogfood adhoc-2135293220, 2026-06-07: the
+   planner's main turn overflowed, was misclassified as a recoverable
+   cli_error, and the submission-retry then died at its 120s hard cap.)"
+  "context_overflow")
+
+(def ^:private context-overflow-markers
+  "Lower-cased substrings the agent CLIs emit when the prompt exceeds the
+   model's context window. Matched case-insensitively against the error
+   message."
+  ["prompt is too long"])
+
+(defn context-overflow-error?
+  "True when `message` indicates the prompt exceeded the model's context
+   window — an unrecoverable terminal condition (see
+   `context-overflow-error-type`)."
+  [message]
+  (let [m (str/lower-case (or message ""))]
+    (boolean (some #(str/includes? m %) context-overflow-markers))))
+
 (defn streaming-error-response
   "Build a streaming error response with diagnostic metadata.
 
@@ -1593,7 +1620,10 @@
                           (not-empty (str/trim (or raw-stdout "")))
                           (msg/t :streaming-error.system/no-output))
         category (if timeout-info :anomalies/timeout :anomalies.agent/llm-error)
-        error-type (if timeout-info "adaptive_timeout" "cli_error")]
+        error-type (cond
+                     timeout-info "adaptive_timeout"
+                     (context-overflow-error? error-message) context-overflow-error-type
+                     :else "cli_error")]
     (cond-> (llm-error category error-type (str/trim error-message)
                        {:exit-code exit-code
                         :stderr err-result
