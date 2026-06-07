@@ -1635,6 +1635,33 @@
       (some? tool-call-count)     (assoc :tool-call-count tool-call-count)
       (seq final-message-preview) (assoc :final-message-preview final-message-preview))))
 
+(def ^:private chars-per-token-estimate
+  "Rough characters-per-token divisor for a pre-flight input-size estimate.
+   ~4 chars/token is the usual English heuristic; this is a coarse gauge of
+   headroom against the model's context window, not a billing figure."
+  4)
+
+(defn prompt-size-telemetry
+  "Pre-flight size gauge for the assembled agent prompt, computed from the
+   system + user prompt BEFORE the request is sent — so it is captured even
+   when the call is rejected with a context-overflow (where `:usage` never
+   arrives). `:estimated-input-tokens` is a coarse chars/4 estimate to
+   gauge headroom against the model's context window.
+
+   Motivated by the 2026-06-07 review-redirect-convergence dogfood, where
+   the planner's first turn silently ran up against the 200k window and
+   only surfaced as 'Prompt is too long' after the fact — miniforge
+   recorded completion tokens but never the input size, so the overflow
+   was a surprise."
+  [system prompt]
+  (let [system-chars (count (or system ""))
+        user-chars   (count (or prompt ""))
+        total-chars  (+ system-chars user-chars)]
+    {:system-chars system-chars
+     :user-chars user-chars
+     :total-chars total-chars
+     :estimated-input-tokens (quot total-chars chars-per-token-estimate)}))
+
 (defn handle-streaming [client request on-chunk backend-config progress-monitor]
   (let [{:keys [logger config]} client
         stream-fn (or (:stream-exec-fn client) stream-exec-fn)
@@ -1656,9 +1683,10 @@
         accumulated-stop-reason (atom nil)
         accumulated-turns (atom nil)]
     (when logger
-      (log/debug logger :system :agent/streaming-prompt-sent
-                 {:data {:backend backend
-                         :prompt-length (count prompt)}}))
+      (log/info logger :system :agent/streaming-prompt-sent
+                {:data (assoc (prompt-size-telemetry (:system request) prompt)
+                              :backend backend
+                              :model model)}))
     (let [base-opts {:progress-monitor progress-monitor
                      :workdir (:workdir request)}
           stream-opts (merge base-opts
