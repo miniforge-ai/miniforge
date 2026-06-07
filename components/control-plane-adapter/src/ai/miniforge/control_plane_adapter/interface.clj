@@ -31,15 +31,69 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Protocol re-exports + pure data + helpers with no in-namespace deps.
 
-(def ControlPlaneAdapter proto/ControlPlaneAdapter)
-(def ControlPlaneAdapterLogs proto/ControlPlaneAdapterLogs)
+(def ControlPlaneAdapter
+  "Protocol vendor-specific adapters must implement to bridge a
+   vendor-native agent API to the control plane's normalized model.
 
-(def adapter-id proto/adapter-id)
-(def discover-agents proto/discover-agents)
-(def poll-agent-status proto/poll-agent-status)
-(def deliver-decision proto/deliver-decision)
-(def send-command proto/send-command)
-(def agent-logs proto/agent-logs)
+   Members: `adapter-id`, `discover-agents`, `poll-agent-status`,
+   `deliver-decision`, `send-command`. Implement via defrecord/reify."
+  proto/ControlPlaneAdapter)
+
+(def ControlPlaneAdapterLogs
+  "Optional protocol for adapters that can retrieve agent logs.
+
+   Single member `agent-logs`; adapters without log support omit it."
+  proto/ControlPlaneAdapterLogs)
+
+(def adapter-id
+  "Protocol fn. Return the keyword identifying an adapter (e.g.
+   :claude-code, :openai). Unique across all registered adapters.
+
+   Args: [this]. Returns: keyword."
+  proto/adapter-id)
+
+(def discover-agents
+  "Protocol fn. Discover running agents for the adapter's vendor.
+
+   Args: [this config]. Returns: seq of agent-registration maps
+   ({:agent/vendor kw :agent/external-id str :agent/name str
+   :agent/capabilities set-of-kw :agent/metadata map}); empty seq
+   when none found or discovery unsupported (push-only adapters)."
+  proto/discover-agents)
+
+(def poll-agent-status
+  "Protocol fn. Poll the current status of a single agent.
+
+   Args: [this agent-record]. Returns: map
+   {:status kw :task str-optional :metrics map-optional}, or nil
+   when the agent is no longer reachable."
+  proto/poll-agent-status)
+
+(def deliver-decision
+  "Protocol fn. Deliver a resolved decision to an agent.
+
+   Args: [this agent-record decision-resolution], where
+   decision-resolution is {:decision/id uuid
+   :decision/resolution str-or-kw :decision/comment str-or-nil}.
+   Returns: map {:delivered? boolean :error str-or-nil}."
+  proto/deliver-decision)
+
+(def send-command
+  "Protocol fn. Send a control command to an agent.
+
+   Args: [this agent-record command] where command is one of
+   :pause :resume :terminate :restart.
+   Returns: map {:success? boolean :error str-or-nil}."
+  proto/send-command)
+
+(def agent-logs
+  "Protocol fn (ControlPlaneAdapterLogs). Retrieve recent agent logs.
+
+   Args: [this agent-record opts] where opts is
+   {:limit max-entries :since java.util.Date}. Returns: seq of
+   log-entry maps ([{:timestamp inst :level kw :message str}]),
+   or nil when log retrieval is unsupported."
+  proto/agent-logs)
 
 (def ^:private vendor-heartbeat-ms
   "Recommended heartbeat intervals per vendor (ms)."

@@ -61,18 +61,6 @@
     (impl/close-store this)))
 
 (defn create-transit-store
-  "Create a new Transit-based artifact store.
-
-   Options:
-   - :dir      - Base directory for storage (defaults to ~/.miniforge)
-   - :logger   - Optional logger
-
-   The artifacts will be stored in {dir}/artifacts/
-
-   Examples:
-     (create-transit-store)                              ; Uses ~/.miniforge/artifacts
-     (create-transit-store {:dir \"/tmp/test\"})          ; Uses /tmp/test/artifacts
-     (create-transit-store {:logger my-logger})"
   ([] (create-transit-store {}))
   ([{:keys [dir logger]}]
    (let [artifacts-dir (impl/artifacts-dir dir)]
