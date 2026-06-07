@@ -190,19 +190,13 @@
 
 (defn- parsed-usage
   [usage]
+  ;; Capture cache fields: a large prompt lands mostly under cache-creation.
+  ;; Assoc only numeric fields — a present-but-nil key defeats downstream
+  ;; `(get usage :input-tokens 0)` defaulting (NPEs llm-success's :tokens sum).
   (let [input-tokens (:input_tokens usage)
         output-tokens (:output_tokens usage)
-        ;; A large prompt lands mostly under cache_creation_input_tokens
-        ;; (input_tokens itself can be tiny), so capture the cache fields
-        ;; too — they're what `total-input-tokens` needs to measure the
-        ;; real input size against the context window.
         cache-creation (:cache_creation_input_tokens usage)
         cache-read (:cache_read_input_tokens usage)]
-    ;; Associate ONLY numeric fields so missing values stay absent. A
-    ;; present-but-nil key breaks downstream `(get usage :input-tokens 0)`
-    ;; defaulting (the default applies only when the key is ABSENT) — e.g.
-    ;; llm-success's `:tokens (+ (get usage :input-tokens 0) ...)` would NPE
-    ;; on a cache-only usage frame.
     (when (some number? [input-tokens output-tokens cache-creation cache-read])
       (cond-> {}
         (number? input-tokens)   (assoc :input-tokens input-tokens)
@@ -1594,38 +1588,23 @@
        (nil? usage)))
 
 (def context-overflow-error-type
-  "Distinct error :type for a prompt that exceeded the model's context
-   window. Kept OUT of submission-recovery/recoverable-error-types: such a
-   turn produced no usable artifact (its stdout holds no plan) and a
-   submission-only retry cannot recover it — the retry re-sends an
-   over-budget prompt and, with nothing to convert, burns its whole budget
-   re-planning from scratch. Classifying it distinctly lets the phase fail
-   cleanly on the real overflow instead of firing a doomed retry.
-   (review-redirect-convergence dogfood adhoc-2135293220, 2026-06-07: the
-   planner's main turn overflowed, was misclassified as a recoverable
-   cli_error, and the submission-retry then died at its 120s hard cap.)"
+  "Error :type for a prompt that exceeded the model's context window.
+   Terminal: excluded from submission-recovery (the turn has no artifact to
+   recover and a retry just re-sends the over-budget prompt). See N12 §4."
   "context_overflow")
 
 (defn total-input-tokens
-  "Total input tokens the model actually consumed for a turn:
-   prompt + cache-creation + cache-read. The CLI reports the bulk of a
-   large prompt under cache_creation_input_tokens (`:input-tokens` itself
-   can be a handful), so summing all three is the only faithful measure of
-   input size to compare against the context window."
+  "prompt + cache-creation + cache-read tokens. Summed because a large
+   prompt lands mostly under cache-creation, not :input-tokens. See N12 §2."
   [usage]
   (+ (or (:input-tokens usage) 0)
      (or (:cache-creation-input-tokens usage) 0)
      (or (:cache-read-input-tokens usage) 0)))
 
 (defn context-overflow-by-usage?
-  "True when a turn's total input tokens met or exceeded the model's
-   context window — the structured, locale- and backend-independent signal
-   that the prompt overflowed (see `context-overflow-error-type`). Replaces
-   matching the backend's human-readable 'prompt is too long' text, which
-   is localized product output and phrased differently per backend.
-
-   `context-window` is the model's max input tokens (nil when the model is
-   not in the catalog, in which case overflow can't be asserted here)."
+  "True when total input tokens >= the model's context window — the
+   structured, locale/backend-independent overflow signal (N12 §4).
+   `context-window` is nil for uncatalogued models → no assertion."
   [usage context-window]
   (boolean (and context-window
                 (pos? (total-input-tokens usage))
@@ -1640,12 +1619,8 @@
    - :tool-call-count      — total number of tool invocations during the run
    - :final-message-preview — last 500 chars of accumulated content (post-mortem aid)
 
-   `usage` and `context-window` drive structured context-overflow
-   classification: when the turn's total input tokens reached the model's
-   window, the error is typed `context_overflow` (terminal, non-retryable)
-   instead of a generic recoverable `cli_error`. They are optional — the
-   9-arity form (used by diagnostic callers that don't have usage/window in
-   hand) simply skips overflow classification."
+   `usage` + `context-window` drive context-overflow classification (N12 §4);
+   optional — the 9-arity form skips it (for callers without them)."
   ([content exit-code err-result raw-stdout timeout-info stop-reason num-turns
     tool-call-count final-message-preview]
    (streaming-error-response content exit-code err-result raw-stdout timeout-info
@@ -1779,10 +1754,7 @@
                                               timeout-info stop-reason num-turns
                                               tool-call-count final-message-preview
                                               usage
-                                              ;; effective model = the one actually invoked
-                                              ;; (request-with-model), which honors a per-request
-                                              ;; :model when config carries none — keeps overflow
-                                              ;; classification consistent with the real call.
+                                              ;; effective model actually invoked (honors per-request :model)
                                               (model-registry/context-window-for-model-id
                                                (:model request-with-model)))
               session-id (assoc :session-id session-id))))))))
