@@ -67,12 +67,6 @@
 ;; Public API — all return data, never throw
 
 (defn register-capability!
-  "Register (or replace) capability `k` with `entry`. Returns the stored
-   entry on success, or an `:invalid-input` anomaly map on bad input.
-
-   - `k`     must be a keyword.
-   - `entry` must be `{:meta map :check fn}` where `:check` is
-     `(fn [artifact context] -> violation-or-nil)`."
   [k entry]
   (cond
     (not (keyword? k))
@@ -90,17 +84,14 @@
         entry)))
 
 (defn get-capability
-  "Return the registered capability entry for `k`, or nil when unregistered."
   [k]
   (get @registry k))
 
 (defn list-capabilities
-  "Return the set of registered capability keywords."
   []
   (set (keys @registry)))
 
 (defn capability-available?
-  "True when capability `k` is registered."
   [k]
   (contains? @registry k))
 

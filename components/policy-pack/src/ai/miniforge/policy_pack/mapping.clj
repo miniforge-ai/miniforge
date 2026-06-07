@@ -84,12 +84,10 @@
 ;; Validation
 
 (defn valid-mapping?
-  "Check if value conforms to the MappingArtifact schema."
   [value]
   (m/validate MappingArtifact value))
 
 (defn validate-mapping
-  "Validate a mapping artifact. Returns {:valid? bool :errors map-or-nil}."
   [value]
   (if (m/validate MappingArtifact value)
     {:valid? true :errors nil}

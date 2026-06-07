@@ -359,22 +359,18 @@
     (me/humanize explanation)))
 
 (defn valid-rule?
-  "Check if value is a valid Rule."
   [value]
   (valid? Rule value))
 
 (defn validate-rule
-  "Validate a rule. Returns {:valid? bool :errors ...}."
   [value]
   (validate Rule value))
 
 (defn valid-pack?
-  "Check if value is a valid PackManifest."
   [value]
   (valid? PackManifest value))
 
 (defn validate-pack
-  "Validate a pack manifest. Returns {:valid? bool :errors ...}."
   [value]
   (validate PackManifest value))
 
