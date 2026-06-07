@@ -287,7 +287,7 @@
 
 (defn create-control-plane
   "Create a control plane (orchestrator) with all components.
-   See orchestrator.interface for the full argument/option contract."
+   See ai.miniforge.orchestrator.interface for the full argument/option contract."
   [llm-backend knowledge-store artifact-store & [{:keys [config logger operator]}]]
   (let [merged-config (merge default-config config)
         router (create-router merged-config)
