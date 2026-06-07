@@ -239,6 +239,30 @@ Defines:
 
 ---
 
+### N12 — Agent Context Economy 🆕
+
+**File:** [normative/N12-agent-context-economy.md](normative/N12-agent-context-economy.md)
+**Status:** Draft
+**Purpose:** The context window as a bounded, governed resource — measure it, degrade before bailing, and grow a learned
+  symbol language for intent
+
+Defines:
+
+- Foundational principle: compression requires a shared codebook (code is pretrained-shared; novel intent is
+  English-bounded)
+- Pre-flight measurement: assembled system+user size gauge, ceil token estimate, emitted as an event even on rejection
+  (§3)
+- Structured overflow detection: `total-input-tokens >= context-window`, never localized error text; terminal +
+  non-retryable; effective-model lookup (§4)
+- The degradation ladder: assemble → **shed eager context to the query surface** → re-measure → bail last; pre-emptive
+  refusal (§5)
+- Query surface & symbol handles: deterministic unfold targets, manifests, code's own symbol layer (§6)
+- Learned domain language: corpus mining → gated promotion → provenance/versioning → decoder availability; standards
+  packs + phase schemas as seed (§7)
+- Boundary compressibility classification: phase↔phase (schema-bound today), code→agent, human-intent→planner (§8)
+
+---
+
 ## Informative Documentation (Non-Normative)
 
 These documents provide guidance, examples, and context but do NOT define contractual requirements.
