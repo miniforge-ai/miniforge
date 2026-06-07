@@ -210,15 +210,21 @@
    `reserve` is headroom kept below the real window: the estimate covers
    only miniforge's assembled prompt, while the agent CLI adds its own
    unmeasured baseline (system prompt, tools, host plugins/skills) on top.
-   The shed/bail fire against `effective-window = window - reserve`."
+   The shed/bail fire against `effective-window = window - reserve`. The
+   reserve is clamped to at most half the window so a reserve >= window
+   (misconfig, or a tiny-window model) can't zero the effective window and
+   make every prompt look over-budget; `:reserve-clamped?` flags that."
   [spec-text existing-files effective-system model reserve]
   (let [window     (llm/context-window-for-model-id model)
-        effective  (when window (max 0 (- window reserve)))
+        eff-reserve (when window (min reserve (quot window 2)))
+        clamped?   (boolean (and window (> reserve eff-reserve)))
+        effective  (when window (- window eff-reserve))
         est        (fn [user] (:estimated-input-tokens
                                (llm/prompt-size-telemetry effective-system user)))
         full       (build-user-prompt spec-text existing-files)
         est-full   (est full)
         base       {:window window :reserve reserve :effective-window effective
+                    :reserve-clamped? clamped?
                     :est-full est-full :file-count (count existing-files)}]
     (cond
       (or (nil? effective) (< est-full effective))
@@ -251,6 +257,7 @@
                     :prompt/estimated-input-tokens (:est-full budget)
                     :prompt/context-window (:window budget)
                     :prompt/reserve (:reserve budget)
+                    :prompt/reserve-clamped? (:reserve-clamped? budget)
                     :prompt/effective-window (:effective-window budget)
                     :prompt/shed? (:shed? budget)
                     :prompt/estimated-after-shed (:est-final budget)
