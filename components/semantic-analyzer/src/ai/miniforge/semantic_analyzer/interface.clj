@@ -34,8 +34,9 @@
    Args: llm-client, complete-fn, repo-path (string), rules (vector of rule
    maps), opts (map with optional :timeout-ms per-rule timeout default 300000
    and :max-parallel max concurrent rules default 4).
-   Returns a vector of per-rule result maps (same shape as analyze-rule, with
-   :status :timeout or :error and an :error message on failures)."
+   Returns a vector of per-rule result maps (same shape as analyze-rule). On a
+   per-rule timeout the result carries :status :timeout (no :error key); on an
+   exception it carries :status :error plus an :error message string."
   core/analyze-rules-parallel)
 
 (def select-files-for-rule
