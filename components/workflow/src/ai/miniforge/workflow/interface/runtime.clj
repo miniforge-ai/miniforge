@@ -26,11 +26,32 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Workflow lifecycle
 
-(def create-workflow core/create-workflow)
-(def add-observer core/add-observer)
-(def remove-observer core/remove-observer)
-(def create-phase-executor core/create-phase-executor)
-(def run-workflow core/run-workflow)
+(def create-workflow
+  "Construct a new in-memory SimpleWorkflow instance (Workflow protocol).
+   No args. Returns the workflow object used as `this` in the lifecycle fns."
+  core/create-workflow)
+
+(def add-observer
+  "Register a WorkflowObserver on a workflow. Args: [workflow observer].
+   Returns the workflow with the observer attached."
+  core/add-observer)
+
+(def remove-observer
+  "Detach a previously-registered WorkflowObserver. Args: [workflow observer].
+   Returns the workflow without that observer."
+  core/remove-observer)
+
+(def create-phase-executor
+  "Build a PhaseExecutor for a phase keyword. Args: [phase llm-backend].
+   Returns an executor for :plan/:implement/:verify/:release, or nil for
+   phases with no dedicated executor."
+  core/create-phase-executor)
+
+(def run-workflow
+  "Drive a run end-to-end from spec to a terminal state. Args:
+   [workflow spec context]. Loops execute-phase/advance until the run is
+   :completed or :failed. Returns the final state map."
+  core/run-workflow)
 
 (defn start
   [workflow spec context]

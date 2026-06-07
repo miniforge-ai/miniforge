@@ -26,9 +26,23 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Pipeline API
 
-(def run-pipeline runner/run-pipeline)
-(def build-pipeline runner/build-pipeline)
-(def validate-pipeline runner/validate-pipeline)
+(def run-pipeline
+  "Execute a workflow's interceptor pipeline end-to-end. Args:
+   [workflow input] or [workflow input opts]. Acquires the execution
+   environment, runs phases, validates, publishes, and always cleans up.
+   Returns the final execution context map; throws a slingshot anomaly on
+   governed-mode misconfiguration."
+  runner/run-pipeline)
+
+(def build-pipeline
+  "Build the interceptor pipeline from a workflow config. Args: [workflow].
+   Returns a vector of phase interceptors."
+  runner/build-pipeline)
+
+(def validate-pipeline
+  "Validate a workflow's pipeline (phase + execution-machine checks). Args:
+   [workflow]. Returns {:valid? boolean :errors [...] :warnings [...]}."
+  runner/validate-pipeline)
 
 (defn run-chain
   [chain-def chain-input opts]

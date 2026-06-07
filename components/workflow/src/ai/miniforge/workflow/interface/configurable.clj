@@ -42,10 +42,26 @@
   ([workflow input opts]
    (configurable/run-configurable-workflow workflow input opts)))
 
-(def get-active-workflow persist/get-active-workflow-id)
-(def set-active-workflow persist/set-active-workflow)
-(def append-event persist/append-event)
-(def load-event-log persist/load-event-log)
+(def get-active-workflow
+  "Read the active workflow selection for a task type. Args: [task-type].
+   Returns {:workflow-id :version}, or nil when none is set."
+  persist/get-active-workflow-id)
+
+(def set-active-workflow
+  "Persist the active workflow selection for a task type. Args:
+   [task-type workflow-id version]. Returns true on success, false on I/O
+   error."
+  persist/set-active-workflow)
+
+(def append-event
+  "Append a log event to a run's event log file. Args: [workflow-id event].
+   Returns true on success, false on I/O error."
+  persist/append-event)
+
+(def load-event-log
+  "Load all events for a run from its event log. Args: [workflow-id].
+   Returns a vector of event maps, empty when the log is absent."
+  persist/load-event-log)
 
 (defn replay-workflow
   [events & {:keys [workflow-id until] :as _opts}]
