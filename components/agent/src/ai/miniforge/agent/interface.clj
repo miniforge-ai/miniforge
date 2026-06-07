@@ -505,6 +505,10 @@
   "Validate a review artifact against the schema and check gate-count
    consistency. Arg: artifact. Returns {:valid? bool :errors ...}."
   specialized/validate-review-artifact)
+(def rejection-warnings-only?
+  "True when a review is a rejection driven solely by warnings (no blocking
+   issues). Arg: artifact. Returns boolean."
+  specialized/rejection-warnings-only?)
 (def review-fingerprint
   "Reduce a review artifact to a stable, comparable fingerprint of its
    actionable items. Arg: review. Returns a sorted vector of

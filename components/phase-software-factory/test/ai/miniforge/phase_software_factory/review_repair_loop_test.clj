@@ -545,6 +545,7 @@
     (let [verdicts @#'review/verdicts]
       (is (contains? verdicts :review/backend-timeout))
       (is (contains? verdicts :approved))
+      (is (contains? verdicts :accept-with-warnings))
       (is (contains? verdicts :exhausted))
       (is (contains? verdicts :stagnated))
       (is (contains? verdicts :needs-decomposition))
@@ -576,3 +577,193 @@
           "anomaly :message preserves the actual adaptive-timeout text the
            operator needs (stream-idle / stagnation / etc.) — not just a
            generic catalog string"))))
+
+;; ============================================================================
+;; Warning-churn tracking — classify-rejection-cause + compute-warning-churn?
+;;
+;; When the reviewer emits only warnings (no blocking issues) for
+;; max-warning-only-cycles consecutive cycles the churn policy fires.
+;; The default policy (:accept-with-warnings) lets the phase succeed with
+;; unresolved warnings attached; the :needs-decomposition policy terminates.
+;;
+;; With the default cap of 2:
+;;   cycle 1: warning-only → count=1, (>= 1 2) = false → :repair-requested
+;;   cycle 2: warning-only → count=2, (>= 2 2) = true  → policy verdict
+;; ============================================================================
+
+(def ^:private warning-only-issue
+  "Review issue that is only a warning (non-blocking)."
+  {:severity :warning :description "Style nit: prefer cond over nested if"})
+
+(def ^:private default-cap
+  "Matches `default-max-warning-only-cycles` in review.clj."
+  2)
+
+(def ^:private count-below-cap
+  "Warning-only-count for cycle 1 — one short of default cap."
+  1)
+
+(def ^:private count-at-cap
+  "Warning-only-count for cycle 2 — exactly at default cap."
+  2)
+
+(defn- run-leave-review-warning-only
+  "Run leave-review with a warning-only reviewer output.
+   `prior-warning-cycles` seeds [:execution :review-warning-only-cycles].
+   Returns the resulting full context."
+  [{:keys [prior-warning-cycles iterations max-iterations]
+    :or   {prior-warning-cycles 0
+           iterations           first-iteration
+           max-iterations       default-max-iterations}}]
+  (let [result {:output  {:review/decision :changes-requested
+                          :review/blocking-issues []
+                          :review/warnings [warning-only-issue]}
+                :metrics {:tokens mock-token-count :duration-ms mock-duration-ms}}
+        ctx {:phase     {:started-at (- (System/currentTimeMillis) mock-elapsed-ms)
+                         :iterations iterations
+                         :budget     {:iterations max-iterations}
+                         :result     result}
+             :phase-config {:phase :review}
+             :execution {:review-fingerprints    []
+                         :review-warning-only-cycles prior-warning-cycles}
+             :execution/phase-results {}
+             :execution/input {:description "test task"}
+             :execution/metrics {}}
+        interceptor (phase/get-phase-interceptor {:phase :review})]
+    ((:leave interceptor) ctx)))
+
+;;------------------------------------------------------------------------------ classify-rejection-cause
+
+(deftest classify-rejection-cause-warning-only-increments-count
+  (testing "warning-only rejection increments the prior count"
+    (let [classify #'review/classify-rejection-cause
+          artifact {:review/decision        :changes-requested
+                    :review/blocking-issues []
+                    :review/warnings        [warning-only-issue]}
+          result   (classify artifact 0)]
+      (is (= :warning-churn (:cause/type result)))
+      (is (= 1 (:warning-only-count result)))))
+  (testing "increments from a non-zero prior"
+    (let [classify #'review/classify-rejection-cause
+          artifact {:review/decision        :changes-requested
+                    :review/blocking-issues []
+                    :review/warnings        [warning-only-issue]}
+          result   (classify artifact 1)]
+      (is (= :warning-churn (:cause/type result)))
+      (is (= 2 (:warning-only-count result))))))
+
+(deftest classify-rejection-cause-blocking-resets-count
+  (testing "blocking defect resets the warning-only count to 0"
+    (let [classify #'review/classify-rejection-cause
+          artifact {:review/decision        :changes-requested
+                    :review/blocking-issues [{:severity :blocking
+                                              :description "Missing require"}]
+                    :review/warnings        []}
+          result   (classify artifact 3)]
+      (is (= :blocking-defect (:cause/type result)))
+      (is (= 0 (:warning-only-count result))))))
+
+;;------------------------------------------------------------------------------ compute-warning-churn?
+
+(deftest compute-warning-churn-below-cap-returns-false
+  (testing "warning-only-count below cap → not churn yet"
+    (let [pred #'review/compute-warning-churn?]
+      (is (not (pred :warning-churn count-below-cap default-cap))
+          "count 1 with cap 2 must not trip the policy"))))
+
+(deftest compute-warning-churn-at-cap-returns-true
+  (testing "warning-only-count at cap → churn fires"
+    (let [pred #'review/compute-warning-churn?]
+      (is (pred :warning-churn count-at-cap default-cap)
+          "count 2 with cap 2 must trip the policy"))))
+
+(deftest compute-warning-churn-blocking-cause-returns-false
+  (testing "blocking-defect cause never trips warning-churn even at or above cap"
+    (let [pred #'review/compute-warning-churn?]
+      (is (not (pred :blocking-defect count-at-cap default-cap))
+          "blocking-defect must not be churn regardless of count"))))
+
+;;------------------------------------------------------------------------------ first warning-only cycle → still repairs
+
+(deftest first-warning-only-rejection-still-redirects
+  (testing "first warning-only rejection (count=1 < cap=2) emits :repair-requested
+            — the policy should not fire until max-warning-only-cycles is reached"
+    (let [final-ctx (run-leave-review-warning-only {:prior-warning-cycles 0})
+          phase     (:phase final-ctx)]
+      (is (= :repair-requested (:verdict phase))
+          "first warning-only cycle must still redirect to implement")
+      (is (= 1 (get-in final-ctx [:execution :review-warning-only-cycles]))
+          "warning cycle count persisted as 1 after first warning-only review"))))
+
+;;------------------------------------------------------------------------------ second warning-only cycle → accept-with-warnings
+
+(deftest second-warning-only-rejection-emits-accept-with-warnings
+  (testing "second consecutive warning-only rejection (count=2 >= cap=2) trips the
+            default :accept-with-warnings policy — phase succeeds"
+    (let [final-ctx (run-leave-review-warning-only {:prior-warning-cycles 1})
+          phase     (:phase final-ctx)]
+      (is (= :accept-with-warnings (:verdict phase))
+          "second warning-only cycle must emit :accept-with-warnings verdict")
+      (is (= :accept-with-warnings
+             (get-in phase [:result :output :phase/verdict]))
+          ":phase/verdict on the result is what determine-phase-event reads")
+      (is (= 2 (get-in final-ctx [:execution :review-warning-only-cycles]))
+          "warning cycle count persisted as 2"))))
+
+(deftest accept-with-warnings-marks-phase-completed
+  (testing ":accept-with-warnings mark the phase as :completed
+            so the workflow can proceed to release"
+    (let [final-ctx (run-leave-review-warning-only {:prior-warning-cycles 1})
+          phase     (:phase final-ctx)]
+      (is (phase/succeeded? phase)
+          ":accept-with-warnings must succeed (not fail) — PR proceeds"))))
+
+(deftest accept-with-warnings-attaches-unresolved-warnings
+  (testing ":accept-with-warnings attaches the unresolved warnings at
+            [:phase :unresolved-warnings] so release can surface them"
+    (let [final-ctx (run-leave-review-warning-only {:prior-warning-cycles 1})
+          phase     (:phase final-ctx)]
+      (is (= [warning-only-issue] (:unresolved-warnings phase))
+          "unresolved warnings from the review artifact are attached to the phase"))))
+
+;;------------------------------------------------------------------------------ warning count persists correctly
+
+(deftest warning-cycle-count-persists-across-re-entries
+  (testing "each warning-only cycle increments the counter stored at
+            [:execution :review-warning-only-cycles]"
+    (let [ctx-after-1 (run-leave-review-warning-only {:prior-warning-cycles 0})
+          count-after-1 (get-in ctx-after-1 [:execution :review-warning-only-cycles])]
+      (is (= 1 count-after-1) "first warning-only cycle stores count=1"))
+    (let [ctx-after-2 (run-leave-review-warning-only {:prior-warning-cycles 1})
+          count-after-2 (get-in ctx-after-2 [:execution :review-warning-only-cycles])]
+      (is (= 2 count-after-2) "second warning-only cycle stores count=2"))))
+
+(deftest blocking-rejection-resets-warning-cycle-count
+  (testing "a blocking-defect rejection resets the warning-only count to 0"
+    (let [result {:output  {:review/decision        :changes-requested
+                            :review/blocking-issues [{:severity    :blocking
+                                                      :description "Missing require"}]
+                            :review/warnings        []}
+                  :metrics {:tokens mock-token-count :duration-ms mock-duration-ms}}
+          ctx {:phase     {:started-at (- (System/currentTimeMillis) mock-elapsed-ms)
+                           :iterations first-iteration
+                           :budget     {:iterations default-max-iterations}
+                           :result     result}
+               :phase-config {:phase :review}
+               :execution {:review-fingerprints        []
+                           :review-warning-only-cycles 1}
+               :execution/phase-results {}
+               :execution/input {:description "test task"}
+               :execution/metrics {}}
+          interceptor (phase/get-phase-interceptor {:phase :review})
+          final-ctx   ((:leave interceptor) ctx)]
+      (is (= 0 (get-in final-ctx [:execution :review-warning-only-cycles]))
+          "blocking defect resets the warning-only cycle counter"))))
+
+;;------------------------------------------------------------------------------ accept-with-warnings is in the verdict set
+
+(deftest accept-with-warnings-is-in-canonical-verdict-set
+  (testing ":accept-with-warnings is declared in the verdicts set so the FSM
+            can recognise it without an IllegalArgumentException from case"
+    (let [verdicts @#'review/verdicts]
+      (is (contains? verdicts :accept-with-warnings)))))

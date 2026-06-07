@@ -46,9 +46,7 @@
    bundle but do not block the release gate.  This is the safe default: it
    avoids silent task-explosion while still making warnings visible.
    The active operational value lives in :review/warning-churn-policy
-   in resources/config/phase/defaults.edn.
-   NOTE: consumed by the compute-verdict warning-churn branch — wired in the
-   follow-up PR 'feat/review-convergence-policy-wiring' (rule 008 deferral)."
+   in resources/config/phase/defaults.edn."
   :accept-with-warnings)
 
 (def default-max-warning-only-cycles
@@ -58,9 +56,7 @@
    transient LLM false-positive, short enough that a genuinely warning-heavy
    PR does not loop all the way to max-redirects and exhaust its token budget.
    The active operational value lives in :review/max-warning-only-cycles
-   in resources/config/phase/defaults.edn.
-   NOTE: consumed by leave-review warning-cycle cap — wired in the follow-up
-   PR 'feat/review-convergence-policy-wiring' (rule 008 deferral)."
+   in resources/config/phase/defaults.edn."
   2)
 
 ;; Schema — validates review convergence config keys at config load time (rule 004).
@@ -102,6 +98,43 @@
 
 ;; Register defaults on load
 (phase/register-phase-defaults! :review default-config)
+
+;; Pure helper — cause classification
+
+(defn- classify-rejection-cause
+  "Pure function. Given a review artifact and the count of prior consecutive
+   warning-only cycles, classify the rejection cause and return an updated count.
+
+   Uses `agent/rejection-warnings-only?` to distinguish a warning-driven
+   rejection (no blocking issues, only advisory warnings) from one containing
+   genuine blocking defects.
+
+   Returns {:cause/type :blocking-defect | :warning-churn
+            :warning-only-count <updated int>}
+
+   :warning-churn increments the counter; :blocking-defect resets to 0."
+  [review-artifact prior-warning-only-count]
+  (if (agent/rejection-warnings-only? review-artifact)
+    {:cause/type         :warning-churn
+     :warning-only-count (inc prior-warning-only-count)}
+    {:cause/type         :blocking-defect
+     :warning-only-count 0}))
+
+(defn- compute-warning-churn?
+  "True when the cause is :warning-churn AND the warning-only-count has reached
+   or exceeded max-warning-only-cycles (the churn policy threshold).
+
+   With the default cap of 2, the first warning-only rejection (count=1) still
+   redirects to implement; the second (count=2) trips the policy."
+  [cause-type warning-only-count max-warning-only-cycles]
+  (and (= :warning-churn cause-type)
+       (>= warning-only-count max-warning-only-cycles)))
+
+(defn- record-warning-cycle-count
+  "Persist the warning-only cycle count at [:execution :review-warning-only-cycles].
+   Survives phase re-entries because it lives on :execution, not :phase."
+  [ctx count]
+  (assoc-in ctx [:execution :review-warning-only-cycles] count))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Interceptor implementation
@@ -402,6 +435,11 @@
    between on-fail redirect and terminal `:failed`.
 
      :approved              — reviewer green-lit; `:phase/succeed` event
+     :accept-with-warnings  — reviewer only raised warnings (no blocking
+                              issues) for max-warning-only-cycles consecutive
+                              cycles; phase succeeds with unresolved warnings
+                              attached at [:phase :unresolved-warnings] so
+                              release can surface them as PR comments
      :repair-requested      — actionable feedback + within budget;
                               FSM may redirect via on-fail
      :stagnated             — same blocking fingerprint as prior cycle;
@@ -422,22 +460,29 @@
                               auto-resume composition (with the
                               network-resilience PR-C, #1054) lives in
                               a follow-up PR."
-  #{:approved :repair-requested :stagnated :needs-decomposition :exhausted
-    :review/backend-timeout})
+  #{:approved :accept-with-warnings :repair-requested :stagnated :needs-decomposition
+    :exhausted :review/backend-timeout})
 
 (defn- compute-verdict
   "Pick the verdict that should flow on the phase result. Mirrors the
    former `compute-decision` semantics one-for-one — `:stagnated` and
-   `:needs-decomposition` keep their priority over `:repair-requested`;
-   a reviewer-blocked failure with no actionable feedback collapses to
-   `:exhausted`.
+   `:needs-decomposition` keep their priority over `:repair-requested`.
+
+   Priority order (highest to lowest):
+     backend-timeout → stagnated → needs-decomposition →
+     warning-churn (policy-resolved) → repair-requested → exhausted → approved
 
    `:review/backend-timeout` takes priority over every code-review
    verdict: when the reviewer LLM never produced a real verdict (PR-A
    wiring), there is no `:rejected` to interpret as repair-requested
-   or exhausted. The infra failure must be reported as itself."
+   or exhausted. The infra failure must be reported as itself.
+
+   `:warning-churn?` gates the warning-churn branch; when true the
+   verdict is resolved from `:warning-churn-policy`:
+     :accept-with-warnings → :accept-with-warnings (phase succeeds)
+     :needs-decomposition  → :needs-decomposition  (terminal)"
   [{:keys [backend-timeout? reviewer-blocked? stagnated? needs-decomposition?
-           within-budget? actionable-feedback?]}]
+           warning-churn? warning-churn-policy within-budget? actionable-feedback?]}]
   (cond
     backend-timeout?
     :review/backend-timeout
@@ -447,6 +492,11 @@
 
     needs-decomposition?
     :needs-decomposition
+
+    (and reviewer-blocked? warning-churn?)
+    (case warning-churn-policy
+      :accept-with-warnings :accept-with-warnings
+      :needs-decomposition  :needs-decomposition)
 
     (and reviewer-blocked? within-budget? actionable-feedback?)
     :repair-requested
@@ -470,9 +520,9 @@
 (defn- apply-verdict
   "Carry out the side-effects implied by a verdict — attach anomalies
    for terminal verdicts, attach handoff feedback for repair-requested,
-   mark completed for approved. The FSM drives the actual phase
-   transition; this fn only enriches the ctx with payload data that
-   evidence-bundle / downstream phases consume."
+   mark completed for approved and accept-with-warnings. The FSM drives
+   the actual phase transition; this fn only enriches the ctx with
+   payload data that evidence-bundle / downstream phases consume."
   [verdict updated-ctx feedback fingerprint-history review-cycle-count]
   (case verdict
     :stagnated
@@ -489,6 +539,16 @@
 
     :review/backend-timeout
     (attach-backend-timeout-anomaly updated-ctx)
+
+    :accept-with-warnings
+    (let [review-artifact (get-in updated-ctx [:phase :result :output])
+          warnings        (get review-artifact :review/warnings [])]
+      ;; Override :phase :status from :failed (set by accumulate-base-ctx because
+      ;; reviewer-blocked? was true) back to :completed — the phase succeeds despite
+      ;; the warning-only rejection; the PR proceeds with warnings surfaced.
+      (-> (mark-completed updated-ctx)
+          (assoc-in [:phase :status] :completed)
+          (assoc-in [:phase :unresolved-warnings] warnings)))
 
     :approved
     (mark-completed updated-ctx)))
@@ -535,7 +595,13 @@
    identical to the immediately prior iteration's, the repair loop has
    produced no movement on the blocking complaints. Terminate with
    :anomalies.review/stagnation instead of redirecting — better to
-   surface the loop than burn another budget cycle."
+   surface the loop than burn another budget cycle.
+
+   Warning-churn guard: if the reviewer only raises warnings (no blocking
+   issues) for max-warning-only-cycles consecutive cycles, apply the
+   configured :review/warning-churn-policy instead of looping indefinitely.
+   The cycle count persists at [:execution :review-warning-only-cycles]
+   across phase re-entries, like fingerprints."
   [ctx]
   (let [start-time        (get-in ctx [:phase :started-at])
         end-time          (System/currentTimeMillis)
@@ -581,16 +647,37 @@
         needs-decomposition? (compute-needs-decomposition?
                               reviewer-blocked? stagnated?
                               review-cycle-count max-no-progress-attempts)
+        ;; Warning-churn tracking: classify the rejection cause and check
+        ;; whether we have exceeded max-warning-only-cycles.
+        max-warning-only-cycles  (get default-config :review/max-warning-only-cycles
+                                       default-max-warning-only-cycles)
+        warning-churn-policy     (get default-config :review/warning-churn-policy
+                                       default-warning-churn-policy)
+        prior-warning-only-count (get-in ctx [:execution :review-warning-only-cycles] 0)
+        cause-map                (when reviewer-blocked?
+                                   (classify-rejection-cause review-artifact
+                                                             prior-warning-only-count))
+        warning-only-count       (get cause-map :warning-only-count prior-warning-only-count)
+        warning-churn?           (boolean
+                                  (when reviewer-blocked?
+                                    (compute-warning-churn?
+                                     (:cause/type cause-map)
+                                     warning-only-count
+                                     max-warning-only-cycles)))
         verdict           (compute-verdict {:backend-timeout?     backend-timeout?
                                             :reviewer-blocked?    reviewer-blocked?
                                             :stagnated?           stagnated?
                                             :needs-decomposition? needs-decomposition?
+                                            :warning-churn?       warning-churn?
+                                            :warning-churn-policy warning-churn-policy
                                             :within-budget?       within-budget?
                                             :actionable-feedback? (actionable-feedback? feedback)})
-        updated-ctx       (-> ctx
-                              (accumulate-base-ctx end-time duration-ms phase-status
-                                                   metrics iterations current-fp)
-                              (attach-verdict verdict))
+        updated-ctx       (cond-> (-> ctx
+                                      (accumulate-base-ctx end-time duration-ms phase-status
+                                                           metrics iterations current-fp)
+                                      (attach-verdict verdict))
+                            reviewer-blocked?
+                            (record-warning-cycle-count warning-only-count))
         next-ctx          (apply-verdict verdict updated-ctx feedback
                                          (conj prior-history current-fp)
                                          review-cycle-count)]
