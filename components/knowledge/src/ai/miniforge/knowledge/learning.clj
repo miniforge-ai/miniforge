@@ -259,15 +259,6 @@
     patterns))
 
 (defn synthesize-recurring-patterns!
-  "Detect recurring patterns and capture them as meta-loop learnings.
-
-   Scans learnings for recurring tags, creates a meta-loop learning for each
-   new pattern found. Skips patterns that already have a corresponding learning.
-
-   Arguments:
-   - knowledge-store - KnowledgeStore instance
-
-   Returns count of new patterns synthesized."
   [knowledge-store]
   (let [patterns (detect-recurring-patterns knowledge-store)
         new-count (atom 0)]
@@ -293,12 +284,6 @@
     @new-count))
 
 (defn list-learnings
-  "List all learnings, optionally filtered.
-
-   Options:
-   - :min-confidence - Minimum confidence threshold
-   - :agent          - Filter by agent role
-   - :promotable?    - If true, only return high-confidence learnings"
   [knowledge-store & [{:keys [min-confidence agent promotable?]}]]
   (let [all-learnings (store/query knowledge-store {:include-types [:learning]})
         filtered (cond->> all-learnings

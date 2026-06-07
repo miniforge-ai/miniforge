@@ -68,21 +68,6 @@
 ;; Lookup orchestration
 
 (defn lookup-policy-rules
-  "Search loaded policy-pack rules by keyword, dewey code, or tag.
-
-   Only :rule-type zettels are searched — those loaded from .mdc rule files
-   or compiled policy packs. The search is case-insensitive; all criteria
-   are ANDed; any criterion may be omitted.
-
-   Arguments:
-   - knowledge-store  KnowledgeStore instance with rules loaded
-   - policy-query     Map satisfying ai.miniforge.knowledge.schema/PolicyQuery
-                      {:query        string  — substring match on title + body
-                       :tags         [kw]    — zettel must carry at least one
-                       :dewey-prefix string  — e.g. \"210\" or \"21\"}
-
-   Returns a vector of {:rule/title string :rule/content string} maps.
-   Returns an empty vector when no rules match or store is nil."
   [knowledge-store policy-query]
   (if (nil? knowledge-store)
     []
