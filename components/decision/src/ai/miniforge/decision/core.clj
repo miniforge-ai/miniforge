@@ -153,7 +153,6 @@
      :context (loop-escalation-context loop-state)}))
 
 (defn decision-response
-  "Create a structured response from a decision type and outcome."
   [decision-type resolution & [rationale]]
   (cond-> {:type (get decision-type->response-type decision-type :approve)
            :value resolution
@@ -164,7 +163,6 @@
 ;; Checkpoint constructors
 
 (defn create-checkpoint
-  "Create a canonical normalized decision checkpoint."
   [{:keys [checkpoint-id status created-at resolved-at requested-authority
            source task proposal uncertainty risk context response]}]
   (cond-> {:checkpoint/id (or checkpoint-id (random-uuid))
@@ -181,7 +179,6 @@
     resolved-at (assoc :checkpoint/resolved-at resolved-at)))
 
 (defn resolve-checkpoint
-  "Resolve a checkpoint with a structured supervision response."
   [checkpoint response]
   (assoc checkpoint
          :checkpoint/status :resolved
@@ -189,13 +186,11 @@
          :response response))
 
 (defn create-control-plane-checkpoint
-  "Normalize a control-plane decision request into the canonical checkpoint shape."
   [agent-id summary opts]
   (-> (control-plane-checkpoint-input agent-id summary opts)
       create-checkpoint))
 
 (defn create-loop-escalation-checkpoint
-  "Normalize an inner-loop escalation into the canonical checkpoint shape."
   [loop-state opts]
   (-> (loop-escalation-checkpoint-input loop-state opts)
       create-checkpoint))
@@ -204,7 +199,6 @@
 ;; Episode constructors
 
 (defn create-episode
-  "Create an episode shell for a checkpoint."
   [checkpoint]
   (let [now (java.util.Date.)]
     (cond-> {:episode/id (random-uuid)
@@ -217,7 +211,6 @@
       (:response checkpoint) (assoc :supervision (:response checkpoint)))))
 
 (defn update-episode
-  "Update an existing episode from the latest checkpoint state."
   [episode checkpoint & [opts]]
   (cond-> (assoc episode
                  :episode/status (cond

@@ -25,25 +25,53 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Schema re-exports
 
-(def DecisionCheckpoint spec/DecisionCheckpoint)
-(def DecisionEpisode spec/DecisionEpisode)
+(def DecisionCheckpoint
+  "Malli schema for a canonical normalized decision checkpoint."
+  spec/DecisionCheckpoint)
+(def DecisionEpisode
+  "Malli schema for a normalized decision episode (pending or resolved)."
+  spec/DecisionEpisode)
 
-(def source-kinds spec/source-kinds)
-(def authority-kinds spec/authority-kinds)
-(def checkpoint-statuses spec/checkpoint-statuses)
-(def episode-statuses spec/episode-statuses)
-(def response-types spec/response-types)
-(def risk-tiers spec/risk-tiers)
-(def ControlPlaneContext spec/ControlPlaneContext)
-(def LoopEscalationContext spec/LoopEscalationContext)
-(def DecisionContext spec/DecisionContext)
+(def source-kinds
+  "Vector of known checkpoint producer categories."
+  spec/source-kinds)
+(def authority-kinds
+  "Vector of authorities that may answer a checkpoint."
+  spec/authority-kinds)
+(def checkpoint-statuses
+  "Vector of checkpoint lifecycle states."
+  spec/checkpoint-statuses)
+(def episode-statuses
+  "Vector of episode lifecycle states."
+  spec/episode-statuses)
+(def response-types
+  "Vector of structured supervision response actions."
+  spec/response-types)
+(def risk-tiers
+  "Vector of risk tiers used for decision routing."
+  spec/risk-tiers)
+(def ControlPlaneContext
+  "Malli schema for control-plane decision checkpoint context."
+  spec/ControlPlaneContext)
+(def LoopEscalationContext
+  "Malli schema for loop-escalation checkpoint context."
+  spec/LoopEscalationContext)
+(def DecisionContext
+  "Malli schema for the known decision-checkpoint context shapes."
+  spec/DecisionContext)
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Validation helpers
 
-(def valid? spec/valid?)
-(def explain spec/explain)
-(def validate spec/validate)
+(def valid?
+  "True when `value` validates against `schema`. (schema value) -> boolean."
+  spec/valid?)
+(def explain
+  "Humanized explanation of why `value` fails `schema`. (schema value) -> map|nil."
+  spec/explain)
+(def validate
+  "Return `value` if it validates against `schema`, else throw. (schema value) -> value."
+  spec/validate)
 
 ;------------------------------------------------------------------------------ Layer 2
 ;; Public constructors

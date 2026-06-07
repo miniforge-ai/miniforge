@@ -29,28 +29,22 @@
 ;; Enums and registry
 
 (def source-kinds
-  "Known checkpoint producer categories."
   [:control-plane-agent :loop-escalation :workflow-node :external-agent :policy-gate])
 
 (def authority-kinds
-  "Who may answer the checkpoint."
   [:human :system :model :rule :hybrid])
 
 (def checkpoint-statuses
-  "Checkpoint lifecycle states."
   [:pending :resolved :cancelled :expired])
 
 (def episode-statuses
-  "Episode lifecycle states for the initial implementation."
   [:pending :resolved :completed])
 
 (def response-types
-  "Structured response actions supported by the initial model."
   [:approve :approve-with-constraints :reject :choose-option
    :request-more-evidence :reroute :mark-delegable :always-escalate :defer])
 
 (def risk-tiers
-  "Risk tiers for decision routing."
   [:low :medium :high :critical])
 
 (def registry
@@ -118,14 +112,12 @@
    [:requires-owner-review? {:optional true} boolean?]])
 
 (def ControlPlaneContext
-  "Context for control-plane decision checkpoints."
   [:map {:registry registry}
    [:context/text {:optional true} :id/string]
    [:context/deadline {:optional true} :common/timestamp]
    [:context/tags {:optional true} [:set keyword?]]])
 
 (def LoopEscalationContext
-  "Context for loop escalation checkpoints."
   [:map {:registry registry}
    [:loop/iteration int?]
    [:loop/state keyword?]
@@ -134,7 +126,6 @@
    [:error-count int?]])
 
 (def DecisionContext
-  "Known context shapes for decision checkpoints."
   [:or ControlPlaneContext LoopEscalationContext])
 
 (def DecisionResponse
@@ -147,7 +138,6 @@
    [:authority-role :authority/kind]])
 
 (def DecisionCheckpoint
-  "Canonical normalized checkpoint."
   [:map {:registry registry}
    [:checkpoint/id :id/uuid]
    [:checkpoint/status :checkpoint/status]
@@ -190,18 +180,15 @@
   :leave-this-here)
 
 (defn valid?
-  "Returns true if value validates against schema."
   [schema value]
   (m/validate schema value))
 
 (defn explain
-  "Returns a humanized explanation for schema failures."
   [schema value]
   (some-> (m/explain schema value)
           me/humanize))
 
 (defn validate
-  "Returns value if valid, otherwise throws."
   [schema value]
   (if (valid? schema value)
     value
