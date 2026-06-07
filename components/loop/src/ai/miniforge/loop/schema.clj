@@ -27,23 +27,18 @@
 ;; Base types and enums
 
 (def inner-loop-states
-  "Possible states for the inner loop state machine."
   [:pending :generating :validating :repairing :complete :failed :escalated])
 
 (def outer-loop-phases
-  "Phases in the outer loop SDLC cycle."
   [:spec :plan :design :implement :verify :review :release :observe])
 
 (def gate-types
-  "Types of validation gates."
   [:syntax :lint :test :policy :custom])
 
 (def repair-strategies
-  "Available repair strategies."
   [:llm-fix :retry :escalate])
 
 (def termination-reasons
-  "Reasons for loop termination."
   [:gates-passed :max-iterations :budget-exhausted :timeout :unrecoverable-error :manual-stop])
 
 (def registry
@@ -88,7 +83,6 @@
      [:column {:optional true} :common/non-neg-int]]]])
 
 (def GateResult
-  "Schema for the result of running a validation gate."
   [:map {:registry registry}
    [:gate/id :gate/id]
    [:gate/type :gate/type]
@@ -98,7 +92,6 @@
    [:gate/duration-ms {:optional true} :common/non-neg-int]])
 
 (def GateConfig
-  "Schema for gate configuration."
   [:map {:registry registry}
    [:gate/id :gate/id]
    [:gate/type :gate/type]
@@ -110,7 +103,6 @@
 ;; Repair schemas
 
 (def RepairAttempt
-  "Schema for a single repair attempt."
   [:map {:registry registry}
    [:repair/id :id/uuid]
    [:repair/strategy :repair/strategy]
@@ -124,7 +116,6 @@
 ;; Loop metrics
 
 (def LoopMetrics
-  "Schema for loop execution metrics."
   [:map {:registry registry}
    [:tokens {:optional true} :common/non-neg-int]
    [:cost-usd {:optional true} :common/pos-number]
@@ -133,7 +124,6 @@
    [:repair-calls {:optional true} :common/non-neg-int]])
 
 (def LoopBudget
-  "Schema for loop execution budget constraints."
   [:map {:registry registry}
    [:max-tokens {:optional true} :common/non-neg-int]
    [:max-cost-usd {:optional true} :common/pos-number]
@@ -144,8 +134,6 @@
 ;; Inner loop state schema
 
 (def InnerLoopState
-  "Schema for the inner loop state machine.
-   Tracks the generate -> validate -> repair cycle."
   [:map {:registry registry}
    ;; Required fields
    [:loop/id :loop/id]
@@ -202,7 +190,6 @@
 ;; Inner loop result
 
 (def InnerLoopResult
-  "Schema for the result of running an inner loop to completion."
   [:map {:registry registry}
    [:success boolean?]
    [:artifact {:optional true}
