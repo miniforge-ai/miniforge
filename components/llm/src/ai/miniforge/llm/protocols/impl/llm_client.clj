@@ -1646,7 +1646,9 @@
    system + user prompt BEFORE the request is sent — so it is captured even
    when the call is rejected with a context-overflow (where `:usage` never
    arrives). `:estimated-input-tokens` is a coarse chars/4 estimate to
-   gauge headroom against the model's context window.
+   gauge headroom against the model's context window. It rounds UP (ceil):
+   as a headroom gauge, truncating would under-report a near-boundary
+   prompt and make an imminent overflow look further off than it is.
 
    Motivated by the 2026-06-07 review-redirect-convergence dogfood, where
    the planner's first turn silently ran up against the 200k window and
@@ -1660,7 +1662,9 @@
     {:system-chars system-chars
      :user-chars user-chars
      :total-chars total-chars
-     :estimated-input-tokens (quot total-chars chars-per-token-estimate)}))
+     ;; ceil division (stay conservative for a headroom gauge)
+     :estimated-input-tokens (quot (+ total-chars (dec chars-per-token-estimate))
+                                   chars-per-token-estimate)}))
 
 (defn handle-streaming [client request on-chunk backend-config progress-monitor]
   (let [{:keys [logger config]} client
