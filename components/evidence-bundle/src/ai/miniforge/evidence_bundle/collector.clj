@@ -45,8 +45,6 @@
 ;; Intent Collection
 
 (defn extract-intent
-  "Extract intent from workflow specification.
-   Returns intent evidence map."
   [workflow-spec]
   {:intent/type (get workflow-spec :intent/type :update)
    :intent/description (or (:description workflow-spec)
@@ -533,8 +531,6 @@
   (contains? #{:completed :failed} (:workflow/status workflow-state)))
 
 (defn auto-collect-evidence
-  "Automatically collect evidence when workflow reaches terminal state.
-   Returns evidence bundle or nil if not ready."
   [workflow-id workflow-state artifact-store]
   (when (should-create-bundle? workflow-state)
     (assemble-evidence-bundle workflow-id workflow-state artifact-store)))

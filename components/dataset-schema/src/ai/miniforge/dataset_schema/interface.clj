@@ -4,12 +4,25 @@
             [ai.miniforge.dataset-schema.field-types :as field-types]))
 
 ;; -- Dataset Types --
-(def dataset-types core/dataset-types)
+(def dataset-types
+  "Set of enumerated dataset-type keywords per N1 §2.2.
+   Value: #{:table :time-series :document-collection :graph :feature-set :report}."
+  core/dataset-types)
 
 ;; -- Field Types --
-(def field-types field-types/field-types)
-(def valid-field-type? field-types/valid-field-type?)
-(def type-widening-compatible? field-types/type-widening-compatible?)
+(def field-types
+  "Set of enumerated field-type keywords per N1 §4.2.
+   Value: #{:string :int :long :decimal :double :boolean :date :instant :uuid :json :bytes}."
+  field-types/field-types)
+
+(def valid-field-type?
+  "Predicate. Given a candidate type, returns true if it is a member of `field-types`, else false."
+  field-types/valid-field-type?)
+
+(def type-widening-compatible?
+  "Predicate. Given `from-type` and `to-type` keywords, returns true if widening from-type to
+   to-type is lossless/backward-compatible (e.g. :int -> :long), else false. Unknown types return false."
+  field-types/type-widening-compatible?)
 
 ;; -- Schema CRUD --
 (defn create-schema

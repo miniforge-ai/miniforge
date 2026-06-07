@@ -25,10 +25,23 @@
    [ai.miniforge.config.profile :as profile]))
 
 ;; Re-export public functions
-(def default-user-config-path user/default-user-config-path)
-(def default-config user/default-config)
-(def miniforge-home user/miniforge-home)
-(def repo-config-dir-name user/repo-config-dir-name)
+(def default-user-config-path
+  "Default filesystem path string for the user config file
+   (`<miniforge-home>/config.edn`). Computed once at load time."
+  user/default-user-config-path)
+(def default-config
+  "Default configuration value: a map loaded at load time from the shipped
+   classpath resource config/default-user-config.edn (with a fallback
+   resource). Empty map {} if neither resource can be read."
+  user/default-config)
+(def miniforge-home
+  "Function returning the miniforge home directory as a string.
+   Args: none. Returns: MINIFORGE_HOME env var if set, else
+   `<user.home>/.miniforge`. Never nil."
+  user/miniforge-home)
+(def repo-config-dir-name
+  "String naming the repo-level config directory: \".miniforge\"."
+  user/repo-config-dir-name)
 
 (defn repo-config-path
   "Return the path to .miniforge/config.edn in the given working directory."
@@ -110,7 +123,10 @@
   (digest/verify-governance-file config-key content))
 
 ;; Profile functions
-(def profile-path profile/profile-path)
+(def profile-path
+  "Default filesystem path string for the user profile file
+   (`<miniforge-home>/profile.edn`). Computed once at load time."
+  profile/profile-path)
 
 (defn load-profile
   "Load user profile from ~/.miniforge/profile.edn."

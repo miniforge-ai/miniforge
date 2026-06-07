@@ -11,7 +11,6 @@
 ;; ContextPack
 
 (defn ->context-pack
-  "Create a ContextPack map."
   [phase budget repo-map-text files search-results]
   {:phase phase
    :budget budget
@@ -26,7 +25,6 @@
 ;; Budget audit
 
 (defn ->budget-audit
-  "Create a budget audit snapshot."
   [phase budget tokens-used exhausted? source-count]
   {:phase phase
    :budget budget
@@ -42,7 +40,6 @@
 ;; Source tracking
 
 (defn ->source
-  "Create a source-tracking entry for audit trail."
   [kind path tokens]
   {:kind kind
    :path path
@@ -52,7 +49,6 @@
 ;; Pack context (used by implement phase to cache context-pack results)
 
 (defn ->pack-context
-  "Create a pack-context map for caching in execution context."
   [repo-index context-pack]
   {:repo-index repo-index
    :context-pack context-pack

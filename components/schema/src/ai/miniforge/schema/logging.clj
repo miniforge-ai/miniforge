@@ -28,11 +28,9 @@
 ;; Base types and event taxonomy
 
 (def log-levels
-  "Log severity levels ordered from most to least verbose."
   [:trace :debug :info :warn :error :fatal])
 
 (def log-categories
-  "High-level categorization of log events."
   [:agent :loop :policy :artifact :system])
 
 (def loop-types
@@ -88,11 +86,9 @@
    :system/health-check])
 
 (def all-events
-  "All known log events."
   (vec (concat agent-events loop-events policy-events artifact-events system-events)))
 
 (def scenario-tags
-  "Standard tags for scenario-based testing."
   [:canary :shadow :regression :smoke :stress :chaos :golden-path :error-recovery :rollback])
 
 (def logging-registry

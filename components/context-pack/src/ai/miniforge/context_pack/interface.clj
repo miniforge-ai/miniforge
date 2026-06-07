@@ -20,17 +20,69 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Schema re-exports
 
-(def ContextPack schema/ContextPack)
-(def BudgetAudit schema/BudgetAudit)
-(def Source schema/Source)
+(def ContextPack
+  "Malli schema (a [:map ...] vector) for a bounded context pack.
+
+   Keys: :phase (keyword), :budget (int), :tokens-used (int),
+   :repo-map (string or nil), :files (vector of maps),
+   :search-results (vector of maps), :exhausted? (boolean),
+   :sources (vector of Source)."
+  schema/ContextPack)
+
+(def BudgetAudit
+  "Malli schema (a [:map ...] vector) for a budget audit snapshot.
+
+   Keys: :phase (keyword), :budget (int), :tokens-used (int),
+   :tokens-remaining (int), :exhausted? (boolean), :source-count (int),
+   :utilization (double)."
+  schema/BudgetAudit)
+
+(def Source
+  "Malli schema (a [:map ...] vector) for a single source-tracking entry.
+
+   Keys: :kind (enum :repo-map | :file | :search), :path (non-empty
+   string or nil), :tokens (int)."
+  schema/Source)
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Factory re-exports
 
-(def ->context-pack factory/->context-pack)
-(def ->budget-audit factory/->budget-audit)
-(def ->source factory/->source)
-(def ->pack-context factory/->pack-context)
+(def ->context-pack
+  "Construct a ContextPack map with an empty audit trail.
+
+   Args: phase (keyword), budget (int), repo-map-text (string or nil),
+   files (vector of maps), search-results (vector of maps).
+   Returns a ContextPack map; :tokens-used 0, :exhausted? false,
+   :sources []. Total function, never throws."
+  factory/->context-pack)
+
+(def ->budget-audit
+  "Construct a BudgetAudit snapshot map.
+
+   Args: phase (keyword), budget (int), tokens-used (int),
+   exhausted? (boolean), source-count (int).
+   Returns a BudgetAudit map; :tokens-remaining clamped at >= 0,
+   :utilization is tokens-used/budget as a double (0.0 when budget
+   is non-positive). Total function, never throws."
+  factory/->budget-audit)
+
+(def ->source
+  "Construct a Source-tracking entry for a pack's audit trail.
+
+   Args: kind (keyword :repo-map | :file | :search), path (string or
+   nil), tokens (int). Returns a Source map. Total function, never
+   throws."
+  factory/->source)
+
+(def ->pack-context
+  "Construct a pack-context map for caching context-pack results in an
+   execution context.
+
+   Args: repo-index (RepoIndex map), context-pack (ContextPack map).
+   Returns a map with :repo-index, :context-pack, :repo-map-text (the
+   pack's :repo-map) and :existing-files (the pack's :files). Total
+   function, never throws."
+  factory/->pack-context)
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Budget queries
