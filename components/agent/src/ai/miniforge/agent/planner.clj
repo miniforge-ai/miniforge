@@ -176,6 +176,34 @@
                    {:spec-text              spec-text
                     :existing-files-section (existing-files-section existing-files)}))
 
+(defn- assemble-within-budget
+  "Assemble the planner user-prompt within the model's context window
+   (N12 §5). If the prompt would overflow, shed the eagerly-inlined
+   existing-files section — the files stay reachable via the context MCP
+   cache (seeded separately in invoke-planner-session), so the agent keeps
+   a query surface. Returns
+   {:user-prompt :shed? :over-after-shed? :window :est-full :est-final
+    :file-count}; :over-after-shed? marks an irreducible overflow."
+  [spec-text existing-files effective-system model]
+  (let [window   (llm/context-window-for-model-id model)
+        est      (fn [user] (:estimated-input-tokens
+                             (llm/prompt-size-telemetry effective-system user)))
+        full     (build-user-prompt spec-text existing-files)
+        est-full (est full)
+        base     {:window window :est-full est-full :file-count (count existing-files)}]
+    (cond
+      (or (nil? window) (< est-full window))
+      (merge base {:user-prompt full :shed? false :over-after-shed? false :est-final est-full})
+
+      (empty? existing-files)            ; nothing left to shed — irreducibly over
+      (merge base {:user-prompt full :shed? false :over-after-shed? true :est-final est-full})
+
+      :else
+      (let [shed (build-user-prompt spec-text nil)
+            est-shed (est shed)]
+        (merge base {:user-prompt shed :shed? true
+                     :over-after-shed? (>= est-shed window) :est-final est-shed})))))
+
 (defn spec->text
   "Convert a spec to text for the LLM."
   [spec]
@@ -618,9 +646,27 @@
               on-chunk (:on-chunk context)
               spec-text (spec->text input)
               existing-files (:task/existing-files input)
-              user-prompt    (build-user-prompt spec-text existing-files)
               effective-system (str @planner-system-prompt
-                                    (get input :task/behavior-addendum ""))]
+                                    (get input :task/behavior-addendum ""))
+              budget (assemble-within-budget spec-text existing-files
+                                             effective-system (:model config))
+              user-prompt (:user-prompt budget)]
+          (when (:shed? budget)
+            (log/info logger :planner :planner/context-shed
+                      {:data {:file-count (:file-count budget)
+                              :window (:window budget)
+                              :estimated-tokens-before (:est-full budget)
+                              :estimated-tokens-after (:est-final budget)}}))
+          ;; Irreducible overflow: bail pre-flight (no LLM call) rather than
+          ;; pay for a request the model will reject. N12 §5.4-5.5.
+          (when (:over-after-shed? budget)
+            (response/throw-anomaly!
+             :anomalies.agent/invoke-failed
+             "Planner prompt exceeds the model's context window even after shedding inlined files"
+             {:context-overflow true
+              :estimated-tokens (:est-final budget)
+              :context-window (:window budget)
+              :tokens 0}))
           ;; Past this point `llm-client` is non-nil — the
           ;; require-llm-client-or-anomaly boundary above already
           ;; escalated when the backend was missing.

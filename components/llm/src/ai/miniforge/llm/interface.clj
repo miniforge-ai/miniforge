@@ -310,6 +310,19 @@
   [model-key]
   (registry/get-model model-key))
 
+(defn context-window-for-model-id
+  "Context window (max input tokens) for a backend model-id string
+   (e.g. \"claude-opus-4-6\"), or nil when uncatalogued. See N12 §2."
+  [model-id]
+  (registry/context-window-for-model-id model-id))
+
+(defn prompt-size-telemetry
+  "Pre-flight size gauge over the assembled system + user prompt:
+   {:system-chars :user-chars :total-chars :estimated-input-tokens}.
+   See N12 §3."
+  [system prompt]
+  (impl/prompt-size-telemetry system prompt))
+
 (defn get-models-by-capability
   "Get models meeting or exceeding a capability level.
 

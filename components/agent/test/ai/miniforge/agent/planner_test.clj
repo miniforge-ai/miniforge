@@ -688,6 +688,48 @@
     (is (false? (boolean (submission-retry?
                           {:success false :error {:stdout "x" :type "other"}} nil nil ""))))))
 
+;------------------------------------------------------------------------------ Layer 6
+;; Context-budget shedding (N12 §5)
+
+(def ^:private assemble-within-budget
+  (var-get (ns-resolve 'ai.miniforge.agent.planner 'assemble-within-budget)))
+
+(defn- big-file [chars]
+  {:path "components/agent/src/ai/miniforge/agent/big.clj"
+   :content (apply str (repeat chars \x))})
+
+(deftest assemble-within-budget-test
+  (testing "uncatalogued model (nil window) → never sheds, files stay inlined"
+    (let [r (assemble-within-budget "do the thing" [(big-file 100)]
+                                    "system" "no-such-model")]
+      (is (false? (:shed? r)))
+      (is (false? (:over-after-shed? r)))
+      (is (str/includes? (:user-prompt r) "big.clj"))))
+
+  (testing "a small prompt under the window is not shed"
+    ;; codellama-34b → 16384-token window; a tiny prompt fits
+    (let [r (assemble-within-budget "do the thing" [(big-file 100)]
+                                    "system" "codellama-34b")]
+      (is (false? (:shed? r)))
+      (is (str/includes? (:user-prompt r) "big.clj"))))
+
+  (testing "files that blow the window are shed; the inlined section drops but
+            the prompt now fits (files stay reachable via the context cache)"
+    ;; ~300k chars of file content >> 16384 tokens; spec+system alone fits
+    (let [r (assemble-within-budget "do the thing" [(big-file 300000)]
+                                    "system" "codellama-34b")]
+      (is (true? (:shed? r)))
+      (is (false? (:over-after-shed? r)))
+      (is (= 1 (:file-count r)))
+      (is (< (:est-final r) (:est-full r)))
+      (is (not (str/includes? (:user-prompt r) "big.clj")))))
+
+  (testing "irreducible overflow (huge spec, no files) → over-after-shed?, no shed"
+    (let [r (assemble-within-budget (apply str (repeat 300000 \y)) []
+                                    "system" "codellama-34b")]
+      (is (false? (:shed? r)))
+      (is (true? (:over-after-shed? r))))))
+
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
   (test/run-tests 'ai.miniforge.agent.planner-test)
