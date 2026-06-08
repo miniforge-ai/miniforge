@@ -63,8 +63,10 @@
   (testing "interface/build-transition-graph forwards anomaly on malformed pipeline"
     (is (anomaly/anomaly? (phase-interface/build-transition-graph []))))
   (testing "graph produced by interface/build-transition-graph validates correctly"
+    ;; :implement has :on-fail :plan (redirect cycle) AND :budget {:iterations 3}
+    ;; so check-cycles treats the plan→implement→plan loop as bounded (not runaway).
     (let [pipeline [{:phase :plan}
-                    {:phase :implement :on-fail :plan}
+                    {:phase :implement :on-fail :plan :budget {:iterations 3}}
                     {:phase :done :terminal? true}]
           tg       (phase-interface/build-transition-graph pipeline)
           result   (sut/validate-graph tg)]

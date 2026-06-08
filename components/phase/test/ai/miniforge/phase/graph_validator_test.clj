@@ -256,8 +256,9 @@
                   :terminal-nodes #{:done}
                   :phase-nodes    #{:implement :stranded}}
           result (sut/check-retry-bounds graph)]
-      ;; :stranded doesn't reach terminal → exhaustion path anomaly
-      (is (pos? (count result))))))
+      ;; :iterations present so no budget-missing anomaly; :stranded cannot reach terminal
+      ;; so exactly 1 exhaustion-path anomaly fires for :implement
+      (is (= 1 (count result))))))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Property 5 — Failure Paths
@@ -304,8 +305,9 @@
                   :terminal-nodes #{:done}
                   :phase-nodes    #{:implement :stranded}}
           result (sut/check-failure-paths graph)]
-      ;; :implement's failure path leads to :stranded which doesn't reach terminal
-      (is (pos? (count result))))))
+      ;; :implement's failure path leads to :stranded (non-terminal) — 1 anomaly;
+      ;; :stranded itself has no failure edge at all — 1 more anomaly; total 2
+      (is (= 2 (count result))))))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Property 6 — Budget Paths
@@ -427,7 +429,8 @@
       (is (empty? (:warnings result)))))
   (testing "graph with multiple property violations → all appear in :errors"
     (let [graph  {:nodes          #{:plan :done}
-                  :edges          [(make-edge :plan :ghost :next)]  ;; dangling + no failure path
+                  :edges          [(make-edge :plan :ghost :next)]  ;; dangling :ghost (existence) + :plan cannot reach terminal (termination)
+                  ;; + :plan has no failure edge (failure-paths) — 3 violations, >= 2 holds
                   :terminal-nodes #{:done}
                   :phase-nodes    #{:plan}}
           result (sut/validate-graph graph)]
@@ -498,7 +501,60 @@
       (is (keyword? (:anomaly/type a)))
       (is (string?  (:anomaly/message a)))
       (is (map?     (:anomaly/data a)))
-      (is (some?    (:anomaly/at a))))))
+      (is (some?    (:anomaly/at a)))))
+  (testing "check-cycles anomaly conforms to rule 005"
+    ;; Runaway cycle: plan→implement→plan via :redirect, no retry-bounded node
+    (let [graph  {:nodes          #{:plan :implement :done :failed}
+                  :edges          [(make-edge :plan      :implement :next)
+                                   (make-edge :implement :plan      :redirect)
+                                   (make-edge :plan      :failed    :on-failure)
+                                   (make-edge :implement :failed    :on-failure)]
+                  :terminal-nodes #{:done :failed}
+                  :phase-nodes    #{:plan :implement}}
+          a      (first (sut/check-cycles graph))]
+      (is (keyword? (:anomaly/type a)))
+      (is (string?  (:anomaly/message a)))
+      (is (map?     (:anomaly/data a)))
+      (is (some?    (:anomaly/at a)))
+      (is (anomaly/anomaly? a) "anomaly/anomaly? must recognise it")))
+  (testing "check-failure-paths anomaly conforms to rule 005"
+    ;; Phase with no failure edge at all
+    (let [graph  {:nodes          #{:plan :done}
+                  :edges          [(make-edge :plan :done :next {})]
+                  :terminal-nodes #{:done}
+                  :phase-nodes    #{:plan}}
+          a      (first (sut/check-failure-paths graph))]
+      (is (keyword? (:anomaly/type a)))
+      (is (string?  (:anomaly/message a)))
+      (is (map?     (:anomaly/data a)))
+      (is (some?    (:anomaly/at a)))
+      (is (anomaly/anomaly? a) "anomaly/anomaly? must recognise it")))
+  (testing "check-retry-bounds anomaly conforms to rule 005"
+    ;; Retry edge with no :iterations in :meta
+    (let [graph  {:nodes          #{:implement :done :failed}
+                  :edges          [(make-edge :implement :implement :retry   {})   ;; no :iterations
+                                   (make-edge :implement :done      :next    {})
+                                   (make-edge :implement :failed    :on-budget-exhausted {})]
+                  :terminal-nodes #{:done :failed}
+                  :phase-nodes    #{:implement}}
+          a      (first (sut/check-retry-bounds graph))]
+      (is (keyword? (:anomaly/type a)))
+      (is (string?  (:anomaly/message a)))
+      (is (map?     (:anomaly/data a)))
+      (is (some?    (:anomaly/at a)))
+      (is (anomaly/anomaly? a) "anomaly/anomaly? must recognise it")))
+  (testing "check-budget-paths anomaly conforms to rule 005"
+    ;; Budget-guarded node with no :on-budget-exhausted edge
+    (let [graph  {:nodes          #{:implement :done}
+                  :edges          [(make-edge :implement :done :next {:budget-guarded? true})]
+                  :terminal-nodes #{:done}
+                  :phase-nodes    #{:implement}}
+          a      (first (sut/check-budget-paths graph))]
+      (is (keyword? (:anomaly/type a)))
+      (is (string?  (:anomaly/message a)))
+      (is (map?     (:anomaly/data a)))
+      (is (some?    (:anomaly/at a)))
+      (is (anomaly/anomaly? a) "anomaly/anomaly? must recognise it"))))
 
 ;------------------------------------------------------------------------------ Layer 2
 ;; Regression — shipped default pipeline
@@ -520,7 +576,13 @@
   (testing "property 2 — every node reaches terminal in default pipeline graph"
     (is (empty? (sut/check-termination (graph/build-transition-graph sdlc-default-pipeline)))))
   (testing "property 5 — every phase has a failure path in default pipeline graph"
-    (is (empty? (sut/check-failure-paths (graph/build-transition-graph sdlc-default-pipeline))))))
+    (is (empty? (sut/check-failure-paths (graph/build-transition-graph sdlc-default-pipeline)))))
+  (testing "property 3 — no runaway cycles in default pipeline graph"
+    (is (empty? (sut/check-cycles (graph/build-transition-graph sdlc-default-pipeline)))))
+  (testing "property 4 — retry bounds satisfied in default pipeline graph"
+    (is (empty? (sut/check-retry-bounds (graph/build-transition-graph sdlc-default-pipeline)))))
+  (testing "property 6 — budget paths satisfied in default pipeline graph"
+    (is (empty? (sut/check-budget-paths (graph/build-transition-graph sdlc-default-pipeline))))))
 
 (comment
   ;; Quick REPL smoke-tests for this test namespace
