@@ -26,8 +26,8 @@
      build-transition-graph, validate-graph, graph-valid?, validate-pipeline-graph
 
    LOAD-TIME FAIL-FAST — build-pipeline validates the graph at construction time:
-     valid pipeline   → interceptor vector (no anomaly)
-     :on-fail dangling → anomaly with :errors vector at construction
+     valid pipeline     → interceptor vector (no anomaly)
+     :on-fail dangling  → anomaly with :errors vector at construction
 
    BACKWARDS COMPATIBILITY — validate-pipeline delegates to validate-pipeline-graph;
    result shape is stable for existing consumers."
@@ -52,7 +52,16 @@
     (phase/reset-phase-loader!)))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Test phase registrations (unique keywords to avoid collision with interface_test.clj)
+;; Named constants
+
+(def ^:private test-phase-budget
+  "Minimal resource budget for graph-test fixture phases — small enough that
+   tests never actually exhaust it; large enough that budget-checking code
+   does not fire spuriously."
+  {:tokens 10 :iterations 1 :time-seconds 1})
+
+;------------------------------------------------------------------------------ Layer 0
+;; Test phase registrations (unique keywords avoid defmethod collision with interface_test.clj)
 
 (defmethod registry/get-phase-interceptor :graph-test-a
   [config]
@@ -64,10 +73,10 @@
 
 (registry/register-phase-defaults!
  :graph-test-a
- {:phase        :graph-test-a
-  :agent        :tester
-  :gates        []
-  :budget       {:tokens 10 :iterations 1 :time-seconds 1}})
+ {:phase  :graph-test-a
+  :agent  :tester
+  :gates  []
+  :budget test-phase-budget})
 
 (defmethod registry/get-phase-interceptor :graph-test-b
   [config]
@@ -79,10 +88,10 @@
 
 (registry/register-phase-defaults!
  :graph-test-b
- {:phase        :graph-test-b
-  :agent        :tester
-  :gates        []
-  :budget       {:tokens 10 :iterations 1 :time-seconds 1}})
+ {:phase  :graph-test-b
+  :agent  :tester
+  :gates  []
+  :budget test-phase-budget})
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Pipeline factories
@@ -95,7 +104,7 @@
 
 (defn- pipeline-with-dangling-on-fail
   "Pipeline where :on-fail names a phase absent from the pipeline.
-   Used to drive the load-time fail-fast path in build-pipeline."
+   Drives the load-time fail-fast path in build-pipeline."
   []
   [{:phase :graph-test-a :on-fail :nonexistent-repair-phase}
    {:phase :graph-test-b}])
@@ -106,10 +115,20 @@
   {:workflow/id       :graph-test-workflow
    :workflow/pipeline pipeline})
 
+;------------------------------------------------------------------------------ Layer 0
+;; Named helpers — config-value functions extracted per Rule 002
+
+(defn- phase-registered?
+  "True when phase-key has a registered interceptor in the phase registry."
+  [phase-key]
+  (contains? (phase/list-phases) phase-key))
+
+;------------------------------------------------------------------------------ Layer 0
+;; Hand-crafted graphs for direct validate-graph / graph-valid? tests
+
 (def ^:private minimal-valid-graph
-  "A hand-crafted TransitionGraph with one phase node and two terminal paths.
-   Used to test validate-graph and graph-valid? without round-tripping through
-   build-transition-graph."
+  "A TransitionGraph with one phase node and two terminal paths.
+   Used to test validate-graph and graph-valid? without build-transition-graph."
   {:nodes          #{:a :failed :completed}
    :edges          [{:from :a :to :failed    :label :on-failure   :meta {}}
                     {:from :a :to :completed :label :already-done :meta {}}]
@@ -142,17 +161,17 @@
       (is (contains? graph :terminal-nodes))
       (is (contains? graph :phase-nodes))))
 
-  (testing "2-arity form (with opts) is also accessible"
+  (testing "2-arity form (with opts) is accessible"
     (let [graph (phase/build-transition-graph (two-phase-pipeline) {})]
       (is (not (anomaly/anomaly? graph)))
       (is (map? graph))))
 
-  (testing "phase-nodes in graph contains the pipeline phases"
+  (testing "phase-nodes contains the pipeline phases"
     (let [graph (phase/build-transition-graph (two-phase-pipeline))]
       (is (contains? (:phase-nodes graph) :graph-test-a))
       (is (contains? (:phase-nodes graph) :graph-test-b))))
 
-  (testing "terminal-nodes set is non-empty for a valid pipeline"
+  (testing "terminal-nodes is non-empty for a valid pipeline"
     (let [graph (phase/build-transition-graph (two-phase-pipeline))]
       (is (seq (:terminal-nodes graph))))))
 
@@ -182,13 +201,13 @@
 
   (testing "returns :valid? true for a structurally sound graph"
     (let [result (phase/validate-graph minimal-valid-graph)]
-      (is (true? (:valid? result)))
+      (is (true?  (:valid? result)))
       (is (empty? (:errors result)))))
 
   (testing "returns :valid? false with :errors for a dangling-edge graph"
     (let [result (phase/validate-graph dangling-edge-graph)]
       (is (false? (:valid? result)))
-      (is (seq (:errors result))))))
+      (is (seq    (:errors result))))))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; INTERFACE WIRING — graph-valid? (renamed from graph-validator/valid?)
@@ -201,18 +220,18 @@
     (is (boolean? (phase/graph-valid? minimal-valid-graph))))
 
   (testing "returns true for a structurally sound graph"
-    (is (true? (phase/graph-valid? minimal-valid-graph))))
+    (is (true?  (phase/graph-valid? minimal-valid-graph))))
 
   (testing "returns false for a graph with a dangling edge"
     (is (false? (phase/graph-valid? dangling-edge-graph))))
 
   (testing "is consistent with validate-graph :valid? field"
-    (let [valid-match?   (= (phase/graph-valid? minimal-valid-graph)
-                            (true? (:valid? (phase/validate-graph minimal-valid-graph))))
-          invalid-match? (= (phase/graph-valid? dangling-edge-graph)
-                            (true? (:valid? (phase/validate-graph dangling-edge-graph))))]
-      (is valid-match?   "graph-valid? must agree with validate-graph :valid? on valid input")
-      (is invalid-match? "graph-valid? must agree with validate-graph :valid? on invalid input"))))
+    (is (= (phase/graph-valid? minimal-valid-graph)
+           (true? (:valid? (phase/validate-graph minimal-valid-graph))))
+        "graph-valid? must agree with validate-graph :valid? on valid input")
+    (is (= (phase/graph-valid? dangling-edge-graph)
+           (true? (:valid? (phase/validate-graph dangling-edge-graph))))
+        "graph-valid? must agree with validate-graph :valid? on invalid input")))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; INTERFACE WIRING — validate-pipeline-graph result shape
@@ -233,113 +252,107 @@
         (is (vector? (:errors result)))
         (is (vector? (:warnings result))))))
 
-  (testing ":valid? is a boolean"
+  (testing ":valid? is true for a structurally sound two-phase pipeline"
     (is (true?  (:valid? (phase/validate-pipeline-graph (two-phase-pipeline)))))
+    (is (empty? (:errors (phase/validate-pipeline-graph (two-phase-pipeline))))))
+
+  (testing ":valid? is false for an empty pipeline"
     (is (false? (:valid? (phase/validate-pipeline-graph [])))))
 
   (testing "pipeline-validation-valid? predicate agrees with :valid? field"
-    (let [valid-result   (phase/validate-pipeline-graph (two-phase-pipeline))
-          invalid-result (phase/validate-pipeline-graph [])]
-      (is (true?  (phase/pipeline-validation-valid? valid-result)))
-      (is (false? (phase/pipeline-validation-valid? invalid-result))))))
+    (is (true?  (phase/pipeline-validation-valid? (phase/validate-pipeline-graph (two-phase-pipeline)))))
+    (is (false? (phase/pipeline-validation-valid? (phase/validate-pipeline-graph []))))))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; LOAD-TIME FAIL-FAST — valid pipeline → no anomaly at build-pipeline
 
 (deftest build-pipeline-valid-pipeline-no-anomaly-test
-  (testing "build-pipeline returns interceptor vector (no anomaly) for a valid pipeline"
-    (let [result (phase/build-pipeline (workflow-from (two-phase-pipeline)))]
+  (let [result (phase/build-pipeline (workflow-from (two-phase-pipeline)))]
+    (testing "returns interceptor vector (no anomaly) for a valid pipeline"
       (is (not (anomaly/anomaly? result))
           "Valid pipeline must not trigger fail-fast at construction")
       (is (vector? result))
-      (is (= 2 (count result)))))
+      (is (= 2 (count result))))
 
-  (testing "each interceptor in the result vector is a map with :name, :enter, :leave, :error"
-    (let [result (phase/build-pipeline (workflow-from (two-phase-pipeline)))]
+    (testing "each interceptor has :name, :enter, :leave, :error"
       (doseq [interceptor result]
         (is (map? interceptor))
-        (is (keyword? (:name interceptor)))
+        (is (keyword?   (:name interceptor)))
         (is (fn? (:enter interceptor)))
         (is (fn? (:leave interceptor)))
         (is (fn? (:error interceptor)))))))
 
 ;------------------------------------------------------------------------------ Layer 1
-;; LOAD-TIME FAIL-FAST — invalid pipeline → anomaly at build-pipeline
+;; LOAD-TIME FAIL-FAST — :on-fail dangling → anomaly at build-pipeline
 
 (deftest build-pipeline-dangling-on-fail-returns-anomaly-test
-  (testing "build-pipeline returns an anomaly when :on-fail names a nonexistent phase"
-    (let [result (phase/build-pipeline (workflow-from (pipeline-with-dangling-on-fail)))]
+  (let [result     (phase/build-pipeline (workflow-from (pipeline-with-dangling-on-fail)))
+        validation (get-in result [:anomaly/data :validation])
+        errors     (:errors validation)]
+    (testing "returns anomaly when :on-fail names a nonexistent phase"
       (is (anomaly/anomaly? result)
-          "Pipeline with :on-fail → nonexistent must produce anomaly at construction")))
+          "Pipeline with :on-fail → nonexistent must produce anomaly at construction"))
 
-  (testing "anomaly type is :invalid-input"
-    (let [result (phase/build-pipeline (workflow-from (pipeline-with-dangling-on-fail)))]
-      (is (= :invalid-input (:anomaly/type result)))))
+    (testing "anomaly type is :invalid-input"
+      (is (= :invalid-input (:anomaly/type result))))
 
-  (testing "anomaly :data carries :pipeline and :validation entries"
-    (let [result (phase/build-pipeline (workflow-from (pipeline-with-dangling-on-fail)))]
+    (testing "anomaly :data carries :pipeline and :validation entries"
       (is (some? (get-in result [:anomaly/data :pipeline])))
-      (is (some? (get-in result [:anomaly/data :validation])))))
+      (is (some? validation)))
 
-  (testing "validation block has :valid? false and non-empty :errors vector"
-    (let [validation (get-in (phase/build-pipeline (workflow-from (pipeline-with-dangling-on-fail)))
-                             [:anomaly/data :validation])]
-      (is (false? (:valid? validation)))
-      (is (vector? (:errors validation)))
-      (is (seq (:errors validation))
-          ":errors must contain at least one property-specific diagnostic")))
+    (testing "validation has :valid? false and non-empty :errors vector"
+      (is (false?  (:valid? validation)))
+      (is (vector? errors))
+      (is (seq     errors)
+          ":errors must contain at least one property-specific diagnostic"))
 
-  (testing "each entry in :errors satisfies anomaly/anomaly?"
-    (let [errors (get-in (phase/build-pipeline (workflow-from (pipeline-with-dangling-on-fail)))
-                         [:anomaly/data :validation :errors])]
+    (testing "every entry in :errors satisfies anomaly/anomaly?"
+      (is (seq errors) "errors must be non-empty before checking individual shapes")
       (is (every? anomaly/anomaly? errors)))))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; LOAD-TIME FAIL-FAST — empty pipeline → anomaly at build-pipeline
 
 (deftest build-pipeline-empty-pipeline-returns-anomaly-test
-  (testing "build-pipeline returns anomaly for empty :workflow/pipeline"
-    (let [result (phase/build-pipeline (workflow-from []))]
-      (is (anomaly/anomaly? result))))
+  (let [result     (phase/build-pipeline (workflow-from []))
+        validation (get-in result [:anomaly/data :validation])]
+    (testing "returns anomaly for empty :workflow/pipeline"
+      (is (anomaly/anomaly? result)))
 
-  (testing "anomaly :data contains :validation with :errors"
-    (let [result (phase/build-pipeline (workflow-from []))]
-      (is (some? (get-in result [:anomaly/data :validation])))
-      (is (seq (get-in result [:anomaly/data :validation :errors]))))))
+    (testing "anomaly :data contains :validation with :errors"
+      (is (some? validation))
+      (is (seq (:errors validation))))))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; BACKWARDS COMPATIBILITY — validate-pipeline shape matches validate-pipeline-graph
 
 (deftest validate-pipeline-compat-shape-test
-  (testing "validate-pipeline returns same keys as validate-pipeline-graph"
-    (let [workflow        (workflow-from (two-phase-pipeline))
-          pipeline-result (phase/validate-pipeline workflow)
-          graph-result    (phase/validate-pipeline-graph (two-phase-pipeline)
-                                                         {:check-interceptors?       true
-                                                          :interceptor-registered-fn #(contains? (phase/list-phases) %)})]
+  (let [workflow        (workflow-from (two-phase-pipeline))
+        pipeline-result (phase/validate-pipeline workflow)
+        graph-result    (phase/validate-pipeline-graph
+                         (two-phase-pipeline)
+                         {:check-interceptors?       true
+                          :interceptor-registered-fn phase-registered?})]
+    (testing "returns same key set as validate-pipeline-graph"
       (is (= (set (keys pipeline-result))
              (set (keys graph-result)))
-          "validate-pipeline must expose the same key set as validate-pipeline-graph")))
+          "validate-pipeline must expose the same key set as validate-pipeline-graph"))
 
-  (testing "validate-pipeline :valid? matches validate-pipeline-graph :valid? for same pipeline"
-    (let [workflow        (workflow-from (two-phase-pipeline))
-          pipeline-result (phase/validate-pipeline workflow)
-          graph-result    (phase/validate-pipeline-graph (two-phase-pipeline)
-                                                         {:check-interceptors?       true
-                                                          :interceptor-registered-fn #(contains? (phase/list-phases) %)})]
-      (is (= (:valid? pipeline-result) (:valid? graph-result)))))
+    (testing ":valid? matches validate-pipeline-graph :valid? for same pipeline"
+      (is (= (:valid? pipeline-result) (:valid? graph-result))))))
 
-  (testing "validate-pipeline valid pipeline → :valid? true with empty :errors"
+(deftest validate-pipeline-result-contract-test
+  (testing "valid pipeline → :valid? true with empty :errors"
     (let [result (phase/validate-pipeline (workflow-from (two-phase-pipeline)))]
       (is (true?  (:valid? result)))
       (is (empty? (:errors result)))))
 
-  (testing "validate-pipeline empty pipeline → :valid? false with :errors"
+  (testing "empty pipeline → :valid? false with :errors"
     (let [result (phase/validate-pipeline (workflow-from []))]
       (is (false? (:valid? result)))
-      (is (seq   (:errors result)))))
+      (is (seq    (:errors result)))))
 
-  (testing "validate-pipeline :errors and :warnings are always vectors"
+  (testing ":errors and :warnings are always vectors"
     (doseq [workflow [(workflow-from (two-phase-pipeline))
                       (workflow-from [])]]
       (let [result (phase/validate-pipeline workflow)]
@@ -357,11 +370,11 @@
                                           {:phase :graph-test-b}])]
     (phase/validate-graph g))
 
-  ;; Fail-fast
+  ;; Fail-fast — dangling :on-fail
   (phase/build-pipeline {:workflow/pipeline
                           [{:phase :graph-test-a :on-fail :nonexistent-repair-phase}
                            {:phase :graph-test-b}]})
-  ;; => anomaly map
+  ;; => anomaly map with :anomaly/data :validation :errors
 
   ;; Backwards compat
   (phase/validate-pipeline {:workflow/pipeline [{:phase :graph-test-a}

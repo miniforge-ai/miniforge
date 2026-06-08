@@ -39,4 +39,7 @@
 
   ;; interface.clj — build-pipeline fail-fast (system-locale; operator-facing only)
   :anomaly/pipeline-graph-invalid
-  "build-pipeline: pipeline failed structural graph validation — see :validation in anomaly data"}}
+  "build-pipeline: pipeline failed structural graph validation — see :validation in anomaly data"
+
+  :anomaly/pipeline-on-fail-dangling
+  "validate-pipeline-graph: :on-fail target names a phase absent from the pipeline — dangling reference"}}

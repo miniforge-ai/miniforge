@@ -372,6 +372,32 @@
   [result]
   (true? (:valid? result)))
 
+(def ^:private built-in-terminal-phases
+  "Phase keywords that are always valid :on-fail targets regardless of whether
+   they appear in the user-supplied pipeline — inserted unconditionally by
+   build-transition-graph as structural terminal nodes."
+  #{:completed :failed :cancelled :done})
+
+(defn- on-fail-reference-errors
+  "Return anomalies for :on-fail values that name a phase absent from both
+   the pipeline and the built-in terminal set.
+
+   build-transition-graph does not model :on-fail as explicit graph edges, so
+   Property 1 (check-existence) never fires for dangling :on-fail targets.
+   This pre-graph check surfaces them before graph construction."
+  [pipeline]
+  (let [valid-targets (into built-in-terminal-phases (keep :phase pipeline))]
+    (into []
+          (comp
+           (filter :on-fail)
+           (remove (fn [step] (contains? valid-targets (:on-fail step))))
+           (map (fn [step]
+                  (anomaly/anomaly :invalid-input
+                                   (messages/ts :anomaly/pipeline-on-fail-dangling)
+                                   {:from-phase     (:phase step)
+                                    :on-fail-target (:on-fail step)}))))
+          pipeline)))
+
 (defn validate-pipeline-graph
   "Validate a pipeline vector using full structural graph analysis.
 
@@ -388,14 +414,23 @@
 
    Returns {:valid? bool :errors [anomaly...] :warnings [...]}.
    When build-transition-graph itself fails (nil/empty/malformed pipeline),
-   that anomaly is wrapped as the single :errors entry."
+   that anomaly is wrapped as the single :errors entry.
+   :on-fail references to phases absent from the pipeline are also reported
+   as errors, even when build-transition-graph succeeds."
   ([pipeline]
    (validate-pipeline-graph pipeline {}))
   ([pipeline opts]
-   (let [graph-or-anomaly (build-transition-graph pipeline)]
+   (let [graph-or-anomaly (build-transition-graph pipeline)
+         on-fail-errors   (when (sequential? pipeline)
+                            (on-fail-reference-errors pipeline))]
      (if (anomaly/anomaly? graph-or-anomaly)
-       (invalid-pipeline-result [graph-or-anomaly])
-       (validate-graph graph-or-anomaly opts)))))
+       (invalid-pipeline-result (into [graph-or-anomaly] (or on-fail-errors [])))
+       (let [graph-result (validate-graph graph-or-anomaly opts)]
+         (if (empty? on-fail-errors)
+           graph-result
+           (-> graph-result
+               (assoc :valid? false)
+               (update :errors into on-fail-errors))))))))
 
 (defn build-pipeline
   "Build interceptor pipeline from workflow config.
