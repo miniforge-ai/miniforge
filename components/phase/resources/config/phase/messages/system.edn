@@ -35,4 +35,8 @@
   "graph-validator: budget-guarded phase has :on-budget-exhausted edge that does not reach a terminal — exhaustion stall risk"
 
   :graph-validator/unregistered-interceptor
-  "graph-validator: phase has no registered interceptor in the phase registry"}}
+  "graph-validator: phase has no registered interceptor in the phase registry"
+
+  ;; interface.clj — build-pipeline fail-fast (system-locale; operator-facing only)
+  :anomaly/pipeline-graph-invalid
+  "build-pipeline: pipeline failed structural graph validation — see :validation in anomaly data"}}

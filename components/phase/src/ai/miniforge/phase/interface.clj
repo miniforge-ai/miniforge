@@ -32,6 +32,7 @@
       :leave   (fn [ctx] -> ctx)    ; Post-processing
       :error   (fn [ctx ex] -> ctx) ; Error handling/repair}"
   (:require
+   [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.phase.agent-behavior :as agent-behavior]
    ;; Load core terminal phase so `{:phase :done}` works in every runtime
    ;; that depends on the phase registry. The require is for side effects
@@ -40,7 +41,9 @@
    [ai.miniforge.phase.done]
    [ai.miniforge.phase.file-context :as file-context]
    [ai.miniforge.phase.graph :as graph]
+   [ai.miniforge.phase.graph-validator :as graph-validator]
    [ai.miniforge.phase.loader :as loader]
+   [ai.miniforge.phase.messages :as messages]
    [ai.miniforge.phase.phase-result :as phase-result]
    [ai.miniforge.phase.registry :as registry]
    [ai.miniforge.phase.telemetry :as telemetry]))
@@ -305,61 +308,7 @@
   phase-result/succeeded?)
 
 ;------------------------------------------------------------------------------ Layer 1
-;; Pipeline construction
-
-(defn build-pipeline
-  "Build interceptor pipeline from workflow config.
-
-   Arguments:
-     workflow - Workflow map with :workflow/pipeline vector
-
-   Returns:
-     Vector of interceptor maps"
-  [workflow]
-  (ensure-phase-implementations-loaded!)
-  (mapv get-phase-interceptor (:workflow/pipeline workflow)))
-
-(defn validate-pipeline
-  "Validate a workflow pipeline configuration.
-
-   Arguments:
-     workflow - Workflow map
-
-   Returns:
-     {:valid? bool :errors [...] :warnings [...]}"
-  [workflow]
-  (ensure-phase-implementations-loaded!)
-  (let [pipeline (:workflow/pipeline workflow)
-        known-phases (list-phases)
-        errors (atom [])
-        warnings (atom [])]
-
-    (when (empty? pipeline)
-      (swap! errors conj {:error :empty-pipeline
-                          :message "Workflow pipeline is empty"}))
-
-    (doseq [{:keys [phase on-fail on-success] :as _config} pipeline]
-      (when-not (contains? known-phases phase)
-        (swap! errors conj {:error :unknown-phase
-                            :phase phase
-                            :message (str "Unknown phase: " phase)}))
-
-      (when (and on-fail (not (contains? known-phases on-fail)))
-        (swap! warnings conj {:warning :unknown-on-fail-target
-                              :phase phase
-                              :target on-fail}))
-
-      (when (and on-success (not (contains? known-phases on-success)))
-        (swap! warnings conj {:warning :unknown-on-success-target
-                              :phase phase
-                              :target on-success})))
-
-    {:valid? (empty? @errors)
-     :errors @errors
-     :warnings @warnings}))
-
-;------------------------------------------------------------------------------ Layer 1
-;; Graph derivation pass-through
+;; Graph derivation pass-throughs
 
 (defn build-transition-graph
   "Derive a TransitionGraph from a workflow execution pipeline.
@@ -374,6 +323,105 @@
    (graph/build-transition-graph pipeline))
   ([pipeline opts]
    (graph/build-transition-graph pipeline opts)))
+
+(defn validate-graph
+  "Run structural property checks on a TransitionGraph.
+
+   opts keys (all optional):
+     :check-interceptors?       — boolean, default false; enables Property 7
+                                  (JVM-only; skip in babashka)
+     :interceptor-registered-fn — (fn [phase-kw] → truthy/falsy); required
+                                  when :check-interceptors? is true
+
+   Returns {:valid? bool :errors [anomaly...] :warnings [anomaly...]}.
+
+   See `graph-validator/validate-graph` for full contract."
+  ([graph]
+   (graph-validator/validate-graph graph))
+  ([graph opts]
+   (graph-validator/validate-graph graph opts)))
+
+(def graph-valid?
+  "Convenience: returns true iff the TransitionGraph passes all structural checks.
+   Renamed from graph-validator/valid? to avoid collision with other interface predicates."
+  graph-validator/valid?)
+
+;------------------------------------------------------------------------------ Layer 1
+;; Pipeline construction and validation
+
+(defn validate-pipeline-graph
+  "Validate a pipeline vector using full structural graph analysis.
+
+   Chains build-transition-graph → validate-graph. Single-call entry
+   point for load-time and bb-task callers.
+
+   `pipeline` — vector of phase config maps (same shape as
+                :workflow/pipeline in a workflow map).
+
+   `opts` — passed to validate-graph; defaults to {}.
+            Use {:check-interceptors? true :interceptor-registered-fn f}
+            to also verify every phase has a registered interceptor
+            (JVM-only — omit in babashka, where interceptors are not loaded).
+
+   Returns {:valid? bool :errors [anomaly...] :warnings [...]}.
+   When build-transition-graph itself fails (nil/empty/malformed pipeline),
+   that anomaly is wrapped as the single :errors entry."
+  ([pipeline]
+   (validate-pipeline-graph pipeline {}))
+  ([pipeline opts]
+   (let [graph-or-anomaly (build-transition-graph pipeline)]
+     (if (anomaly/anomaly? graph-or-anomaly)
+       {:valid?   false
+        :errors   [graph-or-anomaly]
+        :warnings []}
+       (validate-graph graph-or-anomaly opts)))))
+
+(defn build-pipeline
+  "Build interceptor pipeline from workflow config.
+
+   Validates the pipeline graph before building interceptors. Returns an
+   anomaly (rule 005) on structural failure — transparent to callers of
+   valid pipelines (return contract unchanged: vector of interceptor maps).
+
+   Arguments:
+     workflow - Workflow map with :workflow/pipeline vector
+
+   Returns:
+     Vector of interceptor maps on success.
+     An anomaly map (see `ai.miniforge.anomaly.interface/anomaly?`) on failure
+     — :anomaly/data contains {:pipeline [...] :validation {:valid? false ...}}."
+  [workflow]
+  (ensure-phase-implementations-loaded!)
+  (let [pipeline   (:workflow/pipeline workflow)
+        registered #(contains? (list-phases) %)
+        validation (validate-pipeline-graph
+                    pipeline
+                    {:check-interceptors?       true
+                     :interceptor-registered-fn registered})]
+    (if (:valid? validation)
+      (mapv get-phase-interceptor pipeline)
+      (anomaly/anomaly :invalid-input
+                       (messages/ts :anomaly/pipeline-graph-invalid)
+                       {:pipeline   pipeline
+                        :validation validation}))))
+
+(defn validate-pipeline
+  "Validate a workflow pipeline configuration using full graph analysis.
+
+   Delegates to validate-pipeline-graph with interceptor registration
+   check enabled, superseding the prior basic phase-existence checks.
+
+   Arguments:
+     workflow - Workflow map with :workflow/pipeline vector
+
+   Returns:
+     {:valid? bool :errors [anomaly...] :warnings [anomaly...]}"
+  [workflow]
+  (ensure-phase-implementations-loaded!)
+  (validate-pipeline-graph
+   (:workflow/pipeline workflow)
+   {:check-interceptors?       true
+    :interceptor-registered-fn #(contains? (list-phases) %)}))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
@@ -400,7 +448,18 @@
                                      {:phase :done}]})
   (build-pipeline workflow)
 
-  ;; Validate pipeline
+  ;; Validate pipeline (full graph analysis — supersedes basic checks)
   (validate-pipeline workflow)
+
+  ;; Validate a raw pipeline vector (convenience — skips workflow wrapper)
+  (validate-pipeline-graph (:workflow/pipeline workflow))
+
+  ;; Validate graph directly after building it
+  (let [g (build-transition-graph (:workflow/pipeline workflow))]
+    (validate-graph g))
+
+  ;; Convenience boolean check on a graph
+  (let [g (build-transition-graph (:workflow/pipeline workflow))]
+    (graph-valid? g))
 
   :leave-this-here)

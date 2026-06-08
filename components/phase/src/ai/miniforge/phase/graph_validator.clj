@@ -139,14 +139,27 @@
   (= :on-budget-exhausted (:label edge)))
 
 (defn- retry-self-loop?
-  "True when `edge` is a :retry self-loop (from == to, label == :retry)."
+  "True when `edge` is a :retry self-loop (from == to, label == :retry).
+   Used by check-retry-bounds to locate self-loops that require iteration guards."
   [edge]
   (and (= :retry (:label edge)) (= (:from edge) (:to edge))))
 
-(defn- has-retry-edge?
-  "True when the node has at least one :retry self-loop in its outgoing edges."
+(defn- expected-self-loop?
+  "True when `edge` is a self-loop produced by controlled, non-runaway behavior:
+     :retry — bounded iteration retry (iteration budget + exhaustion exit required)
+     :pause — supervisor-initiated pause; resumption is external, not automatic
+   Both are expected by-construction from build-transition-graph and are
+   not structural runaway risks."
+  [edge]
+  (and (= (:from edge) (:to edge))
+       (contains? #{:retry :pause} (:label edge))))
+
+(defn- has-expected-self-loop?
+  "True when the node has at least one expected self-loop (:retry or :pause).
+   Used by check-cycles (Property 3) to exempt controlled self-loops from the
+   runaway-cycle report."
   [node edges-from]
-  (some retry-self-loop? (get edges-from node [])))
+  (some expected-self-loop? (get edges-from node [])))
 
 (defn- budget-guarded?
   "True when the node has at least one outgoing edge with :budget-guarded? true
@@ -243,11 +256,12 @@
 ;; Property 3 — Cycles
 
 (defn check-cycles
-  "Property 3: detect all cycles via DFS back-edge coloring. Self-loops from
-   :retry edges are expected and allowed — they are identified by the presence
-   of a :retry self-loop on at least one node in the cycle. Cycles with NO
-   such node are structural runaway risks (static analog of dogfood finding #988).
-   Property 4 separately verifies that retry-based cycles have iteration bounds."
+  "Property 3: detect all cycles via DFS back-edge coloring. Self-loops that are
+   :retry or :pause edges are expected and allowed — they are identified by the
+   presence of an expected self-loop on at least one node in the cycle. Cycles
+   with NO such node are structural runaway risks (static analog of dogfood
+   finding #988). Property 4 separately verifies that retry-based cycles have
+   iteration bounds."
   [{:keys [nodes edges]}]
   (let [adjacency  (build-adjacency edges)
         edges-from (index-edges-by-from edges)
@@ -255,7 +269,7 @@
     (into []
           (comp
            (remove (fn [cycle-nodes]
-                     (some (fn [n] (has-retry-edge? n edges-from)) cycle-nodes)))
+                     (some (fn [n] (has-expected-self-loop? n edges-from)) cycle-nodes)))
            (map (fn [cycle-nodes]
                   (anomaly/anomaly :invalid-input
                                    (messages/ts :graph-validator/runaway-cycle)
