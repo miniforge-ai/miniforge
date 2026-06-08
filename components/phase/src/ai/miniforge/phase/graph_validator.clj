@@ -128,6 +128,11 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Bounded-retry helpers
 
+(defn- exhaustion-edge?
+  "True when edge carries an :on-budget-exhausted label."
+  [edge]
+  (= :on-budget-exhausted (:label edge)))
+
 (defn- retry-self-loop?
   "True when `edge` is a :retry self-loop (from == to, label == :retry)."
   [edge]
@@ -221,7 +226,7 @@
      (mapcat (fn [retry-edge]
                (let [node                (:from retry-edge)
                      has-iters?          (some? (get-in retry-edge [:meta :iterations]))
-                     exhaustion-edges    (filter (fn [e] (= :on-budget-exhausted (:label e)))
+                     exhaustion-edges    (filter exhaustion-edge?
                                                  (get edges-from node []))
                      exhaustion-reaches? (some (fn [ee]
                                                  (bfs-reaches-terminal?
@@ -279,7 +284,7 @@
     (vec
      (mapcat (fn [node]
                (if (budget-guarded? node edges-from)
-                 (let [exhaustion-edges    (filter (fn [e] (= :on-budget-exhausted (:label e)))
+                 (let [exhaustion-edges    (filter exhaustion-edge?
                                                    (get edges-from node []))
                        exhaustion-reaches? (some (fn [ee]
                                                    (bfs-reaches-terminal?

@@ -7,4 +7,32 @@
   "build-transition-graph: pipeline entry is malformed — each entry must be a map with a :phase keyword"
 
   :anomaly/duplicate-phases
-  "build-transition-graph: pipeline contains duplicate :phase keywords — each phase identifier must be unique"}}
+  "build-transition-graph: pipeline contains duplicate :phase keywords — each phase identifier must be unique"
+
+  ;; graph_validator.clj — structural property check anomaly messages (system-locale; operator-facing only)
+  :graph-validator/dangling-edge
+  "graph-validator: edge target does not exist in :nodes — dangling reference"
+
+  :graph-validator/no-terminal-reachable
+  "graph-validator: no terminal node is reachable from this node via BFS — stall risk"
+
+  :graph-validator/runaway-cycle
+  "graph-validator: cycle detected with no retry-bounded node — structural runaway risk"
+
+  :graph-validator/retry-missing-iterations
+  "graph-validator: retry self-loop is missing :iterations in edge :meta — unbounded retry risk"
+
+  :graph-validator/retry-missing-exhaustion-path
+  "graph-validator: retry node has no :on-budget-exhausted edge reaching a terminal — retry runaway risk"
+
+  :graph-validator/missing-failure-path
+  "graph-validator: phase node has no failure-labeled edge (:on-failure / :on-budget-exhausted / :redirect) reaching a terminal — silent stall risk"
+
+  :graph-validator/missing-budget-exhausted-edge
+  "graph-validator: budget-guarded phase has no :on-budget-exhausted edge — exhaustion path missing"
+
+  :graph-validator/budget-exhausted-no-terminal
+  "graph-validator: budget-guarded phase has :on-budget-exhausted edge that does not reach a terminal — exhaustion stall risk"
+
+  :graph-validator/unregistered-interceptor
+  "graph-validator: phase has no registered interceptor in the phase registry"}}
