@@ -20,7 +20,26 @@
   (:require
    [clojure.test :refer [deftest is testing]]
    [ai.miniforge.anomaly.interface :as anomaly]
+   [ai.miniforge.phase.graph :as graph]
+   [ai.miniforge.phase.interface :as phase-interface]
    [ai.miniforge.phase.graph-validator :as sut]))
+
+;------------------------------------------------------------------------------ Layer 0
+;; Shared constants and factories
+
+(def ^:private sdlc-default-pipeline
+  "Canonical miniforge SDLC pipeline shape — mirrors the shipped default workflow
+   configuration (same shape as the graph.clj comment block examples and the
+   default workflow-runner config). Regression pin: this pipeline must pass all
+   six non-interceptor structural checks without modification.
+
+   Phases: plan → implement (3 iters, retry to plan) → verify → review → done
+   Budget-guarded phases: implement, verify, review (all have :on-fail redirects)."
+  [{:phase :plan}
+   {:phase :implement :budget {:iterations 3} :on-fail :plan}
+   {:phase :verify    :on-fail :implement}
+   {:phase :review    :on-fail :implement}
+   {:phase :done :terminal? true}])
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Test fixtures and factories
@@ -436,6 +455,131 @@
                  :terminal-nodes #{:done}
                  :phase-nodes    #{:plan}}]
       (is (false? (sut/valid? graph))))))
+
+;------------------------------------------------------------------------------ Layer 2
+;; Anomaly shape — rule 005 conformance
+
+(deftest anomaly-maps-match-rule-005-shape
+  (testing "every anomaly produced by any check has the four canonical rule-005 keys"
+    ;; Use check-existence — simplest to trigger with a dangling edge.
+    (let [graph  {:nodes          #{:plan :done}
+                  :edges          [(make-edge :plan :ghost :next)
+                                   (make-edge :plan :done  :on-failure)]
+                  :terminal-nodes #{:done}
+                  :phase-nodes    #{:plan}}
+          a      (first (sut/check-existence graph))]
+      (is (some? (:anomaly/type    a)) ":anomaly/type must be present")
+      (is (some? (:anomaly/message a)) ":anomaly/message must be present")
+      (is (map?  (:anomaly/data    a)) ":anomaly/data must be a map")
+      (is (some? (:anomaly/at      a)) ":anomaly/at must be present")
+      (is (anomaly/anomaly? a)         "anomaly/anomaly? must recognise it")))
+  (testing "check-termination anomaly also conforms to rule 005"
+    (let [graph  {:nodes          #{:stranded :done}
+                  :edges          []
+                  :terminal-nodes #{:done}
+                  :phase-nodes    #{:stranded}}
+          a      (first (sut/check-termination graph))]
+      (is (keyword? (:anomaly/type a)))
+      (is (string?  (:anomaly/message a)))
+      (is (map?     (:anomaly/data a)))
+      (is (some?    (:anomaly/at a)))))
+  (testing "check-interceptors anomaly conforms to rule 005"
+    (let [graph  {:nodes          #{:plan :done}
+                  :edges          []
+                  :terminal-nodes #{:done}
+                  :phase-nodes    #{:plan}}
+          opts   {:check-interceptors?       true
+                  :interceptor-registered-fn (constantly false)}
+          a      (first (sut/check-interceptors graph opts))]
+      (is (keyword? (:anomaly/type a)))
+      (is (string?  (:anomaly/message a)))
+      (is (map?     (:anomaly/data a)))
+      (is (some?    (:anomaly/at a))))))
+
+;------------------------------------------------------------------------------ Layer 2
+;; Regression — shipped default pipeline
+
+(deftest default-pipeline-passes-all-structural-checks
+  (testing "shipped SDLC default pipeline builds without error"
+    (let [graph-or-anomaly (graph/build-transition-graph sdlc-default-pipeline)]
+      (is (not (anomaly/anomaly? graph-or-anomaly))
+          (str "build-transition-graph returned anomaly: " graph-or-anomaly))))
+  (testing "shipped SDLC default pipeline passes all 6 non-interceptor checks"
+    (let [tg     (graph/build-transition-graph sdlc-default-pipeline)
+          result (sut/validate-graph tg)]
+      (is (true?  (:valid? result))
+          (str "expected :valid? true; errors: " (mapv :anomaly/message (:errors result))))
+      (is (empty? (:errors   result)))
+      (is (empty? (:warnings result)))))
+  (testing "property 1 — no dangling edges in default pipeline graph"
+    (is (empty? (sut/check-existence (graph/build-transition-graph sdlc-default-pipeline)))))
+  (testing "property 2 — every node reaches terminal in default pipeline graph"
+    (is (empty? (sut/check-termination (graph/build-transition-graph sdlc-default-pipeline)))))
+  (testing "property 5 — every phase has a failure path in default pipeline graph"
+    (is (empty? (sut/check-failure-paths (graph/build-transition-graph sdlc-default-pipeline))))))
+
+;------------------------------------------------------------------------------ Layer 3
+;; Integration — interface.clj re-exports
+
+(deftest interface-build-transition-graph-resolves
+  (testing "interface/build-transition-graph returns a TransitionGraph (not an anomaly)"
+    (let [pipeline [{:phase :plan}
+                    {:phase :implement}
+                    {:phase :done :terminal? true}]
+          result   (phase-interface/build-transition-graph pipeline)]
+      (is (not (anomaly/anomaly? result))
+          (str "expected TransitionGraph; got: " result))
+      (is (set?    (:nodes result)))
+      (is (vector? (:edges result)))
+      (is (set?    (:terminal-nodes result)))
+      (is (set?    (:phase-nodes    result)))))
+  (testing "interface/build-transition-graph forwards anomaly on malformed pipeline"
+    (is (anomaly/anomaly? (phase-interface/build-transition-graph []))))
+  (testing "graph produced by interface/build-transition-graph validates correctly"
+    (let [pipeline [{:phase :plan}
+                    {:phase :implement :on-fail :plan}
+                    {:phase :done :terminal? true}]
+          tg       (phase-interface/build-transition-graph pipeline)
+          result   (sut/validate-graph tg)]
+      (is (true? (:valid? result))
+          (str "expected :valid? true; errors: " (mapv :anomaly/message (:errors result)))))))
+
+;------------------------------------------------------------------------------ Layer 3
+;; Integration — validate-pipeline-graph end-to-end
+
+(deftest validate-pipeline-graph-happy-path
+  (testing "valid pipeline returns {:valid? true :errors [] :warnings []}"
+    (let [result (sut/validate-pipeline-graph sdlc-default-pipeline)]
+      (is (true?  (:valid? result)))
+      (is (empty? (:errors result)))
+      (is (empty? (:warnings result)))))
+  (testing "single-phase terminal pipeline also passes"
+    (let [result (sut/validate-pipeline-graph [{:phase :plan}
+                                               {:phase :done :terminal? true}])]
+      (is (true? (:valid? result))))))
+
+(deftest validate-pipeline-graph-malformed-pipeline
+  (testing "empty pipeline → anomaly map returned directly (not a graph-validation result)"
+    (let [result (sut/validate-pipeline-graph [])]
+      (is (anomaly/anomaly? result)
+          "empty pipeline should produce anomaly, not {:valid? ...}")))
+  (testing "nil pipeline → anomaly map returned directly"
+    (is (anomaly/anomaly? (sut/validate-pipeline-graph nil))))
+  (testing "duplicate phases → anomaly map returned directly"
+    (is (anomaly/anomaly? (sut/validate-pipeline-graph [{:phase :plan} {:phase :plan}]))))
+  (testing "malformed entry (no :phase key) → anomaly map returned directly"
+    (is (anomaly/anomaly? (sut/validate-pipeline-graph [{:name :broken}])))))
+
+(deftest validate-pipeline-graph-with-opts
+  (testing "check-interceptors? forwarded through opts — unregistered phase flagged"
+    (let [pipeline [{:phase :plan}
+                    {:phase :done :terminal? true}]
+          opts     {:check-interceptors?       true
+                    :interceptor-registered-fn (constantly false)}
+          result   (sut/validate-pipeline-graph pipeline opts)]
+      (is (false? (:valid? result)))
+      (is (pos?   (count (:errors result))))
+      (is (some #(= :plan (:phase (anomaly-data %))) (:errors result))))))
 
 (comment
   ;; Quick REPL smoke-tests for this test namespace

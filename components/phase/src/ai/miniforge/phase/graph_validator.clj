@@ -37,6 +37,7 @@
    requires an :interceptor-registered-fn injected by the caller."
   (:require
    [ai.miniforge.anomaly.interface :as anomaly]
+   [ai.miniforge.phase.graph :as phase-graph]
    [ai.miniforge.phase.messages :as messages]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -374,6 +375,33 @@
   "Convenience: returns true iff the TransitionGraph passes all structural checks."
   [graph]
   (:valid? (validate-graph graph)))
+
+(defn validate-pipeline-graph
+  "Convenience: build a TransitionGraph from `pipeline` and validate it in one call.
+
+   Combines `phase-graph/build-transition-graph` + `validate-graph`. Useful at
+   the workflow-config boundary, where the caller has a pipeline vector and wants
+   a single structural verdict without an intermediate graph binding.
+
+   `opts` — passed to both build-transition-graph (`:budget-guarded-phases`) and
+            validate-graph (`:check-interceptors?`, `:interceptor-registered-fn`).
+
+   Returns {:valid? bool :errors [anomaly...] :warnings [anomaly...]} when the
+   pipeline is structurally valid (even if :valid? is false — the graph built fine
+   but has property violations).
+
+   Returns an anomaly map directly (satisfies `anomaly/anomaly?`) when the pipeline
+   itself is malformed — empty, non-sequential, duplicate phases, or missing :phase
+   keys. Callers must check `anomaly/anomaly?` before consuming graph-result keys."
+  ([pipeline]
+   (validate-pipeline-graph pipeline {}))
+  ([pipeline opts]
+   (let [graph-or-anomaly (phase-graph/build-transition-graph
+                           pipeline
+                           (select-keys opts [:budget-guarded-phases]))]
+     (if (anomaly/anomaly? graph-or-anomaly)
+       graph-or-anomaly
+       (validate-graph graph-or-anomaly opts)))))
 
 (comment
   ;; Quick REPL validation examples
