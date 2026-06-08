@@ -329,3 +329,45 @@
   (testing ":phase-nodes is a subset of :nodes"
     (let [g (graph/build-transition-graph linear-pipeline)]
       (is (every? #(contains? (:nodes g) %) (:phase-nodes g))))))
+
+;------------------------------------------------------------------------------ Layer 1
+;; Duplicate :phase keyword detection — regression test for the uniqueness guard
+
+(deftest test-duplicate-phase-returns-canonical-anomaly
+  (testing "two entries sharing the same :phase keyword → canonical anomaly"
+    (let [result (graph/build-transition-graph [{:phase :plan} {:phase :plan}])]
+      (is (anomaly/anomaly? result)
+          "duplicate :phase keywords should return a canonical anomaly satisfying anomaly?")
+      (is (= :invalid-input (:anomaly/type result)))
+      (is (contains? (set (get-in result [:anomaly/data :duplicate-phases])) :plan)
+          ":duplicate-phases data should name the offending keyword")))
+
+  (testing "three entries two of which share :phase :review → :review in duplicate set"
+    (let [result (graph/build-transition-graph
+                  [{:phase :plan}
+                   {:phase :review}
+                   {:phase :review}])]
+      (is (anomaly/anomaly? result))
+      (is (= :invalid-input (:anomaly/type result)))
+      (is (contains? (set (get-in result [:anomaly/data :duplicate-phases])) :review))))
+
+  (testing "multiple distinct duplicates all reported"
+    (let [result (graph/build-transition-graph
+                  [{:phase :plan}
+                   {:phase :plan}
+                   {:phase :verify}
+                   {:phase :verify}])]
+      (is (anomaly/anomaly? result))
+      (let [dupes (set (get-in result [:anomaly/data :duplicate-phases]))]
+        (is (contains? dupes :plan))
+        (is (contains? dupes :verify)))))
+
+  (testing "malformed entry takes precedence over duplicate detection"
+    ;; per-entry-error runs before duplicate-phase-error in validate-pipeline
+    (let [result (graph/build-transition-graph
+                  [{:name :bad-entry}
+                   {:phase :plan}
+                   {:phase :plan}])]
+      (is (anomaly/anomaly? result))
+      (is (= 0 (get-in result [:anomaly/data :index]))
+          "per-entry error at index 0 should be returned, not a duplicate-phases anomaly"))))

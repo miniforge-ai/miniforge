@@ -158,7 +158,9 @@
   "Return the :already-done transition target: :done when the pipeline
    contains a :done phase, otherwise :completed."
   [pipeline]
-  (or (done-node pipeline) :completed))
+  (if-let [dn (done-node pipeline)]
+    dn
+    :completed))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Pure helpers — edge constructors
@@ -188,11 +190,36 @@
                    (messages/ts :anomaly/malformed-pipeline-entry)
                    {:index idx :entry entry}))
 
+(defn- duplicate-phases-anomaly
+  [dupes]
+  (anomaly/anomaly :invalid-input
+                   (messages/ts :anomaly/duplicate-phases)
+                   {:duplicate-phases (vec dupes)}))
+
+(defn- per-entry-error
+  "Return the first per-entry structural error in `pipeline`, or nil."
+  [pipeline]
+  (some (fn [[idx entry]]
+          (when-not (and (map? entry) (keyword? (:phase entry)))
+            (malformed-entry-anomaly idx entry)))
+        (map-indexed vector pipeline)))
+
+(defn- duplicate-phase-error
+  "Return an anomaly when any :phase keyword appears more than once, or nil."
+  [pipeline]
+  (let [freqs (frequencies (map :phase pipeline))
+        dupes (keep (fn [[k n]] (when (> n 1) k)) freqs)]
+    (when (seq dupes)
+      (duplicate-phases-anomaly dupes))))
+
 (defn- validate-pipeline
   "Return nil when the pipeline is structurally valid, or an anomaly map.
-   Guards are applied in order: nil → non-sequential → empty → per-entry.
-   The nil and sequential? checks deliberately precede empty? to avoid
-   calling seq on non-Seqable values (which would throw ClassCastException)."
+   Guards are applied in order: nil → non-sequential → empty → per-entry →
+   duplicate-phase. The nil and sequential? checks deliberately precede empty?
+   to avoid calling seq on non-Seqable values (which would throw
+   ClassCastException). Duplicate :phase keywords are rejected because
+   graph-node identifiers must be unique — a pipeline with duplicates
+   produces ambiguous edge routing and deduplicated node sets."
   [pipeline]
   (cond
     (nil? pipeline)
@@ -205,10 +232,8 @@
     (empty-pipeline-anomaly)
 
     :else
-    (some (fn [[idx entry]]
-            (when-not (and (map? entry) (keyword? (:phase entry)))
-              (malformed-entry-anomaly idx entry)))
-          (map-indexed vector pipeline))))
+    (or (per-entry-error pipeline)
+        (duplicate-phase-error pipeline))))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Edge derivation — one function per edge class
@@ -325,6 +350,21 @@
          (edge (phase-node-id cfg) :cancelled label-cancel))
        pipeline))
 
+(defn- derive-all-edges
+  "Collect and concatenate all labeled edges for the pipeline.
+   Called once by build-transition-graph after pipeline validation."
+  [pipeline guarded-phases]
+  (vec (concat
+        (next-edges pipeline)
+        (success-edges pipeline)
+        (failure-edges pipeline)
+        (retry-edges pipeline)
+        (budget-exhausted-edges pipeline guarded-phases)
+        (already-done-edges pipeline)
+        (redirect-edges pipeline guarded-phases)
+        (pause-edges pipeline)
+        (cancel-edges pipeline))))
+
 ;------------------------------------------------------------------------------ Layer 1
 ;; Node derivation
 
@@ -353,7 +393,9 @@
   "Derive a TransitionGraph from a workflow execution pipeline.
 
    `pipeline` — vector of phase config maps, each with keys:
-     :phase      (required, keyword) — phase identifier
+     :phase      (required, keyword) — phase identifier; must be unique
+                  across the pipeline (duplicate :phase keywords are rejected
+                  as malformed — graph-node identifiers must be unique)
      :on-fail    (optional, keyword) — redirect target on failure
      :on-success (optional, keyword) — explicit success target; must be a
                   phase keyword present in the pipeline (not a terminal node)
@@ -380,23 +422,14 @@
   ([pipeline]
    (build-transition-graph pipeline {}))
   ([pipeline opts]
-   (let [guarded-phases  (get opts :budget-guarded-phases default-budget-guarded-phases)
+   (let [guarded-phases   (get opts :budget-guarded-phases default-budget-guarded-phases)
          validation-error (validate-pipeline pipeline)]
      (if validation-error
        validation-error
        (let [phase-set    (phase-nodes pipeline)
              terminal-set (terminal-nodes-for pipeline)
              node-set     (all-nodes phase-set terminal-set)
-             edges        (vec (concat
-                                (next-edges pipeline)
-                                (success-edges pipeline)
-                                (failure-edges pipeline)
-                                (retry-edges pipeline)
-                                (budget-exhausted-edges pipeline guarded-phases)
-                                (already-done-edges pipeline)
-                                (redirect-edges pipeline guarded-phases)
-                                (pause-edges pipeline)
-                                (cancel-edges pipeline)))]
+             edges        (derive-all-edges pipeline guarded-phases)]
          {:nodes          node-set
           :edges          edges
           :terminal-nodes terminal-set
@@ -423,6 +456,9 @@
    [{:phase :plan}
     {:phase :implement :on-fail :plan}]
    {:budget-guarded-phases #{:plan :implement}})
+
+  ;; Duplicate :phase keyword — returns anomaly
+  (build-transition-graph [{:phase :plan} {:phase :plan}])
 
   ;; Malformed — no :phase key
   (build-transition-graph [{:name :broken}])

@@ -4,4 +4,7 @@
   "build-transition-graph: pipeline is nil or empty — cannot derive transition graph"
 
   :anomaly/malformed-pipeline-entry
-  "build-transition-graph: pipeline entry is malformed — each entry must be a map with a :phase keyword"}}
+  "build-transition-graph: pipeline entry is malformed — each entry must be a map with a :phase keyword"
+
+  :anomaly/duplicate-phases
+  "build-transition-graph: pipeline contains duplicate :phase keywords — each phase identifier must be unique"}}
