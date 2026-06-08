@@ -184,6 +184,15 @@
    :requires ([standards])
    :task (standards/review *command-line-args*)}
 
+  ;; ──────────────────────────────────────────────────────────────────────────
+  ;; Phase validation — CI gate for phase transition graph integrity
+  ;; ──────────────────────────────────────────────────────────────────────────
+
+  phases:validate
+  {:doc  "Validate phase transition graph structural properties 1–6 (CI gate)"
+   :requires ([phases])
+   :task  (phases/validate)}
+
   work:queue
   {:doc  "Render the prioritized work-spec queue (stdout + work/QUEUE.md)"
    :requires ([work])

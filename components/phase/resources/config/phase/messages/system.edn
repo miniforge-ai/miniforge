@@ -39,4 +39,17 @@
 
   ;; interface.clj — build-pipeline fail-fast (system-locale; operator-facing only)
   :anomaly/pipeline-graph-invalid
-  "build-pipeline: pipeline failed structural graph validation — see :validation in anomaly data"}}
+  "build-pipeline: pipeline failed structural graph validation — see :validation in anomaly data"
+
+  ;; validate_task.clj — CI gate output (system-locale; operator-facing only)
+  :validate-task/summary-valid
+  "Pipeline valid — {node-count} nodes, {edge-count} edges."
+
+  :validate-task/summary-invalid
+  "Pipeline validation failed: {error-count} violation(s) found."
+
+  :validate-task/build-error
+  "Failed to build phase transition graph: {message}"
+
+  :validate-task/violation-format
+  "  [phase: {phase}] {message} | data: {data}"}}

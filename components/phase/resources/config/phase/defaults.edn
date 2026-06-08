@@ -1,0 +1,12 @@
+;; Default SDLC pipeline for miniforge workflows.
+;; Used by bb phases:validate to check structural integrity of the
+;; canonical phase transition graph at CI time.
+;;
+;; Schema: [:vector [:map [:phase keyword?]]]
+{:phase/pipeline
+ [{:phase :plan}
+  {:phase :implement :budget {:iterations 3} :on-fail :plan}
+  {:phase :verify    :on-fail :implement}
+  {:phase :review    :on-fail :implement}
+  {:phase :release}
+  {:phase :done      :terminal? true}]}
