@@ -95,6 +95,16 @@
   (some (fn [[i n]] (when (= n node) i))
         (map-indexed vector path-vec)))
 
+(defn- record-cycle-if-present!
+  "When `neighbor` is on the current gray DFS path, record the cycle nodes.
+   Extracts the subvec from neighbor's position to the end of the path and
+   conjoins it as a set into `cycles`."
+  [cycles path neighbor]
+  (let [path-vec  @path
+        cycle-idx (path-index-of path-vec neighbor)]
+    (when cycle-idx
+      (swap! cycles conj (set (subvec path-vec cycle-idx))))))
+
 (defn- find-cycles
   "Recursive DFS with white/gray/black coloring. Returns a vector of
    cycle-node-sets (each set contains all nodes on the detected cycle).
@@ -111,14 +121,9 @@
                 (doseq [neighbor (get adjacency node [])]
                   (let [c (get @colors neighbor)]
                     (cond
-                      (= :gray c)
-                      (let [path-vec  @path
-                            cycle-idx (path-index-of path-vec neighbor)]
-                        (when cycle-idx
-                          (swap! cycles conj (set (subvec path-vec cycle-idx)))))
-                      (nil? c)
-                      (dfs neighbor)
-                      :else nil)))
+                      (= :gray c) (record-cycle-if-present! cycles path neighbor)
+                      (nil? c)    (dfs neighbor)
+                      :else       nil)))
                 (swap! path pop)
                 (swap! colors assoc node :black)))]
       (doseq [start nodes]
@@ -150,6 +155,53 @@
   [node edges-from]
   (some (fn [e] (true? (get-in e [:meta :budget-guarded?])))
         (get edges-from node [])))
+
+(defn- any-exhaustion-reaches-terminal?
+  "True when any exhaustion edge's :to target reaches a terminal node.
+   Shared guard for check-retry-bounds and check-budget-paths."
+  [adjacency terminal-nodes exhaustion-edges]
+  (some (fn [ee] (bfs-reaches-terminal? adjacency terminal-nodes (:to ee)))
+        exhaustion-edges))
+
+;------------------------------------------------------------------------------ Layer 0
+;; Per-check violation builders (private; called by Layer 1 check functions)
+
+(defn- retry-edge-violations
+  "Build zero, one, or two anomalies for a single :retry self-loop edge.
+   Returns an empty vector when the retry is fully guarded (has :iterations
+   AND an exhaustion edge reaching terminal)."
+  [adjacency terminal-nodes edges-from retry-edge]
+  (let [node             (:from retry-edge)
+        has-iters?       (some? (get-in retry-edge [:meta :iterations]))
+        exhaustion-edges (filter exhaustion-edge? (get edges-from node []))
+        reaches?         (any-exhaustion-reaches-terminal? adjacency terminal-nodes exhaustion-edges)]
+    (cond-> []
+      (not has-iters?)
+      (conj (anomaly/anomaly :invalid-input
+                             (messages/ts :graph-validator/retry-missing-iterations)
+                             {:node node :retry-edge retry-edge}))
+      (not reaches?)
+      (conj (anomaly/anomaly :invalid-input
+                             (messages/ts :graph-validator/retry-missing-exhaustion-path)
+                             {:node node})))))
+
+(defn- budget-node-violations
+  "Build zero, one, or two anomalies for a single budget-guarded phase node.
+   Returns nil (treated as empty by mapcat callers) when the node is not
+   budget-guarded."
+  [adjacency terminal-nodes edges-from node]
+  (when (budget-guarded? node edges-from)
+    (let [exhaustion-edges (filter exhaustion-edge? (get edges-from node []))
+          reaches?         (any-exhaustion-reaches-terminal? adjacency terminal-nodes exhaustion-edges)]
+      (cond-> []
+        (empty? exhaustion-edges)
+        (conj (anomaly/anomaly :invalid-input
+                               (messages/ts :graph-validator/missing-budget-exhausted-edge)
+                               {:node node}))
+        (and (seq exhaustion-edges) (not reaches?))
+        (conj (anomaly/anomaly :invalid-input
+                               (messages/ts :graph-validator/budget-exhausted-no-terminal)
+                               {:node node}))))))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Property 1 — Existence
@@ -222,26 +274,8 @@
   (let [adjacency   (build-adjacency edges)
         edges-from  (index-edges-by-from edges)
         retry-edges (filter retry-self-loop? edges)]
-    (vec
-     (mapcat (fn [retry-edge]
-               (let [node                (:from retry-edge)
-                     has-iters?          (some? (get-in retry-edge [:meta :iterations]))
-                     exhaustion-edges    (filter exhaustion-edge?
-                                                 (get edges-from node []))
-                     exhaustion-reaches? (some (fn [ee]
-                                                 (bfs-reaches-terminal?
-                                                  adjacency terminal-nodes (:to ee)))
-                                               exhaustion-edges)]
-                 (cond-> []
-                   (not has-iters?)
-                   (conj (anomaly/anomaly :invalid-input
-                                          (messages/ts :graph-validator/retry-missing-iterations)
-                                          {:node node :retry-edge retry-edge}))
-                   (not exhaustion-reaches?)
-                   (conj (anomaly/anomaly :invalid-input
-                                          (messages/ts :graph-validator/retry-missing-exhaustion-path)
-                                          {:node node})))))
-             retry-edges))))
+    (vec (mapcat (partial retry-edge-violations adjacency terminal-nodes edges-from)
+                 retry-edges))))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Property 5 — Failure Paths
@@ -281,26 +315,8 @@
   [{:keys [phase-nodes edges terminal-nodes]}]
   (let [adjacency  (build-adjacency edges)
         edges-from (index-edges-by-from edges)]
-    (vec
-     (mapcat (fn [node]
-               (if (budget-guarded? node edges-from)
-                 (let [exhaustion-edges    (filter exhaustion-edge?
-                                                   (get edges-from node []))
-                       exhaustion-reaches? (some (fn [ee]
-                                                   (bfs-reaches-terminal?
-                                                    adjacency terminal-nodes (:to ee)))
-                                                 exhaustion-edges)]
-                   (cond-> []
-                     (empty? exhaustion-edges)
-                     (conj (anomaly/anomaly :invalid-input
-                                            (messages/ts :graph-validator/missing-budget-exhausted-edge)
-                                            {:node node}))
-                     (and (seq exhaustion-edges) (not exhaustion-reaches?))
-                     (conj (anomaly/anomaly :invalid-input
-                                            (messages/ts :graph-validator/budget-exhausted-no-terminal)
-                                            {:node node}))))
-                 []))
-             phase-nodes))))
+    (vec (mapcat #(or (budget-node-violations adjacency terminal-nodes edges-from %) [])
+                 phase-nodes))))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Property 7 — Interceptors (opt-in)
@@ -362,7 +378,7 @@
 (comment
   ;; Quick REPL validation examples
 
-  (def ^:private minimal-valid
+  (def minimal-valid
     {:nodes          #{:plan :implement :failed :completed}
      :edges          [{:from :plan      :to :implement :label :next       :meta {}}
                       {:from :plan      :to :failed    :label :on-failure :meta {}}
@@ -399,8 +415,8 @@
 
   ;; Property 7 — injectable interceptor check
   (check-interceptors
-   {:phase-nodes    #{:plan :implement}}
-   {:check-interceptors?      true
+   {:phase-nodes #{:plan :implement}}
+   {:check-interceptors?       true
     :interceptor-registered-fn #{:plan}})
   ;; => [anomaly {:phase :implement}]
   )
