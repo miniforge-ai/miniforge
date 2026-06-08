@@ -74,7 +74,7 @@
   (testing "given a valid pipeline result → run exits 0"
     (let [[code mock-exit] (capture-exit!)]
       (with-redefs [sut/validate-default-pipeline (constantly (valid-result))
-                    System/exit                   mock-exit]
+                    sut/exit-process!             mock-exit]
         (try (sut/run) (catch clojure.lang.ExceptionInfo _)))
       (is (= 0 @code)
           "run must exit 0 when the pipeline is valid"))))
@@ -87,7 +87,7 @@
                                  (violation-anomaly
                                   :verify
                                   "graph-validator: no terminal node reachable — stall risk")))
-                    System/exit mock-exit]
+                    sut/exit-process! mock-exit]
         (try (sut/run) (catch clojure.lang.ExceptionInfo _)))
       (is (= 1 @code)
           "run must exit 1 when the pipeline has violations"))))
@@ -97,7 +97,7 @@
     (let [[code mock-exit] (capture-exit!)]
       (with-redefs [sut/validate-default-pipeline
                     (constantly (anomaly/anomaly :invalid-input "empty pipeline" {}))
-                    System/exit mock-exit]
+                    sut/exit-process! mock-exit]
         (try (sut/run) (catch clojure.lang.ExceptionInfo _)))
       (is (= 1 @code)
           "run must exit 1 when graph build fails"))))

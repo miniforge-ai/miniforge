@@ -110,15 +110,17 @@
    {:valid? bool :node-count int :edge-count int :errors [anomaly...]}."
   []
   (let [pipeline (load-default-pipeline)
-        opts     (or (load-graph-opts) {})]
-    (let [g (graph/build-transition-graph pipeline opts)]
-      (if (anomaly/anomaly? g)
-        g
-        (let [{:keys [valid? errors]} (graph-validator/validate-graph g)]
-          {:valid?      valid?
-           :node-count  (count (:nodes g))
-           :edge-count  (count (:edges g))
-           :errors      errors})))))
+        opts     (or (load-graph-opts) {})
+        g        (graph/build-transition-graph pipeline opts)]
+    (if (anomaly/anomaly? g)
+      g
+      (let [{:keys [valid? errors]} (graph-validator/validate-graph g)
+            node-count              (count (:nodes g))
+            edge-count              (count (:edges g))]
+        {:valid?      valid?
+         :node-count  node-count
+         :edge-count  edge-count
+         :errors      errors}))))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Output handlers
@@ -146,6 +148,14 @@
     (println (messages/ts :validate-task/build-error
                           {:message (:anomaly/message anomaly-map)}))))
 
+;------------------------------------------------------------------------------ Layer 1
+;; Process exit — var wrapper enables test redefinition
+
+(def ^:private exit-process!
+  "Thin var wrapper around System/exit. Using a var (not a direct static call)
+   allows tests to intercept exit via with-redefs."
+  (fn [code] (System/exit code)))
+
 ;------------------------------------------------------------------------------ Layer 2
 ;; Entry point
 
@@ -169,15 +179,15 @@
     (cond
       (anomaly/anomaly? result)
       (do (emit-build-error result)
-          (System/exit 1))
+          (exit-process! 1))
 
       (:valid? result)
       (do (emit-success result)
-          (System/exit 0))
+          (exit-process! 0))
 
       :else
       (do (emit-failures result)
-          (System/exit 1)))))
+          (exit-process! 1)))))
 
 (comment
   ;; Quick REPL validation — does the default pipeline pass?

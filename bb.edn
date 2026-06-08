@@ -191,7 +191,7 @@
   phases:validate
   {:doc  "Validate phase transition graph structural properties 1–6 (CI gate)"
    :requires ([phases])
-   :task  (phases/validate)}
+   :task (phases/validate)}
 
   work:queue
   {:doc  "Render the prioritized work-spec queue (stdout + work/QUEUE.md)"
