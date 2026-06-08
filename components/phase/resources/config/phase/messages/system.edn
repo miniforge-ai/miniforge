@@ -1,0 +1,30 @@
+;; System-locale message catalog for the phase component.
+;; Keys are looked up via (phase.messages/t :key) at anomaly-construction sites.
+;; Audience: observability pipelines, log consumers, internal tooling — NOT users.
+;; Add user-facing counterparts to en-US.edn with matching <feature>-<condition> suffix.
+{:phase/system
+ {;; Graph structure anomalies emitted by transition-graph-validator
+
+  :anomaly/graph-unresolved-target
+  "Graph edge references a target node id that does not exist in :graph/nodes."
+
+  :anomaly/graph-no-termination-path
+  "Graph has no path from the entry node to any terminal state; execution would loop forever."
+
+  :anomaly/graph-unguarded-cycle
+  "Graph contains a cycle that lacks a termination guard; retry or redirect loop has no guaranteed exit."
+
+  :anomaly/graph-unbounded-retry
+  "Graph contains a :edge/retry loop on a guarded phase with no consecutive-retry cap edge; runaway retry risk."
+
+  :anomaly/graph-missing-failure-edge
+  "Graph node for a guarded phase is missing a required :edge/on-failure or :edge/terminal-verdict edge."
+
+  :anomaly/graph-budget-not-terminal
+  "Graph has a :edge/budget-exhausted edge whose target node is not a terminal state."
+
+  :anomaly/graph-missing-interceptor
+  "Graph node references a phase that has no registered interceptor in the phase registry."
+
+  :anomaly/graph-validation-failed
+  "Transition graph failed validation; one or more structural invariants violated. See :anomaly/data for individual findings."}}
