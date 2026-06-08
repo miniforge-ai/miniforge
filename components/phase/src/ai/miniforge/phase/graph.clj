@@ -293,7 +293,8 @@
   (keep (fn [cfg]
           (let [iterations (get-in cfg [:budget :iterations] 1)]
             (when (> iterations budgeted-phase-iterations-threshold)
-              (edge (phase-node-id cfg) (phase-node-id cfg) label-retry))))
+              (edge (phase-node-id cfg) (phase-node-id cfg) label-retry
+                    {:iterations iterations}))))
         pipeline))
 
 (defn- budget-exhausted-edges
