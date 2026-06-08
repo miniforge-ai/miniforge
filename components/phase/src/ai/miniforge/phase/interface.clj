@@ -39,6 +39,7 @@
    ;; from this namespace.
    [ai.miniforge.phase.done]
    [ai.miniforge.phase.file-context :as file-context]
+   [ai.miniforge.phase.graph :as graph]
    [ai.miniforge.phase.loader :as loader]
    [ai.miniforge.phase.phase-result :as phase-result]
    [ai.miniforge.phase.registry :as registry]
@@ -356,6 +357,23 @@
     {:valid? (empty? @errors)
      :errors @errors
      :warnings @warnings}))
+
+;------------------------------------------------------------------------------ Layer 1
+;; Graph derivation pass-through
+
+(defn build-transition-graph
+  "Derive a TransitionGraph from a workflow execution pipeline.
+
+   Returns either a TransitionGraph map or an anomaly map satisfying
+   `ai.miniforge.anomaly.interface/anomaly?`. Callers must check the return
+   value before consuming graph keys.
+
+   See `graph/build-transition-graph` for full contract, including the optional
+   `opts` argument for overriding `:budget-guarded-phases`."
+  ([pipeline]
+   (graph/build-transition-graph pipeline))
+  ([pipeline opts]
+   (graph/build-transition-graph pipeline opts)))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

@@ -45,8 +45,13 @@
      * :phase/already-done      → :done or :completed (labeled :already-done)
      * :phase/retry             → self-loop (labeled :retry)
      * :pause                   → self (labeled :pause)
-     * :cancel                  → :cancelled (labeled :cancel)"
+     * :cancel                  → :cancelled (labeled :cancel)
+
+   Anomaly returns: on malformed input, returns an anomaly map satisfying
+   `ai.miniforge.anomaly.interface/anomaly?`. Callers must check before
+   consuming graph keys."
   (:require
+   [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.phase.messages :as messages]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -102,11 +107,15 @@
    in the pipeline). Terminal nodes have no outgoing progression edges."
   #{:completed :failed :cancelled})
 
-(def budget-guarded-phases
-  "Phases that route :phase/fail through the verdict-driven guarded array.
-   Matches `workflow/fsm.clj`'s `guarded-phases` set. When a phase is in
-   this set AND has :on-fail configured, the graph includes a :redirect edge
-   guarded by budget (meta :budget-guarded? true)."
+(def default-budget-guarded-phases
+  "Fallback set of phases that route :phase/fail through the verdict-driven
+   guarded array. Matches `workflow/fsm.clj`'s `guarded-phases` set.
+
+   The active operational value lives in
+   `resources/config/phase/graph.edn` under `:phase/budget-guarded-phases`.
+   Callers may pass a different set via the `opts` argument to
+   `build-transition-graph` — this constant is the code-side fallback when
+   no config override is present."
   #{:review :verify :release :implement})
 
 (def budgeted-phase-iterations-threshold
@@ -169,25 +178,31 @@
 
 (defn- empty-pipeline-anomaly
   []
-  {:anomaly/type    :invalid-input
-   :anomaly/message (messages/ts :anomaly/empty-pipeline)
-   :anomaly/data    {}})
+  (anomaly/anomaly :invalid-input
+                   (messages/ts :anomaly/empty-pipeline)
+                   {}))
 
 (defn- malformed-entry-anomaly
   [idx entry]
-  {:anomaly/type    :invalid-input
-   :anomaly/message (messages/ts :anomaly/malformed-pipeline-entry)
-   :anomaly/data    {:index idx :entry entry}})
+  (anomaly/anomaly :invalid-input
+                   (messages/ts :anomaly/malformed-pipeline-entry)
+                   {:index idx :entry entry}))
 
 (defn- validate-pipeline
-  "Return nil when the pipeline is structurally valid, or an anomaly map."
+  "Return nil when the pipeline is structurally valid, or an anomaly map.
+   Guards are applied in order: nil → non-sequential → empty → per-entry.
+   The nil and sequential? checks deliberately precede empty? to avoid
+   calling seq on non-Seqable values (which would throw ClassCastException)."
   [pipeline]
   (cond
-    (or (nil? pipeline) (empty? pipeline))
+    (nil? pipeline)
     (empty-pipeline-anomaly)
 
     (not (sequential? pipeline))
     (malformed-entry-anomaly -1 pipeline)
+
+    (empty? pipeline)
+    (empty-pipeline-anomaly)
 
     :else
     (some (fn [[idx entry]]
@@ -215,7 +230,15 @@
 (defn- success-edges
   "Derive :on-success edges for phases with explicit :on-success config.
    Falls back to the :next edge when :on-success is absent (modeled in
-   next-edges already, so we emit only when the target DIFFERS from N+1)."
+   next-edges already, so we emit only when the target DIFFERS from N+1).
+
+   Constraint: :on-success values must be phase keywords present in the
+   pipeline. Terminal-node targets (:failed, :completed, :cancelled) are not
+   pipeline phases and will not match any pipeline entry — resolve-target-node
+   falls back to :completed for unresolved targets, producing a graph edge
+   that silently differs from config intent. Validate the pipeline's
+   :on-success values before calling this function if you need strict
+   target-resolution guarantees."
   [pipeline]
   (keep-indexed
    (fn [idx cfg]
@@ -249,16 +272,16 @@
         pipeline))
 
 (defn- budget-exhausted-edges
-  "Derive :on-budget-exhausted edges for budgeted phases.
+  "Derive :on-budget-exhausted edges for guarded phases with :on-fail.
    Models the `budget/redirects-spent?` guard branch in guarded-fail-transition:
    when the redirect budget is spent the phase transitions directly to :failed."
-  [pipeline]
+  [pipeline guarded-phases]
   (keep (fn [cfg]
           (let [phase-kw   (:phase cfg)
                 on-fail-kw (:on-fail cfg)]
             ;; Only phases that are guarded AND have :on-fail have a meaningful
             ;; budget-exhausted branch that differs from the plain failure edge.
-            (when (and (contains? budget-guarded-phases phase-kw) on-fail-kw)
+            (when (and (contains? guarded-phases phase-kw) on-fail-kw)
               (edge phase-kw :failed label-on-budget-exhausted
                     {:budget-guarded? true}))))
         pipeline))
@@ -277,11 +300,11 @@
    Models the third branch of guarded-fail-transition (the actual redirect).
    Meta carries :budget-guarded? true to surface the budget-precedes-redirect
    invariant: the :on-budget-exhausted edge fires BEFORE this one."
-  [pipeline]
+  [pipeline guarded-phases]
   (keep (fn [cfg]
           (let [phase-kw   (:phase cfg)
                 on-fail-kw (:on-fail cfg)]
-            (when (and (contains? budget-guarded-phases phase-kw) on-fail-kw)
+            (when (and (contains? guarded-phases phase-kw) on-fail-kw)
               (let [fail-idx    (first-phase-index pipeline on-fail-kw)
                     fail-target (resolve-target-node pipeline fail-idx :failed)]
                 (edge phase-kw fail-target label-redirect
@@ -332,12 +355,21 @@
    `pipeline` — vector of phase config maps, each with keys:
      :phase      (required, keyword) — phase identifier
      :on-fail    (optional, keyword) — redirect target on failure
-     :on-success (optional, keyword) — explicit success target
+     :on-success (optional, keyword) — explicit success target; must be a
+                  phase keyword present in the pipeline (not a terminal node)
      :budget     (optional, map)    — {:iterations n}
      :terminal?  (optional, bool)   — true for terminal phases
 
-   Returns either a TransitionGraph map or an anomaly map (see
-   `ai.miniforge.anomaly.interface/anomaly?`). Callers must check the
+   `opts` — optional config overrides (map):
+     :budget-guarded-phases — set of phase keywords that route :phase/fail
+                              through the verdict-driven guarded array;
+                              defaults to `default-budget-guarded-phases`.
+                              The operational value lives in
+                              `resources/config/phase/graph.edn` under
+                              `:phase/budget-guarded-phases`.
+
+   Returns either a TransitionGraph map or an anomaly map satisfying
+   `ai.miniforge.anomaly.interface/anomaly?`. Callers must check the
    return value before consuming graph keys.
 
    TransitionGraph keys:
@@ -345,27 +377,30 @@
      :edges          — vector of {:from :to :label :meta} maps
      :terminal-nodes — subset of :nodes that are terminal
      :phase-nodes    — subset of :nodes representing actual phases"
-  [pipeline]
-  (let [validation-error (validate-pipeline pipeline)]
-    (if validation-error
-      validation-error
-      (let [phase-set    (phase-nodes pipeline)
-            terminal-set (terminal-nodes-for pipeline)
-            node-set     (all-nodes phase-set terminal-set)
-            edges        (vec (concat
-                               (next-edges pipeline)
-                               (success-edges pipeline)
-                               (failure-edges pipeline)
-                               (retry-edges pipeline)
-                               (budget-exhausted-edges pipeline)
-                               (already-done-edges pipeline)
-                               (redirect-edges pipeline)
-                               (pause-edges pipeline)
-                               (cancel-edges pipeline)))]
-        {:nodes          node-set
-         :edges          edges
-         :terminal-nodes terminal-set
-         :phase-nodes    phase-set}))))
+  ([pipeline]
+   (build-transition-graph pipeline {}))
+  ([pipeline opts]
+   (let [guarded-phases  (get opts :budget-guarded-phases default-budget-guarded-phases)
+         validation-error (validate-pipeline pipeline)]
+     (if validation-error
+       validation-error
+       (let [phase-set    (phase-nodes pipeline)
+             terminal-set (terminal-nodes-for pipeline)
+             node-set     (all-nodes phase-set terminal-set)
+             edges        (vec (concat
+                                (next-edges pipeline)
+                                (success-edges pipeline)
+                                (failure-edges pipeline)
+                                (retry-edges pipeline)
+                                (budget-exhausted-edges pipeline guarded-phases)
+                                (already-done-edges pipeline)
+                                (redirect-edges pipeline guarded-phases)
+                                (pause-edges pipeline)
+                                (cancel-edges pipeline)))]
+         {:nodes          node-set
+          :edges          edges
+          :terminal-nodes terminal-set
+          :phase-nodes    phase-set})))))
 
 (comment
   ;; Basic linear pipeline
@@ -382,6 +417,12 @@
     {:phase :verify    :on-fail :implement}
     {:phase :review    :on-fail :implement}
     {:phase :done :terminal? true}])
+
+  ;; Custom guarded set via opts (e.g. loaded from graph.edn)
+  (build-transition-graph
+   [{:phase :plan}
+    {:phase :implement :on-fail :plan}]
+   {:budget-guarded-phases #{:plan :implement}})
 
   ;; Malformed — no :phase key
   (build-transition-graph [{:name :broken}])

@@ -19,6 +19,7 @@
 (ns ai.miniforge.phase.graph-test
   (:require
    [clojure.test :refer [deftest is testing]]
+   [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.phase.graph :as graph]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -70,33 +71,56 @@
         (:edges graph)))
 
 ;------------------------------------------------------------------------------ Layer 1
-;; Anomaly return on malformed input
+;; Anomaly return on malformed input — canonical anomaly/anomaly? contract
 
-(deftest test-empty-pipeline-returns-anomaly
-  (testing "nil pipeline → anomaly"
+(deftest test-empty-pipeline-returns-canonical-anomaly
+  (testing "nil pipeline → canonical anomaly (anomaly? returns true)"
     (let [result (graph/build-transition-graph nil)]
-      (is (= :invalid-input (:anomaly/type result))
-          "nil pipeline should return an anomaly")))
+      (is (anomaly/anomaly? result)
+          "nil pipeline should return a canonical anomaly satisfying anomaly?")
+      (is (= :invalid-input (:anomaly/type result)))))
 
-  (testing "empty vector pipeline → anomaly"
+  (testing "empty vector pipeline → canonical anomaly"
     (let [result (graph/build-transition-graph [])]
-      (is (= :invalid-input (:anomaly/type result))
-          "empty pipeline should return an anomaly")))
+      (is (anomaly/anomaly? result))
+      (is (= :invalid-input (:anomaly/type result)))))
 
-  (testing "non-sequential pipeline → anomaly"
-    (let [result (graph/build-transition-graph {:phase :plan})]
-      (is (= :invalid-input (:anomaly/type result))
-          "map (not vector) pipeline should return an anomaly"))))
+  (testing "anomaly includes :anomaly/at timestamp"
+    (let [result (graph/build-transition-graph nil)]
+      (is (some? (:anomaly/at result))
+          "canonical anomaly must carry :anomaly/at"))))
 
-(deftest test-malformed-entry-returns-anomaly
-  (testing "entry without :phase key → anomaly"
+(deftest test-malformed-entry-returns-canonical-anomaly
+  (testing "entry without :phase key → canonical anomaly"
     (let [result (graph/build-transition-graph [{:name :broken}])]
+      (is (anomaly/anomaly? result))
       (is (= :invalid-input (:anomaly/type result)))
       (is (= 0 (get-in result [:anomaly/data :index])))))
 
-  (testing "non-map entry → anomaly"
+  (testing "non-map entry → canonical anomaly"
     (let [result (graph/build-transition-graph [:not-a-map])]
-      (is (= :invalid-input (:anomaly/type result))))))
+      (is (anomaly/anomaly? result)))))
+
+(deftest test-non-sequential-pipeline-returns-anomaly-not-throws
+  (testing "keyword input → anomaly (not ClassCastException)"
+    (let [result (graph/build-transition-graph :not-a-vector)]
+      (is (anomaly/anomaly? result)
+          "keyword pipeline should return anomaly, not throw")))
+
+  (testing "integer input → anomaly (not ClassCastException)"
+    (let [result (graph/build-transition-graph 42)]
+      (is (anomaly/anomaly? result)
+          "integer pipeline should return anomaly, not throw")))
+
+  (testing "boolean input → anomaly (not ClassCastException)"
+    (let [result (graph/build-transition-graph true)]
+      (is (anomaly/anomaly? result)
+          "boolean pipeline should return anomaly, not throw")))
+
+  (testing "map input → anomaly (map is not sequential)"
+    (let [result (graph/build-transition-graph {:phase :plan})]
+      (is (anomaly/anomaly? result)
+          "map (not vector) pipeline should return anomaly"))))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Node derivation
@@ -214,7 +238,7 @@
       (is (edge-from-to? g :verify :failed graph/label-on-budget-exhausted))))
 
   (testing "non-guarded phase with :on-fail does NOT get :on-budget-exhausted edge"
-    ;; :plan is not in budget-guarded-phases
+    ;; :plan is not in default-budget-guarded-phases
     (let [g (graph/build-transition-graph guarded-pipeline)
           plan-budget-edges (filter #(and (= :plan (:from %))
                                           (= graph/label-on-budget-exhausted (:label %)))
@@ -229,6 +253,25 @@
                                        (= graph/label-redirect (:label %)))
                                   (:edges g))]
       (is (empty? impl-redirects)))))
+
+;------------------------------------------------------------------------------ Layer 1
+;; opts / :budget-guarded-phases override
+
+(deftest test-custom-guarded-phases-via-opts
+  (testing "custom :budget-guarded-phases in opts controls redirect edge emission"
+    (let [pipeline [{:phase :plan :on-fail :plan}
+                    {:phase :implement}]
+          ;; :plan is not in default-budget-guarded-phases, but is in custom set
+          g (graph/build-transition-graph pipeline {:budget-guarded-phases #{:plan}})]
+      (is (edge-from-to? g :plan :plan graph/label-redirect)
+          "plan should get redirect edge when in custom guarded set")))
+
+  (testing "empty guarded-phases set suppresses all redirect edges"
+    (let [g (graph/build-transition-graph guarded-pipeline {:budget-guarded-phases #{}})]
+      (is (empty? (edges-with-label g graph/label-redirect))
+          "no redirect edges when guarded set is empty")
+      (is (empty? (edges-with-label g graph/label-on-budget-exhausted))
+          "no budget-exhausted edges when guarded set is empty"))))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; :cancel and :pause edge derivation
@@ -249,11 +292,10 @@
 ;; :on-success override
 
 (deftest test-on-success-override
-  (testing "explicit :on-success target gets :on-success edge distinct from :next"
+  (testing "explicit :on-success to adjacent phase — :next edge present, no separate :on-success"
     (let [g (graph/build-transition-graph on-success-pipeline)]
-      ;; :implement → :verify via :on-success (skips linear next which is also :verify)
-      ;; on-success-pipeline has implement at index 1, verify at index 2 — same target,
-      ;; so the dedup check means no separate :on-success edge; confirm :next exists
+      ;; :implement → :verify via :next (on-success-pipeline: implement at 1, verify at 2)
+      ;; since on-success target equals next-index, no separate :on-success edge is emitted
       (is (edge-from-to? g :implement :verify graph/label-next)))))
 
 (deftest test-on-success-non-sequential-target

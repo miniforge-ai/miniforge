@@ -1,0 +1,10 @@
+;; Operational configuration for phase/graph.clj.
+;;
+;; :phase/budget-guarded-phases — phases that route :phase/fail through the
+;;   verdict-driven guarded array (see workflow/fsm.clj guarded-fail-transition).
+;;   When a phase is in this set AND has :on-fail configured, build-transition-graph
+;;   emits both a :redirect edge and an :on-budget-exhausted edge.
+;;   Code-side fallback: graph/default-budget-guarded-phases.
+;;
+;; Schema: [:set keyword?]
+{:phase/budget-guarded-phases #{:review :verify :release :implement}}
