@@ -288,12 +288,16 @@
        pipeline))
 
 (defn- retry-edges
-  "Derive :retry self-loop edges for phases whose iteration budget > 1."
+  "Derive :retry self-loop edges for phases whose iteration budget > 1.
+   Propagates the iteration budget into the edge :meta under :iterations so
+   that graph-validator/check-retry-bounds can verify the bound is present
+   without re-reading the pipeline config."
   [pipeline]
   (keep (fn [cfg]
           (let [iterations (get-in cfg [:budget :iterations] 1)]
             (when (> iterations budgeted-phase-iterations-threshold)
-              (edge (phase-node-id cfg) (phase-node-id cfg) label-retry))))
+              (edge (phase-node-id cfg) (phase-node-id cfg) label-retry
+                    {:iterations iterations}))))
         pipeline))
 
 (defn- budget-exhausted-edges

@@ -49,6 +49,20 @@
    non-terminal phase node."
   #{:on-failure :on-budget-exhausted :redirect})
 
+(def ^:private cycle-detection-edge-labels
+  "Edge labels considered when searching for runaway cycles (Property 3).
+   Only progression and redirect labels can form structural loops that prevent
+   workflow termination. Transient-state labels are excluded:
+     :pause       — externally-interrupted wait; never a progression decision
+     :cancel      — always exits to :cancelled (terminal)
+     :already-done — always exits to :done/:completed (terminal)
+     :on-failure  — always exits to :failed (terminal)
+     :on-budget-exhausted — always exits to :failed (terminal)
+   Excluding these prevents false-positive runaway reports for the self-loops
+   that build-transition-graph generates on every non-terminal phase (:pause)
+   and terminal phase (:already-done, :pause)."
+  #{:next :redirect :retry :on-success})
+
 ;------------------------------------------------------------------------------ Layer 0
 ;; Pure graph query helpers
 
@@ -248,11 +262,20 @@
    :retry edges are expected and allowed — they are identified by the presence
    of a :retry self-loop on at least one node in the cycle. Cycles with NO
    such node are structural runaway risks (static analog of dogfood finding #988).
-   Property 4 separately verifies that retry-based cycles have iteration bounds."
-  [{:keys [nodes edges]}]
-  (let [adjacency  (build-adjacency edges)
-        edges-from (index-edges-by-from edges)
-        cycles     (find-cycles adjacency nodes)]
+   Property 4 separately verifies that retry-based cycles have iteration bounds.
+
+   Cycle detection runs only over `cycle-detection-edge-labels` (progression and
+   redirect edges). Pause, cancel, and terminal-exit edges are excluded from the
+   DFS adjacency because they cannot form unbounded structural loops — they either
+   wait for external interruption or exit to a terminal node. Terminal nodes
+   themselves are excluded from the search: a :done or :failed self-loop is a
+   deterministic steady state, not a runaway."
+  [{:keys [nodes edges terminal-nodes]}]
+  (let [progression-edges (filter (fn [e] (contains? cycle-detection-edge-labels (:label e))) edges)
+        adjacency         (build-adjacency progression-edges)
+        edges-from        (index-edges-by-from edges)
+        non-terminal-nodes (remove terminal-nodes nodes)
+        cycles            (find-cycles adjacency non-terminal-nodes)]
     (into []
           (comp
            (remove (fn [cycle-nodes]

@@ -21,7 +21,6 @@
    [clojure.test :refer [deftest is testing]]
    [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.phase.graph :as graph]
-   [ai.miniforge.phase.interface :as phase-interface]
    [ai.miniforge.phase.graph-validator :as sut]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -29,12 +28,14 @@
 
 (def ^:private sdlc-default-pipeline
   "Canonical miniforge SDLC pipeline shape — mirrors the shipped default workflow
-   configuration (same shape as the graph.clj comment block examples and the
-   default workflow-runner config). Regression pin: this pipeline must pass all
-   six non-interceptor structural checks without modification.
+   configuration (same shape as graph-test.clj's guarded-pipeline and the
+   graph.clj REPL comment block). Regression pin: this pipeline must produce a
+   TransitionGraph that passes all six non-interceptor structural checks.
 
-   Phases: plan → implement (3 iters, retry to plan) → verify → review → done
-   Budget-guarded phases: implement, verify, review (all have :on-fail redirects)."
+   Key-format note: :budget {:iterations N} is the pipeline-config format; the
+   graph builder reads (get-in cfg [:budget :iterations]) and propagates the
+   value to the retry edge :meta under :iterations for graph-validator checks.
+   See graph/retry-edges and graph-validator/check-retry-bounds."
   [{:phase :plan}
    {:phase :implement :budget {:iterations 3} :on-fail :plan}
    {:phase :verify    :on-fail :implement}
@@ -79,15 +80,18 @@
   ([from to label] (make-edge from to label {}))
   ([from to label meta] {:from from :to to :label label :meta meta}))
 
+(def ^:private test-retry-iteration-budget
+  "Iteration count used in retry-bounds test fixtures.
+   Three iterations: enough to exercise the guarded-retry path, small enough
+   to remain clearly test-scoped rather than production-like. Matches the
+   count used in graph-test.clj's budgeted-pipeline and guarded-pipeline
+   fixtures to confirm both are reading the same :budget {:iterations N} key."
+  3)
+
 (defn- anomaly-data
   "Extract :anomaly/data from an anomaly map for structural assertions."
   [a]
   (:anomaly/data a))
-
-(defn- anomaly-type
-  "Extract :anomaly/type from an anomaly map."
-  [a]
-  (:anomaly/type a))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Property 1 — Existence
@@ -208,7 +212,7 @@
 (deftest check-retry-bounds-happy-path
   (testing "retry with :iterations meta AND exhaustion edge to terminal → no anomalies"
     (let [graph  {:nodes          #{:implement :done :failed}
-                  :edges          [(make-edge :implement :implement :retry   {:iterations 3})
+                  :edges          [(make-edge :implement :implement :retry   {:iterations test-retry-iteration-budget})
                                    (make-edge :implement :done      :next    {})
                                    (make-edge :implement :failed    :on-budget-exhausted {})]
                   :terminal-nodes #{:done :failed}
@@ -236,7 +240,7 @@
 (deftest check-retry-bounds-missing-exhaustion-path
   (testing "retry with :iterations but no :on-budget-exhausted edge → anomaly"
     (let [graph  {:nodes          #{:implement :done}
-                  :edges          [(make-edge :implement :implement :retry {:iterations 3})
+                  :edges          [(make-edge :implement :implement :retry {:iterations test-retry-iteration-budget})
                                    (make-edge :implement :done      :next  {})]
                   :terminal-nodes #{:done}
                   :phase-nodes    #{:implement}}
@@ -245,7 +249,7 @@
       (is (every? anomaly/anomaly? result))))
   (testing "retry with :iterations AND exhaustion edge but exhaustion target is non-terminal → anomaly"
     (let [graph  {:nodes          #{:implement :stranded :done}
-                  :edges          [(make-edge :implement :implement :retry             {:iterations 3})
+                  :edges          [(make-edge :implement :implement :retry             {:iterations test-retry-iteration-budget})
                                    (make-edge :implement :done      :next              {})
                                    (make-edge :implement :stranded  :on-budget-exhausted {})]
                   ;; :stranded is NOT in terminal-nodes and has no outgoing edge to terminal
@@ -518,71 +522,9 @@
   (testing "property 5 — every phase has a failure path in default pipeline graph"
     (is (empty? (sut/check-failure-paths (graph/build-transition-graph sdlc-default-pipeline))))))
 
-;------------------------------------------------------------------------------ Layer 3
-;; Integration — interface.clj re-exports
-
-(deftest interface-build-transition-graph-resolves
-  (testing "interface/build-transition-graph returns a TransitionGraph (not an anomaly)"
-    (let [pipeline [{:phase :plan}
-                    {:phase :implement}
-                    {:phase :done :terminal? true}]
-          result   (phase-interface/build-transition-graph pipeline)]
-      (is (not (anomaly/anomaly? result))
-          (str "expected TransitionGraph; got: " result))
-      (is (set?    (:nodes result)))
-      (is (vector? (:edges result)))
-      (is (set?    (:terminal-nodes result)))
-      (is (set?    (:phase-nodes    result)))))
-  (testing "interface/build-transition-graph forwards anomaly on malformed pipeline"
-    (is (anomaly/anomaly? (phase-interface/build-transition-graph []))))
-  (testing "graph produced by interface/build-transition-graph validates correctly"
-    (let [pipeline [{:phase :plan}
-                    {:phase :implement :on-fail :plan}
-                    {:phase :done :terminal? true}]
-          tg       (phase-interface/build-transition-graph pipeline)
-          result   (sut/validate-graph tg)]
-      (is (true? (:valid? result))
-          (str "expected :valid? true; errors: " (mapv :anomaly/message (:errors result)))))))
-
-;------------------------------------------------------------------------------ Layer 3
-;; Integration — validate-pipeline-graph end-to-end
-
-(deftest validate-pipeline-graph-happy-path
-  (testing "valid pipeline returns {:valid? true :errors [] :warnings []}"
-    (let [result (sut/validate-pipeline-graph sdlc-default-pipeline)]
-      (is (true?  (:valid? result)))
-      (is (empty? (:errors result)))
-      (is (empty? (:warnings result)))))
-  (testing "single-phase terminal pipeline also passes"
-    (let [result (sut/validate-pipeline-graph [{:phase :plan}
-                                               {:phase :done :terminal? true}])]
-      (is (true? (:valid? result))))))
-
-(deftest validate-pipeline-graph-malformed-pipeline
-  (testing "empty pipeline → anomaly map returned directly (not a graph-validation result)"
-    (let [result (sut/validate-pipeline-graph [])]
-      (is (anomaly/anomaly? result)
-          "empty pipeline should produce anomaly, not {:valid? ...}")))
-  (testing "nil pipeline → anomaly map returned directly"
-    (is (anomaly/anomaly? (sut/validate-pipeline-graph nil))))
-  (testing "duplicate phases → anomaly map returned directly"
-    (is (anomaly/anomaly? (sut/validate-pipeline-graph [{:phase :plan} {:phase :plan}]))))
-  (testing "malformed entry (no :phase key) → anomaly map returned directly"
-    (is (anomaly/anomaly? (sut/validate-pipeline-graph [{:name :broken}])))))
-
-(deftest validate-pipeline-graph-with-opts
-  (testing "check-interceptors? forwarded through opts — unregistered phase flagged"
-    (let [pipeline [{:phase :plan}
-                    {:phase :done :terminal? true}]
-          opts     {:check-interceptors?       true
-                    :interceptor-registered-fn (constantly false)}
-          result   (sut/validate-pipeline-graph pipeline opts)]
-      (is (false? (:valid? result)))
-      (is (pos?   (count (:errors result))))
-      (is (some #(= :plan (:phase (anomaly-data %))) (:errors result))))))
-
 (comment
   ;; Quick REPL smoke-tests for this test namespace
+  ;; Integration tests live in graph-validator-integration-test.
   (require '[clojure.test :as t])
   (t/run-tests 'ai.miniforge.phase.graph-validator-test)
   )
