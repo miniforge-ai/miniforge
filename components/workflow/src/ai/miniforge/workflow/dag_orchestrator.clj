@@ -287,6 +287,19 @@
     (dag/resolve-base-branch (or registry (dag/create-branch-registry))
                              deps default)))
 
+(defn- resolve-task-pr-base-branch
+  "Branch a task's release PR should target (its base) — the dep's PUSHED
+   branch, so a chained task's PR stacks on the parent's published branch.
+   Distinct from `resolve-task-base-branch` (the local worktree fork point).
+   Falls back to the spec branch for root / not-yet-released / multi-dep
+   tasks. Always returns a branch string (never an anomaly)."
+  [context task-def]
+  (let [registry (some-> (get context :dag/branch-registry) deref)
+        deps (vec (or (:task/deps task-def) []))
+        default (default-spec-branch context)]
+    (dag/resolve-pr-base-branch (or registry (dag/create-branch-registry))
+                                deps default)))
+
 ;--- Layer 1.5: Multi-parent merge (v2)
 ;; See specs/informative/I-DAG-MULTI-PARENT-MERGE.md §3.2 for the algorithm
 ;; and §6 for the failure-mode catalog. Stage 1B implements the no-conflict
@@ -547,17 +560,21 @@
    step 1). Returns the parents vector with `:commit-sha` populated, or
    an anomaly when any branch can't be resolved."
   [host-repo parents]
-  (loop [remaining parents
-         out (transient [])]
-    (if-let [p (first remaining)]
-      (if-not (valid-ref-name? (:branch p))
-        (branch-name-invalid-anomaly p)
+  ;; Validate ALL parent ref-names before any git I/O, so a structurally
+  ;; invalid name deterministically surfaces branch-name-invalid regardless
+  ;; of parent order — otherwise a valid-but-unresolvable sibling that sorts
+  ;; first would mask it (parents derive from a dep SET, so order varies).
+  (if-let [invalid (first (remove #(valid-ref-name? (:branch %)) parents))]
+    (branch-name-invalid-anomaly invalid)
+    (loop [remaining parents
+           out (transient [])]
+      (if-let [p (first remaining)]
         (let [r (run-git host-repo "rev-parse" "--verify" (str (:branch p) "^{commit}"))]
           (if (zero? (:exit r))
             (recur (rest remaining)
                    (conj! out (assoc p :commit-sha (str/trim (:out r)))))
-            (branch-unresolvable-anomaly p r))))
-      {:parents (persistent! out)})))
+            (branch-unresolvable-anomaly p r)))
+        {:parents (persistent! out)}))))
 
 (defn- ancestor-of?
   "True when `sha-a` is an ancestor of (reachable from) `sha-b`."
@@ -1155,6 +1172,12 @@
                            s)))
          resolved-branch (when (and base-result (dag/ok? base-result))
                            (:branch (:data base-result)))
+         ;; The PR base is the dep's PUSHED branch (a chained task stacks on
+         ;; the parent's published mf/... branch), NOT the local worktree
+         ;; fork point above. Root tasks resolve to the spec branch → base
+         ;; unchanged. The release-executor fetches this and degrades to the
+         ;; default if it can't be fetched.
+         pr-base-branch (resolve-task-pr-base-branch context task-def)
          merge-anomaly (when (merge-error? base-result) base-result)
          base-opts {:disable-dag-execution true
                     :skip-lifecycle-events true
@@ -1166,11 +1189,7 @@
        (get-in context [:execution/opts :event-stream])
        (assoc :event-stream (get-in context [:execution/opts :event-stream]))
        resolved-branch (assoc :branch resolved-branch)
-       ;; Same resolved base drives the task's release PR base, so a
-       ;; dependency-chained task's PR STACKS on its parent's branch instead
-       ;; of opening against the default branch with a cumulative diff. Root
-       ;; tasks resolve to the spec branch → base unchanged.
-       resolved-branch (assoc :release/base-branch resolved-branch)
+       pr-base-branch  (assoc :release/base-branch pr-base-branch)
        merge-anomaly  (assoc :dag/merge-anomaly merge-anomaly)))))
 
 ;--- Layer 1: Mini-Workflow Execution
@@ -1590,7 +1609,13 @@
     (doseq [[task-id result] batch-results]
       (when (dag/ok? result)
         (when-let [branch (get-in result [:data :task-branch])]
-          (swap! registry-atom dag/register-branch task-id {:branch branch}))))))
+          ;; :branch is the LOCAL worktree branch (downstream worktree fork
+          ;; point). :pr-branch is the PUSHED branch this task's release
+          ;; published — the base a dependent task's PR should stack on
+          ;; (resolve-pr-base-branch). nil when the task opened no PR.
+          (swap! registry-atom dag/register-branch task-id
+                 {:branch    branch
+                  :pr-branch (get-in result [:data :pr-info :branch])}))))))
 
 (defn execute-dag-loop [tasks-map context logger]
   (let [{:keys [on-task-start on-task-complete]} context

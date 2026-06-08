@@ -160,6 +160,26 @@
       :else
       (non-forest-anomaly deps))))
 
+(defn resolve-pr-base-branch
+  "Decide which branch a task's RELEASE PR should target (its base).
+
+   Distinct from `resolve-base-branch`, which returns the LOCAL worktree
+   fork point (`:branch`, e.g. a `task-XXXX` scratch branch that never
+   leaves the host). The PR base must be the dep's PUSHED branch
+   (`:pr-branch`, the `mf/...` branch the dep's release published to the
+   remote) so a chained task's PR stacks on the parent's published branch
+   and `origin/<base>` actually resolves.
+
+   Falls back to `default-branch` for root tasks (0 deps), a dep that
+   hasn't released yet, or a dep that recorded no pushed branch. Multi-dep
+   tasks also fall back to the default (stacked PRs are single-parent;
+   multi-parent worktrees go through the merge path)."
+  [registry task-deps default-branch]
+  (let [deps (vec task-deps)]
+    (if (= 1 (count deps))
+      (or (:pr-branch (lookup-branch registry (first deps))) default-branch)
+      default-branch)))
+
 (defn resolve-error?
   "True for `resolve-base-branch` outputs that represent an anomaly rather
    than a usable branch name. Lets callers branch on the result without

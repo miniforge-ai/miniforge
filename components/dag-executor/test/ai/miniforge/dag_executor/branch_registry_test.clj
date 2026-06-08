@@ -61,6 +61,26 @@
     (let [reg (br/register-branch (br/create-registry) :a {:branch "task-a"})]
       (is (= "task-a" (br/resolve-base-branch reg [:a] "main"))))))
 
+;; resolve-pr-base-branch — PR base is the dep's PUSHED branch, not its
+;; worktree fork branch (the #1102 regression fix).
+
+(deftest resolve-pr-base-returns-deps-pushed-branch-test
+  (testing "single dep: PR base is the dep's :pr-branch (pushed), distinct
+            from :branch (local worktree fork point)"
+    (let [reg (br/register-branch (br/create-registry) :a
+                                  {:branch "task-a" :pr-branch "mf/a-pushed"})]
+      (is (= "mf/a-pushed" (br/resolve-pr-base-branch reg [:a] "main")))
+      (is (= "task-a" (br/resolve-base-branch reg [:a] "main"))
+          "worktree fork still uses the local branch"))))
+
+(deftest resolve-pr-base-falls-back-without-pushed-branch-test
+  (testing "dep registered but no :pr-branch (not yet released) → default"
+    (let [reg (br/register-branch (br/create-registry) :a {:branch "task-a"})]
+      (is (= "main" (br/resolve-pr-base-branch reg [:a] "main")))))
+  (testing "zero deps (root) and multi-dep both fall back to default"
+    (is (= "main" (br/resolve-pr-base-branch (br/create-registry) [] "main")))
+    (is (= "main" (br/resolve-pr-base-branch (br/create-registry) [:a :b] "main")))))
+
 (deftest resolve-single-dep-falls-back-when-unregistered-test
   (testing "single dep not yet registered: fall back to default"
     ;; The scheduler is supposed to order tasks so deps complete first;

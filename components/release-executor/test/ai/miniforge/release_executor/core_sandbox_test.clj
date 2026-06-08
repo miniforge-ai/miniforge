@@ -307,9 +307,10 @@
       (is (some #(clojure.string/includes? (str %) "fetch origin mf/parent-task") @commands)
           "the parent branch was fetched"))))
 
-(deftest step-create-branch-fails-when-override-fetch-fails
-  (testing "an unfetchable parent branch fails the step fast — the stacked PR
-            base would be unresolvable, so don't proceed silently"
+(deftest step-create-branch-degrades-when-override-fetch-fails
+  (testing "an unfetchable parent branch degrades gracefully — the release
+            does NOT fail; the PR targets the detected default instead of
+            stacking (degraded, not fatal)"
     (let [[exec _] (create-mock-executor
                     :responses (merge detects-main-branch
                                       {"fetch origin mf/parent-task"
@@ -318,5 +319,5 @@
                     :release-meta test-release-meta
                     :base-branch-override "mf/parent-task"}
           result   (core/step-create-branch state)]
-      (is (core/failed? result))
-      (is (= :base-branch-fetch-failed (:type (:failure result)))))))
+      (is (not (core/failed? result)) "release proceeds despite the fetch failure")
+      (is (= "main" (:base-branch result)) "falls back to the detected default"))))
