@@ -27,6 +27,7 @@
    [ai.miniforge.phase.interface :as phase]
    [ai.miniforge.phase.loader :as loader]
    [ai.miniforge.phase-software-factory.review]
+   [ai.miniforge.phase-software-factory.review-convergence]
    [ai.miniforge.phase-software-factory.implement]))
 
 ;; ---------------------------------------------------------------------------
