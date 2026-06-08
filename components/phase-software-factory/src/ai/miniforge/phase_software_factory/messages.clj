@@ -25,3 +25,9 @@
   "Look up a phase message by key, with optional param substitution."
   (messages/create-translator "config/phase/messages/en-US.edn"
                               :phase/messages))
+
+(def ts
+  "Look up a system-locale phase message by key (operator-facing: logs, startup
+   errors, observability pipelines — never rendered directly to a user)."
+  (messages/create-translator "config/phase/messages/system.edn"
+                              :phase/system))

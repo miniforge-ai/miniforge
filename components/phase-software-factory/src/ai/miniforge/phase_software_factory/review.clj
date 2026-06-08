@@ -30,20 +30,30 @@
    [ai.miniforge.phase-software-factory.phase-handoff :as phase-handoff]
    [ai.miniforge.phase-software-factory.knowledge-helpers :as kb-helpers]
    [ai.miniforge.phase-software-factory.phase-terminal :as phase-terminal]
+   [ai.miniforge.phase-software-factory.review-convergence :as conv]
    [ai.miniforge.agent.interface :as agent]
    [ai.miniforge.knowledge.interface :as knowledge]
-   [ai.miniforge.response.interface :as response]
-   [clojure.string :as str]))
+   [ai.miniforge.response.interface :as response]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Defaults
+;; Phase config — convergence decision logic lives in the review-convergence ns
 
 (def default-config
   "Phase defaults loaded from config/phase/defaults.edn."
   (phase-config/defaults-for :review))
 
+;; Fail fast on a bad defaults.edn at load (rule 004) rather than surfacing a
+;; ClassCastException deep inside the review phase.
+(conv/validate-convergence-config! default-config)
+
 ;; Register defaults on load
 (phase/register-phase-defaults! :review default-config)
+
+(defn- record-warning-cycle-count
+  "Persist the warning-only cycle count at [:execution :review-warning-only-cycles].
+   Survives phase re-entries because it lives on :execution, not :phase."
+  [ctx count]
+  (assoc-in ctx [:execution :review-warning-only-cycles] count))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Interceptor implementation
@@ -206,34 +216,6 @@
     (-> (phase/enter-context ctx :review :reviewer gates budget start-time result)
         (assoc-in [:phase :rules-manifest] rules-manifest))))
 
-(def ^:private blocking-decisions
-  "Reviewer decisions that mean 'don't ship this — fix it.' Iter 23
-   regression: :rejected fell through to :completed, letting release
-   open a PR against a reviewer-rejected artifact. Both decisions
-   route through the :failed branch; the FSM's verdict-driven guarded
-   :phase/fail array (Phase 2b) decides between redirect and terminate."
-  #{:rejected :changes-requested})
-
-(def ^:private default-max-no-progress-attempts
-  "After this many CONSECUTIVE review→implement repair cycles where each
-   review still rejects (with non-identical fingerprints — stagnation hasn't
-   fired) the workflow emits :needs-decomposition rather than continuing to
-   burn the redirect budget. Catches the dogfood case where the implementer
-   keeps fixing the reviewer's prior blockers but the reviewer keeps surfacing
-   new legitimate ones — a strong signal the task is too coarse for one
-   implement turn to satisfy in full. Default 3; configurable via
-   `:phase :budget :max-no-progress-attempts` (and overridable by
-   `:phase-config`)."
-  3)
-
-(def ^:private default-absolute-max-redirect-attempts
-  "Hard ceiling on review→implement repair cycles, regardless of progress.
-   A loop whose blocking-issue count keeps shrinking (converging) is allowed
-   past `max-no-progress-attempts` — but never past this. Backstop against a
-   genuinely huge task that decrements one blocker per cycle indefinitely.
-   Default 6; configurable via `:phase :budget :absolute-max-redirect-attempts`."
-  6)
-
 (defn- attach-stagnated-anomaly
   "Phase 2b: attach the stagnation anomaly to the phase result so the
    workflow runner / evidence bundle can report what didn't move.
@@ -317,139 +299,11 @@
   [ctx blocking-count]
   (update-in ctx [:execution :review-blocking-counts] (fnil conj []) blocking-count))
 
-(defn- count-blocking-issues
-  "Blocking-issue count for a review artifact, tolerant of both shapes:
-   the enumerated `:review/blocking-issues` list (real reviewer output) and
-   `:review/issues` filtered by `:severity :blocking`."
-  [review-artifact]
-  (let [enumerated (count (agent/get-blocking-issues review-artifact))]
-    (if (pos? enumerated)
-      enumerated
-      (count (filter #(= :blocking (:severity %))
-                     (:review/issues review-artifact))))))
-
 (defn- mark-completed
   "Mark the review phase as completed in the execution-level
    phases-completed list. Only called on the :complete branch."
   [ctx]
   (update-in ctx [:execution :phases-completed] (fnil conj []) :review))
-
-(defn- compute-stagnated?
-  "True when the reviewer is blocked AND the new fingerprint matches
-   the immediately prior fingerprint — i.e., the repair loop has
-   produced no movement on the blocking complaints."
-  [reviewer-blocked? prior-history current-fp]
-  (and reviewer-blocked?
-       (agent/review-stagnated? (peek prior-history) current-fp)))
-
-(defn- no-progress-streak
-  "Consecutive trailing review cycles that did NOT strictly reduce the
-   blocking-issue count, given the full per-cycle count sequence (oldest
-   first, including the current cycle). A cycle counts as progress — and
-   resets the streak to 0 — only when its count is strictly less than the
-   immediately prior cycle's; the first cycle has no predecessor and counts
-   as no-progress.
-
-   Examples: [3 2 1] → 0 (each pass shrank); [3 2 2] → 1 (one stall after
-   progress); [1 1 1] → 3 (flat throughout)."
-  [counts]
-  (reduce (fn [streak [prev cur]]
-            (if (and prev (< cur prev)) 0 (inc streak)))
-          0
-          (map vector (cons nil counts) counts)))
-
-(defn- compute-needs-decomposition?
-  "True when the reviewer keeps rejecting with NEW blockers (not stagnated)
-   and the loop is NOT converging — either the blocking count has failed to
-   shrink for `max-no-progress-attempts` CONSECUTIVE cycles, OR the task has
-   hit the absolute redirect ceiling.
-
-   A loop whose blocking count is still shrinking is allowed to continue up
-   to `absolute-max-attempts`: it is converging, just not in one turn.
-   (Dogfood 2026-06-07b: a standards-dense task fixed a real blocker each
-   pass — strict progress — but the old flat cap killed it at 3 while it was
-   still converging.)
-
-   `no-progress-streak` is the consecutive trailing no-progress cycle count
-   (see `no-progress-streak`); `review-cycle-count` is the TASK-LEVEL attempt
-   count, used only for the absolute ceiling."
-  [reviewer-blocked? stagnated? no-progress-streak
-   review-cycle-count max-no-progress-attempts absolute-max-attempts]
-  (and reviewer-blocked?
-       (not stagnated?)
-       (or (>= review-cycle-count absolute-max-attempts)
-           (>= no-progress-streak max-no-progress-attempts))))
-
-(defn- compute-phase-status
-  [reviewer-blocked? gate-failed?]
-  (cond
-    reviewer-blocked? :failed
-    gate-failed?      :failed
-    :else             :completed))
-
-(def ^:private verdicts
-  "Phase 2b verdict tag set. Replaces the old flag bag
-   (`:stagnated?` / `:needs-decomposition?`) + `compute-decision` ladder
-   with a single keyword that flows through `[:phase :result :output
-   :phase/verdict]` to the FSM. The FSM's verdict-driven guarded
-   `:phase/fail` array reads it via `:verdict/terminal?` to decide
-   between on-fail redirect and terminal `:failed`.
-
-     :approved              — reviewer green-lit; `:phase/succeed` event
-     :repair-requested      — actionable feedback + within budget;
-                              FSM may redirect via on-fail
-     :stagnated             — same blocking fingerprint as prior cycle;
-                              FSM terminates
-     :needs-decomposition   — N non-stagnated rejections; FSM terminates
-                              with the decomposition signal
-     :exhausted             — reviewer blocked but no actionable
-                              feedback or over phase-level budget;
-                              FSM terminates
-     :review/backend-timeout — the reviewer LLM call hit its adaptive
-                              timeout (stream-idle / stagnation / etc.)
-                              with no real verdict produced. PR-A
-                              (#1058) wired the agent to take the
-                              `:reviewer/backend-timeout` error exit
-                              instead of synthesizing a false
-                              `:rejected`; this verdict surfaces that
-                              infra failure to the FSM. Terminal —
-                              auto-resume composition (with the
-                              network-resilience PR-C, #1054) lives in
-                              a follow-up PR."
-  #{:approved :repair-requested :stagnated :needs-decomposition :exhausted
-    :review/backend-timeout})
-
-(defn- compute-verdict
-  "Pick the verdict that should flow on the phase result. Mirrors the
-   former `compute-decision` semantics one-for-one — `:stagnated` and
-   `:needs-decomposition` keep their priority over `:repair-requested`;
-   a reviewer-blocked failure with no actionable feedback collapses to
-   `:exhausted`.
-
-   `:review/backend-timeout` takes priority over every code-review
-   verdict: when the reviewer LLM never produced a real verdict (PR-A
-   wiring), there is no `:rejected` to interpret as repair-requested
-   or exhausted. The infra failure must be reported as itself."
-  [{:keys [backend-timeout? reviewer-blocked? stagnated? needs-decomposition?
-           within-budget? actionable-feedback?]}]
-  (cond
-    backend-timeout?
-    :review/backend-timeout
-
-    stagnated?
-    :stagnated
-
-    needs-decomposition?
-    :needs-decomposition
-
-    (and reviewer-blocked? within-budget? actionable-feedback?)
-    :repair-requested
-
-    reviewer-blocked?
-    :exhausted
-
-    :else
-    :approved))
 
 (defn- attach-verdict
   "Phase 2b: attach the verdict to both the phase-internal `:phase
@@ -464,9 +318,9 @@
 (defn- apply-verdict
   "Carry out the side-effects implied by a verdict — attach anomalies
    for terminal verdicts, attach handoff feedback for repair-requested,
-   mark completed for approved. The FSM drives the actual phase
-   transition; this fn only enriches the ctx with payload data that
-   evidence-bundle / downstream phases consume."
+   mark completed for approved and accept-with-warnings. The FSM drives
+   the actual phase transition; this fn only enriches the ctx with
+   payload data that evidence-bundle / downstream phases consume."
   [verdict updated-ctx feedback fingerprint-history review-cycle-count]
   (case verdict
     :stagnated
@@ -483,6 +337,16 @@
 
     :review/backend-timeout
     (attach-backend-timeout-anomaly updated-ctx)
+
+    :accept-with-warnings
+    (let [review-artifact (get-in updated-ctx [:phase :result :output])
+          warnings        (get review-artifact :review/warnings [])]
+      ;; Override :phase :status from :failed (set by accumulate-base-ctx because
+      ;; reviewer-blocked? was true) back to :completed — the phase succeeds despite
+      ;; the warning-only rejection; the PR proceeds with warnings surfaced.
+      (-> (mark-completed updated-ctx)
+          (assoc-in [:phase :status] :completed)
+          (assoc-in [:phase :unresolved-warnings] warnings)))
 
     :approved
     (mark-completed updated-ctx)))
@@ -505,20 +369,6 @@
       (record-fingerprint current-fp)
       (record-blocking-count current-blocking-count)))
 
-(defn- review-feedback
-  "Extract feedback the implementer should consume on a repair redirect."
-  [result]
-  (or (get-in result [:output :review/feedback])
-      (get-in result [:output :review/issues])))
-
-(defn- actionable-feedback?
-  "True when review feedback gives implement something concrete to repair."
-  [feedback]
-  (cond
-    (string? feedback)     (not (str/blank? feedback))
-    (sequential? feedback) (seq feedback)
-    :else                  (some? feedback)))
-
 (defn leave-review
   "Post-processing for review phase.
 
@@ -531,84 +381,64 @@
    identical to the immediately prior iteration's, the repair loop has
    produced no movement on the blocking complaints. Terminate with
    :anomalies.review/stagnation instead of redirecting — better to
-   surface the loop than burn another budget cycle."
+   surface the loop than burn another budget cycle.
+
+   Warning-churn guard: if the reviewer only raises warnings (no blocking
+   issues) for max-warning-only-cycles consecutive cycles, apply the
+   configured :review/warning-churn-policy instead of looping indefinitely.
+   The cycle count persists at [:execution :review-warning-only-cycles]
+   across phase re-entries, like fingerprints."
   [ctx]
-  (let [start-time        (get-in ctx [:phase :started-at])
-        end-time          (System/currentTimeMillis)
-        duration-ms       (- end-time start-time)
-        result            (get-in ctx [:phase :result])
-        review-artifact   (get result :output)
-        review-decision   (get-in result [:output :review/decision])
-        metrics           (-> (get result :metrics {:tokens 0 :duration-ms duration-ms})
-                              (assoc :duration-ms duration-ms))
-        iterations        (get-in ctx [:phase :iterations] 1)
-        max-iterations    (get-in ctx [:phase :budget :iterations]
-                                  (get-in default-config [:budget :iterations]))
-        gate-failed?      (= :failed (:phase/status (get-in ctx [:phase])))
-        ;; PR-A (#1058) makes the reviewer agent take the
-        ;; `:reviewer/backend-timeout` error exit on an LLM-call
-        ;; stream-idle (or stagnation / hard-limit / generic timeout)
-        ;; instead of synthesizing a false `:rejected`. Detect that
-        ;; error code here and route to the `:review/backend-timeout`
-        ;; verdict — terminal, distinct from `:exhausted` — so the FSM
-        ;; can treat an infra timeout differently from a real
-        ;; non-actionable rejection (the auto-resume composition with
-        ;; the network-resilience PR-C lives in a follow-up PR).
-        backend-timeout?  (= :reviewer/backend-timeout
-                             (get-in result [:error :data :code]))
-        reviewer-blocked? (contains? blocking-decisions review-decision)
-        prior-history     (get-in ctx [:execution :review-fingerprints] [])
-        current-fp        (agent/review-fingerprint review-artifact)
-        stagnated?        (compute-stagnated? reviewer-blocked? prior-history current-fp)
-        phase-status      (compute-phase-status reviewer-blocked? gate-failed?)
-        within-budget?    (< iterations max-iterations)
-        feedback          (review-feedback result)
-        ;; Convergence cap: terminate with :needs-decomposition when the
-        ;; loop keeps surfacing NEW legit blockers (non-stagnated) but is NOT
-        ;; converging — a sharper signal for the meta-agent to split the task
-        ;; than a generic "exhausted".
-        max-no-progress-attempts (get-in ctx [:phase :budget :max-no-progress-attempts]
-                                         default-max-no-progress-attempts)
-        absolute-max-attempts (get-in ctx [:phase :budget :absolute-max-redirect-attempts]
-                                      default-absolute-max-redirect-attempts)
-        ;; Task-level review count: prior fingerprints already recorded + this
-        ;; cycle. The phase-local :iterations counter resets per phase entry,
-        ;; so it can never reach the shipped review :budget :iterations of 2;
-        ;; the cap MUST key off the task-wide history or it stays dead code.
-        review-cycle-count (inc (count prior-history))
-        ;; Convergence trend: blocking-issue count per cycle. While the count
-        ;; keeps shrinking the repair loop is converging (just not in one
-        ;; turn); decompose only after it stalls for max-no-progress-attempts
-        ;; consecutive cycles, or at the absolute ceiling.
-        current-blocking-count (count-blocking-issues review-artifact)
-        prior-counts      (get-in ctx [:execution :review-blocking-counts] [])
-        np-streak         (no-progress-streak (conj (vec prior-counts) current-blocking-count))
-        needs-decomposition? (compute-needs-decomposition?
-                              reviewer-blocked? stagnated? np-streak
-                              review-cycle-count max-no-progress-attempts absolute-max-attempts)
-        verdict           (compute-verdict {:backend-timeout?     backend-timeout?
-                                            :reviewer-blocked?    reviewer-blocked?
-                                            :stagnated?           stagnated?
-                                            :needs-decomposition? needs-decomposition?
-                                            :within-budget?       within-budget?
-                                            :actionable-feedback? (actionable-feedback? feedback)})
-        updated-ctx       (-> ctx
-                              (accumulate-base-ctx end-time duration-ms phase-status
-                                                   metrics iterations current-fp
-                                                   current-blocking-count)
-                              (attach-verdict verdict))
-        next-ctx          (apply-verdict verdict updated-ctx feedback
-                                         (conj prior-history current-fp)
-                                         review-cycle-count)]
+  (let [end-time    (System/currentTimeMillis)
+        duration-ms (- end-time (get-in ctx [:phase :started-at]))
+        result      (get-in ctx [:phase :result])
+        metrics     (-> (get result :metrics {:tokens 0 :duration-ms duration-ms})
+                        (assoc :duration-ms duration-ms))
+        iterations  (get-in ctx [:phase :iterations] 1)
+        ;; All convergence decision logic is pure in review-convergence; this
+        ;; interceptor gathers the ctx inputs, then applies the decision.
+        decision (conv/compute-review-decision
+                  {:review-artifact          (get result :output)
+                   :review-decision          (get-in result [:output :review/decision])
+                   :result                   result
+                   :prior-fingerprints       (get-in ctx [:execution :review-fingerprints] [])
+                   :prior-blocking-counts    (get-in ctx [:execution :review-blocking-counts] [])
+                   :prior-warning-only-count (get-in ctx [:execution :review-warning-only-cycles] 0)
+                   :gate-failed?             (= :failed (:phase/status (get-in ctx [:phase])))
+                   :within-budget?           (< iterations
+                                                (get-in ctx [:phase :budget :iterations]
+                                                        (get-in default-config [:budget :iterations])))
+                   :max-no-progress-attempts (get-in ctx [:phase :budget :max-no-progress-attempts]
+                                                     conv/default-max-no-progress-attempts)
+                   :absolute-max-attempts    (get-in ctx [:phase :budget :absolute-max-redirect-attempts]
+                                                     conv/default-absolute-max-redirect-attempts)
+                   :max-warning-only-cycles  (get default-config :review/max-warning-only-cycles
+                                                  conv/default-max-warning-only-cycles)
+                   :warning-churn-policy     (get default-config :review/warning-churn-policy
+                                                  conv/default-warning-churn-policy)})
+        {:keys [verdict review-cause phase-status reviewer-blocked? current-fp
+                current-blocking-count warning-only-count review-cycle-count feedback]} decision
+        prior-history (get-in ctx [:execution :review-fingerprints] [])
+        updated-ctx (cond-> (-> ctx
+                                (accumulate-base-ctx end-time duration-ms phase-status
+                                                     metrics iterations current-fp
+                                                     current-blocking-count)
+                                (attach-verdict verdict))
+                      reviewer-blocked? (record-warning-cycle-count warning-only-count))
+        next-ctx (apply-verdict verdict updated-ctx feedback
+                                (conj prior-history current-fp) review-cycle-count)]
     (when (= :repair-requested verdict)
       (knowledge/capture-feedback-learning!
        (:knowledge-store ctx) :reviewer
        (get-in ctx [:execution/input :title]) feedback))
     (phase/emit-phase-completed! next-ctx :review
-      (merge {:outcome     (if (= :completed phase-status) :success :failure)
+      ;; :outcome from the FINAL (verdict-corrected) status, not phase-status:
+      ;; apply-verdict promotes :accept-with-warnings to :completed.
+      (merge {:outcome     (if (= :completed (get-in next-ctx [:phase :status])) :success :failure)
               :duration-ms duration-ms
               :tokens      (:tokens metrics 0)}
-             (phase-terminal/derive-termination-reason result nil)))
+             (phase-terminal/derive-termination-reason result nil)
+             (when review-cause {:review/cause review-cause})))
     next-ctx))
 
 (defn error-review
