@@ -25,6 +25,12 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Test fixtures and factories
 
+(def ^:private budget-test-iteration-count
+  "Iteration count used to exercise the retry-edge derivation path. Must be > 1
+   to produce a :retry self-loop; 3 gives one retry cycle beyond the initial
+   attempt without oversizing the fixture."
+  3)
+
 (def ^:private minimal-pipeline
   "Simplest valid pipeline — one phase."
   [{:phase :plan}])
@@ -38,14 +44,14 @@
 (def ^:private budgeted-pipeline
   "Pipeline where :implement has an iteration budget > 1."
   [{:phase :plan}
-   {:phase :implement :budget {:iterations 3}}
+   {:phase :implement :budget {:iterations budget-test-iteration-count}}
    {:phase :verify}
    {:phase :done :terminal? true}])
 
 (def ^:private guarded-pipeline
   "Pipeline with guarded phases and on-fail configuration."
   [{:phase :plan}
-   {:phase :implement :budget {:iterations 3} :on-fail :plan}
+   {:phase :implement :budget {:iterations budget-test-iteration-count} :on-fail :plan}
    {:phase :verify    :on-fail :implement}
    {:phase :review    :on-fail :implement}
    {:phase :done :terminal? true}])
@@ -103,29 +109,27 @@
 ;; Standard 5-phase pipeline — node set and edge count
 
 (deftest test-default-five-phase-pipeline-nodes
-  (testing "standard 5-phase pipeline produces exactly the expected phase-nodes"
-    (let [g (graph/build-transition-graph standard-five-phase-pipeline)]
+  (let [g (graph/build-transition-graph standard-five-phase-pipeline)]
+    (testing "standard 5-phase pipeline produces exactly the expected phase-nodes"
       (is (= #{:plan :implement :verify :review :release} (:phase-nodes g))
-          "phase-nodes should match all five pipeline phases")))
+          "phase-nodes should match all five pipeline phases"))
 
-  (testing "standard 5-phase pipeline node count: 5 phases + 3 canonical terminals"
-    (let [g (graph/build-transition-graph standard-five-phase-pipeline)]
-      (is (= five-phase-node-count (count (:nodes g))))))
+    (testing "standard 5-phase pipeline node count: 5 phases + 3 canonical terminals"
+      (is (= five-phase-node-count (count (:nodes g)))))
 
-  (testing "standard 5-phase pipeline terminal-nodes equals canonical set (no :done)"
-    (let [g (graph/build-transition-graph standard-five-phase-pipeline)]
+    (testing "standard 5-phase pipeline terminal-nodes equals canonical set (no :done)"
       (is (= graph/canonical-terminal-nodes (:terminal-nodes g))
           "no :done phase → terminal-nodes is exactly canonical-terminal-nodes"))))
 
 (deftest test-default-five-phase-pipeline-next-edges
   (testing "standard 5-phase pipeline produces 4 :next edges in order"
-    (let [g    (graph/build-transition-graph standard-five-phase-pipeline)
-          nexts (edges-with-label g graph/label-next)]
+    (let [g     (graph/build-transition-graph standard-five-phase-pipeline)
+          nexts  (edges-with-label g graph/label-next)]
       (is (= five-phase-next-edge-count (count nexts)))
-      (is (edge-from-to? g :plan     :implement graph/label-next))
+      (is (edge-from-to? g :plan      :implement graph/label-next))
       (is (edge-from-to? g :implement :verify    graph/label-next))
-      (is (edge-from-to? g :verify   :review    graph/label-next))
-      (is (edge-from-to? g :review   :release   graph/label-next))))
+      (is (edge-from-to? g :verify    :review    graph/label-next))
+      (is (edge-from-to? g :review    :release   graph/label-next))))
 
   (testing ":release has no :next edge (last phase)"
     (let [g (graph/build-transition-graph standard-five-phase-pipeline)
@@ -153,24 +157,47 @@
       (is (empty? (edges-with-label g graph/label-on-budget-exhausted))))))
 
 ;------------------------------------------------------------------------------ Layer 1
-;; Anomaly return on malformed input — canonical anomaly/anomaly? contract
+;; Nil pipeline — canonical anomaly (nil ≠ empty vector: distinct failure mode)
 
-(deftest test-empty-pipeline-returns-canonical-anomaly
-  (testing "nil pipeline → canonical anomaly (anomaly? returns true)"
+(deftest test-nil-pipeline-returns-anomaly
+  (testing "nil pipeline → canonical anomaly satisfying anomaly?"
     (let [result (graph/build-transition-graph nil)]
       (is (anomaly/anomaly? result)
           "nil pipeline should return a canonical anomaly satisfying anomaly?")
       (is (= :invalid-input (:anomaly/type result)))))
 
-  (testing "empty vector pipeline → canonical anomaly"
-    (let [result (graph/build-transition-graph [])]
-      (is (anomaly/anomaly? result))
-      (is (= :invalid-input (:anomaly/type result)))))
-
-  (testing "anomaly includes :anomaly/at timestamp"
+  (testing "nil anomaly carries :anomaly/at timestamp"
     (let [result (graph/build-transition-graph nil)]
       (is (some? (:anomaly/at result))
           "canonical anomaly must carry :anomaly/at"))))
+
+;------------------------------------------------------------------------------ Layer 1
+;; Empty pipeline — valid graph: no phase nodes, only canonical terminal nodes
+
+(deftest test-empty-pipeline-valid-graph
+  (testing "empty vector pipeline → valid graph (not an anomaly)"
+    (let [g (graph/build-transition-graph [])]
+      (is (not (anomaly/anomaly? g))
+          "[] should return a graph, not an anomaly")))
+
+  (testing "empty pipeline :phase-nodes is the empty set"
+    (let [g (graph/build-transition-graph [])]
+      (is (= #{} (:phase-nodes g)))))
+
+  (testing "empty pipeline :nodes contains only canonical terminals"
+    (let [g (graph/build-transition-graph [])]
+      (is (= graph/canonical-terminal-nodes (:nodes g)))))
+
+  (testing "empty pipeline :terminal-nodes equals canonical-terminal-nodes"
+    (let [g (graph/build-transition-graph [])]
+      (is (= graph/canonical-terminal-nodes (:terminal-nodes g)))))
+
+  (testing "empty pipeline has no edges"
+    (let [g (graph/build-transition-graph [])]
+      (is (= [] (:edges g))))))
+
+;------------------------------------------------------------------------------ Layer 1
+;; Malformed input — canonical anomaly/anomaly? contract
 
 (deftest test-malformed-entry-returns-canonical-anomaly
   (testing "entry without :phase key → canonical anomaly"
@@ -251,7 +278,7 @@
 
 (deftest test-single-phase-no-next-edges
   (testing "single-phase pipeline produces no :next edges"
-    (let [g (graph/build-transition-graph minimal-pipeline)
+    (let [g         (graph/build-transition-graph minimal-pipeline)
           next-edges (edges-with-label g graph/label-next)]
       (is (empty? next-edges)))))
 
@@ -413,9 +440,13 @@
       (is (every? #(contains? (:nodes g) %) (:phase-nodes g))))))
 
 ;------------------------------------------------------------------------------ Layer 1
-;; Duplicate :phase keyword detection — regression test for the uniqueness guard
+;; Duplicate :phase keyword detection
+;; Structural invariant: graph-node identifiers must be unique. Duplicate :phase
+;; keywords produce ambiguous edge routing — the same node would receive multiple
+;; conflicting :next edges and an indeterminate :already-done target — so the
+;; derivation rejects them before graph construction.
 
-(deftest test-duplicate-phase-returns-canonical-anomaly
+(deftest test-duplicate-phase-names-rejected-as-ambiguous
   (testing "two entries sharing the same :phase keyword → canonical anomaly"
     (let [result (graph/build-transition-graph [{:phase :plan} {:phase :plan}])]
       (is (anomaly/anomaly? result)
@@ -453,3 +484,34 @@
       (is (anomaly/anomaly? result))
       (is (= 0 (get-in result [:anomaly/data :index]))
           "per-entry error at index 0 should be returned, not a duplicate-phases anomaly"))))
+
+(comment
+  ;; Minimal valid pipeline — one phase
+  (graph/build-transition-graph [{:phase :plan}])
+  ;; => {:nodes #{:plan :failed :completed :cancelled}
+  ;;     :edges [... 4 edges: :on-failure :already-done :pause :cancel]
+  ;;     :terminal-nodes #{:failed :completed :cancelled}
+  ;;     :phase-nodes #{:plan}}
+
+  ;; Empty pipeline — valid, returns only canonical terminal nodes
+  (graph/build-transition-graph [])
+  ;; => {:nodes #{:failed :completed :cancelled}
+  ;;     :edges []
+  ;;     :terminal-nodes #{:failed :completed :cancelled}
+  ;;     :phase-nodes #{}}
+
+  ;; Standard 5-phase pipeline — 24 edges total
+  (graph/build-transition-graph
+   [{:phase :plan}
+    {:phase :implement}
+    {:phase :verify}
+    {:phase :review}
+    {:phase :release}])
+  ;; => {:nodes #{:plan :implement :verify :review :release :failed :completed :cancelled}
+  ;;     :edges [...24...] ...}
+
+  ;; Duplicate :phase → anomaly (ambiguous graph routing)
+  (graph/build-transition-graph [{:phase :plan} {:phase :plan}])
+  ;; => {:anomaly/type :invalid-input
+  ;;     :anomaly/data {:duplicate-phases [:plan]} ...}
+  )

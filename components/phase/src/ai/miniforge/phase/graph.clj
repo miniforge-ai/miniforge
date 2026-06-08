@@ -214,12 +214,22 @@
 
 (defn- validate-pipeline
   "Return nil when the pipeline is structurally valid, or an anomaly map.
-   Guards are applied in order: nil → non-sequential → empty → per-entry →
-   duplicate-phase. The nil and sequential? checks deliberately precede empty?
-   to avoid calling seq on non-Seqable values (which would throw
-   ClassCastException). Duplicate :phase keywords are rejected because
-   graph-node identifiers must be unique — a pipeline with duplicates
-   produces ambiguous edge routing and deduplicated node sets."
+   Guards are applied in order: nil → non-sequential → per-entry →
+   duplicate-phase. The nil and sequential? checks deliberately precede
+   per-entry? to avoid calling seq on non-Seqable values (which would throw
+   ClassCastException).
+
+   Empty pipelines ([]) are valid: they produce a graph with no phase nodes
+   and only the canonical terminal nodes (:failed :completed :cancelled).
+   This is the empty-workflow semantic — a pipeline with no phases can still
+   reach :failed or :cancelled.
+
+   Duplicate :phase keywords are rejected because graph-node identifiers
+   must be unique. A pipeline with duplicates produces ambiguous edge routing:
+   two entries with the same :phase keyword would both emit :next, :retry,
+   and :already-done edges from the same node, making the FSM model
+   indeterminate. Callers that want repeated phase logic should compose
+   distinct phase keywords (e.g. :implement-1, :implement-2)."
   [pipeline]
   (cond
     (nil? pipeline)
@@ -227,9 +237,6 @@
 
     (not (sequential? pipeline))
     (malformed-entry-anomaly -1 pipeline)
-
-    (empty? pipeline)
-    (empty-pipeline-anomaly)
 
     :else
     (or (per-entry-error pipeline)
