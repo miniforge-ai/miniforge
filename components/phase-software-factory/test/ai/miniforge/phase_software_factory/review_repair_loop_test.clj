@@ -26,7 +26,8 @@
    [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.phase.interface :as phase]
    [ai.miniforge.phase.loader :as loader]
-   [ai.miniforge.phase-software-factory.review :as review]
+   [ai.miniforge.phase-software-factory.review]
+   [ai.miniforge.phase-software-factory.review-convergence :as rconv]
    [ai.miniforge.phase-software-factory.implement]))
 
 (def phase-test-config-resource
@@ -513,7 +514,7 @@
           "absolute ceiling overrides progress"))))
 
 (deftest no-progress-streak-unit-test
-  (let [streak @#'review/no-progress-streak]
+  (let [streak @#'rconv/no-progress-streak]
     (testing "shrinking every cycle = 0 streak"
       (is (= 0 (streak [3 2 1])))
       (is (= 0 (streak [5 4]))))
@@ -527,7 +528,7 @@
       (is (= 0 (streak []))))))
 
 (deftest compute-needs-decomposition?-progress-aware-unit-test
-  (let [nd @#'review/compute-needs-decomposition?]
+  (let [nd @#'rconv/compute-needs-decomposition?]
     ;; args: blocked? stagnated? no-progress-streak cycle-count max-no-progress absolute-max
     (testing "streak below the cap does not decompose (still converging)"
       (is (false? (nd true false 0 3 3 6)))
@@ -614,7 +615,7 @@
             tag-set must enumerate it. Coverage here pins the public
             surface so a rename can't silently slip past."
     ;; Read the private var via the var; the resolved value is the set.
-    (let [verdicts @#'review/verdicts]
+    (let [verdicts @#'rconv/verdicts]
       (is (contains? verdicts :review/backend-timeout))
       (is (contains? verdicts :approved))
       (is (contains? verdicts :accept-with-warnings))
@@ -708,7 +709,7 @@
 
 (deftest classify-rejection-cause-warning-only-increments-count
   (testing "warning-only rejection increments the prior count"
-    (let [classify #'review/classify-rejection-cause
+    (let [classify #'rconv/classify-rejection-cause
           artifact {:review/decision        :changes-requested
                     :review/blocking-issues []
                     :review/warnings        [warning-only-issue]}
@@ -716,7 +717,7 @@
       (is (= :warning-churn (:cause/type result)))
       (is (= 1 (:warning-only-count result)))))
   (testing "increments from a non-zero prior"
-    (let [classify #'review/classify-rejection-cause
+    (let [classify #'rconv/classify-rejection-cause
           artifact {:review/decision        :changes-requested
                     :review/blocking-issues []
                     :review/warnings        [warning-only-issue]}
@@ -726,7 +727,7 @@
 
 (deftest classify-rejection-cause-blocking-resets-count
   (testing "blocking defect resets the warning-only count to 0"
-    (let [classify #'review/classify-rejection-cause
+    (let [classify #'rconv/classify-rejection-cause
           artifact {:review/decision        :changes-requested
                     :review/blocking-issues [{:severity :blocking
                                               :description "Missing require"}]
@@ -739,19 +740,19 @@
 
 (deftest compute-warning-churn-below-cap-returns-false
   (testing "warning-only-count below cap → not churn yet"
-    (let [pred #'review/compute-warning-churn?]
+    (let [pred #'rconv/compute-warning-churn?]
       (is (not (pred :warning-churn count-below-cap default-cap))
           "count 1 with cap 2 must not trip the policy"))))
 
 (deftest compute-warning-churn-at-cap-returns-true
   (testing "warning-only-count at cap → churn fires"
-    (let [pred #'review/compute-warning-churn?]
+    (let [pred #'rconv/compute-warning-churn?]
       (is (pred :warning-churn count-at-cap default-cap)
           "count 2 with cap 2 must trip the policy"))))
 
 (deftest compute-warning-churn-blocking-cause-returns-false
   (testing "blocking-defect cause never trips warning-churn even at or above cap"
-    (let [pred #'review/compute-warning-churn?]
+    (let [pred #'rconv/compute-warning-churn?]
       (is (not (pred :blocking-defect count-at-cap default-cap))
           "blocking-defect must not be churn regardless of count"))))
 
@@ -837,5 +838,5 @@
 (deftest accept-with-warnings-is-in-canonical-verdict-set
   (testing ":accept-with-warnings is declared in the verdicts set so the FSM
             can recognise it without an IllegalArgumentException from case"
-    (let [verdicts @#'review/verdicts]
+    (let [verdicts @#'rconv/verdicts]
       (is (contains? verdicts :accept-with-warnings)))))

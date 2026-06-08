@@ -46,7 +46,7 @@
 
 ;; Private helper accessed directly for pure-function unit tests.
 (def ^:private build-review-cause
-  #'ai.miniforge.phase-software-factory.review/build-review-cause)
+  #'ai.miniforge.phase-software-factory.review-convergence/build-review-cause)
 
 (def ^:private blocking-cause-map
   {:cause/type :blocking-defect :warning-only-count 0})

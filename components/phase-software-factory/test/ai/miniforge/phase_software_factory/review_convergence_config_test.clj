@@ -23,7 +23,7 @@
    [clojure.test :refer [deftest is testing]]
    [malli.core :as m]
    [ai.miniforge.phase-software-factory.messages :as messages]
-   [ai.miniforge.phase-software-factory.review :as review]
+   [ai.miniforge.phase-software-factory.review-convergence :as rconv]
    [ai.miniforge.phase-software-factory.phase-config :as phase-config]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -31,7 +31,7 @@
 
 (def ^:private schema
   "Direct var access to the private schema for white-box validation tests."
-  #'ai.miniforge.phase-software-factory.review/ReviewConvergenceConfigSchema)
+  #'ai.miniforge.phase-software-factory.review-convergence/ReviewConvergenceConfigSchema)
 
 (defn- valid?
   "Returns true when the candidate map satisfies the convergence schema."
@@ -43,11 +43,11 @@
 
 (deftest test-default-warning-churn-policy-value
   (testing "default policy is :accept-with-warnings"
-    (is (= :accept-with-warnings review/default-warning-churn-policy))))
+    (is (= :accept-with-warnings rconv/default-warning-churn-policy))))
 
 (deftest test-default-max-warning-only-cycles-value
   (testing "default max cycles is 2"
-    (is (= 2 review/default-max-warning-only-cycles))))
+    (is (= 2 rconv/default-max-warning-only-cycles))))
 
 ;------------------------------------------------------------------------------ Layer 2
 ;; Schema validation tests
@@ -100,13 +100,13 @@
 (deftest test-defaults-edn-policy-matches-constant
   (testing "defaults.edn :review/warning-churn-policy matches the fallback constant"
     (let [cfg (phase-config/defaults-for :review)]
-      (is (= review/default-warning-churn-policy
+      (is (= rconv/default-warning-churn-policy
              (:review/warning-churn-policy cfg))))))
 
 (deftest test-defaults-edn-cycle-count-matches-constant
   (testing "defaults.edn :review/max-warning-only-cycles matches the fallback constant"
     (let [cfg (phase-config/defaults-for :review)]
-      (is (= review/default-max-warning-only-cycles
+      (is (= rconv/default-max-warning-only-cycles
              (:review/max-warning-only-cycles cfg))))))
 
 ;; System-locale message catalog tests

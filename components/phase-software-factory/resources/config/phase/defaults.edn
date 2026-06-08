@@ -24,7 +24,14 @@
    :gates [:review-approved :quality-check :policy-review]
    :budget {:tokens 20000
             :iterations 2
-            :time-seconds 180}
+            :time-seconds 180
+            ;; Redirect-convergence caps (review-convergence ns). Decompose
+            ;; after this many CONSECUTIVE non-shrinking review→implement
+            ;; cycles...
+            :max-no-progress-attempts 3
+            ;; ...but never run past this hard ceiling, even while the
+            ;; blocking-issue count is still shrinking.
+            :absolute-max-redirect-attempts 6}
    :model-hint :sonnet
    ;; Convergence policy: what to do when the reviewer keeps emitting
    ;; warnings but no blocking issues.  :accept-with-warnings lets the
