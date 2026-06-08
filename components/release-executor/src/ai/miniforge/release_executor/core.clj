@@ -104,17 +104,24 @@
 (defn step-create-branch [state]
   (if (failed? state)
     state
-    (let [{:keys [release-meta executor environment-id]} state
+    (let [{:keys [release-meta executor environment-id base-branch-override]} state
           branch-name (:release/branch-name release-meta)
           result (sandbox/create-branch! executor environment-id branch-name)]
-      (if (result/succeeded? result)
-        (assoc state
-               :branch (:branch result)
-               ;; An explicit override (chained DAG task's parent branch) wins
-               ;; over the detected default, so the PR stacks on the parent.
-               :base-branch (or (:base-branch-override state)
-                                (:base-branch result)))
-        (fail state :branch-create-failed (:error result))))))
+      (if-not (result/succeeded? result)
+        (fail state :branch-create-failed (:error result))
+        (let [detected (:base-branch result)
+              ;; An explicit override (chained DAG task's parent branch) wins
+              ;; over the detected default, so the PR stacks on the parent.
+              base (or base-branch-override detected)
+              ;; create-branch! fetched only origin/<detected>. When the base
+              ;; is a different parent branch, fetch it too so later
+              ;; origin/<base> range diffs / commits-ahead and the PR
+              ;; merge-base resolve rather than failing on a missing ref.
+              fetch-r (when (and base-branch-override (not= base-branch-override detected))
+                        (sandbox/fetch-branch! executor environment-id base-branch-override))]
+          (if (and fetch-r (not (result/succeeded? fetch-r)))
+            (fail state :base-branch-fetch-failed (:error fetch-r))
+            (assoc state :branch (:branch result) :base-branch base)))))))
 
 (defn step-stage-dirty-files
   "Stage all dirty files in the executor environment.
