@@ -76,7 +76,7 @@
   [backend]
   (get backend-resume-flags (keyword backend) "--resume"))
 
-(defn- binary-for
+(defn binary-for
   "Return the CLI binary name for a backend.
 
    Arguments:

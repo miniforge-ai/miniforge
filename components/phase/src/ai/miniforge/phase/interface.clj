@@ -349,6 +349,29 @@
 ;------------------------------------------------------------------------------ Layer 1
 ;; Pipeline construction and validation
 
+(defn- registered-phase?
+  "True when phase-kw has a registered interceptor in the phase registry.
+   Extracted to a named fn so it is independently testable and referenceable
+   as a configuration callback (Rule 002)."
+  [phase-kw]
+  (contains? (list-phases) phase-kw))
+
+(defn- invalid-pipeline-result
+  "Construct a failed validate-pipeline-graph result map.
+   Canonical factory for the {:valid? false ...} shape (Rule 003).
+   Mirrors the shape produced by graph-validator/validate-graph."
+  [errors]
+  {:valid?   false
+   :errors   (vec errors)
+   :warnings []})
+
+(defn pipeline-validation-valid?
+  "True when a validate-pipeline-graph result has no errors.
+   Prefer this predicate over direct :valid? key access so callers
+   remain decoupled from the internal result shape (Rule 003)."
+  [result]
+  (true? (:valid? result)))
+
 (defn validate-pipeline-graph
   "Validate a pipeline vector using full structural graph analysis.
 
@@ -371,9 +394,7 @@
   ([pipeline opts]
    (let [graph-or-anomaly (build-transition-graph pipeline)]
      (if (anomaly/anomaly? graph-or-anomaly)
-       {:valid?   false
-        :errors   [graph-or-anomaly]
-        :warnings []}
+       (invalid-pipeline-result [graph-or-anomaly])
        (validate-graph graph-or-anomaly opts)))))
 
 (defn build-pipeline
@@ -393,12 +414,11 @@
   [workflow]
   (ensure-phase-implementations-loaded!)
   (let [pipeline   (:workflow/pipeline workflow)
-        registered #(contains? (list-phases) %)
         validation (validate-pipeline-graph
                     pipeline
                     {:check-interceptors?       true
-                     :interceptor-registered-fn registered})]
-    (if (:valid? validation)
+                     :interceptor-registered-fn registered-phase?})]
+    (if (pipeline-validation-valid? validation)
       (mapv get-phase-interceptor pipeline)
       (anomaly/anomaly :invalid-input
                        (messages/ts :anomaly/pipeline-graph-invalid)
@@ -421,7 +441,7 @@
   (validate-pipeline-graph
    (:workflow/pipeline workflow)
    {:check-interceptors?       true
-    :interceptor-registered-fn #(contains? (list-phases) %)}))
+    :interceptor-registered-fn registered-phase?}))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
