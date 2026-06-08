@@ -1,0 +1,7 @@
+{:phase/system
+ {;; graph.clj — build-transition-graph validation errors (system-locale; operator-facing only)
+  :anomaly/empty-pipeline
+  "build-transition-graph: pipeline is nil or empty — cannot derive transition graph"
+
+  :anomaly/malformed-pipeline-entry
+  "build-transition-graph: pipeline entry is malformed — each entry must be a map with a :phase keyword"}}
