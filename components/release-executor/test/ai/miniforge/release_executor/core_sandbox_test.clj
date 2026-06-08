@@ -265,3 +265,58 @@
                   {:release-meta test-release-meta})]
       ;; The pipeline should succeed and create a PR
       (is (:success? result)))))
+
+;; ============================================================================
+;; Stacked-PR base: a chained DAG task's parent-branch override wins
+;; ============================================================================
+
+(def ^:private detects-main-branch
+  "Mock executor responses so detect-default-branch resolves to 'main'."
+  {"symbolic-ref" {:exit-code 0 :stdout "refs/remotes/origin/main\n" :stderr ""}})
+
+(deftest step-create-branch-prefers-base-branch-override
+  (testing "an explicit base-branch-override (chained DAG task's parent branch)
+            wins over the executor-detected default, so the PR stacks on the
+            parent and diff/commits-ahead range off it"
+    (let [[exec _] (create-mock-executor :responses detects-main-branch)
+          state    {:executor exec :environment-id "mock-env"
+                    :release-meta test-release-meta
+                    :base-branch-override "mf/parent-task"}
+          result   (core/step-create-branch state)]
+      (is (= "mf/parent-task" (:base-branch result))
+          "override wins over the detected 'main'")))
+
+  (testing "absent override → executor-detected default branch (root task / non-DAG)"
+    (let [[exec _] (create-mock-executor :responses detects-main-branch)
+          state    {:executor exec :environment-id "mock-env"
+                    :release-meta test-release-meta}
+          result   (core/step-create-branch state)]
+      (is (= "main" (:base-branch result))))))
+
+(deftest step-create-branch-fetches-override-branch
+  (testing "when stacking on a parent branch, the override branch is fetched
+            (create-branch! only fetched the default) so later origin/<base>
+            range diffs and the PR merge-base resolve"
+    (let [[exec commands] (create-mock-executor :responses detects-main-branch)
+          state    {:executor exec :environment-id "mock-env"
+                    :release-meta test-release-meta
+                    :base-branch-override "mf/parent-task"}
+          result   (core/step-create-branch state)]
+      (is (not (core/failed? result)))
+      (is (= "mf/parent-task" (:base-branch result)))
+      (is (some #(clojure.string/includes? (str %) "fetch origin mf/parent-task") @commands)
+          "the parent branch was fetched"))))
+
+(deftest step-create-branch-fails-when-override-fetch-fails
+  (testing "an unfetchable parent branch fails the step fast — the stacked PR
+            base would be unresolvable, so don't proceed silently"
+    (let [[exec _] (create-mock-executor
+                    :responses (merge detects-main-branch
+                                      {"fetch origin mf/parent-task"
+                                       {:exit-code 1 :stdout "" :stderr "no such ref"}}))
+          state    {:executor exec :environment-id "mock-env"
+                    :release-meta test-release-meta
+                    :base-branch-override "mf/parent-task"}
+          result   (core/step-create-branch state)]
+      (is (core/failed? result))
+      (is (= :base-branch-fetch-failed (:type (:failure result)))))))

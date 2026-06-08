@@ -295,6 +295,12 @@
              ;; Allow disabling PR creation via config or execution opts
              :create-pr? (or (get-in ctx [:execution/opts :create-pr?])
                              (get config :create-pr? true))
+             ;; PR base override for a dependency-chained DAG task: the DAG
+             ;; orchestrator passes the parent task's branch so this task's PR
+             ;; STACKS on the parent (base = parent branch) instead of opening
+             ;; against the default branch with a cumulative diff. Absent (root
+             ;; tasks / non-DAG runs) → executor falls back to the default branch.
+             :base-branch (get-in ctx [:execution/opts :release/base-branch])
              ;; Resolve and inject GitHub token for capsule gh CLI auth
              :github-token (resolve-github-token ctx)}
       on-chunk (assoc :on-chunk on-chunk)

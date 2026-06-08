@@ -142,6 +142,15 @@
       (result/shell-failure (str "Failed to fetch: " (:error fetch-r)) {:branch nil})
       (try-checkout-branch executor env-id branch-name default-branch))))
 
+(defn fetch-branch!
+  "Fetch origin/<branch> into the sandbox. `create-branch!` fetches only the
+   detected default; when a stacked-PR base is a parent task's branch, this
+   pulls it so later `origin/<base>` range diffs / commits-ahead and the PR
+   merge-base resolve instead of failing on a missing remote-tracking ref.
+   Returns a shell-result."
+  [executor env-id branch]
+  (exec! executor env-id (str "git fetch origin " branch)))
+
 (defn commits-ahead-of-base
   "Count commits HEAD has added since branching from `origin/<base>`.
    Counts against the merge-base (`origin/<base>...HEAD`, three-dot
