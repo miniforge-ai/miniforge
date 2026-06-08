@@ -56,6 +56,35 @@
    {:phase :implement :on-success :verify}
    {:phase :verify}])
 
+(def ^:private standard-five-phase-pipeline
+  "The canonical 5-phase software-factory pipeline: plan → implement → verify →
+   review → release. Mirrors the phase keywords from defaults.edn without
+   per-phase budget or on-fail overrides so the derived graph reflects pure
+   structural edges only."
+  [{:phase :plan}
+   {:phase :implement}
+   {:phase :verify}
+   {:phase :review}
+   {:phase :release}])
+
+(def ^:private five-phase-node-count
+  "Expected total node count for the standard 5-phase pipeline:
+   5 phase nodes + 3 canonical terminals (:failed :completed :cancelled) = 8."
+  8)
+
+(def ^:private five-phase-next-edge-count
+  "Expected :next edge count for the 5-phase pipeline — one per consecutive
+   phase pair: plan→implement, implement→verify, verify→review, review→release."
+  4)
+
+(def ^:private five-phase-total-edge-count
+  "Expected total edge count for the 5-phase pipeline with no on-fail or
+   iteration-budget overrides:
+     :next (4) + :on-failure (5) + :already-done (5) + :pause (5) + :cancel (5)
+   = 24. No :retry, :redirect, or :on-budget-exhausted edges are emitted
+   because no phase carries :on-fail or :budget {:iterations >1}."
+  24)
+
 (defn- edges-with-label
   "Return all edges from graph with the given label."
   [graph label]
@@ -69,6 +98,59 @@
                (= to   (:to e))
                (= label (:label e))))
         (:edges graph)))
+
+;------------------------------------------------------------------------------ Layer 1
+;; Standard 5-phase pipeline — node set and edge count
+
+(deftest test-default-five-phase-pipeline-nodes
+  (testing "standard 5-phase pipeline produces exactly the expected phase-nodes"
+    (let [g (graph/build-transition-graph standard-five-phase-pipeline)]
+      (is (= #{:plan :implement :verify :review :release} (:phase-nodes g))
+          "phase-nodes should match all five pipeline phases")))
+
+  (testing "standard 5-phase pipeline node count: 5 phases + 3 canonical terminals"
+    (let [g (graph/build-transition-graph standard-five-phase-pipeline)]
+      (is (= five-phase-node-count (count (:nodes g))))))
+
+  (testing "standard 5-phase pipeline terminal-nodes equals canonical set (no :done)"
+    (let [g (graph/build-transition-graph standard-five-phase-pipeline)]
+      (is (= graph/canonical-terminal-nodes (:terminal-nodes g))
+          "no :done phase → terminal-nodes is exactly canonical-terminal-nodes"))))
+
+(deftest test-default-five-phase-pipeline-next-edges
+  (testing "standard 5-phase pipeline produces 4 :next edges in order"
+    (let [g    (graph/build-transition-graph standard-five-phase-pipeline)
+          nexts (edges-with-label g graph/label-next)]
+      (is (= five-phase-next-edge-count (count nexts)))
+      (is (edge-from-to? g :plan     :implement graph/label-next))
+      (is (edge-from-to? g :implement :verify    graph/label-next))
+      (is (edge-from-to? g :verify   :review    graph/label-next))
+      (is (edge-from-to? g :review   :release   graph/label-next))))
+
+  (testing ":release has no :next edge (last phase)"
+    (let [g (graph/build-transition-graph standard-five-phase-pipeline)
+          release-nexts (filter #(and (= :release (:from %))
+                                      (= graph/label-next (:label %)))
+                                (:edges g))]
+      (is (empty? release-nexts)))))
+
+(deftest test-default-five-phase-pipeline-total-edge-count
+  (testing "standard 5-phase pipeline without on-fail/budget overrides: 24 total edges"
+    (let [g (graph/build-transition-graph standard-five-phase-pipeline)]
+      (is (= five-phase-total-edge-count (count (:edges g)))
+          "4 :next + 5 :on-failure + 5 :already-done + 5 :pause + 5 :cancel = 24")))
+
+  (testing "no :retry edges on 5-phase pipeline with no iteration budget"
+    (let [g (graph/build-transition-graph standard-five-phase-pipeline)]
+      (is (empty? (edges-with-label g graph/label-retry)))))
+
+  (testing "no :redirect edges on 5-phase pipeline without on-fail"
+    (let [g (graph/build-transition-graph standard-five-phase-pipeline)]
+      (is (empty? (edges-with-label g graph/label-redirect)))))
+
+  (testing "no :on-budget-exhausted edges on 5-phase pipeline without on-fail"
+    (let [g (graph/build-transition-graph standard-five-phase-pipeline)]
+      (is (empty? (edges-with-label g graph/label-on-budget-exhausted))))))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Anomaly return on malformed input — canonical anomaly/anomaly? contract
