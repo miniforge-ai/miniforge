@@ -271,7 +271,13 @@
     (let [child (dag-orch/task-sub-opts
                  (registry-context {id-a {:branch "task-a"}} "main")
                  (make-task-def id-b "B" #{id-a}))]
-      (is (= "main" (:release/base-branch child))))))
+      (is (= "main" (:release/base-branch child)))))
+
+  (testing "single-arity (task-def nil, adapter / non-DAG path) sets NO
+            :release/base-branch — no forced override/fetch in the release
+            phase, preserving pre-stacking semantics"
+    (let [opts (dag-orch/task-sub-opts (registry-context {} "feat/spec"))]
+      (is (not (contains? opts :release/base-branch))))))
 
 (deftest task-sub-opts-single-dep-unregistered-falls-back-test
   (testing "single dep not yet registered: fall back to default branch.

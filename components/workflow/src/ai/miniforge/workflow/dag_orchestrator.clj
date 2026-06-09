@@ -1177,7 +1177,11 @@
          ;; fork point above. Root tasks resolve to the spec branch → base
          ;; unchanged. The release-executor fetches this and degrades to the
          ;; default if it can't be fetched.
-         pr-base-branch (resolve-task-pr-base-branch context task-def)
+         ;; Only for an actual task (DAG path). The single-arity
+         ;; `(task-sub-opts context)` passes task-def=nil (adapter / non-DAG
+         ;; callers) — leave :release/base-branch unset there so the release
+         ;; phase keeps its default-branch behavior (no forced override/fetch).
+         pr-base-branch (when task-def (resolve-task-pr-base-branch context task-def))
          merge-anomaly (when (merge-error? base-result) base-result)
          base-opts {:disable-dag-execution true
                     :skip-lifecycle-events true
