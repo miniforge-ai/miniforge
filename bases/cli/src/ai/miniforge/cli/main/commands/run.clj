@@ -90,7 +90,10 @@
         execution-opts (cond-> {}
                          (:worktree opts) (assoc :worktree-path (:worktree opts)))
         parsed-spec (-> (spec-parser/parse-spec-file spec-path)
-                        (assoc :spec/source-dir source-dir))
+                        (assoc :spec/source-dir source-dir)
+                        ;; Carry the spec path through to the PR provenance
+                        ;; frontmatter so a PR maps back to its source spec.
+                        (assoc :spec/path spec-path))
         validation  (spec-parser/validate-spec parsed-spec)
         runner-opts (cond-> {:output :pretty :quiet false}
                       (:backend opts)         (assoc :backend (:backend opts))

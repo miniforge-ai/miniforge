@@ -241,22 +241,33 @@
    The task description becomes the spec description, and the task itself
    is passed as the plan (single-task plan) so the implement phase can
    pick it up directly. Includes task title and acceptance criteria for
-   use by the release phase (PR title/body)."
-  [task-def]
-  (cond-> {:title (:task/description task-def "Implement task")
-           :description (:task/description task-def "Implement task")
-           :task/type (:task/type task-def :implement)
-           :task/acceptance-criteria (:task/acceptance-criteria task-def [])
-           :task/id (:task/id task-def)
-           ;; Provide the task as a single-task plan so the implement phase
-           ;; receives it without needing another plan phase
-           :plan/tasks [{:task/id (random-uuid)
-                         :task/description (:task/description task-def "Implement task")
-                         :task/type (:task/type task-def :implement)}]}
-    (:task/exclusive-files task-def)
-    (assoc :files-in-scope (:task/exclusive-files task-def))
-    (:task/component task-def)
-    (assoc :task/component (:task/component task-def))))
+   use by the release phase (PR title/body).
+
+   The 2-arity form threads PR-provenance from the orchestrator context: a
+   sub-task's PR frontmatter shares the parent RUN's id and spec path (so all
+   PRs from one workflow map back to it), distinguished by :task/id."
+  ([task-def] (task-sub-input task-def nil))
+  ([task-def context]
+   (cond-> {:title (:task/description task-def "Implement task")
+            :description (:task/description task-def "Implement task")
+            :task/type (:task/type task-def :implement)
+            :task/acceptance-criteria (:task/acceptance-criteria task-def [])
+            :task/id (:task/id task-def)
+            ;; Provide the task as a single-task plan so the implement phase
+            ;; receives it without needing another plan phase
+            :plan/tasks [{:task/id (random-uuid)
+                          :task/description (:task/description task-def "Implement task")
+                          :task/type (:task/type task-def :implement)}]}
+     (:task/exclusive-files task-def)
+     (assoc :files-in-scope (:task/exclusive-files task-def))
+     (:task/component task-def)
+     (assoc :task/component (:task/component task-def))
+     ;; PR provenance: parent run id + source spec, shared across the DAG's
+     ;; PRs; :task/id (above) distinguishes them.
+     (get-in context [:execution/input :spec/path])
+     (assoc :spec/path (get-in context [:execution/input :spec/path]))
+     (get context :execution/id)
+     (assoc :workflow/parent-id (get context :execution/id)))))
 
 (defn- default-spec-branch
   "Branch the orchestrator should treat as the spec's parent — the one root
@@ -1241,7 +1252,7 @@
    workflow result."
   [task-def context]
   (let [sub-workflow (task-sub-workflow task-def context)
-        sub-input    (task-sub-input task-def)
+        sub-input    (task-sub-input task-def context)
         sub-opts     (task-sub-opts context task-def)
         merge-anomaly (:dag/merge-anomaly sub-opts)]
     (if merge-anomaly
