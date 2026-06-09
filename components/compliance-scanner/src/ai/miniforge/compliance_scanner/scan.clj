@@ -277,32 +277,44 @@
 ;------------------------------------------------------------------------------ Layer 0.6
 ;; Diff/plan detection and incremental mode helpers
 
+(defn- safe-git-ref?
+  "Return true iff ref contains only characters valid in a git ref argument.
+   Rejects empty strings, nil, and any value starting with '-' (which git
+   could interpret as an option flag)."
+  [ref]
+  (boolean (and (string? ref)
+                (seq ref)
+                (not (str/starts-with? ref "-"))
+                (re-matches #"[a-zA-Z0-9/_.\-~^@{}]+" ref))))
+
 (defn- git-diff
   "Run git diff and return the output string."
   [repo-path since-ref]
-  (try
-    (let [pb (ProcessBuilder. ^java.util.List
-              ["git" "diff" (str since-ref "..HEAD")])
-          _  (.directory pb (io/file repo-path))
-          proc (.start pb)
-          out  (slurp (.getInputStream proc))]
-      (.waitFor proc)
-      (when-not (str/blank? out) out))
-    (catch Exception _ nil)))
+  (when (safe-git-ref? since-ref)
+    (try
+      (let [pb (ProcessBuilder. ^java.util.List
+                ["git" "diff" (str since-ref "..HEAD")])
+            _  (.directory pb (io/file repo-path))
+            proc (.start pb)
+            out  (slurp (.getInputStream proc))]
+        (.waitFor proc)
+        (when-not (str/blank? out) out))
+      (catch Exception _ nil))))
 
 (defn- git-diff-name-only
   "Run git diff --name-only and return set of changed file paths."
   [repo-path since-ref]
-  (try
-    (let [pb (ProcessBuilder. ^java.util.List
-              ["git" "diff" "--name-only" (str since-ref "..HEAD")])
-          _  (.directory pb (io/file repo-path))
-          proc (.start pb)
-          out  (slurp (.getInputStream proc))]
-      (.waitFor proc)
-      (when-not (str/blank? out)
-        (set (str/split-lines (str/trim out)))))
-    (catch Exception _ nil)))
+  (when (safe-git-ref? since-ref)
+    (try
+      (let [pb (ProcessBuilder. ^java.util.List
+                ["git" "diff" "--name-only" (str since-ref "..HEAD")])
+            _  (.directory pb (io/file repo-path))
+            proc (.start pb)
+            out  (slurp (.getInputStream proc))]
+        (.waitFor proc)
+        (when-not (str/blank? out)
+          (set (str/split-lines (str/trim out)))))
+      (catch Exception _ nil))))
 
 (defn- scan-diff-rule
   "Scan a git diff for violations using a diff-analysis rule.
