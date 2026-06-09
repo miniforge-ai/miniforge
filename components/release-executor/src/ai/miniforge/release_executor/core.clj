@@ -267,7 +267,7 @@
                spec       (conj (str "spec: " spec))
                task       (conj (str "task: " task))
                commit-sha (conj (str "commit: " commit-sha))
-               :always    (conj "generated-by: miniforge"))]
+               true       (conj "generated-by: miniforge"))]
     (str "---\n" (str/join "\n" rows) "\n---\n\n")))
 
 (defn with-provenance

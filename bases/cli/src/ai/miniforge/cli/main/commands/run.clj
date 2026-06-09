@@ -90,10 +90,7 @@
         execution-opts (cond-> {}
                          (:worktree opts) (assoc :worktree-path (:worktree opts)))
         parsed-spec (-> (spec-parser/parse-spec-file spec-path)
-                        (assoc :spec/source-dir source-dir)
-                        ;; Carry the spec path through to the PR provenance
-                        ;; frontmatter so a PR maps back to its source spec.
-                        (assoc :spec/path spec-path))
+                        (assoc :spec/source-dir source-dir))
         validation  (spec-parser/validate-spec parsed-spec)
         runner-opts (cond-> {:output :pretty :quiet false}
                       (:backend opts)         (assoc :backend (:backend opts))
@@ -107,7 +104,11 @@
         nil)
       (do
         (display/print-info (messages/t :run/running-workflow {:title (:spec/title parsed-spec)}))
-        (workflow-runner/run-workflow-from-spec! parsed-spec runner-opts)))))
+        ;; Attach the spec path AFTER validation (it's runtime provenance, not
+        ;; part of the validated spec contract) so it reaches the PR frontmatter
+        ;; without tripping the SpecPayload schema.
+        (workflow-runner/run-workflow-from-spec!
+         (assoc parsed-spec :spec/path spec-path) runner-opts)))))
 
 ;------------------------------------------------------------------------------ Layer 2
 ;; Run command
