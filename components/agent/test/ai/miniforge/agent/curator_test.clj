@@ -184,6 +184,25 @@
            this is the terminal signal that makes the implement phase fail
            instead of retrying blindly"))))
 
+(deftest curate-no-files-error-carries-diagnostic
+  (testing "the terminal no-files error includes a diagnostic explaining why
+            each collection source was empty — so capture loss (nil
+            pre-snapshot / wrong dir / mode) is distinguishable from a genuine
+            no-write"
+    (let [result (sut/curate-implement-output
+                  {:implementer-result (impl-result-with-files [])
+                   :worktree-path "/tmp/nothing"
+                   :intent-scope ["a.clj"]})
+          diag   (get-in result [:error :data :diagnostic])]
+      (is (some? diag) "no-files error must carry a :diagnostic")
+      (is (= 0 (get-in diag [:source-file-counts :from-result]))
+          "reports per-source counts so the empty source is visible")
+      (is (false? (:pre-session-snapshot? diag))
+          "flags the missing pre-session-snapshot — a documented loss mode")
+      (is (= "/tmp/nothing" (:worktree-path diag)))
+      (is (= :local (:collection-mode diag))
+          "no executor/env-id → local collection mode"))))
+
 (deftest curate-errors-when-implementer-result-has-no-output
   (testing "missing :output map → empty diff → error"
     (let [result (sut/curate-implement-output

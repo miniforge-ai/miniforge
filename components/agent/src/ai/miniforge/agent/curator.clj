@@ -274,6 +274,29 @@
                (files-via-local-snapshot input)
                [])))
 
+(defn collect-files-diagnostic
+  "Explain WHY file collection came up empty, so the terminal
+   :curator/no-files-written error is debuggable rather than opaque.
+   Distinguishes the documented loss modes — nil pre-session-snapshot,
+   missing worktree-path, wrong collection mode, or the implementer simply
+   capturing nothing — from a genuine no-write. Pure probes; no FS mutation.
+
+   Reports per-source file counts so the reader sees exactly which fallback
+   (result / executor / local-snapshot) produced what."
+  [input]
+  (let [from-result (count (or (files-from-result (:implementer-result input)) []))
+        via-exec    (count (or (files-via-executor input) []))
+        via-local   (count (or (files-via-local-snapshot input) []))]
+    {:source-file-counts {:from-result   from-result
+                          :via-executor  via-exec
+                          :via-local     via-local}
+     :pre-session-snapshot? (some? (:pre-session-snapshot input))
+     :worktree-path         (:worktree-path input)
+     :collection-mode       (if (and (:executor input) (:execute-fn input)
+                                     (:env-id input) (:worktree-path input))
+                              :capsule :local)
+     :env-id                (:env-id input)}))
+
 ;------------------------------------------------------------------------------ Layer 2
 ;; Optional LLM enrichment
 
@@ -396,7 +419,11 @@
    {:data {:code :curator/no-files-written
            :worktree-path (:worktree-path input)
            :env-id (:env-id input)
-           :intent-scope (:intent-scope input)}}))
+           :intent-scope (:intent-scope input)
+           ;; Why each collection source came up empty — distinguishes a
+           ;; genuine no-write from a capture loss (nil pre-snapshot / wrong
+           ;; dir / mode). See collect-files-diagnostic.
+           :diagnostic (collect-files-diagnostic input)}}))
 
 (defmulti curate
   "Curator entry point. Dispatches on `:curator/kind` so each agent
