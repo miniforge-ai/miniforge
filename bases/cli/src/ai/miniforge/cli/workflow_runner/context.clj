@@ -151,7 +151,10 @@
           :sandbox (:spec/sandbox enriched-spec)
           :context (:spec/context enriched-spec)
           :metadata (:spec/metadata enriched-spec)
-          :provenance (:spec/provenance enriched-spec)}))
+          :provenance (:spec/provenance enriched-spec)
+          ;; Spec source path → PR provenance frontmatter (deterministic
+          ;; PR → spec mapping).
+          :spec/path (:spec/path enriched-spec)}))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Context decoration

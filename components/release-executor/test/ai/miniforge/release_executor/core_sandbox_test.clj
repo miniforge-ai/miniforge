@@ -321,3 +321,39 @@
           result   (core/step-create-branch state)]
       (is (not (core/failed? result)) "release proceeds despite the fetch failure")
       (is (= "main" (:base-branch result)) "falls back to the detected default"))))
+
+;; ============================================================================
+;; PR provenance frontmatter — deterministic PR → workflow + spec mapping
+;; ============================================================================
+
+(deftest provenance-frontmatter-renders-yaml
+  (testing "frontmatter carries workflow + spec + task + commit + generated-by"
+    (let [fm (core/provenance-frontmatter
+              {:provenance {:workflow "adhoc--123" :spec "work/x.spec.edn" :task "t-1"}
+               :commit-sha "abc1234"})]
+      (is (clojure.string/starts-with? fm "---\n"))
+      (is (clojure.string/includes? fm "miniforge-workflow: adhoc--123"))
+      (is (clojure.string/includes? fm "spec: work/x.spec.edn"))
+      (is (clojure.string/includes? fm "task: t-1"))
+      (is (clojure.string/includes? fm "commit: abc1234"))
+      (is (clojure.string/includes? fm "generated-by: miniforge"))
+      (is (clojure.string/includes? fm "\n---\n\n")))))
+
+(deftest provenance-frontmatter-omits-absent-fields
+  (testing "absent spec/task/commit omitted; workflow + generated-by remain"
+    (let [fm (core/provenance-frontmatter {:provenance {:workflow "run-1"} :commit-sha nil})]
+      (is (clojure.string/includes? fm "miniforge-workflow: run-1"))
+      (is (not (clojure.string/includes? fm "spec:")))
+      (is (not (clojure.string/includes? fm "task:")))
+      (is (not (clojure.string/includes? fm "commit:")))
+      (is (clojure.string/includes? fm "generated-by: miniforge")))))
+
+(deftest with-provenance-prepends-and-is-idempotent
+  (testing "prepends frontmatter to a plain body"
+    (let [out (core/with-provenance "## Summary\nbody" {:provenance {:workflow "r1"} :commit-sha "c1"})]
+      (is (clojure.string/starts-with? out "---\n"))
+      (is (clojure.string/includes? out "## Summary"))))
+  (testing "does not double-prepend when the body already opens with frontmatter"
+    (let [already "---\nminiforge-workflow: x\n---\n\nbody"]
+      (is (= already (core/with-provenance already {:provenance {:workflow "r1"}}))))))
+

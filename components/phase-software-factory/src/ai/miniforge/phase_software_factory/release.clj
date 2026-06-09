@@ -301,6 +301,14 @@
              ;; against the default branch with a cumulative diff. Absent (root
              ;; tasks / non-DAG runs) → executor falls back to the default branch.
              :base-branch (get-in ctx [:execution/opts :release/base-branch])
+             ;; PR provenance → rendered as YAML frontmatter on the PR body so
+             ;; a PR maps deterministically back to its workflow run + spec.
+             ;; :workflow is the PARENT run id for a DAG sub-task (shared across
+             ;; the run's PRs) else this run's id; :task distinguishes DAG tasks.
+             :provenance {:workflow (or (get-in ctx [:execution/input :workflow/parent-id])
+                                        (get-in ctx [:execution/id]))
+                          :spec     (get-in ctx [:execution/input :spec/path])
+                          :task     (get-in ctx [:execution/input :task/id])}
              ;; Resolve and inject GitHub token for capsule gh CLI auth
              :github-token (resolve-github-token ctx)}
       on-chunk (assoc :on-chunk on-chunk)

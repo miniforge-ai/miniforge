@@ -236,6 +236,20 @@
       (is (= "feat/spec" (:branch opts))
           "zero-dep tasks fork from the spec branch resolved off context"))))
 
+(deftest task-sub-input-threads-pr-provenance-test
+  (testing "2-arity threads the parent run id + spec path into the sub-input
+            so a DAG task's PR frontmatter maps back to its workflow + spec"
+    (let [ctx {:execution/id "parent-run-1"
+               :execution/input {:spec/path "work/x.spec.edn"}}
+          in  (dag-orch/task-sub-input (make-task-def id-a "A") ctx)]
+      (is (= "parent-run-1" (:workflow/parent-id in)))
+      (is (= "work/x.spec.edn" (:spec/path in)))
+      (is (= id-a (:task/id in)) "task id distinguishes PRs within the run")))
+  (testing "1-arity (no context) omits provenance — backward compatible"
+    (let [in (dag-orch/task-sub-input (make-task-def id-a "A"))]
+      (is (not (contains? in :workflow/parent-id)))
+      (is (not (contains? in :spec/path))))))
+
 (deftest task-sub-opts-single-dep-uses-deps-branch-test
   (testing "single dep registered: base = the dep's persisted branch.
             This is the whole point of the chaining feature — the

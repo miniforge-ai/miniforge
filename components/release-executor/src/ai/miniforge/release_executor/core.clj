@@ -262,6 +262,31 @@
         state
         (fail state :push-failed (:error result))))))
 
+(defn provenance-frontmatter
+  "YAML frontmatter mapping a PR back to its workflow run + spec. Built from
+   state's :provenance ({:workflow :spec :task}) + :commit-sha. Always emits
+   `generated-by: miniforge` (authorship) plus whatever provenance is present.
+   Visible in the rendered PR — human-readable AND deterministically parsable
+   (fixed position, explicit `---` delimiters, rigid key: value)."
+  [{:keys [provenance commit-sha]}]
+  (let [{:keys [workflow spec task]} provenance
+        rows (cond-> []
+               workflow   (conj (str "miniforge-workflow: " workflow))
+               spec       (conj (str "spec: " spec))
+               task       (conj (str "task: " task))
+               commit-sha (conj (str "commit: " commit-sha))
+               true       (conj "generated-by: miniforge"))]
+    (str "---\n" (str/join "\n" rows) "\n---\n\n")))
+
+(defn with-provenance
+  "Prepend the provenance frontmatter to a PR body. Idempotent: a body that
+   already opens with a `---` frontmatter block is returned unchanged."
+  [body state]
+  (let [body (str body)]
+    (if (str/starts-with? body "---\n")
+      body
+      (str (provenance-frontmatter state) body))))
+
 (defn step-create-pr [state]
   (cond
     (failed? state) state
@@ -270,7 +295,7 @@
     (let [{:keys [release-meta base-branch executor environment-id]} state
           result (sandbox/create-pr! executor environment-id
                                      {:title (:release/pr-title release-meta)
-                                      :body (:release/pr-body release-meta)
+                                      :body (with-provenance (:release/pr-body release-meta) state)
                                       :base-branch base-branch}
                                      (gh-exec-opts state))]
       (if (result/succeeded? result)
@@ -502,7 +527,9 @@
     :else
     (let [{:keys [release-meta pr-number executor environment-id logger
                   code-artifacts workflow-data]} state
-          body (render-pr-body-fallback release-meta code-artifacts workflow-data)]
+          body (with-provenance
+                (render-pr-body-fallback release-meta code-artifacts workflow-data)
+                state)]
       (try
         (sandbox/edit-pr-body! executor environment-id
                                pr-number body
@@ -669,6 +696,9 @@
                                ;; stacks on the parent; diff/commits-ahead ranges
                                ;; key off it too, yielding this task's own layer.
                                :base-branch-override (:base-branch context)
+                               ;; PR provenance ({:workflow :spec :task}) →
+                               ;; rendered as YAML frontmatter on the PR body.
+                               :provenance (:provenance context)
                                :releaser (:releaser opts)
                                :task-description (get-in workflow-state [:workflow/spec :spec/description])
                                :code-artifacts (extract-code-artifacts workflow-artifacts)
