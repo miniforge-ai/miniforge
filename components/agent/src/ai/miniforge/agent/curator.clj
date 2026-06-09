@@ -257,45 +257,54 @@
        (not (contains? non-substantive-paths path))
        (not (.startsWith ^String path ".miniforge/"))))
 
+(defn- source-file-count
+  "Raw vs substantive count for one collection source's result — so a diff of
+   only non-substantive files (e.g. .miniforge-session-id) reads as zero
+   substantive, not a misleading non-zero. nil-safe: count/filterv treat a
+   nil (didn't-run) source as empty."
+  [raw]
+  {:raw (count raw)
+   :substantive (count (filterv substantive-file? raw))})
+
+(defn collect-files+diagnostic
+  "Single-pass collection: resolve the substantive file diff AND a diagnostic
+   in ONE traversal of the sources, in priority order:
+   1. implementer-result :code/files (fast path)
+   2. executor collection (capsule mode)
+   3. local git-status collection (non-capsule)
+
+   Each source is probed at most once; later sources run only when earlier
+   ones return nil (preserving the short-circuit — no executor IO / git scan
+   when the result already carries files). Returns
+   `{:files <substantive vector> :diagnostic <map>}`. The diagnostic reports
+   raw vs substantive per-source counts plus the loss-mode signals
+   (pre-session-snapshot?, worktree-path, collection-mode) so an empty result
+   is debuggable without a second collection pass."
+  [input]
+  (let [from-result (files-from-result (:implementer-result input))
+        via-exec    (when (nil? from-result) (files-via-executor input))
+        via-local   (when (and (nil? from-result) (nil? via-exec))
+                      (files-via-local-snapshot input))
+        ;; nil when every source returned nil — filterv handles it, no (or … []).
+        raw         (or from-result via-exec via-local)]
+    {:files (filterv substantive-file? raw)
+     :diagnostic {:source-file-counts {:from-result  (source-file-count from-result)
+                                       :via-executor (source-file-count via-exec)
+                                       :via-local    (source-file-count via-local)}
+                  :pre-session-snapshot? (some? (:pre-session-snapshot input))
+                  :worktree-path         (:worktree-path input)
+                  :collection-mode       (if (and (:executor input) (:execute-fn input)
+                                                  (:env-id input) (:worktree-path input))
+                                           :capsule :local)
+                  :env-id                (:env-id input)}}))
+
 (defn collect-files
-  "Resolve the file diff from available sources, in priority order:
-   1. implementer-result has :code/files already (fast path)
-   2. fresh collection via executor (capsule mode)
-   3. fresh collection via local git status (non-capsule)
-
-   Filters non-substantive files (session markers, miniforge runtime
-   artifacts) — these shouldn't count as implementer output.
-
-   Returns a vector (possibly empty) of file entries."
+  "Substantive file diff from available sources (priority order). Filters
+   non-substantive files (session markers, miniforge runtime artifacts).
+   Returns a vector (possibly empty). For the diagnostic alongside it, use
+   `collect-files+diagnostic`."
   [input]
-  (filterv substantive-file?
-           (or (files-from-result (:implementer-result input))
-               (files-via-executor input)
-               (files-via-local-snapshot input)
-               [])))
-
-(defn collect-files-diagnostic
-  "Explain WHY file collection came up empty, so the terminal
-   :curator/no-files-written error is debuggable rather than opaque.
-   Distinguishes the documented loss modes — nil pre-session-snapshot,
-   missing worktree-path, wrong collection mode, or the implementer simply
-   capturing nothing — from a genuine no-write. Pure probes; no FS mutation.
-
-   Reports per-source file counts so the reader sees exactly which fallback
-   (result / executor / local-snapshot) produced what."
-  [input]
-  (let [from-result (count (or (files-from-result (:implementer-result input)) []))
-        via-exec    (count (or (files-via-executor input) []))
-        via-local   (count (or (files-via-local-snapshot input) []))]
-    {:source-file-counts {:from-result   from-result
-                          :via-executor  via-exec
-                          :via-local     via-local}
-     :pre-session-snapshot? (some? (:pre-session-snapshot input))
-     :worktree-path         (:worktree-path input)
-     :collection-mode       (if (and (:executor input) (:execute-fn input)
-                                     (:env-id input) (:worktree-path input))
-                              :capsule :local)
-     :env-id                (:env-id input)}))
+  (:files (collect-files+diagnostic input)))
 
 ;------------------------------------------------------------------------------ Layer 2
 ;; Optional LLM enrichment
@@ -413,7 +422,7 @@
 (defn- empty-diff-error
   "Build the terminal 'no files written' error. The :code keyword is the
    stable contract the phase runner branches on to stop retrying."
-  [input]
+  [input diagnostic]
   (response/error
    (messages/t :error/curator-no-files-written)
    {:data {:code :curator/no-files-written
@@ -422,8 +431,9 @@
            :intent-scope (:intent-scope input)
            ;; Why each collection source came up empty — distinguishes a
            ;; genuine no-write from a capture loss (nil pre-snapshot / wrong
-           ;; dir / mode). See collect-files-diagnostic.
-           :diagnostic (collect-files-diagnostic input)}}))
+           ;; dir / mode). Computed in the SAME pass as collect-files (no
+           ;; second collection / executor IO on the error path).
+           :diagnostic diagnostic}}))
 
 (defmulti curate
   "Curator entry point. Dispatches on `:curator/kind` so each agent
@@ -433,9 +443,9 @@
 
 (defmethod curate :implement
   [{:keys [intent-scope spec-description llm-client] :as input}]
-  (let [files (collect-files input)]
+  (let [{:keys [files diagnostic]} (collect-files+diagnostic input)]
     (if (empty? files)
-      (empty-diff-error input)
+      (empty-diff-error input diagnostic)
       (let [tests-added? (detect-tests-added files)
             deviations (detect-scope-deviations files intent-scope)
             language (detect-language files)

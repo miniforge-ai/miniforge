@@ -195,13 +195,27 @@
                    :intent-scope ["a.clj"]})
           diag   (get-in result [:error :data :diagnostic])]
       (is (some? diag) "no-files error must carry a :diagnostic")
-      (is (= 0 (get-in diag [:source-file-counts :from-result]))
-          "reports per-source counts so the empty source is visible")
+      (is (= {:raw 0 :substantive 0} (get-in diag [:source-file-counts :from-result]))
+          "reports raw + substantive per-source counts so the empty source is visible")
       (is (false? (:pre-session-snapshot? diag))
           "flags the missing pre-session-snapshot — a documented loss mode")
       (is (= "/tmp/nothing" (:worktree-path diag)))
       (is (= :local (:collection-mode diag))
           "no executor/env-id → local collection mode"))))
+
+(deftest curate-diagnostic-distinguishes-raw-from-substantive
+  (testing "a diff of ONLY non-substantive files (e.g. .miniforge-session-id)
+            still errors, and the diagnostic reports raw>0 / substantive=0 —
+            not a misleading non-zero count"
+    (let [result (sut/curate-implement-output
+                  {:implementer-result
+                   (impl-result-with-files [{:path ".miniforge-session-id" :action :modify}])
+                   :worktree-path "/tmp/x"
+                   :intent-scope []})
+          diag   (get-in result [:error :data :diagnostic])]
+      (is (= :curator/no-files-written (get-in result [:error :data :code])))
+      (is (= {:raw 1 :substantive 0} (get-in diag [:source-file-counts :from-result]))
+          "raw counts the session marker; substantive correctly excludes it"))))
 
 (deftest curate-errors-when-implementer-result-has-no-output
   (testing "missing :output map → empty diff → error"
