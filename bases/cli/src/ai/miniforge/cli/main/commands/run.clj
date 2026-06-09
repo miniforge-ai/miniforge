@@ -104,7 +104,11 @@
         nil)
       (do
         (display/print-info (messages/t :run/running-workflow {:title (:spec/title parsed-spec)}))
-        (workflow-runner/run-workflow-from-spec! parsed-spec runner-opts)))))
+        ;; Attach the spec path AFTER validation (it's runtime provenance, not
+        ;; part of the validated spec contract) so it reaches the PR frontmatter
+        ;; without tripping the SpecPayload schema.
+        (workflow-runner/run-workflow-from-spec!
+         (assoc parsed-spec :spec/path spec-path) runner-opts)))))
 
 ;------------------------------------------------------------------------------ Layer 2
 ;; Run command
