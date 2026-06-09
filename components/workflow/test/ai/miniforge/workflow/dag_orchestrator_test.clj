@@ -260,22 +260,38 @@
       (is (= "task-a" (:branch opts))
           "single-dep base resolves to the dep's branch, NOT the spec branch"))))
 
-(deftest task-sub-opts-release-base-branch-mirrors-resolved-branch-test
-  (testing "the release PR base equals the resolved fork base, so a chained
-            task's PR STACKS on its parent (base = parent branch) while a
-            root task bases on the spec branch. Prevents the
-            chained-task-PRs-vs-main duplication."
+(deftest task-sub-opts-release-base-is-parent-pushed-branch-test
+  (testing "the release PR base is the dep's PUSHED branch (:pr-branch), so a
+            chained task stacks on the parent's PUBLISHED branch — distinct
+            from :branch, the LOCAL worktree fork point. Root tasks base on
+            the spec branch. (Fixes the #1102 regression where the PR base
+            was the unpushed worktree branch task-XXXX.)"
     (let [root  (dag-orch/task-sub-opts (registry-context {} "feat/spec")
                                         (make-task-def id-a "A"))
-          child (dag-orch/task-sub-opts (registry-context {id-a {:branch "task-a"}} "main")
-                                        (make-task-def id-b "B" #{id-a}))]
+          child (dag-orch/task-sub-opts
+                 (registry-context {id-a {:branch "task-a" :pr-branch "mf/a-pushed"}} "main")
+                 (make-task-def id-b "B" #{id-a}))]
       (is (= "feat/spec" (:release/base-branch root))
-          "root task's PR bases on the spec branch (unchanged)")
-      (is (= (:branch root) (:release/base-branch root))
-          "release base mirrors the worktree fork base")
-      (is (= "task-a" (:release/base-branch child))
-          "chained task's PR bases on the parent's branch (stacked, not main)")
-      (is (= (:branch child) (:release/base-branch child))))))
+          "root task's PR bases on the spec branch")
+      (is (= "task-a" (:branch child))
+          "worktree fork point = dep's local branch (unchanged)")
+      (is (= "mf/a-pushed" (:release/base-branch child))
+          "PR base = dep's PUSHED branch, not the worktree branch")
+      (is (not= (:branch child) (:release/base-branch child))
+          "PR base differs from the worktree fork — the regression fix")))
+
+  (testing "single dep with no recorded :pr-branch (not yet released) → PR
+            base falls back to the spec branch rather than a missing ref"
+    (let [child (dag-orch/task-sub-opts
+                 (registry-context {id-a {:branch "task-a"}} "main")
+                 (make-task-def id-b "B" #{id-a}))]
+      (is (= "main" (:release/base-branch child)))))
+
+  (testing "single-arity (task-def nil, adapter / non-DAG path) sets NO
+            :release/base-branch — no forced override/fetch in the release
+            phase, preserving pre-stacking semantics"
+    (let [opts (dag-orch/task-sub-opts (registry-context {} "feat/spec"))]
+      (is (not (contains? opts :release/base-branch))))))
 
 (deftest task-sub-opts-single-dep-unregistered-falls-back-test
   (testing "single dep not yet registered: fall back to default branch.

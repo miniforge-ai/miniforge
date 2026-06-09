@@ -612,6 +612,13 @@
    single dep, or an `:anomalies/dag-non-forest` map on multi-dep tasks."
   branch-registry/resolve-base-branch)
 
+(def resolve-pr-base-branch
+  "Decide a downstream task's RELEASE PR base: the dep's PUSHED branch
+   (`:pr-branch`), so a chained task's PR stacks on the parent's published
+   branch. Falls back to the default branch for root / not-yet-released /
+   multi-dep tasks. Distinct from resolve-base-branch (local worktree fork)."
+  branch-registry/resolve-pr-base-branch)
+
 (def resolve-base-branch-error?
   "True when `resolve-base-branch` returned an anomaly map rather than a
    branch string. Lets callers branch on the result without coupling to

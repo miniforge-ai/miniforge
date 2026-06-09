@@ -109,19 +109,27 @@
           result (sandbox/create-branch! executor environment-id branch-name)]
       (if-not (result/succeeded? result)
         (fail state :branch-create-failed (:error result))
-        (let [detected (:base-branch result)
-              ;; An explicit override (chained DAG task's parent branch) wins
-              ;; over the detected default, so the PR stacks on the parent.
-              base (or base-branch-override detected)
-              ;; create-branch! fetched only origin/<detected>. When the base
-              ;; is a different parent branch, fetch it too so later
+        (let [detected  (:base-branch result)
+              logger    (:logger state)
+              ;; A chained DAG task's parent branch (override) becomes the PR
+              ;; base so the PR stacks on the parent. create-branch! fetched
+              ;; only origin/<detected>; fetch the override too so later
               ;; origin/<base> range diffs / commits-ahead and the PR
-              ;; merge-base resolve rather than failing on a missing ref.
-              fetch-r (when (and base-branch-override (not= base-branch-override detected))
-                        (sandbox/fetch-branch! executor environment-id base-branch-override))]
-          (if (and fetch-r (not (result/succeeded? fetch-r)))
-            (fail state :base-branch-fetch-failed (:error fetch-r))
-            (assoc state :branch (:branch result) :base-branch base)))))))
+              ;; merge-base resolve.
+              override? (and base-branch-override (not= base-branch-override detected))
+              fetch-r   (when override?
+                          (sandbox/fetch-branch! executor environment-id base-branch-override))
+              ;; Degrade gracefully: if the parent branch can't be fetched
+              ;; (e.g. not yet on the remote), fall back to the detected
+              ;; default rather than failing the release — the PR opens
+              ;; against the default instead of stacking. Degraded, not fatal.
+              fetch-ok? (or (not override?) (result/succeeded? fetch-r))
+              base      (if (and override? fetch-ok?) base-branch-override detected)]
+          (when (and override? (not fetch-ok?) logger)
+            (log/warn logger :release-executor :base-branch-fetch-degraded
+                      {:message (str "Could not fetch base branch " base-branch-override
+                                     "; PR targets " detected " instead of stacking.")}))
+          (assoc state :branch (:branch result) :base-branch base))))))
 
 (defn step-stage-dirty-files
   "Stage all dirty files in the executor environment.
