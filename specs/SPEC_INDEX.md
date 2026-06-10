@@ -263,6 +263,33 @@ Defines:
 
 ---
 
+### N13 — Policy Injection & Standards Learning 🆕
+
+**File:** [normative/N13-policy-injection-and-standards-learning.md](normative/N13-policy-injection-and-standards-learning.md)
+**Status:** Draft
+**Purpose:** Split policy into full-fidelity **enforcement** (gates) and compact **guidance** (session injection); learn
+  the per-repo guidance subset from violations and promote broadly-valuable rules to a generic bootstrap set
+
+Defines:
+
+- The two tiers: enforcement (complete, detector/gate-checked, no prompt dependence) vs guidance (bounded, relevant,
+  injected) — opposite size pressures, conflated today (§1–§2)
+- Guidance selection pipeline: static scope → learned rank → changeset relevance → bootstrap fallback → budget cap;
+  agent-behavior only, never knowledge-content (§4)
+- Compilation obligation: MDC→pack MUST emit `:rule/applies-to` + stable ids; unscoped rule is a warning, not match-all
+  (fixes the 153k-char/38k-token full-pack dump into every phase) (§4.6)
+- Per-repo violation ledger (local flywheel): rule-attributed signal → persist → rank; zero-violation rules demote (§5)
+- Cross-repo promotion/demotion (global flywheel): broadly-violated → generic bootstrap seed; dormant/noisy → demote
+  (§6)
+- Bootstrap: cold-start from the generic seed; v0 = author's hand-curated list (Appendix A), the existence proof the
+  loop automates (§7)
+- The gate as safety net: full enforcement de-risks compact guidance — a pruned rule that regresses is caught and
+  re-promoted (§9)
+- Objective + metrics: minimize injected tokens s.t. gate-pass holds; unattributed findings signal missing detectors
+  (§10)
+
+---
+
 ## Informative Documentation (Non-Normative)
 
 These documents provide guidance, examples, and context but do NOT define contractual requirements.

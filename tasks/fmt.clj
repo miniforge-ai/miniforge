@@ -87,7 +87,13 @@
                         (str/starts-with? trimmed "|")
                         (str/starts-with? trimmed "<")
                         (str/starts-with? trimmed "[")
-                        (re-find #"^\s*```" trimmed))]
+                        (re-find #"^\s*```" trimmed)
+                        ;; No whitespace past the limit → unbreakable (e.g. a
+                        ;; long `**File:** [text](url)` link). markdownlint
+                        ;; MD013 exempts these; wrapping them only mangles the
+                        ;; line. Mirror that exemption rather than force-break.
+                        (and (> (count line) max-col)
+                             (not (re-find #"\s" (subs line max-col)))))]
           (if (or skip? (<= (count line) max-col))
             (recur (rest remaining) new-block? (conj out line))
             (recur (rest remaining) new-block?
