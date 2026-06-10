@@ -796,6 +796,10 @@
                               :tokens (:tokens normalized)
                               :streaming? (boolean on-chunk)
                               :artifact-source (or (:artifact-source normalized) :none)
+                              ;; Dir the agent wrote to / collection scanned —
+                              ;; surfaces the worktree-path-vs-CWD resolution so
+                              ;; a write/scan dir mismatch is diagnosable.
+                              :working-dir working-dir
                               :tools-called (:tools-called normalized)}
                        (:stop-reason response)
                        (assoc :stop-reason (:stop-reason response))
