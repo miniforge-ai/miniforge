@@ -349,3 +349,32 @@
 (comment
   (clojure.test/run-tests 'ai.miniforge.phase.agent-behavior-test)
   :leave-this-here)
+
+;; ============================================================================
+;; N13 — guidance tier (compact, seed-restricted, behavior-only)
+;; ============================================================================
+
+(deftest load-guidance-addendum-test
+  (testing "guidance addendum is compact, behavior-only, seed-restricted"
+    (let [lean (str (sut/load-guidance-addendum
+                     :implement {:task {:task/intent {:intent/type :implement}}}))
+          full (str (sut/load-and-filter-behaviors
+                     :implement {:task {:task/intent {:intent/type :implement}}}))]
+      ;; Only assert content when packs are present on the classpath.
+      (when (pos? (count full))
+        (is (< (count lean) (count full))
+            "lean guidance is smaller than the full behavior+knowledge addendum")
+        (is (<= (count lean) 12000)
+            "guidance is capped to the char budget (N13 §4.5)")
+        (is (re-find #"(?i)local|catalog|emitted string" lean)
+            "keeps curated seed rules — localization (the churn rule) survives")
+        (is (not (re-find #"(?i)\brust\b|cargo|tokio" lean))
+            "drops language rules outside the seed (no Rust)")
+        (is (not (re-find #"Reference Material|Knowledge" lean))
+            "behavior-only — no knowledge-content section (N13 §4.5)")))))
+
+(deftest bootstrap-seed-rule-ids-are-std-namespaced-test
+  (testing "every seed id is :std/ namespaced"
+    (is (seq sut/bootstrap-seed-rule-ids))
+    (doseq [id sut/bootstrap-seed-rule-ids]
+      (is (= "std" (namespace id)) (str id " should be :std/ namespaced")))))

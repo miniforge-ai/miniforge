@@ -124,7 +124,7 @@
   (let [existing-files (:exploration/files explore-result)
         {:keys [formatted manifest]} (kb-helpers/inject-with-manifest
                                        knowledge-store :planner (get input :tags []))
-        behavior-addendum (phase/load-and-filter-behaviors
+        behavior-addendum (phase/load-guidance-addendum
                             :plan {:task {:task/intent (:intent input)}})
         task (cond-> {:task/id (random-uuid)
                       :task/type :plan

@@ -210,7 +210,7 @@
         pack-ctx (or (get-in ctx [:execution/pack-context])
                      (build-context-pack worktree-path files-in-scope))
         existing-files (resolve-existing-files ctx pack-ctx worktree-path files-in-scope)
-        behavior-addendum (phase/load-and-filter-behaviors
+        behavior-addendum (phase/load-guidance-addendum
                             :implement {:task {:task/intent (:intent input)}})
         review-feedback (resolve-review-feedback ctx)
         phase-handoff (resolve-phase-handoff ctx)

@@ -208,8 +208,14 @@
   file-context/load-files-in-scope)
 
 (def load-and-filter-behaviors
-  "Load and filter rule-pack agent-behavior entries applicable to a phase."
+  "Load and filter rule-pack agent-behavior entries applicable to a phase.
+   Full path (behavior + knowledge) — for enforcement-adjacent consumers."
   agent-behavior/load-and-filter-behaviors)
+
+(def load-guidance-addendum
+  "N13 guidance tier: compact, behavior-only, seed-restricted, capped addendum
+   for authoring sessions (plan/implement). See agent-behavior namespace."
+  agent-behavior/load-guidance-addendum)
 
 (def success
   "Build a successful environment-model phase result."
