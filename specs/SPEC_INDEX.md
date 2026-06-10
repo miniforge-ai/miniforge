@@ -265,8 +265,7 @@ Defines:
 
 ### N13 — Policy Injection & Standards Learning 🆕
 
-**File:**
-  [normative/N13-policy-injection-and-standards-learning.md](normative/N13-policy-injection-and-standards-learning.md)
+**File:** [normative/N13-policy-injection-and-standards-learning.md](normative/N13-policy-injection-and-standards-learning.md)
 **Status:** Draft
 **Purpose:** Split policy into full-fidelity **enforcement** (gates) and compact **guidance** (session injection); learn
   the per-repo guidance subset from violations and promote broadly-valuable rules to a generic bootstrap set

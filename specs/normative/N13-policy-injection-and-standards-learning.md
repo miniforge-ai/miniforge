@@ -64,8 +64,9 @@ the detector/enforcement semantics defined in N4; it changes only what is
 ### 2.1 Enforcement tier (full fidelity)
 
 - The enforcement tier MUST evaluate the **complete** applicable rule set for
-  the artifact, via deterministic detectors / policy gates (`:policy-verify`,
-  `:policy-review` per N4), independent of what was injected into any agent.
+  the artifact, via deterministic detectors / policy gates (the
+  `:policy-verify` / `:policy-review` gates in the implementation, under N4's
+  gate contract), independent of what was injected into any agent.
 - Enforcement MUST NOT depend on prompt injection. An agent that was never
   shown a rule is still bound by it at the gate.
 - A `:policy-review` _agent_ (LLM judging rules without a deterministic
@@ -110,9 +111,11 @@ set; cheap/static stages run first.
 ### 4.1 Static scope
 
 Filter the pack by declared applicability: `:rule/applies-to`
-(`:phases`, `:file-globs`, `:task-types`). A rule with empty applicability
-matches broadly and SHOULD be treated as a candidate for _all_ phases only
-when explicitly marked `:rule/always-inject?`.
+(`:phases`, `:file-globs`, `:task-types`). A rule with empty applicability is
+unscoped — per §4.6 a compilation warning, never a silent match-all. Only a
+rule explicitly marked `:rule/always-inject?` is a guidance candidate across
+all phases; an unscoped rule that is not `:rule/always-inject?` is excluded
+from guidance until it declares scope (it remains fully enforced, §2.1).
 
 > **Defect this fixes:** today every rule has nil `:rule/applies-to :phases`,
 > and `rule-matches-phase?` treats nil as "matches all", so static scope is a
@@ -130,8 +133,8 @@ reliably comply with is dead weight in the prompt.
 ### 4.3 Changeset relevance
 
 Boost rules whose `:file-globs` / category match the files or symbols the task
-touches. A localization rule is more relevant to a task editing emitting code
-than to a pure-refactor of a data namespace.
+touches. A localization rule is more relevant to a task editing code that
+emits strings than to a pure refactor of a data namespace.
 
 ### 4.4 Bootstrap fallback
 
@@ -142,8 +145,9 @@ bootstrap set (§7) intersected with §4.1 static scope.
 ### 4.5 Budget cap
 
 The composed, ranked set MUST be truncated to a configurable token budget
-(`:guidance/max-tokens`, default SHOULD be small relative to the phase
-window — order 10² rules' worth is wrong; order 10¹ is the target). Only the
+(`:guidance/max-tokens`, default SHOULD be a small fraction of the phase
+window — on the order of single-digit thousands of tokens, not the ~38k of
+the full-pack dump). Only the
 rule's `:rule/agent-behavior` (the terse actionable directive) is injected;
 the bulky `:rule/knowledge-content` MUST NOT be injected into the session path
 (it belongs in retrieval / enforcement rationale, not every prompt).
