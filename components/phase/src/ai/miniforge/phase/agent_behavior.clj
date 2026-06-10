@@ -304,38 +304,49 @@
 ;; ----------------------------------------------------------------------------
 ;; N13 guidance tier — compact, behavior-only addendum for authoring sessions
 
-(def bootstrap-seed-rule-ids
+(def bootstrap-seed-rule-order
   "Cold-start guidance set (N13 §7.2): the author's hand-curated generic seed
-   (Appendix A) mapped to pack rule-ids. Until the per-repo violation ledger
-   (N13 §5) exists, the guidance tier injects ONLY these — behavior text,
-   capped — instead of the full 50-rule pack. Language/framework-specific
-   rules (rust/swift/python/js/css/html/fulcro/k8s) are intentionally absent;
-   a repo that needs them declares scope (N13 §4.1)."
-  #{:std/stratified-design :std/simple-made-easy :std/config-as-data
-    :std/localization :std/named-constants :std/code-quality
-    :std/tests-with-code :std/no-dead-code :std/result-handling
-    :std/validation-boundaries :std/exceptions-as-data :std/pr-layering
-    :std/clojure :std/clojure-exception-handling :std/polylith
-    :std/polylith-composition})
+   (Appendix A) mapped to pack rule-ids, in PRIORITY order (most important
+   first). Until the per-repo violation ledger (N13 §5) exists, the guidance
+   tier injects ONLY these — behavior text, capped — instead of the full
+   50-rule pack. The order is the curated priority: when the cap trims, the
+   tail (lowest priority) drops first, deterministically, regardless of pack
+   load order. Language/framework-specific rules (rust/swift/python/js/css/
+   html/fulcro/k8s) are intentionally absent; a repo that needs them declares
+   scope (N13 §4.1)."
+  [:std/stratified-design :std/simple-made-easy :std/exceptions-as-data
+   :std/result-handling :std/validation-boundaries :std/localization
+   :std/named-constants :std/config-as-data :std/code-quality
+   :std/no-dead-code :std/tests-with-code :std/clojure
+   :std/clojure-exception-handling :std/polylith :std/polylith-composition
+   :std/pr-layering])
+
+(def bootstrap-seed-rule-ids
+  "Membership set derived from `bootstrap-seed-rule-order` (order is the
+   priority source; this is the fast lookup)."
+  (set bootstrap-seed-rule-order))
 
 (def ^:private guidance-max-chars
-  "Backstop cap on the guidance addendum (N13 §4.5). The seed behaviors sum to
-   ~5k chars, well under this; the cap only guards against pack growth /
-   misconfiguration. Char proxy for tokens — no tokenizer dependency here."
+  "Hard cap on the formatted guidance addendum (N13 §4.5). The seed behaviors
+   format to ~5k chars, well under this; the cap only guards against pack
+   growth / misconfiguration. Char proxy for tokens — no tokenizer dependency."
   12000)
 
 (defn- cap-behaviors
-  "Keep behaviors in order until the running total would exceed
-   guidance-max-chars. Order is the seed-priority order (N13 §4.5: keep the
-   rules that matter, drop the tail)."
+  "Longest prefix of the (priority-ordered) behaviors whose FORMATTED addendum
+   fits `guidance-max-chars`. Measures `format-behavior-addendum`'s actual
+   output — header, numbering, and join newlines included — so the cap is a
+   real bound on the emitted string, not just the raw behavior sum. The tail
+   (lowest priority) is dropped first."
   [behaviors]
-  (loop [[b & more] behaviors, total 0, kept []]
-    (if (nil? b)
-      kept
-      (let [total' (+ total (count (str b)))]
-        (if (> total' guidance-max-chars)
-          kept
-          (recur more total' (conj kept b)))))))
+  (let [bv (vec behaviors)]
+    (loop [n (count bv)]
+      (if (zero? n)
+        []
+        (if (<= (count (str (format-behavior-addendum (subvec bv 0 n))))
+                guidance-max-chars)
+          (subvec bv 0 n)
+          (recur (dec n)))))))
 
 (defn load-guidance-addendum
   "N13 guidance tier: a compact, behavior-only addendum for AUTHORING agent
@@ -352,8 +363,14 @@
    the cold-start path keys only off phase + the bootstrap seed."
   [phase _context]
   (try
-    (let [seed-rules    (filterv #(contains? bootstrap-seed-rule-ids (:rule/id %))
-                                 (load-all-rules))
+    (let [order-idx     (into {} (map-indexed (fn [i id] [id i])
+                                              bootstrap-seed-rule-order))
+          seed-rules    (->> (load-all-rules)
+                             (filter #(contains? bootstrap-seed-rule-ids (:rule/id %)))
+                             ;; Sort by curated priority so the cap is
+                             ;; deterministic — not dependent on pack load order.
+                             (sort-by #(get order-idx (:rule/id %) Long/MAX_VALUE))
+                             vec)
           phase-matched (filterv #(rule-matches-phase? % phase) seed-rules)
           behaviors     (cap-behaviors (extract-agent-behaviors phase-matched))]
       (format-behavior-addendum behaviors))

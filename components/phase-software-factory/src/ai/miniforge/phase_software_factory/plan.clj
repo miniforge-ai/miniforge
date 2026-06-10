@@ -112,12 +112,12 @@
 (defn build-planner-task
   "Build the task map to pass to the planner agent.
 
-   The planner now receives a `:task/behavior-addendum` produced by
-   `phase/load-and-filter-behaviors` for rules that target `:plan`
-   (specification-standards, work-spec-authoring, simple-made-easy,
-   etc.) — same mechanism implement and review use. Closes the gap
-   where the planner generated plans without consulting the
-   compiled standards pack.
+   The planner receives a `:task/behavior-addendum` produced by
+   `phase/load-guidance-addendum` (N13 guidance tier): the compact,
+   behavior-only, bootstrap-seed subset that targets `:plan`, capped to a
+   token budget — same mechanism implement uses. Closes the gap where the
+   planner generated plans without consulting the standards pack, without
+   dumping the full pack into the prompt.
 
    Returns {:task task-map :rules-manifest manifest-or-nil}."
   [input explore-result knowledge-store]
