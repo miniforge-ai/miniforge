@@ -83,16 +83,22 @@
       (is (= :b (fsm/current-state s1)))
       (is (= :c (fsm/current-state s2))))))
 
-(deftest transition-no-match-test
-  (testing "transition stays in state when no matching event"
+(deftest transition-unknown-event-throws-test
+  (testing "an event the state doesn't handle throws a typed anomaly — never a
+            silent no-op (Fable review §2.2)"
     (let [machine (fsm/define-machine
                    {:fsm/id :test
                     :fsm/initial :idle
                     :fsm/states {:idle {:on {:start :running}}
                                  :running {:type :final}}})
           s0 (fsm/initialize machine)
-          s1 (fsm/transition machine s0 :unknown-event)]
-      (is (= :idle (fsm/current-state s1))))))
+          ex (try (fsm/transition machine s0 :unknown-event) nil
+                  (catch clojure.lang.ExceptionInfo e e))]
+      (is (some? ex) "unknown event must throw, not return state unchanged")
+      (is (= :anomalies/fsm-unknown-event (:anomaly/category (ex-data ex)))
+          "typed category so boundaries can catch + emit :fsm/unknown-event")
+      (is (= {:type :unknown-event} (:fsm/event (ex-data ex)))
+          "ex-data names the offending event for diagnosis"))))
 
 (deftest transition-with-event-data-test
   (testing "transition accepts event with data"

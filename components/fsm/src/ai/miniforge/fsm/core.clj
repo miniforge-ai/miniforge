@@ -132,8 +132,15 @@
      state   - Current state
      event   - Event keyword or {:type :event-type :data ...}
 
-   Returns:
-     New state after transition (or same state if no valid transition)."
+   Returns the new state after transition.
+
+   An event the current state does not handle is NOT silently ignored: it
+   throws a typed `:anomalies/fsm-unknown-event` ex-info (carrying the state +
+   event) rather than returning the state unchanged. A silent no-op here was a
+   load-bearing source of 'machine seemed stuck' / 'workflow advanced wrongly'
+   mysteries (Fable review §2.2). An unknown event is either a programming
+   error or an ignore that MUST be declared in the machine — both should be
+   loud. Callers that legitimately tolerate it catch this category."
   [machine state event]
   (let [event-map (if (keyword? event)
                     {:type event}
@@ -141,9 +148,16 @@
     (try
       (sc/transition machine state event-map)
       (catch clojure.lang.ExceptionInfo e
-        ;; If it's an unknown event error, return current state unchanged
         (if (re-find #"got unknown event" (ex-message e))
-          state
+          ;; Compact message — just the state NAME (:_state), not the whole
+          ;; state map (which can be large / carry sensitive context). The
+          ;; full state is in ex-data :fsm/state for diagnosis.
+          (throw (ex-info (str "FSM unknown event " (pr-str (:type event-map))
+                               " at state " (pr-str (get state :_state state)))
+                          {:anomaly/category :anomalies/fsm-unknown-event
+                           :fsm/state state
+                           :fsm/event event-map}
+                          e))
           (throw e))))))
 
 (defn current-state
