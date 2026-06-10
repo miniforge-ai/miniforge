@@ -351,8 +351,19 @@
    terminal failure."
   [ctx event _pipeline _transition-to-completed-fn transition-to-failed-fn]
   (let [prior-state (:execution/fsm-state ctx)
-        next-ctx (context/transition-execution ctx event)
-        state-changed? (not= prior-state (:execution/fsm-state next-ctx))]
+        ;; The FSM kernel now THROWS a typed :anomalies/fsm-unknown-event
+        ;; instead of silently returning the state unchanged (Fable §2.2). At
+        ;; this boundary an unknown phase event is a terminal invalid
+        ;; transition: catch it and route through the same fail path as a
+        ;; no-op transition — loud, but graceful, not a crashed run.
+        next-ctx (try
+                   (context/transition-execution ctx event)
+                   (catch clojure.lang.ExceptionInfo e
+                     (if (= :anomalies/fsm-unknown-event (:anomaly/category (ex-data e)))
+                       ::unknown-event
+                       (throw e))))
+        state-changed? (and (not= ::unknown-event next-ctx)
+                            (not= prior-state (:execution/fsm-state next-ctx)))]
     (if (or state-changed? (= :phase/retry event))
       next-ctx
       (phase-transition-failure ctx
