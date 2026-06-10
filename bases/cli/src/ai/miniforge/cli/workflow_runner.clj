@@ -1079,13 +1079,10 @@
       (println (display/colorize :cyan (apply str (repeat 60 "─")))))))
 
 (defn list-workflows-from-resources []
-  (try
-    (let [list-workflows workflow/list-workflows]
-      (->> (list-workflows)
-           (sort-by (juxt :workflow/id :workflow/version))
-           format-workflow-listing))
-    (catch Exception e
-      (println (display/colorize :red (messages/t :workflow-runner/list-failed {:error (ex-message e)}))))))
+  (let [list-workflows workflow/list-workflows]
+    (->> (list-workflows)
+         (sort-by (juxt :workflow/id :workflow/version))
+         format-workflow-listing)))
 
 (defn list-workflows! []
   (try
