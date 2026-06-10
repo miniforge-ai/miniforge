@@ -8,11 +8,29 @@
 
 | | |
 |---|---|
-| **Status** | Proposed |
+| **Status** | Implemented |
 | **Date** | 2026-06-02 |
+| **Implemented** | 2026-06-10 (verified during the Fable design review §2.1) |
 | **Authors** | Chris Lester (christopher@miniforge.ai) |
 | **Discussion** | PR #TBD |
 | **Implementation tracking** | task #32 |
+
+> **Implementation status (2026-06-10).** All five migration phases have
+> landed; recorded here so the doc reflects reality (the Fable review flagged
+> doc-vs-code drift as a risk).
+>
+> - **Phase 1** — named-guard registry: `workflow/guards.clj`,
+>   `workflow/standard_guards_and_actions.clj`.
+> - **Phases 2–3** — guarded `:phase/fail` array for review/verify/release/
+>   implement: `workflow/fsm.clj` `guarded-fail-transition`.
+> - **Phase 4** — channel-A redirect workaround deleted; `:redirect/inc-count`
+>   on the guarded array is the single accounting site.
+> - **Phase 5** — three compile-time invariants in `validate-execution-machine`
+>   (`fsm.clj`): every guarded `:phase/fail` array has a default branch; at
+>   most one `:redirect/inc-count` per array; the `:budget/redirects-spent?`
+>   guard exists and precedes the redirect branch in document order. Plus
+>   `validate-guard-references` (dangling-guard detection).
+> - **Phase 6** (Mermaid export) — optional, not implemented.
 
 ## Summary
 
