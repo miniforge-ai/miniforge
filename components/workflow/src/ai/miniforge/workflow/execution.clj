@@ -362,14 +362,17 @@
                      (if (= :anomalies/fsm-unknown-event (:anomaly/category (ex-data e)))
                        ::unknown-event
                        (throw e))))
-        state-changed? (and (not= ::unknown-event next-ctx)
-                            (not= prior-state (:execution/fsm-state next-ctx)))]
-    (if (or state-changed? (= :phase/retry event))
-      next-ctx
-      (phase-transition-failure ctx
-                                event
-                                (invalid-phase-transition-anomaly event)
-                                transition-to-failed-fn))))
+        fail (fn [] (phase-transition-failure ctx
+                                              event
+                                              (invalid-phase-transition-anomaly event)
+                                              transition-to-failed-fn))]
+    (cond
+      ;; Unknown event is always a terminal invalid transition here — never
+      ;; return the sentinel; never let :phase/retry leak it out.
+      (= ::unknown-event next-ctx) (fail)
+      (not= prior-state (:execution/fsm-state next-ctx)) next-ctx
+      (= :phase/retry event) next-ctx
+      :else (fail))))
 
 ;------------------------------------------------------------------------------ Layer 1.5: DAG integration helpers
 

@@ -149,8 +149,11 @@
       (sc/transition machine state event-map)
       (catch clojure.lang.ExceptionInfo e
         (if (re-find #"got unknown event" (ex-message e))
+          ;; Compact message — just the state NAME (:_state), not the whole
+          ;; state map (which can be large / carry sensitive context). The
+          ;; full state is in ex-data :fsm/state for diagnosis.
           (throw (ex-info (str "FSM unknown event " (pr-str (:type event-map))
-                               " at state " (pr-str state))
+                               " at state " (pr-str (get state :_state state)))
                           {:anomaly/category :anomalies/fsm-unknown-event
                            :fsm/state state
                            :fsm/event event-map}
