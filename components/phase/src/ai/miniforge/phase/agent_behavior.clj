@@ -283,6 +283,100 @@
 ;------------------------------------------------------------------------------ Layer 2
 ;; Full pipeline
 
+(defn load-all-rules
+  "Load every rule from all sources (classpath builtin + standards packs, plus
+   user/repo/extra-path dir packs), subject to :disabled-pack-ids. Shared by
+   the full-behavior path and the lean guidance path."
+  []
+  (let [policy-packs   (load-policy-packs-config)
+        disabled-ids   (set (get policy-packs :disabled-pack-ids []))
+        builtin-pack   (load-pack-manifest-from-resource "packs/miniforge-builtin.pack.edn")
+        standards-pack (load-pack-manifest-from-resource "packs/miniforge-standards.pack.edn")
+        classpath-rules (vec
+                         (for [pack  [builtin-pack standards-pack]
+                               :when (and pack
+                                          (not (contains? disabled-ids (:pack/id pack))))
+                               rule  (:pack/rules pack)]
+                           rule))
+        dir-rules (load-dir-pack-rules policy-packs disabled-ids)]
+    (into classpath-rules dir-rules)))
+
+;; ----------------------------------------------------------------------------
+;; N13 guidance tier — compact, behavior-only addendum for authoring sessions
+
+(def bootstrap-seed-rule-order
+  "Cold-start guidance set (N13 §7.2): the author's hand-curated generic seed
+   (Appendix A) mapped to pack rule-ids, in PRIORITY order (most important
+   first). Until the per-repo violation ledger (N13 §5) exists, the guidance
+   tier injects ONLY these — behavior text, capped — instead of the full
+   50-rule pack. The order is the curated priority: when the cap trims, the
+   tail (lowest priority) drops first, deterministically, regardless of pack
+   load order. Language/framework-specific rules (rust/swift/python/js/css/
+   html/fulcro/k8s) are intentionally absent; a repo that needs them declares
+   scope (N13 §4.1)."
+  [:std/stratified-design :std/simple-made-easy :std/exceptions-as-data
+   :std/result-handling :std/validation-boundaries :std/localization
+   :std/named-constants :std/config-as-data :std/code-quality
+   :std/no-dead-code :std/tests-with-code :std/clojure
+   :std/clojure-exception-handling :std/polylith :std/polylith-composition
+   :std/pr-layering])
+
+(def bootstrap-seed-rule-ids
+  "Membership set derived from `bootstrap-seed-rule-order` (order is the
+   priority source; this is the fast lookup)."
+  (set bootstrap-seed-rule-order))
+
+(def ^:private guidance-max-chars
+  "Hard cap on the formatted guidance addendum (N13 §4.5). The seed behaviors
+   format to ~5k chars, well under this; the cap only guards against pack
+   growth / misconfiguration. Char proxy for tokens — no tokenizer dependency."
+  12000)
+
+(defn- cap-behaviors
+  "Longest prefix of the (priority-ordered) behaviors whose FORMATTED addendum
+   fits `guidance-max-chars`. Measures `format-behavior-addendum`'s actual
+   output — header, numbering, and join newlines included — so the cap is a
+   real bound on the emitted string, not just the raw behavior sum. The tail
+   (lowest priority) is dropped first."
+  [behaviors]
+  (let [bv (vec behaviors)]
+    (loop [n (count bv)]
+      (if (zero? n)
+        []
+        (if (<= (count (str (format-behavior-addendum (subvec bv 0 n))))
+                guidance-max-chars)
+          (subvec bv 0 n)
+          (recur (dec n)))))))
+
+(defn load-guidance-addendum
+  "N13 guidance tier: a compact, behavior-only addendum for AUTHORING agent
+   sessions (plan / implement). Restricts to the bootstrap-seed rules
+   (cold-start default; per-repo ledger ranking is N13 Stage 2), extracts
+   `:rule/agent-behavior` ONLY (never `:rule/knowledge-content` — N13 §4.5),
+   phase-gates, and caps to a char budget. Returns a formatted string or nil.
+   Fail-safe.
+
+   Distinct from `load-and-filter-behaviors`, which remains the full path for
+   enforcement-adjacent consumers (review / release).
+
+   `_context` is reserved for changeset-relevance ranking (N13 §4.3, Stage 4);
+   the cold-start path keys only off phase + the bootstrap seed."
+  [phase _context]
+  (try
+    (let [order-idx     (into {} (map-indexed (fn [i id] [id i])
+                                              bootstrap-seed-rule-order))
+          seed-rules    (->> (load-all-rules)
+                             (filter #(contains? bootstrap-seed-rule-ids (:rule/id %)))
+                             ;; Sort by curated priority so the cap is
+                             ;; deterministic — not dependent on pack load order.
+                             (sort-by #(get order-idx (:rule/id %) Long/MAX_VALUE))
+                             vec)
+          phase-matched (filterv #(rule-matches-phase? % phase) seed-rules)
+          behaviors     (cap-behaviors (extract-agent-behaviors phase-matched))]
+      (format-behavior-addendum behaviors))
+    (catch Exception _
+      nil)))
+
 (defn load-and-filter-behaviors
   "Full pipeline: load rules from all sources, filter by phase, extract and format.
 
@@ -305,24 +399,7 @@
    - Formatted string addendum or nil. Fail-safe (catches all exceptions)."
   [phase context]
   (try
-    (let [policy-packs   (load-policy-packs-config)
-          disabled-ids   (set (get policy-packs :disabled-pack-ids []))
-
-          ;; Classpath packs — always included, subject to disabled-ids
-          builtin-pack   (load-pack-manifest-from-resource "packs/miniforge-builtin.pack.edn")
-          standards-pack (load-pack-manifest-from-resource "packs/miniforge-standards.pack.edn")
-
-          classpath-rules (vec
-                           (for [pack  [builtin-pack standards-pack]
-                                 :when (and pack
-                                            (not (contains? disabled-ids (:pack/id pack))))
-                                 rule  (:pack/rules pack)]
-                             rule))
-
-          ;; Directory packs — user global + repo + extra-search-paths
-          dir-rules (load-dir-pack-rules policy-packs disabled-ids)
-
-          all-rules (into classpath-rules dir-rules)
+    (let [all-rules (load-all-rules)
 
           ;; Split: always-inject rules bypass context filtering
           {always-inject true, context-gated false}
