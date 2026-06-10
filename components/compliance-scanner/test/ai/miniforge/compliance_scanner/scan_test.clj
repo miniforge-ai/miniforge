@@ -142,6 +142,26 @@
           (doseq [f (reverse (file-seq tmp-dir))]
             (.delete f)))))))
 
+;; ---------------------------------------------------------------------------
+;; safe-git-ref? validation
+
+(deftest safe-git-ref-allows-well-formed-refs
+  (testing "common git ref forms are accepted"
+    (is (#'scan/safe-git-ref? "origin/main"))
+    (is (#'scan/safe-git-ref? "HEAD~1"))
+    (is (#'scan/safe-git-ref? "abc123def456"))
+    (is (#'scan/safe-git-ref? "v1.0.0-rc1"))
+    (is (#'scan/safe-git-ref? "refs/heads/feature-branch"))))
+
+(deftest safe-git-ref-rejects-unsafe-values
+  (testing "values that could inject git options or shell constructs are rejected"
+    (is (not (#'scan/safe-git-ref? "; rm -rf /")))
+    (is (not (#'scan/safe-git-ref? "--exec=cmd")))
+    (is (not (#'scan/safe-git-ref? "-C /malicious/path")))
+    (is (not (#'scan/safe-git-ref? "ref with spaces")))
+    (is (not (#'scan/safe-git-ref? "")))
+    (is (not (#'scan/safe-git-ref? nil)))))
+
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
   (clojure.test/run-tests 'ai.miniforge.compliance-scanner.scan-test)
