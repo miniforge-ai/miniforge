@@ -47,14 +47,14 @@ $8-15 run that should have terminated after 5 redirects burned through to
 forced kill. Three workaround PRs (#1010, #1011, #1013) patched symptoms
 without fixing the design.
 
-This RFC proposes adopting `clj-statecharts` end-to-end for workflow phase
+This RFC adopted `clj-statecharts` end-to-end for workflow phase
 transitions, with a named-guard registry layered on top for closed-set
 compile-time validation. `clj-statecharts` is already a runtime dependency,
 already wrapped in the `fsm` component, and already proven Babashka-compatible
 by other in-process FSMs. The redesign moves every transition decision
 into the FSM as a typed, enumerable guard — the bug class becomes
-structurally impossible to express. Migration is five independently
-mergeable phases. Net negative LOC.
+structurally impossible to express. Migration completed across five independently
+merged phases. Net negative LOC.
 
 ## Problem
 
