@@ -6,6 +6,8 @@
   ;; Context cache lifecycle
   :cache/loaded                "Context cache loaded: {count} files"
   :cache/load-failed           "WARN: failed to load context cache: {error}"
+  :cache/saved                 "Context cache persisted: {count} files to {path}"
+  :cache/save-failed           "WARN: failed to persist context cache: {error}"
   :cache/misses-written        "Context misses written: {count} misses to {path}"
 
   ;; Context tool responses
