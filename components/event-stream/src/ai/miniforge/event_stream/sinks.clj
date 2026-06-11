@@ -76,12 +76,16 @@
    (constantly "t")
    (fn [^Instant v] (str v))))
 
-(defn- write-transit-json
+(defn event->transit-json
   "Serialize `event` to a Transit-JSON string using the verbose writer.
    Verbose mode ensures UUIDs appear as {\"~#uuid\" \"...\"} and instants
    as {\"~#inst\" \"...\"} rather than compact ~u and ~m tag-strings,
    so the Rust parser can decode them without millisecond arithmetic.
-   Custom handler for java.time.Instant (not supported by Transit defaults)."
+   Custom handler for java.time.Instant (not supported by Transit defaults).
+
+   Public: this is the canonical wire encoding for every event the file
+   sink persists. Contract tooling (supervisory golden fixtures) calls it
+   directly so vendored fixtures share the exact byte path with production."
   [event]
   (let [out (ByteArrayOutputStream.)
         writer (transit/writer out :json-verbose
@@ -277,7 +281,7 @@
                         (event-file-path base-dir workflow-id event)
                         (operator-event-file-path base-dir event))]
         (ensure-parent-dir! file-path)
-        (spit file-path (write-transit-json event)))
+        (spit file-path (event->transit-json event)))
       (catch Exception e
         ;; Log to stderr so failures are visible without breaking the event stream
         (binding [*out* *err*]
