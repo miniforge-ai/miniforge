@@ -31,6 +31,11 @@
 
 (defn max-phases           [] (get @defaults :max-phases 50))
 (defn max-redirects        [] (get @defaults :max-redirects 5))
+;; Infra-retry budget (Fable §2.4): transient infrastructure verdicts
+;; (timeout/rate-limit/backend-died) retry the SAME phase up to this many
+;; times — a budget DISTINCT from max-redirects, so a flaky provider can't
+;; burn the work/redirect budget.
+(defn max-infra-retries    [] (get @defaults :max-infra-retries 3))
 (defn max-consecutive-phase-retries
   "Cap on how many times the SAME phase may run in immediately consecutive
    pipeline iterations before the workflow fails loud. Distinct from

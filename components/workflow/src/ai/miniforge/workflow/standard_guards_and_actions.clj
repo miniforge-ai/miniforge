@@ -131,6 +131,20 @@
         max-r (defaults/max-redirects)]
     (>= (get ctx :redirect-count 0) max-r)))
 
+(defn verdict-infra-retriable?
+  "Guard: true when the failing-phase verdict is a TRANSIENT infrastructure
+   verdict (timeout / rate-limit / backend-died / network-dropped) AND the
+   infra-retry budget is not yet spent. When true the guarded `:phase/fail`
+   array retries the SAME phase (a backoff can clear the failure) against the
+   dedicated infra budget — not the redirect/work budget. Once the budget is
+   spent this returns false and the verdict falls through to
+   `verdict-terminal?` → `:failed` (infra verdicts are still in
+   `terminal-verdicts`). Fable §2.4."
+  [state event]
+  (and (contains? infrastructure-verdicts (:phase/verdict event))
+       (< (get (fsm/context state) :infra-retry-count 0)
+          (defaults/max-infra-retries))))
+
 ;------------------------------------------------------------------------------ Actions
 
 (def redirect-inc-count
@@ -148,11 +162,21 @@
   (sc/assign (fn [ctx _event]
                (update ctx :redirect-count (fnil inc 0)))))
 
+(def infra-inc-count
+  "Action: bumps the FSM-context `:infra-retry-count` by 1 on each infra
+   retry. Separate counter from `:redirect-count` so transient
+   infrastructure retries never consume the work/redirect budget. Uses
+   `sc/assign` directly for the same reason as `redirect-inc-count`."
+  (sc/assign (fn [ctx _event]
+               (update ctx :infra-retry-count (fnil inc 0)))))
+
 ;------------------------------------------------------------------------------ Registration
 
 ;; Eager registration at namespace load — `(require '...standard-guards-and-actions)`
 ;; is enough to populate both registries. `compile-execution-machine` then
 ;; resolves the keyword refs.
 (guards/register-guard! :verdict/terminal?         verdict-terminal?)
+(guards/register-guard! :verdict/infra-retriable?  verdict-infra-retriable?)
 (guards/register-guard! :budget/redirects-spent?   budget-redirects-spent?)
 (actions/register-action! :redirect/inc-count      redirect-inc-count)
+(actions/register-action! :infra/inc-count         infra-inc-count)
