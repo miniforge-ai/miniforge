@@ -685,6 +685,29 @@
                                               :task/type :implement})]
       (is (= :error (:status result))))))
 
+;; Tool-disallow-list — role-scoped restriction forcing the implementer onto
+;; the MCP context cache (Fable #4 context side). Mirrors planner/tester.
+
+(deftest implementer-disallowed-tools-contents-test
+  (testing "names the native read/search tools (forced onto context_*)"
+    (let [dt @#'implementer/implementer-disallowed-tools]
+      (doseq [t ["Read" "Grep" "Glob" "LS" "Agent"]]
+        (is (some #{t} dt) (str "expected " t " in disallowed-tools")))))
+
+  (testing "does NOT include the write tools — the implementer's whole job"
+    (let [dt @#'implementer/implementer-disallowed-tools]
+      (doseq [t ["Write" "Edit" "MultiEdit"]]
+        (is (nil? (some #{t} dt)) (str t " must stay allowed")))))
+
+  (testing "does NOT include the MCP context tools"
+    (let [dt @#'implementer/implementer-disallowed-tools]
+      (doseq [t ["context_read" "context_grep" "context_glob"]]
+        (is (nil? (some #{t} dt)) (str "MCP tool " t " must NOT be disallowed")))))
+
+  (testing "does NOT (yet) include Bash — kept for build/git; tighten if dogfood
+            shows cat/rg-via-Bash cache evasion"
+    (is (nil? (some #{"Bash"} @#'implementer/implementer-disallowed-tools)))))
+
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
   (test/run-tests 'ai.miniforge.agent.implementer-test)
