@@ -31,6 +31,23 @@
    N5-delta-1 §12.4.")
 
 ;------------------------------------------------------------------------------ Layer 0
+;; Contract version
+
+(def schema-version
+  "Version of the supervisory entity contract, stamped on every
+   `:supervisory/*-upserted` event as `:supervisory/schema-version`.
+
+   Bump on any change to an entity shape that an external consumer
+   could observe: a renamed key, a removed key, a changed enum value,
+   or a changed value type. Adding a NEW optional key does NOT require
+   a bump — entities are open maps and consumers preserve unknowns.
+
+   Consumers (miniforge-control supervisory-entities crate) pin the
+   version their vendored golden fixtures were generated from and warn
+   at runtime on mismatch instead of silently dropping fields."
+  1)
+
+;------------------------------------------------------------------------------ Layer 0
 ;; Enums — match the Rust enum variants in supervisory-entities
 
 (def workflow-run-statuses

@@ -28,7 +28,20 @@
    Envelope + sequence numbering is delegated to `event-stream/create-envelope`;
    the emitter does not reach into the stream's internal state."
   (:require
-   [ai.miniforge.event-stream.interface :as es]))
+   [ai.miniforge.event-stream.interface :as es]
+   [ai.miniforge.supervisory-state.schema :as schema]))
+
+;------------------------------------------------------------------------------ Layer -1
+;; Contract stamp shared by every constructor
+
+(defn- attach-entity
+  "Attach the entity payload and the contract version to an upsert
+   envelope. Every `:supervisory/*-upserted` event flows through here so
+   `:supervisory/schema-version` cannot be forgotten on a new family."
+  [envelope entity]
+  (assoc envelope
+         :supervisory/entity entity
+         :supervisory/schema-version schema/schema-version))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Event constructors (match N3 §3.19 schemas)
@@ -39,7 +52,7 @@
                           :supervisory/spec-upserted
                           nil
                           (str "Spec " (:spec/title spec-entity) " upserted"))
-      (assoc :supervisory/entity spec-entity)))
+      (attach-entity spec-entity)))
 
 (defn workflow-upserted
   [stream workflow-entity]
@@ -48,7 +61,7 @@
                           (:workflow-run/id workflow-entity)
                           (str "Workflow " (:workflow-run/workflow-key workflow-entity)
                                " upserted"))
-      (assoc :supervisory/entity workflow-entity)))
+      (attach-entity workflow-entity)))
 
 (defn agent-upserted
   [stream agent-entity]
@@ -56,7 +69,7 @@
                           :supervisory/agent-upserted
                           nil
                           (str "Agent " (:agent/name agent-entity) " upserted"))
-      (assoc :supervisory/entity agent-entity)))
+      (attach-entity agent-entity)))
 
 (defn pr-upserted
   [stream pr-entity]
@@ -65,7 +78,7 @@
                           nil
                           (str "PR " (:pr/repo pr-entity) "#" (:pr/number pr-entity)
                                " upserted"))
-      (assoc :supervisory/entity pr-entity)))
+      (attach-entity pr-entity)))
 
 (defn policy-evaluated
   [stream policy-entity]
@@ -76,7 +89,7 @@
                                (:policy-eval/id policy-entity)
                                ": "
                                (:policy-eval/passed? policy-entity)))
-      (assoc :supervisory/entity policy-entity)))
+      (attach-entity policy-entity)))
 
 (defn attention-derived
   [stream attention-entity]
@@ -86,7 +99,7 @@
                           (str "Attention "
                                (name (:attention/severity attention-entity)) ": "
                                (:attention/summary attention-entity)))
-      (assoc :supervisory/entity attention-entity)))
+      (attach-entity attention-entity)))
 
 (defn task-node-upserted
   [stream task-entity]
@@ -95,7 +108,7 @@
                           (:task/workflow-run-id task-entity)
                           (str "Task " (:task/id task-entity)
                                " → " (name (or (:task/kanban-column task-entity) :blocked))))
-      (assoc :supervisory/entity task-entity)))
+      (attach-entity task-entity)))
 
 (defn decision-upserted
   [stream decision-entity]
@@ -104,7 +117,7 @@
                           (:decision/workflow-run-id decision-entity)
                           (str "Decision " (:decision/id decision-entity)
                                " → " (name (or (:decision/status decision-entity) :pending))))
-      (assoc :supervisory/entity decision-entity)))
+      (attach-entity decision-entity)))
 
 (defn intervention-upserted
   [stream intervention-entity]
@@ -114,7 +127,7 @@
                           (str "Intervention " (:intervention/id intervention-entity)
                                " → "
                                (name (or (:intervention/state intervention-entity) :proposed))))
-      (assoc :supervisory/entity intervention-entity)))
+      (attach-entity intervention-entity)))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Diff + emit — publish one event per entity that changed
