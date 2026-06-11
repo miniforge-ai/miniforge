@@ -65,7 +65,6 @@
     (is (true? (sut/verdict-terminal? {} {:phase/verdict :verify/timeout})))
     (is (false? (sut/verdict-terminal? {} {:phase/verdict :repair-requested})))
     (is (false? (sut/verdict-terminal? {} {:phase/verdict nil})))))
-
 (deftest verdict-infra-retriable?-test
   (testing "infra verdict + infra budget left → retriable (retry same phase)"
     (is (true? (sut/verdict-infra-retriable? {:_state :p :infra-retry-count 0}
