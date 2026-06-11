@@ -1,6 +1,7 @@
 {:paths ["src" "resources"]
  :deps {metosin/malli {:mvn/version "0.16.4"}
         ai.miniforge/anomaly {:local/root "../anomaly"}
+        ai.miniforge/workspace {:local/root "../workspace"}
         ai.miniforge/messages {:local/root "../messages"}
         ai.miniforge/phase {:local/root "../phase"}
         ai.miniforge/agent {:local/root "../agent"}

@@ -32,6 +32,7 @@
    [ai.miniforge.patterns.interface :as patterns]
    [ai.miniforge.repo-index.interface :as messages]
    [ai.miniforge.response.interface :as response]
+   [ai.miniforge.workspace.interface :as workspace]
    [ai.miniforge.schema.interface :as schema]
    [ai.miniforge.logging.interface :as log]
    [ai.miniforge.llm.interface :as llm]
@@ -763,8 +764,7 @@
   "Invoke the implementer via the LLM backend."
   [llm-client user-prompt effective-system-prompt config context on-chunk logger
    existing-files input]
-  (let [working-dir (or (:execution/worktree-path context)
-                        (System/getProperty "user.dir"))
+  (let [working-dir (workspace/resolve-execution-workdir context "implement")
         {:keys [llm-result artifact worktree-artifacts context-misses
                 pre-session-snapshot session-mode]}
         (artifact-session/with-session context

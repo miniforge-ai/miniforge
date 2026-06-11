@@ -1,5 +1,6 @@
 {:paths ["src" "resources"]
  :deps {ai.miniforge/anomaly {:local/root "../anomaly"}
+        ai.miniforge/workspace {:local/root "../workspace"}
         ai.miniforge/messages {:local/root "../messages"}
         ai.miniforge/tool {:local/root "../tool"}
         ai.miniforge/patterns {:local/root "../patterns"}

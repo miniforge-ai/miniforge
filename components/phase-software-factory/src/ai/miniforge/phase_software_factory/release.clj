@@ -26,6 +26,7 @@
    Agent: :releaser
    Default gates: [:release-ready]"
   (:require [clojure.java.io :as io]
+            [ai.miniforge.workspace.interface :as workspace]
             [clojure.java.shell :as shell]
             [clojure.string :as str]
             [ai.miniforge.agent.interface :as agent]
@@ -74,10 +75,7 @@
 (defn- ctx-worktree-path
   "Resolve the working directory from phase context."
   [ctx]
-  (or (get-in ctx [:execution/worktree-path])
-      (get-in ctx [:worktree-path])
-      (get-in ctx [:execution/opts :worktree-path])
-      (System/getProperty "user.dir")))
+  (workspace/resolve-execution-workdir ctx "release"))
 
 (defn- git-dirty-files
   "Scan git working tree for new/modified/deleted files; return as :code/files entries.
@@ -281,11 +279,14 @@
         input (get-in ctx [:execution/input])
         behavior-addendum (phase/load-and-filter-behaviors
                             :release {:task {:task/intent (:intent input)}})]
-    (cond-> {:worktree-path (or (get-in ctx [:execution/worktree-path])
+    (cond-> {;; Preserve the original precedence — explicit ctx worktree paths
+             ;; win over config; the blessed resolver is the LAST resort,
+             ;; adding the opts key + the governed-fail / CWD decision (no
+             ;; silent user.dir downgrade) in place of the old bare fallback.
+             :worktree-path (or (get-in ctx [:execution/worktree-path])
                                 (get-in ctx [:worktree-path])
                                 (get-in config [:worktree-path])
-                                (get-in ctx [:execution/opts :worktree-path])
-                                (System/getProperty "user.dir"))
+                                (workspace/resolve-execution-workdir ctx "release"))
              :executor (get-in ctx [:execution/executor])
              :environment-id (get-in ctx [:execution/environment-id])
              :logger (or (get-in ctx [:execution/logger]) logger)
