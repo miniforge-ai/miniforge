@@ -916,7 +916,9 @@
       (doseq [t ["Write" "Edit" "MultiEdit" "Bash"]]
         (is (some #{t} dt) (str t " must be disallowed for a read-only reviewer")))))
 
-  (testing "does NOT disallow the MCP context tools"
-    (let [dt @#'reviewer/reviewer-disallowed-tools]
-      (doseq [t ["context_read" "context_grep" "context_glob"]]
-        (is (nil? (some #{t} dt)) (str "MCP tool " t " must NOT be disallowed"))))))
+  (testing "is exactly the native tool set — the MCP read tools are allowlisted
+            by their prefixed wire names (e.g. mcp__context__context_read) and
+            are never in this native disallow-list, so reads route through the
+            cache. Pinned so any change is deliberate."
+    (is (= #{"Read" "Grep" "Glob" "LS" "Agent" "Bash" "Write" "Edit" "MultiEdit"}
+           (set @#'reviewer/reviewer-disallowed-tools)))))

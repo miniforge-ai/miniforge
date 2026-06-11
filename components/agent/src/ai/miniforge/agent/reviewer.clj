@@ -176,10 +176,17 @@
                             (fn [session]
                               (artifact-session/write-cursor-permissions-for-session!
                                session reviewer-disallowed-tools)
-                              (let [opts (merge base-opts
-                                                (assoc (artifact-session/session->mcp-opts
-                                                        session budget-usd max-turns)
-                                                       :disallowed-tools reviewer-disallowed-tools))]
+                              (let [opts (cond-> (merge base-opts
+                                                        (assoc (artifact-session/session->mcp-opts
+                                                                session budget-usd max-turns)
+                                                               :disallowed-tools reviewer-disallowed-tools))
+                                           ;; Thread the worktree cwd like the
+                                           ;; other roles — CWD-dependent
+                                           ;; backends (e.g. Cursor's project-
+                                           ;; scoped .cursor/*) need it to read
+                                           ;; the session's permission allowlist
+                                           ;; and the right repo root.
+                                           (:workdir session) (assoc :workdir (:workdir session)))]
                                 (if on-chunk
                                   (llm/chat-stream llm-client user-prompt on-chunk opts)
                                   (llm/chat llm-client user-prompt opts)))))
