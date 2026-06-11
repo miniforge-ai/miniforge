@@ -24,6 +24,7 @@
    this phase validates them by running the test suite.
    Default gates: [:tests-pass :coverage]"
   (:require [ai.miniforge.phase.interface :as phase]
+            [ai.miniforge.workspace.interface :as workspace]
             [ai.miniforge.phase-software-factory.phase-config :as phase-config]
             [ai.miniforge.phase-software-factory.messages :as messages]
             [ai.miniforge.phase-software-factory.phase-terminal :as phase-terminal]
@@ -270,9 +271,7 @@
                             {:phase :verify
                              :hint (messages/t :verify/no-environment-hint)})))
 
-        worktree-path (or (get ctx :execution/worktree-path)
-                          (get ctx :worktree-path)
-                          (System/getProperty "user.dir"))
+        worktree-path (workspace/resolve-execution-workdir ctx "verify")
 
         ;; Allow spec to override the test command; otherwise infer from repo structure
         test-cmd (or (get-in ctx [:execution/input :spec/test-command])
