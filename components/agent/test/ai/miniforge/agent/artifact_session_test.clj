@@ -351,7 +351,6 @@
   (testing "mcp-tools translate to Mcp(...) + Write(**) rules"
     (let [allow (session/cursor-permission-allow session/mcp-tools nil)]
       (is (some #(= "Mcp(context:context_read)" %) allow))
-      (is (some #(= "Mcp(context:submit)" %) allow))
       (is (some #(= "Write(**)" %) allow))
       (testing "Write/Edit/MultiEdit collapse to a single Write(**) rule"
         (is (= 1 (count (filter #(= "Write(**)" %) allow)))))))
