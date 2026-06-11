@@ -8,8 +8,7 @@
 ;; you may not use this file except in compliance with the License.
 
 (ns ai.miniforge.mcp-context-server.tools-test
-  (:require [clojure.set :as set]
-            [clojure.string :as str]
+  (:require [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [ai.miniforge.mcp-context-server.tools :as tools]))
 
@@ -88,11 +87,5 @@
                                   (str (pr-str k) " at " (vec path)))
                                 offenders))))))))
 
-(deftest submit-tool-alias-map-covers-every-declared-property
-  (testing "every input_schema property of the submit tool has a :param-aliases entry"
-    (let [submit (get (tools/tool-registry) "submit")
-          declared (set (keys (get-in submit [:tool-def :inputSchema :properties])))
-          aliased  (set (keys (get submit :param-aliases {})))]
-      (is (= declared aliased)
-          (str "submit tool declares properties without aliases: "
-               (set/difference declared aliased))))))
+;; submit-tool-alias-map test removed with the submit tool (artifact is now
+;; the worktree/container diff, not an agent metadata channel).

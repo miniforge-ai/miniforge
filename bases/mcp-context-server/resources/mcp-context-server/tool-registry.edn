@@ -53,27 +53,4 @@
     :properties
     {"pattern" {:type "string" :description "Glob pattern to match files (e.g. \"**/*.clj\", \"src/**/*.ts\")"}}}}
   :required-params
-  {"pattern" {:check :non-blank :msg "pattern is required"}}}
-
- "submit"
- {:handler :submit
-  :tool-def
-  {:name "submit"
-   :description "Submit structured phase artifact metadata. Use after writing files with Write/Edit. The runtime derives file contents from the working tree and reads this metadata from artifact.edn."
-   :inputSchema
-   {:type "object"
-    :properties
-    {"code_summary" {:type "string" :description "Brief summary of changes made"}
-     "code_tests_needed" {:type "boolean" :description "Whether tests should be run for the changes"}
-     "code_dependencies_added" {:type "array"
-                                :items {:type "string"}
-                                :description "Dependency coordinates added by the change"}
-     "status" {:type "string" :description "Status for non-code submissions, for example already-implemented"}
-     "summary" {:type "string" :description "Summary for non-code submissions"}}}}
-  :param-aliases
-  {"code_summary"            :code/summary
-   "code_tests_needed"       :code/tests-needed?
-   "code_dependencies_added" :code/dependencies-added
-   "status"                  :status
-   "summary"                 :summary}
-  :required-params {}}}
+  {"pattern" {:check :non-blank :msg "pattern is required"}}}}
