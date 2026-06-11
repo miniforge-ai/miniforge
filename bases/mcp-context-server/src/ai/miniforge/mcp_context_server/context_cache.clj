@@ -176,7 +176,8 @@
    source-root. Under .miniforge/ (gitignored) so it rides workspace
    persistence into containers across phases."
   [source-root]
-  (when source-root (str source-root "/" persistent-cache-relpath)))
+  (when-not (str/blank? source-root)
+    (str source-root "/" persistent-cache-relpath)))
 
 (defn- read-cache-edn
   "Read {:files .. :mtimes ..} from an EDN cache file, or nil on missing/bad."
@@ -223,7 +224,7 @@
    nothing is cached. Best-effort: a write failure is logged, not thrown."
   []
   (let [{:keys [source-root files mtimes]} @cache-state]
-    (when-let [path (and source-root (seq files) (persistent-cache-path source-root))]
+    (when-let [path (and (seq files) (persistent-cache-path source-root))]
       (try
         (io/make-parents path)
         (spit path (pr-str {:files files :mtimes mtimes}))
@@ -286,7 +287,7 @@
 
 (defn- cache-put!
   "Store content in the cache for a path, stamping the file's current mtime so
-   `cache-fresh?` can later detect on-disk changes (write-invalidation)."
+   `cache-stale?` can later detect on-disk changes (write-invalidation)."
   [path content]
   (swap! cache-state #(-> %
                           (assoc-in [:files path] content)
@@ -320,13 +321,13 @@
    Records a miss only on a GENUINE miss (never cached), not on a
    staleness-driven refresh. Returns content string or nil."
   [path]
-  (if (and (cache-get path) (not (cache-stale? path)))
-    (cache-get path)
-    (let [genuine-miss? (nil? (cache-get path))]
+  (let [cached (cache-get path)]
+    (if (and cached (not (cache-stale? path)))
+      cached
       (try
         (let [content (slurp (resolve-source-path path))]
           (cache-put! path content)
-          (when genuine-miss?
+          (when (nil? cached)
             (record-miss! "context_read" {:path path} (estimate-tokens content)))
           content)
         (catch Exception _ nil)))))

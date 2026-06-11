@@ -331,7 +331,8 @@
           (is (= "V1" (read-text (cache/handle-context-read {"path" "src/a.clj"})))
               "first read caches V1")
           (spit f "V2")
-          (.setLastModified f (+ (.lastModified f) 10000))
+          (is (.setLastModified f (+ (.lastModified f) 10000))
+              "precondition: filesystem must honor setLastModified for this test")
           (is (= "V2" (read-text (cache/handle-context-read {"path" "src/a.clj"})))
               "second read returns fresh V2, not the stale cached V1"))))))
 
