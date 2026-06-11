@@ -312,7 +312,8 @@
           (println output)
           (flush))
         (catch Exception _e
-          nil)))))
+          (binding [*out* *err*]
+            (println (str "WARNING: Event sink write failed: " (ex-message _e)))))))))
 
 (defn stderr-sink
   "Create a stderr sink that prints events to standard error.
@@ -339,7 +340,8 @@
             (binding [*out* *err*]
               (println output)))
           (catch Exception _e
-            nil))))))
+            (binding [*out* *err*]
+              (println (str "WARNING: Event sink write failed: " (ex-message _e))))))))))
 
 ;;------------------------------------------------------------------------------ Layer 2: Fleet Sink
 
