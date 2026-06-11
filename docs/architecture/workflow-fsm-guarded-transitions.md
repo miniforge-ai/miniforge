@@ -8,11 +8,29 @@
 
 | | |
 |---|---|
-| **Status** | Proposed |
+| **Status** | Implemented |
 | **Date** | 2026-06-02 |
+| **Implemented** | 2026-06-10 (verified during the Fable design review §2.1) |
 | **Authors** | Chris Lester (christopher@miniforge.ai) |
 | **Discussion** | PR #TBD |
 | **Implementation tracking** | task #32 |
+
+> **Implementation status (2026-06-10).** All five migration phases have
+> landed; recorded here so the doc reflects reality (the Fable review flagged
+> doc-vs-code drift as a risk).
+>
+> - **Phase 1** — named-guard registry: `workflow/guards.clj`,
+>   `workflow/standard_guards_and_actions.clj`.
+> - **Phases 2–3** — guarded `:phase/fail` array for review/verify/release/
+>   implement: `workflow/fsm.clj` `guarded-fail-transition`.
+> - **Phase 4** — channel-A redirect workaround deleted; `:redirect/inc-count`
+>   on the guarded array is the single accounting site.
+> - **Phase 5** — three compile-time invariants in `validate-execution-machine`
+>   (`fsm.clj`): every guarded `:phase/fail` array has a default branch; at
+>   most one `:redirect/inc-count` per array; the `:budget/redirects-spent?`
+>   guard exists and precedes the redirect branch in document order. Plus
+>   `validate-guard-references` (dangling-guard detection).
+> - **Phase 6** (Mermaid export) — optional, not implemented.
 
 ## Summary
 
@@ -29,14 +47,14 @@ $8-15 run that should have terminated after 5 redirects burned through to
 forced kill. Three workaround PRs (#1010, #1011, #1013) patched symptoms
 without fixing the design.
 
-This RFC proposes adopting `clj-statecharts` end-to-end for workflow phase
+This RFC adopted `clj-statecharts` end-to-end for workflow phase
 transitions, with a named-guard registry layered on top for closed-set
 compile-time validation. `clj-statecharts` is already a runtime dependency,
 already wrapped in the `fsm` component, and already proven Babashka-compatible
 by other in-process FSMs. The redesign moves every transition decision
 into the FSM as a typed, enumerable guard — the bug class becomes
-structurally impossible to express. Migration is five independently
-mergeable phases. Net negative LOC.
+structurally impossible to express. Migration completed across five independently
+merged phases. Net negative LOC.
 
 ## Problem
 
