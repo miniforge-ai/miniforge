@@ -65,3 +65,23 @@
     (is (true? (sut/verdict-terminal? {} {:phase/verdict :verify/timeout})))
     (is (false? (sut/verdict-terminal? {} {:phase/verdict :repair-requested})))
     (is (false? (sut/verdict-terminal? {} {:phase/verdict nil})))))
+
+(deftest verdict-infra-retriable?-test
+  (testing "infra verdict + infra budget left → retriable (retry same phase)"
+    (is (true? (sut/verdict-infra-retriable? {:_state :p :infra-retry-count 0}
+                                             {:phase/verdict :verify/timeout})))
+    (is (true? (sut/verdict-infra-retriable? {:_state :p :infra-retry-count 2}
+                                             {:phase/verdict :implement/rate-limited})))
+    (is (true? (sut/verdict-infra-retriable? {:_state :p}
+                                             {:phase/verdict :review/backend-timeout}))
+        "absent counter treated as 0"))
+  (testing "infra verdict + budget spent (>= max 3) → not retriable → falls to terminal"
+    (is (false? (sut/verdict-infra-retriable? {:_state :p :infra-retry-count 3}
+                                              {:phase/verdict :verify/timeout}))))
+  (testing "non-infra verdict is never infra-retriable, regardless of budget"
+    (is (false? (sut/verdict-infra-retriable? {:_state :p :infra-retry-count 0}
+                                              {:phase/verdict :stagnated})))
+    (is (false? (sut/verdict-infra-retriable? {:_state :p :infra-retry-count 0}
+                                              {:phase/verdict :implement/empty-diff})))
+    (is (false? (sut/verdict-infra-retriable? {:_state :p}
+                                              {:phase/verdict :repair-requested})))))

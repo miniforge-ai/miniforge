@@ -30,9 +30,11 @@
    propagating bad state down the pipeline."
   (:require
    [clojure.test :refer [deftest is testing]]
-   [ai.miniforge.phase.phase-result :as phase-result]
+   [ai.miniforge.fsm.interface :as fsm]
    [ai.miniforge.workflow.execution :as exec]
-   [ai.miniforge.workflow.fsm :as workflow-fsm]))
+   [ai.miniforge.workflow.fsm :as workflow-fsm]
+   ;; loaded for its eager guard/action registration (infra-retry guards)
+   [ai.miniforge.workflow.standard-guards-and-actions]))
 
 ;; Phase 4b removed `exec/redirect-target` and the
 ;; `determine-phase-event-failure-with-redirect-target` test (which
@@ -218,3 +220,48 @@
           "happy path must not flag the ctx as failed")
       (is (not= prior-state (:execution/fsm-state out))
           "happy path must move the FSM forward"))))
+
+;; -------------------------------------------------------------------------- infra-retry (Fable §2.4 PR-B)
+;;
+;; A transient infrastructure verdict retries the SAME phase against a
+;; dedicated infra budget — not the redirect/work budget — then terminates
+;; once the budget is spent. Driven through the real compiled execution
+;; machine so the guarded-array behaviour matches production.
+
+(defn- guarded-phase-machine
+  "Compile a single guarded-phase (implement) workflow and park the FSM at it."
+  []
+  (let [m (workflow-fsm/compile-execution-machine
+           {:workflow/id :infra-retry-test
+            :workflow/version "1.0.0"
+            :workflow/pipeline [{:phase :implement}]})]
+    {:machine m
+     :state (->> (workflow-fsm/initialize-execution m)
+                 (workflow-fsm/start-execution m))}))
+
+(deftest infra-verdict-retries-same-phase-then-terminates
+  (testing "infra verdict retries the same phase up to the infra budget, then
+            terminates — and never touches the redirect/work budget"
+    (let [{:keys [machine state]} (guarded-phase-machine)
+          phase (:_state state)
+          fail-infra (fn [s] (fsm/transition machine s
+                                             {:type :phase/fail
+                                              :phase/verdict :implement/rate-limited}))
+          s1 (fail-infra state)
+          s2 (fail-infra s1)
+          s3 (fail-infra s2)]
+      (is (= phase (:_state s1)) "1st infra fail retries the same phase, not :failed")
+      (is (= phase (:_state s3)) "still at the phase while infra budget remains")
+      (is (= 3 (:infra-retry-count s3)) "the infra counter bumps each retry")
+      (is (= 0 (get s3 :redirect-count 0)) "redirect/work budget is untouched")
+      (let [s4 (fail-infra s3)]
+        (is (= :failed (:_state s4))
+            "infra budget exhausted (>= max-infra-retries) → terminal :failed")))))
+
+(deftest non-infra-verdict-does-not-consume-infra-budget
+  (testing "a work-terminal verdict goes straight to :failed without retrying"
+    (let [{:keys [machine state]} (guarded-phase-machine)
+          out (fsm/transition machine state
+                              {:type :phase/fail :phase/verdict :stagnated})]
+      (is (= :failed (:_state out)) "terminal work verdict → :failed immediately")
+      (is (= 0 (get out :infra-retry-count 0)) "no infra retry consumed"))))

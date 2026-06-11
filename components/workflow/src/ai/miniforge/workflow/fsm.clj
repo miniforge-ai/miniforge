@@ -110,10 +110,6 @@
   [index phase]
   (keyword (phase-state-name paused-phase-state-prefix index phase)))
 
-(defn- increment-redirect-count
-  [redirect-count]
-  (inc (or redirect-count 0)))
-
 (defn- matching-phase-index
   [phase [index config]]
   (when (= phase (:phase config))
@@ -230,14 +226,25 @@
      FSM-owned `:redirect-count` (single accounting site — Phase 4
      deletes the runner's parallel `redirect-event?` check).
    * Branch 4: default — no verdict, no on-fail, just fail."
-  [failure-target on-fail-configured?]
-  (if on-fail-configured?
-    [{:target :failed         :guard :verdict/terminal?}
-     {:target :failed         :guard :budget/redirects-spent?}
-     {:target failure-target  :actions [:redirect/inc-count]}
-     {:target :failed}]
-    [{:target :failed :guard :verdict/terminal?}
-     {:target :failed}]))
+  [failure-target on-fail-configured? self-state-id]
+  ;; Branch 0 (first): transient infrastructure verdict with infra budget left
+  ;; → retry the SAME phase (self-transition), bumping the dedicated
+  ;; :infra-retry-count. A backoff can clear timeouts/rate-limits; don't burn
+  ;; the redirect/work budget on them (Fable §2.4). When the infra budget is
+  ;; spent the guard is false and the verdict falls through to
+  ;; `:verdict/terminal?` → :failed.
+  (let [infra-branch {:target self-state-id
+                      :guard :verdict/infra-retriable?
+                      :actions [:infra/inc-count]}]
+    (if on-fail-configured?
+      [infra-branch
+       {:target :failed         :guard :verdict/terminal?}
+       {:target :failed         :guard :budget/redirects-spent?}
+       {:target failure-target  :actions [:redirect/inc-count]}
+       {:target :failed}]
+      [infra-branch
+       {:target :failed :guard :verdict/terminal?}
+       {:target :failed}])))
 
 (def ^:private guarded-phases
   "Phases whose `:phase/fail` dispatch routes through the verdict-driven
@@ -277,7 +284,8 @@
         ;; opt-in and applies the guarded form unconditionally.
         phase-fail-transition (if (guarded-phase? config)
                                 (guarded-fail-transition failure-target
-                                                         (some? on-fail-index))
+                                                         (some? on-fail-index)
+                                                         state-id)
                                 failure-target)]
     ;; Phase 4a: `:phase/terminal-fail` removed. The verdict-driven
     ;; guarded `:phase/fail` array (Phase 2b/3) is the superseding
