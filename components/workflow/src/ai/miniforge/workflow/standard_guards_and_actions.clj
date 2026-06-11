@@ -39,6 +39,7 @@
    omitted entirely — no runtime check needed. This is structurally
    identical to the RFC behavior with simpler runtime arithmetic."
   (:require
+   [clojure.set :as set]
    [ai.miniforge.fsm.interface :as fsm]
    [ai.miniforge.workflow.actions :as actions]
    [ai.miniforge.workflow.guards :as guards]
@@ -47,62 +48,68 @@
 
 ;------------------------------------------------------------------------------ Verdict-driven guards
 
-(def terminal-verdicts
-  "The set of `:phase/verdict` values that route a phase failure straight
-   to the workflow terminal `:failed` state, bypassing any on-fail
-   redirect. Mirrors the legacy `:stagnated?` / `:needs-decomposition?`
-   flag bits from the workaround era; collapsed here into a single
-   FSM-readable signal."
-  #{;; Convergence-failure verdicts (review phase)
-    :stagnated
-    :needs-decomposition
-    :exhausted
-    ;; Verify-specific (Phase 3a): retrying implement does not unblock a
-    ;; timed-out test process or a provider rate-limit. Both terminate.
-    :verify/timeout
+;; Verdict taxonomy (Fable review §2.4). Three classes of failure verdict,
+;; each carrying different machine semantics. PR-A (this change) names the
+;; classes and keeps `terminal-verdicts` as their UNION — so routing is
+;; byte-for-byte unchanged. PR-B peels `infrastructure-verdicts` off the
+;; terminal path to retry-same-phase against an infra budget (transient
+;; failures a backoff can clear), where ~half the recorded burn incidents
+;; live.
+
+(def infrastructure-verdicts
+  "TRANSIENT infrastructure failures — a timeout, provider rate-limit,
+   backend/stream death, or dropped network. A retry after backoff CAN clear
+   these; they are not evidence the work is wrong. Today still terminal (kept
+   in `terminal-verdicts`); PR-B routes them to retry-same-phase against a
+   dedicated infra-retry budget instead of the redirect/work budget."
+  #{:verify/timeout
     :verify/rate-limited
-    ;; Release-specific (Phase 3b): curator-rejected (no files to ship).
-    ;; Retrying implement won't change the curator's decision — the
-    ;; diff is empty and the next pass would just produce another empty
-    ;; diff. Terminal.
-    :release/zero-files
-    ;; Implement-specific (Phase 3c). All three are cases where the
-    ;; on-fail :implement loop would just re-enter and hit the same
-    ;; wall — terminate the workflow instead.
-    ;;   :rate-limited — provider quota; budget retries won't change it
-    ;;   :empty-diff   — curator: no files written; retry would produce
-    ;;                   another empty diff
-    ;;   :already-implemented-invalid — the implementer claimed done
-    ;;                   but verify hadn't passed; retry won't fix the
-    ;;                   stale claim
     :implement/rate-limited
-    :implement/empty-diff
-    :implement/already-implemented-invalid
-    ;; PR-C of network-resilience stack: the implement phase exhausted
-    ;; its iteration budget retrying from the persisted checkpoint
-    ;; after PR-B's network-monitor detected sustained provider
-    ;; outages. Retrying again would just hit the same dead network on
-    ;; the next probe cycle. Terminal — operator surfaces the workflow
-    ;; for manual resume once connectivity is restored.
     :implement/network-dropped
-    ;; PR-B of phase-timeout stack (companion to network-resilience):
-    ;; the reviewer LLM call hit its adaptive timeout (stream-idle /
-    ;; stagnation / hard-limit / generic) with no real verdict
-    ;; produced. PR-A (#1058) made the reviewer agent take the
-    ;; `:reviewer/backend-timeout` error exit instead of synthesizing
-    ;; a false `:rejected`; this verdict surfaces that to the FSM.
-    ;; Distinct from `:exhausted` — `:exhausted` means the reviewer
-    ;; HAD a verdict the gate couldn't approve, this means the
-    ;; reviewer never produced one.
-    :review/backend-timeout
-    ;; PR-C of phase-timeout stack (companion to PR-B + network-
-    ;; resilience PR-C): the implementer LLM call exhausted its
-    ;; iteration budget retrying from the persisted checkpoint after
-    ;; consecutive stream-idle / stagnation / hard-limit timeouts.
-    ;; Same recovery shape as `:implement/network-dropped` — retriable
-    ;; up to the budget, then terminal. Retrying again would just hit
-    ;; the same slow provider on the next pass.
-    :implement/backend-timeout})
+    :implement/backend-timeout
+    :review/backend-timeout})
+
+(def no-op-verdicts
+  "EVIDENCE-OF-ABSENCE failures — the work produced nothing actionable, so a
+   retry would just reproduce the same empty result. Always fail closed.
+     :empty-diff / :zero-files — curator found no files written
+     :already-implemented-invalid — implementer claimed done but verify
+                                    hadn't passed; retry won't fix the claim"
+  #{:implement/empty-diff
+    :release/zero-files
+    :implement/already-implemented-invalid})
+
+(def work-terminal-verdicts
+  "WORK that ran its course — the review/repair loop exhausted its budget
+   without converging. Terminal (the end of the work-redirect path)."
+  #{:stagnated
+    :needs-decomposition
+    :exhausted})
+
+(def terminal-verdicts
+  "The set of `:phase/verdict` values that route a phase failure straight to
+   the workflow terminal `:failed` state, bypassing any on-fail redirect.
+
+   The UNION of the three terminal classes — identical membership to the
+   pre-taxonomy flat set, so `verdict-terminal?` routing is unchanged by the
+   PR-A split. PR-B removes `infrastructure-verdicts` from this union so
+   transient failures retry rather than terminate."
+  (set/union infrastructure-verdicts no-op-verdicts work-terminal-verdicts))
+
+(defn verdict-class
+  "Classify a phase `:phase/verdict` into the taxonomy (Fable §2.4):
+     :infrastructure — transient; retry-worthy (PR-B)
+     :no-op          — evidence of absence; fail closed
+     :work-terminal  — work budget exhausted; fail closed
+     :work           — an ordinary actionable failure → redirect / repair
+   Closed over the three sets; the default `:work` covers every
+   non-terminal verdict (e.g. `:repair-requested`)."
+  [verdict]
+  (cond
+    (contains? infrastructure-verdicts verdict) :infrastructure
+    (contains? no-op-verdicts verdict)          :no-op
+    (contains? work-terminal-verdicts verdict)  :work-terminal
+    :else                                       :work))
 
 (defn verdict-terminal?
   "Guard: true when the failing-phase event carries a terminal verdict.
