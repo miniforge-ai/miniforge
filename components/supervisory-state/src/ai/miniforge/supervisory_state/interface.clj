@@ -33,9 +33,11 @@
 ;; Contract version + golden fixtures
 
 (def schema-version
-  "Version of the supervisory entity contract, stamped on every
-   `:supervisory/*-upserted` event as `:supervisory/schema-version`.
-   Bump rules live on `schema/schema-version`."
+  "Version of the supervisory entity contract, stamped as
+   `:supervisory/schema-version` on every supervisory snapshot event
+   (N3 §3.19, including `:supervisory/policy-evaluated` and
+   `:supervisory/attention-derived`). Bump rules live on
+   `schema/schema-version`."
   schema/schema-version)
 
 (def write-golden-fixtures!

@@ -34,8 +34,10 @@
 ;; Contract version
 
 (def schema-version
-  "Version of the supervisory entity contract, stamped on every
-   `:supervisory/*-upserted` event as `:supervisory/schema-version`.
+  "Version of the supervisory entity contract, stamped as
+   `:supervisory/schema-version` on every supervisory snapshot event
+   (N3 §3.19): the `:supervisory/*-upserted` families plus
+   `:supervisory/policy-evaluated` and `:supervisory/attention-derived`.
 
    Bump on any change to an entity shape that an external consumer
    could observe: a renamed key, a removed key, a changed enum value,

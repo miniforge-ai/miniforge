@@ -78,10 +78,12 @@
 
 (defn event->transit-json
   "Serialize `event` to a Transit-JSON string using the verbose writer.
-   Verbose mode ensures UUIDs appear as {\"~#uuid\" \"...\"} and instants
-   as {\"~#inst\" \"...\"} rather than compact ~u and ~m tag-strings,
-   so the Rust parser can decode them without millisecond arithmetic.
-   Custom handler for java.time.Instant (not supported by Transit defaults).
+   Verbose mode disables transit's cache codes (repeated keywords stay
+   literal, never `^0` references) and renders instants as RFC-3339
+   `~t...` tag-strings instead of compact `~m` millisecond strings, so
+   the Rust parser can decode them without millisecond arithmetic.
+   UUIDs render as `~u...` tag-strings. Custom handler for
+   java.time.Instant (not supported by Transit defaults).
 
    Public: this is the canonical wire encoding for every event the file
    sink persists. Contract tooling (supervisory golden fixtures) calls it

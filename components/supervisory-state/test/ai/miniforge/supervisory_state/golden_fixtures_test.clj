@@ -45,10 +45,12 @@
    (transit/reader (ByteArrayInputStream. (.getBytes ^String s "UTF-8")) :json)))
 
 (defn- slurp-dir
-  "Map of filename -> content for every file in `dir`."
+  "Map of filename -> content for every file in `dir`. Empty map when
+   `dir` is missing or not a directory (`.listFiles` returns nil there)
+   so the drift-gate equality reports a clear diff instead of an NPE."
   [dir]
   (into {}
-        (for [^java.io.File f (.listFiles (io/file dir))]
+        (for [^java.io.File f (or (.listFiles (io/file dir)) [])]
           [(.getName f) (slurp f)])))
 
 (defn- find-workspace-root

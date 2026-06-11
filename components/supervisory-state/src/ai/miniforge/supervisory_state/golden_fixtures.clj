@@ -18,8 +18,8 @@
 
 (ns ai.miniforge.supervisory-state.golden-fixtures
   "Generate the canonical golden fixtures for the supervisory entity
-   contract — one `:supervisory/*-upserted` event per entity family,
-   serialized through the production transit encoder.
+   contract — one supervisory snapshot event (N3 §3.19) per entity
+   family, serialized through the production transit encoder.
 
    The fixtures are the cross-language contract surface consumed by the
    miniforge-control `supervisory-entities` Rust crate: that repo vendors
@@ -282,13 +282,28 @@
 ;------------------------------------------------------------------------------ Layer 4
 ;; Disk layout — one file per family + a manifest for consumers
 
+(defn- clear-stale-fixtures!
+  "Delete previously generated fixture files in `dir` so a removed or
+   renamed family cannot leave an orphan behind that only the drift
+   gate would notice. Touches only the generator's own output shapes."
+  [dir]
+  (doseq [^java.io.File f (or (.listFiles (io/file dir)) [])
+          :when (or (.endsWith (.getName f) ".transit.json")
+                    (= "manifest.edn" (.getName f)))]
+    (io/delete-file f)))
+
 (defn write-golden-fixtures!
   "Write `<family>.transit.json` per family plus `manifest.edn` into
-   `:out-dir` (string path). Returns a summary map. Designed for
-   `clojure -X` invocation; see the `fixtures:supervisory` bb task."
+   `:out-dir` (string path), replacing any previously generated files
+   there. Returns a summary map. Designed for `clojure -X` invocation;
+   see the `fixtures:supervisory` bb task."
   [{:keys [out-dir]}]
+  (when-not (and (string? out-dir) (seq out-dir))
+    (throw (ex-info "write-golden-fixtures! requires a non-blank :out-dir string"
+                    {:out-dir out-dir})))
   (let [dir (io/file out-dir)]
     (.mkdirs dir)
+    (clear-stale-fixtures! dir)
     (let [events (golden-events)]
       (doseq [{:keys [family event]} events]
         (spit (io/file dir (str (name family) ".transit.json"))

@@ -118,11 +118,12 @@
 
 (def serialize-event
   "Serialize an event map to the canonical Transit-JSON wire string —
-   the exact encoding the file sink writes to disk (verbose mode, so
-   UUIDs and instants appear as tagged objects the Rust consumer can
-   decode). Exposed for contract tooling: the supervisory golden-fixture
-   generator serializes through this fn so vendored fixtures cannot
-   drift from the production byte path. Pure: no IO."
+   the exact encoding the file sink writes to disk (verbose mode: no
+   cache codes; UUIDs/instants as `~u...`/`~t...` tag-strings the Rust
+   consumer strips directly). Exposed for contract tooling: the
+   supervisory golden-fixture generator serializes through this fn so
+   vendored fixtures cannot drift from the production byte path.
+   Pure: no IO."
   sinks/event->transit-json)
 
 (def digest-content

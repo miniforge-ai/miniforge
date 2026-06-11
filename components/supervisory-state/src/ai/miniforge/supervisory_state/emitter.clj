@@ -35,8 +35,10 @@
 ;; Contract stamp shared by every constructor
 
 (defn- attach-entity
-  "Attach the entity payload and the contract version to an upsert
-   envelope. Every `:supervisory/*-upserted` event flows through here so
+  "Attach the entity payload and the contract version to a supervisory
+   snapshot envelope. Every snapshot constructor in this namespace —
+   the `*-upserted` families plus `policy-evaluated` and
+   `attention-derived` — flows through here so
    `:supervisory/schema-version` cannot be forgotten on a new family."
   [envelope entity]
   (assoc envelope
