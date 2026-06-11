@@ -22,9 +22,9 @@
    working directory as `(or <ctx-worktree-path> (System/getProperty
    \"user.dir\"))`, silently falling back to the process CWD when the real
    worktree was absent — the wrong-tree source of greenfield/empty work that
-   passed gates against the wrong files. This is the ONE place
-   `(System/getProperty \"user.dir\")` is allowed; a lint forbids it
-   elsewhere in execution namespaces.")
+   passed gates against the wrong files. This is the intended single home for
+   that read; a lint forbidding `(System/getProperty \"user.dir\")` elsewhere
+   in execution namespaces is a planned follow-up (it does not exist yet).")
 
 (def ^:private worktree-path-keys
   "Context keys, in priority order, that carry the execution worktree path.
@@ -57,20 +57,20 @@
      ex-info (fail closed). Silently using the host CWD inside a capsule run
      is how wrong-tree/greenfield work slipped past gates; refuse it.
    - Absent on a local (ungoverned) run → fall back to the process CWD, the
-     dev-convenience default. The single sanctioned `user.dir` read.
+     dev-convenience default. The single intended `user.dir` read.
 
-   `_label` is a short site identifier carried into the anomaly / for callers
+   `label` is a short site identifier carried into the anomaly / for callers
    that want to log which resolver site degraded."
   ([ctx] (resolve-execution-workdir ctx nil))
-  ([ctx _label]
+  ([ctx label]
    (if-let [wt (ctx-worktree-path ctx)]
      wt
      (if (governed? ctx)
        (throw (ex-info (str "Execution worktree-path unresolved in a governed run"
-                            (when _label (str " (" _label ")"))
+                            (when label (str " (" label ")"))
                             " — refusing to fall back to the process CWD (no silent downgrade).")
                        {:anomaly/category :anomalies/workdir-unresolved
-                        :workspace/site _label
+                        :workspace/site label
                         :execution/mode (or (:execution/mode ctx)
                                             (get-in ctx [:execution/opts :execution-mode])
                                             :local)

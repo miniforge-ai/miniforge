@@ -279,10 +279,13 @@
         input (get-in ctx [:execution/input])
         behavior-addendum (phase/load-and-filter-behaviors
                             :release {:task {:task/intent (:intent input)}})]
-    (cond-> {:worktree-path (or (get-in config [:worktree-path])
-                                ;; Standard ctx keys + governed-fail/CWD fallback
-                                ;; live in the blessed resolver (no silent
-                                ;; user.dir downgrade).
+    (cond-> {;; Preserve the original precedence — explicit ctx worktree paths
+             ;; win over config; the blessed resolver is the LAST resort,
+             ;; adding the opts key + the governed-fail / CWD decision (no
+             ;; silent user.dir downgrade) in place of the old bare fallback.
+             :worktree-path (or (get-in ctx [:execution/worktree-path])
+                                (get-in ctx [:worktree-path])
+                                (get-in config [:worktree-path])
                                 (workspace/resolve-execution-workdir ctx "release"))
              :executor (get-in ctx [:execution/executor])
              :environment-id (get-in ctx [:execution/environment-id])
