@@ -716,3 +716,18 @@
 (comment
   (test/run-tests 'ai.miniforge.agent.artifact-session-test)
   :leave-this-here)
+
+(deftest with-readonly-session-test
+  (testing "runs body-fn with a configured session and returns its result
+            directly (no artifact-promotion map), for read-only agents"
+    (let [ran (atom false)
+          result (session/with-readonly-session
+                  {}
+                  (fn [s]
+                    (reset! ran true)
+                    (is (:mcp-config-path s) "session has an mcp-config path")
+                    (is (:mcp-allowed-tools s) "session carries the MCP tool allowlist")
+                    :review-result))]
+      (is @ran "body-fn ran")
+      (is (= :review-result result)
+          "returns the body-fn value directly, not a normalized artifact map"))))

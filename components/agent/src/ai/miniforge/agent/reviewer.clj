@@ -21,6 +21,8 @@
    Performs LLM-backed semantic code review plus deterministic gate validation.
    Falls back to gate-only review when no LLM backend is available."
   (:require
+   [ai.miniforge.agent.artifact-session :as artifact-session]
+   [ai.miniforge.agent.budget :as budget]
    [ai.miniforge.agent.model :as model]
    [ai.miniforge.agent.result-boundary :as result-boundary]
    [ai.miniforge.agent.reviewer.artifact :as artifact]
@@ -74,6 +76,15 @@
 ;; Enumeration-retry validator + well-formed-recovery? +
 ;; recover-review-enumeration moved to ai.miniforge.agent.reviewer.llm-response
 ;; (PR-F decomposition).
+
+(def ^:private reviewer-disallowed-tools
+  "Native tools the reviewer MUST NOT call. Forces reads onto the MCP context
+   cache (context_read/grep/glob) — same mechanism as planner/implementer/
+   tester — and blocks ALL mutation: the reviewer inspects, it never writes.
+   Read/Grep/Glob/LS/Agent → use the cached read tools; Write/Edit/MultiEdit/
+   Bash → off entirely. With cached reads it can check reachability (callers,
+   related files) without native exploration or modifying anything."
+  ["Read" "Grep" "Glob" "LS" "Agent" "Bash" "Write" "Edit" "MultiEdit"])
 
 (defn create-reviewer
   "Create a Reviewer agent with optional configuration overrides.
@@ -149,10 +160,29 @@
                   base-opts (cond-> {:system effective-system
                                      :max-turns max-turns}
                               monitor (assoc :progress-monitor monitor))
-                  response (if on-chunk
-                             (llm/chat-stream llm-client user-prompt on-chunk
-                                              base-opts)
-                             (llm/chat llm-client user-prompt base-opts))
+                  budget-usd (budget/resolve-cost-budget-usd :reviewer review-config context)
+                  ;; Run the main review inside a read-only artifact session so
+                  ;; the reviewer reads through the MCP context cache
+                  ;; (context_read/grep/glob) instead of native tools — same
+                  ;; mechanism as planner/implementer/tester. Read-only (no
+                  ;; Write/Edit/Bash) so it can cheaply check reachability via
+                  ;; the cache without modifying anything. with-readonly-session
+                  ;; skips artifact promotion/WARN (the reviewer has no work
+                  ;; product) and returns the LLM result directly. The
+                  ;; enumeration-retry below keeps base-opts — it re-asks over
+                  ;; the same content and needs no tools/cache.
+                  response (artifact-session/with-readonly-session
+                            context
+                            (fn [session]
+                              (artifact-session/write-cursor-permissions-for-session!
+                               session reviewer-disallowed-tools)
+                              (let [opts (merge base-opts
+                                                (assoc (artifact-session/session->mcp-opts
+                                                        session budget-usd max-turns)
+                                                       :disallowed-tools reviewer-disallowed-tools))]
+                                (if on-chunk
+                                  (llm/chat-stream llm-client user-prompt on-chunk opts)
+                                  (llm/chat llm-client user-prompt opts)))))
                   normalized (result-boundary/normalize-llm-result
                               {:response response
                                :parse-response llm-response/parse-review-response})

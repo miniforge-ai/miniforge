@@ -1146,6 +1146,37 @@
                       write-mcp-config!)]
       (run-session session body-fn read-artifact cleanup-session! :host))))
 
+(defn with-readonly-session
+  "Like `with-session`, but for READ-ONLY agents (e.g. the reviewer) that
+   consume the MCP context cache but produce NO worktree artifact.
+
+   Sets up the session + MCP config (host or governed/capsule, mirroring
+   `with-session`), runs `body-fn`, and cleans up — but skips the artifact
+   read + the nothing-found WARN that `run-session` does, since a reviewer
+   has no work product to promote. Returns the `body-fn` result directly
+   (the LLM result), not a normalized artifact map.
+
+   Use when an agent needs cached reads (context_read/grep/glob) for
+   exploration but does not write files."
+  [context body-fn]
+  (let [run (fn [session cleanup-fn]
+              (try (body-fn session)
+                   (finally (cleanup-fn session))))]
+    (if (governed? context)
+      (let [executor (:execution/executor context)
+            env-id   (:execution/environment-id context)
+            workdir  (or (:execution/worktree-path context) "/workspace")
+            session  (-> (create-capsule-session! executor env-id workdir)
+                         write-capsule-mcp-config!)]
+        (run session cleanup-capsule-session!))
+      (let [workdir (:execution/worktree-path context)
+            session (-> (if workdir
+                          (create-session! {:workdir workdir
+                                            :source-root (:source-root context)})
+                          (create-session! {:source-root (:source-root context)}))
+                        write-mcp-config!)]
+        (run session cleanup-session!)))))
+
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
   ;; Create a session
