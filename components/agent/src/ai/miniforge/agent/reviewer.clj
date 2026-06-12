@@ -86,6 +86,24 @@
    related files) without native exploration or modifying anything."
   ["Read" "Grep" "Glob" "LS" "Agent" "Bash" "Write" "Edit" "MultiEdit"])
 
+(defn- invoke-reviewer-session
+  "Read-only session body for the reviewer: force the MCP-read tools, build the
+   chat opts (base-opts + session MCP opts + the disallow-list + worktree cwd),
+   and call the LLM. Returns the LLM response. Run via `with-readonly-session`
+   so reads go through the context cache and nothing is written."
+  [session llm-client user-prompt on-chunk base-opts budget-usd max-turns]
+  (artifact-session/write-cursor-permissions-for-session! session reviewer-disallowed-tools)
+  (let [opts (cond-> (merge base-opts
+                            (assoc (artifact-session/session->mcp-opts session budget-usd max-turns)
+                                   :disallowed-tools reviewer-disallowed-tools))
+               ;; Thread the worktree cwd like the other roles — CWD-dependent
+               ;; backends (e.g. Cursor's project-scoped .cursor/*) need it to
+               ;; read the session's permission allowlist and the right repo root.
+               (:workdir session) (assoc :workdir (:workdir session)))]
+    (if on-chunk
+      (llm/chat-stream llm-client user-prompt on-chunk opts)
+      (llm/chat llm-client user-prompt opts))))
+
 (defn create-reviewer
   "Create a Reviewer agent with optional configuration overrides.
 
@@ -173,23 +191,8 @@
                   ;; the same content and needs no tools/cache.
                   response (artifact-session/with-readonly-session
                             context
-                            (fn [session]
-                              (artifact-session/write-cursor-permissions-for-session!
-                               session reviewer-disallowed-tools)
-                              (let [opts (cond-> (merge base-opts
-                                                        (assoc (artifact-session/session->mcp-opts
-                                                                session budget-usd max-turns)
-                                                               :disallowed-tools reviewer-disallowed-tools))
-                                           ;; Thread the worktree cwd like the
-                                           ;; other roles — CWD-dependent
-                                           ;; backends (e.g. Cursor's project-
-                                           ;; scoped .cursor/*) need it to read
-                                           ;; the session's permission allowlist
-                                           ;; and the right repo root.
-                                           (:workdir session) (assoc :workdir (:workdir session)))]
-                                (if on-chunk
-                                  (llm/chat-stream llm-client user-prompt on-chunk opts)
-                                  (llm/chat llm-client user-prompt opts)))))
+                            #(invoke-reviewer-session % llm-client user-prompt on-chunk
+                                                      base-opts budget-usd max-turns))
                   normalized (result-boundary/normalize-llm-result
                               {:response response
                                :parse-response llm-response/parse-review-response})
