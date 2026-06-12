@@ -382,6 +382,15 @@
         curator-terminal?
         (= :curator/no-files-written
            (get-in curator-result [:error :data :code]))
+        ;; Surface the curator's collection diagnostic (per-source file counts,
+        ;; pre-session-snapshot?, collection-mode, worktree-path) when it
+        ;; fast-fails with no-files. It is computed in curate but otherwise
+        ;; only buried in the error data — emitting it makes "implementer wrote
+        ;; files but curator saw none" debuggable from the event stream instead
+        ;; of requiring a worktree autopsy (which is gone after cleanup).
+        _ (when curator-terminal?
+            (log/warn logger :implement :implement/curator-no-files-diagnostic
+                      {:data (get-in curator-result [:error :data :diagnostic])}))
         already-implemented-noop?
         (= :already-implemented (:status impl-result))
         ;; "Degraded handoff" means the implementer agent reported a hard
