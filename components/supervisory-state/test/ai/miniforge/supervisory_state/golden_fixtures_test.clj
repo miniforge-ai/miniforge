@@ -53,6 +53,12 @@
         (for [^java.io.File f (or (.listFiles (io/file dir)) [])]
           [(.getName f) (slurp f)])))
 
+(def ^:private max-workspace-walk-hops
+  "Upper bound on parent-directory hops when locating workspace.edn —
+   deep enough for any worktree nesting in this repo, small enough to
+   fail fast when the tests run outside the workspace entirely."
+  8)
+
 (defn- find-workspace-root
   "Walk up from user.dir until workspace.edn is found. Fails the calling
    test via exception when the workspace root cannot be located — a
@@ -61,7 +67,7 @@
   (loop [dir (io/file (System/getProperty "user.dir")) hops 0]
     (cond
       (.exists (io/file dir "workspace.edn")) dir
-      (or (nil? (.getParentFile dir)) (>= hops 8))
+      (or (nil? (.getParentFile dir)) (>= hops max-workspace-walk-hops))
       (throw (ex-info "workspace.edn not found walking up from user.dir"
                       {:user-dir (System/getProperty "user.dir")}))
       :else (recur (.getParentFile dir) (inc hops)))))

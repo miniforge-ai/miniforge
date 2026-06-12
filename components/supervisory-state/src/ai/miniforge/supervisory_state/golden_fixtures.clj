@@ -56,6 +56,18 @@
   "The single pinned timestamp used everywhere in the fixtures."
   (Date/from (java.time.Instant/parse "2026-01-01T00:00:00Z")))
 
+(def ^:private envelope-id-slot-offset
+  "golden-uuid slot offset for envelope event ids. Entity ids occupy
+   slots 1-9; envelope event ids occupy 101-109, so no fixture's
+   `:event/id` can collide with an entity id."
+  100)
+
+(def ^:private pinned-sequence-number
+  "Every fixture pins `:event/sequence-number` to the first slot —
+   sequence numbering is per-workflow runtime state, meaningless in a
+   single-event fixture."
+  1)
+
 (def ^:private workflow-run-id (golden-uuid 1))
 (def ^:private correlation-id  (golden-uuid 2))
 (def ^:private spec-id         (golden-uuid 3))
@@ -70,6 +82,13 @@
 ;; Canonical synthetic entities — one per family, exercising the
 ;; optional blocks the Rust contract also models (PR scoring, nested
 ;; spec snapshot, violations) so absence-vs-presence both round-trip.
+;;
+;; Numeric payload values (scores, counts, intervals) are arbitrary
+;; pinned data — the entity def is the name; the values carry no
+;; semantics beyond "plausible for the field's type and range".
+;; They are deliberately asymmetric (additions 10 vs deletions 2,
+;; score 0.5 vs threshold 0.8) so a field transposition in either
+;; codec shows up as a fixture diff instead of cancelling out.
 
 (def ^:private workflow-run-entity
   {:workflow-run/id workflow-run-id
@@ -263,9 +282,9 @@
    production key set; only the values are pinned."
   [event n]
   (assoc event
-         :event/id (golden-uuid (+ 100 n))
+         :event/id (golden-uuid (+ envelope-id-slot-offset n))
          :event/timestamp t0
-         :event/sequence-number 1))
+         :event/sequence-number pinned-sequence-number))
 
 (defn golden-events
   "Build the pinned upsert event for every family. Validates each
