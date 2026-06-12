@@ -96,6 +96,7 @@
 ;; Shell fallbacks
 
 (declare source-root)
+(declare file-mtime)
 
 (defn shell-grep
   "Fall back to ripgrep for files not in cache.
@@ -146,14 +147,16 @@
 ;------------------------------------------------------------------------------ Layer 1
 ;; Stateful cache operations
 
-;; Cache atom holding :files (path → content) and :misses (recorded cache misses).
+;; Cache atom holding :files (path → content), :mtimes (path → epoch-ms of the
+;; file when its content was cached, for write-invalidation), and :misses
+;; (recorded cache misses).
 (defonce cache-state
-  (atom {:files {} :misses [] :source-root nil :artifact-dir nil}))
+  (atom {:files {} :mtimes {} :misses [] :source-root nil :artifact-dir nil}))
 
 (defn reset-state!
   "Reset cache state. Intended for test isolation."
   []
-  (reset! cache-state {:files {} :misses [] :source-root nil :artifact-dir nil}))
+  (reset! cache-state {:files {} :mtimes {} :misses [] :source-root nil :artifact-dir nil}))
 
 (defn- source-root
   []
@@ -166,24 +169,70 @@
       (.getPath f)
       (.getPath (io/file (source-root) path)))))
 
+(def ^:private persistent-cache-relpath ".miniforge/context-cache.edn")
+
+(defn- persistent-cache-path
+  "Worktree-resident cross-phase cache file, or nil when there's no
+   source-root. Under .miniforge/ (gitignored) so it rides workspace
+   persistence into containers across phases."
+  [source-root]
+  (when-not (str/blank? source-root)
+    (str source-root "/" persistent-cache-relpath)))
+
+(defn- read-cache-edn
+  "Read {:files .. :mtimes ..} from an EDN cache file, or nil on missing/bad."
+  [path]
+  (let [f (and path (io/file path))]
+    (when (and f (.exists f))
+      (try (edn/read-string (slurp f))
+           (catch Exception _ nil)))))
+
 (defn load-cache!
-  "Load context-cache.edn from artifact-dir into the cache atom."
+  "Load the context cache from two sources (freshest wins):
+
+   1. the cross-phase PERSISTENT cache at <source-root>/.miniforge/
+      context-cache.edn — reads accumulated by earlier phases. Its stored
+      mtimes are restored, so any file changed since it was persisted is
+      detected as stale and re-read on access (no stale cross-phase content).
+   2. this phase's PRE-POPULATED cache at <artifact-dir>/context-cache.edn —
+      the orchestrator's curated, just-read file set. Merged ON TOP (wins)
+      and stamped with current disk mtimes."
   ([artifact-dir] (load-cache! artifact-dir nil))
   ([artifact-dir source-root]
-   (let [path (str artifact-dir "/context-cache.edn")
-         f (io/file path)]
-     (swap! cache-state assoc
-            :source-root source-root
-            :artifact-dir artifact-dir)
-     (when (.exists f)
-       (try
-         (let [data (edn/read-string (slurp f))]
-           (swap! cache-state assoc :files (get data :files {}))
-           (binding [*out* *err*]
-             (println (msg/t :cache/loaded {:count (count (:files data))}))))
-         (catch Exception e
-           (binding [*out* *err*]
-             (println (msg/t :cache/load-failed {:error (ex-message e)})))))))))
+   (swap! cache-state assoc :source-root source-root :artifact-dir artifact-dir)
+   (try
+     (let [persistent (read-cache-edn (persistent-cache-path source-root))
+           prepop     (read-cache-edn (str artifact-dir "/context-cache.edn"))
+           pre-files  (get prepop :files {})
+           files      (merge (get persistent :files {}) pre-files)
+           ;; persistent entries keep stored mtimes (stale ones re-read);
+           ;; pre-pop entries were just read fresh → stamp current mtime.
+           pre-mtimes (reduce-kv (fn [m p _] (assoc m p (file-mtime p))) {} pre-files)
+           mtimes     (merge (get persistent :mtimes {}) pre-mtimes)]
+       (swap! cache-state assoc :files files :mtimes mtimes)
+       (when (seq files)
+         (binding [*out* *err*]
+           (println (msg/t :cache/loaded {:count (count files)})))))
+     (catch Exception e
+       (binding [*out* *err*]
+         (println (msg/t :cache/load-failed {:error (ex-message e)})))))))
+
+(defn save-cache!
+  "Persist the accumulated in-memory cache (pre-populated + read-through
+   additions, with mtimes) to the worktree-resident cross-phase cache file so
+   the NEXT phase's server loads it. No-ops without a source-root or when
+   nothing is cached. Best-effort: a write failure is logged, not thrown."
+  []
+  (let [{:keys [source-root files mtimes]} @cache-state]
+    (when-let [path (and (seq files) (persistent-cache-path source-root))]
+      (try
+        (io/make-parents path)
+        (spit path (pr-str {:files files :mtimes mtimes}))
+        (binding [*out* *err*]
+          (println (msg/t :cache/saved {:count (count files) :path path})))
+        (catch Exception e
+          (binding [*out* *err*]
+            (println (msg/t :cache/save-failed {:error (ex-message e)}))))))))
 
 (defn flush-misses!
   "Write accumulated cache misses to context-misses.edn in artifact-dir."
@@ -213,10 +262,33 @@
   [path]
   (get-in @cache-state [:files path]))
 
+(defn- file-mtime
+  "Last-modified epoch-ms of the resolved source file, or nil if absent."
+  [path]
+  (let [f (io/file (resolve-source-path path))]
+    (when (.exists f)
+      (.lastModified f))))
+
 (defn- cache-put!
-  "Store content in the cache for a path."
+  "Store content in the cache for a path, stamping the file's current mtime so
+   `cache-stale?` can later detect on-disk changes (write-invalidation)."
   [path content]
-  (swap! cache-state assoc-in [:files path] content))
+  (swap! cache-state #(-> %
+                          (assoc-in [:files path] content)
+                          (assoc-in [:mtimes path] (file-mtime path)))))
+
+(defn- cache-stale?
+  "True only when the cached entry can be PROVEN out of date: we recorded an
+   mtime for it, the file still exists, and it was modified after we cached.
+   When there's no recorded mtime or no on-disk file, staleness cannot be
+   proven, so the cached content is trusted (preserves orchestrator-seeded /
+   pre-pop entries and virtual paths). Every entry cached via `cache-put!`
+   carries an mtime, so read-after-write — an agent writing a file it earlier
+   read through the cache — is correctly detected and re-read."
+  [path]
+  (let [cached (get-in @cache-state [:mtimes path])
+        disk   (file-mtime path)]
+    (boolean (and cached disk (> disk cached)))))
 
 (defn- cached-files
   "Return the current files map from the cache."
@@ -227,16 +299,22 @@
 ;; Read-through cache: resolve content from cache or filesystem
 
 (defn- read-through
-  "Resolve file content: cache hit returns instantly, miss reads from disk,
-   caches the content, and records the miss. Returns content string or nil."
+  "Resolve file content. Fresh cache hit returns instantly. A miss — or a
+   cached entry whose file changed on disk since it was cached — reads from
+   disk, re-caches (with the new mtime), and returns the current content.
+   Records a miss only on a GENUINE miss (never cached), not on a
+   staleness-driven refresh. Returns content string or nil."
   [path]
-  (or (cache-get path)
+  (let [cached (cache-get path)]
+    (if (and cached (not (cache-stale? path)))
+      cached
       (try
         (let [content (slurp (resolve-source-path path))]
           (cache-put! path content)
-          (record-miss! "context_read" {:path path} (estimate-tokens content))
+          (when (nil? cached)
+            (record-miss! "context_read" {:path path} (estimate-tokens content)))
           content)
-        (catch Exception _ nil))))
+        (catch Exception _ nil)))))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; MCP response helpers

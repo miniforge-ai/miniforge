@@ -137,4 +137,7 @@
           (process-line line)
           (recur))))
     (finally
-      (context-cache/flush-misses! artifact-dir))))
+      (context-cache/flush-misses! artifact-dir)
+      ;; Persist the accumulated cache (incl. read-through additions) to the
+      ;; worktree so the next phase loads it — cross-phase write-through.
+      (context-cache/save-cache!))))

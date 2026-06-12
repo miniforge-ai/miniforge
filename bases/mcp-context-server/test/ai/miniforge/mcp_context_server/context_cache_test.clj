@@ -275,3 +275,53 @@
       (fn [dir]
         (cache/flush-misses! dir)
         (is (not (.exists (io/file (str dir "/context-misses.edn")))))))))
+
+;------------------------------------------------------------------------------ Write-invalidation + cross-phase persistence (Fable #4)
+
+(defn- read-text [result]
+  (get-in result [:content 0 :text]))
+
+(deftest read-through-invalidates-on-disk-change-test
+  (testing "a cached read is re-read when the file changes on disk — no stale
+            content after a write (the safety guard for forcing write-heavy
+            agents onto context_read, and for cross-phase persistence)"
+    (with-temp-dir
+      (fn [dir]
+        (let [f (io/file dir "src/a.clj")]
+          (io/make-parents f)
+          (spit f "V1")
+          (cache/load-cache! dir dir)
+          (is (= "V1" (read-text (cache/handle-context-read {"path" "src/a.clj"})))
+              "first read caches V1")
+          (spit f "V2")
+          (is (.setLastModified f (+ (.lastModified f) 10000))
+              "precondition: filesystem must honor setLastModified for this test")
+          (is (= "V2" (read-text (cache/handle-context-read {"path" "src/a.clj"})))
+              "second read returns fresh V2, not the stale cached V1"))))))
+
+(deftest save-cache-persists-across-phases-test
+  (testing "save-cache! writes the accumulated cache to <source-root>/.miniforge,
+            and a fresh load (next phase) picks it up"
+    (with-temp-dir
+      (fn [dir]
+        (let [f (io/file dir "src/b.clj")]
+          (io/make-parents f)
+          (spit f "BBB")
+          (cache/load-cache! dir dir)
+          (cache/handle-context-read {"path" "src/b.clj"})
+          (cache/save-cache!)
+          (is (.exists (io/file dir ".miniforge/context-cache.edn"))
+              "persistent cache file written under .miniforge")
+          ;; Simulate the next phase: new process state, same worktree.
+          (cache/reset-state!)
+          (cache/load-cache! (str dir "/no-prepop") dir)
+          (is (= "BBB" (get-in @cache/cache-state [:files "src/b.clj"]))
+              "the earlier phase's read is present in the next phase's cache")
+          (is (contains? (:mtimes @cache/cache-state) "src/b.clj")
+              "its mtime is restored so staleness is still detectable"))))))
+
+(deftest save-cache-noop-without-source-root-test
+  (testing "save-cache! is a safe no-op when there's no source-root"
+    (cache/reset-state!)
+    (swap! cache/cache-state assoc :files {"x" "y"})
+    (is (nil? (cache/save-cache!)) "no throw, nothing to persist without a worktree")))
