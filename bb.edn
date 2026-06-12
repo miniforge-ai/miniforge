@@ -162,6 +162,19 @@
    :task (test-runner/precommit-smoke)}
 
   ;; ──────────────────────────────────────────────────────────────────────────
+  ;; Cross-language contract fixtures
+  ;; ──────────────────────────────────────────────────────────────────────────
+
+  fixtures:supervisory
+  {:doc  "Regenerate the supervisory golden fixtures (contracts/supervisory-entities/golden) consumed by miniforge-control. Run after any supervisory entity schema change, commit the diff, re-vendor downstream."
+   :task (let [exit (run-clojure-stream!
+                     "-X:dev"
+                     "ai.miniforge.supervisory-state.interface/write-golden-fixtures!"
+                     ":out-dir" "\"contracts/supervisory-entities/golden\"")]
+           (when-not (zero? exit)
+             (System/exit exit)))}
+
+  ;; ──────────────────────────────────────────────────────────────────────────
   ;; Pre-commit
   ;; ──────────────────────────────────────────────────────────────────────────
 

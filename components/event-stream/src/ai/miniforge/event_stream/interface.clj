@@ -116,6 +116,16 @@
    ~/.miniforge/events; (base-dir workflow-id)."
   sinks/workflow-dir)
 
+(def serialize-event
+  "Serialize an event map to the canonical Transit-JSON wire string —
+   the exact encoding the file sink writes to disk (verbose mode: no
+   cache codes; UUIDs/instants as `~u...`/`~t...` tag-strings the Rust
+   consumer strips directly). Exposed for contract tooling: the
+   supervisory golden-fixture generator serializes through this fn so
+   vendored fixtures cannot drift from the production byte path.
+   Pure: no IO."
+  sinks/event->transit-json)
+
 (def digest-content
   "Produce a bounded, reproducible digest map from arbitrary content
    (string, byte array, or any value coerced via str). Returns

@@ -26,7 +26,28 @@
    dashboard."
   (:require
    [ai.miniforge.supervisory-state.core :as core]
+   [ai.miniforge.supervisory-state.golden-fixtures :as golden-fixtures]
    [ai.miniforge.supervisory-state.schema :as schema]))
+
+;------------------------------------------------------------------------------ Layer 0
+;; Contract version + golden fixtures
+
+(def schema-version
+  "Version of the supervisory entity contract, stamped as
+   `:supervisory/schema-version` on every supervisory snapshot event
+   (N3 §3.19, including `:supervisory/policy-evaluated` and
+   `:supervisory/attention-derived`). Bump rules live on
+   `schema/schema-version`."
+  schema/schema-version)
+
+(def write-golden-fixtures!
+  "Write the canonical golden fixtures — one pinned, schema-validated
+   `:supervisory/*-upserted` event per entity family, serialized through
+   the production transit encoder — plus `manifest.edn` into `:out-dir`.
+   Consumed (vendored) by the miniforge-control supervisory-entities
+   crate as the cross-language contract test corpus. `clojure -X`
+   compatible; see the `fixtures:supervisory` bb task."
+  golden-fixtures/write-golden-fixtures!)
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Schemas (re-exports)

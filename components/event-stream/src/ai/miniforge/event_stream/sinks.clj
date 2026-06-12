@@ -70,18 +70,26 @@
            (ZonedDateTime/now ZoneOffset/UTC)))
 
 (def ^:private instant-write-handler
-  "Transit write handler for java.time.Instant — converts to java.util.Date
-   which Transit handles natively as ~#inst."
+  "Transit write handler for java.time.Instant — writes the instant's
+   RFC-3339 string under tag `t`, surfacing as a `~t...` tag-string in
+   verbose Transit JSON (same shape Transit gives java.util.Date in
+   verbose mode)."
   (transit/write-handler
    (constantly "t")
    (fn [^Instant v] (str v))))
 
-(defn- write-transit-json
+(defn event->transit-json
   "Serialize `event` to a Transit-JSON string using the verbose writer.
-   Verbose mode ensures UUIDs appear as {\"~#uuid\" \"...\"} and instants
-   as {\"~#inst\" \"...\"} rather than compact ~u and ~m tag-strings,
-   so the Rust parser can decode them without millisecond arithmetic.
-   Custom handler for java.time.Instant (not supported by Transit defaults)."
+   Verbose mode disables transit's cache codes (repeated keywords stay
+   literal, never `^0` references) and renders instants as RFC-3339
+   `~t...` tag-strings instead of compact `~m` millisecond strings, so
+   the Rust parser can decode them without millisecond arithmetic.
+   UUIDs render as `~u...` tag-strings. Custom handler for
+   java.time.Instant (not supported by Transit defaults).
+
+   Public: this is the canonical wire encoding for every event the file
+   sink persists. Contract tooling (supervisory golden fixtures) calls it
+   directly so vendored fixtures share the exact byte path with production."
   [event]
   (let [out (ByteArrayOutputStream.)
         writer (transit/writer out :json-verbose
@@ -277,7 +285,10 @@
                         (event-file-path base-dir workflow-id event)
                         (operator-event-file-path base-dir event))]
         (ensure-parent-dir! file-path)
-        (spit file-path (write-transit-json event)))
+        ;; Explicit UTF-8: payload strings can carry non-ASCII and these
+        ;; files are a cross-language contract surface — platform default
+        ;; encoding must never decide the on-disk bytes.
+        (spit file-path (event->transit-json event) :encoding "UTF-8"))
       (catch Exception e
         ;; Log to stderr so failures are visible without breaking the event stream
         (binding [*out* *err*]
