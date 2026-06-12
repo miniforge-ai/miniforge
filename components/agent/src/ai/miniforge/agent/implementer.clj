@@ -621,6 +621,21 @@
       (io/make-parents f)
       (spit f session-id))))
 
+(def ^:private implementer-disallowed-tools
+  "Native read/search tools the implementer MUST NOT call — forces it onto the
+   MCP context cache (context_read/context_grep/context_glob), the same
+   mechanism the planner and tester use. The cache is read-through +
+   write-through (a miss reads from source-root, caches the content, records
+   the miss), so context_read serves any file, not just the pre-populated set,
+   and re-reads within the session hit.
+
+   Write/Edit/MultiEdit stay allowed (the implementer's whole job) and so does
+   Bash — the implementer may legitimately need a shell for build/git steps.
+   That leaves a `cat`/`rg`-via-Bash cache-bypass open; if dogfood shows the
+   implementer evading the cache through the shell, add \"Bash\" here (the
+   planner disallows it for exactly that reason)."
+  ["Read" "Grep" "Glob" "LS" "Agent"])
+
 (defn- invoke-implementer-session
   "Session body for the implementer: cache files, build mcp-opts, call LLM."
   [session llm-client user-prompt effective-system-prompt config context on-chunk
@@ -629,10 +644,12 @@
     (let [files-map (into {} (map (fn [f] [(:path f) (:content f)])
                                   existing-files))]
       (artifact-session/write-context-cache-for-session! session files-map)))
+  (artifact-session/write-cursor-permissions-for-session! session implementer-disallowed-tools)
   (let [budget-usd (budget/resolve-cost-budget-usd :implementer config context)
         max-turns (get @implementer-prompt-data :prompt/max-turns 10)
         resume-id (read-session-checkpoint working-dir)
         mcp-opts (cond-> (artifact-session/session->mcp-opts session budget-usd max-turns)
+                   true        (assoc :disallowed-tools implementer-disallowed-tools)
                    working-dir (assoc :workdir working-dir)
                    resume-id   (assoc :resume resume-id))
         result (if on-chunk
@@ -747,12 +764,15 @@
               :retry-prompt     (submission-retry-prompt (task->text input)
                                                          (:content normalized))
               :mcp-opts-fn      (fn [session]
+                                  (artifact-session/write-cursor-permissions-for-session!
+                                   session implementer-disallowed-tools)
                                   (let [budget-usd      (budget/resolve-cost-budget-usd
                                                          :implementer config context)
                                         retry-max-turns (get @implementer-prompt-data
                                                              :prompt/submission-retry-max-turns 6)]
                                     (cond-> (artifact-session/session->mcp-opts
                                              session budget-usd retry-max-turns)
+                                      true        (assoc :disallowed-tools implementer-disallowed-tools)
                                       working-dir (assoc :workdir working-dir))))})
         recovered (normalize-implementer-result raw context working-dir)]
     (when (or (:structured-artifact recovered)
