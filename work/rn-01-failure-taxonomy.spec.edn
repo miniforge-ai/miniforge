@@ -131,4 +131,4 @@
    :verification "Unrecognized error classified as unknown, not nil"}]
 
  :estimated-effort "1-2 days"
- :workflow/type :simple}
+ :workflow/type :canonical-sdlc}
