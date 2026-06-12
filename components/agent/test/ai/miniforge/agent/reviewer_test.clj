@@ -901,3 +901,24 @@
         (is (= 1 (count out))
             "the adjacent-file blocker is preserved as an advisory observation")
         (is (= "adjacent-file blocker" (:description (first out))))))))
+
+;; Tool-disallow-list — the reviewer is forced onto the MCP context cache and
+;; blocked from all mutation (Fable #4 context side, reviewer rewire).
+
+(deftest reviewer-disallowed-tools-contents-test
+  (testing "names the native read/search tools (forced onto context_*)"
+    (let [dt @#'reviewer/reviewer-disallowed-tools]
+      (doseq [t ["Read" "Grep" "Glob" "LS" "Agent"]]
+        (is (some #{t} dt) (str "expected " t " in disallowed-tools")))))
+
+  (testing "blocks ALL mutation — the reviewer inspects, never writes"
+    (let [dt @#'reviewer/reviewer-disallowed-tools]
+      (doseq [t ["Write" "Edit" "MultiEdit" "Bash"]]
+        (is (some #{t} dt) (str t " must be disallowed for a read-only reviewer")))))
+
+  (testing "is exactly the native tool set — the MCP read tools are allowlisted
+            by their prefixed wire names (e.g. mcp__context__context_read) and
+            are never in this native disallow-list, so reads route through the
+            cache. Pinned so any change is deliberate."
+    (is (= #{"Read" "Grep" "Glob" "LS" "Agent" "Bash" "Write" "Edit" "MultiEdit"}
+           (set @#'reviewer/reviewer-disallowed-tools)))))
