@@ -588,6 +588,7 @@
                  "components/tool/resources"
                  "components/artifact/src"
                  "components/artifact/resources"
+                 "components/workspace/src"
                  "components/agent/src"
                  "components/agent/resources"
                  "components/task/src"
