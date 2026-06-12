@@ -51,7 +51,7 @@
   [dir]
   (into {}
         (for [^java.io.File f (or (.listFiles (io/file dir)) [])]
-          [(.getName f) (slurp f)])))
+          [(.getName f) (slurp f :encoding "UTF-8")])))
 
 (def ^:private max-workspace-walk-hops
   "Upper bound on parent-directory hops when locating workspace.edn —
@@ -103,7 +103,8 @@
     (golden-fixtures/write-golden-fixtures! {:out-dir (.getPath dir)})
     (doseq [[family entity-schema] family->schema]
       (testing (str family)
-        (let [event (read-transit (slurp (io/file dir (str (name family) ".transit.json"))))]
+        (let [event (read-transit (slurp (io/file dir (str (name family) ".transit.json"))
+                                         :encoding "UTF-8"))]
           (is (= schema/schema-version (:supervisory/schema-version event))
               "every fixture event carries the contract version")
           (is (some? (:event/id event)))

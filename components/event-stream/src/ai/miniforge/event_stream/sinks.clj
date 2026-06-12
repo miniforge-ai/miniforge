@@ -70,8 +70,10 @@
            (ZonedDateTime/now ZoneOffset/UTC)))
 
 (def ^:private instant-write-handler
-  "Transit write handler for java.time.Instant — converts to java.util.Date
-   which Transit handles natively as ~#inst."
+  "Transit write handler for java.time.Instant — writes the instant's
+   RFC-3339 string under tag `t`, surfacing as a `~t...` tag-string in
+   verbose Transit JSON (same shape Transit gives java.util.Date in
+   verbose mode)."
   (transit/write-handler
    (constantly "t")
    (fn [^Instant v] (str v))))
@@ -283,7 +285,10 @@
                         (event-file-path base-dir workflow-id event)
                         (operator-event-file-path base-dir event))]
         (ensure-parent-dir! file-path)
-        (spit file-path (event->transit-json event)))
+        ;; Explicit UTF-8: payload strings can carry non-ASCII and these
+        ;; files are a cross-language contract surface — platform default
+        ;; encoding must never decide the on-disk bytes.
+        (spit file-path (event->transit-json event) :encoding "UTF-8"))
       (catch Exception e
         ;; Log to stderr so failures are visible without breaking the event stream
         (binding [*out* *err*]

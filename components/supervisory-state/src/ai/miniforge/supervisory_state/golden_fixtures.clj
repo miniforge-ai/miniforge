@@ -58,8 +58,9 @@
 
 (def ^:private envelope-id-slot-offset
   "golden-uuid slot offset for envelope event ids. Entity ids occupy
-   slots 1-9; envelope event ids occupy 101-109, so no fixture's
-   `:event/id` can collide with an entity id."
+   slots 1-9; envelope event ids occupy 100-108 (offset + 0-based
+   family index), so no fixture's `:event/id` can collide with an
+   entity id."
   100)
 
 (def ^:private pinned-sequence-number
@@ -287,16 +288,20 @@
          :event/sequence-number pinned-sequence-number))
 
 (defn golden-events
-  "Build the pinned upsert event for every family. Validates each
-   entity against its schema first — fails closed on drift."
+  "Build the pinned upsert event for every family, as a fully realized
+   vector — callers traverse it repeatedly, and the constructors touch
+   stream state (sequence numbering), so laziness would mean silent
+   recomputation. Validates each entity against its schema first —
+   fails closed on drift."
   []
   (let [stream (es/create-event-stream {:sinks []})]
-    (map-indexed
-     (fn [n {:keys [family ctor schema entity]}]
-       (validate! family schema entity)
-       {:family family
-        :event (pin-envelope (ctor stream entity) n)})
-     families)))
+    (into []
+          (map-indexed
+           (fn [n {:keys [family ctor schema entity]}]
+             (validate! family schema entity)
+             {:family family
+              :event (pin-envelope (ctor stream entity) n)}))
+          families)))
 
 ;------------------------------------------------------------------------------ Layer 4
 ;; Disk layout — one file per family + a manifest for consumers
@@ -326,10 +331,12 @@
     (let [events (golden-events)]
       (doseq [{:keys [family event]} events]
         (spit (io/file dir (str (name family) ".transit.json"))
-              (es/serialize-event event)))
+              (es/serialize-event event)
+              :encoding "UTF-8"))
       (spit (io/file dir "manifest.edn")
             (pr-str {:supervisory/schema-version schema/schema-version
-                     :fixture/families (mapv :family events)}))
+                     :fixture/families (mapv :family events)})
+            :encoding "UTF-8")
       {:out-dir (.getPath dir)
        :schema-version schema/schema-version
        :families (mapv :family events)})))
