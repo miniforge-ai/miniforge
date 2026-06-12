@@ -195,25 +195,9 @@
         (binding [*out* *err*]
           (println (msg/t :cache/misses-written {:count (count misses) :path path})))))))
 
-(defn- artifact-dir
-  []
-  (:artifact-dir @cache-state))
-
-(defn handle-submit
-  "Persist a structured artifact payload to artifact.edn.
-
-   Params arrive after the tool registry's `:param-aliases` rewrite
-   in `tools/handle-tool-call`, so callers see EDN-ready keyword keys
-   (e.g. `:code/summary`, `:code/tests-needed?`)."
-  [params]
-  (let [dir (artifact-dir)]
-    (when (str/blank? dir)
-      (throw (ex-info "artifact-dir is not configured" {:code -32603})))
-    (let [path (str dir "/artifact.edn")]
-      (io/make-parents path)
-      (spit path (pr-str params))
-      {:content [{:type "text"
-                  :text (str "Artifact submitted to " path)}]})))
+;; `handle-submit` (the artifact.edn metadata channel) removed: the artifact is
+;; the worktree/container diff (promotion); the curator derives the summary.
+;; Models ignored the opt-in submit tool anyway. See artifact_session/mcp-tools.
 
 (defn- record-miss!
   "Record a cache miss for meta-loop learning."

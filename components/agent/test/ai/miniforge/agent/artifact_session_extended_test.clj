@@ -285,8 +285,9 @@
   (testing "context-server MCP tools are present"
     (let [mcp-entries (filter map? session/mcp-tools)]
       (is (every? #(= :context (:mcp/server %)) mcp-entries))
-      (is (= #{:context_read :context_grep :context_glob :submit}
-             (into #{} (map :mcp/tool) mcp-entries)))))
+      (is (= #{:context_read :context_grep :context_glob}
+             (into #{} (map :mcp/tool) mcp-entries))
+          "submit removed — the artifact is the worktree/container diff")))
 
   (testing "native Write is auto-approved — plan.edn submission path"
     ;; Iter 15 dogfood regression — Write wasn't in --allowedTools,

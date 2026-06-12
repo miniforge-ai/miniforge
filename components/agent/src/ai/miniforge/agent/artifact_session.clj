@@ -491,10 +491,14 @@
    iter discovered Write worked while Edit did not. Both issues trace
    back to keeping the structured form honest and adapters translating
    at the CLI boundary."
+  ;; No `:submit` — the artifact is the worktree/container diff (promotion),
+  ;; the definitive channel. Models trained to their native tools ignore an
+  ;; opt-in submit tool anyway (84:0 in dogfood), and a submit-without-files
+  ;; turn is exactly the empty-disk failure we want to eliminate. Files are
+  ;; the def; the curator derives the summary from the diff.
   [{:mcp/server :context :mcp/tool :context_read}
    {:mcp/server :context :mcp/tool :context_grep}
    {:mcp/server :context :mcp/tool :context_glob}
-   {:mcp/server :context :mcp/tool :submit}
    ;; Native write tools: implementer needs all three patch shapes.
    ;; `Write` for full-file rewrites (planner's plan.edn, implementer
    ;; new files, releaser PR drafts). `Edit` for single-region patches.
