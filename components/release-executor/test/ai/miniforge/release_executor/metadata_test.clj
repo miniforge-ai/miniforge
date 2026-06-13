@@ -73,6 +73,34 @@
       (is (str/includes? body "✅ tests"))
       (is (str/includes? body "✅ security")))))
 
+(deftest format-known-issues-renders-warnings-test
+  (testing "format-known-issues renders a markdown list with file:line + description"
+    (let [out (metadata/format-known-issues
+               [{:severity :warning :file "src/a.clj" :line 12 :description "magic number"}
+                {:severity :warning :description "missing docstring"}])]
+      (is (str/includes? out "Known issues"))
+      (is (str/includes? out "2 unresolved warning"))
+      (is (str/includes? out "`src/a.clj:12` — magic number"))
+      (is (str/includes? out "missing docstring"))))
+  (testing "nil/empty warnings → nil (no section)"
+    (is (nil? (metadata/format-known-issues [])))
+    (is (nil? (metadata/format-known-issues nil)))))
+
+(deftest fallback-release-metadata-with-unresolved-warnings-test
+  (testing "an accept-with-warnings review surfaces the warnings as known-issues
+            in the PR body, even without a :review/summary"
+    (let [review-artifact {:review/decision :accept-with-warnings
+                           :review/warnings [{:severity :warning :file "src/a.clj" :line 7
+                                              :description "prefer named constant"}]}
+          result (metadata/fallback-release-metadata
+                  "Add feature"
+                  [{:code/files [{:path "src/a.clj" :action :modify}]}]
+                  {:review-artifacts [review-artifact]})
+          body (:release/pr-body result)]
+      (is (str/includes? body "Known issues"))
+      (is (str/includes? body "prefer named constant"))
+      (is (str/includes? body "**Decision**: accept-with-warnings")))))
+
 (deftest fallback-release-metadata-with-failed-gates
   (testing "fallback metadata shows failed gate status correctly"
     (let [review-artifact {:review/id (random-uuid)

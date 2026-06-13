@@ -232,13 +232,26 @@
                                               :code/summary   (get impl-result :summary
                                                                    (messages/t :release/changes-description))
                                               :environment-id (:environment-id impl-result)}}]
+          ;; Carry the review phase's unresolved non-blocking warnings into the
+          ;; release as a :review artifact, so an :accept-with-warnings PR opens
+          ;; with those warnings recorded as known-issues (release-executor's
+          ;; PR-body renderer reads :review-typed artifacts). Pass-through only:
+          ;; presentation lives in the renderer. Clean reviews carry no warnings
+          ;; → no :review artifact → no change to the happy-path PR body.
+          review-output  (get-in ctx [:execution/phase-results :review :result :output])
+          warnings       (get review-output :review/warnings [])
+          review-artifacts (when (seq warnings)
+                             [{:artifact/type    :review
+                               :artifact/content {:review/decision (:review/decision review-output)
+                                                  :review/summary  (:review/summary review-output)
+                                                  :review/warnings (vec warnings)}}])
           input          (get-in ctx [:execution/input])]
       {:workflow/id       (or (get-in ctx [:execution/id]) (random-uuid))
        :workflow/phase    :release
        :workflow/spec     {:spec/description (or (:description input)
                                                  (:title input)
                                                  (messages/t :default/task-description))}
-       :workflow/artifacts code-artifacts})))
+       :workflow/artifacts (into code-artifacts review-artifacts)})))
 
 (defn- resolve-github-token
   "Resolve GitHub token for capsule PR operations.
