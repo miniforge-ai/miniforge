@@ -421,8 +421,12 @@
           :release-meta {:release/pr-title "feat: test"
                          :release/pr-description "Short summary"
                          :release/pr-body "# Rich Body\n\n## Summary\nDetailed"}})
-        (is (= "# Rich Body\n\n## Summary\nDetailed"
-               (:body @seen-payload)))))))
+        ;; Assert the rich :release/pr-body is used (not the short description).
+        ;; with-provenance prepends a YAML frontmatter block, so match on
+        ;; inclusion rather than equality — the frontmatter is orthogonal here.
+        (is (clojure.string/includes? (:body @seen-payload)
+                                      "# Rich Body\n\n## Summary\nDetailed"))
+        (is (not (clojure.string/includes? (:body @seen-payload) "Short summary")))))))
 
 ;; ============================================================================
 ;; step-build-artifact

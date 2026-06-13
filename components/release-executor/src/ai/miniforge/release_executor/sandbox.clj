@@ -27,6 +27,7 @@
    dag/executor-execute!, never through host-side shell/sh."
   (:require
    [ai.miniforge.dag-executor.interface :as dag]
+   [ai.miniforge.release-executor.messages :as msg]
    [ai.miniforge.release-executor.result :as result]
    [clojure.string :as str]))
 
@@ -247,10 +248,47 @@
              result))
          result)))))
 
+(defn- parse-pr-ref
+  "Parse a gh PR URL into {:pr-url :pr-number}, or nil when the output carries
+   no /pull/<n> reference (so a phantom success can be told from a real PR)."
+  [output]
+  (let [url (str/trim (or output ""))]
+    (when-let [match (re-find #"/pull/(\d+)" url)]
+      {:pr-url url :pr-number (parse-long (second match))})))
+
+(defn- pr-already-exists?
+  "True when a gh error indicates a PR already exists for the current branch."
+  [error]
+  (boolean (some-> error str/lower-case (str/includes? "already exists"))))
+
+(defn- reuse-existing-pr!
+  "Resolve the PR already open for the current branch via gh pr view, so a
+   release retry reuses it instead of opening a duplicate. Falls back to a
+   failure carrying the original create error when it can't be resolved."
+  [executor env-id exec-opts _create-error]
+  (let [r (exec! executor env-id "gh pr view --json url --jq '.url'" exec-opts)]
+    (if-let [pr (and (result/succeeded? r) (parse-pr-ref (:output r "")))]
+      (result/shell-success pr)
+      ;; Surface the actual gh pr view resolution failure (its stderr, or the
+      ;; unparseable stdout when it exited 0 without a URL) — not the original
+      ;; "already exists" create error — so retries are debuggable.
+      (result/shell-failure (msg/t :pr/reuse-unresolved
+                                   {:error (or (not-empty (:error r))
+                                               (not-empty (str/trim (:output r "")))
+                                               (msg/t :pr/reuse-no-url))})
+                            {:pr-url nil :pr-number nil}))))
+
 (defn create-pr!
   "Create a pull request using gh CLI inside the sandbox container.
    Optional exec-opts supports :env for GH_TOKEN injection.
-   Returns {:success? bool :pr-number int :pr-url string :error string}"
+   Returns {:success? bool :pr-number int :pr-url string :error string}.
+
+   Two robustness guarantees beyond the bare gh call:
+   - A `gh pr create` that exits 0 but prints no PR URL is a FAILURE, not a
+     phantom success — release must never ship a PR doc claiming a PR it
+     never opened.
+   - A branch that already has an open PR (retry/resume) reuses that PR
+     rather than opening a duplicate."
   ([executor env-id pr-opts] (create-pr! executor env-id pr-opts {}))
   ([executor env-id {:keys [title body base-branch]} exec-opts]
    (let [base (or base-branch "main")
@@ -261,11 +299,18 @@
                   " --body '" escaped-body "'"
                   " --base " base)
          r (exec! executor env-id cmd exec-opts)]
-     (if (result/succeeded? r)
-       (let [pr-url (str/trim (:output r ""))
-             pr-num (when-let [match (re-find #"/pull/(\d+)" pr-url)]
-                      (parse-long (second match)))]
-         (result/shell-success {:pr-url pr-url :pr-number pr-num}))
+     (cond
+       (result/succeeded? r)
+       (if-let [pr (parse-pr-ref (:output r ""))]
+         (result/shell-success pr)
+         (result/shell-failure (msg/t :pr/create-unconfirmed
+                                      {:output (str/trim (:output r ""))})
+                               {:pr-url nil :pr-number nil}))
+
+       (pr-already-exists? (:error r))
+       (reuse-existing-pr! executor env-id exec-opts (:error r))
+
+       :else
        (result/shell-failure (:error r) {:pr-url nil :pr-number nil})))))
 
 (defn edit-pr-body!

@@ -276,6 +276,51 @@
       (is (not (:success? result)))
       (is (some? (:error result))))))
 
+(deftest create-pr-unconfirmed-is-failure-test
+  (testing "gh pr create exits 0 but prints no PR URL → FAILURE, not a phantom
+            success (the original 'doc but no PR' symptom)"
+    (let [[exec _cmds] (create-mock-executor
+                        :responses {"gh pr create" {:exit-code 0
+                                                    :stdout ""
+                                                    :stderr ""}})
+          result (sandbox/create-pr! exec "env-1"
+                                     {:title "PR" :body "" :base-branch "main"})]
+      (is (not (:success? result)) "unconfirmed PR must not report success")
+      (is (nil? (:pr-number result)))
+      (is (some? (:error result))))))
+
+(deftest create-pr-reuses-existing-pr-test
+  (testing "a branch that already has an open PR reuses it (no duplicate)"
+    (let [[exec cmds] (create-mock-executor
+                       :responses {"gh pr create"
+                                   {:exit-code 1 :stdout ""
+                                    :stderr "a pull request for branch \"feat/x\" already exists"}
+                                   "gh pr view"
+                                   {:exit-code 0
+                                    :stdout "https://github.com/org/repo/pull/7\n" :stderr ""}})
+          result (sandbox/create-pr! exec "env-1"
+                                     {:title "PR" :body "" :base-branch "main"})]
+      (is (:success? result) "existing PR is reused as success")
+      (is (= 7 (:pr-number result)))
+      (is (= "https://github.com/org/repo/pull/7" (:pr-url result)))
+      (is (some #(clojure.string/includes? % "gh pr view") @cmds)
+          "resolves the existing PR via gh pr view"))))
+
+(deftest create-pr-already-exists-but-unresolvable-fails-test
+  (testing "PR already exists but gh pr view can't resolve it → failure (no phantom)"
+    (let [[exec _cmds] (create-mock-executor
+                        :responses {"gh pr create"
+                                    {:exit-code 1 :stdout ""
+                                     :stderr "a pull request already exists"}
+                                    "gh pr view"
+                                    {:exit-code 1 :stdout "" :stderr "no pull requests found"}})
+          result (sandbox/create-pr! exec "env-1"
+                                     {:title "PR" :body "" :base-branch "main"})]
+      (is (not (:success? result)))
+      (is (nil? (:pr-number result)))
+      (is (clojure.string/includes? (:error result) "no pull requests found")
+          "error surfaces the gh pr view resolution failure, not the create error"))))
+
 ;; ============================================================================
 ;; write-and-stage-files! tests
 ;; ============================================================================

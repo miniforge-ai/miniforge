@@ -142,39 +142,53 @@
     (let [state (make-state {:pr-number nil})]
       (is (= state (core/step-update-pr-body state))))))
 
+(defn- degraded-body-state
+  "A pipeline state whose agent body is degraded (blank), so
+   step-update-pr-body fires and posts the fallback render."
+  [overrides]
+  (make-state (merge {:release-meta {:release/pr-title "feat: test"
+                                     :release/pr-description "## Summary\nChange"
+                                     :release/pr-body ""}}
+                     overrides)))
+
 (deftest step-update-pr-body-calls-edit-pr-body-test
-  (testing "step-update-pr-body calls sandbox/edit-pr-body! and returns state"
-    (let [called (atom false)]
+  (testing "with a DEGRADED agent body, step-update-pr-body posts the
+            fallback-rendered body via sandbox/edit-pr-body! and returns state"
+    (let [called (atom false)
+          seen-body (atom nil)]
       (with-redefs [sandbox/edit-pr-body!
                     (fn [_exec _env-id pr-number body _opts]
                       (reset! called true)
+                      (reset! seen-body body)
                       (is (= 42 pr-number))
-                      (is (= "## Summary\nChange" body))
                       {:success? true})]
-        (let [state (make-state {})
+        (let [state (degraded-body-state {})
               result (core/step-update-pr-body state)]
-          (is @called)
+          (is @called "edit-pr-body! fires only when the agent body is degraded")
+          (is (clojure.string/includes? @seen-body "## Summary")
+              "posts the structured fallback render, not the empty agent body")
           ;; step-update-pr-body returns state (not the edit result)
           (is (= (:pr-number state) (:pr-number result)))
           (is (not (contains? result :failure))))))))
 
-(deftest step-update-pr-body-prefers-generated-doc-content-test
-  (testing "generated PR doc content overrides the initial fallback body"
-    (let [seen-body (atom nil)]
+(deftest step-update-pr-body-skips-when-agent-body-present-test
+  (testing "a real agent :release/pr-body is NOT overwritten — the guard skips
+            edit-pr-body! (replaces the old :pr-doc-content-preference test; the
+            GitHub PR body and the committed docs file are separate surfaces)"
+    (let [called (atom false)]
       (with-redefs [sandbox/edit-pr-body!
-                    (fn [_exec _env-id _pr-number body _opts]
-                      (reset! seen-body body)
-                      {:success? true})]
-        (core/step-update-pr-body
-         (make-state {:pr-doc-content "# Rich Doc\n\n## Summary\nGenerated"}))
-        (is (= "# Rich Doc\n\n## Summary\nGenerated" @seen-body))))))
+                    (fn [& _args] (reset! called true) {:success? true})]
+        ;; make-state's default release-meta carries a real pr-body
+        (core/step-update-pr-body (make-state {}))
+        (is (not @called) "present agent body → step skips, body preserved")))))
 
 (deftest step-update-pr-body-survives-exception-test
   (testing "step-update-pr-body catches exceptions and returns state (non-fatal)"
     (with-redefs [sandbox/edit-pr-body!
                   (fn [& _args]
                     (throw (ex-info "Network error" {})))]
-      (let [state (make-state {})
+      ;; degraded body so the step actually reaches edit-pr-body! and the catch
+      (let [state (degraded-body-state {})
             result (core/step-update-pr-body state)]
         ;; Non-fatal — no :failure key
         (is (not (contains? result :failure)))))))
@@ -186,7 +200,7 @@
                     (fn [_exec _env-id _pr-number _body opts]
                       (reset! seen-opts opts)
                       {:success? true})]
-        (let [state (make-state {:github-token "my-token"})]
+        (let [state (degraded-body-state {:github-token "my-token"})]
           (core/step-update-pr-body state)
           (is (= {"GH_TOKEN" "my-token"} (:env @seen-opts))))))))
 
