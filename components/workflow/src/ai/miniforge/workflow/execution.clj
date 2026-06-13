@@ -142,7 +142,11 @@
           ;; map: the review gate got the code-under-review at :artifact instead
           ;; of the verdict at :output, so it rejected every approved review.
           artifact (response/phase-output phase-result)]
-      (if (and (seq gate-keywords) artifact)
+      ;; Fail closed: when gates are configured, run them even if the canonical
+      ;; artifact is nil. Skipping on nil would let a phase that omits its
+      ;; :output bypass validation entirely — the gate runner turns a nil
+      ;; artifact into a failed gate result (loud), which is what we want.
+      (if (seq gate-keywords)
         (let [gate-result (gate/check-gates gate-keywords artifact ctx)]
           (if (:passed? gate-result)
             phase-result

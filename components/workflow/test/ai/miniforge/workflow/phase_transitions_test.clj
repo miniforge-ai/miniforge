@@ -34,7 +34,9 @@
    [ai.miniforge.workflow.execution :as exec]
    [ai.miniforge.workflow.fsm :as workflow-fsm]
    ;; loaded for its eager guard/action registration (infra-retry guards)
-   [ai.miniforge.workflow.standard-guards-and-actions]))
+   [ai.miniforge.workflow.standard-guards-and-actions]
+   ;; loaded so the :review-approved gate is registered for the gate-validation tests
+   [ai.miniforge.gate.policy]))
 
 ;; Phase 4b removed `exec/redirect-target` and the
 ;; `determine-phase-event-failure-with-redirect-target` test (which
@@ -265,3 +267,23 @@
                               {:type :phase/fail :phase/verdict :stagnated})]
       (is (= :failed (:_state out)) "terminal work verdict → :failed immediately")
       (is (= 0 (get out :infra-retry-count 0)) "no infra retry consumed"))))
+
+;; -------------------------------------------------------------------------- apply-gate-validation (fail-closed)
+;;
+;; Gates validate the canonical phase :output ([:result :output]). When gates
+;; are configured they MUST run even if that output is absent — skipping on a
+;; nil artifact would let a phase bypass validation (fail-open). The gate
+;; runner turns a nil artifact into a failed gate result.
+
+(deftest apply-gate-validation-fails-closed-on-missing-output
+  (testing "gates configured + no canonical :output → phase fails (not skipped)"
+    (let [out (exec/apply-gate-validation {:config {:gates [:review-approved]}}
+                                          {:result {}} {})]
+      (is (= :failed (:phase/status out)))))
+  (testing "gates configured + approved verdict at the canonical location → passes"
+    (let [out (exec/apply-gate-validation {:config {:gates [:review-approved]}}
+                                          {:result {:output {:review/decision :approved}}} {})]
+      (is (not= :failed (:phase/status out)))))
+  (testing "no gates configured → unchanged (nothing to validate)"
+    (let [pr {:result {}}]
+      (is (= pr (exec/apply-gate-validation {:config {:gates []}} pr {}))))))
