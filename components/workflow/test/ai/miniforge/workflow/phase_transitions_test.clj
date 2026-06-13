@@ -279,7 +279,11 @@
   (testing "gates configured + no canonical :output → phase fails (not skipped)"
     (let [out (exec/apply-gate-validation {:config {:gates [:review-approved]}}
                                           {:result {}} {})]
-      (is (= :failed (:phase/status out)))))
+      (is (= :failed (:phase/status out)))
+      ;; The gate actually RAN on the nil artifact and emitted an error — proof
+      ;; the fail-closed branch engaged rather than the old fail-open skip
+      ;; (which returned the phase-result untouched, no :phase/gate-errors).
+      (is (seq (:phase/gate-errors out)))))
   (testing "gates configured + approved verdict → phase-result returned UNCHANGED
             (apply-gate-validation adds nothing when gates pass)"
     (let [pr  {:result {:output {:review/decision :approved}}}
