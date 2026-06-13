@@ -295,19 +295,26 @@
         (let [evt {:type :phase/fail :phase/verdict :exhausted}
               after (fsm/transition-execution machine at-review evt)]
           (is (= :failed (fsm/execution-status machine after)))))
-      (testing ":review/backend-timeout terminates straight to :failed
-                — companion to :implement/network-dropped, fires when the
-                reviewer LLM hit its adaptive timeout (stream-idle /
-                stagnation / hard-limit) with no real verdict produced.
-                Distinct from :exhausted (LLM HAD a verdict the gate
-                couldn't approve) and from :rejected (real defect)."
+      (testing ":review/backend-timeout is a TRANSIENT infra verdict — it
+                retries the review phase on its dedicated infra budget and
+                NEVER redirects into on-fail :implement (a dead provider
+                wouldn't recover via an implement cycle). Distinct from
+                :exhausted (LLM HAD a verdict the gate couldn't approve)
+                and :rejected (real defect), which are work-terminal."
         (let [evt {:type :phase/fail :phase/verdict :review/backend-timeout}
               after (fsm/transition-execution machine at-review evt)]
-          (is (= :failed (fsm/execution-status machine after))
-              "terminal verdict bypasses :on-fail :implement
-               — an infra timeout must not redirect into another
-               implement cycle that would just hit the same dead
-               provider on the next review pass")))
+          (is (= :review (fsm/current-phase-id machine after))
+              "infra verdict retries the SAME phase, not on-fail :implement")
+          (is (= 1 (get after :infra-retry-count 0))
+              "consumes the dedicated infra budget")
+          (is (= 0 (get after :redirect-count 0))
+              "the redirect/work budget is untouched"))
+        (testing "infra budget spent → terminal :failed (still never on-fail)"
+          (let [maxed (engine/update-context
+                       at-review assoc :infra-retry-count (defaults/max-infra-retries))
+                after (fsm/transition-execution
+                       machine maxed {:type :phase/fail :phase/verdict :review/backend-timeout})]
+            (is (= :failed (fsm/execution-status machine after))))))
       (testing ":phase/verdict :repair-requested follows on-fail to :implement"
         (let [evt {:type :phase/fail :phase/verdict :repair-requested}
               after (fsm/transition-execution machine at-review evt)]
@@ -329,11 +336,12 @@
 
 (deftest verify-phase-verdict-routes-fail-via-guarded-array-test
   (testing "Phase 3: verify phase now ALSO uses the guarded :phase/fail
-            array. :verify/timeout and :verify/rate-limited are terminal
-            verdicts that bypass on-fail :implement — fixes the
-            2026-05-28 dogfood bottleneck where verify timed out, looped
-            to implement, implementer wrote a recovery, verify timed out
-            again, repeat for hours."
+            array. :verify/timeout and :verify/rate-limited are TRANSIENT
+            infra verdicts — they retry the verify phase on a dedicated
+            infra budget, go terminal once it is spent, and never redirect
+            to on-fail :implement — fixes the 2026-05-28 dogfood bottleneck
+            where verify timed out, looped to implement, implementer wrote
+            a recovery, verify timed out again, repeat for hours."
     (let [workflow {:workflow/id :verify-verdict-test
                     :workflow/pipeline [{:phase :plan}
                                         {:phase :implement}
@@ -346,15 +354,26 @@
                          (#(fsm/transition-execution machine % :phase/succeed))
                          (#(fsm/transition-execution machine % :phase/succeed)))]
       (is (= :verify (fsm/current-phase-id machine at-verify)))
-      (testing ":verify/timeout terminates straight to :failed"
+      (testing ":verify/timeout is a TRANSIENT infra verdict — retries the
+                verify phase on its infra budget; never redirects to
+                on-fail :implement (retrying the implementer can't unblock
+                a hung test process)."
         (let [evt {:type :phase/fail :phase/verdict :verify/timeout}
               after (fsm/transition-execution machine at-verify evt)]
-          (is (= :failed (fsm/execution-status machine after))
-              "verify timeout MUST NOT redirect to implement — retrying
-               the implementer cannot unblock a hung test process")))
-      (testing ":verify/rate-limited terminates straight to :failed"
+          (is (= :verify (fsm/current-phase-id machine after))
+              "infra verdict retries the SAME phase, not on-fail :implement")
+          (is (= 1 (get after :infra-retry-count 0)) "consumes the infra budget")
+          (is (= 0 (get after :redirect-count 0)) "redirect budget untouched")))
+      (testing ":verify/rate-limited retries verify on the infra budget"
         (let [evt {:type :phase/fail :phase/verdict :verify/rate-limited}
               after (fsm/transition-execution machine at-verify evt)]
+          (is (= :verify (fsm/current-phase-id machine after)))
+          (is (= 1 (get after :infra-retry-count 0)))))
+      (testing "verify infra budget spent → terminal :failed (never on-fail)"
+        (let [maxed (engine/update-context
+                     at-verify assoc :infra-retry-count (defaults/max-infra-retries))
+              after (fsm/transition-execution
+                     machine maxed {:type :phase/fail :phase/verdict :verify/timeout})]
           (is (= :failed (fsm/execution-status machine after)))))
       (testing ":repair-requested follows on-fail to :implement (baseline)"
         (let [evt {:type :phase/fail :phase/verdict :repair-requested}
@@ -398,10 +417,12 @@
 
 (deftest implement-phase-verdict-routes-fail-via-guarded-array-test
   (testing "Phase 3c: implement joins the guarded :phase/fail array.
-            :implement/rate-limited, :implement/empty-diff, and
-            :implement/already-implemented-invalid are terminal —
-            FSM bypasses on-fail because retrying would hit the same
-            wall."
+            :implement/empty-diff and :implement/already-implemented-invalid
+            are work-terminal (retrying would hit the same wall).
+            :implement/rate-limited, :implement/network-dropped, and
+            :implement/backend-timeout are TRANSIENT infra verdicts — they
+            retry the implement phase on a dedicated infra budget, go
+            terminal once it is spent, and never redirect to on-fail."
     (let [workflow {:workflow/id :impl-verdict-test
                     :workflow/pipeline [{:phase :plan}
                                         {:phase :implement :on-fail :plan}
@@ -413,12 +434,16 @@
                             (fsm/start-execution machine)
                             (#(fsm/transition-execution machine % :phase/succeed)))]
       (is (= :implement (fsm/current-phase-id machine at-implement)))
-      (testing ":implement/rate-limited terminates straight to :failed"
+      (testing ":implement/rate-limited is a TRANSIENT infra verdict —
+                retries implement on its infra budget; never redirects to
+                on-fail :plan (provider quota won't change between attempts,
+                but the budget bounds the spin)."
         (let [evt {:type :phase/fail :phase/verdict :implement/rate-limited}
               after (fsm/transition-execution machine at-implement evt)]
-          (is (= :failed (fsm/execution-status machine after))
-              "implement rate-limit MUST NOT redirect — provider quota
-               won't change between attempts")))
+          (is (= :implement (fsm/current-phase-id machine after))
+              "infra verdict retries the SAME phase, not on-fail :plan")
+          (is (= 1 (get after :infra-retry-count 0)) "consumes the infra budget")
+          (is (= 0 (get after :redirect-count 0)) "redirect budget untouched")))
       (testing ":implement/empty-diff terminates straight to :failed"
         (let [evt {:type :phase/fail :phase/verdict :implement/empty-diff}
               after (fsm/transition-execution machine at-implement evt)]
@@ -429,28 +454,28 @@
                    :phase/verdict :implement/already-implemented-invalid}
               after (fsm/transition-execution machine at-implement evt)]
           (is (= :failed (fsm/execution-status machine after)))))
-      (testing ":implement/network-dropped terminates straight to :failed
-                (PR-C of network-resilience: iteration budget exhausted
-                retrying from checkpoint; another redirect would just
-                hit the same dead network on the next probe cycle)"
+      (testing ":implement/network-dropped is a TRANSIENT infra verdict —
+                retries implement on its infra budget before going
+                terminal; never redirects to on-fail :plan (the operator
+                surfaces for manual resume once connectivity is restored)."
         (let [evt {:type :phase/fail :phase/verdict :implement/network-dropped}
               after (fsm/transition-execution machine at-implement evt)]
-          (is (= :failed (fsm/execution-status machine after))
-              "implement network-drop after retry exhaustion MUST NOT
-               redirect — operator surfaces for manual resume once
-               connectivity is restored")))
-      (testing ":implement/backend-timeout terminates straight to :failed
-                (PR-C of phase-timeout stack: implementer LLM call
-                exhausted iteration budget retrying after consecutive
-                stream-idle / stagnation / hard-limit timeouts.
-                Companion to :review/backend-timeout — same shape,
-                applied to the implement phase)"
+          (is (= :implement (fsm/current-phase-id machine after)))
+          (is (= 1 (get after :infra-retry-count 0)))))
+      (testing ":implement/backend-timeout is a TRANSIENT infra verdict —
+                retries implement on its infra budget; companion to
+                :review/backend-timeout, same shape on the implement phase.
+                Never redirects to on-fail :plan."
         (let [evt {:type :phase/fail :phase/verdict :implement/backend-timeout}
               after (fsm/transition-execution machine at-implement evt)]
-          (is (= :failed (fsm/execution-status machine after))
-              "implement backend-timeout after retry exhaustion MUST
-               NOT redirect — retrying would just hit the same slow
-               provider on the next pass")))
+          (is (= :implement (fsm/current-phase-id machine after)))
+          (is (= 1 (get after :infra-retry-count 0)))))
+      (testing "implement infra budget spent → terminal :failed (never on-fail)"
+        (let [maxed (engine/update-context
+                     at-implement assoc :infra-retry-count (defaults/max-infra-retries))
+              after (fsm/transition-execution
+                     machine maxed {:type :phase/fail :phase/verdict :implement/backend-timeout})]
+          (is (= :failed (fsm/execution-status machine after)))))
       (testing ":repair-requested follows on-fail (here :plan) + counter"
         (let [evt {:type :phase/fail :phase/verdict :repair-requested}
               after (fsm/transition-execution machine at-implement evt)]
