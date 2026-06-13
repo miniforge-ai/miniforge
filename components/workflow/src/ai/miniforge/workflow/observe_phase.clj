@@ -134,9 +134,8 @@
   (let [dag-prs (get-in ctx [:execution/dag-pr-infos])]
     (cond
       (seq dag-prs) (vec dag-prs)
-      :else (when-let [pr-info (or (get-in ctx [:execution/phase-results :release
-                                                :result :output :workflow/pr-info])
-                                   (get-in ctx [:metrics :release :pr-info]))]
+      :else (when-let [pr-info (response/release-pr-info
+                                (get-in ctx [:execution/phase-results :release]))]
               [pr-info]))))
 
 (defn enter-observe

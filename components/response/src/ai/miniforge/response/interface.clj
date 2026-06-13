@@ -255,6 +255,11 @@
    :review/decision — no fossil fallbacks."
   access/review-decision)
 
+(def release-pr-info
+  "The release PR info, from the release phase-result's one canonical location
+   [:result :output :workflow/pr-info]."
+  access/release-pr-info)
+
 ;------------------------------------------------------------------------------ Layer 5
 ;; Anomaly utilities (keyword-based)
 
