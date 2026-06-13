@@ -415,7 +415,15 @@
         ;; Emit agent-completed telemetry event for release executor
         _ (phase/emit-agent-completed! ctx :release :releaser result)]
 
-    (phase/enter-context ctx :release :releaser gates budget start-time result)))))
+    (-> (phase/enter-context ctx :release :releaser gates budget start-time result)
+        ;; Single derived projection of the canonical [:result :output
+        ;; :workflow/pr-info] onto ctx-level :workflow/pr-info — the API surface
+        ;; several consumers read (runner_events completion event, CLI summary,
+        ;; evidence-bundle). Derived from the authority, not an independent
+        ;; write, so it can't drift. (The independent [:metrics :release
+        ;; :pr-info] write is what PR3 removes.)
+        (cond-> (phase/result-succeeded? result)
+          (assoc-in [:workflow/pr-info] (get-in (:output result) [:workflow/pr-info]))))))))
 
 (def ^:private verdicts
   "Phase 3b verdict tag set for release.

@@ -33,9 +33,9 @@
            (#'sut/resolve-pr-infos
             {:execution/phase-results
              {:release {:result {:output {:workflow/pr-info sample-pr}}}}}))))
-  (testing "single-PR: metrics fallback path"
-    (is (= [sample-pr]
-           (#'sut/resolve-pr-infos {:metrics {:release {:pr-info sample-pr}}}))))
+  (testing "the deprecated [:metrics :release :pr-info] fallback is NO LONGER read
+            (one canonical location — the release output)"
+    (is (nil? (#'sut/resolve-pr-infos {:metrics {:release {:pr-info sample-pr}}}))))
   (testing "REGRESSION (the #979 handoff bug): the old shallow [:release :pr-info] key is NOT read"
     (is (nil? (#'sut/resolve-pr-infos
                {:execution/phase-results {:release {:pr-info sample-pr}}}))))
