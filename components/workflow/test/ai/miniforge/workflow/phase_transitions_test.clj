@@ -280,10 +280,13 @@
     (let [out (exec/apply-gate-validation {:config {:gates [:review-approved]}}
                                           {:result {}} {})]
       (is (= :failed (:phase/status out)))))
-  (testing "gates configured + approved verdict at the canonical location → passes"
-    (let [out (exec/apply-gate-validation {:config {:gates [:review-approved]}}
-                                          {:result {:output {:review/decision :approved}}} {})]
-      (is (not= :failed (:phase/status out)))))
+  (testing "gates configured + approved verdict → phase-result returned UNCHANGED
+            (apply-gate-validation adds nothing when gates pass)"
+    (let [pr  {:result {:output {:review/decision :approved}}}
+          out (exec/apply-gate-validation {:config {:gates [:review-approved]}} pr {})]
+      (is (= pr out) "unchanged on pass")
+      (is (not (contains? out :phase/status)))
+      (is (not (contains? out :phase/gate-errors)))))
   (testing "no gates configured → unchanged (nothing to validate)"
     (let [pr {:result {}}]
       (is (= pr (exec/apply-gate-validation {:config {:gates []}} pr {}))))))
