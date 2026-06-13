@@ -67,7 +67,7 @@
 (deftest build-planner-task-threads-behavior-addendum-test
   (testing "build-planner-task computes and attaches :task/behavior-addendum"
     (let [stub-addendum "\n\n## Policy Rules — Required Behaviors\n\n1. Plan rule body."]
-      (with-redefs [phase/load-and-filter-behaviors
+      (with-redefs [phase/load-guidance-addendum
                     (fn [phase-kw _ctx]
                       (when (= :plan phase-kw) stub-addendum))
                     kb-helpers/inject-with-manifest
@@ -84,8 +84,8 @@
               "planner task must carry the phase-filtered addendum so create-planner can append it to the system prompt"))))))
 
 (deftest build-planner-task-omits-behavior-addendum-when-filter-returns-nil-test
-  (testing "no :task/behavior-addendum key when phase/load-and-filter-behaviors yields nil"
-    (with-redefs [phase/load-and-filter-behaviors (fn [_phase _ctx] nil)
+  (testing "no :task/behavior-addendum key when phase/load-guidance-addendum yields nil"
+    (with-redefs [phase/load-guidance-addendum (fn [_phase _ctx] nil)
                   kb-helpers/inject-with-manifest
                   (fn [_store _role _tags]
                     {:formatted nil :manifest nil})]
