@@ -5,6 +5,7 @@
    :regex "Codex cannot access session files.*permission denied"
    :vendor "Codex"
    :description "Codex session directory owned by root"
+   :failure/class :failure.class/configuration
    :failure/source :user-env
    :failure/vendor :codex
    :dependency/class :permission
@@ -20,6 +21,7 @@
    :regex "connection refused.*localhost:11434"
    :vendor "Ollama"
    :description "Ollama server not running"
+   :failure/class :failure.class/configuration
    :failure/source :user-env
    :failure/vendor :ollama
    :dependency/class :misconfiguration
@@ -35,6 +37,7 @@
    :regex "opencode.*(auth|credential|provider|login)|No provider found|not authenticated|API key.*missing"
    :vendor "OpenCode"
    :description "OpenCode provider credentials missing or not configured"
+   :failure/class :failure.class/auth
    :failure/source :user-env
    :failure/vendor :opencode
    :dependency/class :misconfiguration

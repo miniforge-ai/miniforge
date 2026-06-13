@@ -5,6 +5,7 @@
    :regex "(anthropic|claude).*(rate limit|429|too many requests)"
    :vendor "Anthropic"
    :description "Anthropic provider rate limit"
+   :failure/class :failure.class/rate-limit
    :failure/source :external-provider
    :failure/vendor :anthropic
    :dependency/class :rate-limit
@@ -26,6 +27,7 @@
    :regex "(?i)(anthropic|claude)[^\\n]{0,80}(\\b529\\b|overloaded_error|overloaded[^.]{0,40}(error|response|status))|(\\b529\\b|overloaded_error|overloaded[^.]{0,40}(error|response|status))[^\\n]{0,80}(anthropic|claude)"
    :vendor "Anthropic"
    :description "Anthropic capacity / overload (HTTP 529, overloaded_error)"
+   :failure/class :failure.class/rate-limit
    :failure/source :external-provider
    :failure/vendor :anthropic
    :dependency/class :rate-limit
@@ -35,6 +37,7 @@
    :regex "(openai|codex).*(rate limit|429|too many requests|rate_limit_exceeded|insufficient_quota|requests per minute|RPM exceeded|TPM exceeded)"
    :vendor "OpenAI"
    :description "OpenAI or Codex provider rate limit"
+   :failure/class :failure.class/rate-limit
    :failure/source :external-provider
    :failure/vendor :openai
    :dependency/class :rate-limit
@@ -47,6 +50,7 @@
    :regex "(?i)(openai|codex|chatgpt).{0,40}(overloaded|service unavailable|503|temporarily unavailable|try again later)"
    :vendor "OpenAI"
    :description "OpenAI capacity / overload (503, model is overloaded)"
+   :failure/class :failure.class/rate-limit
    :failure/source :external-provider
    :failure/vendor :openai
    :dependency/class :rate-limit
@@ -56,6 +60,7 @@
    :regex "GitHub API rate limit exceeded|GitHub.*(rate limit|429|too many requests)"
    :vendor "GitHub"
    :description "GitHub platform rate limit"
+   :failure/class :failure.class/rate-limit
    :failure/source :external-platform
    :failure/vendor :github
    :dependency/class :rate-limit
@@ -73,6 +78,7 @@
    :regex "(?i)\\brate.?limit\\b|API rate limit exceeded|rate limit exceeded|Rate limit reached|rate-limit error|\\b429\\b|Too Many Requests|too many requests|Quota exceeded|quota.?exceeded|You've hit your( rate)? limit|hit your limit|resets \\d|resets in \\d+"
    :vendor "External Service"
    :description "Provider or platform rate limit"
+   :failure/class :failure.class/rate-limit
    :failure/source :external-provider
    :dependency/class :rate-limit
    :dependency/retryability :retryable}
@@ -90,6 +96,7 @@
    :regex "(?i)(throttl(ed|ing)|back ?off|please (slow down|try again|retry)|try again (later|in \\d+)|is overloaded|at capacity|service capacity|usage limit reached|usage cap reached|please wait|too busy|exceeded your quota|temporarily (overloaded|throttled|throttling)|overloaded_error|\\b529 (overloaded|too many|capacity)\\b)"
    :vendor "External Service"
    :description "Free-text rate-limit / throttle / overload signal — vendor used prose, not a standard code"
+   :failure/class :failure.class/rate-limit
    :failure/source :external-provider
    :dependency/class :rate-limit
    :dependency/retryability :retryable}
@@ -98,6 +105,7 @@
    :regex "GitHub.*(401|403|authentication failed|bad credentials|forbidden)"
    :vendor "GitHub"
    :description "GitHub authentication failed"
+   :failure/class :failure.class/auth
    :failure/source :external-platform
    :failure/vendor :github
    :dependency/class :auth
@@ -125,6 +133,7 @@
    :regex "Kubernetes.*(401|403|forbidden|unauthorized|authentication failed)"
    :vendor "Kubernetes"
    :description "Kubernetes authentication failed"
+   :failure/class :failure.class/auth
    :failure/source :external-platform
    :failure/vendor :kubernetes
    :dependency/class :auth
@@ -143,6 +152,7 @@
    :regex "Codex account cannot use model|model .* unsupported|unsupported model|does not have access to model|model .* not available for your account"
    :vendor "Codex"
    :description "Codex or provider account limitation"
+   :failure/class :failure.class/auth
    :failure/source :external-provider
    :failure/vendor :codex
    :dependency/class :account-limitation
@@ -160,6 +170,7 @@
    :regex "Request timeout|timed out waiting for response|deadline exceeded"
    :vendor "External Service"
    :description "Provider request timeout"
+   :failure/class :failure.class/timeout
    :failure/source :external-provider
    :dependency/class :timeout
    :dependency/retryability :retryable}
