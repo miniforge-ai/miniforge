@@ -143,19 +143,47 @@
               (str header "\n" gate-lines)
               header)))))))
 
+(defn- warning-location
+  "Markdown `file:line` prefix for a review warning, or empty when absent."
+  [{:keys [file line]}]
+  (if file
+    (str "`" file (when line (str ":" line)) "` — ")
+    ""))
+
+(defn format-known-issues
+  "Render a vector of unresolved non-blocking review warnings as a markdown
+   known-issues list, or nil when there are none. Public so both the PR-body
+   renderer and the docs-file renderer present warnings identically."
+  [warnings]
+  (when (seq warnings)
+    (str (msg/t :pr/known-issues-header {:count (count warnings)})
+         (str/join "\n"
+                   (map (fn [w]
+                          (msg/t :pr/known-issue-item
+                                 {:item (str (warning-location w) (:description w))}))
+                        warnings)))))
+
 (defn- format-review-summary
   "Extract and format the review summary from review artifacts.
-   Returns a formatted string or nil if no review summary available."
+   Returns a formatted string or nil when there is neither a summary nor
+   any unresolved warnings to record."
   [review-artifacts]
-  (let [reviews (filter #(contains? % :review/summary) review-artifacts)]
+  (let [reviews (filter #(or (contains? % :review/summary)
+                             (seq (:review/warnings %)))
+                        review-artifacts)]
     (when (seq reviews)
       (let [latest-review (last reviews)
             summary (:review/summary latest-review)
-            decision (:review/decision latest-review)]
-        (when (and summary (not (str/blank? summary)))
-          (let [decision-str (when decision
-                               (str "**Decision**: " (name decision) "\n\n"))]
-            (str decision-str summary)))))))
+            decision (:review/decision latest-review)
+            decision-str (when decision
+                           (str "**Decision**: " (name decision) "\n\n"))
+            summary-str (when (and summary (not (str/blank? summary))) summary)
+            known-issues (format-known-issues (:review/warnings latest-review))
+            body (str decision-str
+                      summary-str
+                      (when (and summary-str known-issues) "\n\n")
+                      known-issues)]
+        (when-not (str/blank? body) body)))))
 
 (defn- render-pr-body
   "Render a structured PR body from available data.

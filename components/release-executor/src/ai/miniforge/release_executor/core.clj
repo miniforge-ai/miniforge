@@ -362,16 +362,20 @@
     "_No test artifacts available._"))
 
 (defn- format-review-decision
-  "Format review decision and summary from review artifacts as markdown."
+  "Format review decision, summary, and any unresolved non-blocking warnings
+   from review artifacts as markdown."
   [review-artifacts]
   (if (seq review-artifacts)
     (let [latest (last review-artifacts)
           decision (:review/decision latest)
-          summary (:review/summary latest)]
+          summary (:review/summary latest)
+          known-issues (metadata/format-known-issues (:review/warnings latest))]
       (str (when decision
              (str "**Decision**: " (name decision) "\n"))
            (when (and summary (not (str/blank? summary)))
-             (str "\n" summary))))
+             (str "\n" summary))
+           (when known-issues
+             (str "\n\n" known-issues))))
     "_No review artifacts available._"))
 
 (defn- render-pr-doc-full

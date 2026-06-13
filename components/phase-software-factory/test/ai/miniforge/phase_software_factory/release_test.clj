@@ -215,6 +215,47 @@
           (is (= 2 files-written)
               "Should report 2 files written (src + test)")))))))
 
+(deftest release-carries-unresolved-warnings-as-review-artifact-test
+  (testing "an accept-with-warnings review hands its unresolved warnings to
+            release as a :review artifact (so the PR opens with known-issues)"
+    (with-test-worktree
+      (fn [worktree]
+        (let [seen (atom nil)]
+          (with-redefs [release-executor/execute-release-phase
+                        (fn [workflow-state _exec-context _opts]
+                          (reset! seen workflow-state)
+                          {:success? true :artifacts [] :metrics {:files-written 0}})]
+            (let [ctx (-> (create-base-context worktree)
+                          (assoc-in [:execution/phase-results :review :result :output]
+                                    {:review/decision :accept-with-warnings
+                                     :review/warnings [{:severity :warning :file "src/a.clj"
+                                                        :line 7 :description "prefer named constant"}]}))
+                  interceptor (phase/get-phase-interceptor {:phase :release})]
+              ((:enter interceptor) (assoc ctx :phase-config {:phase :release}))
+              (let [review-arts (filter #(= :review (:artifact/type %))
+                                        (:workflow/artifacts @seen))]
+                (is (= 1 (count review-arts)) "one :review artifact carried into release")
+                (is (= :accept-with-warnings
+                       (get-in (first review-arts) [:artifact/content :review/decision])))
+                (is (= 1 (count (get-in (first review-arts)
+                                        [:artifact/content :review/warnings]))))))))))))
+
+(deftest release-adds-no-review-artifact-on-clean-review-test
+  (testing "a clean review (no unresolved warnings) adds no :review artifact —
+            the happy-path PR body is unchanged"
+    (with-test-worktree
+      (fn [worktree]
+        (let [seen (atom nil)]
+          (with-redefs [release-executor/execute-release-phase
+                        (fn [workflow-state _exec-context _opts]
+                          (reset! seen workflow-state)
+                          {:success? true :artifacts [] :metrics {:files-written 0}})]
+            (let [interceptor (phase/get-phase-interceptor {:phase :release})]
+              ((:enter interceptor) (assoc (create-base-context worktree)
+                                           :phase-config {:phase :release}))
+              (is (empty? (filter #(= :review (:artifact/type %))
+                                  (:workflow/artifacts @seen)))))))))))
+
 (deftest release-fails-when-write-fails-test
   (testing "release phase fails when file write operation fails"
     (with-test-worktree
