@@ -29,6 +29,7 @@
    3. Query status:   (succeeded? chain)
    4. Get summary:    (summarize chain)"
   (:require
+   [ai.miniforge.response.access :as access]
    [ai.miniforge.response.chain :as chain]
    [ai.miniforge.response.anomaly :as anomaly]
    [ai.miniforge.response.builder :as builder]
@@ -240,6 +241,19 @@
 (def default-anomaly-classifier
   "Default function to classify exceptions into anomalies."
   chain/default-anomaly-classifier)
+
+;------------------------------------------------------------------------------ Layer 5
+;; Canonical phase/agent-result accessors (one reader per logical value)
+
+(def phase-output
+  "THE phase artifact gates validate — the agent response :output at
+   [:result :output] on a phase-result. See `access` ns."
+  access/phase-output)
+
+(def review-decision
+  "THE review verdict decision keyword, read from a phase :output map.
+   Canonical key :review/decision, no fossil fallbacks. See `access` ns."
+  access/review-decision)
 
 ;------------------------------------------------------------------------------ Layer 5
 ;; Anomaly utilities (keyword-based)

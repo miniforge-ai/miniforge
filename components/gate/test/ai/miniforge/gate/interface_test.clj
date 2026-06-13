@@ -271,24 +271,17 @@
       (is (not (:passed? result)))
       (is (= :not-approved (get-in (first (:errors result)) [:type]))))))
 
-(deftest check-gate-review-approved-fallback-paths-test
-  (testing "review-approved gate passes via :metadata :approved fallback"
-    (let [result (gate/check-gate :review-approved
-                                   {:metadata {:approved true}}
-                                   {})]
-      (is (:passed? result))))
+(deftest check-gate-review-approved-canonical-only-test
+  (testing "review-approved gate keys ONLY off the canonical :review/decision —
+            legacy metadata-flag shapes no longer approve (they were fossils
+            from before the verdict keyword and could approve an artifact with
+            no real verdict)."
+    (is (not (:passed? (gate/check-gate :review-approved {:metadata {:approved true}} {}))))
+    (is (not (:passed? (gate/check-gate :review-approved {:artifact/metadata {:approved true}} {}))))
+    (is (not (:passed? (gate/check-gate :review-approved {:review {:approved true}} {})))))
 
-  (testing "review-approved gate passes via :artifact/metadata :approved fallback"
-    (let [result (gate/check-gate :review-approved
-                                   {:artifact/metadata {:approved true}}
-                                   {})]
-      (is (:passed? result))))
-
-  (testing "review-approved gate passes via :review :approved fallback"
-    (let [result (gate/check-gate :review-approved
-                                   {:review {:approved true}}
-                                   {})]
-      (is (:passed? result))))
+  (testing "passes on the canonical :review/decision :approved"
+    (is (:passed? (gate/check-gate :review-approved {:review/decision :approved} {}))))
 
   (testing "review-approved gate fails when no approval signal present"
     (let [result (gate/check-gate :review-approved {} {})]
