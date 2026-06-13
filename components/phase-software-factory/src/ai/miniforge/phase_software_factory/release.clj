@@ -417,11 +417,13 @@
 
     (-> (phase/enter-context ctx :release :releaser gates budget start-time result)
         ;; Single derived projection of the canonical pr-info onto ctx-level
-        ;; :workflow/pr-info — the API surface several consumers read
-        ;; (runner_events completion event, CLI summary, evidence-bundle). Read
-        ;; through the same response/release-pr-info accessor every consumer
-        ;; uses ({:result result} is the phase-result shape it expects), so the
-        ;; projection and the authority share one key-path and can't drift.
+        ;; :workflow/pr-info, which several consumers still read directly
+        ;; (runner_events completion event, CLI summary, evidence-bundle) until
+        ;; they migrate to response/release-pr-info. The projected value is
+        ;; derived from the authority via that accessor ({:result result} is the
+        ;; phase-result shape it expects), so this copy can never hold a value
+        ;; the authority doesn't — a derived cache of one reader, not a second
+        ;; source of truth.
         (cond-> (phase/result-succeeded? result)
           (assoc :workflow/pr-info (response/release-pr-info {:result result}))))))))
 
