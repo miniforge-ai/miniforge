@@ -34,9 +34,7 @@
    [ai.miniforge.workflow.execution :as exec]
    [ai.miniforge.workflow.fsm :as workflow-fsm]
    ;; loaded for its eager guard/action registration (infra-retry guards)
-   [ai.miniforge.workflow.standard-guards-and-actions]
-   ;; loaded so the :review-approved gate is registered for the gate-validation tests
-   [ai.miniforge.gate.policy]))
+   [ai.miniforge.workflow.standard-guards-and-actions]))
 
 ;; Phase 4b removed `exec/redirect-target` and the
 ;; `determine-phase-event-failure-with-redirect-target` test (which
