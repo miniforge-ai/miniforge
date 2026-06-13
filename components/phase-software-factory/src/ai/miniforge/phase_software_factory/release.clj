@@ -178,6 +178,18 @@
            (filter agent/substantive-file?)
            vec))))
 
+(defn- unresolved-known-issues
+  "The review's unresolved non-blocking issues to record on the PR. Prefer the
+   structured `:review/issues` (severity :warning/:nit — these carry file/line);
+   fall back to the legacy `:review/warnings` description strings when no
+   structured issues are present (gate-produced warnings arrive as strings)."
+  [review-output]
+  (let [structured (filterv (comp #{:warning :nit} :severity)
+                            (get review-output :review/issues []))]
+    (if (seq structured)
+      structured
+      (vec (get review-output :review/warnings [])))))
+
 (defn build-workflow-state
   "Build workflow state from phase context for the release executor.
 
@@ -239,12 +251,12 @@
           ;; presentation lives in the renderer. Clean reviews carry no warnings
           ;; → no :review artifact → no change to the happy-path PR body.
           review-output  (get-in ctx [:execution/phase-results :review :result :output])
-          warnings       (get review-output :review/warnings [])
-          review-artifacts (when (seq warnings)
+          known-issues   (unresolved-known-issues review-output)
+          review-artifacts (when (seq known-issues)
                              [{:artifact/type    :review
                                :artifact/content {:review/decision (:review/decision review-output)
                                                   :review/summary  (:review/summary review-output)
-                                                  :review/warnings (vec warnings)}}])
+                                                  :review/warnings known-issues}}])
           input          (get-in ctx [:execution/input])]
       {:workflow/id       (or (get-in ctx [:execution/id]) (random-uuid))
        :workflow/phase    :release

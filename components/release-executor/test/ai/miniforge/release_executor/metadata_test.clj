@@ -73,22 +73,34 @@
       (is (str/includes? body "✅ tests"))
       (is (str/includes? body "✅ security")))))
 
-(deftest format-known-issues-renders-warnings-test
-  (testing "format-known-issues renders a markdown list with file:line + description"
+(deftest format-known-issues-renders-structured-warnings-test
+  (testing "structured warning maps render as `file:line` — description"
     (let [out (metadata/format-known-issues
                [{:severity :warning :file "src/a.clj" :line 12 :description "magic number"}
-                {:severity :warning :description "missing docstring"}])]
+                {:severity :nit :description "missing docstring"}])]
       (is (str/includes? out "Known issues"))
       (is (str/includes? out "2 unresolved warning"))
       (is (str/includes? out "`src/a.clj:12` — magic number"))
-      (is (str/includes? out "missing docstring"))))
+      (is (str/includes? out "missing docstring")))))
+
+(deftest format-known-issues-renders-legacy-string-warnings-test
+  (testing "legacy string warnings (the production :review/warnings shape) render
+            verbatim — they must NOT collapse to empty bullets"
+    (let [out (metadata/format-known-issues
+               ["prefer a named constant" "extract this into a helper"])]
+      (is (str/includes? out "2 unresolved warning"))
+      (is (str/includes? out "- prefer a named constant"))
+      (is (str/includes? out "- extract this into a helper"))
+      ;; regression guard: no empty bullet items
+      (is (not (re-find #"(?m)^-\s*$" out))))))
+
+(deftest format-known-issues-empty-test
   (testing "nil/empty warnings → nil (no section)"
     (is (nil? (metadata/format-known-issues [])))
     (is (nil? (metadata/format-known-issues nil)))))
 
-(deftest fallback-release-metadata-with-unresolved-warnings-test
-  (testing "an accept-with-warnings review surfaces the warnings as known-issues
-            in the PR body, even without a :review/summary"
+(deftest fallback-release-metadata-with-structured-warnings-test
+  (testing "structured warnings surface as known-issues in the PR body, with file:line"
     (let [review-artifact {:review/decision :accept-with-warnings
                            :review/warnings [{:severity :warning :file "src/a.clj" :line 7
                                               :description "prefer named constant"}]}
@@ -98,8 +110,21 @@
                   {:review-artifacts [review-artifact]})
           body (:release/pr-body result)]
       (is (str/includes? body "Known issues"))
-      (is (str/includes? body "prefer named constant"))
+      (is (str/includes? body "`src/a.clj:7` — prefer named constant"))
       (is (str/includes? body "**Decision**: accept-with-warnings")))))
+
+(deftest fallback-release-metadata-with-legacy-string-warnings-test
+  (testing "legacy string warnings still render in the PR body (regression: the
+            production :review/warnings shape, not empty bullets)"
+    (let [review-artifact {:review/decision :accept-with-warnings
+                           :review/warnings ["prefer a named constant"]}
+          result (metadata/fallback-release-metadata
+                  "Add feature"
+                  [{:code/files [{:path "src/a.clj" :action :modify}]}]
+                  {:review-artifacts [review-artifact]})
+          body (:release/pr-body result)]
+      (is (str/includes? body "Known issues"))
+      (is (str/includes? body "- prefer a named constant")))))
 
 (deftest fallback-release-metadata-with-failed-gates
   (testing "fallback metadata shows failed gate status correctly"
