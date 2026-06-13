@@ -368,7 +368,8 @@
         (let [evt {:type :phase/fail :phase/verdict :verify/rate-limited}
               after (fsm/transition-execution machine at-verify evt)]
           (is (= :verify (fsm/current-phase-id machine after)))
-          (is (= 1 (get after :infra-retry-count 0)))))
+          (is (= 1 (get after :infra-retry-count 0)))
+          (is (= 0 (get after :redirect-count 0)) "redirect budget untouched")))
       (testing "verify infra budget spent → terminal :failed (never on-fail)"
         (let [maxed (engine/update-context
                      at-verify assoc :infra-retry-count (defaults/max-infra-retries))
@@ -461,7 +462,8 @@
         (let [evt {:type :phase/fail :phase/verdict :implement/network-dropped}
               after (fsm/transition-execution machine at-implement evt)]
           (is (= :implement (fsm/current-phase-id machine after)))
-          (is (= 1 (get after :infra-retry-count 0)))))
+          (is (= 1 (get after :infra-retry-count 0)))
+          (is (= 0 (get after :redirect-count 0)) "redirect budget untouched")))
       (testing ":implement/backend-timeout is a TRANSIENT infra verdict —
                 retries implement on its infra budget; companion to
                 :review/backend-timeout, same shape on the implement phase.
@@ -469,7 +471,8 @@
         (let [evt {:type :phase/fail :phase/verdict :implement/backend-timeout}
               after (fsm/transition-execution machine at-implement evt)]
           (is (= :implement (fsm/current-phase-id machine after)))
-          (is (= 1 (get after :infra-retry-count 0)))))
+          (is (= 1 (get after :infra-retry-count 0)))
+          (is (= 0 (get after :redirect-count 0)) "redirect budget untouched")))
       (testing "implement infra budget spent → terminal :failed (never on-fail)"
         (let [maxed (engine/update-context
                      at-implement assoc :infra-retry-count (defaults/max-infra-retries))
