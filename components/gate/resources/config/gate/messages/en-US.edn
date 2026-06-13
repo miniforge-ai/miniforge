@@ -1,5 +1,9 @@
 {:gate/messages
- {;; Behavioral gate — registry description
+ {;; Review-approved gate — verdict not approved (carries the decision read)
+  :review/not-approved
+  "Review not approved (decision={decision})"
+
+  ;; Behavioral gate — registry description
   :behavioral/description
   "Validates harness telemetry event stream against policy packs (phase: observe)"
 

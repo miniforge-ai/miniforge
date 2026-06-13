@@ -136,9 +136,12 @@
   (if (already-done? phase-result)
     phase-result
     (let [gate-keywords (get-in interceptor [:config :gates] [])
-          artifact (or (:artifact phase-result)
-                       (get-in phase-result [:result :artifact])
-                       (get-in phase-result [:result :output]))]
+          ;; Canonical: gates validate the phase's :output ([:result :output]) —
+          ;; one location, no shape-guessing. The old (or :artifact
+          ;; [:result :artifact] [:result :output]) could hand a gate the wrong
+          ;; map: the review gate got the code-under-review at :artifact instead
+          ;; of the verdict at :output, so it rejected every approved review.
+          artifact (response/phase-output phase-result)]
       (if (and (seq gate-keywords) artifact)
         (let [gate-result (gate/check-gates gate-keywords artifact ctx)]
           (if (:passed? gate-result)
