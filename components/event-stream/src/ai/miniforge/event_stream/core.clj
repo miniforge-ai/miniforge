@@ -510,6 +510,7 @@
                :phase/outcome outcome)
         (cond->
           (:duration-ms result) (assoc :phase/duration-ms (:duration-ms result))
+          (:review-decision result) (assoc :phase/review-decision (:review-decision result))
           (:artifacts result) (assoc :phase/artifacts (:artifacts result))
           (:error result) (assoc :phase/error (:error result))
           transition-request (assoc :phase/transition-request transition-request)

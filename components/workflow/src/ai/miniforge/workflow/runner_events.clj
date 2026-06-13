@@ -25,6 +25,7 @@
    [clojure.string :as str]
    [ai.miniforge.event-stream.interface :as es]
    [ai.miniforge.phase.interface :as phase]
+   [ai.miniforge.response.interface :as response]
    [ai.miniforge.self-healing.interface :as self-healing]
    [ai.miniforge.workflow.messages :as messages]
    [cheshire.core :as json]))
@@ -149,6 +150,9 @@
                          (when-let [msg (:message result)]
                            {:message msg})))
         transition-request (phase/transition-request result)
+        ;; Review verdict, from the one canonical location (the phase :output).
+        ;; Carried on the event so resume can reconstruct a blocked review.
+        review-decision (response/review-decision (response/phase-output result))
         tokens   (get-in result [:metrics :tokens]
                    (get-in result [:phase/metrics :tokens]))
         cost-usd (get-in result [:metrics :cost-usd]
@@ -178,6 +182,7 @@
                                 tool-call-count       (assoc :tool-call-count tool-call-count))))]
     (cond-> {:outcome outcome :duration-ms duration-ms}
       error-info              (assoc :error error-info)
+      review-decision         (assoc :review-decision review-decision)
       transition-request      (assoc :phase/transition-request transition-request)
       tokens                  (assoc :tokens tokens)
       cost-usd                (assoc :cost-usd cost-usd)

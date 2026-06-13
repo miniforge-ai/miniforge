@@ -20,7 +20,21 @@
   "Unit tests for error classification and message generation."
   (:require [clojure.test :refer [deftest is testing are]]
             [clojure.string :as str]
-            [ai.miniforge.agent-runtime.interface :as classifier]))
+            [ai.miniforge.agent-runtime.interface :as classifier]
+            [ai.miniforge.failure-classifier.interface :as failure-classifier]))
+
+(deftest classify-error-emits-canonical-failure-class
+  (testing "classification carries a :failure/class from failure-classifier's
+            canonical set — one taxonomy, referenced not redefined"
+    (doseq [err ["connection refused" "Simple error string" "anything at all"]]
+      (is (failure-classifier/valid-failure-class?
+           (:failure/class (classifier/classify-error err nil)))
+          (str "non-canonical :failure/class for: " err))))
+  (testing "retry :type maps to the canonical class"
+    (is (= :failure.class/external
+           (:failure/class (classifier/classify-error "connection refused" nil))))
+    (is (= :failure.class/task-code
+           (:failure/class (classifier/classify-error "Simple error string" nil))))))
 
 ;------------------------------------------------------------------------------ Layer 0 Tests
 ;; Pattern matching and classification
