@@ -79,7 +79,7 @@
                [{:severity :warning :file "src/a.clj" :line 12 :description "magic number"}
                 {:severity :nit :description "missing docstring"}])]
       (is (str/includes? out "Known issues"))
-      (is (str/includes? out "2 unresolved warning"))
+      (is (str/includes? out "2 unresolved non-blocking issue"))
       (is (str/includes? out "`src/a.clj:12` — magic number"))
       (is (str/includes? out "missing docstring")))))
 
@@ -88,7 +88,7 @@
             verbatim — they must NOT collapse to empty bullets"
     (let [out (metadata/format-known-issues
                ["prefer a named constant" "extract this into a helper"])]
-      (is (str/includes? out "2 unresolved warning"))
+      (is (str/includes? out "2 unresolved non-blocking issue"))
       (is (str/includes? out "- prefer a named constant"))
       (is (str/includes? out "- extract this into a helper"))
       ;; regression guard: no empty bullet items

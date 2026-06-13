@@ -162,10 +162,12 @@
     (str w)))
 
 (defn format-known-issues
-  "Render a vector of unresolved non-blocking review warnings as a markdown
-   known-issues list, or nil when there are none. Accepts both structured
-   warning maps and legacy description strings. Public so both the PR-body
-   renderer and the docs-file renderer present warnings identically."
+  "Render unresolved non-blocking review issues (severities :warning and :nit)
+   as a markdown known-issues list, or nil when there are none. Each item may
+   be a structured issue map ({:file :line :description}) or a legacy
+   description string; both render without collapsing to an empty bullet.
+   Public so both the PR-body renderer and the docs-file renderer present
+   issues identically."
   [warnings]
   (when (seq warnings)
     (str (msg/t :pr/known-issues-header {:count (count warnings)})
