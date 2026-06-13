@@ -1233,9 +1233,7 @@
   "Extract PR info from a sub-workflow result if the release phase produced one."
   [result task-def]
   (let [release-result (get-in result [:execution/phase-results :release])
-        pr-info (or (get-in release-result [:result :output :workflow/pr-info])
-                    ;; Also check metrics path where leave-release stores it
-                    (get-in result [:metrics :release :pr-info]))]
+        pr-info (response/release-pr-info release-result)]
     (when pr-info
       (merge pr-info
              {:task-id (:task/id task-def)

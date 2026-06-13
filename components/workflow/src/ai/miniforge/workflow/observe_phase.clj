@@ -123,20 +123,19 @@
   "Resolve the PR(s) to observe from the execution context. Returns a vector
    of pr-info maps, or nil when there is nothing to observe.
 
-   DAG runs populate `[:execution/dag-pr-infos]`. For a single-PR run, the
-   release phase stores PR info at `[:execution/phase-results :release :result
-   :output :workflow/pr-info]` (with a `[:metrics :release :pr-info]`
-   fallback) — the SAME paths `dag-orchestrator/extract-pr-info-from-result`
-   reads. The prior single-PR fallback read `[:release :pr-info]` (one level
-   too shallow, wrong key), so observe always saw nil and skipped — a
-   single-PR dogfood opened its PR and exited without ever monitoring it."
+   DAG runs populate `[:execution/dag-pr-infos]`. For a single-PR run, the PR
+   info is read via `response/release-pr-info` from the one canonical location
+   (the release phase-result's `[:result :output :workflow/pr-info]`) — the
+   same accessor `dag-orchestrator/extract-pr-info-from-result` uses. (An
+   earlier shallow `[:release :pr-info]` read and a `[:metrics :release
+   :pr-info]` fallback are both gone — observe used to see nil and skip, so a
+   single-PR dogfood opened its PR and exited without ever monitoring it.)"
   [ctx]
   (let [dag-prs (get-in ctx [:execution/dag-pr-infos])]
     (cond
       (seq dag-prs) (vec dag-prs)
-      :else (when-let [pr-info (or (get-in ctx [:execution/phase-results :release
-                                                :result :output :workflow/pr-info])
-                                   (get-in ctx [:metrics :release :pr-info]))]
+      :else (when-let [pr-info (response/release-pr-info
+                                (get-in ctx [:execution/phase-results :release]))]
               [pr-info]))))
 
 (defn enter-observe

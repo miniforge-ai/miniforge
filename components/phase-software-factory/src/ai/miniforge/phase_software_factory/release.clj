@@ -416,9 +416,16 @@
         _ (phase/emit-agent-completed! ctx :release :releaser result)]
 
     (-> (phase/enter-context ctx :release :releaser gates budget start-time result)
-        ;; Store PR info at top level for easy access
+        ;; Single derived projection of the canonical pr-info onto ctx-level
+        ;; :workflow/pr-info, which several consumers still read directly
+        ;; (runner_events completion event, CLI summary, evidence-bundle) until
+        ;; they migrate to response/release-pr-info. The projected value is
+        ;; derived from the authority via that accessor ({:result result} is the
+        ;; phase-result shape it expects), so this copy can never hold a value
+        ;; the authority doesn't — a derived cache of one reader, not a second
+        ;; source of truth.
         (cond-> (phase/result-succeeded? result)
-          (assoc-in [:workflow/pr-info] (get-in (:output result) [:workflow/pr-info]))))))))
+          (assoc :workflow/pr-info (response/release-pr-info {:result result}))))))))
 
 (def ^:private verdicts
   "Phase 3b verdict tag set for release.
@@ -482,7 +489,6 @@
                        :failed
                        (phase/determine-phase-status
                         agent-status iterations max-iterations))
-        pr-info (get-in ctx [:workflow/pr-info])
         on-fail (get-in ctx [:phase-config :on-fail])
         ;; Verdict is only meaningful for terminal phase statuses
         ;; (:completed → :approved; :failed → one of the failure
@@ -506,8 +512,6 @@
         updated-ctx (-> updated-ctx
                         (assoc-in [:metrics :release :duration-ms] duration-ms)
                         (assoc-in [:metrics :release :repair-cycles] (dec iterations))
-                        (cond-> pr-info
-                          (assoc-in [:metrics :release :pr-info] pr-info))
                         (update-in [:execution :phases-completed] (fnil conj []) :release)
                         (update-in [:execution/metrics :tokens] (fnil + 0) (:tokens metrics 0))
                         (update-in [:execution/metrics :cost-usd] (fnil + 0.0) (:cost-usd metrics 0.0))

@@ -22,7 +22,9 @@
    [clojure.test :refer [deftest is testing]]))
 
 (def ^:private sample-pr
-  {:pr-number 42 :pr-url "https://github.com/o/r/pull/42" :pr-branch "mf/x"})
+  ;; Mirrors the production :workflow/pr-info shape built in
+  ;; phase-software-factory/release.clj (:pr-number/:pr-url/:branch/:commit-sha).
+  {:pr-number 42 :pr-url "https://github.com/o/r/pull/42" :branch "mf/x" :commit-sha "deadbeef"})
 
 (deftest resolve-pr-infos-test
   (testing "DAG path: returns the populated dag-pr-infos"
@@ -33,9 +35,9 @@
            (#'sut/resolve-pr-infos
             {:execution/phase-results
              {:release {:result {:output {:workflow/pr-info sample-pr}}}}}))))
-  (testing "single-PR: metrics fallback path"
-    (is (= [sample-pr]
-           (#'sut/resolve-pr-infos {:metrics {:release {:pr-info sample-pr}}}))))
+  (testing "the deprecated [:metrics :release :pr-info] fallback is NO LONGER read
+            (one canonical location — the release output)"
+    (is (nil? (#'sut/resolve-pr-infos {:metrics {:release {:pr-info sample-pr}}}))))
   (testing "REGRESSION (the #979 handoff bug): the old shallow [:release :pr-info] key is NOT read"
     (is (nil? (#'sut/resolve-pr-infos
                {:execution/phase-results {:release {:pr-info sample-pr}}}))))

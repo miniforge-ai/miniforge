@@ -27,3 +27,7 @@
 (defn review-decision
   [output]
   (get output :review/decision))
+
+(defn release-pr-info
+  [release-phase-result]
+  (:workflow/pr-info (phase-output release-phase-result)))

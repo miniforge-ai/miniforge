@@ -21,3 +21,11 @@
     (is (nil? (access/review-decision {:metadata {:approved true}}))
         "no fossil fallback to legacy :approved flags")
     (is (nil? (access/review-decision {})))))
+
+(deftest release-pr-info-reads-canonical-location
+  (testing "release-pr-info is [:result :output :workflow/pr-info] — the one place"
+    (is (= {:pr-number 7}
+           (access/release-pr-info {:result {:output {:workflow/pr-info {:pr-number 7}}}})))
+    (is (nil? (access/release-pr-info {:metrics {:release {:pr-info {:pr-number 7}}}}))
+        "no fossil fallback to the old [:metrics :release :pr-info] write")
+    (is (nil? (access/release-pr-info {})))))
