@@ -1,5 +1,6 @@
 {:paths ["src" "resources"]
- :deps {ai.miniforge/task {:local/root "../task"}}
+ :deps {ai.miniforge/task {:local/root "../task"}
+        ai.miniforge/failure-classifier {:local/root "../failure-classifier"}}
  :aliases
  {:test {:extra-paths ["test"]
          :extra-deps {io.github.cognitect-labs/test-runner
