@@ -131,7 +131,9 @@
   "Apply gate validation to phase result.
 
    Returns updated phase-result with :phase/status and :phase/gate-errors if gates fail.
-   Skips gate checks when phase indicates work is already done."
+   Skips gate checks when phase indicates work is already done. When gates are
+   configured they run even if the canonical artifact ([:result :output]) is
+   nil — a nil artifact fails the gate (fail-closed), never bypasses it."
   [interceptor phase-result ctx]
   (if (already-done? phase-result)
     phase-result
