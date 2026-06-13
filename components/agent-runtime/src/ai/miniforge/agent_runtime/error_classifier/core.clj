@@ -173,7 +173,5 @@
             :completed-work (or completed-work [])
             :report-url report-url
             :should-retry (should-retry? (:type pattern) completed-work)
-            ;; Canonical SLI failure class (failure-classifier, N1 §5.3.3),
-            ;; derived from the retry :type. One taxonomy, referenced not redefined.
             :failure/class (->failure-class (:type pattern))
             :confidence confidence})))
