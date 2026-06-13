@@ -1,3 +1,9 @@
+;; Audit note (2026-06-12): reviewed for failure-class divergence.
+;; All 8 patterns are user-code errors (syntax, compilation, linting, test failures,
+;; namespace resolution, file-not-found, parse errors) that correctly map to
+;; :failure.class/task-code via the file-level :type fallback.
+;; No compilation-timeout or test-runner-stall entries present.
+;; No :failure/class annotations required on current entries.
 {:description "Patterns that indicate user code errors"
  :type :task-code
  :vendor "miniforge"

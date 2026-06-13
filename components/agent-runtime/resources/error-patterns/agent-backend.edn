@@ -1,3 +1,8 @@
+;; Audit note (2026-06-12): reviewed for failure-class divergence.
+;; All 7 patterns are JavaScript/agent-framework runtime errors that correctly
+;; map to :failure.class/agent-backend via the file-level :type fallback.
+;; No timeout, resource-exhaustion, or concurrency patterns present.
+;; No :failure/class annotations required on current entries.
 {:description "Patterns that indicate agent system bugs (Claude Code internal errors)"
  :type :agent-backend
  :vendor "Claude Code"
