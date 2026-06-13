@@ -242,17 +242,17 @@
   "Default function to classify exceptions into anomalies."
   chain/default-anomaly-classifier)
 
-;------------------------------------------------------------------------------ Layer 5
-;; Canonical phase/agent-result accessors (one reader per logical value)
+;------------------------------------------------------------------------------ Canonical phase/agent-result accessors
+;; One reader per logical value — the single place consumers read these shapes.
 
 (def phase-output
-  "THE phase artifact gates validate — the agent response :output at
-   [:result :output] on a phase-result. See `access` ns."
+  "The phase artifact gates validate: the agent response :output, at the one
+   canonical location [:result :output] on a phase-result."
   access/phase-output)
 
 (def review-decision
-  "THE review verdict decision keyword, read from a phase :output map.
-   Canonical key :review/decision, no fossil fallbacks. See `access` ns."
+  "The review verdict decision, read from a phase :output map. Canonical key
+   :review/decision — no fossil fallbacks."
   access/review-decision)
 
 ;------------------------------------------------------------------------------ Layer 5

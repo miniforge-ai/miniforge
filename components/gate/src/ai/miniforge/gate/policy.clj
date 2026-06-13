@@ -104,7 +104,7 @@
       {:passed? true}
       {:passed? false
        :errors [{:type :not-approved
-                 :message (str "Review not approved (decision=" (pr-str decision) ")")}]})))
+                 :message (msg/t :review/not-approved {:decision (pr-str decision)})}]})))
 
 (defn check-quality
   "Generic quality check - passes if no explicit failures."
