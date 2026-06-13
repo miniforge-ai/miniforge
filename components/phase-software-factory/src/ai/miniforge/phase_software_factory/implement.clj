@@ -384,6 +384,18 @@
            (get-in curator-result [:error :data :code]))
         already-implemented-noop?
         (= :already-implemented (:status impl-result))
+        ;; Surface the curator's collection diagnostic (per-source file counts,
+        ;; pre-session-snapshot?, collection-mode, worktree-path) when the
+        ;; no-files result is actually propagated as the phase failure. It is
+        ;; computed in curate but otherwise only buried in the error data —
+        ;; emitting it makes "implementer wrote files but curator saw none"
+        ;; debuggable from the event stream instead of requiring a worktree
+        ;; autopsy (which is gone after cleanup). Gated on
+        ;; (not already-implemented-noop?) so the legitimate
+        ;; success-by-prior-work path (handled below) stays quiet.
+        _ (when (and curator-terminal? (not already-implemented-noop?))
+            (log/warn logger :implement :implement/curator-no-files-diagnostic
+                      {:data (get-in curator-result [:error :data :diagnostic])}))
         ;; "Degraded handoff" means the implementer agent reported a hard
         ;; error but the curator recovered files anyway. :already-implemented
         ;; is a deliberate skip (work was completed in a prior turn) — the
