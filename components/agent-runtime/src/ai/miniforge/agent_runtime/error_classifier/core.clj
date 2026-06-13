@@ -22,7 +22,25 @@
    Orchestrates pattern matching, completed work extraction, and metadata generation."
   (:require
    [ai.miniforge.agent-runtime.error-classifier.patterns :as patterns]
-   [ai.miniforge.agent-runtime.error-classifier.reporting :as reporting]))
+   [ai.miniforge.agent-runtime.error-classifier.reporting :as reporting]
+   [ai.miniforge.failure-classifier.interface :as failure-classifier]))
+
+(def ^:private retry-type->failure-class
+  "Map the narrow retry-classification `:type` to the ONE canonical failure
+   class. The failure taxonomy (N1 §5.3.3) is owned by `failure-classifier`
+   (its single source of truth) — referenced here, never redefined. `:type`
+   stays as this classifier's retry tag; `:failure/class` is the canonical SLI
+   class derived from it."
+  {:agent-backend :failure.class/agent-error
+   :task-code     :failure.class/task-code
+   :external      :failure.class/external})
+
+(defn- ->failure-class
+  "Derive the canonical failure class for a retry `:type`, validated against
+   failure-classifier's set so we can never emit a non-canonical class."
+  [retry-type]
+  (let [c (get retry-type->failure-class retry-type :failure.class/unknown)]
+    (if (failure-classifier/valid-failure-class? c) c :failure.class/unknown)))
 
 ;;------------------------------------------------------------------------------ Layer 0
 ;; Error message extraction
@@ -131,7 +149,8 @@
      task-state - Optional map with task execution state
 
    Returns: Map with classification and metadata
-     {:type :agent-backend | :task-code | :external
+     {:type :agent-backend | :task-code | :external   ; retry tag
+      :failure/class <canonical failure-classifier class>  ; SLI taxonomy
       :vendor string
       :message string
       :original-error Exception or string
@@ -154,4 +173,7 @@
             :completed-work (or completed-work [])
             :report-url report-url
             :should-retry (should-retry? (:type pattern) completed-work)
+            ;; Canonical SLI failure class (failure-classifier, N1 §5.3.3),
+            ;; derived from the retry :type. One taxonomy, referenced not redefined.
+            :failure/class (->failure-class (:type pattern))
             :confidence confidence})))

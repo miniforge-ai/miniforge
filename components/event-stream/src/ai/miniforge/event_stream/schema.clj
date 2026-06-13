@@ -153,6 +153,10 @@
     [:workflow/phase keyword?]
     [:phase/duration-ms {:optional true} int?]
     [:phase/outcome {:optional true} [:enum :success :failure :skipped]]
+    ;; Review verdict, present only for the review phase. Carried so resume can
+    ;; reconstruct a blocked review from events alone — the event is a writer of
+    ;; this datum, one canonical location, no lossy reconstruction.
+    [:phase/review-decision {:optional true} keyword?]
     [:phase/artifacts {:optional true} [:vector uuid?]]
     [:phase/transition-request {:optional true} TransitionRequest]
     [:phase/redirect-to {:optional true} keyword?]

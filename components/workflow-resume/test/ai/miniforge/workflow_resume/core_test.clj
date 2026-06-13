@@ -63,7 +63,25 @@
           result (core/extract-phase-results events)]
       (is (= :success (get-in result [:plan :outcome])))
       (is (= 42 (get-in result [:plan :duration-ms])))
-      (is (= "2026-04-21T00:00:00Z" (get-in result [:plan :timestamp]))))))
+      (is (= "2026-04-21T00:00:00Z" (get-in result [:plan :timestamp])))))
+
+  (testing "review verdict is reconstructed into the canonical
+            [:result :output :review/decision] location — lossless from events,
+            so a blocked review is detectable on event-only resume"
+    (let [events [{:event/type :workflow/phase-completed
+                   :workflow/phase :review
+                   :phase/outcome :success
+                   :phase/review-decision :changes-requested
+                   :event/timestamp "2026-04-21T00:00:00Z"}]
+          result (core/extract-phase-results events)]
+      (is (= :changes-requested
+             (get-in result [:review :result :output :review/decision])))))
+
+  (testing "non-review phases carry no review decision (key absent, not nil)"
+    (let [events [{:event/type :workflow/phase-completed
+                   :workflow/phase :plan :phase/outcome :success}]
+          result (core/extract-phase-results events)]
+      (is (not (contains? (get-in result [:plan :result] {}) :output))))))
 
 (deftest extract-completed-dag-tasks-test
   (testing "collects :dag/task-id values from :dag/task-completed events"
@@ -312,7 +330,7 @@
                                     :plan {:status :completed}
                                     :implement {:status :completed}
                                     :review {:status :completed
-                                             :review/decision :changes-requested}
+                                             :result {:output {:review/decision :changes-requested}}}
                                     :release {:status :retrying}}}
    :damaged-manifest {:manifest {:workflow/phases-completed [:release :plan]}
                       :phase-results {:release {:status :retrying}

@@ -118,9 +118,16 @@
        (filter #(= :workflow/phase-completed (:event/type %)))
        (reduce (fn [acc evt]
                  (assoc acc (:workflow/phase evt)
-                        {:outcome (:phase/outcome evt)
-                         :duration-ms (:phase/duration-ms evt)
-                         :timestamp (:event/timestamp evt)}))
+                        ;; Reconstruct into the canonical phase-result shape so
+                        ;; one accessor reads event-reconstructed and live
+                        ;; checkpoint results alike — the review verdict at the
+                        ;; one canonical location [:result :output :review/decision].
+                        (cond-> {:outcome (:phase/outcome evt)
+                                 :duration-ms (:phase/duration-ms evt)
+                                 :timestamp (:event/timestamp evt)}
+                          (:phase/review-decision evt)
+                          (assoc-in [:result :output :review/decision]
+                                    (:phase/review-decision evt)))))
                {})))
 
 (defn find-workflow-spec
@@ -200,13 +207,7 @@
   [phase-id phase-result]
   (and (= :review phase-id)
        (contains? blocking-review-decisions
-                  (or (:review/decision phase-result)
-                      (get-in phase-result [:result :review/decision])
-                      (get-in phase-result [:result :output :review/decision])
-                      (get-in phase-result [:phase/result :review/decision])
-                      (get-in phase-result [:phase/result :output :review/decision])
-                      (get-in phase-result [:result :decision])
-                      (:decision phase-result)))))
+                  (response/review-decision (response/phase-output phase-result)))))
 
 (defn- completed-phase-result?
   [phase-id phase-result]
