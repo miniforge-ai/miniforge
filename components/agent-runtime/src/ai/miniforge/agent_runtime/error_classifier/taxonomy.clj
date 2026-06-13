@@ -21,11 +21,12 @@
 
    All values are pure data — no I/O, no side effects.
 
-   Strata note: this file is stratum 0. It may not require any other
-   error-classifier namespace. Consumers (patterns, core) sit above it.")
+   Strata note: this namespace is stratum 0 in the error-classifier sub-system.
+   It must not require any other error-classifier namespace.
+   Consumers (patterns, core, schema) sit above it.")
 
 ;;------------------------------------------------------------------------------ Layer 0
-;; Canonical failure class constants
+;; Canonical failure class keyword constants
 
 (def failure-class-agent-backend
   "Agent runtime internal bugs — Claude Code, Codex, or miniforge agent framework itself."
@@ -68,7 +69,7 @@
   :failure.class/unknown)
 
 ;;------------------------------------------------------------------------------ Layer 1
-;; Closed set and Malli schema
+;; Closed set, Malli schema, and legacy type mapping — all pure data
 
 (def failure-classes
   "Complete set of all valid failure class keywords.
@@ -104,9 +105,6 @@
    failure-class-concurrency
    failure-class-unknown])
 
-;;------------------------------------------------------------------------------ Layer 2
-;; Legacy type mapping
-
 (def legacy-type->failure-class
   "Deterministic map from old 3-class :type keywords to canonical :failure.class/* equivalents.
 
@@ -115,27 +113,28 @@
      :task-code      — user code / spec errors
      :external       — any external service or provider failure
 
-   The backend-setup patterns used :type :external but represent
-   configuration issues, so :backend-setup maps to :failure.class/configuration."
+   The backend-setup patterns carried :type :external but represent configuration
+   issues, so :backend-setup maps to :failure.class/configuration."
   {:agent-backend failure-class-agent-backend
    :task-code     failure-class-task-code
    :external      failure-class-external-service
    :backend-setup failure-class-configuration})
 
-;;------------------------------------------------------------------------------ Layer 3
+;;------------------------------------------------------------------------------ Layer 2
 ;; Resolution function
 
 (defn resolve-failure-class
   "Resolve a canonical failure class from a pattern map and error message.
 
    Resolution order:
-   1. `:failure/class` on the pattern — most specific, authoritative
-   2. `:rate-limit?` true on the pattern — fine-grained rate-limit class
+   1. `:failure/class` on the pattern — explicit, authoritative; only used when
+      the value is a member of `failure-classes` (guards against stale EDN typos)
+   2. `:rate-limit? true` on the pattern — fine-grained rate-limit class
    3. `:type` on the pattern — legacy type → canonical class via legacy-type->failure-class
-   4. :failure.class/unknown — never returns nil
+   4. :failure.class/unknown — default; never returns nil
 
    Arguments:
-     pattern-map   - Pattern map that matched the error (may be nil or empty)
+     pattern-map    - Pattern map that matched the error (may be nil or empty)
      _error-message - Error message string (reserved for future content-based overrides)
 
    Returns: Keyword from failure-classes — never nil."
@@ -160,7 +159,7 @@
   (require '[malli.core :as m])
   (m/validate FailureClass :failure.class/rate-limit)   ;; => true
   (m/validate FailureClass :failure.class/unknown)      ;; => true
-  (m/validate FailureClass :rate-limit)                 ;; => false (old style)
+  (m/validate FailureClass :rate-limit)                 ;; => false (old unqualified style)
 
   ;; Resolve from a pattern map
   (resolve-failure-class {:failure/class :failure.class/auth} "auth error")
@@ -180,4 +179,8 @@
 
   (resolve-failure-class {} "")
   ;; => :failure.class/unknown
+
+  ;; Invalid `:failure/class` (not in failure-classes) falls through
+  (resolve-failure-class {:failure/class :some/garbage :type :external} "msg")
+  ;; => :failure.class/external-service
   )

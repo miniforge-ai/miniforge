@@ -158,10 +158,14 @@
    :dependency/class :account-limitation
    :dependency/retryability :operator-action}
 
+  ;; Note: `overloaded_error` intentionally excluded — the vendor-specific patterns
+  ;; (:anthropic-overloaded, :provider-throttle-text) classify it as :rate-limit.
+  ;; Including it here would produce a mis-classification as :external-service for
+  ;; bare `overloaded_error` matches when Anthropic context is absent.
   {:id :provider-service-unavailable
-   :regex "API service unavailable|503 Service Unavailable|502 Bad Gateway|overloaded_error"
+   :regex "API service unavailable|503 Service Unavailable|502 Bad Gateway"
    :vendor "External Service"
-   :description "Provider service unavailable"
+   :description "Provider service unavailable (502/503 HTTP outage codes)"
    :failure/source :external-provider
    :dependency/class :outage
    :dependency/retryability :retryable}
