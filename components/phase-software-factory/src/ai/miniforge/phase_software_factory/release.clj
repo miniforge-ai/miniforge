@@ -416,13 +416,14 @@
         _ (phase/emit-agent-completed! ctx :release :releaser result)]
 
     (-> (phase/enter-context ctx :release :releaser gates budget start-time result)
-        ;; Single derived projection of the canonical [:result :output
-        ;; :workflow/pr-info] onto ctx-level :workflow/pr-info — the API surface
-        ;; several consumers read (runner_events completion event, CLI summary,
-        ;; evidence-bundle). Derived from the authority, not an independent
-        ;; write, so it can't drift.
+        ;; Single derived projection of the canonical pr-info onto ctx-level
+        ;; :workflow/pr-info — the API surface several consumers read
+        ;; (runner_events completion event, CLI summary, evidence-bundle). Read
+        ;; through the same response/release-pr-info accessor every consumer
+        ;; uses ({:result result} is the phase-result shape it expects), so the
+        ;; projection and the authority share one key-path and can't drift.
         (cond-> (phase/result-succeeded? result)
-          (assoc-in [:workflow/pr-info] (get-in (:output result) [:workflow/pr-info]))))))))
+          (assoc :workflow/pr-info (response/release-pr-info {:result result}))))))))
 
 (def ^:private verdicts
   "Phase 3b verdict tag set for release.

@@ -22,7 +22,9 @@
    [clojure.test :refer [deftest is testing]]))
 
 (def ^:private sample-pr
-  {:pr-number 42 :pr-url "https://github.com/o/r/pull/42" :pr-branch "mf/x"})
+  ;; Mirrors the production :workflow/pr-info shape built in
+  ;; phase-software-factory/release.clj (:pr-number/:pr-url/:branch/:commit-sha).
+  {:pr-number 42 :pr-url "https://github.com/o/r/pull/42" :branch "mf/x" :commit-sha "deadbeef"})
 
 (deftest resolve-pr-infos-test
   (testing "DAG path: returns the populated dag-pr-infos"
