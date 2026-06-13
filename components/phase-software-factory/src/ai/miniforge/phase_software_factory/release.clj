@@ -420,8 +420,7 @@
         ;; :workflow/pr-info] onto ctx-level :workflow/pr-info — the API surface
         ;; several consumers read (runner_events completion event, CLI summary,
         ;; evidence-bundle). Derived from the authority, not an independent
-        ;; write, so it can't drift. (The independent [:metrics :release
-        ;; :pr-info] write is what PR3 removes.)
+        ;; write, so it can't drift.
         (cond-> (phase/result-succeeded? result)
           (assoc-in [:workflow/pr-info] (get-in (:output result) [:workflow/pr-info]))))))))
 
