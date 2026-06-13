@@ -26,6 +26,7 @@
    - :plan-complete - Plan completeness check"
   (:require [ai.miniforge.gate.messages  :as msg]
             [ai.miniforge.gate.registry  :as registry]
+            [ai.miniforge.response.interface :as response]
             [slingshot.slingshot         :refer [try+]]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -87,21 +88,23 @@
        :step-count (count steps)})))
 
 (defn check-review-approved
-  "Check if review is approved."
+  "Check if review is approved.
+
+   Reads the decision from the ONE canonical location
+   (`response/review-decision` → `:review/decision` on the phase output the
+   gate is handed). No fossil fallbacks (`[:metadata :approved]`,
+   `[:artifact/metadata :approved]`, `[:review :approved]`): if the decision
+   isn't where the contract says, the review is not approved — loudly —
+   rather than silently coerced from a legacy boolean flag. The gate runner
+   passes the phase `:output` (the verdict) as the artifact."
   [artifact _ctx]
-  (let [decision (get artifact :review/decision)
-        explicit-decision? (some? decision)
-        approved? (if explicit-decision?
-                    (or (= :approved decision)
-                        (= :conditionally-approved decision))
-                    (or (get-in artifact [:metadata :approved])
-                        (get-in artifact [:artifact/metadata :approved])
-                        (get-in artifact [:review :approved])))]
+  (let [decision (response/review-decision artifact)
+        approved? (contains? #{:approved :conditionally-approved} decision)]
     (if approved?
       {:passed? true}
       {:passed? false
        :errors [{:type :not-approved
-                 :message "Review not approved"}]})))
+                 :message (str "Review not approved (decision=" (pr-str decision) ")")}]})))
 
 (defn check-quality
   "Generic quality check - passes if no explicit failures."

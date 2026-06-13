@@ -61,14 +61,14 @@
                  {})]
     (is (false? (:passed? result)))))
 
-(deftest check-review-approved-fallback-paths-still-honored
-  (testing "legacy artifact shapes without :review/decision fall back to metadata flags"
-    (is (= {:passed? true}
-           (policy/check-review-approved {:metadata {:approved true}} {})))
-    (is (= {:passed? true}
-           (policy/check-review-approved {:artifact/metadata {:approved true}} {})))
-    (is (= {:passed? true}
-           (policy/check-review-approved {:review {:approved true}} {})))))
+(deftest check-review-approved-fossil-paths-no-longer-honored
+  (testing "legacy metadata-flag shapes are NO LONGER accepted — the verdict
+            must be at the one canonical :review/decision location. A legacy
+            :approved boolean without :review/decision fails closed (it can no
+            longer silently approve an artifact that carries no real verdict)."
+    (is (false? (:passed? (policy/check-review-approved {:metadata {:approved true}} {}))))
+    (is (false? (:passed? (policy/check-review-approved {:artifact/metadata {:approved true}} {}))))
+    (is (false? (:passed? (policy/check-review-approved {:review {:approved true}} {}))))))
 
 (deftest check-review-approved-no-signal-fails-closed
   (testing "artifact with no decision and no metadata flag → :passed? false"
