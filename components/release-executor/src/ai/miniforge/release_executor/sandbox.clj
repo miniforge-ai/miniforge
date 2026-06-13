@@ -265,11 +265,17 @@
   "Resolve the PR already open for the current branch via gh pr view, so a
    release retry reuses it instead of opening a duplicate. Falls back to a
    failure carrying the original create error when it can't be resolved."
-  [executor env-id exec-opts create-error]
+  [executor env-id exec-opts _create-error]
   (let [r (exec! executor env-id "gh pr view --json url --jq '.url'" exec-opts)]
     (if-let [pr (and (result/succeeded? r) (parse-pr-ref (:output r "")))]
       (result/shell-success pr)
-      (result/shell-failure (msg/t :pr/reuse-unresolved {:error create-error})
+      ;; Surface the actual gh pr view resolution failure (its stderr, or the
+      ;; unparseable stdout when it exited 0 without a URL) — not the original
+      ;; "already exists" create error — so retries are debuggable.
+      (result/shell-failure (msg/t :pr/reuse-unresolved
+                                   {:error (or (not-empty (:error r))
+                                               (not-empty (str/trim (:output r "")))
+                                               (msg/t :pr/reuse-no-url))})
                             {:pr-url nil :pr-number nil}))))
 
 (defn create-pr!

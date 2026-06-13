@@ -317,7 +317,9 @@
           result (sandbox/create-pr! exec "env-1"
                                      {:title "PR" :body "" :base-branch "main"})]
       (is (not (:success? result)))
-      (is (nil? (:pr-number result))))))
+      (is (nil? (:pr-number result)))
+      (is (clojure.string/includes? (:error result) "no pull requests found")
+          "error surfaces the gh pr view resolution failure, not the create error"))))
 
 ;; ============================================================================
 ;; write-and-stage-files! tests

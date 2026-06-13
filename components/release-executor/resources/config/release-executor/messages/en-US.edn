@@ -20,6 +20,7 @@
   ;; pr creation
   :pr/create-unconfirmed "gh pr create reported success but printed no PR URL — cannot confirm a PR was opened (output: {output})"
   :pr/reuse-unresolved "A PR already exists for this branch but could not be resolved via gh pr view: {error}"
+  :pr/reuse-no-url "gh pr view returned no PR URL"
 
   ;; pipeline steps
   :step/metadata-generation-failed "Releaser agent failed to generate release metadata"
