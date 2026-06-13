@@ -144,23 +144,36 @@
               header)))))))
 
 (defn- warning-location
-  "Markdown `file:line` prefix for a review warning, or empty when absent."
+  "Markdown `file:line` prefix for a structured review warning, or empty when
+   absent."
   [{:keys [file line]}]
   (if file
     (str "`" file (when line (str ":" line)) "` — ")
     ""))
 
+(defn- known-issue-text
+  "Markdown text for one known issue. A structured warning is a map with
+   :file/:line/:description; legacy reviewer warnings (and gate-produced
+   warnings) arrive as plain description strings — render those verbatim so
+   they never collapse to an empty bullet."
+  [w]
+  (if (map? w)
+    (str (warning-location w) (get w :description ""))
+    (str w)))
+
 (defn format-known-issues
-  "Render a vector of unresolved non-blocking review warnings as a markdown
-   known-issues list, or nil when there are none. Public so both the PR-body
-   renderer and the docs-file renderer present warnings identically."
+  "Render unresolved non-blocking review issues (severities :warning and :nit)
+   as a markdown known-issues list, or nil when there are none. Each item may
+   be a structured issue map ({:file :line :description}) or a legacy
+   description string; both render without collapsing to an empty bullet.
+   Public so both the PR-body renderer and the docs-file renderer present
+   issues identically."
   [warnings]
   (when (seq warnings)
     (str (msg/t :pr/known-issues-header {:count (count warnings)})
          (str/join "\n"
                    (map (fn [w]
-                          (msg/t :pr/known-issue-item
-                                 {:item (str (warning-location w) (:description w))}))
+                          (msg/t :pr/known-issue-item {:item (known-issue-text w)}))
                         warnings)))))
 
 (defn- format-review-summary
@@ -176,7 +189,7 @@
             summary (:review/summary latest-review)
             decision (:review/decision latest-review)
             decision-str (when decision
-                           (str "**Decision**: " (name decision) "\n\n"))
+                           (str (msg/t :pr/decision {:decision (name decision)}) "\n\n"))
             summary-str (when (and summary (not (str/blank? summary))) summary)
             known-issues (format-known-issues (:review/warnings latest-review))
             body (str decision-str

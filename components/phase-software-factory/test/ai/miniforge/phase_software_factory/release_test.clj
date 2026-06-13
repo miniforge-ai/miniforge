@@ -215,30 +215,50 @@
           (is (= 2 files-written)
               "Should report 2 files written (src + test)")))))))
 
-(deftest release-carries-unresolved-warnings-as-review-artifact-test
-  (testing "an accept-with-warnings review hands its unresolved warnings to
-            release as a :review artifact (so the PR opens with known-issues)"
+(defn- captured-review-artifact
+  "Run the release enter interceptor with the given review output and return the
+   single :review artifact handed to the release executor (or nil)."
+  [worktree review-output]
+  (let [seen (atom nil)]
+    (with-redefs [release-executor/execute-release-phase
+                  (fn [workflow-state _exec-context _opts]
+                    (reset! seen workflow-state)
+                    {:success? true :artifacts [] :metrics {:files-written 0}})]
+      (let [ctx (-> (create-base-context worktree)
+                    (assoc-in [:execution/phase-results :review :result :output] review-output))
+            interceptor (phase/get-phase-interceptor {:phase :release})]
+        ((:enter interceptor) (assoc ctx :phase-config {:phase :release}))
+        (first (filter #(= :review (:artifact/type %)) (:workflow/artifacts @seen)))))))
+
+(deftest release-carries-structured-warning-issues-test
+  (testing "prefers the structured :review/issues (severity :warning/:nit, with
+            file/line) and excludes :blocking issues"
     (with-test-worktree
       (fn [worktree]
-        (let [seen (atom nil)]
-          (with-redefs [release-executor/execute-release-phase
-                        (fn [workflow-state _exec-context _opts]
-                          (reset! seen workflow-state)
-                          {:success? true :artifacts [] :metrics {:files-written 0}})]
-            (let [ctx (-> (create-base-context worktree)
-                          (assoc-in [:execution/phase-results :review :result :output]
-                                    {:review/decision :accept-with-warnings
-                                     :review/warnings [{:severity :warning :file "src/a.clj"
-                                                        :line 7 :description "prefer named constant"}]}))
-                  interceptor (phase/get-phase-interceptor {:phase :release})]
-              ((:enter interceptor) (assoc ctx :phase-config {:phase :release}))
-              (let [review-arts (filter #(= :review (:artifact/type %))
-                                        (:workflow/artifacts @seen))]
-                (is (= 1 (count review-arts)) "one :review artifact carried into release")
-                (is (= :accept-with-warnings
-                       (get-in (first review-arts) [:artifact/content :review/decision])))
-                (is (= 1 (count (get-in (first review-arts)
-                                        [:artifact/content :review/warnings]))))))))))))
+        (let [art (captured-review-artifact
+                   worktree
+                   {:review/decision :accept-with-warnings
+                    :review/warnings ["legacy string — should be ignored when issues present"]
+                    :review/issues [{:severity :warning :file "src/a.clj" :line 7 :description "named constant"}
+                                    {:severity :nit :description "docstring"}
+                                    {:severity :blocking :description "real defect"}]})
+              recorded (get-in art [:artifact/content :review/warnings])]
+          (is (= :accept-with-warnings (get-in art [:artifact/content :review/decision])))
+          (is (= 2 (count recorded)) "only the :warning + :nit issues, not :blocking")
+          (is (every? map? recorded) "structured issues, not legacy strings")
+          (is (= #{:warning :nit} (set (map :severity recorded)))))))))
+
+(deftest release-falls-back-to-legacy-string-warnings-test
+  (testing "when no structured :review/issues exist, falls back to the
+            :review/warnings description strings (gate-produced warnings)"
+    (with-test-worktree
+      (fn [worktree]
+        (let [art (captured-review-artifact
+                   worktree
+                   {:review/decision :accept-with-warnings
+                    :review/warnings ["prefer a named constant"]})
+              recorded (get-in art [:artifact/content :review/warnings])]
+          (is (= ["prefer a named constant"] recorded)))))))
 
 (deftest release-adds-no-review-artifact-on-clean-review-test
   (testing "a clean review (no unresolved warnings) adds no :review artifact —

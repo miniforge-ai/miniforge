@@ -371,7 +371,7 @@
           summary (:review/summary latest)
           known-issues (metadata/format-known-issues (:review/warnings latest))]
       (str (when decision
-             (str "**Decision**: " (name decision) "\n"))
+             (str (msg/t :pr/decision {:decision (name decision)}) "\n"))
            (when (and summary (not (str/blank? summary)))
              (str "\n" summary))
            (when known-issues
