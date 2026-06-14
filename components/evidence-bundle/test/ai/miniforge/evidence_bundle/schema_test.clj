@@ -79,6 +79,11 @@
       (is (empty? (:errors result))))))
 
 (deftest test-retention-policy-schema-rejects-missing-keys
+  (testing "retention-policy-schema rejects a map missing :retain-days"
+    (let [result (schema/validate-schema schema/retention-policy-schema
+                                         {:auto-delete? true :legal-hold? false})]
+      (is (not (:valid? result)))
+      (is (some #(= :retain-days (:key %)) (:errors result)))))
   (testing "retention-policy-schema rejects a map missing :legal-hold?"
     (let [result (schema/validate-schema schema/retention-policy-schema
                                          {:retain-days 30 :auto-delete? true})]

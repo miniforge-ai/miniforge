@@ -141,8 +141,8 @@
                   {:compliance {:evidence/retention-policy
                                 {:retain-days one-year-retention-days}}})]
       (is (= one-year-retention-days (get-in bundle [:evidence/retention-policy :retain-days])))
-      (is (contains? (:evidence/retention-policy bundle) :auto-delete?))
-      (is (contains? (:evidence/retention-policy bundle) :legal-hold?))))
+      (is (true? (get-in bundle [:evidence/retention-policy :auto-delete?])))
+      (is (false? (get-in bundle [:evidence/retention-policy :legal-hold?])))))
   (testing "full override replaces all three sub-keys"
     (let [bundle (collector/assemble-evidence-bundle
                   workflow-id base-workflow-state nil
