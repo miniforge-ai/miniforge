@@ -37,7 +37,14 @@
     (let [invalid-data {:constraint/type :pre}
           result (schema/validate-schema schema/constraint-schema invalid-data)]
       (is (not (:valid? result)))
-      (is (some #(= "Required key missing" (:error %)) (:errors result))))))
+      (is (some #(= "Required key missing" (:error %)) (:errors result)))))
+
+  (testing "Schema validation rejects present falsy values that fail validators"
+    (let [invalid-data {:constraint/type :pre
+                        :constraint/description false}
+          result (schema/validate-schema schema/constraint-schema invalid-data)]
+      (is (not (:valid? result)))
+      (is (some #(= :constraint/description (:key %)) (:errors result))))))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Pack Promotion Schema Tests
@@ -227,3 +234,136 @@
   (test-pack-promotion-justification-field)
 
   :leave-this-here)
+
+;------------------------------------------------------------------------------ Layer 4
+;; Compliance Metadata Tests
+
+(deftest test-create-evidence-bundle-template-compliance-defaults
+  (testing "Template emits all six compliance fields with correct defaults"
+    (let [bundle (schema/create-evidence-bundle-template)]
+      (testing ":evidence/data-classification defaults to :internal"
+        (is (= :internal (:evidence/data-classification bundle))))
+      (testing ":evidence/contains-pii? defaults to false"
+        (is (false? (:evidence/contains-pii? bundle))))
+      (testing ":evidence/retention-policy is a map with all required keys"
+        (let [rp (:evidence/retention-policy bundle)]
+          (is (map? rp))
+          (is (contains? rp :retain-days))
+          (is (contains? rp :auto-delete?))
+          (is (contains? rp :legal-hold?))))
+      (testing ":evidence/retention-policy :auto-delete? is true"
+        (is (true? (get-in bundle [:evidence/retention-policy :auto-delete?]))))
+      (testing ":evidence/retention-policy :legal-hold? is false"
+        (is (false? (get-in bundle [:evidence/retention-policy :legal-hold?]))))
+      (testing ":evidence/regulatory-tags defaults to empty set"
+        (is (= #{} (:evidence/regulatory-tags bundle))))
+      (testing ":evidence/created-by defaults to system principal"
+        (is (= schema/default-created-by-principal (:evidence/created-by bundle))))
+      (testing ":evidence/access-log defaults to empty vector"
+        (is (= [] (:evidence/access-log bundle)))))))
+
+(deftest test-template-retention-days-from-named-constant
+  (testing ":retain-days in template comes from default-retention-days constant, not a magic literal"
+    (let [bundle (schema/create-evidence-bundle-template)
+          retain-days (get-in bundle [:evidence/retention-policy :retain-days])]
+      (is (= schema/default-retention-days retain-days)
+          "retain-days must equal the named constant, not a different value"))))
+
+(deftest test-evidence-bundle-schema-data-classification-valid
+  (testing "evidence-bundle-schema accepts known data-classification values"
+    (doseq [cls schema/data-classifications]
+      (let [bundle (-> (schema/create-evidence-bundle-template)
+                       (assoc :evidence-bundle/workflow-id (random-uuid))
+                       (assoc :evidence/data-classification cls))
+            result (schema/validate-schema schema/evidence-bundle-schema bundle)]
+        (is (:valid? result)
+            (str "Classification " cls " should be valid"))))))
+
+(deftest test-evidence-bundle-schema-data-classification-invalid
+  (testing "evidence-bundle-schema rejects unknown data-classification value"
+    (let [bundle (-> (schema/create-evidence-bundle-template)
+                     (assoc :evidence-bundle/workflow-id (random-uuid))
+                     (assoc :evidence/data-classification :top-secret))
+          result (schema/validate-schema schema/evidence-bundle-schema bundle)]
+      (is (not (:valid? result))
+          "Unknown classification :top-secret should fail validation")
+      (is (some #(= :evidence/data-classification (:key %)) (:errors result))
+          "Error should name :evidence/data-classification"))))
+
+(deftest test-evidence-bundle-schema-regulatory-tags-valid
+  (testing "evidence-bundle-schema accepts known regulatory tags"
+    (let [bundle (-> (schema/create-evidence-bundle-template)
+                     (assoc :evidence-bundle/workflow-id (random-uuid))
+                     (assoc :evidence/regulatory-tags #{:gdpr :sox}))
+          result (schema/validate-schema schema/evidence-bundle-schema bundle)]
+      (is (:valid? result))
+      (is (empty? (:errors result))))))
+
+(deftest test-evidence-bundle-schema-regulatory-tags-invalid
+  (testing "evidence-bundle-schema rejects unknown regulatory tags"
+    (let [bundle (-> (schema/create-evidence-bundle-template)
+                     (assoc :evidence-bundle/workflow-id (random-uuid))
+                     (assoc :evidence/regulatory-tags #{:gdpr :unknown-framework}))
+          result (schema/validate-schema schema/evidence-bundle-schema bundle)]
+      (is (not (:valid? result))
+          "Bundle with unknown regulatory tag should fail validation")
+      (is (some #(= :evidence/regulatory-tags (:key %)) (:errors result))
+          "Error should name :evidence/regulatory-tags"))))
+
+(deftest test-evidence-bundle-schema-backwards-compatible
+  (testing "Existing bundles without new compliance keys still pass validation"
+    (let [legacy-bundle {:evidence-bundle/id (random-uuid)
+                         :evidence-bundle/workflow-id (random-uuid)
+                         :evidence-bundle/created-at (java.time.Instant/now)
+                         :evidence-bundle/version "1.0.0"
+                         :evidence/intent {}
+                         :evidence/policy-checks []
+                         :evidence/outcome {}}
+          result (schema/validate-schema schema/evidence-bundle-schema legacy-bundle)]
+      (is (:valid? result)
+          "Legacy bundle without compliance fields should pass schema validation")
+      (is (empty? (:errors result))))))
+
+(deftest test-retention-policy-schema-validates-sub-document
+  (testing "retention-policy-schema accepts valid retention policy"
+    (let [valid-policy {:retain-days 30 :auto-delete? true :legal-hold? false}
+          result (schema/validate-schema schema/retention-policy-schema valid-policy)]
+      (is (:valid? result))))
+  (testing "retention-policy-schema rejects missing required keys"
+    (let [invalid-policy {:retain-days 30 :auto-delete? true}
+          result (schema/validate-schema schema/retention-policy-schema invalid-policy)]
+      (is (not (:valid? result)))
+      (is (some #(= :legal-hold? (:key %)) (:errors result))))))
+
+(deftest test-evidence-bundle-schema-wires-retention-policy
+  (testing "evidence-bundle-schema validates :evidence/retention-policy via retention-policy-schema"
+    (let [bad-retention {:retain-days -1 :auto-delete? true :legal-hold? false}
+          bundle (-> (schema/create-evidence-bundle-template)
+                     (assoc :evidence-bundle/workflow-id (random-uuid))
+                     (assoc :evidence/retention-policy bad-retention))
+          result (schema/validate-schema schema/evidence-bundle-schema bundle)]
+      (is (not (:valid? result))
+          "Bundle with invalid retention policy should fail validation"))))
+
+(deftest test-evidence-bundle-schema-wires-access-log
+  (testing "evidence-bundle-schema validates :evidence/access-log entries via access-log-entry-schema"
+    (let [bad-entry {:access-log/principal "alice"
+                     :access-log/timestamp (java.time.Instant/now)}
+          ;; missing :access-log/action
+          bundle (-> (schema/create-evidence-bundle-template)
+                     (assoc :evidence-bundle/workflow-id (random-uuid))
+                     (assoc :evidence/access-log [bad-entry]))
+          result (schema/validate-schema schema/evidence-bundle-schema bundle)]
+      (is (not (:valid? result))
+          "Bundle with invalid access-log entry should fail validation")))
+  (testing "evidence-bundle-schema requires :evidence/access-log to be a vector"
+    (let [bad-access-log {:access-log/principal "alice"
+                          :access-log/action :read
+                          :access-log/timestamp (java.time.Instant/now)}
+          bundle (-> (schema/create-evidence-bundle-template)
+                     (assoc :evidence-bundle/workflow-id (random-uuid))
+                     (assoc :evidence/access-log bad-access-log))
+          result (schema/validate-schema schema/evidence-bundle-schema bundle)]
+      (is (not (:valid? result))
+          "Bundle with non-vector access-log should fail validation")
+      (is (some #(= :evidence/access-log (:key %)) (:errors result))))))
