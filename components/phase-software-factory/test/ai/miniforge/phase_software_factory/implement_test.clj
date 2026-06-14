@@ -167,6 +167,25 @@
         (is (nil? (get-in final-result [:phase :result :output]))
             "Result should NOT contain serialized :output / :code/files")))))
 
+(deftest leave-implement-tolerates-nil-tokens-metrics-test
+  (testing "an agent result with an EXPLICIT nil :tokens (file-artifact fallback
+            path) does not NPE in leave — tokens coerce to 0, verdict survives"
+    (with-redefs [agent/create-implementer (fn [_] {:type :mock-implementer})
+                  agent/invoke (fn [_ _ _]
+                                (response/success nil {:tokens nil :duration-ms 1200}))
+                  agent/curate-implement-output mock-curator-success]
+      (let [ctx (-> (create-base-context)
+                    (assoc :execution/environment-id (random-uuid)))
+            ctx-with-config (assoc ctx :phase-config {:phase :implement})
+            interceptor (phase/get-phase-interceptor {:phase :implement})
+            enter-result ((:enter interceptor) ctx-with-config)
+            ;; Pre-fix this threw a message-less NullPointerException.
+            final-result ((:leave interceptor) enter-result)]
+        (is (= :completed (get-in final-result [:phase :status])))
+        (is (number? (get-in final-result [:execution/metrics :tokens]))
+            "nil agent tokens accumulate as 0, not a throw")
+        (is (number? (get-in final-result [:phase :metrics :cost-usd])))))))
+
 (deftest implement-reads-plan-from-context-test
   (testing "implement phase reads plan from execution phase results"
     (let [plan-read-atom (atom nil)]
