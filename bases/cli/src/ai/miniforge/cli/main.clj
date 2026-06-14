@@ -415,11 +415,12 @@
   "Run the MCP context server (internal — spawned as subprocess by the agent).
 
    Reads JSON-RPC 2.0 from stdin, serves context_read/context_grep/context_glob
-   from a pre-populated cache with filesystem fallback. Invoked automatically;
-   not intended for direct user use."
+   from a pre-populated cache with filesystem fallback, plus context_write which
+   writes to --workdir (the agent's worktree). Invoked automatically; not
+   intended for direct user use."
   [m]
-  (let [{:keys [artifact-dir]} (get-opts m)]
-    (mcp-context-server/start-server artifact-dir)))
+  (let [{:keys [artifact-dir source-root workdir]} (get-opts m)]
+    (mcp-context-server/start-server artifact-dir source-root workdir)))
 
 (defn lsp-mcp-bridge-cmd
   "Run the LSP-to-MCP bridge server (spawned by Claude Code/Desktop/Codex as MCP server).
@@ -478,7 +479,9 @@
    ;; MCP context server (internal — spawned as subprocess by agent)
    {:cmds ["context-server"]
     :fn context-server-cmd
-    :spec {:artifact-dir {:alias :a :require true}}}
+    :spec {:artifact-dir {:alias :a :require true}
+           :source-root  {:alias :s}
+           :workdir      {:alias :w}}}
 
    ;; LSP-to-MCP bridge server (internal — spawned by Claude Code/Desktop/Codex)
    {:cmds ["lsp-mcp-bridge"]

@@ -48,14 +48,18 @@ a tool call is **not delivered** and will be discarded by the runtime.
 
 Required delivery sequence:
 
-1. **Write each file to the working directory. Pick the tool by file state:**
-   - **New file** → use `Write` with the complete contents.
-   - **Existing file** → edit it with `Bash` (a heredoc `cat > file`, `sed`,
-     `patch`, etc.). Do NOT use `Write`/`Edit` on an existing file: the native
-     `Read` tool is disabled here (read files with the `mcp__context__context_read`
-     MCP tool), and `Write`/`Edit` refuse to touch an existing file until read
-     with the native `Read` tool — so on an existing file they fail. Go straight
-     to `Bash`; don't burn turns discovering this.
+1. **Write each file to the working directory with the `mcp__context__context_write`
+   MCP tool.** Pass the path + the COMPLETE file contents. It creates new files
+   AND edits existing ones, needs no prior read, and refreshes the cache so a
+   later `mcp__context__context_read` sees your change. This is the reliable
+   path on every backend (Claude/Codex/Cursor).
+   - Why not native `Write`/`Edit` for existing files: the native `Read` tool is
+     disabled here (read with `mcp__context__context_read`), and `Write`/`Edit`
+     refuse to modify a file until it has been read with the native `Read` — so
+     they fail on existing files. Use `mcp__context__context_write`.
+   - If `mcp__context__context_write` is unavailable in your environment, fall
+     back to native `Write` for NEW files and `Bash` (heredoc/`sed`) for
+     EXISTING ones.
 
    Provide the complete file contents — no placeholders, no \"rest unchanged\"
    markers, no Clojure EDN maps in chat as a substitute.
@@ -63,8 +67,8 @@ Required delivery sequence:
    `code_summary` describing what you changed and why. `submit` is the
    structured confirmation path, not the only path: delivery is the set of
    files present in the working directory, collected from the worktree
-   regardless of which tool wrote them (`Write` or `Bash`). So your changes
-   land whether or not `submit` is available — but always call it when present.
+   regardless of which tool wrote them. So your changes land whether or not
+   `submit` is available — but always call it when present.
 
 Do NOT:
 - Emit a `{:code/files [...]}` map in this conversation in place of Write
@@ -183,10 +187,9 @@ Specifically:
 ## Turn Budget — HARD LIMIT
 
 You have at most 40 tool calls total.
-**Your FIRST action must write a file — `Write` for a new file, `Bash` for an
-existing one — NOT reading files, NOT planning in chat, NOT printing the code
-first.** (Never `Write`/`Edit` an existing file here; see the delivery sequence.)
-After at most 3 file reads, you MUST start writing.
+**Your FIRST action must write a file — use `mcp__context__context_write` (new or
+existing files) — NOT reading files, NOT planning in chat, NOT printing the code
+first.** After at most 3 file reads, you MUST start writing.
 A good-enough implementation written to disk on time is better than a perfect
 plan that never lands as files.
 
@@ -206,9 +209,10 @@ Do NOT explore further. Do NOT call context_read/context_grep/context_glob.
 Your only job is to DELIVER the implementation NOW by writing the files.
 
 Primary submission path:
-  Write each file — `Write` for new files, `Bash` for existing ones (native
-  `Write`/`Edit` fail on existing files in this environment). The files on disk
-  ARE the submission.
+  Write each file with `mcp__context__context_write` (new or existing files). If
+  it is unavailable, fall back to native `Write` for new files and `Bash` for
+  existing ones (native `Write`/`Edit` fail on existing files in this
+  environment). The files on disk ARE the submission.
 
 Fallback only if Write is unavailable:
   Write `.miniforge/implement.edn` with a `{:code/files [...]}` map, or end your

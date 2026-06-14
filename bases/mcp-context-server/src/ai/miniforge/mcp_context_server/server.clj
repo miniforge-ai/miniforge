@@ -112,7 +112,8 @@
   []
   (tools/register-handler! :context-read  context-cache/handle-context-read)
   (tools/register-handler! :context-grep  context-cache/handle-context-grep)
-  (tools/register-handler! :context-glob  context-cache/handle-context-glob))
+  (tools/register-handler! :context-glob  context-cache/handle-context-glob)
+  (tools/register-handler! :context-write context-cache/handle-context-write))
 
 (defn run-server
   "Run the MCP context server loop, reading JSON-RPC messages from stdin.
@@ -125,19 +126,24 @@
 
    Arguments:
    - artifact-dir — directory path for context cache and miss tracking
-   - source-root — repo root for filesystem fallback"
-  [artifact-dir source-root]
-  (log-stderr "miniforge-context MCP server started, artifact-dir:" artifact-dir "source-root:" source-root)
-  (context-cache/load-cache! artifact-dir source-root)
-  (register-context-handlers!)
-  (try
-    (let [reader (java.io.BufferedReader. (java.io.InputStreamReader. System/in "UTF-8"))]
-      (loop []
-        (when-let [line (.readLine reader)]
-          (process-line line)
-          (recur))))
-    (finally
-      (context-cache/flush-misses! artifact-dir)
-      ;; Persist the accumulated cache (incl. read-through additions) to the
-      ;; worktree so the next phase loads it — cross-phase write-through.
-      (context-cache/save-cache!))))
+   - source-root — repo root for read-side filesystem fallback
+   - workdir — write target for context_write (the agent's worktree); defaults
+     to source-root when absent"
+  ([artifact-dir source-root] (run-server artifact-dir source-root nil))
+  ([artifact-dir source-root workdir]
+   (log-stderr "miniforge-context MCP server started, artifact-dir:" artifact-dir
+               "source-root:" source-root "workdir:" workdir)
+   (context-cache/load-cache! artifact-dir source-root)
+   (context-cache/set-workdir! workdir)
+   (register-context-handlers!)
+   (try
+     (let [reader (java.io.BufferedReader. (java.io.InputStreamReader. System/in "UTF-8"))]
+       (loop []
+         (when-let [line (.readLine reader)]
+           (process-line line)
+           (recur))))
+     (finally
+       (context-cache/flush-misses! artifact-dir)
+       ;; Persist the accumulated cache (incl. read-through additions) to the
+       ;; worktree so the next phase loads it — cross-phase write-through.
+       (context-cache/save-cache!)))))

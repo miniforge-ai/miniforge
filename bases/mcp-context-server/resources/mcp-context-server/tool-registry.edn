@@ -53,4 +53,19 @@
     :properties
     {"pattern" {:type "string" :description "Glob pattern to match files (e.g. \"**/*.clj\", \"src/**/*.ts\")"}}}}
   :required-params
-  {"pattern" {:check :non-blank :msg "pattern is required"}}}}
+  {"pattern" {:check :non-blank :msg "pattern is required"}}}
+
+ "context_write"
+ {:handler :context-write
+  :tool-def
+  {:name "context_write"
+   :description "Create or overwrite a file in the working directory with the full contents you provide, and refresh the context cache so a later context_read returns it. Use this to create new files AND to edit existing ones — it needs no prior read, so it is the reliable cross-agent way to modify existing files. Provide the COMPLETE file contents (no placeholders or 'rest unchanged' markers)."
+   :inputSchema
+   {:type "object"
+    :required ["path" "content"]
+    :properties
+    {"path"    {:type "string" :description "File path relative to the working directory"}
+     "content" {:type "string" :description "Complete file contents to write"}}}}
+  :required-params
+  {"path"    {:check :non-blank :msg "path is required"}
+   "content" {:check :string    :msg "content is required (string)"}}}}

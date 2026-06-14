@@ -33,14 +33,17 @@
                                 (assoc opts :artifact-dir (second args)))
         "--source-root" (recur (drop 2 args)
                                (assoc opts :source-root (second args)))
+        "--workdir" (recur (drop 2 args)
+                           (assoc opts :workdir (second args)))
         (recur (rest args) opts)))))
 
 (defn -main [& args]
   (let [opts (parse-args args)
         artifact-dir (:artifact-dir opts)
-        source-root (:source-root opts)]
+        source-root (:source-root opts)
+        workdir (:workdir opts)]
     (when-not artifact-dir
       (binding [*out* *err*]
         (println "ERROR: --artifact-dir is required"))
       (System/exit 1))
-    (server/run-server artifact-dir source-root)))
+    (server/run-server artifact-dir source-root workdir)))
