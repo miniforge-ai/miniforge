@@ -278,8 +278,8 @@
    keys you need to change.
 
    Returns evidence bundle map (not yet stored)."
-  [workflow-id workflow-state artifact-store]
-  (collector/assemble-evidence-bundle workflow-id workflow-state artifact-store))
+  [workflow-id workflow-state artifact-store & [opts]]
+  (collector/assemble-evidence-bundle workflow-id workflow-state artifact-store opts))
 
 (defn append-access-log-entry
   "Append an access log entry to the bundle's :evidence/access-log.

@@ -55,7 +55,7 @@
    :intent/declared-at (java.time.Instant/now)
    :intent/author (get workflow-spec :author "system")})
 
-;------------------------------------------------------------------------------ Layer 0.5
+;------------------------------------------------------------------------------ Layer 1
 ;; Compliance Defaults and Overrides
 
 (defn- build-default-compliance-metadata
@@ -83,9 +83,7 @@
    - :evidence/regulatory-tags
    - :evidence/created-by"
   [workflow-spec opts]
-  (or (get workflow-spec :compliance)
-      (get opts :compliance)
-      {}))
+  (get workflow-spec :compliance (get opts :compliance {})))
 
 (defn- merge-compliance
   "Merge compliance defaults with operator overrides.
@@ -102,7 +100,7 @@
                     (get overrides :evidence/retention-policy)))
       base)))
 
-;------------------------------------------------------------------------------ Layer 0.5
+;------------------------------------------------------------------------------ Layer 1
 ;; Access Log
 
 (defn append-access-log-entry
