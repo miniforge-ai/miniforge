@@ -52,8 +52,8 @@ Required delivery sequence:
    - **New file** → use `Write` with the complete contents.
    - **Existing file** → edit it with `Bash` (a heredoc `cat > file`, `sed`,
      `patch`, etc.). Do NOT use `Write`/`Edit` on an existing file: the native
-     `Read` tool is disabled here (read files with the `context_read` MCP tool),
-     and `Write`/`Edit` refuse to touch an existing file until it has been read
+     `Read` tool is disabled here (read files with the `mcp__context__context_read`
+     MCP tool), and `Write`/`Edit` refuse to touch an existing file until read
      with the native `Read` tool — so on an existing file they fail. Go straight
      to `Bash`; don't burn turns discovering this.
 
@@ -178,13 +178,14 @@ Specifically:
   use `Write` to create it at that path. Write will succeed.
 - Do NOT conclude \"files not accessible\" from failed reads of new paths.
 - Do NOT produce a report or summary instead of writing files because reads failed.
-- Do NOT halt or produce narration when Write is the correct next action.
+- Do NOT halt or produce narration when writing a file is the correct next action.
 
 ## Turn Budget — HARD LIMIT
 
 You have at most 40 tool calls total.
-**Your FIRST action must be a Write or Edit tool call — NOT reading files,
-NOT planning in chat, NOT printing the code first.**
+**Your FIRST action must write a file — `Write` for a new file, `Bash` for an
+existing one — NOT reading files, NOT planning in chat, NOT printing the code
+first.** (Never `Write`/`Edit` an existing file here; see the delivery sequence.)
 After at most 3 file reads, you MUST start writing.
 A good-enough implementation written to disk on time is better than a perfect
 plan that never lands as files.
@@ -205,7 +206,8 @@ Do NOT explore further. Do NOT call context_read/context_grep/context_glob.
 Your only job is to DELIVER the implementation NOW by writing the files.
 
 Primary submission path:
-  Use the Write (or Edit) tool to create/modify each file. The files on disk
+  Write each file — `Write` for new files, `Bash` for existing ones (native
+  `Write`/`Edit` fail on existing files in this environment). The files on disk
   ARE the submission.
 
 Fallback only if Write is unavailable:
