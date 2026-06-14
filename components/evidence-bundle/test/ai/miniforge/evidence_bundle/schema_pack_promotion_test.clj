@@ -104,7 +104,8 @@
 
 (deftest test-evidence-bundle-with-pack-promotions
   (testing "Evidence bundle accepts pack-promotions field"
-    (let [bundle    (schema/create-evidence-bundle-template)
+    (let [bundle    (assoc (schema/create-evidence-bundle-template)
+                           :evidence-bundle/workflow-id (random-uuid))
           promotion {:pack/id "pack-001"
                      :pack/type :knowledge
                      :from-trust :untrusted
@@ -115,10 +116,14 @@
                      :promotion-justification "manual review approved"
                      :pack-hash "sha256:test123"
                      :pack-signature ""}
-          bundle+   (assoc bundle :evidence/pack-promotions [promotion])]
+          bundle+   (assoc bundle :evidence/pack-promotions [promotion])
+          result    (schema/validate-schema schema/evidence-bundle-schema bundle+)]
       (is (= 1 (count (:evidence/pack-promotions bundle+))))
       (is (= "manual review approved"
-             (-> bundle+ :evidence/pack-promotions first :promotion-justification))))))
+             (-> bundle+ :evidence/pack-promotions first :promotion-justification)))
+      (is (:valid? result)
+          (str "Bundle with pack promotions should pass evidence-bundle-schema; errors: "
+               (:errors result))))))
 
 (deftest test-evidence-bundle-template-includes-pack-promotions
   (testing "Evidence bundle template initializes pack-promotions as empty vector"

@@ -60,6 +60,21 @@
    retention-policy sub-keys simultaneously. SOX mandates 7 years."
   2555)
 
+(def ^:private preserved-access-log-first-timestamp
+  "Stable timestamp for the first pre-existing access-log entry; verifies
+   append-access-log-entry preserves earlier entries without mutation."
+  (java.time.Instant/parse "2024-01-01T00:00:00Z"))
+
+(def ^:private preserved-access-log-second-timestamp
+  "Stable timestamp for the second pre-existing access-log entry; verifies
+   append ordering across multiple pre-existing entries."
+  (java.time.Instant/parse "2024-06-01T00:00:00Z"))
+
+(def ^:private caller-supplied-access-log-timestamp
+  "Stable timestamp supplied by the caller; verifies append-access-log-entry
+   does not replace a timestamp that is already present."
+  (java.time.Instant/parse "2024-03-15T12:00:00Z"))
+
 ;------------------------------------------------------------------------------ Layer 1
 ;; assemble-evidence-bundle: Defaults and Overrides
 
@@ -182,10 +197,12 @@
 
 (deftest append-access-log-entry-preserves-existing-entries
   (testing "append-only: existing entries are never removed or mutated"
-    (let [t1     (java.time.Instant/parse "2024-01-01T00:00:00Z")
-          t2     (java.time.Instant/parse "2024-06-01T00:00:00Z")
-          e1     {:access-log/principal "alice" :access-log/action :read  :access-log/timestamp t1}
-          e2     {:access-log/principal "bob"   :access-log/action :audit :access-log/timestamp t2}
+    (let [e1     {:access-log/principal "alice"
+                  :access-log/action :read
+                  :access-log/timestamp preserved-access-log-first-timestamp}
+          e2     {:access-log/principal "bob"
+                  :access-log/action :audit
+                  :access-log/timestamp preserved-access-log-second-timestamp}
           bundle (reduce collector/append-access-log-entry {:evidence/access-log []} [e1 e2])
           result (collector/append-access-log-entry
                   bundle
@@ -195,9 +212,11 @@
           log    (:evidence/access-log result)]
       (is (= 3 (count log)))
       (is (= "alice" (:access-log/principal (nth log 0))))
-      (is (= t1      (:access-log/timestamp (nth log 0))))
+      (is (= preserved-access-log-first-timestamp
+             (:access-log/timestamp (nth log 0))))
       (is (= "bob"   (:access-log/principal (nth log 1))))
-      (is (= t2      (:access-log/timestamp (nth log 1))))
+      (is (= preserved-access-log-second-timestamp
+             (:access-log/timestamp (nth log 1))))
       (is (= "carol" (:access-log/principal (nth log 2)))))))
 
 (deftest append-access-log-entry-stamps-timestamp-when-absent
@@ -210,14 +229,14 @@
       (is (contains? logged :access-log/timestamp))
       (is (instance? java.time.Instant (:access-log/timestamp logged)))))
   (testing ":access-log/timestamp is NOT overwritten when already present"
-    (let [fixed-ts (java.time.Instant/parse "2024-03-15T12:00:00Z")
-          result   (collector/append-access-log-entry
+    (let [result   (collector/append-access-log-entry
                     {:evidence/access-log []}
                     {:access-log/principal "auditor"
                      :access-log/action    :read
-                     :access-log/timestamp fixed-ts})
+                     :access-log/timestamp caller-supplied-access-log-timestamp})
           logged   (first (:evidence/access-log result))]
-      (is (= fixed-ts (:access-log/timestamp logged))))))
+      (is (= caller-supplied-access-log-timestamp
+             (:access-log/timestamp logged))))))
 
 (deftest assembled-bundle-passes-validate-schema
   (testing "default assembled bundle satisfies evidence-bundle-schema"
