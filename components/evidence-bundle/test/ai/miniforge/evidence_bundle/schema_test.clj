@@ -102,15 +102,12 @@
                  :promotion-justification "passed knowledge-safety scans")
 
           result-without (schema/validate-schema schema/pack-promotion-schema
-                                                  promotion-no-justification)
-          result-with (schema/validate-schema schema/pack-promotion-schema
-                                               promotion-with-justification)]
+                                                 promotion-no-justification)
+          result-with    (schema/validate-schema schema/pack-promotion-schema
+                                                 promotion-with-justification)]
 
-      ;; Without justification should fail
       (is (not (:valid? result-without))
           "Promotion without justification should fail")
-
-      ;; With justification should pass
       (is (:valid? result-with)
           "Promotion with justification should pass")
       (is (empty? (:errors result-with))))))
@@ -126,15 +123,9 @@
                            :promotion-policy "knowledge-safety"
                            :promotion-justification "passed scans"
                            :pack-hash "sha256:abc"}
-
-          invalid-promotion (assoc valid-promotion
-                                   :from-trust :invalid-level)
-
-          result-valid (schema/validate-schema schema/pack-promotion-schema
-                                                valid-promotion)
-          result-invalid (schema/validate-schema schema/pack-promotion-schema
-                                                  invalid-promotion)]
-
+          invalid-promotion (assoc valid-promotion :from-trust :invalid-level)
+          result-valid   (schema/validate-schema schema/pack-promotion-schema valid-promotion)
+          result-invalid (schema/validate-schema schema/pack-promotion-schema invalid-promotion)]
       (is (:valid? result-valid)
           "Valid trust levels should pass")
       (is (not (:valid? result-invalid))
@@ -145,7 +136,7 @@
 
 (deftest test-evidence-bundle-with-pack-promotions
   (testing "Evidence bundle accepts pack-promotions field"
-    (let [bundle (schema/create-evidence-bundle-template)
+    (let [bundle    (schema/create-evidence-bundle-template)
           promotion {:pack/id "pack-001"
                      :pack/type :knowledge
                      :from-trust :untrusted
@@ -156,16 +147,11 @@
                      :promotion-justification "manual review approved"
                      :pack-hash "sha256:test123"
                      :pack-signature ""}
-          bundle-with-promotions (assoc bundle
-                                        :evidence/pack-promotions [promotion])]
-
-      (is (vector? (:evidence/pack-promotions bundle-with-promotions)))
-      (is (= 1 (count (:evidence/pack-promotions bundle-with-promotions))))
+          bundle+   (assoc bundle :evidence/pack-promotions [promotion])]
+      (is (vector? (:evidence/pack-promotions bundle+)))
+      (is (= 1 (count (:evidence/pack-promotions bundle+))))
       (is (= "manual review approved"
-             (-> bundle-with-promotions
-                 :evidence/pack-promotions
-                 first
-                 :promotion-justification))))))
+             (-> bundle+ :evidence/pack-promotions first :promotion-justification))))))
 
 (deftest test-evidence-bundle-template-includes-pack-promotions
   (testing "Evidence bundle template initializes pack-promotions as empty vector"
@@ -187,27 +173,26 @@
                           "verified signature from trusted key 0x123ABC"
                           "meets all policy compliance requirements"
                           "automated validation completed successfully"]
-          promotions (map (fn [justification]
-                            {:pack/id "pack-001"
-                             :pack/type :knowledge
-                             :from-trust :untrusted
-                             :to-trust :trusted
-                             :promoted-by "system"
-                             :promoted-at (java.time.Instant/now)
-                             :promotion-policy "knowledge-safety"
-                             :promotion-justification justification
-                             :pack-hash "sha256:test"
-                             :pack-signature ""})
-                          justifications)
-          results (map #(schema/validate-schema schema/pack-promotion-schema %)
-                       promotions)]
-
+          make-promotion (fn [j]
+                           {:pack/id "pack-001"
+                            :pack/type :knowledge
+                            :from-trust :untrusted
+                            :to-trust :trusted
+                            :promoted-by "system"
+                            :promoted-at (java.time.Instant/now)
+                            :promotion-policy "knowledge-safety"
+                            :promotion-justification j
+                            :pack-hash "sha256:test"
+                            :pack-signature ""})
+          results (map #(schema/validate-schema schema/pack-promotion-schema
+                                                (make-promotion %))
+                       justifications)]
       (is (every? :valid? results)
           "All common justification patterns should be valid")
       (is (every? #(empty? (:errors %)) results)))))
 
 (deftest test-empty-justification-invalid
-  (testing "Empty justification string should fail validation"
+  (testing "Empty justification string passes schema (content validated at business layer)"
     (let [promotion {:pack/id "pack-001"
                      :pack/type :knowledge
                      :from-trust :untrusted
@@ -215,17 +200,13 @@
                      :promoted-by "system"
                      :promoted-at (java.time.Instant/now)
                      :promotion-policy "knowledge-safety"
-                     :promotion-justification ""  ;; Empty string
+                     :promotion-justification ""
                      :pack-hash "sha256:test"
                      :pack-signature ""}
           result (schema/validate-schema schema/pack-promotion-schema promotion)]
-
-      ;; Schema validation only checks type, not content
-      ;; Content validation happens at business logic layer
       (is (:valid? result)
           "Schema validation passes for empty string (business logic should reject)"))))
 
-;------------------------------------------------------------------------------ Rich Comment
 (comment
   ;; Run all tests
   (clojure.test/run-tests)
