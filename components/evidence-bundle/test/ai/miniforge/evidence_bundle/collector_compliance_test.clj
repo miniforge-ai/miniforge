@@ -69,6 +69,20 @@
       (is (= "bob" (:access-log/principal (first (:evidence/access-log result)))))
       (is (= "alice" (:access-log/principal (second (:evidence/access-log result))))))))
 
+(deftest append-access-log-entry-normalizes-existing-log-to-vector
+  (testing "existing non-vector access logs keep append ordering"
+    (let [prior  {:access-log/principal "bob"
+                  :access-log/action    :export
+                  :access-log/timestamp (java.time.Instant/now)}
+          bundle {:evidence/access-log (list prior)}
+          entry  {:access-log/principal "alice"
+                  :access-log/action    :read
+                  :access-log/timestamp (java.time.Instant/now)}
+          result (collector/append-access-log-entry bundle entry)
+          log    (:evidence/access-log result)]
+      (is (vector? log))
+      (is (= ["bob" "alice"] (mapv :access-log/principal log))))))
+
 (deftest append-access-log-entry-stamps-missing-timestamp
   (testing ":access-log/timestamp is added when absent"
     (let [bundle {:evidence/access-log []}
@@ -77,6 +91,16 @@
           result (collector/append-access-log-entry bundle entry)
           logged (first (:evidence/access-log result))]
       (is (contains? logged :access-log/timestamp))
+      (is (instance? java.time.Instant (:access-log/timestamp logged))))))
+
+(deftest append-access-log-entry-stamps-nil-timestamp
+  (testing ":access-log/timestamp nil is treated as missing"
+    (let [bundle {:evidence/access-log []}
+          entry  {:access-log/principal "carol"
+                  :access-log/action    :validate
+                  :access-log/timestamp nil}
+          result (collector/append-access-log-entry bundle entry)
+          logged (first (:evidence/access-log result))]
       (is (instance? java.time.Instant (:access-log/timestamp logged))))))
 
 (deftest append-access-log-entry-preserves-existing-timestamp
@@ -173,6 +197,18 @@
       ;; spec is checked first by extract-compliance-overrides
       (is (= :restricted (:evidence/data-classification bundle))))))
 
+(deftest assemble-nil-spec-compliance-falls-back-to-opts
+  (testing "workflow-spec :compliance nil does not suppress opts :compliance"
+    (let [state  (assoc base-workflow-state
+                        :workflow/spec
+                        {:intent/type :update
+                         :description "nil spec compliance"
+                         :compliance  nil})
+          bundle (collector/assemble-evidence-bundle
+                  workflow-id state nil
+                  {:compliance {:evidence/data-classification :confidential}})]
+      (is (= :confidential (:evidence/data-classification bundle))))))
+
 ;------------------------------------------------------------------------------ Layer 5
 ;; Partial retention-policy merge
 
@@ -183,8 +219,8 @@
                   {:compliance {:evidence/retention-policy {:retain-days 365}}})]
       ;; caller only supplied :retain-days; auto-delete? and legal-hold? survive
       (is (= 365 (get-in bundle [:evidence/retention-policy :retain-days])))
-      (is (contains? (:evidence/retention-policy bundle) :auto-delete?))
-      (is (contains? (:evidence/retention-policy bundle) :legal-hold?)))))
+      (is (true? (get-in bundle [:evidence/retention-policy :auto-delete?])))
+      (is (false? (get-in bundle [:evidence/retention-policy :legal-hold?]))))))
 
 (deftest assemble-full-retention-policy-override
   (testing "full :evidence/retention-policy override replaces all sub-keys"

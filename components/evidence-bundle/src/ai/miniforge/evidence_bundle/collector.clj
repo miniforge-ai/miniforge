@@ -80,10 +80,12 @@
    - :evidence/data-classification
    - :evidence/contains-pii?
    - :evidence/retention-policy  (partial — merged one level deep)
-   - :evidence/regulatory-tags
-   - :evidence/created-by"
+  - :evidence/regulatory-tags
+  - :evidence/created-by"
   [workflow-spec opts]
-  (get workflow-spec :compliance (get opts :compliance {})))
+  (or (:compliance workflow-spec)
+      (:compliance opts)
+      {}))
 
 (defn- merge-compliance
   "Merge compliance defaults with operator overrides.
@@ -109,10 +111,12 @@
    Append-only contract: existing entries are never removed or mutated.
    Returns the updated bundle."
   [bundle entry]
-  (let [stamped (if (contains? entry :access-log/timestamp)
+  (let [stamped (if (some? (:access-log/timestamp entry))
                   entry
                   (assoc entry :access-log/timestamp (java.time.Instant/now)))]
-    (update bundle :evidence/access-log (fnil conj []) stamped)))
+    (update bundle :evidence/access-log
+            (fn [access-log]
+              (conj (vec (or access-log [])) stamped)))))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Phase Evidence Collection
