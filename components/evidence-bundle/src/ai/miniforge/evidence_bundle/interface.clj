@@ -370,7 +370,8 @@
 
 (def default-retention-days
   "Default retention period for evidence bundles — 90 days.
-   Override via :agent/retention-days in EDN config for regulatory environments."
+   Callers can override per-bundle retention through :evidence/retention-policy
+   in workflow-spec or opts compliance metadata."
   schema/default-retention-days)
 
 (def default-data-classification

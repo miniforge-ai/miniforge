@@ -227,9 +227,9 @@
 
 (def default-retention-days
   "Default retention period for evidence bundles — 90 days aligns with the
-   team's baseline audit window. Operators should override via
-   :agent/retention-days in EDN config for regulatory environments that
-   require longer holds (e.g. HIPAA mandates 6 years, SOX mandates 7 years)."
+   team's baseline audit window. Callers can override per-bundle retention
+   through :evidence/retention-policy in workflow-spec or opts compliance
+   metadata for regulatory environments that require longer holds."
   90)
 
 (def default-data-classification

@@ -71,6 +71,20 @@
    :evidence/regulatory-tags     #{}
    :evidence/created-by          schema/default-created-by-principal})
 
+(def ^:private compliance-override-keys
+  "Allowed keys for workflow-spec and opts compliance override maps."
+  #{:evidence/data-classification
+    :evidence/contains-pii?
+    :evidence/retention-policy
+    :evidence/regulatory-tags
+    :evidence/created-by})
+
+(defn- normalize-compliance-overrides
+  "Return only documented compliance override keys from m, or nil for non-maps."
+  [m]
+  (when (map? m)
+    (select-keys m compliance-override-keys)))
+
 (defn- extract-compliance-overrides
   "Read compliance overrides from workflow-spec or opts.
    Checks the :compliance key on the spec map first, then falls back to opts.
@@ -80,11 +94,11 @@
    - :evidence/data-classification
    - :evidence/contains-pii?
    - :evidence/retention-policy  (partial — merged one level deep)
-  - :evidence/regulatory-tags
-  - :evidence/created-by"
+   - :evidence/regulatory-tags
+   - :evidence/created-by"
   [workflow-spec opts]
-  (or (:compliance workflow-spec)
-      (:compliance opts)
+  (or (normalize-compliance-overrides (:compliance workflow-spec))
+      (normalize-compliance-overrides (:compliance opts))
       {}))
 
 (defn- merge-compliance

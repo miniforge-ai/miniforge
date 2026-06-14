@@ -115,7 +115,7 @@
       (is (= ts (:access-log/timestamp logged))))))
 
 (deftest append-access-log-entry-initializes-nil-access-log
-  (testing "fnil initializes missing :evidence/access-log as a vector"
+  (testing "missing :evidence/access-log is initialized as a vector"
     (let [bundle {}
           entry  {:access-log/principal "eve"
                   :access-log/action    :read
@@ -208,6 +208,27 @@
                   workflow-id state nil
                   {:compliance {:evidence/data-classification :confidential}})]
       (is (= :confidential (:evidence/data-classification bundle))))))
+
+(deftest assemble-non-map-spec-compliance-falls-back-to-opts
+  (testing "workflow-spec :compliance non-map does not suppress opts :compliance"
+    (let [state  (assoc base-workflow-state
+                        :workflow/spec
+                        {:intent/type :update
+                         :description "invalid spec compliance"
+                         :compliance  :not-a-map})
+          bundle (collector/assemble-evidence-bundle
+                  workflow-id state nil
+                  {:compliance {:evidence/data-classification :confidential}})]
+      (is (= :confidential (:evidence/data-classification bundle))))))
+
+(deftest assemble-filters-compliance-override-keys
+  (testing "override maps cannot replace non-compliance evidence keys"
+    (let [bundle (collector/assemble-evidence-bundle
+                  workflow-id base-workflow-state nil
+                  {:compliance {:evidence/data-classification :confidential
+                                :evidence/outcome {:outcome/success false}}})]
+      (is (= :confidential (:evidence/data-classification bundle)))
+      (is (not= {:outcome/success false} (:evidence/outcome bundle))))))
 
 ;------------------------------------------------------------------------------ Layer 5
 ;; Partial retention-policy merge
