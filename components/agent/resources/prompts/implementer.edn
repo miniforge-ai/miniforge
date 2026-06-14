@@ -48,15 +48,23 @@ a tool call is **not delivered** and will be discarded by the runtime.
 
 Required delivery sequence:
 
-1. **Use Write (or Edit) tools to create or modify each file.** One tool call
-   per file. Provide the complete file contents in each call — no placeholders,
-   no \"rest unchanged\" markers, no Clojure EDN maps in chat as a substitute.
+1. **Write each file to the working directory. Pick the tool by file state:**
+   - **New file** → use `Write` with the complete contents.
+   - **Existing file** → edit it with `Bash` (a heredoc `cat > file`, `sed`,
+     `patch`, etc.). Do NOT use `Write`/`Edit` on an existing file: the native
+     `Read` tool is disabled here (read files with the `context_read` MCP tool),
+     and `Write`/`Edit` refuse to touch an existing file until it has been read
+     with the native `Read` tool — so on an existing file they fail. Go straight
+     to `Bash`; don't burn turns discovering this.
+
+   Provide the complete file contents — no placeholders, no \"rest unchanged\"
+   markers, no Clojure EDN maps in chat as a substitute.
 2. **After writing all files, call the `submit` MCP tool** with a brief
-   `code_summary` describing what you changed and why. If `submit` is not
-   available in your environment, the runtime falls back to collecting
-   whatever files you wrote with Write/Edit — so Write/Edit alone is
-   sufficient delivery. `submit` is the structured confirmation path; never
-   the only path.
+   `code_summary` describing what you changed and why. `submit` is the
+   structured confirmation path, not the only path: delivery is the set of
+   files present in the working directory, collected from the worktree
+   regardless of which tool wrote them (`Write` or `Bash`). So your changes
+   land whether or not `submit` is available — but always call it when present.
 
 Do NOT:
 - Emit a `{:code/files [...]}` map in this conversation in place of Write
@@ -82,7 +90,8 @@ rejects slashes; the runtime maps them back to the namespaced EDN keys
 it persists `artifact.edn`.
 
 Note: `code_files` is NOT part of the submit payload. The runtime derives
-the file list from your Write/Edit tool calls.
+the file list from the working directory (the worktree diff), so files you
+edit with `Bash` count exactly like files you create with `Write`.
 
 ## Guidelines
 
@@ -144,7 +153,8 @@ If `Write` is unavailable, the same EDN map in your final message is an
 acceptable fallback. The runtime normalizes both paths.
 
 Only use this when ALL acceptance criteria are already met by existing code.
-If even partial changes are needed, proceed with normal Write/Edit delivery.
+If even partial changes are needed, proceed with normal file delivery (step 1:
+`Write` for new files, `Bash` for existing ones).
 
 ## CRITICAL: Do NOT Re-Read Files Already In This Prompt
 
