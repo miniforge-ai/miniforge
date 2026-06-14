@@ -459,16 +459,33 @@
         (str/join "\n" matches)
         (msg/t :context/no-glob-matches)))))
 
+(defn- within-write-root?
+  "True when the resolved target canonicalizes to a path inside write-root.
+   Blocks absolute paths and `..` traversal that would let an MCP client
+   overwrite files outside the worktree."
+  [target]
+  (let [root-c   (.getCanonicalPath (io/file (write-root)))
+        target-c (.getCanonicalPath (io/file target))]
+    (or (= target-c root-c)
+        (str/starts-with? target-c (str root-c java.io.File/separator)))))
+
 (defn handle-context-write
   "Handler for the context_write MCP tool. Writes the full file content to the
    worktree (write-root) and refreshes the cache so a later context_read returns
    the new content. Agent-agnostic edit path — works for any MCP client and,
-   unlike native Write/Edit, needs no prior native Read of the file."
+   unlike native Write/Edit, needs no prior native Read of the file. Paths are
+   relative to the worktree; absolute paths and `..` escapes are rejected."
   [params]
   (let [path    (get params "path")
         content (get params "content")]
-    (if (or (str/blank? path) (not (string? content)))
+    (cond
+      (or (str/blank? path) (not (string? content)))
       (error-response (msg/t :context/write-error {:path (str path)}))
+
+      (not (within-write-root? (resolve-write-path path)))
+      (error-response (msg/t :context/write-unsafe {:path (str path)}))
+
+      :else
       (try
         (let [target (io/file (resolve-write-path path))]
           (io/make-parents target)
@@ -479,7 +496,9 @@
           (swap! cache-state #(-> %
                                   (assoc-in [:files path] content)
                                   (assoc-in [:mtimes path] (.lastModified target))))
-          (text-response (msg/t :context/write-ok {:path path :bytes (count content)})))
+          (text-response (msg/t :context/write-ok
+                                {:path path
+                                 :bytes (alength (.getBytes ^String content "UTF-8"))})))
         (catch Exception e
           (error-response (msg/t :context/write-failed
                                  {:path path :error (ex-message e)})))))))

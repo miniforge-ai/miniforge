@@ -16,4 +16,5 @@
   :context/no-glob-matches     "No files matched the pattern."
   :context/write-ok            "Wrote {path} ({bytes} bytes)"
   :context/write-error         "context_write requires a non-blank path and string content (path: {path})"
+  :context/write-unsafe        "Refusing to write {path}: path must be relative to the working directory (no absolute paths or '..' escapes)"
   :context/write-failed        "Error writing {path}: {error}"}}

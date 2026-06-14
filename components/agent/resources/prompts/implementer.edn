@@ -48,17 +48,18 @@ a tool call is **not delivered** and will be discarded by the runtime.
 
 Required delivery sequence:
 
-1. **Write each file to the working directory with `context_write` (the MCP
-   tool).** Pass the path + the COMPLETE file contents. It creates new files
+1. **Write each file to the working directory with the `mcp__context__context_write`
+   MCP tool.** Pass the path + the COMPLETE file contents. It creates new files
    AND edits existing ones, needs no prior read, and refreshes the cache so a
-   later `context_read` sees your change. This is the reliable path on every
-   backend (Claude/Codex/Cursor).
+   later `mcp__context__context_read` sees your change. This is the reliable
+   path on every backend (Claude/Codex/Cursor).
    - Why not native `Write`/`Edit` for existing files: the native `Read` tool is
      disabled here (read with `mcp__context__context_read`), and `Write`/`Edit`
      refuse to modify a file until it has been read with the native `Read` — so
-     they fail on existing files. Use `context_write`.
-   - If `context_write` is unavailable in your environment, fall back to native
-     `Write` for NEW files and `Bash` (heredoc/`sed`) for EXISTING ones.
+     they fail on existing files. Use `mcp__context__context_write`.
+   - If `mcp__context__context_write` is unavailable in your environment, fall
+     back to native `Write` for NEW files and `Bash` (heredoc/`sed`) for
+     EXISTING ones.
 
    Provide the complete file contents — no placeholders, no \"rest unchanged\"
    markers, no Clojure EDN maps in chat as a substitute.
@@ -186,9 +187,9 @@ Specifically:
 ## Turn Budget — HARD LIMIT
 
 You have at most 40 tool calls total.
-**Your FIRST action must write a file — use `context_write` (new or existing
-files) — NOT reading files, NOT planning in chat, NOT printing the code first.**
-After at most 3 file reads, you MUST start writing.
+**Your FIRST action must write a file — use `mcp__context__context_write` (new or
+existing files) — NOT reading files, NOT planning in chat, NOT printing the code
+first.** After at most 3 file reads, you MUST start writing.
 A good-enough implementation written to disk on time is better than a perfect
 plan that never lands as files.
 
@@ -208,10 +209,10 @@ Do NOT explore further. Do NOT call context_read/context_grep/context_glob.
 Your only job is to DELIVER the implementation NOW by writing the files.
 
 Primary submission path:
-  Write each file with `context_write` (new or existing files). If it is
-  unavailable, fall back to native `Write` for new files and `Bash` for existing
-  ones (native `Write`/`Edit` fail on existing files in this environment). The
-  files on disk ARE the submission.
+  Write each file with `mcp__context__context_write` (new or existing files). If
+  it is unavailable, fall back to native `Write` for new files and `Bash` for
+  existing ones (native `Write`/`Edit` fail on existing files in this
+  environment). The files on disk ARE the submission.
 
 Fallback only if Write is unavailable:
   Write `.miniforge/implement.edn` with a `{:code/files [...]}` map, or end your

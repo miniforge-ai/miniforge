@@ -244,16 +244,18 @@
    3. mf context-server (production — bundled in the miniforge binary)
    4. miniforge context-server (fallback binary name)
 
-   The server reads context-cache.edn from artifact-dir on startup and
-   serves context_read/context_grep/context_glob to the inner LLM agent."
-  [artifact-dir source-root workdir]
-  (let [mcp-args (cond-> ["--artifact-dir" artifact-dir]
-                   source-root (into ["--source-root" source-root])
-                   ;; Write target for context_write — the agent's worktree.
-                   ;; Embedded in every backend's MCP config (claude/codex/
-                   ;; cursor all launch the server via this same command).
-                   workdir     (into ["--workdir" workdir]))
-        bb-root  (find-bb-root)]
+   The server reads context-cache.edn from artifact-dir on startup and serves
+   context_read/context_grep/context_glob and context_write to the inner LLM
+   agent. `workdir` (the agent's worktree) is the context_write target."
+  ([artifact-dir source-root] (server-command artifact-dir source-root nil))
+  ([artifact-dir source-root workdir]
+   (let [mcp-args (cond-> ["--artifact-dir" artifact-dir]
+                    source-root (into ["--source-root" source-root])
+                    ;; Write target for context_write — the agent's worktree.
+                    ;; Embedded in every backend's MCP config (claude/codex/
+                    ;; cursor all launch the server via this same command).
+                    workdir     (into ["--workdir" workdir]))
+         bb-root  (find-bb-root)]
     (cond
       (System/getenv "MINIFORGE_MCP_CMD")
       {:command (System/getenv "MINIFORGE_MCP_CMD") :args mcp-args}
@@ -269,7 +271,7 @@
       {:command "mf" :args (into ["context-server"] mcp-args)}
 
       :else
-      {:command "miniforge" :args (into ["context-server"] mcp-args)})))
+      {:command "miniforge" :args (into ["context-server"] mcp-args)}))))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; MCP config generation

@@ -360,3 +360,17 @@
       "blank path rejected")
   (is (:isError (cache/handle-context-write {"path" "f" "content" nil}))
       "nil content rejected"))
+
+(deftest handle-context-write-rejects-path-escapes-test
+  (with-temp-dir
+    (fn [dir]
+      (cache/reset-state!)
+      (cache/set-workdir! dir)
+      (testing "`..` traversal escaping the worktree is refused"
+        (is (:isError (cache/handle-context-write
+                       {"path" "../escape.clj" "content" "x"})))
+        (is (not (.exists (io/file dir ".." "escape.clj")))))
+      (testing "absolute paths are refused"
+        (is (:isError (cache/handle-context-write
+                       {"path" "/tmp/abs-escape.clj" "content" "x"})))
+        (is (not (.exists (io/file "/tmp/abs-escape.clj"))))))))
