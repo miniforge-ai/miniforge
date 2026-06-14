@@ -44,7 +44,7 @@
 
 ;------------------------------------------------------------------------------ Layer 0b
 ;; Schema Validation Helper
-;; Defined early so Layer 5+ schemas can reference it in validator fns.
+;; Defined early so Layer 5+ schemas can reference it in named validator fns.
 
 (defn validate-schema
   "Simple schema validation.
@@ -226,11 +226,17 @@
   #{:gdpr :hipaa :sox :pci})
 
 (def default-retention-days
-  "Default number of days to retain an evidence bundle before auto-deletion."
+  "Default retention period for evidence bundles — 90 days aligns with the
+   team's baseline audit window. Operators should override via
+   :agent/retention-days in EDN config for regulatory environments that
+   require longer holds (e.g. HIPAA mandates 6 years, SOX mandates 7 years)."
   90)
 
 (def default-data-classification
-  "Default data classification assigned to new evidence bundles."
+  "Default data classification for new evidence bundles. :internal rather
+   than :public ensures new bundles are never accidentally treated as safe
+   to share externally; operators promoting to :public must explicitly opt in.
+   :confidential and :restricted require manual assignment at bundle creation."
   :internal)
 
 (def default-created-by-principal
@@ -251,6 +257,31 @@
    :access-log/action keyword?
    :access-log/timestamp inst?
    (optional-key :access-log/reason) string?})
+
+;------------------------------------------------------------------------------ Layer 5b
+;; Compliance Validators
+;; Named fns — not anonymous — so they can be tested independently and
+;; referenced by name in evidence-bundle-schema (rule 002: no anon fns in maps).
+
+(defn- valid-data-classification?
+  "Returns true when v is a member of data-classifications."
+  [v]
+  (contains? data-classifications v))
+
+(defn- valid-retention-policy-map?
+  "Returns true when v is a map that satisfies retention-policy-schema."
+  [v]
+  (:valid? (validate-schema retention-policy-schema v)))
+
+(defn- valid-access-log-entry?
+  "Returns true when a single access log entry satisfies access-log-entry-schema."
+  [entry]
+  (:valid? (validate-schema access-log-entry-schema entry)))
+
+(defn- valid-access-log?
+  "Returns true when every entry in the access log vector is valid."
+  [v]
+  (every? valid-access-log-entry? v))
 
 ;------------------------------------------------------------------------------ Layer 5a
 ;; Rule Applied Schema
@@ -330,15 +361,12 @@
    (optional-key :compliance/auditor-notes) string?
 
    ;; Compliance Metadata (extended) — all optional for backwards compatibility.
-   ;; :evidence/data-classification validated against data-classifications enum.
-   ;; :evidence/retention-policy validated against retention-policy-schema.
-   ;; :evidence/access-log entries each validated against access-log-entry-schema.
-   (optional-key :evidence/data-classification) (fn [v] (contains? data-classifications v))
+   (optional-key :evidence/data-classification) valid-data-classification?
    (optional-key :evidence/contains-pii?) boolean?
-   (optional-key :evidence/retention-policy) (fn [v] (:valid? (validate-schema retention-policy-schema v)))
+   (optional-key :evidence/retention-policy) valid-retention-policy-map?
    (optional-key :evidence/regulatory-tags) set?
    (optional-key :evidence/created-by) string?
-   (optional-key :evidence/access-log) (fn [v] (every? #(:valid? (validate-schema access-log-entry-schema %)) v))})
+   (optional-key :evidence/access-log) valid-access-log?})
 
 ;------------------------------------------------------------------------------ Layer 7
 ;; Artifact Provenance Schema
