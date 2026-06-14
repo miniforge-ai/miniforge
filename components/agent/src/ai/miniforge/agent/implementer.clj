@@ -375,13 +375,6 @@
       (nil? (:content f)) (assoc :content "")
       (not (:action f))   (assoc :action :create))))
 
-(defn- fill-empty-creates
-  "Add placeholder content to empty :create files."
-  [f]
-  (if (and (= :create (:action f)) (empty? (:content f)))
-    (assoc f :content ";; TODO: Implement\n")
-    f))
-
 (defn- deduplicate-files
   "Deduplicate file entries by path, keeping last occurrence."
   [files]
@@ -402,7 +395,6 @@
                      (update :code/id #(or % (random-uuid)))
                      (update :code/files #(or % []))
                      (update :code/files #(filterv some? (map ensure-required-fields %)))
-                     (update :code/files #(mapv fill-empty-creates %))
                      (update :code/files deduplicate-files))]
     {:status :success
      :output repaired
