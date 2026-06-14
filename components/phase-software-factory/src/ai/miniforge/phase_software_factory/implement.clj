@@ -33,6 +33,7 @@
    [ai.miniforge.repo-index.interface :as repo-index]
    [ai.miniforge.logging.interface :as log]
    [ai.miniforge.response.interface :as response]
+   [ai.miniforge.schema.interface :as schema]
    [ai.miniforge.phase-software-factory.phase-terminal :as phase-terminal]
    [clojure.string :as str]))
 
@@ -642,6 +643,24 @@
                :code/file-actions (mapv :action files)
                :code/file-count (count files))))))
 
+(defn- ensure-valid-metrics
+  "Phase-input boundary validation for the agent result's `:metrics`. The
+   response builders guarantee non-nil numeric `:tokens`/`:duration-ms`, but a
+   producer that bypasses them (or a future regression) could send a nil that
+   then throws a message-less NPE in the cost/accumulation arithmetic below.
+   Validate against `schema/Metrics`; on violation, log loudly and coerce to a
+   valid shape (telemetry must not crash the phase) rather than fail silently."
+  [metrics logger]
+  (if (schema/valid? schema/Metrics metrics)
+    metrics
+    (let [coerced (-> metrics
+                      (update :tokens #(if (nat-int? %) % 0))
+                      (update :duration-ms #(if (nat-int? %) % 0)))]
+      (when logger
+        (log/warn logger :implement :metrics/boundary-invalid
+                  {:data {:received metrics :coerced coerced}}))
+      coerced)))
+
 (defn leave-implement
   "Post-processing for implementation phase.
 
@@ -650,6 +669,7 @@
   (let [start-time (get-in ctx [:phase :started-at])
         end-time (System/currentTimeMillis)
         duration-ms (if start-time (- end-time start-time) 0)
+        logger (get-in ctx [:execution/logger])
         result (get-in ctx [:phase :result])
         agent-status (:status result)
         rate-limited? (and (= :error agent-status) (rate-limit-in-result? result))
@@ -725,7 +745,9 @@
                        curator-empty-diff? :failed
                        :else (phase/determine-phase-status
                                effective-status iterations max-iterations))
-        metrics (get result :metrics {:tokens 0 :duration-ms duration-ms})
+        metrics (ensure-valid-metrics
+                  (get result :metrics {:tokens 0 :duration-ms duration-ms})
+                  logger)
         cost-usd (get result :cost-usd
                    (get metrics :cost-usd
                      (* (get metrics :tokens 0) 0.000015)))
