@@ -236,11 +236,12 @@
         (assoc :exclude-contexts excludes)))))
 
 (def ^:private valid-enforcement-actions
-  "Enforcement actions a rule may opt into via frontmatter `enforcement.action`.
-   `:hard-halt` makes a pack-derived gate BLOCK; the rest are non-blocking
-   (recorded / surfaced for review). An unrecognized value falls back to the
-   alwaysApply default so a typo can't silently produce a garbage action."
-  #{:hard-halt :warn :audit :review :require-approval})
+  "Enforcement actions a rule may opt into via frontmatter `enforcement.action`,
+   derived from the ONE canonical source (`schema/enforcement-actions`) so the
+   compiler can never accept an action the rule schema rejects. `:hard-halt`
+   makes a pack-derived gate BLOCK; the rest are non-blocking. An unrecognized
+   value falls back to the alwaysApply default — a typo can't produce garbage."
+  (set schema/enforcement-actions))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Field mapping transforms
