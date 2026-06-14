@@ -56,6 +56,83 @@
    :intent/author (get workflow-spec :author "system")})
 
 ;------------------------------------------------------------------------------ Layer 1
+;; Compliance Defaults and Overrides
+
+(defn- build-default-compliance-metadata
+  "Return the default compliance map for assembled evidence bundles.
+   Uses schema-defined defaults so the single source of truth lives in schema.clj.
+   Covers the assembly path; the template function covers manual construction."
+  []
+  {:evidence/data-classification schema/default-data-classification
+   :evidence/contains-pii?       false
+   :evidence/retention-policy    {:retain-days  schema/default-retention-days
+                                  :auto-delete? true
+                                  :legal-hold?  false}
+   :evidence/regulatory-tags     #{}
+   :evidence/created-by          schema/default-created-by-principal})
+
+(def ^:private compliance-override-keys
+  "Allowed keys for workflow-spec and opts compliance override maps."
+  #{:evidence/data-classification
+    :evidence/contains-pii?
+    :evidence/retention-policy
+    :evidence/regulatory-tags
+    :evidence/created-by})
+
+(defn- normalize-compliance-overrides
+  "Return only documented compliance override keys from m, or nil for non-maps."
+  [m]
+  (when (map? m)
+    (select-keys m compliance-override-keys)))
+
+(defn- extract-compliance-overrides
+  "Read compliance overrides from workflow-spec or opts.
+   Checks the :compliance key on the spec map first, then falls back to opts.
+   Returns a map of overrides to merge into the bundle, or {} when absent.
+
+   Allowed override keys:
+   - :evidence/data-classification
+   - :evidence/contains-pii?
+   - :evidence/retention-policy  (partial — merged one level deep)
+   - :evidence/regulatory-tags
+   - :evidence/created-by"
+  [workflow-spec opts]
+  (or (normalize-compliance-overrides (:compliance workflow-spec))
+      (normalize-compliance-overrides (:compliance opts))
+      {}))
+
+(defn- merge-compliance
+  "Merge compliance defaults with operator overrides.
+   :evidence/retention-policy is merged one level deep so callers may supply
+   only the keys they wish to change (e.g. just {:retain-days 365}) without
+   losing the other retention fields from the defaults."
+  [defaults overrides]
+  (let [base (merge defaults overrides)]
+    (if (and (contains? overrides :evidence/retention-policy)
+             (map? (get defaults :evidence/retention-policy))
+             (map? (get overrides :evidence/retention-policy)))
+      (assoc base :evidence/retention-policy
+             (merge (get defaults :evidence/retention-policy)
+                    (get overrides :evidence/retention-policy)))
+      base)))
+
+;------------------------------------------------------------------------------ Layer 1
+;; Access Log
+
+(defn append-access-log-entry
+  "Append an access log entry to the bundle's :evidence/access-log.
+   Stamps :access-log/timestamp on the entry when absent.
+   Append-only contract: existing entries are never removed or mutated.
+   Returns the updated bundle."
+  [bundle entry]
+  (let [stamped (if (some? (:access-log/timestamp entry))
+                  entry
+                  (assoc entry :access-log/timestamp (java.time.Instant/now)))]
+    (update bundle :evidence/access-log
+            (fn [access-log]
+              (conj (vec (or access-log [])) stamped)))))
+
+;------------------------------------------------------------------------------ Layer 1
 ;; Phase Evidence Collection
 
 (defn- build-phase-output
@@ -445,6 +522,18 @@
 (defn assemble-evidence-bundle
   "Assemble complete evidence bundle from workflow state and context.
    Merges N11 §9.1 execution evidence fields from :execution/output.
+
+   Compliance defaults (data-classification :internal, retention 90 days, no PII)
+   are applied after the main cond-> chain. Callers may override any compliance
+   field by supplying a :compliance map on the workflow-spec or opts:
+
+     opts:          {:compliance {:evidence/data-classification :confidential}}
+     workflow-spec: {:compliance {:evidence/contains-pii? true
+                                  :evidence/retention-policy {:retain-days 365}}}
+
+   :evidence/retention-policy overrides are merged one level deep — partial
+   overrides (e.g. only :retain-days) leave the other retention fields intact.
+
    Returns evidence bundle ready for storage."
   [workflow-id workflow-state artifact-store & [opts]]
   (let [workflow-spec (:workflow/spec workflow-state)
@@ -463,6 +552,11 @@
 
         ;; N11 §9.1: extract execution evidence from workflow result
         execution-evidence (collect-execution-evidence workflow-state)
+
+        ;; Compliance: defaults from schema + caller overrides from spec/opts
+        compliance-defaults (build-default-compliance-metadata)
+        compliance-overrides (extract-compliance-overrides workflow-spec opts)
+        compliance-data (merge-compliance compliance-defaults compliance-overrides)
 
         ;; Get artifacts for semantic validation
         artifacts (when artifact-store
@@ -506,6 +600,12 @@
                  (assoc :evidence/rules-applied rules-applied)
                  semantic-validation
                  (assoc :evidence/semantic-validation semantic-validation))
+
+        ;; Wire compliance defaults then caller overrides into the assembled bundle.
+        ;; Runs after the cond-> chain so that spec/opts overrides take precedence
+        ;; over the template defaults.  The scanner step below may still add
+        ;; :compliance/* scan-detected keys on top.
+        bundle (merge bundle compliance-data)
 
         ;; Run sensitive data scanner before hashing
         scan-result (try

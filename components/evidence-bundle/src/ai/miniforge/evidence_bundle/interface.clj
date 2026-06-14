@@ -265,12 +265,38 @@
    - workflow-state: Current workflow state
    - artifact-store: Artifact store instance
 
-   Returns evidence bundle map (not yet stored).
+   Compliance defaults (data-classification :internal, 90-day retention, no PII)
+   are applied automatically. Override via a :compliance map on the workflow-spec
+   or the optional opts argument:
+
+     (assemble-evidence-bundle wf-id state store
+       {:compliance {:evidence/data-classification :confidential
+                     :evidence/contains-pii? true
+                     :evidence/retention-policy {:retain-days 365}}})
+
+   :evidence/retention-policy overrides merge one level deep — supply only the
+   keys you need to change.
+
+   Returns evidence bundle map (not yet stored)."
+  [workflow-id workflow-state artifact-store & [opts]]
+  (collector/assemble-evidence-bundle workflow-id workflow-state artifact-store opts))
+
+(defn append-access-log-entry
+  "Append an access log entry to the bundle's :evidence/access-log.
+   Stamps :access-log/timestamp on the entry when absent.
+   Append-only contract: existing entries are never removed or mutated.
+   Returns the updated bundle.
+
+   Entry map should include at minimum:
+   - :access-log/principal  string  — identity of the accessor
+   - :access-log/action     keyword — e.g. :read, :export, :validate
 
    Example:
-     (assemble-evidence-bundle workflow-id state artifact-store)"
-  [workflow-id workflow-state artifact-store]
-  (collector/assemble-evidence-bundle workflow-id workflow-state artifact-store))
+     (append-access-log-entry bundle
+       {:access-log/principal \"alice@example.com\"
+        :access-log/action    :read})"
+  [bundle entry]
+  (collector/append-access-log-entry bundle entry))
 
 (defn auto-collect-evidence
   "Automatically collect evidence when workflow reaches terminal state.
@@ -331,6 +357,27 @@
 (def semantic-validation-rules
   "Validation rules per N6 section 2.4.1."
   schema/semantic-validation-rules)
+
+(def data-classifications
+  "Valid data classification levels for evidence bundles.
+   Members: :public :internal :confidential :restricted."
+  schema/data-classifications)
+
+(def regulatory-tag-values
+  "Regulatory frameworks that may apply to an evidence bundle.
+   Members: :gdpr :hipaa :sox :pci."
+  schema/regulatory-tag-values)
+
+(def default-retention-days
+  "Default retention period for evidence bundles — 90 days.
+   Callers can override per-bundle retention through :evidence/retention-policy
+   in workflow-spec or opts compliance metadata."
+  schema/default-retention-days)
+
+(def default-data-classification
+  "Default data classification for new evidence bundles — :internal.
+   Operators must explicitly assign :public, :confidential, or :restricted."
+  schema/default-data-classification)
 
 (defn create-evidence-template
   "Create an empty evidence bundle template.
