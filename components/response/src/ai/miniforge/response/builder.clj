@@ -24,6 +24,21 @@
   (:require [clojure.string]))
 
 ;------------------------------------------------------------------------------ Layer 0
+;; Metrics normalization
+
+(defn normalize-metrics
+  "Guarantee the canonical metrics contract: `:tokens` and `:duration-ms` are
+   always present non-nil numbers. `(merge {:tokens 0} {:tokens nil})` yields
+   `{:tokens nil}` — an explicit nil in a caller-supplied metrics map silently
+   overrides the default and violates the documented `{:tokens N :duration-ms N}`
+   shape, which then throws a message-less NPE in any downstream arithmetic.
+   Normalizing here, at the constructor boundary, means no reader has to defend."
+  [metrics tokens duration-ms]
+  (-> (merge {:tokens (or tokens 0) :duration-ms (or duration-ms 0)} metrics)
+      (update :tokens #(or % 0))
+      (update :duration-ms #(or % 0))))
+
+;------------------------------------------------------------------------------ Layer 0
 ;; Success responses
 
 (defn success
@@ -45,9 +60,7 @@
   ([output]
    (success output {}))
   ([output {:keys [metrics artifact tokens duration-ms]}]
-   (let [default-metrics {:tokens (or tokens 0)
-                         :duration-ms (or duration-ms 0)}
-         merged-metrics (merge default-metrics metrics)]
+   (let [merged-metrics (normalize-metrics metrics tokens duration-ms)]
      (cond-> {:status :success
               :output output
               :metrics merged-metrics}
@@ -146,9 +159,7 @@
   ([message]
    (error message {}))
   ([message {:keys [data metrics output tokens duration-ms]}]
-   (let [default-metrics {:tokens (or tokens 0)
-                         :duration-ms (or duration-ms 0)}
-         merged-metrics (merge default-metrics metrics)]
+   (let [merged-metrics (normalize-metrics metrics tokens duration-ms)]
      (cond-> {:status :error
               :error (error-details message data)
               :metrics merged-metrics}
