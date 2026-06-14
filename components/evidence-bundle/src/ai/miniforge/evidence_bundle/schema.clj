@@ -195,6 +195,35 @@
    (optional-key :compliance/retention-policy) keyword?
    (optional-key :compliance/auditor-notes) string?})
 
+(def data-classifications
+  "Valid data classification levels for evidence bundles."
+  #{:public :internal :confidential :restricted})
+
+(def regulatory-tag-values
+  "Regulatory frameworks that may apply to an evidence bundle."
+  #{:gdpr :hipaa :sox :pci})
+
+(def default-retention-days
+  "Default number of days to retain an evidence bundle before auto-deletion."
+  90)
+
+(def default-data-classification
+  "Default data classification assigned to new evidence bundles."
+  :internal)
+
+(def retention-policy-schema
+  "Schema for retention policy sub-document."
+  {:retain-days pos-int?
+   :auto-delete? boolean?
+   :legal-hold? boolean?})
+
+(def access-log-entry-schema
+  "Schema for a single access log entry on an evidence bundle."
+  {:access-log/principal string?
+   :access-log/action keyword?
+   :access-log/timestamp inst?
+   (optional-key :access-log/reason) string?})
+
 ;------------------------------------------------------------------------------ Layer 5a
 ;; Rule Applied Schema
 
@@ -270,7 +299,15 @@
    (optional-key :compliance/sensitive-data) boolean?
    (optional-key :compliance/pii-handling) keyword?
    (optional-key :compliance/retention-policy) keyword?
-   (optional-key :compliance/auditor-notes) string?})
+   (optional-key :compliance/auditor-notes) string?
+
+   ;; Compliance Metadata (extended)
+   (optional-key :evidence/data-classification) (fn [v] (contains? data-classifications v))
+   (optional-key :evidence/contains-pii?) boolean?
+   (optional-key :evidence/retention-policy) map?
+   (optional-key :evidence/regulatory-tags) set?
+   (optional-key :evidence/created-by) string?
+   (optional-key :evidence/access-log) vector?})
 
 ;------------------------------------------------------------------------------ Layer 7
 ;; Artifact Provenance Schema
@@ -373,7 +410,7 @@
      :errors @errors}))
 
 (defn create-evidence-bundle-template
-  "Create an empty evidence bundle template."
+  "Create an empty evidence bundle template with default compliance metadata."
   []
   {:evidence-bundle/id (random-uuid)
    :evidence-bundle/workflow-id nil
@@ -384,4 +421,12 @@
    :evidence/outcome {}
    :evidence/tool-invocations []
    :evidence/pack-promotions []
-   :evidence/dependency-health {}})
+   :evidence/dependency-health {}
+   :evidence/data-classification default-data-classification
+   :evidence/contains-pii? false
+   :evidence/retention-policy {:retain-days default-retention-days
+                               :auto-delete? true
+                               :legal-hold? false}
+   :evidence/regulatory-tags #{}
+   :evidence/created-by "system"
+   :evidence/access-log []})
