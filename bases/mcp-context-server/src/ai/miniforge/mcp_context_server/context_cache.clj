@@ -151,16 +151,30 @@
 ;; file when its content was cached, for write-invalidation), and :misses
 ;; (recorded cache misses).
 (defonce cache-state
-  (atom {:files {} :mtimes {} :misses [] :source-root nil :artifact-dir nil}))
+  (atom {:files {} :mtimes {} :misses [] :source-root nil :artifact-dir nil :workdir nil}))
 
 (defn reset-state!
   "Reset cache state. Intended for test isolation."
   []
-  (reset! cache-state {:files {} :mtimes {} :misses [] :source-root nil :artifact-dir nil}))
+  (reset! cache-state {:files {} :mtimes {} :misses [] :source-root nil :artifact-dir nil :workdir nil}))
+
+(defn set-workdir!
+  "Set the write target for context_write — the agent's worktree, distinct from
+   `:source-root` (the read reference). Reads resolve against source-root;
+   writes land in the worktree where the run collects the diff. Agent-agnostic:
+   every backend's context server is launched with the same command, so this
+   applies to Claude/Codex/Cursor alike."
+  [workdir]
+  (swap! cache-state assoc :workdir workdir))
 
 (defn- source-root
   []
   (or (:source-root @cache-state) "."))
+
+(defn- write-root
+  "Root for context_write: the worktree (`:workdir`) when set, else source-root."
+  []
+  (or (:workdir @cache-state) (source-root)))
 
 (defn- resolve-source-path
   [path]
@@ -168,6 +182,14 @@
     (if (.isAbsolute f)
       (.getPath f)
       (.getPath (io/file (source-root) path)))))
+
+(defn- resolve-write-path
+  "Resolve a write path against write-root (the worktree)."
+  [path]
+  (let [f (io/file path)]
+    (if (.isAbsolute f)
+      (.getPath f)
+      (.getPath (io/file (write-root) path)))))
 
 (def ^:private persistent-cache-relpath ".miniforge/context-cache.edn")
 
@@ -436,3 +458,28 @@
       (if (seq matches)
         (str/join "\n" matches)
         (msg/t :context/no-glob-matches)))))
+
+(defn handle-context-write
+  "Handler for the context_write MCP tool. Writes the full file content to the
+   worktree (write-root) and refreshes the cache so a later context_read returns
+   the new content. Agent-agnostic edit path — works for any MCP client and,
+   unlike native Write/Edit, needs no prior native Read of the file."
+  [params]
+  (let [path    (get params "path")
+        content (get params "content")]
+    (if (or (str/blank? path) (not (string? content)))
+      (error-response (msg/t :context/write-error {:path (str path)}))
+      (try
+        (let [target (io/file (resolve-write-path path))]
+          (io/make-parents target)
+          (spit target content)
+          ;; Cache the written content stamped with the new file's mtime so
+          ;; read-through serves this write — cache-stale? trusts a freshly
+          ;; stamped entry over an older/absent source-root copy.
+          (swap! cache-state #(-> %
+                                  (assoc-in [:files path] content)
+                                  (assoc-in [:mtimes path] (.lastModified target))))
+          (text-response (msg/t :context/write-ok {:path path :bytes (count content)})))
+        (catch Exception e
+          (error-response (msg/t :context/write-failed
+                                 {:path path :error (ex-message e)})))))))

@@ -35,7 +35,10 @@
   "Keyword → predicate map for validation rules in the registry config.
    These are the only functions that bridge EDN config to runtime behavior."
   {:non-empty (fn [v] (and v (seq v)))
-   :non-blank (fn [v] (and (string? v) (not (str/blank? v))))})
+   :non-blank (fn [v] (and (string? v) (not (str/blank? v))))
+   ;; :string accepts the empty string (truncating a file is a valid write),
+   ;; unlike :non-blank.
+   :string    (fn [v] (string? v))})
 
 (defn resolve-validator
   "Resolve a keyword validator to its predicate function."

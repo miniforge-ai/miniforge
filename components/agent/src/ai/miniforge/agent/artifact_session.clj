@@ -246,9 +246,13 @@
 
    The server reads context-cache.edn from artifact-dir on startup and
    serves context_read/context_grep/context_glob to the inner LLM agent."
-  [artifact-dir source-root]
+  [artifact-dir source-root workdir]
   (let [mcp-args (cond-> ["--artifact-dir" artifact-dir]
-                   source-root (into ["--source-root" source-root]))
+                   source-root (into ["--source-root" source-root])
+                   ;; Write target for context_write — the agent's worktree.
+                   ;; Embedded in every backend's MCP config (claude/codex/
+                   ;; cursor all launch the server via this same command).
+                   workdir     (into ["--workdir" workdir]))
         bb-root  (find-bb-root)]
     (cond
       (System/getenv "MINIFORGE_MCP_CMD")
@@ -499,6 +503,11 @@
   [{:mcp/server :context :mcp/tool :context_read}
    {:mcp/server :context :mcp/tool :context_grep}
    {:mcp/server :context :mcp/tool :context_glob}
+   ;; Agent-agnostic edit path: writes to the worktree + refreshes the cache,
+   ;; needs no prior native Read. The reliable way to modify EXISTING files
+   ;; across Claude/Codex/Cursor (native Write/Edit require a prior Read, which
+   ;; the implementer disallows to force the cache).
+   {:mcp/server :context :mcp/tool :context_write}
    ;; Native write tools: implementer needs all three patch shapes.
    ;; `Write` for full-file rewrites (planner's plan.edn, implementer
    ;; new files, releaser PR drafts). `Edit` for single-region patches.
@@ -528,7 +537,7 @@
 
    Returns: session (for threading)"
   [session]
-  (let [srv-cmd       (server-command (:dir session) (:source-root session))
+  (let [srv-cmd       (server-command (:dir session) (:source-root session) (:workdir session))
         config-root   (:config-root session)
         mcp-config    {"mcpServers" {"context" {"command" (:command srv-cmd)
                                                 "args"    (:args srv-cmd)}}}

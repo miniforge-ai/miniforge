@@ -34,11 +34,15 @@
    Blocks until stdin is closed.
 
    Arguments:
-   - artifact-dir — directory path for context cache and miss tracking"
+   - artifact-dir — directory path for context cache and miss tracking
+   - source-root — read-side filesystem fallback root
+   - workdir — write target for context_write (the agent's worktree)"
   ([artifact-dir]
    (server/run-server artifact-dir nil))
   ([artifact-dir source-root]
-   (server/run-server artifact-dir source-root)))
+   (server/run-server artifact-dir source-root))
+  ([artifact-dir source-root workdir]
+   (server/run-server artifact-dir source-root workdir)))
 
 (defn handle-tool-call
   "Invoke a tool handler directly (for testing without JSON-RPC).

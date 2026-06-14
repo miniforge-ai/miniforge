@@ -325,3 +325,38 @@
     (cache/reset-state!)
     (swap! cache/cache-state assoc :files {"x" "y"})
     (is (nil? (cache/save-cache!)) "no throw, nothing to persist without a worktree")))
+
+;------------------------------------------------------------------------------ Layer 3
+;; context_write handler
+
+(deftest handle-context-write-writes-to-workdir-and-caches-test
+  (with-temp-dir
+    (fn [dir]
+      (cache/reset-state!)
+      (cache/set-workdir! dir)
+      (let [resp (cache/handle-context-write {"path" "src/new.clj" "content" "(ns new)"})]
+        (is (not (:isError resp)) "write succeeds")
+        (testing "file landed in the worktree (workdir), not source-root"
+          (is (= "(ns new)" (slurp (io/file dir "src/new.clj")))))
+        (testing "read-after-write coherence — context_read returns the new content"
+          (let [read-resp (cache/handle-context-read {"path" "src/new.clj"})]
+            (is (= "(ns new)" (-> read-resp :content first :text)))))))))
+
+(deftest handle-context-write-overwrites-existing-test
+  (with-temp-dir
+    (fn [dir]
+      (cache/reset-state!)
+      (cache/set-workdir! dir)
+      (spit (io/file dir "a.clj") "(ns a)")
+      (let [resp (cache/handle-context-write {"path" "a.clj" "content" "(ns a-v2)"})]
+        (is (not (:isError resp)))
+        (is (= "(ns a-v2)" (slurp (io/file dir "a.clj"))))
+        (is (= "(ns a-v2)" (-> (cache/handle-context-read {"path" "a.clj"}) :content first :text))
+            "an existing file is edited and the cache reflects it")))))
+
+(deftest handle-context-write-rejects-bad-input-test
+  (cache/reset-state!)
+  (is (:isError (cache/handle-context-write {"path" "" "content" "x"}))
+      "blank path rejected")
+  (is (:isError (cache/handle-context-write {"path" "f" "content" nil}))
+      "nil content rejected"))
