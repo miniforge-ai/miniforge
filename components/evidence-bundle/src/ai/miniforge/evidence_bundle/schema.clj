@@ -258,6 +258,21 @@
    :access-log/timestamp inst?
    (optional-key :access-log/reason) string?})
 
+;------------------------------------------------------------------------------ Layer 5a
+;; Rule Applied Schema
+
+(def rule-applied-schema
+  "Schema for a single rule-applied entry in the evidence bundle.
+   Captures which knowledge base rules were injected into agent context.
+   Keys match the manifest shape returned by knowledge store's
+   compute-manifest-entry, with :phase added by the collector."
+  {:id uuid?
+   :title string?
+   :role keyword?
+   :tags-matched vector?
+   :score number?
+   :phase keyword?})
+
 ;------------------------------------------------------------------------------ Layer 5b
 ;; Compliance Validators
 ;; Named fns — not anonymous — so they can be tested independently and
@@ -282,21 +297,6 @@
   "Returns true when every entry in the access log vector is valid."
   [v]
   (every? valid-access-log-entry? v))
-
-;------------------------------------------------------------------------------ Layer 5a
-;; Rule Applied Schema
-
-(def rule-applied-schema
-  "Schema for a single rule-applied entry in the evidence bundle.
-   Captures which knowledge base rules were injected into agent context.
-   Keys match the manifest shape returned by knowledge store's
-   compute-manifest-entry, with :phase added by the collector."
-  {:id uuid?
-   :title string?
-   :role keyword?
-   :tags-matched vector?
-   :score number?
-   :phase keyword?})
 
 ;------------------------------------------------------------------------------ Layer 6
 ;; Evidence Bundle Schema
