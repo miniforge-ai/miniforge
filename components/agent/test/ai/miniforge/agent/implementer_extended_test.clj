@@ -298,7 +298,7 @@
       (is (response/success? result))
       (is (vector? (get-in result [:output :code/files]))))))
 
-(deftest repair-fills-empty-create-content-test
+(deftest repair-preserves-empty-create-content-test
   (testing "preserves empty content in :create files — no TODO stub injected"
     (let [artifact {:code/id (random-uuid)
                     :code/files [{:path "a.clj" :content "" :action :create}]}
