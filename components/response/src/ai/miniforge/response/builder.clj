@@ -26,13 +26,15 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Metrics normalization
 
-(defn normalize-metrics
-  "Guarantee the canonical metrics contract: `:tokens` and `:duration-ms` are
-   always present non-nil numbers. `(merge {:tokens 0} {:tokens nil})` yields
-   `{:tokens nil}` — an explicit nil in a caller-supplied metrics map silently
-   overrides the default and violates the documented `{:tokens N :duration-ms N}`
-   shape, which then throws a message-less NPE in any downstream arithmetic.
-   Normalizing here, at the constructor boundary, means no reader has to defend."
+(defn- normalize-metrics
+  "Ensure `:tokens` and `:duration-ms` are always PRESENT and non-nil,
+   replacing a missing or explicit-nil value with 0. `(merge {:tokens 0}
+   {:tokens nil})` yields `{:tokens nil}` — an explicit nil in a
+   caller-supplied metrics map silently overrides the default and violates the
+   documented `{:tokens N :duration-ms N}` shape, which then throws a
+   message-less NPE in any downstream arithmetic. Normalizing here, at the
+   constructor boundary, means no reader has to defend. (Does not coerce
+   non-nil non-numeric values — callers supply numbers or nil.)"
   [metrics tokens duration-ms]
   (-> (merge {:tokens (or tokens 0) :duration-ms (or duration-ms 0)} metrics)
       (update :tokens #(or % 0))
