@@ -1832,8 +1832,7 @@
    - workdir     - workspace directory inside capsule"
   [execute-fn executor env-id workdir]
   (fn [cmd]
-    (let [command-str (clojure.string/join " " cmd)
-          result (execute-fn executor env-id command-str {:workdir workdir})]
+    (let [result (execute-fn executor env-id cmd {:workdir workdir})]
       (if (and (map? result) (:data result))
         {:out (get-in result [:data :stdout] "")
          :err (get-in result [:data :stderr] "")
