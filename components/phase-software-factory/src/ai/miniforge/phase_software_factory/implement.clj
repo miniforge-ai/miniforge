@@ -653,7 +653,10 @@
   [metrics logger]
   (if (schema/valid? schema/Metrics metrics)
     metrics
-    (let [coerced (-> metrics
+    ;; Resilient to ANY invalid shape — a non-map :metrics (string/vector) must
+    ;; coerce too, not throw before we can log/recover.
+    (let [base    (if (map? metrics) metrics {})
+          coerced (-> base
                       (update :tokens #(if (nat-int? %) % 0))
                       (update :duration-ms #(if (nat-int? %) % 0)))]
       (when logger
