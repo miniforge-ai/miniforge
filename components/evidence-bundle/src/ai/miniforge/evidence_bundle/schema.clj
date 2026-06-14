@@ -42,6 +42,28 @@
     (:key k)
     k))
 
+;------------------------------------------------------------------------------ Layer 0b
+;; Schema Validation Helper
+;; Defined early so Layer 5+ schemas can reference it in validator fns.
+
+(defn validate-schema
+  "Simple schema validation.
+   Returns {:valid? bool :errors [...]}"
+  [schema data]
+  (let [errors (atom [])]
+    (doseq [[k validator] schema]
+      (let [is-optional? (optional-key? k)
+            actual-key   (unwrap-key k)
+            v            (get data actual-key)]
+        (cond
+          (and (nil? v) (not is-optional?))
+          (swap! errors conj {:key actual-key :error "Required key missing"})
+
+          (and v (fn? validator) (not (validator v)))
+          (swap! errors conj {:key actual-key :error "Validation failed" :value v}))))
+    {:valid? (empty? @errors)
+     :errors @errors}))
+
 ;; Intent Schema
 
 (def intent-types
@@ -211,6 +233,12 @@
   "Default data classification assigned to new evidence bundles."
   :internal)
 
+(def default-created-by-principal
+  "Default :evidence/created-by value for system-generated bundles.
+   The string 'system' is the canonical principal token for automated evidence
+   collection, distinct from a human user identity."
+  "system")
+
 (def retention-policy-schema
   "Schema for retention policy sub-document."
   {:retain-days pos-int?
@@ -301,13 +329,16 @@
    (optional-key :compliance/retention-policy) keyword?
    (optional-key :compliance/auditor-notes) string?
 
-   ;; Compliance Metadata (extended)
+   ;; Compliance Metadata (extended) — all optional for backwards compatibility.
+   ;; :evidence/data-classification validated against data-classifications enum.
+   ;; :evidence/retention-policy validated against retention-policy-schema.
+   ;; :evidence/access-log entries each validated against access-log-entry-schema.
    (optional-key :evidence/data-classification) (fn [v] (contains? data-classifications v))
    (optional-key :evidence/contains-pii?) boolean?
-   (optional-key :evidence/retention-policy) map?
+   (optional-key :evidence/retention-policy) (fn [v] (:valid? (validate-schema retention-policy-schema v)))
    (optional-key :evidence/regulatory-tags) set?
    (optional-key :evidence/created-by) string?
-   (optional-key :evidence/access-log) vector?})
+   (optional-key :evidence/access-log) (fn [v] (every? #(:valid? (validate-schema access-log-entry-schema %)) v))})
 
 ;------------------------------------------------------------------------------ Layer 7
 ;; Artifact Provenance Schema
@@ -389,25 +420,7 @@
    (optional-key :control-action/target) map?})
 
 ;------------------------------------------------------------------------------ Layer 10
-;; Helper Functions
-
-(defn validate-schema
-  "Simple schema validation.
-   Returns {:valid? bool :errors [...]}"
-  [schema data]
-  (let [errors (atom [])]
-    (doseq [[k validator] schema]
-      (let [is-optional? (optional-key? k)
-            actual-key (unwrap-key k)
-            v (get data actual-key)]
-        (cond
-          (and (nil? v) (not is-optional?))
-          (swap! errors conj {:key actual-key :error "Required key missing"})
-
-          (and v (fn? validator) (not (validator v)))
-          (swap! errors conj {:key actual-key :error "Validation failed" :value v}))))
-    {:valid? (empty? @errors)
-     :errors @errors}))
+;; Template
 
 (defn create-evidence-bundle-template
   "Create an empty evidence bundle template with default compliance metadata."
@@ -428,5 +441,5 @@
                                :auto-delete? true
                                :legal-hold? false}
    :evidence/regulatory-tags #{}
-   :evidence/created-by "system"
+   :evidence/created-by default-created-by-principal
    :evidence/access-log []})
