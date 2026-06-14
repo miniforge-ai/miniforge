@@ -302,6 +302,32 @@
         (is (some? (:rule/agent-behavior rule)))
         (is (some? (:rule/knowledge-content rule)))))))
 
+(deftest mdc->rule-enforcement-action-override-test
+  (testing "frontmatter enforcement.action :hard-halt makes the rule BLOCKING
+            (content-scan detector + :major severity), so a gate can block on it"
+    (let [content (str "---\ndewey: \"212\"\n"
+                       "description: No requiring-resolve\n"
+                       "globs: [\"**/*.clj\"]\n"
+                       "detection.pattern: \"\\(requiring-resolve\\s\"\n"
+                       "enforcement.action: hard-halt\n"
+                       "enforcement.message: Use a direct require\n"
+                       "---\n\n# No requiring-resolve\n\nbody")
+          rule (:rule (sut/mdc->rule "clojure-no-requiring-resolve.mdc" content))]
+      (is (= :hard-halt (get-in rule [:rule/enforcement :action])))
+      (is (= "Use a direct require" (get-in rule [:rule/enforcement :message])))
+      (is (= :major (:rule/severity rule)) "a blocking rule is at least :major")
+      (is (= :content-scan (get-in rule [:rule/detection :type])))
+      (is (= "\\(requiring-resolve\\s" (get-in rule [:rule/detection :pattern])))))
+  (testing "an unrecognized action falls back to the alwaysApply default, not garbage"
+    (let [content (str "---\ndewey: \"001\"\ndescription: X\nalwaysApply: true\n"
+                       "enforcement.action: bogus-action\n---\n\n# X\n\nbody")
+          rule (:rule (sut/mdc->rule "x.mdc" content))]
+      (is (= :warn (get-in rule [:rule/enforcement :action])))))
+  (testing "no enforcement override → existing default (advisory rule audits)"
+    (let [content (str "---\ndewey: \"001\"\ndescription: X\n---\n\n# X\n\nbody")
+          rule (:rule (sut/mdc->rule "x.mdc" content))]
+      (is (= :audit (get-in rule [:rule/enforcement :action]))))))
+
 (deftest mdc->rule-field-mapping-completeness-test
   (testing "all four frontmatter fields are mapped: dewey, description, alwaysApply, globs"
     (let [content (str "---\ndewey: \"210\"\n"

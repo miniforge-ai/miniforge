@@ -235,6 +235,13 @@
         (seq excludes)
         (assoc :exclude-contexts excludes)))))
 
+(def ^:private valid-enforcement-actions
+  "Enforcement actions a rule may opt into via frontmatter `enforcement.action`.
+   `:hard-halt` makes a pack-derived gate BLOCK; the rest are non-blocking
+   (recorded / surfaced for review). An unrecognized value falls back to the
+   alwaysApply default so a typo can't silently produce a garbage action."
+  #{:hard-halt :warn :audit :review :require-approval})
+
 ;------------------------------------------------------------------------------ Layer 1
 ;; Field mapping transforms
 
@@ -520,10 +527,26 @@
           agent-behavior  (extract-agent-behavior body)
 
           ;; ── Build rule map ──────────────────────────────────────────────
-          ;; alwaysApply rules are mandatory — :major severity, :warn action.
-          ;; Non-always rules are advisory — :minor severity, :audit action.
-          severity    (if always-apply :major :minor)
-          action      (if always-apply :warn :audit)
+          ;; Enforcement action: a rule MAY opt into a stronger action via
+          ;; frontmatter `enforcement.action` — notably `hard-halt`, which
+          ;; makes a pack-derived gate (:policy-verify/:policy-review) BLOCK
+          ;; rather than only warn. Without an override, alwaysApply rules warn
+          ;; and advisory rules audit (both non-blocking).
+          enforcement-fm (get fm "enforcement")
+          fm-action      (some-> enforcement-fm (get "action") str str/trim
+                                 not-empty keyword)
+          action         (cond
+                           (contains? valid-enforcement-actions fm-action) fm-action
+                           always-apply :warn
+                           :else :audit)
+          ;; A rule that opts into blocking is at least :major.
+          severity       (cond
+                           (= action :hard-halt) :major
+                           always-apply :major
+                           :else :minor)
+          enforcement-msg (or (some-> enforcement-fm (get "message") str str/trim
+                                      not-empty)
+                              (str "Standard: " title))
 
           rule (cond->
                  {:rule/id          rule-id
@@ -534,7 +557,7 @@
                   :rule/applies-to  applies-to
                   :rule/detection   detection
                   :rule/enforcement {:action  action
-                                    :message (str "Standard: " title)}}
+                                    :message enforcement-msg}}
 
                  always-apply
                  (assoc :rule/always-inject? true)

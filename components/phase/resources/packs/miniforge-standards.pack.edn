@@ -1,4 +1,4 @@
-#:pack{:created-at #inst "2026-06-05T06:02:06.195-00:00",
+#:pack{:created-at #inst "2026-06-14T23:14:15.405-00:00",
        :version "2026.06",
        :rules
        [#:rule{:title
@@ -129,6 +129,28 @@
                :category "211",
                :description
                "Engineering standard (211): Clojure exception handling — prefer slingshot `try+` / `throw+`; plain `try` only in narrow exemptions (no-slingshot-dep leaf catch, leaf inside `try+`, REPL/`(comment …)`)"}
+        #:rule{:title
+               "No requiring-resolve — fix the underlying load-order/design, don't lazy-resolve around it",
+               :agent-behavior
+               "Never introduce `(requiring-resolve ...)`. When you need a function from another namespace, add a direct `(:require [ns :as alias])` to the `ns` form and call `alias/fn`. If a direct require would create a load-order cycle, do NOT reach for `requiring-resolve` — instead fix the underlying design: move the shared interface to a lower stratum, split the over-large namespace, or add an adapter component.",
+               :enforcement
+               {:action :hard-halt,
+                :message
+                "requiring-resolve is an anti-pattern. Use a direct (:require [ns :as alias]) and call alias/fn. If a direct require would cause a load-order cycle, fix the design (move the interface down a stratum, split the namespace, or introduce an adapter) — do not lazy-resolve around it."},
+               :applies-to
+               {:phases #{:review :implement},
+                :file-globs ["**/*.clj" "**/*.cljc"]},
+               :severity :major,
+               :knowledge-content
+               "# No requiring-resolve (BLOCKING)\n\n`requiring-resolve` is an agent-smell. It almost always papers over a load-order\nor design problem that should be fixed at the source, not deferred to runtime.\n\n## The rule\n\nDo not call `requiring-resolve`. Resolve dependencies with a direct\n`(:require [some.ns :as alias])` in the namespace form and call `alias/fn`.\n\nThe only legitimate use is a genuine plugin/extension point where the dependency\nis *optionally* present at the module level (a true late-binding seam, declared\nas such). That is rare; default to a direct require.\n\n## Why it's blocked\n\nA direct require that would cause a cycle is signalling a real design issue:\n\n- an \"upward\" dependency (a lower stratum reaching into a higher one),\n- a namespace that does too much and should be split, or\n- a missing adapter/interface between two components.\n\n`requiring-resolve` hides that signal and lets the cycle persist. Fixing the\ndesign keeps the dependency graph honest and the load order static.\n\n## Agent behavior\n\nNever introduce `(requiring-resolve ...)`. When you need a function from another\nnamespace, add a direct `(:require [ns :as alias])` to the `ns` form and call\n`alias/fn`. If a direct require would create a load-order cycle, do NOT reach for\n`requiring-resolve` — instead fix the underlying design: move the shared\ninterface to a lower stratum, split the over-large namespace, or add an adapter\ncomponent. If you believe a case is a genuine optional plugin/extension point,\ncall it out explicitly in the code and the PR rather than using it silently.",
+               :id :std/clojure-no-requiring-resolve,
+               :detection
+               {:type :content-scan,
+                :pattern "\\(requiring-resolve\\s",
+                :mode :positive},
+               :category "212",
+               :description
+               "Engineering standard (212): No requiring-resolve — fix the underlying load-order/design, don't lazy-resolve around it"}
         #:rule{:title
                "Code quality — composable pipelines, no nested conditionals, DRY component extraction",
                :agent-behavior
@@ -1049,6 +1071,7 @@
                    :rules
                    [:std/clojure
                     :std/clojure-exception-handling
+                    :std/clojure-no-requiring-resolve
                     :std/css
                     :std/html
                     :std/javascript
@@ -1081,7 +1104,7 @@
                     :std/pre-commit-discipline
                     :std/tests-with-code]}],
        :trust-level :trusted,
-       :updated-at #inst "2026-06-05T06:02:06.195-00:00",
+       :updated-at #inst "2026-06-14T23:14:15.405-00:00",
        :author "miniforge.ai",
        :taxonomy-ref
        #:taxonomy{:id :miniforge/dewey, :min-version "1.0.0"},
