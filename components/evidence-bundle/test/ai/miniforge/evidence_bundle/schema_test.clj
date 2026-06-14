@@ -367,3 +367,120 @@
       (is (not (:valid? result))
           "Bundle with non-vector access-log should fail validation")
       (is (some #(= :evidence/access-log (:key %)) (:errors result))))))
+
+;------------------------------------------------------------------------------ Layer 5
+;; Enum Membership Tests
+
+(deftest test-data-classifications-enum-contains-expected-members
+  (testing "data-classifications set contains all four N6-specified levels"
+    (is (contains? schema/data-classifications :public))
+    (is (contains? schema/data-classifications :internal))
+    (is (contains? schema/data-classifications :confidential))
+    (is (contains? schema/data-classifications :restricted)))
+  (testing "data-classifications set has no extra unexpected members"
+    (is (= 4 (count schema/data-classifications)))))
+
+(deftest test-regulatory-tag-values-enum-contains-expected-members
+  (testing "regulatory-tag-values set contains all four N6-specified frameworks"
+    (is (contains? schema/regulatory-tag-values :gdpr))
+    (is (contains? schema/regulatory-tag-values :hipaa))
+    (is (contains? schema/regulatory-tag-values :sox))
+    (is (contains? schema/regulatory-tag-values :pci)))
+  (testing "regulatory-tag-values set has no extra unexpected members"
+    (is (= 4 (count schema/regulatory-tag-values)))))
+
+;------------------------------------------------------------------------------ Layer 6
+;; access-log-entry-schema Direct Tests
+
+(deftest test-access-log-entry-schema-valid-entry
+  (testing "access-log-entry-schema accepts a correctly shaped entry"
+    (let [entry  {:access-log/principal "alice@example.com"
+                  :access-log/action    :read
+                  :access-log/timestamp (java.time.Instant/now)}
+          result (schema/validate-schema schema/access-log-entry-schema entry)]
+      (is (:valid? result))
+      (is (empty? (:errors result)))))
+
+  (testing "access-log-entry-schema accepts entry with optional :access-log/reason"
+    (let [entry  {:access-log/principal "auditor"
+                  :access-log/action    :export
+                  :access-log/timestamp (java.time.Instant/now)
+                  :access-log/reason    "quarterly compliance audit"}
+          result (schema/validate-schema schema/access-log-entry-schema entry)]
+      (is (:valid? result)))))
+
+(deftest test-access-log-entry-schema-invalid-missing-action
+  (testing "access-log-entry-schema rejects entry missing :access-log/action"
+    (let [entry  {:access-log/principal "alice@example.com"
+                  :access-log/timestamp (java.time.Instant/now)}
+          result (schema/validate-schema schema/access-log-entry-schema entry)]
+      (is (not (:valid? result)))
+      (is (some #(= :access-log/action (:key %)) (:errors result))))))
+
+(deftest test-access-log-entry-schema-invalid-missing-principal
+  (testing "access-log-entry-schema rejects entry missing :access-log/principal"
+    (let [entry  {:access-log/action    :read
+                  :access-log/timestamp (java.time.Instant/now)}
+          result (schema/validate-schema schema/access-log-entry-schema entry)]
+      (is (not (:valid? result)))
+      (is (some #(= :access-log/principal (:key %)) (:errors result))))))
+
+(deftest test-access-log-entry-schema-invalid-missing-timestamp
+  (testing "access-log-entry-schema rejects entry missing :access-log/timestamp"
+    (let [entry  {:access-log/principal "alice@example.com"
+                  :access-log/action    :read}
+          result (schema/validate-schema schema/access-log-entry-schema entry)]
+      (is (not (:valid? result)))
+      (is (some #(= :access-log/timestamp (:key %)) (:errors result))))))
+
+;------------------------------------------------------------------------------ Layer 7
+;; evidence-bundle-schema — bundles WITH new optional compliance fields
+
+(deftest test-evidence-bundle-schema-accepts-bundle-with-all-new-fields
+  (testing "evidence-bundle-schema accepts a bundle carrying all six new compliance fields"
+    (let [bundle (-> (schema/create-evidence-bundle-template)
+                     (assoc :evidence-bundle/workflow-id (random-uuid))
+                     ;; All six new compliance fields explicitly set
+                     (assoc :evidence/data-classification :confidential)
+                     (assoc :evidence/contains-pii? true)
+                     (assoc :evidence/retention-policy {:retain-days  365
+                                                        :auto-delete? false
+                                                        :legal-hold?  true})
+                     (assoc :evidence/regulatory-tags #{:gdpr :hipaa})
+                     (assoc :evidence/created-by "operator-alice")
+                     (assoc :evidence/access-log
+                            [{:access-log/principal "auditor"
+                              :access-log/action    :read
+                              :access-log/timestamp (java.time.Instant/now)}]))
+          result (schema/validate-schema schema/evidence-bundle-schema bundle)]
+      (is (:valid? result)
+          (str "Bundle with all new compliance fields should pass; errors: "
+               (:errors result))))))
+
+(deftest test-evidence-bundle-schema-accepts-each-data-classification
+  (testing "evidence-bundle-schema accepts every member of data-classifications"
+    (doseq [cls schema/data-classifications]
+      (let [bundle (-> (schema/create-evidence-bundle-template)
+                       (assoc :evidence-bundle/workflow-id (random-uuid))
+                       (assoc :evidence/data-classification cls))
+            result (schema/validate-schema schema/evidence-bundle-schema bundle)]
+        (is (:valid? result)
+            (str "Classification " cls " should be accepted by evidence-bundle-schema"))))))
+
+(deftest test-evidence-bundle-schema-accepts-regulatory-tags-set
+  (testing "evidence-bundle-schema accepts a bundle with regulatory-tags populated"
+    (let [bundle (-> (schema/create-evidence-bundle-template)
+                     (assoc :evidence-bundle/workflow-id (random-uuid))
+                     (assoc :evidence/regulatory-tags #{:sox :pci}))
+          result (schema/validate-schema schema/evidence-bundle-schema bundle)]
+      (is (:valid? result)
+          "Bundle with regulatory-tags should pass schema validation"))))
+
+(deftest test-evidence-bundle-schema-rejects-invalid-data-classification
+  (testing "evidence-bundle-schema rejects :evidence/data-classification outside the enum"
+    (let [bundle (-> (schema/create-evidence-bundle-template)
+                     (assoc :evidence-bundle/workflow-id (random-uuid))
+                     (assoc :evidence/data-classification :ultra-secret))
+          result (schema/validate-schema schema/evidence-bundle-schema bundle)]
+      (is (not (:valid? result)))
+      (is (some #(= :evidence/data-classification (:key %)) (:errors result))))))
