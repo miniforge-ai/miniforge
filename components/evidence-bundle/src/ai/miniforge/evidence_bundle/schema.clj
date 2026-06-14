@@ -59,7 +59,7 @@
           (and (nil? v) (not is-optional?))
           (swap! errors conj {:key actual-key :error "Required key missing"})
 
-          (and v (fn? validator) (not (validator v)))
+          (and (some? v) (fn? validator) (not (validator v)))
           (swap! errors conj {:key actual-key :error "Validation failed" :value v}))))
     {:valid? (empty? @errors)
      :errors @errors}))
@@ -286,7 +286,14 @@
 (defn- valid-retention-policy-map?
   "Returns true when v is a map that satisfies retention-policy-schema."
   [v]
-  (:valid? (validate-schema retention-policy-schema v)))
+  (and (map? v)
+       (:valid? (validate-schema retention-policy-schema v))))
+
+(defn- valid-regulatory-tags?
+  "Returns true when v is a set containing only known regulatory tags."
+  [v]
+  (and (set? v)
+       (every? #(contains? regulatory-tag-values %) v)))
 
 (defn- valid-access-log-entry?
   "Returns true when a single access log entry satisfies access-log-entry-schema."
@@ -294,9 +301,10 @@
   (:valid? (validate-schema access-log-entry-schema entry)))
 
 (defn- valid-access-log?
-  "Returns true when every entry in the access log vector is valid."
+  "Returns true when the access log is a vector of valid entries."
   [v]
-  (every? valid-access-log-entry? v))
+  (and (vector? v)
+       (every? valid-access-log-entry? v)))
 
 ;------------------------------------------------------------------------------ Layer 6
 ;; Evidence Bundle Schema
@@ -364,7 +372,7 @@
    (optional-key :evidence/data-classification) valid-data-classification?
    (optional-key :evidence/contains-pii?) boolean?
    (optional-key :evidence/retention-policy) valid-retention-policy-map?
-   (optional-key :evidence/regulatory-tags) set?
+   (optional-key :evidence/regulatory-tags) valid-regulatory-tags?
    (optional-key :evidence/created-by) string?
    (optional-key :evidence/access-log) valid-access-log?})
 

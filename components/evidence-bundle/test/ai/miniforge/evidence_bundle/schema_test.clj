@@ -37,7 +37,14 @@
     (let [invalid-data {:constraint/type :pre}
           result (schema/validate-schema schema/constraint-schema invalid-data)]
       (is (not (:valid? result)))
-      (is (some #(= "Required key missing" (:error %)) (:errors result))))))
+      (is (some #(= "Required key missing" (:error %)) (:errors result)))))
+
+  (testing "Schema validation rejects present falsy values that fail validators"
+    (let [invalid-data {:constraint/type :pre
+                        :constraint/description false}
+          result (schema/validate-schema schema/constraint-schema invalid-data)]
+      (is (not (:valid? result)))
+      (is (some #(= :constraint/description (:key %)) (:errors result))))))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Pack Promotion Schema Tests
@@ -283,6 +290,26 @@
       (is (some #(= :evidence/data-classification (:key %)) (:errors result))
           "Error should name :evidence/data-classification"))))
 
+(deftest test-evidence-bundle-schema-regulatory-tags-valid
+  (testing "evidence-bundle-schema accepts known regulatory tags"
+    (let [bundle (-> (schema/create-evidence-bundle-template)
+                     (assoc :evidence-bundle/workflow-id (random-uuid))
+                     (assoc :evidence/regulatory-tags #{:gdpr :sox}))
+          result (schema/validate-schema schema/evidence-bundle-schema bundle)]
+      (is (:valid? result))
+      (is (empty? (:errors result))))))
+
+(deftest test-evidence-bundle-schema-regulatory-tags-invalid
+  (testing "evidence-bundle-schema rejects unknown regulatory tags"
+    (let [bundle (-> (schema/create-evidence-bundle-template)
+                     (assoc :evidence-bundle/workflow-id (random-uuid))
+                     (assoc :evidence/regulatory-tags #{:gdpr :unknown-framework}))
+          result (schema/validate-schema schema/evidence-bundle-schema bundle)]
+      (is (not (:valid? result))
+          "Bundle with unknown regulatory tag should fail validation")
+      (is (some #(= :evidence/regulatory-tags (:key %)) (:errors result))
+          "Error should name :evidence/regulatory-tags"))))
+
 (deftest test-evidence-bundle-schema-backwards-compatible
   (testing "Existing bundles without new compliance keys still pass validation"
     (let [legacy-bundle {:evidence-bundle/id (random-uuid)
@@ -328,4 +355,15 @@
                      (assoc :evidence/access-log [bad-entry]))
           result (schema/validate-schema schema/evidence-bundle-schema bundle)]
       (is (not (:valid? result))
-          "Bundle with invalid access-log entry should fail validation"))))
+          "Bundle with invalid access-log entry should fail validation")))
+  (testing "evidence-bundle-schema requires :evidence/access-log to be a vector"
+    (let [bad-access-log {:access-log/principal "alice"
+                          :access-log/action :read
+                          :access-log/timestamp (java.time.Instant/now)}
+          bundle (-> (schema/create-evidence-bundle-template)
+                     (assoc :evidence-bundle/workflow-id (random-uuid))
+                     (assoc :evidence/access-log bad-access-log))
+          result (schema/validate-schema schema/evidence-bundle-schema bundle)]
+      (is (not (:valid? result))
+          "Bundle with non-vector access-log should fail validation")
+      (is (some #(= :evidence/access-log (:key %)) (:errors result))))))
