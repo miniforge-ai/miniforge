@@ -172,6 +172,18 @@
    [:cost-usd {:optional true} :common/pos-number]
    [:duration-ms {:optional true} :common/non-neg-int]])
 
+(def Metrics
+  "Schema for an agent/phase result's `:metrics` map. `:tokens` and
+   `:duration-ms` are REQUIRED and non-nil — they are consumed by cost and
+   accumulation arithmetic, so a missing or nil value is a boundary violation
+   (it throws a message-less NPE downstream). `:non-neg-int` already rejects a
+   present nil; making the keys required also rejects an absent one."
+  [:map {:registry registry}
+   [:tokens :common/non-neg-int]
+   [:duration-ms :common/non-neg-int]
+   [:cost-usd {:optional true} :common/pos-number]
+   [:iterations {:optional true} :common/non-neg-int]])
+
 (def Workflow
   "Schema for an outer loop SDLC delivery instance."
   [:map {:registry registry}

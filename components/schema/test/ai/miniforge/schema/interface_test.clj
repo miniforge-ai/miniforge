@@ -202,6 +202,18 @@
                           #"Schema validation failed"
                           (schema/validate schema/Agent {:agent/id "bad"})))))
 
+(deftest metrics-schema-test
+  (testing "valid metrics pass"
+    (is (schema/valid? schema/Metrics {:tokens 0 :duration-ms 0}))
+    (is (schema/valid? schema/Metrics {:tokens 1500 :duration-ms 3000 :cost-usd 0.02})))
+  (testing "explicit nil :tokens is rejected (the NPE class)"
+    (is (not (schema/valid? schema/Metrics {:tokens nil :duration-ms 0}))))
+  (testing "missing required key is rejected"
+    (is (not (schema/valid? schema/Metrics {:duration-ms 0})))
+    (is (not (schema/valid? schema/Metrics {:tokens 0}))))
+  (testing "negative tokens rejected"
+    (is (not (schema/valid? schema/Metrics {:tokens -1 :duration-ms 0})))))
+
 ;; Enum access tests
 
 (deftest enum-values-test

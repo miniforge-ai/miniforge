@@ -186,6 +186,38 @@
             "nil agent tokens accumulate as 0, not a throw")
         (is (number? (get-in final-result [:phase :metrics :cost-usd])))))))
 
+(deftest leave-implement-boundary-coerces-raw-invalid-metrics-test
+  (testing "metrics that bypass the response builders (raw nil :tokens) are
+            caught at the phase-input boundary and coerced, not NPE'd"
+    (with-redefs [agent/create-implementer (fn [_] {:type :mock-implementer})
+                  agent/invoke (fn [_ _ _]
+                                (response/success nil {:tokens 10 :duration-ms 100}))
+                  agent/curate-implement-output mock-curator-success]
+      (let [ctx (-> (create-base-context)
+                    (assoc :execution/environment-id (random-uuid)))
+            ctx-with-config (assoc ctx :phase-config {:phase :implement})
+            interceptor (phase/get-phase-interceptor {:phase :implement})
+            enter-result ((:enter interceptor) ctx-with-config)
+            ;; Inject a raw, schema-invalid metrics map AFTER enter — simulates
+            ;; a producer that did not go through response/success.
+            tampered (assoc-in enter-result [:phase :result :metrics] {:tokens nil})
+            final-result ((:leave interceptor) tampered)]
+        (is (number? (get-in final-result [:execution/metrics :tokens]))
+            "boundary coerced the invalid metrics; no NPE")
+        (is (number? (get-in final-result [:phase :metrics :cost-usd]))))))
+  (testing "a non-map :metrics (wrong shape entirely) is coerced, not thrown"
+    (with-redefs [agent/create-implementer (fn [_] {:type :mock-implementer})
+                  agent/invoke (fn [_ _ _]
+                                (response/success nil {:tokens 10 :duration-ms 100}))
+                  agent/curate-implement-output mock-curator-success]
+      (let [ctx (assoc (create-base-context) :execution/environment-id (random-uuid))
+            interceptor (phase/get-phase-interceptor {:phase :implement})
+            enter-result ((:enter interceptor) (assoc ctx :phase-config {:phase :implement}))
+            tampered (assoc-in enter-result [:phase :result :metrics] "not-a-map")
+            final-result ((:leave interceptor) tampered)]
+        (is (number? (get-in final-result [:execution/metrics :tokens]))
+            "non-map metrics coerced to a valid shape; no throw")))))
+
 (deftest implement-reads-plan-from-context-test
   (testing "implement phase reads plan from execution phase results"
     (let [plan-read-atom (atom nil)]

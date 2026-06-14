@@ -78,6 +78,13 @@
    `:workflow/consumed` in [[Workflow]]."
   core/WorkflowBudget)
 
+(def Metrics
+  "Malli `:map` schema for an agent/phase result's `:metrics`: REQUIRED non-nil
+   `:tokens` and `:duration-ms` (consumed by cost/accumulation arithmetic),
+   optional `:cost-usd`, `:iterations`. Validate agent-result metrics against
+   this at the phase-input boundary so a nil fails loud instead of NPE-ing."
+  core/Metrics)
+
 (def LogEntry
   "Malli `:map` schema for a structured EDN log entry. Required: `:log/id`,
    `:log/timestamp`, `:log/level`, `:log/category`, `:log/event`. Optional:
