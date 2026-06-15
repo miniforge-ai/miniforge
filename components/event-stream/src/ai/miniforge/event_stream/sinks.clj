@@ -317,8 +317,7 @@
                        :edn (if compact?
                               (pr-str event)
                               (with-out-str (pprint/pprint event)))
-                       :json (let [gen-str (requiring-resolve 'cheshire.core/generate-string)]
-                               (str (gen-str event {:pretty (not compact?)})))
+                       :json (str (json/generate-string event {:pretty (not compact?)}))
                        (pr-str event))]
           (println output)
           (flush))
@@ -345,8 +344,7 @@
         (try
           (let [output (case format
                          :edn (pr-str event)
-                         :json (let [gen-str (requiring-resolve 'cheshire.core/generate-string)]
-                                 (gen-str event))
+                         :json (json/generate-string event)
                          (pr-str event))]
             (binding [*out* *err*]
               (println output)))
