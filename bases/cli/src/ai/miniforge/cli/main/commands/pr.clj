@@ -25,7 +25,9 @@
    [ai.miniforge.cli.app-config :as app-config]
    [ai.miniforge.cli.main.display :as display]
    [ai.miniforge.cli.main.commands.pr-review :as pr-review]
-   [ai.miniforge.cli.messages :as messages]))
+   [ai.miniforge.cli.messages :as messages]
+   [ai.miniforge.cli.workflow-runner :as workflow-runner]
+   [ai.miniforge.pr-lifecycle.interface :as pr-lifecycle]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Shell helpers
@@ -122,8 +124,7 @@
 
       ;; URL path: parse, checkout, derive base, delegate
       url
-      (let [parse-url (requiring-resolve 'ai.miniforge.pr-lifecycle.interface/parse-pr-url)
-            {:keys [number]} (parse-url url)]
+      (let [{:keys [number]} (pr-lifecycle/parse-pr-url url)]
         (cond
           (not number)
           (display/print-error (messages/t :pr/respond-bad-url))
@@ -164,10 +165,7 @@
   (let [{:keys [url]} opts]
     (if-not url
       (display/print-error (messages/t :pr/respond-usage {:command (app-config/command-string "pr respond <pr-url>")}))
-      (let [parse-url (requiring-resolve 'ai.miniforge.pr-lifecycle.interface/parse-pr-url)
-            respond!  (requiring-resolve 'ai.miniforge.pr-lifecycle.interface/respond-to-comments!)
-            run-spec  (requiring-resolve 'ai.miniforge.cli.workflow-runner/run-workflow-from-spec!)
-            {:keys [number]} (parse-url url)]
+      (let [{:keys [number]} (pr-lifecycle/parse-pr-url url)]
         (when-not number
           (display/print-error (messages/t :pr/respond-bad-url))
           (System/exit 1))
@@ -178,10 +176,12 @@
             (System/exit 1))
           (display/print-info (messages/t :pr/respond-on-branch {:branch branch}))
           (let [cwd (System/getProperty "user.dir")
-                result (respond! url cwd
-                                 (fn [spec run-opts] (run-spec spec (merge {:quiet true} run-opts)))
-                                 push!
-                                 opts)]
+                result (pr-lifecycle/respond-to-comments!
+                        url cwd
+                        (fn [spec run-opts]
+                          (workflow-runner/run-workflow-from-spec! spec (merge {:quiet true} run-opts)))
+                        push!
+                        opts)]
             (display/print-info
              (messages/t :pr/respond-done
                          {:comments (:comments-found result)
@@ -243,17 +243,14 @@
         poll-ms    (parse-poll-interval poll-interval cli-cfg)
         mon-opts   (cond-> {:worktree-path cwd :self-author author}
                      poll-ms (assoc :poll-interval-ms poll-ms))
-        create-mon (requiring-resolve 'ai.miniforge.pr-lifecycle.interface/create-pr-monitor)
-        run-loop   (requiring-resolve 'ai.miniforge.pr-lifecycle.interface/run-pr-monitor-loop)
-        stop-loop  (requiring-resolve 'ai.miniforge.pr-lifecycle.interface/stop-pr-monitor-loop)
-        monitor    (create-mon mon-opts)
+        monitor    (pr-lifecycle/create-pr-monitor mon-opts)
         eff-ms     (get-in @monitor [:config :poll-interval-ms])]
     (display/print-info (messages/t :pr/monitor-starting {:author author}))
     (display/print-info (messages/t :pr/monitor-polling {:seconds (/ eff-ms 1000) :dir cwd}))
     (display/print-info (messages/t :pr/monitor-stop-hint))
     (let [shutdown (fn []
                      (display/print-info (messages/t :pr/monitor-stopping))
-                     (try (stop-loop monitor) (catch Exception _)))]
+                     (try (pr-lifecycle/stop-pr-monitor-loop monitor) (catch Exception _)))]
       (.addShutdownHook (Runtime/getRuntime) (Thread. ^Runnable shutdown))
-      (let [evidence (run-loop monitor author)]
+      (let [evidence (pr-lifecycle/run-pr-monitor-loop monitor author)]
         (display/print-info (messages/t :pr/monitor-stopped {:evidence (pr-str evidence)}))))))
