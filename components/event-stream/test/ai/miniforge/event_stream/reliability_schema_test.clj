@@ -26,15 +26,20 @@
      Layer 3.5 — repository index intelligence (RN-19/20):
        :repo-index/quality-measured, :repo-index/coverage-changed
 
-   Three assertions per schema:
+   Coverage per schema:
      1. A conforming map passes malli/validate.
      2. A map missing a required field fails malli/validate.
      3. Optional fields can be omitted without failing validation.
+     4. Range-constrained fields reject out-of-contract values.
 
    Reliability schemas are exercised through the published interface
    constructors (es/sli-computed etc.) so field-name drift between
-   constructors and schemas surfaces immediately.  Repo-index schemas
-   have no constructors yet; conforming maps are built inline."
+   constructors and schemas surfaces immediately.  The constructors emit
+   :workflow/id nil (background monitoring context — not tied to a
+   workflow run); the schema accepts nil via [:maybe uuid?] / optional.
+
+   Repo-index schemas have no constructors yet; conforming maps are
+   built inline."
   (:require
    [clojure.test :refer [deftest is testing]]
    [malli.core :as m]
@@ -44,20 +49,27 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Named constants — no magic literals in test bodies
 
-(def ^:private rolling-window :rolling-5m)
-(def ^:private standard-tier  :standard)
-(def ^:private critical-tier  :critical)
-(def ^:private normal-mode    :normal)
-(def ^:private reduced-mode   :reduced-capacity)
-(def ^:private sli-name-avail :availability)
-(def ^:private slo-target     0.999)
-(def ^:private slo-actual     0.995)
+(def ^:private rolling-window  :rolling-5m)
+(def ^:private standard-tier   :standard)
+(def ^:private critical-tier   :critical)
+(def ^:private normal-mode     :normal)
+(def ^:private reduced-mode    :reduced-capacity)
+(def ^:private sli-name-avail  :availability)
+(def ^:private slo-target      0.999)
+(def ^:private slo-actual      0.995)
 (def ^:private budget-remaining 0.42)
-(def ^:private burn-rate       2.3)
-(def ^:private quality-score   0.87)
-(def ^:private staleness-ms    45000)
-(def ^:private coverage-new    0.95)
-(def ^:private coverage-old    0.88)
+(def ^:private burn-rate        2.3)
+(def ^:private quality-score    0.87)
+(def ^:private staleness-ms     45000)
+(def ^:private coverage-new     0.95)
+(def ^:private coverage-old     0.88)
+
+;; Out-of-range sentinels for boundary tests
+(def ^:private fraction-above-one  1.001)
+(def ^:private fraction-below-zero -0.001)
+(def ^:private negative-millis     -1)
+(def ^:private zero-burn-rate       0.0)
+(def ^:private negative-burn-rate  -1.0)
 
 (defn- stream [] (es/create-event-stream))
 
@@ -65,9 +77,10 @@
 ;; :reliability/sli-computed
 
 (deftest sli-computed-valid-conforms-test
-  (testing "conforming sli-computed event passes SliComputed schema"
+  (testing "conforming sli-computed event (nil workflow/id) passes SliComputed schema"
     (let [ev (es/sli-computed (stream) sli-name-avail 0.999 rolling-window)]
       (is (= :reliability/sli-computed (:event/type ev)))
+      (is (nil? (:workflow/id ev)) "constructor emits nil workflow/id (background monitoring)")
       (is (m/validate schema/SliComputed ev)))))
 
 (deftest sli-computed-missing-required-field-fails-test
@@ -95,6 +108,16 @@
                                :dimensions {:region "us-east-1"}})]
       (is (= standard-tier (:sli/tier ev)))
       (is (map? (:sli/dimensions ev)))
+      (is (m/validate schema/SliComputed ev)))))
+
+(deftest sli-computed-workflow-id-nil-accepted-test
+  (testing ":workflow/id nil is accepted (system-level telemetry, no workflow context)"
+    (let [ev (assoc (es/sli-computed (stream) sli-name-avail 0.999 rolling-window)
+                    :workflow/id nil)]
+      (is (m/validate schema/SliComputed ev))))
+  (testing ":workflow/id absent is also accepted"
+    (let [ev (dissoc (es/sli-computed (stream) sli-name-avail 0.999 rolling-window)
+                     :workflow/id)]
       (is (m/validate schema/SliComputed ev)))))
 
 ;------------------------------------------------------------------------------ Layer 1
@@ -181,6 +204,28 @@
       (is (= burn-rate        (:budget/burn-rate ev)))
       (is (= rolling-window   (:budget/window ev))))))
 
+(deftest error-budget-update-range-enforcement-test
+  (testing ":budget/remaining above 1.0 is rejected"
+    (let [ev (assoc (es/error-budget-update (stream) standard-tier sli-name-avail
+                                            budget-remaining burn-rate rolling-window)
+                    :budget/remaining fraction-above-one)]
+      (is (false? (m/validate schema/ErrorBudgetUpdate ev)))))
+  (testing ":budget/remaining below 0.0 is rejected"
+    (let [ev (assoc (es/error-budget-update (stream) standard-tier sli-name-avail
+                                            budget-remaining burn-rate rolling-window)
+                    :budget/remaining fraction-below-zero)]
+      (is (false? (m/validate schema/ErrorBudgetUpdate ev)))))
+  (testing ":budget/burn-rate of zero is rejected (undefined in SRE sense)"
+    (let [ev (assoc (es/error-budget-update (stream) standard-tier sli-name-avail
+                                            budget-remaining burn-rate rolling-window)
+                    :budget/burn-rate zero-burn-rate)]
+      (is (false? (m/validate schema/ErrorBudgetUpdate ev)))))
+  (testing ":budget/burn-rate negative is rejected"
+    (let [ev (assoc (es/error-budget-update (stream) standard-tier sli-name-avail
+                                            budget-remaining burn-rate rolling-window)
+                    :budget/burn-rate negative-burn-rate)]
+      (is (false? (m/validate schema/ErrorBudgetUpdate ev))))))
+
 ;------------------------------------------------------------------------------ Layer 1
 ;; :reliability/degradation-mode-changed
 
@@ -258,6 +303,28 @@
                     :index/tree-sha "abc1234def5678abc1234def5678abc1234def5678abc")]
       (is (m/validate schema/RepoIndexQualityMeasured ev)))))
 
+(deftest repo-index-quality-measured-range-enforcement-test
+  (testing ":index/quality-score above 1.0 is rejected"
+    (is (false? (m/validate schema/RepoIndexQualityMeasured
+                            (assoc (quality-measured-base)
+                                   :index/quality-score fraction-above-one)))))
+  (testing ":index/quality-score below 0.0 is rejected"
+    (is (false? (m/validate schema/RepoIndexQualityMeasured
+                            (assoc (quality-measured-base)
+                                   :index/quality-score fraction-below-zero)))))
+  (testing ":index/coverage above 1.0 is rejected"
+    (is (false? (m/validate schema/RepoIndexQualityMeasured
+                            (assoc (quality-measured-base)
+                                   :index/coverage fraction-above-one)))))
+  (testing ":index/coverage below 0.0 is rejected"
+    (is (false? (m/validate schema/RepoIndexQualityMeasured
+                            (assoc (quality-measured-base)
+                                   :index/coverage fraction-below-zero)))))
+  (testing ":index/staleness-ms negative is rejected"
+    (is (false? (m/validate schema/RepoIndexQualityMeasured
+                            (assoc (quality-measured-base)
+                                   :index/staleness-ms negative-millis))))))
+
 ;------------------------------------------------------------------------------ Layer 2
 ;; :repo-index/coverage-changed
 
@@ -300,6 +367,24 @@
                     :workflow/id (random-uuid)
                     :index/tree-sha "abc1234def5678abc1234def5678abc1234def5678abc")]
       (is (m/validate schema/RepoIndexCoverageChanged ev)))))
+
+(deftest repo-index-coverage-changed-range-enforcement-test
+  (testing ":index/coverage above 1.0 is rejected"
+    (is (false? (m/validate schema/RepoIndexCoverageChanged
+                            (assoc (coverage-changed-base)
+                                   :index/coverage fraction-above-one)))))
+  (testing ":index/coverage below 0.0 is rejected"
+    (is (false? (m/validate schema/RepoIndexCoverageChanged
+                            (assoc (coverage-changed-base)
+                                   :index/coverage fraction-below-zero)))))
+  (testing ":index/previous-coverage above 1.0 is rejected"
+    (is (false? (m/validate schema/RepoIndexCoverageChanged
+                            (assoc (coverage-changed-base)
+                                   :index/previous-coverage fraction-above-one)))))
+  (testing ":index/previous-coverage below 0.0 is rejected"
+    (is (false? (m/validate schema/RepoIndexCoverageChanged
+                            (assoc (coverage-changed-base)
+                                   :index/previous-coverage fraction-below-zero))))))
 
 ;------------------------------------------------------------------------------ Layer 3
 ;; Privacy defaults
