@@ -37,6 +37,7 @@
    [ai.miniforge.cli.main.commands.shared :as shared]
    [ai.miniforge.cli.main.display :as display]
    [ai.miniforge.cli.messages :as messages]
+   [ai.miniforge.cli.repo-analyzer :as repo-analyzer]
    [ai.miniforge.response.interface :as response]
    [ai.miniforge.schema.interface :as schema]))
 
@@ -190,8 +191,7 @@
       (display/print-error (messages/t :etl/clone-failed {:error (:error clone-result)}))
       (let [repo-path (:path clone-result)]
         (try
-          (let [analyze-fn (requiring-resolve 'ai.miniforge.cli.repo-analyzer/analyze-repo)
-                analysis   (analyze-fn repo-path)]
+          (let [analysis (repo-analyzer/analyze-repo repo-path)]
             (display/print-success (messages/t :etl/analysis-complete))
             (println (messages/t :etl/technologies {:value (pr-str (:technologies analysis))}))
             (println (messages/t :etl/git-host {:value (get analysis :git-host "unknown")}))
