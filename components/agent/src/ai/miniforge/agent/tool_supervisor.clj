@@ -36,6 +36,7 @@
   (:require
    [cheshire.core :as json]
    [clojure.string :as str]
+   [ai.miniforge.event-stream.interface :as events]
    [ai.miniforge.agent.meta-evaluator :as meta-eval])
   (:import
    [java.io PushbackReader]))
@@ -178,27 +179,25 @@
            :meta-eval eval-result})))))
 
 ;------------------------------------------------------------------------------ Layer 1.7
-;; Event emission (soft dependency via requiring-resolve)
+;; Event emission
 
 (defn emit-tool-use-event!
   "Emit a tool-use-evaluated event to the event stream (if available).
 
-   Uses requiring-resolve to avoid hard dependency on event-stream component.
-   Silently no-ops if event-stream is not loaded or no stream is bound."
+   Silently no-ops if no event stream or workflow id is bound."
   [tool-name result & [{:keys [event-stream workflow-id phase]}]]
   (try
     (when (and event-stream workflow-id)
-      (let [emit-fn (requiring-resolve 'ai.miniforge.event-stream.core/tool-use-evaluated)
-            publish-fn (requiring-resolve 'ai.miniforge.event-stream.core/publish!)
-            meta-eval (:meta-eval result)
-            event (emit-fn event-stream workflow-id tool-name
-                           (:decision result)
-                           (cond-> {}
-                             (:reasoning meta-eval) (assoc :reasoning (:reasoning meta-eval))
-                             (:meta-eval? meta-eval) (assoc :meta-eval? true)
-                             (:confidence meta-eval) (assoc :confidence (:confidence meta-eval))
-                             phase (assoc :phase phase)))]
-        (publish-fn event-stream event)))
+      (let [meta-eval (:meta-eval result)
+            event (events/tool-use-evaluated
+                    event-stream workflow-id tool-name
+                    (:decision result)
+                    (cond-> {}
+                      (:reasoning meta-eval) (assoc :reasoning (:reasoning meta-eval))
+                      (:meta-eval? meta-eval) (assoc :meta-eval? true)
+                      (:confidence meta-eval) (assoc :confidence (:confidence meta-eval))
+                      phase (assoc :phase phase)))]
+        (events/publish! event-stream event)))
     (catch Exception _e
       ;; Silently ignore — event emission is observability, not critical path
       nil)))
