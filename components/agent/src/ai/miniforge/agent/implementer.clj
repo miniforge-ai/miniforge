@@ -89,9 +89,9 @@
 ;; Validation
 
 (defn- find-empty-creates
-  "Find :create files with empty content."
+  "Find :create files with blank content."
   [files]
-  (filter (fn [f] (and (= :create (:action f)) (empty? (:content f)))) files))
+  (filter (fn [f] (and (= :create (:action f)) (str/blank? (:content f)))) files))
 
 (defn- find-duplicate-paths
   "Find file paths that appear more than once."
@@ -367,13 +367,42 @@
 ;------------------------------------------------------------------------------ Layer 1
 ;; Artifact repair
 
+(defn- repair-placeholder-content
+  "Build minimal non-empty placeholder content for an otherwise blank file."
+  [path]
+  (let [comment-prefix (case (extract-extension path)
+                         "clj" ";;"
+                         "cljc" ";;"
+                         "cljs" ";;"
+                         "edn" ";;"
+                         "js" "//"
+                         "ts" "//"
+                         "java" "//"
+                         "go" "//"
+                         "rs" "//"
+                         "swift" "//"
+                         "py" "#"
+                         "rb" "#"
+                         "sh" "#"
+                         "yml" "#"
+                         "yaml" "#"
+                         "toml" "#"
+                         nil)]
+    (if comment-prefix
+      (str comment-prefix " TODO: replace generated placeholder for " path "\n")
+      (str "TODO: replace generated placeholder for " path "\n"))))
+
 (defn- ensure-required-fields
   "Ensure a file entry has content and action. Drops entries with no path."
   [f]
   (when (:path f)
-    (cond-> f
-      (nil? (:content f)) (assoc :content "")
-      (not (:action f))   (assoc :action :create))))
+    (let [file (cond-> f
+                 (nil? (:content f)) (assoc :content "")
+                 (not (:action f))   (assoc :action :create))]
+      (cond-> file
+        (and (= :create (:action file))
+             (str/blank? (:content file)))
+        (assoc :content (repair-placeholder-content (:path file)))))))
 
 (defn- deduplicate-files
   "Deduplicate file entries by path, keeping last occurrence."
