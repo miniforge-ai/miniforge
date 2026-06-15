@@ -566,11 +566,14 @@
     (failed? state) state
     (not (:create-pr? state)) state
     :else
-    (let [{:keys [worktree-path release-meta pr-number pr-url branch
+    (let [{:keys [release-meta pr-number pr-url branch
                   executor environment-id logger code-artifacts workflow-data]} state
           filename (pr-doc-filename (:release/pr-title release-meta))
+          ;; Relative to the container workdir (the worktree root). The sandbox
+          ;; rejects absolute paths (assert-safe-container-path!), so this must
+          ;; NOT be prefixed with worktree-path — the executor resolves it
+          ;; against the workdir. The git add below already uses rel-path.
           rel-path (str "docs/pull-requests/" filename)
-          full-path (str worktree-path "/" rel-path)
           content (render-pr-doc-full
                    release-meta
                    {:pr-number pr-number :pr-url pr-url :branch branch}
@@ -578,7 +581,7 @@
                    workflow-data)]
       (try
         ;; Write via executor (governed) — never touch host filesystem
-        (sandbox/write-file! executor environment-id full-path content)
+        (sandbox/write-file! executor environment-id rel-path content)
         (when logger
           (log/info logger :release-executor :pr-doc-generated
                     {:data {:path rel-path}}))
