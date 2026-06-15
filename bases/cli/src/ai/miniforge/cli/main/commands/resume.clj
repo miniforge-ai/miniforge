@@ -39,6 +39,7 @@
    [ai.miniforge.response.interface :as response]
    [ai.miniforge.supervisory-state.interface :as supervisory]
    [ai.miniforge.automation-edge-correlator.interface :as correlator]
+   [ai.miniforge.workflow.interface :as workflow]
    [ai.miniforge.workflow-resume.interface :as wr]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -46,6 +47,16 @@
 
 (def events-dir
   (app-config/events-dir))
+
+(def load-workflow
+  "Workflow loader dependency, exposed as a var so tests can rebind the
+   CLI boundary without dynamic namespace resolution."
+  workflow/load-workflow)
+
+(def run-pipeline
+  "Workflow runner dependency, exposed as a var so tests can rebind the
+   CLI boundary without dynamic namespace resolution."
+  workflow/run-pipeline)
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Thin delegations kept for compatibility with existing callers/tests
@@ -121,11 +132,6 @@
                 (display/print-info
                   (messages/t :resume/events-found
                               {:count (:event-count reconstructed)})))
-
-            ;; Resolve workflow interface lazily — avoids pulling the
-            ;; workflow component onto the cold-start path.
-            load-workflow (requiring-resolve 'ai.miniforge.workflow.interface/load-workflow)
-            run-pipeline (requiring-resolve 'ai.miniforge.workflow.interface/run-pipeline)
 
             {:keys [workflow-type workflow-version]} (resolve-resume-workflow reconstructed)
             {:keys [workflow]} (load-workflow workflow-type workflow-version {})
