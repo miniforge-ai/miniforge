@@ -298,13 +298,14 @@
       (is (response/success? result))
       (is (vector? (get-in result [:output :code/files]))))))
 
-(deftest repair-preserves-empty-create-content-test
-  (testing "preserves empty content in :create files — no TODO stub injected"
+(deftest repair-fills-empty-create-content-test
+  (testing "fills empty content in :create files so repair returns a valid artifact"
     (let [artifact {:code/id (random-uuid)
                     :code/files [{:path "a.clj" :content "" :action :create}]}
           result (impl/repair-code-artifact artifact {:files "empty"} {})]
       (is (response/success? result))
-      (is (= "" (get-in result [:output :code/files 0 :content]))))))
+      (is (seq (get-in result [:output :code/files 0 :content])))
+      (is (:valid? (impl/validate-code-artifact (:output result)))))))
 
 (deftest repair-deduplicates-files-test
   (testing "keeps last occurrence of duplicate paths"

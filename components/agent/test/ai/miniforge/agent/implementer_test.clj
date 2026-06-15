@@ -673,7 +673,8 @@
                                       :action :create}]}
           result (core/repair agent bad-artifact {:files ["empty content"]} {})]
       (is (response/success? result))
-      (is (seq (get-in result [:output :code/files 0 :content]))))))
+      (is (seq (get-in result [:output :code/files 0 :content])))
+      (is (:valid? (implementer/validate-code-artifact (:output result)))))))
 
 ;------------------------------------------------------------------------------ Layer 6
 ;; Full cycle tests

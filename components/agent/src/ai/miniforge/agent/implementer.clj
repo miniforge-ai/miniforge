@@ -88,10 +88,10 @@
 ;------------------------------------------------------------------------------ Layer 1
 ;; Validation
 
-(defn- find-empty-creates
-  "Find :create files with empty content."
+(defn- find-blank-creates
+  "Find :create files with blank content."
   [files]
-  (filter (fn [f] (and (= :create (:action f)) (empty? (:content f)))) files))
+  (filter (fn [f] (and (= :create (:action f)) (str/blank? (:content f)))) files))
 
 (defn- find-duplicate-paths
   "Find file paths that appear more than once."
@@ -106,13 +106,13 @@
     (schema/invalid (schema/explain CodeArtifact artifact)
                     {:errors (schema/explain CodeArtifact artifact)})
     (let [files (:code/files artifact)
-          empty-creates (find-empty-creates files)
+          blank-creates (find-blank-creates files)
           duplicate-paths (find-duplicate-paths files)]
       (cond
-        (seq empty-creates)
-        (schema/invalid (str "Empty content for :create files: " (mapv :path empty-creates))
-                        {:errors {:files (str "Empty content for :create files: "
-                                              (mapv :path empty-creates))}})
+        (seq blank-creates)
+        (schema/invalid (str "Blank content for :create files: " (mapv :path blank-creates))
+                        {:errors {:files (str "Blank content for :create files: "
+                                              (mapv :path blank-creates))}})
         (seq duplicate-paths)
         (schema/invalid (str "Duplicate file paths: " (keys duplicate-paths))
                         {:errors {:files (str "Duplicate file paths: " (keys duplicate-paths))}})
@@ -367,13 +367,43 @@
 ;------------------------------------------------------------------------------ Layer 1
 ;; Artifact repair
 
+(defn- repair-placeholder-content
+  "Build minimal non-empty placeholder content for an otherwise blank file."
+  [path]
+  (let [comment-prefix (case (some-> path extract-extension str/lower-case)
+                         "clj" ";;"
+                         "cljc" ";;"
+                         "cljs" ";;"
+                         "edn" ";;"
+                         "js" "//"
+                         "ts" "//"
+                         "java" "//"
+                         "go" "//"
+                         "rs" "//"
+                         "swift" "//"
+                         "py" "#"
+                         "rb" "#"
+                         "sh" "#"
+                         "yml" "#"
+                         "yaml" "#"
+                         "toml" "#"
+                         nil)]
+    (if comment-prefix
+      (str comment-prefix " TODO: replace generated placeholder for " path "\n")
+      (str "TODO: replace generated placeholder for " path "\n"))))
+
 (defn- ensure-required-fields
-  "Ensure a file entry has content and action. Drops entries with no path."
+  "Ensure a file entry has content and action, filling blank creates with a placeholder.
+  Drops entries with no path."
   [f]
   (when (:path f)
-    (cond-> f
-      (nil? (:content f)) (assoc :content "")
-      (not (:action f))   (assoc :action :create))))
+    (let [file (cond-> f
+                 (nil? (:content f)) (assoc :content "")
+                 (not (:action f))   (assoc :action :create))]
+      (cond-> file
+        (and (= :create (:action file))
+             (str/blank? (:content file)))
+        (assoc :content (repair-placeholder-content (:path file)))))))
 
 (defn- deduplicate-files
   "Deduplicate file entries by path, keeping last occurrence."
