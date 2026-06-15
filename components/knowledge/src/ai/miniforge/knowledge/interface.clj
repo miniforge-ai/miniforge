@@ -40,6 +40,7 @@
    [ai.miniforge.knowledge.messages :as messages]
    [ai.miniforge.knowledge.policy-lookup :as policy-lookup]
    [ai.miniforge.knowledge.trust]
+   [ai.miniforge.knowledge.yaml :as yaml]
    [malli.core :as m]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -516,12 +517,12 @@
 (def split-frontmatter
   "Split markdown content into frontmatter and body.
    Returns {:frontmatter string :body string} or nil if no frontmatter."
-  (requiring-resolve 'ai.miniforge.knowledge.yaml/split-frontmatter))
+  yaml/split-frontmatter)
 
 (def parse-yaml-frontmatter
   "Parse YAML frontmatter into EDN map.
    Handles basic YAML: key: value, arrays, lists."
-  (requiring-resolve 'ai.miniforge.knowledge.yaml/parse-yaml-frontmatter))
+  yaml/parse-yaml-frontmatter)
 
 ;------------------------------------------------------------------------------ Layer 8
 ;; Rule and documentation loading
