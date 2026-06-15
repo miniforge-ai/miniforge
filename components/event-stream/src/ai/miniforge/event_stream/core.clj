@@ -1242,8 +1242,10 @@
   "Emit when an SLI value is computed over a rolling window."
   [stream sli-name value window & [opts]]
   (-> (create-envelope stream :reliability/sli-computed nil
-                       (format "SLI computed: %s = %.3f over %s"
-                               (name sli-name) (double value) (name window)))
+                       (messages/t :reliability/sli-computed
+                                   {:sli-name (name sli-name)
+                                    :value    value
+                                    :window   (name window)}))
       (assoc :sli/name sli-name
              :sli/value value
              :sli/window window)
@@ -1255,8 +1257,11 @@
   "Emit when an SLO target is missed for :standard or :critical tiers."
   [stream sli-name target actual tier window]
   (-> (create-envelope stream :reliability/slo-breach nil
-                       (format "SLO breach: %s target=%.3f actual=%.3f tier=%s"
-                               (name sli-name) (double target) (double actual) (name tier)))
+                       (messages/t :reliability/slo-breach
+                                   {:sli-name (name sli-name)
+                                    :target   target
+                                    :actual   actual
+                                    :tier     (name tier)}))
       (assoc :slo/sli-name sli-name
              :slo/target target
              :slo/actual actual
@@ -1267,8 +1272,11 @@
   "Emit when error budget state is recomputed."
   [stream tier sli remaining burn-rate window]
   (-> (create-envelope stream :reliability/error-budget-update nil
-                       (format "Error budget: tier=%s sli=%s remaining=%.3f burn-rate=%.2f"
-                               (name tier) (name sli) (double remaining) (double burn-rate)))
+                       (messages/t :reliability/error-budget-update
+                                   {:tier      (name tier)
+                                    :sli       (name sli)
+                                    :remaining remaining
+                                    :burn-rate burn-rate}))
       (assoc :budget/tier tier
              :budget/sli sli
              :budget/remaining remaining
@@ -1279,8 +1287,10 @@
   "Emit when the system transitions between degradation modes (N1 §5.5.5)."
   [stream from-mode to-mode trigger]
   (-> (create-envelope stream :reliability/degradation-mode-changed nil
-                       (format "Degradation mode: %s → %s (%s)"
-                               (name from-mode) (name to-mode) trigger))
+                       (messages/t :reliability/degradation-mode-changed
+                                   {:from    (name from-mode)
+                                    :to      (name to-mode)
+                                    :trigger trigger}))
       (assoc :degradation/from from-mode
              :degradation/to to-mode
              :degradation/trigger trigger)))

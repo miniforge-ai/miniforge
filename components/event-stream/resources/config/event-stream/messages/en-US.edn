@@ -88,6 +88,21 @@
   :fleet-sink.system/flush-error
   "fleet-sink: flush error: {error}"
 
+  ;; Reliability metric event constructors (N3 §3.17, N1 §5.5)
+  ;; System-facing observability strings — routed through catalog so
+  ;; they stay auditable and overridable without a code release.
+  :reliability/sli-computed
+  "SLI computed: {sli-name} = {value} over {window}"
+
+  :reliability/slo-breach
+  "SLO breach: {sli-name} target={target} actual={actual} tier={tier}"
+
+  :reliability/error-budget-update
+  "Error budget: tier={tier} sli={sli} remaining={remaining} burn-rate={burn-rate}"
+
+  :reliability/degradation-mode-changed
+  "Degradation mode: {from} -> {to} ({trigger})"
+
   ;; Repository index quality tracker (RN-19/20)
   :repo-index/quality-measured
   "Index {index-id} quality measured: {quality-score}"
