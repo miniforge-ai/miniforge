@@ -24,6 +24,7 @@
   (:require [clojure.java.io :as io]
             [clojure.java.shell :as shell]
             [clojure.string :as str]
+            [ai.miniforge.event-stream.interface :as events]
             [ai.miniforge.gate.interface :as gate]
             [ai.miniforge.phase.interface :as phase]
             [ai.miniforge.response.interface :as response]
@@ -515,15 +516,14 @@
   [ctx outcome reason extra]
   (when-let [stream (resolve-event-stream ctx)]
     (try
-      (let [publish! (requiring-resolve 'ai.miniforge.event-stream.interface/publish!)
-            event (merge
+      (let [event (merge
                     {:event/type :workflow/dag-considered
                      :event/timestamp (str (java.time.Instant/now))
                      :workflow/id (resolve-workflow-id ctx)
                      :dag/outcome outcome
                      :dag/reason reason}
                     extra)]
-        (publish! stream event))
+        (events/publish! stream event))
       (catch Exception _ nil))))
 
 (defn- emit-dag-activated!
@@ -535,12 +535,11 @@
   [ctx plan]
   (when-let [stream (resolve-event-stream ctx)]
     (try
-      (let [publish! (requiring-resolve 'ai.miniforge.event-stream.interface/publish!)]
-        (publish! stream {:event/type      :workflow/dag-activated
-                          :event/timestamp (str (java.time.Instant/now))
-                          :workflow/id     (resolve-workflow-id ctx)
-                          :plan/id         (:plan/id plan)
-                          :plan/task-count (count (:plan/tasks plan))}))
+      (events/publish! stream {:event/type      :workflow/dag-activated
+                               :event/timestamp (str (java.time.Instant/now))
+                               :workflow/id     (resolve-workflow-id ctx)
+                               :plan/id         (:plan/id plan)
+                               :plan/task-count (count (:plan/tasks plan))})
       (catch Exception _ nil))))
 
 (defn- emit-dag-skipped!
@@ -552,12 +551,11 @@
   [ctx reason extra]
   (when-let [stream (resolve-event-stream ctx)]
     (try
-      (let [publish! (requiring-resolve 'ai.miniforge.event-stream.interface/publish!)]
-        (publish! stream (merge {:event/type      :workflow/dag-skipped
-                                 :event/timestamp (str (java.time.Instant/now))
-                                 :workflow/id     (resolve-workflow-id ctx)
-                                 :dag/reason      reason}
-                                extra)))
+      (events/publish! stream (merge {:event/type      :workflow/dag-skipped
+                                      :event/timestamp (str (java.time.Instant/now))
+                                      :workflow/id     (resolve-workflow-id ctx)
+                                      :dag/reason      reason}
+                                     extra))
       (catch Exception _ nil))))
 
 (defn- merge-sub-worktree-changes!
