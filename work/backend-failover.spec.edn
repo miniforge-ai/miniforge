@@ -29,7 +29,7 @@
   create a new client for it, and retry the call transparently. Config drives
   which backends are eligible and in what order."
 
- :spec/intent {:type :fix
+ :spec/intent {:type :bugfix
                :scope ["components/self-healing/src"
                        "components/llm/src"]}
 

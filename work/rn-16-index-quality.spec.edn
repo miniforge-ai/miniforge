@@ -17,7 +17,7 @@
   Target state: Quality scoring with canary-based degradation detection."
 
  :spec/intent
- {:type :new-component
+ {:type :feature
   :scope ["components/index-quality (NEW)"
           "components/canary (NEW)"
           "components/event-stream (extend with repo-index events)"]}

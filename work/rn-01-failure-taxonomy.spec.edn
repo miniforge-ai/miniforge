@@ -20,7 +20,7 @@
   Target state: 10-class enum with every failure event carrying :failure/class."
 
  :spec/intent
- {:type :reliability-foundation
+ {:type :feature
   :scope ["components/agent-runtime/src/ai/miniforge/agent_runtime/error_classifier"
           "components/event-stream/src/ai/miniforge/event_stream/schema.clj"
           "components/event-stream/src/ai/miniforge/event_stream/core.clj"]}

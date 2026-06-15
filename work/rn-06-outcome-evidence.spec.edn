@@ -16,7 +16,7 @@
   Target state: Every evidence bundle carries reliability context."
 
  :spec/intent
- {:type :schema-extension
+ {:type :feature
   :scope ["components/evidence-bundle/src/ai/miniforge/evidence_bundle"]}
 
  :normative-refs

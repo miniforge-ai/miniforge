@@ -17,7 +17,7 @@
   Target state: Schema validation + sanitization at capsule boundary."
 
  :spec/intent
- {:type :enhancement
+ {:type :feature
   :scope ["components/tool/src/ai/miniforge/tool"
           "components/tool-registry/src/ai/miniforge/tool_registry"]}
 

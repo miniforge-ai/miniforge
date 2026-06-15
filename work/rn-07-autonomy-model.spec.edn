@@ -18,7 +18,7 @@
   Target state: Single A0-A5 model with cross-spec mapping."
 
  :spec/intent
- {:type :new-component
+ {:type :feature
   :scope ["components/autonomy (NEW)"
           "components/event-stream (extend)"
           "components/workflow (extend)"]}

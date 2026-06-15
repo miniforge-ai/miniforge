@@ -64,7 +64,7 @@
      so the next FSM/snapshot drift fails at test time."
 
  :spec/intent
- {:type :fix
+ {:type :bugfix
   :scope ["components/workflow/src/ai/miniforge/workflow/runner_environment.clj"
           "components/workflow/src/ai/miniforge/workflow/context.clj"
           "components/workflow/src/ai/miniforge/workflow/runner.clj"
