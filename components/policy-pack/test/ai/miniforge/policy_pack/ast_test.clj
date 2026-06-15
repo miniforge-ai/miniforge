@@ -7,7 +7,7 @@
   (:require
    [clojure.test :refer [deftest testing is]]
    [ai.miniforge.policy-pack.ast :as sut]
-   [ai.miniforge.policy-pack.schema :as schema]))
+   [ai.miniforge.policy-pack.detection :as detection]))
 
 (deftest file-extension-test
   (testing "extracts extension from simple filename"
@@ -75,27 +75,25 @@
 
 (deftest state-comparison-detection-test
   (testing "detects drift between desired and current state"
-    (let [detect (requiring-resolve 'ai.miniforge.policy-pack.detection/detect-state-comparison)
-          rule    {:rule/id :test/drift :rule/enforcement {:action :warn :message "Drift"}}
+    (let [rule    {:rule/id :test/drift :rule/enforcement {:action :warn :message "Drift"}}
           context {:desired-state {:replicas 3 :image "v2"}
                    :current-state {:replicas 1 :image "v1"}}
-          result  (detect rule {} context)]
+          result  (detection/detect-state-comparison rule {} context)]
       (is (some? result))
       (is (= :state-comparison (:type result)))))
 
   (testing "returns nil when no drift"
-    (let [detect  (requiring-resolve 'ai.miniforge.policy-pack.detection/detect-state-comparison)
-          rule    {:rule/id :test/drift :rule/enforcement {:action :warn :message "Drift"}}
+    (let [rule    {:rule/id :test/drift :rule/enforcement {:action :warn :message "Drift"}}
           context {:desired-state {:replicas 3} :current-state {:replicas 3}}
-          result  (detect rule {} context)]
+          result  (detection/detect-state-comparison rule {} context)]
       (is (nil? result)))))
 
 (deftest plan-resource-counts-test
   (testing "counts creates, updates, destroys from plan output"
-    (let [counts (requiring-resolve 'ai.miniforge.policy-pack.detection/plan-resource-counts)
-          plan   "# aws_vpc.main will be created\n# aws_route.old will be destroyed\n# aws_subnet.main will be updated"]
-      (is (= {:creates 1 :updates 1 :destroys 1} (counts plan)))))
+    (let [plan "# aws_vpc.main will be created\n# aws_route.old will be destroyed\n# aws_subnet.main will be updated"]
+      (is (= {:creates 1 :updates 1 :destroys 1}
+             (detection/plan-resource-counts plan)))))
 
   (testing "empty plan returns zeros"
-    (let [counts (requiring-resolve 'ai.miniforge.policy-pack.detection/plan-resource-counts)]
-      (is (= {:creates 0 :updates 0 :destroys 0} (counts "no resources"))))))
+    (is (= {:creates 0 :updates 0 :destroys 0}
+           (detection/plan-resource-counts "no resources")))))

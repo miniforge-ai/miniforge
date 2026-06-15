@@ -26,8 +26,9 @@
    Layer 1: Pack selection
    Layer 2: Evaluation and reporting"
   (:require
-   [clojure.string :as str]
-   [ai.miniforge.policy-pack.core :as core]))
+   [ai.miniforge.policy-pack.core :as core]
+   [ai.miniforge.policy-pack.registry :as registry]
+   [clojure.string :as str]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Diff parsing
@@ -87,10 +88,9 @@
 (defn files-match-globs?
   "True if any path in `paths` matches any pattern in `globs`."
   [paths globs]
-  (let [glob-fn @(requiring-resolve 'ai.miniforge.policy-pack.registry/glob-matches?)]
-    (some (fn [path]
-            (some #(path-matches-glob? glob-fn % path) globs))
-          paths)))
+  (some (fn [path]
+          (some #(path-matches-glob? registry/glob-matches? % path) globs))
+        paths))
 
 (defn pack-applies?
   "True if a pack applies to the given changed files.

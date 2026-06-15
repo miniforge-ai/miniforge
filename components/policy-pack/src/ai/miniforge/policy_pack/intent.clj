@@ -32,6 +32,7 @@
      :refactor → Creates: 0, Updates: 0, Destroys: 0
      :migrate  → Creates: >0, Destroys: >0"
   (:require
+   [ai.miniforge.policy-pack.detection :as detection]
    [clojure.string :as str]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -143,12 +144,10 @@
    Arguments:
    - plan-output — Raw terraform plan output string
 
-   Returns:
+  Returns:
    - {:creates int :updates int :destroys int}"
   [plan-output]
-  (if-let [f (requiring-resolve 'ai.miniforge.policy-pack.detection/plan-resource-counts)]
-    (f plan-output)
-    {:creates 0 :updates 0 :destroys 0}))
+  (detection/plan-resource-counts plan-output))
 
 ;------------------------------------------------------------------------------ Layer 2
 ;; Kubernetes diff parsing
