@@ -28,7 +28,9 @@
    The registry wraps event-stream subscription with capability metadata and
    enforcement."
   (:require
+   [ai.miniforge.event-stream.control :as control]
    [ai.miniforge.event-stream.core :as core]
+   [ai.miniforge.event-stream.schema :as schema]
    [ai.miniforge.response.interface :as response]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -63,12 +65,7 @@
    Uses schema-defined privacy levels with fallback overrides for
    specific event types that need stricter filtering."
   [event-type]
-  (let [;; Get privacy from schema (if available)
-        privacy (try
-                  (let [privacy-fn (requiring-resolve
-                                    'ai.miniforge.event-stream.schema/event-privacy)]
-                    (privacy-fn event-type))
-                  (catch Exception _e :internal))]
+  (let [privacy (schema/event-privacy event-type)]
     (get privacy->min-capability privacy :observe)))
 
 (defn matches-workflow?
@@ -230,5 +227,4 @@
                                 :capability (:listener/capability listener)
                                 :required :control}))
     ;; Delegate to control/execute-control-action!
-    (let [execute-fn (requiring-resolve 'ai.miniforge.event-stream.control/execute-control-action!)]
-      (execute-fn stream action execution-fn))))
+    (control/execute-control-action! stream action execution-fn)))
