@@ -40,7 +40,7 @@
           workflow-id (random-uuid)
           result      (msg-impl/emit-inter-agent-event!
                         stream workflow-id :implementer :planner :clarification-request
-                        'ai.miniforge.event-stream.interface/inter-agent-message-sent)]
+                        event-stream/inter-agent-message-sent)]
       (is (some? result))
       (is (= :agent/message-sent (:event/type result)))
       (is (= :implementer (:from-agent/id result)))
@@ -54,7 +54,7 @@
   (testing "emit-inter-agent-event! with nil stream is a safe no-op"
     (let [result (msg-impl/emit-inter-agent-event!
                    nil (random-uuid) :a :b :concern
-                   'ai.miniforge.event-stream.interface/inter-agent-message-sent)]
+                   event-stream/inter-agent-message-sent)]
       (is (nil? result)))))
 
 (deftest test-send-message-emits-events-with-stream

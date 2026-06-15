@@ -21,6 +21,7 @@
 
    Implements N1 Architecture Specification section 6.2."
   (:require
+   [ai.miniforge.event-stream.interface :as events]
    [ai.miniforge.response.interface :as response]
    [malli.core :as m]))
 
@@ -197,8 +198,7 @@
    inter-agent-message-received constructor, which wraps create-envelope
    and therefore includes the required event/sequence-number field.
 
-   Uses requiring-resolve to avoid a hard compile-time dependency on
-   the event-stream component. Silently no-ops on any failure.
+   Silently no-ops on any failure.
 
    Arguments:
    - stream          — event-stream atom (from :event-stream on context)
@@ -206,16 +206,14 @@
    - from-agent      — keyword identifying the sending agent
    - to-agent        — keyword identifying the receiving agent
    - message-type    — keyword (:clarification-request, :concern, :suggestion, ...)
-   - constructor-sym — fully-qualified symbol for the event-stream constructor var
+   - constructor     — event-stream constructor var
 
    Returns the published event map, or nil when unavailable."
-  [stream workflow-id from-agent to-agent message-type constructor-sym]
+  [stream workflow-id from-agent to-agent message-type constructor]
   (try
     (when stream
-      (let [publish-fn  (requiring-resolve 'ai.miniforge.event-stream.interface/publish!)
-            constructor (requiring-resolve constructor-sym)]
-        (publish-fn stream
-                    (constructor stream workflow-id from-agent to-agent message-type))))
+      (events/publish! stream
+                       (constructor stream workflow-id from-agent to-agent message-type)))
     (catch Exception _ nil)))
 
 ;------------------------------------------------------------------------------ Layer 5
@@ -252,11 +250,11 @@
           message-type (:message/type routed-msg)
           sent-event   (emit-inter-agent-event!
                          stream workflow-id from-agent to-agent message-type
-                         'ai.miniforge.event-stream.interface/inter-agent-message-sent)]
+                         events/inter-agent-message-sent)]
       ;; Emit :agent/message-received on behalf of the recipient agent.
       (emit-inter-agent-event!
         stream workflow-id from-agent to-agent message-type
-        'ai.miniforge.event-stream.interface/inter-agent-message-received)
+        events/inter-agent-message-received)
       {:message routed-msg
        :event sent-event})))
 
