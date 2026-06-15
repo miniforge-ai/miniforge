@@ -157,6 +157,25 @@
           rotated-path (str file-path "." timestamp)]
       (.renameTo (io/file file-path) (io/file rotated-path)))))
 
+(defn cleanup-old-rotated-logs
+  "Delete rotated log files in `logs-dir` older than `retention-days`.
+
+   Rotated files are named like `<workflow-id>.log.yyyyMMdd-HHmmss`.
+   Returns the number of files deleted."
+  [logs-dir retention-days]
+  (let [dir (io/file logs-dir)
+        retention-days (max 0 (long retention-days))
+        cutoff (- (System/currentTimeMillis)
+                  (* retention-days 24 60 60 1000))
+        rotated-log? #(boolean (re-matches #".+\.log\.\d{8}-\d{6}" (.getName ^java.io.File %)))]
+    (if-not (.exists dir)
+      0
+      (->> (.listFiles dir)
+           (filter rotated-log?)
+           (filter #(< (.lastModified ^java.io.File %) cutoff))
+           (filter #(.delete ^java.io.File %))
+           count))))
+
 (defn file-output-fn
   "Output function that writes logs to per-workflow files.
 

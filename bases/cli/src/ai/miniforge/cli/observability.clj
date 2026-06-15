@@ -30,7 +30,8 @@
    [clojure.edn :as edn]
    [cheshire.core :as json]
    [ai.miniforge.cli.app-config :as app-config]
-   [ai.miniforge.cli.messages :as messages]))
+   [ai.miniforge.cli.messages :as messages]
+   [ai.miniforge.logging.interface :as logging]))
 
 ;;------------------------------------------------------------------------------ ANSI Colors
 
@@ -413,11 +414,8 @@
     "list" (list-files-command find-log-files "log files")
     "cat" (cat-file-command file)
     "cleanup" (let [logs-dir (app-config/logs-dir)
-                    deleted (requiring-resolve 'ai.miniforge.logging.core/cleanup-old-rotated-logs)]
-                (if deleted
-                  (let [count (deleted logs-dir 7)]
-                    (println (colorize :green (messages/t :observability/cleanup-result {:count count}))))
-                  (println (colorize :yellow (messages/t :observability/cleanup-not-available)))))
+                    count (logging/cleanup-old-rotated-logs logs-dir 7)]
+                (println (colorize :green (messages/t :observability/cleanup-result {:count count}))))
     (println (colorize :red (messages/t :observability/unknown-subcommand {:subcommand subcommand})))))
 
 ;;------------------------------------------------------------------------------ Layer 2.5: Workflow timeline (show)

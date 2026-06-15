@@ -166,6 +166,12 @@
   [logger level category event & body]
   `(timed ~logger ~level ~category ~event (fn [] ~@body)))
 
+(defn cleanup-old-rotated-logs
+  "Delete rotated log files in `logs-dir` older than `retention-days`.
+   Returns the number of files deleted."
+  [logs-dir retention-days]
+  (core/cleanup-old-rotated-logs logs-dir retention-days))
+
 ;------------------------------------------------------------------------------ Layer 3
 ;; HTTP request builder — used by both the in-brick fleet sink and the
 ;; event-stream fleet sink. Pass-through to `ai.miniforge.logging.http`.

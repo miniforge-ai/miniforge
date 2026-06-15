@@ -206,6 +206,32 @@
       (is (= :done result))
       (is (= 1 @calls)))))
 
+(deftest cleanup-old-rotated-logs-test
+  (testing "deletes only rotated logs older than the retention window"
+    (let [dir (java.nio.file.Files/createTempDirectory "miniforge-logs-test" (make-array java.nio.file.attribute.FileAttribute 0))
+          old-rotated (.toFile (.resolve dir "workflow.log.20250101-000000"))
+          new-rotated (.toFile (.resolve dir "workflow.log.20260101-000000"))
+          active-log (.toFile (.resolve dir "workflow.log"))
+          old-plain (.toFile (.resolve dir "plain.txt"))]
+      (try
+        (doseq [f [old-rotated new-rotated active-log old-plain]]
+          (spit f "x"))
+        (let [old-time (- (System/currentTimeMillis) (* 10 24 60 60 1000))
+              new-time (System/currentTimeMillis)]
+          (.setLastModified old-rotated old-time)
+          (.setLastModified old-plain old-time)
+          (.setLastModified new-rotated new-time)
+          (.setLastModified active-log old-time))
+        (is (= 1 (log/cleanup-old-rotated-logs (.toString dir) 7)))
+        (is (not (.exists old-rotated)))
+        (is (.exists new-rotated))
+        (is (.exists active-log))
+        (is (.exists old-plain))
+        (finally
+          (doseq [f [old-rotated new-rotated active-log old-plain]]
+            (when (.exists f) (.delete f)))
+          (.delete (.toFile dir)))))))
+
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
   (test/run-tests 'ai.miniforge.logging.interface-test)
