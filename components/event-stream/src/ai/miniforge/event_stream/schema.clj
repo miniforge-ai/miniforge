@@ -502,6 +502,164 @@
     [:message string?]]))
 
 ;------------------------------------------------------------------------------ Layer 3
+;; Reliability metric event schemas (N3 §3.17, N1 §5.5)
+;;
+;; Field names match the constructors in core.clj (sli-computed,
+;; slo-breach, error-budget-update, degradation-mode-changed) exactly.
+;; Schema is the canonical boundary contract; the constructors stamp
+;; the same keys so conformance is verifiable end-to-end.
+
+(def SliComputed
+  "Schema for :reliability/sli-computed event.
+
+   Emitted when an SLI value is computed over a rolling window.
+   `:sli/name`  — keyword identifying the indicator (e.g. :availability).
+   `:sli/value` — computed ratio or rate (unbounded number).
+   `:sli/window` — rolling-window label (e.g. :rolling-5m).
+   `:sli/tier` (optional) — workload tier the reading is scoped to.
+   `:sli/dimensions` (optional) — extra breakdown dimensions for this
+   reading, forwarded to the metric-registry as-is."
+  (with-identity
+   [:map
+    [:event/type [:= :reliability/sli-computed]]
+    [:event/id uuid?]
+    [:event/timestamp inst?]
+    [:event/version string?]
+    [:event/sequence-number int?]
+    [:workflow/id uuid?]
+    [:sli/name keyword?]
+    [:sli/value number?]
+    [:sli/window keyword?]
+    [:sli/tier {:optional true} keyword?]
+    [:sli/dimensions {:optional true} map?]
+    [:message string?]]))
+
+(def SloBreach
+  "Schema for :reliability/slo-breach event.
+
+   Emitted when an SLO target is missed for :standard or :critical tiers.
+   `:slo/sli-name` — the SLI whose value crossed the threshold.
+   `:slo/target`   — the agreed objective (e.g. 0.999).
+   `:slo/actual`   — the measured value that fell below the target.
+   `:slo/tier`     — workload tier (e.g. :standard, :critical).
+   `:slo/window`   — evaluation window label."
+  (with-identity
+   [:map
+    [:event/type [:= :reliability/slo-breach]]
+    [:event/id uuid?]
+    [:event/timestamp inst?]
+    [:event/version string?]
+    [:event/sequence-number int?]
+    [:workflow/id uuid?]
+    [:slo/sli-name keyword?]
+    [:slo/target number?]
+    [:slo/actual number?]
+    [:slo/tier keyword?]
+    [:slo/window keyword?]
+    [:message string?]]))
+
+(def ErrorBudgetUpdate
+  "Schema for :reliability/error-budget-update event.
+
+   Emitted when error budget state is recomputed.
+   `:budget/tier`      — workload tier (e.g. :standard, :critical).
+   `:budget/sli`       — SLI the budget is derived from.
+   `:budget/remaining` — fraction of budget remaining (0.0–1.0).
+   `:budget/burn-rate` — current burn rate multiplier vs. nominal.
+   `:budget/window`    — evaluation window label."
+  (with-identity
+   [:map
+    [:event/type [:= :reliability/error-budget-update]]
+    [:event/id uuid?]
+    [:event/timestamp inst?]
+    [:event/version string?]
+    [:event/sequence-number int?]
+    [:workflow/id uuid?]
+    [:budget/tier keyword?]
+    [:budget/sli keyword?]
+    [:budget/remaining number?]
+    [:budget/burn-rate number?]
+    [:budget/window keyword?]
+    [:message string?]]))
+
+(def DegradationModeChanged
+  "Schema for :reliability/degradation-mode-changed event.
+
+   Emitted when the system transitions between degradation modes (N1 §5.5.5).
+   `:degradation/from`    — prior mode keyword (e.g. :normal).
+   `:degradation/to`      — new mode keyword (e.g. :reduced-capacity).
+   `:degradation/trigger` — human-readable description of the cause."
+  (with-identity
+   [:map
+    [:event/type [:= :reliability/degradation-mode-changed]]
+    [:event/id uuid?]
+    [:event/timestamp inst?]
+    [:event/version string?]
+    [:event/sequence-number int?]
+    [:workflow/id uuid?]
+    [:degradation/from keyword?]
+    [:degradation/to keyword?]
+    [:degradation/trigger string?]
+    [:message string?]]))
+
+;------------------------------------------------------------------------------ Layer 3.5
+;; Repository index intelligence event schemas (RN-19/20)
+;;
+;; Emitted by the repo-index component when it re-evaluates an index
+;; entry's quality or detects a material change in tracked-file coverage.
+;; `:workflow/id` is optional/maybe — index re-scoring runs outside any
+;; workflow context when triggered by background refresh.
+
+(def RepoIndexQualityMeasured
+  "Schema for :repo-index/quality-measured event (RN-19).
+
+   Emitted when the repo-index component re-scores an index entry.
+   `:index/id`            — stable string identifier for the index.
+   `:index/quality-score` — normalised quality score in [0.0, 1.0].
+   `:index/staleness-ms`  — milliseconds since last successful refresh.
+   `:index/coverage`      — fraction of tracked files present in the index.
+   `:index/tree-sha` (optional) — git tree SHA the measurement is pinned to."
+  (with-identity
+   [:map
+    [:event/type [:= :repo-index/quality-measured]]
+    [:event/id uuid?]
+    [:event/timestamp inst?]
+    [:event/version string?]
+    [:event/sequence-number int?]
+    [:workflow/id {:optional true} [:maybe uuid?]]
+    [:index/id string?]
+    [:index/quality-score number?]
+    [:index/staleness-ms int?]
+    [:index/coverage number?]
+    [:index/tree-sha {:optional true} string?]
+    [:message string?]]))
+
+(def RepoIndexCoverageChanged
+  "Schema for :repo-index/coverage-changed event (RN-20).
+
+   Emitted when tracked-file coverage crosses a threshold or changes
+   materially between index refreshes. Carries both the prior and new
+   coverage fractions so subscribers can compute the delta without an
+   additional read.
+   `:index/id`               — stable string identifier for the index.
+   `:index/coverage`         — new coverage fraction in [0.0, 1.0].
+   `:index/previous-coverage` — coverage fraction before this change.
+   `:index/tree-sha` (optional) — git tree SHA the new reading is pinned to."
+  (with-identity
+   [:map
+    [:event/type [:= :repo-index/coverage-changed]]
+    [:event/id uuid?]
+    [:event/timestamp inst?]
+    [:event/version string?]
+    [:event/sequence-number int?]
+    [:workflow/id {:optional true} [:maybe uuid?]]
+    [:index/id string?]
+    [:index/coverage number?]
+    [:index/previous-coverage number?]
+    [:index/tree-sha {:optional true} string?]
+    [:message string?]]))
+
+;------------------------------------------------------------------------------ Layer 3.8
 ;; Self-healing event schemas
 
 (def WorkaroundApplied
@@ -694,7 +852,21 @@
    ;; event carries `:zettel/content` directly — Fleet's privacy
    ;; gates (Decision 8) decide whether the zettel is actually
    ;; cleared for cross-instance share, not the local default.
-   :zettel/promoted          :internal})
+   :zettel/promoted          :internal
+
+   ;; Reliability metric events (N3 §3.17, N1 §5.5).
+   ;; SLI readings and budget updates are internal operational telemetry.
+   ;; Breaches and mode changes are public so the operator dashboard and
+   ;; on-call runbooks can surface them without a privilege escalation.
+   :reliability/sli-computed            :internal
+   :reliability/slo-breach              :public
+   :reliability/error-budget-update     :internal
+   :reliability/degradation-mode-changed :public
+
+   ;; Repository index intelligence events (RN-19/20).
+   ;; Both are internal operational telemetry scoped to index health.
+   :repo-index/quality-measured  :internal
+   :repo-index/coverage-changed  :internal})
 
 (defn create-privacy-config
   "Create a privacy configuration by merging overrides into defaults.
@@ -975,5 +1147,7 @@
   ;; Privacy lookup
   (event-privacy :workflow/started) ;; => :public
   (event-privacy :control-action/requested) ;; => :confidential
+  (event-privacy :reliability/slo-breach) ;; => :public
+  (event-privacy :repo-index/quality-measured) ;; => :internal
 
   :leave-this-here)
