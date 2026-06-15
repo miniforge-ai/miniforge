@@ -106,7 +106,7 @@
   "Create an event trigger that subscribes to an event stream.
 
    Arguments:
-   - event-stream: Event stream to subscribe to
+   - stream: Event stream to subscribe to
    - trigger-config: {:triggers [{:on :event/type :match {...} :run {...}}]}
    - opts: Options map, passed to workflow execution
 
