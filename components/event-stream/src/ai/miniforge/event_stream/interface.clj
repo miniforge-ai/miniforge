@@ -754,6 +754,7 @@
    string for empty/nil input). Pure: no IO. Arities: (events) uses a
    60s default gap; (events opts) takes {:gap-threshold-ms long}."
   timeline/render-timeline)
+
 ;------------------------------------------------------------------------------ Layer 9.5
 ;; Repository index intelligence event constructors (RN-19/20)
 

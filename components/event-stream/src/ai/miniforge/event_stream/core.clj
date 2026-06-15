@@ -34,6 +34,12 @@
 (def ^:private redirect-transition-type
   :transition/redirect)
 
+(def ^:private index-ratio-fmt
+  "printf format specifier for index quality/coverage ratios — 3 decimal places
+   matching the schema-constrained precision of :index/quality-score, :index/coverage,
+   and :index/previous-coverage fields."
+  "%.3f")
+
 (defn- redirect-target
   "Project a redirect target for legacy consumers.
 
@@ -1510,8 +1516,8 @@
   (-> (create-envelope stream :repo-index/quality-measured nil
                        (messages/t :repo-index/quality-measured
                                    {:index-id index-id
-                                    :quality-score (format "%.3f" (double quality-score))
-                                    :coverage (format "%.3f" (double coverage))}))
+                                    :quality-score (format index-ratio-fmt (double quality-score))
+                                    :coverage (format index-ratio-fmt (double coverage))}))
       (assoc :index/id index-id
              :index/quality-score quality-score
              :index/staleness-ms staleness-ms
@@ -1527,8 +1533,8 @@
   (-> (create-envelope stream :repo-index/coverage-changed nil
                        (messages/t :repo-index/coverage-changed
                                    {:index-id index-id
-                                    :previous-coverage (format "%.3f" (double previous-coverage))
-                                    :coverage (format "%.3f" (double coverage))}))
+                                    :previous-coverage (format index-ratio-fmt (double previous-coverage))
+                                    :coverage (format index-ratio-fmt (double coverage))}))
       (assoc :index/id index-id
              :index/coverage coverage
              :index/previous-coverage previous-coverage)
