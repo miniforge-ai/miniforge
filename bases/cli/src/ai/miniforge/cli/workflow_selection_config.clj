@@ -19,6 +19,7 @@
 (ns ai.miniforge.cli.workflow-selection-config
   "Resource-driven workflow selection profile resolution."
   (:require
+   [ai.miniforge.workflow.interface :as workflow]
    [clojure.edn :as edn]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -47,10 +48,14 @@
 
 (defn- workflow-characteristics
   "Resolve workflow characteristics through the workflow interface."
-  [workflow]
-  (when-let [characteristics-fn (requiring-resolve
-                                  'ai.miniforge.workflow.interface/workflow-characteristics)]
-    (characteristics-fn workflow)))
+  [workflow-def]
+  (workflow/workflow-characteristics workflow-def))
+
+(defn- available-workflow-definitions
+  "Return full workflow definitions from the registry for fallback scoring."
+  []
+  (workflow/ensure-initialized!)
+  (keep workflow/get-workflow (workflow/list-workflow-ids)))
 
 (defn- simplest-workflow-id
   "Choose the simplest available workflow by phase count and max iterations."
@@ -90,9 +95,9 @@
 
    Profiles are app-owned configuration. If a configured profile points at a
    workflow not present on the active classpath, fall back to generic workflow
-   characteristics."
+  characteristics."
   ([profile]
-   (let [available-workflows ((requiring-resolve 'ai.miniforge.workflow.interface/list-workflows))]
+   (let [available-workflows (available-workflow-definitions)]
      (resolve-selection-profile profile available-workflows)))
   ([profile available-workflows]
    (let [configured-id (get (configured-selection-profiles) profile)

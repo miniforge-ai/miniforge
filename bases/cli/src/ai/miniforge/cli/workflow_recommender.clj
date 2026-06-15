@@ -30,6 +30,7 @@
    [ai.miniforge.cli.messages :as messages]
    [ai.miniforge.cli.workflow-recommendation-config :as recommendation-config]
    [ai.miniforge.cli.workflow-selection-config :as selection-config]
+   [ai.miniforge.llm.interface :as llm]
    [ai.miniforge.workflow.interface :as workflow]
    [ai.miniforge.response.interface :as response]))
 
@@ -148,8 +149,7 @@
   [llm-client prompt]
   (when llm-client
     (try
-      (let [complete-fn (requiring-resolve 'ai.miniforge.llm.interface/complete)
-            result (complete-fn llm-client {:prompt prompt :max-tokens 500})]
+      (let [result (llm/complete llm-client {:prompt prompt :max-tokens 500})]
         (when (:success result)
           (:content result)))
       (catch Exception e
