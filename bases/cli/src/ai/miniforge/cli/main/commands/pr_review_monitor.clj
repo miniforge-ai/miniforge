@@ -104,8 +104,7 @@
 (defn- run-pass!
   "One pass over the in-scope open PR set."
   [base-repo author review-opts]
-  (let [poller-fn (requiring-resolve 'ai.miniforge.pr-lifecycle.pr-poller/poll-open-prs)
-        r         (poller-fn base-repo author)]
+  (let [r (pr-lifecycle/poll-open-prs base-repo author)]
     (cond
       (not (dag/ok? r))
       (display/print-error

@@ -28,6 +28,7 @@
    [ai.miniforge.cli.worktree :as worktree]
    [ai.miniforge.cli.workflow-runner.display :as display]
    [ai.miniforge.event-stream.interface :as es]
+   [ai.miniforge.llm.interface :as llm]
    [ai.miniforge.response.interface :as response]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -183,11 +184,10 @@
      (let [cfg (config/load-config)
            llm-backend (config/get-llm-backend
                         cfg
-                        (or backend-override
-                            (get-in workflow [:workflow/config :llm-backend])
-                            (:spec/llm-backend spec)))]
-       (when-let [create-client (requiring-resolve 'ai.miniforge.llm.interface/create-client)]
-         (create-client {:backend llm-backend})))
+                            (or backend-override
+                                (get-in workflow [:workflow/config :llm-backend])
+                                (:spec/llm-backend spec)))]
+       (llm/create-client {:backend llm-backend}))
      (catch Exception e
        (when-not quiet
          (println (display/colorize :yellow (str "Warning: Could not create LLM client (" (ex-message e) "), agents will use fallback mode"))))
