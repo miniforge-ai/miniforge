@@ -206,7 +206,7 @@
    - from-agent      — keyword identifying the sending agent
    - to-agent        — keyword identifying the receiving agent
    - message-type    — keyword (:clarification-request, :concern, :suggestion, ...)
-   - constructor     — event-stream constructor var
+   - constructor     — event-stream constructor function
 
    Returns the published event map, or nil when unavailable."
   [stream workflow-id from-agent to-agent message-type constructor]

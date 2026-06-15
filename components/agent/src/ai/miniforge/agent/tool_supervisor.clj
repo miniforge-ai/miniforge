@@ -184,7 +184,7 @@
 (defn emit-tool-use-event!
   "Emit a tool-use-evaluated event to the event stream (if available).
 
-   Silently no-ops if no stream is bound."
+   Silently no-ops if no event stream or workflow id is bound."
   [tool-name result & [{:keys [event-stream workflow-id phase]}]]
   (try
     (when (and event-stream workflow-id)
