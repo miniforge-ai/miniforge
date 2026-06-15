@@ -151,6 +151,22 @@
     (is (false? (sut/network-drop-error?
                   {:llm-error {:timeout {:type :stagnation :elapsed-ms 180000}}})))))
 
+(deftest backend-timeout-error?-covers-all-adaptive-no-verdict-timeouts
+  ;; A 2026-06-14 dogfood (rn-03) reviewer STAGNATION-timed-out; the
+  ;; stream-idle-only check missed it, so it fell through to a synthesized
+  ;; :rejected with the timeout text as a blocking issue. This predicate covers
+  ;; all three no-verdict adaptive timeouts so any of them routes to the
+  ;; backend-timeout (infra) path.
+  (testing "stream-idle / stagnation / hard-limit all match"
+    (is (true? (sut/backend-timeout-error? {:llm-error {:timeout {:type :stream-idle :elapsed-ms 360000}}})))
+    (is (true? (sut/backend-timeout-error? {:llm-error {:timeout {:type :stagnation :elapsed-ms 318398}}})))
+    (is (true? (sut/backend-timeout-error? {:llm-error {:timeout {:type :hard-limit :elapsed-ms 600000}}}))))
+  (testing "network-drop is excluded (dedicated retry/resume handling)"
+    (is (false? (sut/backend-timeout-error? {:llm-error {:timeout {:type :network-drop :elapsed-ms 30000}}}))))
+  (testing "non-timeout / missing-error maps do NOT match"
+    (is (false? (sut/backend-timeout-error? {:llm-error {:type "cli_error"}})))
+    (is (false? (sut/backend-timeout-error? {})))))
+
 (deftest error-response-preserves-backend-error-shape
   (testing "error-response carries raw backend data and response metadata through"
     (let [normalized {:llm-error {:message "Adaptive timeout"

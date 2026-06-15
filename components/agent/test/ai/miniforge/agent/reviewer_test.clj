@@ -192,6 +192,21 @@
                :elapsed-ms elapsed-ms
                :stats {:lines-read 0}}}))
 
+(defn- stagnation-llm-error
+  "Build the LLM-error shape `streaming-error-response` produces when the
+   STAGNATION adaptive timeout fires (provider streamed, but made no forward
+   progress for the configured window). The 2026-06-14 dogfood (`rn-03`) hit
+   exactly this path on review cycle #3 — and the OLD stream-idle-only check
+   missed it, synthesizing a false :rejected."
+  [elapsed-ms]
+  (let [message (str "Adaptive timeout: Stagnation timeout: no progress for "
+                     elapsed-ms "ms (type: stagnation, elapsed: " elapsed-ms "ms)")]
+    {:type backend-timeout-type
+     :message message
+     :timeout {:type :stagnation
+               :message (str "no progress for " elapsed-ms "ms")
+               :elapsed-ms elapsed-ms}}))
+
 ;------------------------------------------------------------------------------ Core functionality tests
 
 (deftest test-create-reviewer
@@ -453,6 +468,43 @@
           (is (vector? (get-in result [:error :data :blocking-issues]))
               "vector shape preserved end-to-end — pinned because PR #1058 review
                flagged the original implementation returning nil here."))))))
+
+(deftest test-reviewer-boundary-stagnation-is-agent-error
+  ;; The 2026-06-14 dogfood (`rn-03`) shape: on review cycle #3 the reviewer
+  ;; LLM streamed but stagnated (no forward progress for 318398ms) and returned
+  ;; NO parsed review. The OLD boundary check tested only `stream-idle-error?`,
+  ;; so this fell through to the parse-failed branch — the framework promoted
+  ;; the timeout text into `:review/blocking-issues` and synthesized a false
+  ;; `:rejected` (decision routed back to IMPLEMENT, wasting a redirect cycle
+  ;; "fixing" a non-rejection). The widened `backend-timeout-error?` covers
+  ;; `:stagnation` (and `:hard-limit`) too, so this must take the same
+  ;; `:reviewer/backend-timeout` exit as the stream-idle variant.
+  (testing "stagnation on the LLM-call boundary (no parsed review) → :reviewer/backend-timeout"
+    (let [stagnation-elapsed-ms 318398
+          err (stagnation-llm-error stagnation-elapsed-ms)]
+      (with-redefs [model/resolve-llm-client-for-role (fn [_role client] client)
+                    llm/chat (fn [_client _prompt _opts]
+                               (mock-llm-response ""
+                                                  :success? false
+                                                  :tokens timeout-review-token-count
+                                                  :error err))
+                    llm/success? :success?
+                    llm/get-content :content
+                    llm/get-error :error]
+        (let [reviewer (reviewer/create-reviewer {:llm-backend ::mock-backend
+                                                  :gates []})
+              result (core/invoke reviewer {} sample-artifact)]
+          (is (= :error (:status result))
+              "Stagnation must surface as an agent-level error, not a synthetic :rejected review")
+          (is (= :reviewer/backend-timeout
+                 (get-in result [:error :data :code]))
+              "Error code must be :reviewer/backend-timeout — distinguishes infra timeout from real defect")
+          (is (= (:message err)
+                 (get-in result [:error :message]))
+              "Error message preserves the adaptive-timeout text verbatim for operator post-mortem")
+          (is (= []
+                 (get-in result [:error :data :blocking-issues]))
+              "blocking-issues defaults to an empty vector — never a synthetic rejection"))))))
 
 (deftest test-reviewer-timeout-only-shape-does-not-hide-real-gate-failures
   (testing "timeout-only classification requires the deterministic gates to approve"

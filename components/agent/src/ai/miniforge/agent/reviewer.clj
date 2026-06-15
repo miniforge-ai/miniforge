@@ -225,13 +225,20 @@
                     ;; at 360s with no parsed response; the framework
                     ;; promoted the timeout text into `:review/blocking-
                     ;; issues` via the parse-failed branch and synthesized
-                    ;; a false `:rejected`. Adding the boundary-level
-                    ;; stream-idle check covers that path so a real
-                    ;; infra timeout takes the `timeout-only-error-result`
-                    ;; exit instead of masquerading as a code-review
-                    ;; rejection.
-                    backend-stream-idle? (result-boundary/stream-idle-error? normalized)
-                    backend-timeout? (or timeout-only-review? backend-stream-idle?)
+                    ;; a false `:rejected`. The boundary-level check below
+                    ;; covers that path so a real infra timeout takes the
+                    ;; `timeout-only-error-result` exit instead of
+                    ;; masquerading as a code-review rejection.
+                    ;;
+                    ;; ANY adaptive LLM timeout (stream-idle / stagnation /
+                    ;; hard-limit) means the reviewer produced no verdict — route
+                    ;; to the backend-timeout (infra) path, not a synthesized
+                    ;; :rejected. The 2026-06-05 fix only covered :stream-idle; a
+                    ;; 2026-06-14 dogfood (rn-03) stagnation-timed-out and was
+                    ;; promoted into a false :rejected via the parse-failed
+                    ;; branch, redirecting implement to "fix" a non-rejection.
+                    backend-adaptive-timeout? (result-boundary/backend-timeout-error? normalized)
+                    backend-timeout? (or timeout-only-review? backend-adaptive-timeout?)
                     ;; "initial" = the first-call decision/issues fed into the
                     ;; enumeration validator. Named to contrast with
                     ;; `recovered-review` below; these are already normalized,
@@ -389,7 +396,7 @@
                                         :llm-decision llm-decision
                                         :llm-parse-failed? parse-failed?
                                         :timeout-only-review? timeout-only-review?
-                                        :backend-stream-idle? backend-stream-idle?
+                                        :backend-adaptive-timeout? backend-adaptive-timeout?
                                         :gates-passed (:passed counts)
                                         :gates-failed (:failed counts)
                                         :failing-gate-ids failing-gate-ids
