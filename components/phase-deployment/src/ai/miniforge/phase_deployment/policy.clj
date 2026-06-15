@@ -20,9 +20,10 @@
   "Custom policy check functions for deployment safety rules.
 
    Referenced by detection entries in the deployment-safety policy pack
-   via :check-fn symbols."
+  via :check-fn symbols."
   (:require [ai.miniforge.phase-deployment.messages :as msg]
             [ai.miniforge.schema.interface :as schema]
+            [cheshire.core :as json]
             [clojure.string :as str]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -43,8 +44,7 @@
   [content]
   (if (string? content)
     (try
-      (let [parse-fn (requiring-resolve 'cheshire.core/parse-string)]
-        (parse-fn content true))
+      (json/parse-string content true)
       (catch Exception _ {}))
     content))
 

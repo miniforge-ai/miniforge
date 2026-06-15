@@ -6,7 +6,9 @@
         ai.miniforge/schema {:local/root "../schema"}
         ai.miniforge/response {:local/root "../response"}
         ai.miniforge/evidence-bundle {:local/root "../evidence-bundle"}
-        ai.miniforge/policy-pack {:local/root "../policy-pack"}}
+        ai.miniforge/policy-pack {:local/root "../policy-pack"}
+        cheshire/cheshire {:mvn/version "5.13.0"}
+        metosin/malli {:mvn/version "0.16.4"}}
  :aliases
  {:test {:extra-paths ["test"]
          :extra-deps {ai.miniforge/gate {:local/root "../gate"}}}}}

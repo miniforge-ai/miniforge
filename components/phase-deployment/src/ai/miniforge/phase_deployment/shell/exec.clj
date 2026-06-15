@@ -20,6 +20,7 @@
   "Shared deployment shell execution helpers."
   (:require [ai.miniforge.phase-deployment.messages :as msg]
             [ai.miniforge.schema.interface :as schema]
+            [cheshire.core :as json]
             [clojure.java.shell :as shell]
             [clojure.string :as str]))
 
@@ -63,8 +64,7 @@
    (if-let [parsed (when (and (string? (:stdout result))
                               (not (str/blank? (:stdout result))))
                      (try
-                       (let [parse-fn (requiring-resolve 'cheshire.core/parse-string)]
-                         (parse-fn (:stdout result) true))
+                       (json/parse-string (:stdout result) true)
                        (catch Exception _ nil)))]
      (assoc result :parsed parsed)
      result)))

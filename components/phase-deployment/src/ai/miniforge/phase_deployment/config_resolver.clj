@@ -31,7 +31,9 @@
   (:require [ai.miniforge.phase-deployment.messages :as msg]
             [ai.miniforge.schema.interface :as schema]
             [clojure.set :as set]
-            [clojure.string :as str]))
+            [clojure.string :as str]
+            [malli.core :as m]
+            [malli.error :as me]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Placeholder parsing + schemas
@@ -267,7 +269,7 @@
        (schema/success :resolved-values resolved
                        {:log @log-acc})))))
 
-;; Schema validation (uses Malli via requiring-resolve)
+;; Schema validation
 
 (defn validate-config
   "Validate resolved config against a Malli schema.
@@ -281,12 +283,10 @@
       :errors  nil or humanized error map}"
   [config config-schema]
   (try
-    (let [validate-fn (requiring-resolve 'malli.core/validate)
-          explain-fn  (requiring-resolve 'malli.core/explain)
-          humanize-fn (requiring-resolve 'malli.error/humanize)]
-      (if (validate-fn config-schema config)
-        (schema/valid)
-        (schema/invalid-with-errors (humanize-fn (explain-fn config-schema config)))))
+    (if (m/validate config-schema config)
+      (schema/valid)
+      (schema/invalid-with-errors
+       (me/humanize (m/explain config-schema config))))
     (catch Exception e
       (schema/invalid-with-errors
        {:_schema (msg/t :config-resolver/validation-error
