@@ -21,7 +21,8 @@
 
    Subscribes to event streams and fires workflows or chains
    when matching events occur."
-  (:require [ai.miniforge.workflow.loader :as loader]
+  (:require [ai.miniforge.event-stream.interface :as event-stream]
+            [ai.miniforge.workflow.loader :as loader]
             [ai.miniforge.workflow.runner :as runner]
             [clojure.edn]))
 
@@ -105,23 +106,23 @@
   "Create an event trigger that subscribes to an event stream.
 
    Arguments:
-   - event-stream: Event stream to subscribe to
+   - stream: Event stream to subscribe to
    - trigger-config: {:triggers [{:on :event/type :match {...} :run {...}}]}
    - opts: Options map, passed to workflow execution
 
    Returns {:subscriber-id keyword, :stop-fn (fn [])}"
-  [event-stream trigger-config opts]
+  [stream trigger-config opts]
   (let [triggers     (:triggers trigger-config)
         futures-atom (atom [])
-        subscribe!   (requiring-resolve 'ai.miniforge.event-stream.interface/subscribe!)
-        unsubscribe! (requiring-resolve 'ai.miniforge.event-stream.interface/unsubscribe!)
         run-pipeline runner/run-pipeline
         load-wf      loader/load-workflow
         sub-id       :event-trigger]
-    (subscribe! event-stream sub-id
-                (partial handle-trigger-event triggers opts futures-atom load-wf run-pipeline))
+    (event-stream/subscribe!
+      stream
+      sub-id
+      (partial handle-trigger-event triggers opts futures-atom load-wf run-pipeline))
     {:subscriber-id sub-id
-     :stop-fn       #(do (unsubscribe! event-stream sub-id)
+     :stop-fn       #(do (event-stream/unsubscribe! stream sub-id)
                          (cancel-futures! futures-atom))}))
 
 (defn create-merge-trigger
