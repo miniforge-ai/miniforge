@@ -133,6 +133,23 @@
   [normalized]
   (= :network-drop (llm-timeout-type normalized)))
 
+(def ^:private adaptive-timeout-types
+  "The adaptive-timeout `:type`s that mean the LLM call ended WITHOUT producing
+   a usable verdict — the provider was reachable but the turn never completed.
+   `:network-drop` is excluded: it is connectivity-loss with dedicated
+   retry/resume handling (PR-C auto-resumer), not a no-verdict timeout."
+  #{:stream-idle :stagnation :hard-limit})
+
+(defn backend-timeout-error?
+  "True when the normalized boundary carries ANY adaptive LLM timeout
+   (`:stream-idle` / `:stagnation` / `:hard-limit`) — the call timed out before
+   the model produced a verdict. Callers (e.g. the reviewer) must treat this as
+   an INFRA failure (a backend-timeout verdict to retry / terminate), NOT as a
+   parse failure that synthesizes a content `:rejected`. Broader than
+   `stream-idle-error?`, which catches only one of the three types."
+  [normalized]
+  (boolean (adaptive-timeout-types (llm-timeout-type normalized))))
+
 (defn error-response
   "Build a failure response that preserves the backend error shape plus
    common response metadata for post-mortem."
