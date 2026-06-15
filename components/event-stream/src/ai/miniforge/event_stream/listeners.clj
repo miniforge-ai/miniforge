@@ -65,10 +65,7 @@
    Uses schema-defined privacy levels with fallback overrides for
    specific event types that need stricter filtering."
   [event-type]
-  (let [;; Get privacy from schema (if available)
-        privacy (try
-                  (schema/event-privacy event-type)
-                  (catch Exception _e :internal))]
+  (let [privacy (schema/event-privacy event-type)]
     (get privacy->min-capability privacy :observe)))
 
 (defn matches-workflow?
