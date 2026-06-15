@@ -16,7 +16,7 @@
   Target state: Every workflow carries a tier, available throughout execution."
 
  :spec/intent
- {:type :reliability-foundation
+ {:type :feature
   :scope ["components/workflow/src/ai/miniforge/workflow"
           "components/dag-executor/src/ai/miniforge/dag_executor"]}
 

@@ -20,7 +20,7 @@
   Target state: New component computing 7 SLIs with per-tier SLO evaluation."
 
  :spec/intent
- {:type :new-component
+ {:type :feature
   :scope ["components/reliability-metrics (NEW)"
           "components/observer (extend)"]}
 

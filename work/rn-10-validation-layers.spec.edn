@@ -17,7 +17,7 @@
   Target state: 5 layers with enforced ordering."
 
  :spec/intent
- {:type :enhancement
+ {:type :feature
   :scope ["components/gate/src/ai/miniforge/gate"
           "components/policy-pack/src/ai/miniforge/policy_pack"]}
 

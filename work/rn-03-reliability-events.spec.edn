@@ -19,7 +19,7 @@
   Target state: 6 new event types with Malli schemas and constructors."
 
  :spec/intent
- {:type :reliability-foundation
+ {:type :feature
   :scope ["components/event-stream/src/ai/miniforge/event_stream/schema.clj"
           "components/event-stream/src/ai/miniforge/event_stream/core.clj"]}
 

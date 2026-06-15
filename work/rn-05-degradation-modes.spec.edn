@@ -17,7 +17,7 @@
   Target state: Formal 3-state machine with event-driven transitions."
 
  :spec/intent
- {:type :enhancement
+ {:type :feature
   :scope ["components/workflow/src/ai/miniforge/workflow"
           "components/reliability-metrics (extend)"]}
 

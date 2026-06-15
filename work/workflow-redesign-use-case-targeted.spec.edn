@@ -34,7 +34,7 @@
   - Clear mapping from user intent to workflow type"
 
  :spec/intent
- {:type :architectural-redesign
+ {:type :refactor
   :scope ["Remove simple/lean/canonical workflows"
           "Implement 5 use-case targeted workflows"
           "Update workflow selector logic"

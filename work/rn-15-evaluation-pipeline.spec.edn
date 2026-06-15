@@ -18,7 +18,7 @@
   Target state: Full evaluation pipeline with golden sets and 3 execution modes."
 
  :spec/intent
- {:type :new-component
+ {:type :feature
   :scope ["components/evaluation (NEW)"
           "components/workflow (extend replay.clj)"
           "components/evidence-bundle (golden-set artifacts)"]}

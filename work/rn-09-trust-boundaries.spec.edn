@@ -17,7 +17,7 @@
   Target state: All 5 boundaries enforced with invariant validation."
 
  :spec/intent
- {:type :enhancement
+ {:type :feature
   :scope ["components/policy-pack/src/ai/miniforge/policy_pack"
           "components/gate/src/ai/miniforge/gate"]}
 

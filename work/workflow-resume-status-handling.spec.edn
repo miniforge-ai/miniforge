@@ -51,7 +51,7 @@
   when the FSM evaluator stalls."
 
  :spec/intent
- {:type :fix
+ {:type :bugfix
   :scope ["bases/cli/src/ai/miniforge/cli/main/commands/resume.clj"
           "components/workflow-resume/src"
           "components/workflow/src"]}
