@@ -521,7 +521,7 @@
    reading, forwarded to the metric-registry as-is."
   (with-identity
    [:map
-    [:event/type [:= :reliability/sli-computed]]
+      [:event/type [:= :reliability/sli-computed]]
     [:event/id uuid?]
     [:event/timestamp inst?]
     [:event/version string?]
@@ -545,7 +545,7 @@
    `:slo/window`   — evaluation window label."
   (with-identity
    [:map
-    [:event/type [:= :reliability/slo-breach]]
+      [:event/type [:= :reliability/slo-breach]]
     [:event/id uuid?]
     [:event/timestamp inst?]
     [:event/version string?]
@@ -569,7 +569,7 @@
    `:budget/window`    — evaluation window label."
   (with-identity
    [:map
-    [:event/type [:= :reliability/error-budget-update]]
+      [:event/type [:= :reliability/error-budget-update]]
     [:event/id uuid?]
     [:event/timestamp inst?]
     [:event/version string?]
@@ -591,7 +591,7 @@
    `:degradation/trigger` — human-readable description of the cause."
   (with-identity
    [:map
-    [:event/type [:= :reliability/degradation-mode-changed]]
+      [:event/type [:= :reliability/degradation-mode-changed]]
     [:event/id uuid?]
     [:event/timestamp inst?]
     [:event/version string?]
@@ -621,7 +621,7 @@
    `:index/tree-sha` (optional) — git tree SHA the measurement is pinned to."
   (with-identity
    [:map
-    [:event/type [:= :repo-index/quality-measured]]
+      [:event/type [:= :repo-index/quality-measured]]
     [:event/id uuid?]
     [:event/timestamp inst?]
     [:event/version string?]
@@ -647,7 +647,7 @@
    `:index/tree-sha` (optional) — git tree SHA the new reading is pinned to."
   (with-identity
    [:map
-    [:event/type [:= :repo-index/coverage-changed]]
+      [:event/type [:= :repo-index/coverage-changed]]
     [:event/id uuid?]
     [:event/timestamp inst?]
     [:event/version string?]
