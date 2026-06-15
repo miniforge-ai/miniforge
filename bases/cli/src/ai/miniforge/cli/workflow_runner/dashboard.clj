@@ -29,7 +29,8 @@
    [clojure.edn :as edn]
    [cheshire.core :as json]
    [ai.miniforge.cli.app-config :as app-config]
-   [ai.miniforge.cli.workflow-runner.display :as display]))
+   [ai.miniforge.cli.workflow-runner.display :as display]
+   [ai.miniforge.event-stream.interface :as es]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Auto-discovery
@@ -89,11 +90,11 @@
                                     data (edn/read-string content)
                                     command (keyword (:command data))]
                                 (case command
-                                  :pause (do ((requiring-resolve 'ai.miniforge.event-stream.interface/pause!) control-state)
+                                  :pause (do (es/pause! control-state)
                                              (println "\u23f8  Workflow paused by dashboard"))
-                                  :resume (do ((requiring-resolve 'ai.miniforge.event-stream.interface/resume!) control-state)
+                                  :resume (do (es/resume! control-state)
                                               (println "\u25b6  Workflow resumed by dashboard"))
-                                  :stop (do ((requiring-resolve 'ai.miniforge.event-stream.interface/cancel!) control-state)
+                                  :stop (do (es/cancel! control-state)
                                             (println "\u23f9  Workflow stopped by dashboard"))
                                   nil)
                                 (.delete file))

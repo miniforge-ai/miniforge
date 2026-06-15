@@ -28,6 +28,7 @@
    [clojure.string :as str]
    [clojure.java.io :as io]
    [clojure.edn :as edn]
+   [cheshire.core :as json]
    [ai.miniforge.cli.app-config :as app-config]
    [ai.miniforge.cli.messages :as messages]))
 
@@ -459,15 +460,14 @@
    by filename (which is timestamp-prefixed)."
   [dir]
   (when (.exists ^java.io.File dir)
-    (let [json-parse (requiring-resolve 'cheshire.core/parse-string)]
-      (->> (.listFiles ^java.io.File dir)
-           (filter #(.endsWith (.getName ^java.io.File %) ".json"))
-           (sort-by #(.getName ^java.io.File %))
-           (keep (fn [f]
-                   (try
-                     (let [raw (json-parse (slurp f) false)]
-                       (strip-transit-prefix raw))
-                     (catch Exception _e nil))))))))
+    (->> (.listFiles ^java.io.File dir)
+         (filter #(.endsWith (.getName ^java.io.File %) ".json"))
+         (sort-by #(.getName ^java.io.File %))
+         (keep (fn [f]
+                 (try
+                   (let [raw (json/parse-string (slurp f) false)]
+                     (strip-transit-prefix raw))
+                   (catch Exception _e nil)))))))
 
 (defn- ts-short
   "Render the :event/timestamp field (may be a plain string after transit

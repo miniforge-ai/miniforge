@@ -134,20 +134,14 @@
                                                     (fn [] nil))
                   main-display/print-info (fn [& _] nil)
                   main-display/print-error (fn [& _] nil)
-                  clojure.core/requiring-resolve
-                  (fn [sym]
-                    (cond
-                      (= sym 'ai.miniforge.workflow.interface/load-workflow)
-                      (fn [_workflow-type _workflow-version _opts]
-                        {:workflow {:workflow/id :canonical-sdlc
-                                    :workflow/version "1.0.0"
-                                    :workflow/pipeline [{:phase :verify}]}})
-
-                      (= sym 'ai.miniforge.workflow.interface/run-pipeline)
-                      (fn [workflow _input opts]
-                        (reset! run-pipeline-workflow workflow)
-                        (reset! run-pipeline-opts opts)
-                        {:execution/status :completed})))]
+                  sut/load-workflow (fn [_workflow-type _workflow-version _opts]
+                                      {:workflow {:workflow/id :canonical-sdlc
+                                                  :workflow/version "1.0.0"
+                                                  :workflow/pipeline [{:phase :verify}]}})
+                  sut/run-pipeline (fn [workflow _input opts]
+                                     (reset! run-pipeline-workflow workflow)
+                                     (reset! run-pipeline-opts opts)
+                                     {:execution/status :completed})]
       (let [result (sut/resume-workflow workflow-id {:quiet true})]
         (is (= :completed (:execution/status result)))
         (is (= [{:phase :verify}]
@@ -190,17 +184,11 @@
                   dashboard/start-command-poller! (fn [_ _] (fn [] nil))
                   main-display/print-info (fn [& _] nil)
                   main-display/print-error (fn [& _] nil)
-                  clojure.core/requiring-resolve
-                  (fn [sym]
-                    (cond
-                      (= sym 'ai.miniforge.workflow.interface/load-workflow)
-                      (fn [& _]
-                        {:workflow {:workflow/id :canonical-sdlc
-                                    :workflow/version "1.0.0"
-                                    :workflow/pipeline [{:phase :verify}]}})
-
-                      (= sym 'ai.miniforge.workflow.interface/run-pipeline)
-                      (fn [& _] {:execution/status :running})))]
+                  sut/load-workflow (fn [& _]
+                                      {:workflow {:workflow/id :canonical-sdlc
+                                                  :workflow/version "1.0.0"
+                                                  :workflow/pipeline [{:phase :verify}]}})
+                  sut/run-pipeline (fn [& _] {:execution/status :running})]
       (is (thrown-with-msg?
            clojure.lang.ExceptionInfo
            #"non-terminal status :running"
@@ -248,22 +236,16 @@
                                                     (fn [] nil))
                   main-display/print-info (fn [& _] nil)
                   main-display/print-error (fn [& _] nil)
-                  clojure.core/requiring-resolve
-                  (fn [sym]
-                    (cond
-                      (= sym 'ai.miniforge.workflow.interface/load-workflow)
-                      (fn [_workflow-type _workflow-version _opts]
-                        {:workflow {:workflow/id :canonical-sdlc
-                                    :workflow/version "1.0.0"
-                                    :workflow/pipeline [{:phase :plan}
-                                                        {:phase :implement}
-                                                        {:phase :verify}]}})
-
-                      (= sym 'ai.miniforge.workflow.interface/run-pipeline)
-                      (fn [workflow _input opts]
-                        (reset! run-pipeline-workflow workflow)
-                        (reset! run-pipeline-opts opts)
-                        {:execution/status :completed})))]
+                  sut/load-workflow (fn [_workflow-type _workflow-version _opts]
+                                      {:workflow {:workflow/id :canonical-sdlc
+                                                  :workflow/version "1.0.0"
+                                                  :workflow/pipeline [{:phase :plan}
+                                                                      {:phase :implement}
+                                                                      {:phase :verify}]}})
+                  sut/run-pipeline (fn [workflow _input opts]
+                                     (reset! run-pipeline-workflow workflow)
+                                     (reset! run-pipeline-opts opts)
+                                     {:execution/status :completed})]
       (let [result (sut/resume-workflow workflow-id {:quiet true})]
         (is (= :completed (:execution/status result)))
         (is (= [{:phase :implement} {:phase :verify}]
