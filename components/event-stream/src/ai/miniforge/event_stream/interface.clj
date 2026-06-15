@@ -754,3 +754,24 @@
    string for empty/nil input). Pure: no IO. Arities: (events) uses a
    60s default gap; (events opts) takes {:gap-threshold-ms long}."
   timeline/render-timeline)
+;------------------------------------------------------------------------------ Layer 9.5
+;; Repository index intelligence event constructors (RN-19/20)
+
+(def repo-index-quality-measured
+  "Build and return a :repo-index/quality-measured event envelope map
+   (RN-19) emitted when the repo-index component re-scores an index entry.
+   Required: stream, index-id (string), quality-score (number in [0.0,1.0]),
+   staleness-ms (non-negative int), coverage (number in [0.0,1.0]). Optional
+   opts map carries :tree-sha (git tree SHA string the measurement is pinned
+   to). Emits :workflow/id nil — index re-scoring runs outside any workflow
+   context when triggered by background refresh."
+  events/repo-index-quality-measured)
+
+(def repo-index-coverage-changed
+  "Build and return a :repo-index/coverage-changed event envelope map
+   (RN-20) emitted when tracked-file coverage crosses a threshold or changes
+   materially between index refreshes. Required: stream, index-id (string),
+   coverage (number in [0.0,1.0]), previous-coverage (number in [0.0,1.0]).
+   Optional opts map carries :tree-sha (git tree SHA string the new reading
+   is pinned to). Emits :workflow/id nil."
+  events/repo-index-coverage-changed)

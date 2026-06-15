@@ -86,4 +86,11 @@
   "fleet-sink: interrupted during flush: {error}"
 
   :fleet-sink.system/flush-error
-  "fleet-sink: flush error: {error}"}}
+  "fleet-sink: flush error: {error}"
+
+  ;; Repository index intelligence events (RN-19/20)
+  :repo-index/quality-measured
+  "Repo-index quality: {index-id} score={quality-score} coverage={coverage}"
+
+  :repo-index/coverage-changed
+  "Repo-index coverage changed: {index-id} {previous-coverage} -> {coverage}"}}

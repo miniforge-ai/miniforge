@@ -1498,6 +1498,42 @@
      affected-workflow-run-id (assoc :affected/workflow-run-id
                                      affected-workflow-run-id))))
 
+;------------------------------------------------------------------------------ Layer 9.5
+;; Repository index intelligence events (RN-19/20)
+
+(defn repo-index-quality-measured
+  "Emit when the repo-index component re-scores an index entry (RN-19).
+   quality-score and coverage must be in [0.0, 1.0]; staleness-ms must be >= 0.
+   Optional opts map accepts :tree-sha (git tree SHA string the measurement is
+   pinned to)."
+  [stream index-id quality-score staleness-ms coverage & [opts]]
+  (-> (create-envelope stream :repo-index/quality-measured nil
+                       (messages/t :repo-index/quality-measured
+                                   {:index-id index-id
+                                    :quality-score (format "%.3f" (double quality-score))
+                                    :coverage (format "%.3f" (double coverage))}))
+      (assoc :index/id index-id
+             :index/quality-score quality-score
+             :index/staleness-ms staleness-ms
+             :index/coverage coverage)
+      (cond-> (:tree-sha opts) (assoc :index/tree-sha (:tree-sha opts)))))
+
+(defn repo-index-coverage-changed
+  "Emit when tracked-file coverage crosses a threshold or changes materially
+   between index refreshes (RN-20). coverage and previous-coverage must be in
+   [0.0, 1.0]. Optional opts map accepts :tree-sha (git tree SHA string the
+   new reading is pinned to)."
+  [stream index-id coverage previous-coverage & [opts]]
+  (-> (create-envelope stream :repo-index/coverage-changed nil
+                       (messages/t :repo-index/coverage-changed
+                                   {:index-id index-id
+                                    :previous-coverage (format "%.3f" (double previous-coverage))
+                                    :coverage (format "%.3f" (double coverage))}))
+      (assoc :index/id index-id
+             :index/coverage coverage
+             :index/previous-coverage previous-coverage)
+      (cond-> (:tree-sha opts) (assoc :index/tree-sha (:tree-sha opts)))))
+
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
   ;; Create event stream
