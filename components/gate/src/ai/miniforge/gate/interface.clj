@@ -45,6 +45,7 @@
    ;; registry on load, so pack-gate evaluation sees :lint/:format/:syntax/
    ;; :no-secrets capabilities without an explicit caller.
    [ai.miniforge.gate.capabilities]
+   [ai.miniforge.event-stream.interface :as events]
    [ai.miniforge.gate.registry :as registry]
    [ai.miniforge.response.interface :as response]
    [ai.miniforge.schema.interface :as schema]))
@@ -106,16 +107,15 @@
 ;; Gate operations
 
 (defn emit-gate-event!
-  "Emit a gate lifecycle event via requiring-resolve (no hard dep on event-stream)."
+  "Emit a gate lifecycle event when the context carries an event stream."
   [ctx gate-kw event-type & [extra]]
   (try
     (when-let [stream (get ctx :event-stream)]
-      (when-let [publish-fn (requiring-resolve 'ai.miniforge.event-stream.interface/publish!)]
-        (let [constructor (case event-type
-                            :started (requiring-resolve 'ai.miniforge.event-stream.interface/gate-started)
-                            :passed (requiring-resolve 'ai.miniforge.event-stream.interface/gate-passed)
-                            :failed (requiring-resolve 'ai.miniforge.event-stream.interface/gate-failed))]
-          (publish-fn stream (constructor stream (:workflow/id ctx) gate-kw extra)))))
+      (let [constructor (case event-type
+                          :started events/gate-started
+                          :passed events/gate-passed
+                          :failed events/gate-failed)]
+        (events/publish! stream (constructor stream (:workflow/id ctx) gate-kw extra))))
     (catch Exception _ nil)))
 
 (defn check-gate

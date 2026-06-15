@@ -24,6 +24,7 @@
    [clojure.set :as set]
    [clojure.string :as str]
    [ai.miniforge.anomaly.interface :as anomaly]
+   [ai.miniforge.event-stream.interface :as events]
    [ai.miniforge.logging.interface :as log]
    [ai.miniforge.tool.tracking :as tracking]))
 
@@ -108,17 +109,16 @@
   (find-tools [this query] "Find tools matching query."))
 
 (defn emit-tool-event!
-  "Emit a tool lifecycle event via requiring-resolve (no hard dep on event-stream)."
+  "Emit a tool lifecycle event when the context carries an event stream."
   [context tool-id event-type & [extra]]
   (try
     (when-let [stream (:event-stream context)]
-      (when-let [publish-fn (requiring-resolve 'ai.miniforge.event-stream.interface/publish!)]
-        (let [wf-id (:workflow/id context)
-              agent-id (:agent/id context)
-              constructor (case event-type
-                            :invoked (requiring-resolve 'ai.miniforge.event-stream.interface/tool-invoked)
-                            :completed (requiring-resolve 'ai.miniforge.event-stream.interface/tool-completed))]
-          (publish-fn stream (constructor stream wf-id agent-id tool-id extra)))))
+      (let [wf-id (:workflow/id context)
+            agent-id (:agent/id context)
+            constructor (case event-type
+                          :invoked events/tool-invoked
+                          :completed events/tool-completed)]
+        (events/publish! stream (constructor stream wf-id agent-id tool-id extra))))
     (catch Exception _ nil)))
 
 (defrecord FunctionTool [id name description parameters handler metadata]

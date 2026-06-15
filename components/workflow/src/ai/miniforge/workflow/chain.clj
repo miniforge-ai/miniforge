@@ -37,6 +37,7 @@
    - [:prev/last-phase-result ...] — navigates into previous step's last phase result
    - keyword                 — reads from chain input"
   (:require
+   [ai.miniforge.event-stream.interface :as events]
    [ai.miniforge.phase.interface :as phase]
    [ai.miniforge.workflow.loader :as loader]
    [ai.miniforge.workflow.runner :as runner]))
@@ -97,11 +98,9 @@
 
 (defn emit!
   "Emit a chain event if event-stream is present in opts."
-  [opts constructor-sym & args]
+  [opts constructor & args]
   (when-let [stream (:event-stream opts)]
-    (let [publish! (requiring-resolve 'ai.miniforge.event-stream.interface/publish!)
-          constructor (requiring-resolve constructor-sym)]
-      (publish! stream (apply constructor stream args)))))
+    (events/publish! stream (apply constructor stream args))))
 
 ;------------------------------------------------------------------------------ Layer 2: Chain execution
 
@@ -126,7 +125,7 @@
         chain-id (:chain/id chain-def)
         steps (:chain/steps chain-def)
         load-workflow loader/load-workflow]
-    (emit! opts 'ai.miniforge.event-stream.interface/chain-started
+    (emit! opts events/chain-started
            chain-id (count steps))
     (loop [remaining steps
            prev-output nil
@@ -135,7 +134,7 @@
       (if (empty? remaining)
         ;; All steps completed successfully
         (let [duration-ms (- (System/currentTimeMillis) start-time)]
-          (emit! opts 'ai.miniforge.event-stream.interface/chain-completed
+          (emit! opts events/chain-completed
                  chain-id duration-ms (count steps))
           {:chain/id chain-id
            :chain/status :completed
@@ -147,7 +146,7 @@
         (let [step (first remaining)
               step-id (:step/id step)
               workflow-id (:step/workflow-id step)
-              _ (emit! opts 'ai.miniforge.event-stream.interface/chain-step-started
+              _ (emit! opts events/chain-step-started
                        chain-id step-id idx workflow-id)
               input-bindings (:step/input-bindings step)
               resolved-input (resolve-bindings input-bindings prev-output chain-input)
@@ -166,9 +165,9 @@
           (if (phase/failed? result)
             ;; Step failed — emit failure events and stop
             (let [error (get result :execution/error "Step execution failed")]
-              (emit! opts 'ai.miniforge.event-stream.interface/chain-step-failed
+              (emit! opts events/chain-step-failed
                      chain-id step-id idx error)
-              (emit! opts 'ai.miniforge.event-stream.interface/chain-failed
+              (emit! opts events/chain-failed
                      chain-id step-id error)
               {:chain/id chain-id
                :chain/status :failed
@@ -178,7 +177,7 @@
 
             ;; Step succeeded — emit completion and continue
             (do
-              (emit! opts 'ai.miniforge.event-stream.interface/chain-step-completed
+              (emit! opts events/chain-step-completed
                      chain-id step-id idx)
               (recur (rest remaining)
                      output

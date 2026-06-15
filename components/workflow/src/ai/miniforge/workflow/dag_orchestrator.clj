@@ -37,6 +37,7 @@
    resolution sub-workflow."
   (:require
    [ai.miniforge.dag-executor.interface :as dag]
+   [ai.miniforge.event-stream.interface :as events]
    [ai.miniforge.logging.interface :as log]
    [ai.miniforge.phase.interface :as phase]
    [ai.miniforge.response.interface :as response]
@@ -1490,10 +1491,9 @@
   [event-stream workflow-id reset-at auto-resume? completed-ids wait-ms]
   (when (and event-stream reset-at)
     (try
-      (let [publish! (requiring-resolve 'ai.miniforge.event-stream.interface/publish!)]
-        (publish! event-stream
-                  (make-resume-hint-event workflow-id reset-at auto-resume?
-                                          completed-ids wait-ms)))
+      (events/publish! event-stream
+                       (make-resume-hint-event workflow-id reset-at auto-resume?
+                                               completed-ids wait-ms))
       (catch Exception _ nil))))
 
 (defn- checkpoint-log-data

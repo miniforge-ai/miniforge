@@ -28,6 +28,7 @@
   (:require
    [ai.miniforge.clock.interface :as clock]
    [ai.miniforge.dag-executor.interface :as dag]
+   [ai.miniforge.event-stream.interface :as events]
    [ai.miniforge.logging.interface :as log]
    [ai.miniforge.workflow.checkpoint-store :as checkpoint-store]))
 
@@ -217,13 +218,12 @@
   [event-stream workflow-id task-id result]
   (when event-stream
     (try
-      (let [publish! (requiring-resolve 'ai.miniforge.event-stream.interface/publish!)]
-        (publish! event-stream
-                  {:event/type :dag/task-completed
-                   :event/timestamp (str (java.time.Instant/now))
-                   :workflow/id workflow-id
-                   :dag/task-id task-id
-                   :dag/result (select-keys result [:data :status])}))
+      (events/publish! event-stream
+                       {:event/type :dag/task-completed
+                        :event/timestamp (str (java.time.Instant/now))
+                        :workflow/id workflow-id
+                        :dag/task-id task-id
+                        :dag/result (select-keys result [:data :status])})
       (catch Exception _ nil))))
 
 (defn emit-dag-task-failed!
@@ -236,13 +236,12 @@
   [event-stream workflow-id task-id result]
   (when event-stream
     (try
-      (let [publish! (requiring-resolve 'ai.miniforge.event-stream.interface/publish!)]
-        (publish! event-stream
-                  {:event/type :dag/task-failed
-                   :event/timestamp (str (java.time.Instant/now))
-                   :workflow/id workflow-id
-                   :dag/task-id task-id
-                   :dag/result (select-keys result [:error :status])}))
+      (events/publish! event-stream
+                       {:event/type :dag/task-failed
+                        :event/timestamp (str (java.time.Instant/now))
+                        :workflow/id workflow-id
+                        :dag/task-id task-id
+                        :dag/result (select-keys result [:error :status])})
       (catch Exception _ nil))))
 
 (defn emit-dag-paused!
@@ -250,13 +249,12 @@
   [event-stream workflow-id completed-ids reason]
   (when event-stream
     (try
-      (let [publish! (requiring-resolve 'ai.miniforge.event-stream.interface/publish!)]
-        (publish! event-stream
-                  {:event/type :dag/paused
-                   :event/timestamp (str (java.time.Instant/now))
-                   :workflow/id workflow-id
-                   :dag/completed-task-ids (vec completed-ids)
-                   :dag/pause-reason reason}))
+      (events/publish! event-stream
+                       {:event/type :dag/paused
+                        :event/timestamp (str (java.time.Instant/now))
+                        :workflow/id workflow-id
+                        :dag/completed-task-ids (vec completed-ids)
+                        :dag/pause-reason reason})
       (catch Exception _ nil))))
 
 ;--- Layer 2: Batch Analysis + Rate Limit Handling
