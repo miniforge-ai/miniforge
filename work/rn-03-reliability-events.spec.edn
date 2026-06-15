@@ -110,4 +110,4 @@
    :verification "event/id, event/type, event/timestamp on all events"}]
 
  :estimated-effort "1 day"
- :workflow/type :simple}
+ :workflow/type :canonical-sdlc}
