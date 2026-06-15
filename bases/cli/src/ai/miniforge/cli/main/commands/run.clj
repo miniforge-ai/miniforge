@@ -28,6 +28,7 @@
    [ai.miniforge.cli.workflow-runner :as workflow-runner]
    [ai.miniforge.cli.main.commands.plan-executor :as plan-executor]
    [ai.miniforge.cli.main.commands.resume :as resume]
+   [ai.miniforge.agent-runtime.interface :as agent-runtime]
    [slingshot.slingshot :refer [try+]]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -37,8 +38,7 @@
   "Attempt runtime error classification. Returns classification or nil."
   [e]
   (try
-    (when-let [classifier (requiring-resolve 'ai.miniforge.agent-runtime.interface/classify-error)]
-      (classifier e (ex-data e)))
+    (agent-runtime/classify-error e (ex-data e))
     (catch Exception _ nil)))
 
 (defn- print-run-error-and-exit!
