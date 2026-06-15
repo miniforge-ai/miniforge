@@ -1339,6 +1339,56 @@
                     previous-status
                     :dependency/recovered))
 
+;------------------------------------------------------------------------------ Layer 6.3
+;; Repository intelligence event constructors (RN-19/20)
+
+(defn repo-index-quality-measured
+  "Build a :repo-index/quality-measured event.
+
+   Emitted by the index quality tracker (RN-19) when it samples the
+   composite quality score for a named index.
+
+   Arguments:
+   - stream:        event-stream atom
+   - index-id:      string slug identifying the index (e.g. \"main-code-index\")
+   - quality-score: number in [0.0, 1.0] — composite quality ratio
+   - coverage:      number in [0.0, 1.0] — fraction of files indexed
+   - staleness-ms:  int — age of oldest document in the index (milliseconds)
+   - opts:          optional map; `:measured-at` adds an explicit inst timestamp"
+  [stream index-id quality-score coverage staleness-ms & [opts]]
+  (-> (create-envelope stream :repo-index/quality-measured nil
+                       (messages/t :repo-index/quality-measured
+                                   {:index-id index-id
+                                    :quality-score quality-score}))
+      (assoc :index/id index-id
+             :index/quality-score quality-score
+             :index/coverage coverage
+             :index/staleness-ms staleness-ms)
+      (cond-> (:measured-at opts) (assoc :index/measured-at (:measured-at opts)))))
+
+(defn repo-index-coverage-changed
+  "Build a :repo-index/coverage-changed event.
+
+   Emitted by the index quality tracker (RN-20) when the coverage ratio
+   of a named index changes beyond the configured threshold.
+
+   Arguments:
+   - stream:             event-stream atom
+   - index-id:           string slug identifying the index
+   - previous-coverage:  number in [0.0, 1.0] — coverage before the change
+   - coverage:           number in [0.0, 1.0] — coverage after the change
+   - opts:               optional map; `:changed-files` adds the count of
+                         files whose index state changed in this transition"
+  [stream index-id previous-coverage coverage & [opts]]
+  (-> (create-envelope stream :repo-index/coverage-changed nil
+                       (messages/t :repo-index/coverage-changed
+                                   {:index-id index-id
+                                    :coverage coverage}))
+      (assoc :index/id index-id
+             :index/previous-coverage previous-coverage
+             :index/coverage coverage)
+      (cond-> (:changed-files opts) (assoc :index/changed-files (:changed-files opts)))))
+
 ;------------------------------------------------------------------------------ Layer 6
 ;; Meta-loop events
 

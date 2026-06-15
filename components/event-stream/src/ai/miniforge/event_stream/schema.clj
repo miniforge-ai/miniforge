@@ -961,6 +961,148 @@
     [:oci/duration-ms {:optional true} int?]
     [:message string?]]))
 
+;------------------------------------------------------------------------------ Layer 5.5
+;; Reliability metric event schemas (RN-03, N3 §3.17)
+;;
+;; Schemas for the 4 reliability metric events emitted by the SLI
+;; computation engine (RN-04). Field names match the assoc'd keys in
+;; the existing core.clj constructors (sli-computed, slo-breach,
+;; error-budget-update, degradation-mode-changed).
+
+(def SliComputed
+  "Schema for :reliability/sli-computed event.
+
+   Emitted by the SLI computation engine (RN-04) each time an SLI value
+   is computed over a rolling window.  `:sli/tier` and `:sli/dimensions`
+   are optional; single-tier deployments omit them."
+  (with-identity
+   [:map
+    [:event/type [:= :reliability/sli-computed]]
+    [:event/id uuid?]
+    [:event/timestamp inst?]
+    [:event/version string?]
+    [:event/sequence-number int?]
+    [:workflow/id {:optional true} [:maybe uuid?]]
+    [:sli/name keyword?]
+    [:sli/value number?]
+    [:sli/window keyword?]
+    [:sli/tier {:optional true} keyword?]
+    [:sli/dimensions {:optional true} map?]
+    [:message string?]]))
+
+(def SloBreach
+  "Schema for :reliability/slo-breach event.
+
+   Emitted when an SLO target is missed for :standard or :critical
+   tiers.  All 5 required fields are always present — there is no
+   partial-breach shape."
+  (with-identity
+   [:map
+    [:event/type [:= :reliability/slo-breach]]
+    [:event/id uuid?]
+    [:event/timestamp inst?]
+    [:event/version string?]
+    [:event/sequence-number int?]
+    [:workflow/id {:optional true} [:maybe uuid?]]
+    [:slo/sli-name keyword?]
+    [:slo/target number?]
+    [:slo/actual number?]
+    [:slo/tier keyword?]
+    [:slo/window keyword?]
+    [:message string?]]))
+
+(def ErrorBudgetUpdate
+  "Schema for :reliability/error-budget-update event.
+
+   Emitted when error-budget state is recomputed after each SLI window
+   closes.  `:budget/remaining` is a ratio [0.0, 1.0]; `:budget/burn-rate`
+   is a dimensionless multiplier (>1 = burning faster than replenished)."
+  (with-identity
+   [:map
+    [:event/type [:= :reliability/error-budget-update]]
+    [:event/id uuid?]
+    [:event/timestamp inst?]
+    [:event/version string?]
+    [:event/sequence-number int?]
+    [:workflow/id {:optional true} [:maybe uuid?]]
+    [:budget/tier keyword?]
+    [:budget/sli keyword?]
+    [:budget/remaining number?]
+    [:budget/burn-rate number?]
+    [:budget/window keyword?]
+    [:message string?]]))
+
+(def DegradationModeChanged
+  "Schema for :reliability/degradation-mode-changed event.
+
+   Emitted when the system transitions between degradation modes per
+   N1 §5.5.5.  `:degradation/trigger` is a human-readable string
+   describing the condition that caused the transition."
+  (with-identity
+   [:map
+    [:event/type [:= :reliability/degradation-mode-changed]]
+    [:event/id uuid?]
+    [:event/timestamp inst?]
+    [:event/version string?]
+    [:event/sequence-number int?]
+    [:workflow/id {:optional true} [:maybe uuid?]]
+    [:degradation/from keyword?]
+    [:degradation/to keyword?]
+    [:degradation/trigger string?]
+    [:message string?]]))
+
+;------------------------------------------------------------------------------ Layer 6
+;; Repository intelligence event schemas (RN-19/20)
+;;
+;; Schemas for the 2 repo-index events emitted by the index quality
+;; tracker (RN-19/20).  `:index/id` is a string slug identifying the
+;; index (e.g. "main-code-index"); quality and coverage are ratios
+;; in [0.0, 1.0]; staleness is elapsed wall-clock milliseconds.
+
+(def RepoIndexQualityMeasured
+  "Schema for :repo-index/quality-measured event.
+
+   Emitted by the index quality tracker (RN-19) each time it samples
+   the composite quality score for a named index.  `:index/staleness-ms`
+   is the age of the oldest document in the index at measurement time.
+   `:index/measured-at` is optional (defaults to envelope timestamp
+   when absent)."
+  (with-identity
+   [:map
+    [:event/type [:= :repo-index/quality-measured]]
+    [:event/id uuid?]
+    [:event/timestamp inst?]
+    [:event/version string?]
+    [:event/sequence-number int?]
+    [:workflow/id {:optional true} [:maybe uuid?]]
+    [:index/id string?]
+    [:index/quality-score number?]
+    [:index/coverage number?]
+    [:index/staleness-ms int?]
+    [:index/measured-at {:optional true} inst?]
+    [:message string?]]))
+
+(def RepoIndexCoverageChanged
+  "Schema for :repo-index/coverage-changed event.
+
+   Emitted by the index quality tracker (RN-20) when the coverage ratio
+   of a named index changes beyond the configured threshold.
+   `:index/changed-files` is the count of files whose index state
+   changed in this transition; optional (omit when not computable)."
+  (with-identity
+   [:map
+    [:event/type [:= :repo-index/coverage-changed]]
+    [:event/id uuid?]
+    [:event/timestamp inst?]
+    [:event/version string?]
+    [:event/sequence-number int?]
+    [:workflow/id {:optional true} [:maybe uuid?]]
+    [:index/id string?]
+    [:index/previous-coverage number?]
+    [:index/coverage number?]
+    [:index/changed-files {:optional true} int?]
+    [:message string?]]))
+
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
   ;; Example event

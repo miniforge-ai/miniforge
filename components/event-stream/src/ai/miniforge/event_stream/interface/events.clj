@@ -503,3 +503,21 @@
    (:workflow/phase, :agent/backend, :agent/session-id). Must be emitted
    before the first tool call so resume-on-kill has a valid session id."
   core/agent-session-captured)
+;------------------------------------------------------------------------------ Layer 4
+;; Repository intelligence event constructors (RN-19/20)
+
+(def repo-index-quality-measured
+  "Build and return a :repo-index/quality-measured event envelope map
+   (:workflow/id nil) emitted when the index quality tracker (RN-19)
+   samples the composite quality score for a named index
+   (:index/id, :index/quality-score, :index/coverage, :index/staleness-ms);
+   optional opts add :index/measured-at."
+  core/repo-index-quality-measured)
+
+(def repo-index-coverage-changed
+  "Build and return a :repo-index/coverage-changed event envelope map
+   (:workflow/id nil) emitted when the index quality tracker (RN-20)
+   detects that coverage for a named index changed beyond the configured
+   threshold (:index/id, :index/previous-coverage, :index/coverage);
+   optional opts add :index/changed-files."
+  core/repo-index-coverage-changed)
