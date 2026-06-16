@@ -30,9 +30,11 @@
    [ai.miniforge.agent.role-config :as role-config]
    [ai.miniforge.agent.specialized :as specialized]
    [ai.miniforge.agent.task-classifier :as classifier]
+   [ai.miniforge.agent-runtime.interface :as agent-runtime]
    [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.llm.interface :as llm]
    [ai.miniforge.response.interface :as response]
+   [ai.miniforge.self-healing.interface :as self-healing]
    [ai.miniforge.tool.interface :as tool]
    [ai.miniforge.logging.interface :as log]
    [slingshot.slingshot :refer [try+]]))
@@ -425,20 +427,18 @@ Output execution logs and status reports."})
       :agent/config (:config agent)})))
 
 (defn record-backend-health!
-  "Record backend call success/failure via self-healing (optional dep)."
+  "Record backend call success/failure via self-healing."
   [context success?]
   (try
-    (when-let [record-fn (requiring-resolve 'ai.miniforge.self-healing.interface/record-backend-call!)]
-      (let [backend (or (get-in context [:llm-backend :config :backend]) :anthropic)]
-        (record-fn backend success?)))
+    (let [backend (or (get-in context [:llm-backend :config :backend]) :anthropic)]
+      (self-healing/record-backend-call! backend success?))
     (catch Exception _ nil)))
 
 (defn- classify-execution-error
-  "Try to classify an execution error via agent-runtime. Returns classification or nil."
+  "Classify an execution error via agent-runtime. Returns classification or nil."
   [exception task-id]
   (try
-    (when-let [classifier (requiring-resolve 'ai.miniforge.agent-runtime.interface/classify-error)]
-      (classifier exception {:task-id task-id}))
+    (agent-runtime/classify-error exception {:task-id task-id})
     (catch Exception _ nil)))
 
 (defn- retry?
@@ -467,10 +467,9 @@ Output execution logs and status reports."})
   "Attempt workaround when agent execution fails. Returns {:retry? bool} or nil."
   [exception]
   (try
-    (when-let [detect-fn (requiring-resolve 'ai.miniforge.self-healing.interface/detect-and-apply-workaround)]
-      (let [result (detect-fn exception {})]
-        (when (and (:workaround-found? result) (:applied? result) (:success? result))
-          {:retry? true :workaround-result result})))
+    (let [result (self-healing/detect-and-apply-workaround exception {})]
+      (when (and (:workaround-found? result) (:applied? result) (:success? result))
+        {:retry? true :workaround-result result}))
     (catch Exception _ nil)))
 
 (defrecord DefaultExecutor [logger memory-store]
