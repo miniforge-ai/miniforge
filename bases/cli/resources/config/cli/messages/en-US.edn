@@ -570,6 +570,7 @@
   :pr/monitor-worklist-pruned "Removed {removed} closed PR(s); {remaining} still open."
   :pr/monitor-worklist-empty "All PRs in the work-list are merged or closed — nothing to monitor."
   :pr/monitor-worklist-prune-error "Could not check PR state: {error}"
+  :pr/monitor-no-author "Could not resolve a GitHub author login. Set --author or ensure 'gh auth login' is configured."
 
   ;; ── Observability ─────────────────────────────────────────────────────
   :observability/error-tailing "Error tailing file: {error}"

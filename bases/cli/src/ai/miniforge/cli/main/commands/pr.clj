@@ -17,20 +17,20 @@
 ;; limitations under the License.
 
 (ns ai.miniforge.cli.main.commands.pr
-  "PR operations using GitHub CLI."
+  "PR subcommands: list, review, respond, merge.
+   The monitor command is implemented in pr-monitor and delegated here."
   (:require
    [babashka.process :as process]
    [cheshire.core :as json]
    [clojure.string :as str]
-   [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.cli.app-config :as app-config]
+   [ai.miniforge.cli.main.commands.pr-monitor :as pr-monitor]
+   [ai.miniforge.cli.main.commands.pr-review :as pr-review]
    [ai.miniforge.cli.main.commands.shared :as shared]
    [ai.miniforge.cli.main.display :as display]
-   [ai.miniforge.cli.main.commands.pr-review :as pr-review]
    [ai.miniforge.cli.messages :as messages]
    [ai.miniforge.cli.workflow-runner :as workflow-runner]
-   [ai.miniforge.pr-lifecycle.interface :as pr-lifecycle]
-   [ai.miniforge.schema.interface :as schema]))
+   [ai.miniforge.pr-lifecycle.interface :as pr-lifecycle]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Shell primitives
@@ -46,29 +46,15 @@
 (defn- push! []
   (zero? (:exit (sh! "git" "push"))))
 
-(defn- remote-origin-url
-  "Return the git remote origin URL for `repo-path`, or nil on failure."
-  [repo-path]
-  (let [r (sh! "git" "-C" repo-path "remote" "get-url" "origin")]
-    (when (zero? (:exit r))
-      (str/trim (:out r)))))
-
 ;------------------------------------------------------------------------------ Layer 1
-;; PR commands + monitor primitives
-
-;;; Constant used wherever poll-interval-s (config) is converted to
-;;; poll-interval-ms (internal representation). Extracted once per rule 006.
-(def ^:private ms-per-second
-  "Milliseconds in one second."
-  1000)
+;; PR commands
 
 (defn pr-list-cmd
   "List PRs using GitHub CLI."
   [opts load-config-fn]
   (let [{:keys [repo config]} opts
-        cfg (load-config-fn config)
+        cfg   (load-config-fn config)
         repos (if repo [repo] (get-in cfg [:fleet :repos] []))]
-
     (if (empty? repos)
       (do
         (display/print-error (messages/t :pr/no-repos))
@@ -84,13 +70,13 @@
                   (println (messages/t :pr/no-open))
                   (doseq [{:keys [number title state author]} prs]
                     (let [status-style (case state
-                                         "OPEN" :green
+                                         "OPEN"   :green
                                          "MERGED" :magenta
                                          "CLOSED" :red
                                          :white)
-                          state-badge (display/style
-                                       (messages/t :pr/list-state-badge {:state state})
-                                       :foreground status-style)]
+                          state-badge  (display/style
+                                        (messages/t :pr/list-state-badge {:state state})
+                                        :foreground status-style)]
                       (println (messages/t :pr/list-row
                                            {:number      number
                                             :state-badge state-badge
@@ -105,7 +91,7 @@
             (display/print-error (messages/t :pr/query-failed {:error (:err result)}))))))))
 
 (defn- gh-pr-base-ref
-  "Resolve the base-branch ref for `pr-number` via the GitHub CLI.
+  "Resolve the base-branch ref for `pr-number` via gh CLI.
    Returns a remote-prefixed ref like \"origin/main\", or nil on failure."
   [pr-number]
   (let [r (sh! "gh" "pr" "view" (str pr-number)
@@ -123,10 +109,9 @@
    review comments per N13 §2.3 to stdout.
 
    With `--post`, additionally batch-posts the rendered comments as a
-   single PR review (event=COMMENT) via `pr-lifecycle/post-review!`.
-   The PR head SHA needed for the create-review API is derived from
-   the worktree HEAD after `gh pr checkout`. Does NOT apply fixes —
-   that remains the Comment Response Agent's job.
+   single PR review via `pr-lifecycle/post-review!`. The PR head SHA
+   is derived from the worktree HEAD after `gh pr checkout`. Does NOT
+   apply fixes — that remains the Comment Response Agent's job.
 
    Pass --repo <path> + --base <ref> to operate on an existing checkout
    without using `gh` to fetch metadata; `--url <pr-url>` is the default
@@ -134,11 +119,9 @@
   [opts]
   (let [{:keys [url repo base]} opts]
     (cond
-      ;; --repo + --base path: operate on existing checkout
       (and repo base)
       (pr-review/run-pr-review-by-path-cmd opts)
 
-      ;; URL path: parse, checkout, derive base, delegate
       url
       (let [{:keys [number]} (pr-lifecycle/parse-pr-url url)]
         (cond
@@ -155,13 +138,11 @@
                 (display/print-error (messages/t :pr/respond-checkout-failed))
 
                 (not base-ref)
-                (display/print-error
-                 (messages/t :pr/review-base-ref-failed))
+                (display/print-error (messages/t :pr/review-base-ref-failed))
 
                 :else
                 (let [cwd (System/getProperty "user.dir")]
-                  (display/print-info
-                   (messages/t :pr/respond-on-branch {:branch branch}))
+                  (display/print-info (messages/t :pr/respond-on-branch {:branch branch}))
                   (pr-review/run-pr-review!
                    cwd
                    (cond-> {:base-ref base-ref}
@@ -191,7 +172,7 @@
             (display/print-error (messages/t :pr/respond-checkout-failed))
             (shared/exit! 1))
           (display/print-info (messages/t :pr/respond-on-branch {:branch branch}))
-          (let [cwd (System/getProperty "user.dir")
+          (let [cwd    (System/getProperty "user.dir")
                 result (pr-lifecycle/respond-to-comments!
                         url cwd
                         (fn [spec run-opts]
@@ -216,151 +197,20 @@
         (display/print-info (messages/t :pr/merging {:url url}))
         (println (messages/t :pr/merge-todo))))))
 
-;;; Monitor primitives — depend only on Layer 0 and external interfaces.
-
-(defn- resolve-author
-  "Resolve the GitHub author login from --author flag, gh CLI, or config default."
-  [author-opt default-author]
-  (or author-opt
-      (let [result (sh! "gh" "api" "user" "--jq" ".login")]
-        (when (zero? (:exit result))
-          (let [login (str/trim (:out result))]
-            (when (seq login) login))))
-      default-author))
-
-(defn- parse-poll-interval
-  "Parse poll interval string in seconds, with bounds checking.
-   Returns milliseconds, or nil when the value is out-of-range or unparseable."
-  [interval-str {:keys [min-poll-interval-s max-poll-interval-s]}]
-  (when interval-str
-    (try
-      (let [seconds (Long/parseLong (str interval-str))]
-        (if (<= min-poll-interval-s seconds max-poll-interval-s)
-          (* seconds ms-per-second)
-          (do (display/print-error
-               (messages/t :pr/monitor-interval-bounds
-                           {:min min-poll-interval-s :max max-poll-interval-s :value seconds}))
-              nil)))
-      (catch NumberFormatException _
-        (display/print-error (messages/t :pr/monitor-interval-invalid {:value interval-str}))
-        nil))))
-
-(defn- worklist-poll-ms
-  "Derive a poll-interval in milliseconds from the PR entries in a worklist.
-   Takes the minimum :pr/poll-interval (seconds) across all entries.
-   Returns nil when no entries carry that key — caller uses monitor default."
-  [prs]
-  (some->> (seq (keep :pr/poll-interval prs))
-           (apply min)
-           (* ms-per-second)))
-
-;------------------------------------------------------------------------------ Layer 2
-;; Monitor session — composes Layer 1 helpers with pr-lifecycle calls.
-
-(defn- run-monitor!
-  "Create a PR monitor from `mon-opts`, install a shutdown hook, and run the loop.
-
-   Shared by both the fresh-monitor and resume-from-worklist paths so the
-   loop is implemented exactly once."
-  [mon-opts author]
-  (let [monitor (pr-lifecycle/create-pr-monitor mon-opts)
-        eff-ms  (get-in @monitor [:config :poll-interval-ms])
-        path    (:worktree-path mon-opts)]
-    (display/print-info (messages/t :pr/monitor-starting {:author author}))
-    (display/print-info (messages/t :pr/monitor-polling {:seconds (/ eff-ms ms-per-second) :dir path}))
-    (display/print-info (messages/t :pr/monitor-stop-hint))
-    (let [shutdown (fn []
-                     (display/print-info (messages/t :pr/monitor-stopping))
-                     (try (pr-lifecycle/stop-pr-monitor-loop monitor) (catch Exception _)))]
-      (.addShutdownHook (Runtime/getRuntime) (Thread. ^Runnable shutdown))
-      (let [evidence (pr-lifecycle/run-pr-monitor-loop monitor author)]
-        (display/print-info (messages/t :pr/monitor-stopped {:evidence (pr-str evidence)}))))))
-
-(defn- resume-from-worklist!
-  "Load persisted worklist for `repo-path`, prune closed PRs, then run monitor.
-
-   Return types differ intentionally between the two pr-lifecycle calls:
-   - load-worklist  → schema/success | schema/failure  (checked via schema/failed?)
-   - prune-closed-prs → WorklistEntry | anomaly map    (checked via anomaly/anomaly?)
-   See monitor_worklist.clj ns-doc for the authoritative contract.
-
-   Exit codes:
-   - returns normally (exit 0) when the worklist is empty after pruning
-   - shared/exit! 1 when remote URL unresolvable, no worklist, or gh fails"
-  [repo-path cli-cfg]
-  (let [origin-url (remote-origin-url repo-path)]
-    (when-not origin-url
-      (display/print-error (messages/t :pr/monitor-no-remote {:path repo-path}))
-      (shared/exit! 1))
-    (let [rkey        (pr-lifecycle/worklist-repo-key origin-url)
-          wl-path     (pr-lifecycle/worklist-path (app-config/home-dir) rkey)
-          load-result (pr-lifecycle/load-worklist wl-path)]
-      (when (schema/failed? load-result)
-        (display/print-error (messages/t :pr/monitor-no-worklist))
-        (shared/exit! 1))
-      ;; schema/success :worklist entry → {:success? true :worklist <entry>}
-      (let [worklist       (:worklist load-result)
-            original-count (count (:worklist/prs worklist))]
-        (display/print-info (messages/t :pr/monitor-worklist-loaded {:count original-count}))
-        (display/print-info (messages/t :pr/monitor-worklist-pruning))
-        (let [pruned (pr-lifecycle/prune-closed-prs worklist)]
-          (when (anomaly/anomaly? pruned)
-            (display/print-error
-             (messages/t :pr/monitor-worklist-prune-error
-                         {:error (:anomaly/message pruned)}))
-            (shared/exit! 1))
-          (let [prs     (:worklist/prs pruned)
-                removed (- original-count (count prs))]
-            (when (pos? removed)
-              (display/print-info
-               (messages/t :pr/monitor-worklist-pruned
-                           {:removed removed :remaining (count prs)})))
-            (if (empty? prs)
-              (display/print-info (messages/t :pr/monitor-worklist-empty))
-              (let [author   (resolve-author nil (:default-self-author cli-cfg))
-                    poll-ms  (worklist-poll-ms prs)
-                    mon-opts (cond-> {:worktree-path repo-path :self-author author}
-                               poll-ms (assoc :poll-interval-ms poll-ms))]
-                (run-monitor! mon-opts author)))))))))
-
-;------------------------------------------------------------------------------ Layer 3
-;; Command entry point — dispatches to Layer 2 paths.
-
 (defn pr-monitor-cmd
-  "Start the PR monitor loop for autonomous comment resolution.
-
-   With --author: creates a fresh monitor polling that author's open PRs.
-   Without --author: resumes from a persisted work-list. Uses --repo (or
-   cwd) as the repo path for work-list key derivation.
-
-   Returns normally (exit 0) when the work-list is empty after pruning.
-   Calls shared/exit! 1 when no work-list exists and no --author supplied.
-
-   Polls open PRs, classifies new comments, and routes them to handlers
-   (fix change-requests, answer questions, skip noise). Runs continuously
-   until stopped with Ctrl+C, budget exhausted, or no open PRs remain."
+  "Delegates to pr-monitor/pr-monitor-cmd. See that namespace for full docs."
   [opts]
-  (let [{:keys [author poll-interval repo]} opts
-        cli-cfg   (app-config/pr-monitor-config)
-        cwd       (System/getProperty "user.dir")
-        repo-path (or repo cwd)]
-    (if author
-      (let [resolved (resolve-author author (:default-self-author cli-cfg))
-            poll-ms  (parse-poll-interval poll-interval cli-cfg)
-            mon-opts (cond-> {:worktree-path repo-path :self-author resolved}
-                       poll-ms (assoc :poll-interval-ms poll-ms))]
-        (run-monitor! mon-opts resolved))
-      (resume-from-worklist! repo-path cli-cfg))))
+  (pr-monitor/pr-monitor-cmd opts))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
-  ;; Fresh monitor for a specific author
-  (pr-monitor-cmd {:author "alice" :repo "/path/to/repo" :poll-interval "60"})
+  ;; List PRs across fleet repos
+  ;; (pr-list-cmd {} load-config)
 
-  ;; Resume from persisted work-list in the current directory
-  (pr-monitor-cmd {})
+  ;; Review a PR via URL
+  ;; (pr-review-cmd {:url "https://github.com/org/repo/pull/42"})
 
-  ;; Resume from an explicit repo path
-  (pr-monitor-cmd {:repo "/path/to/other-repo"})
+  ;; Respond to comments on a PR
+  ;; (pr-respond-cmd {:url "https://github.com/org/repo/pull/42"})
 
   :leave-this-here)
