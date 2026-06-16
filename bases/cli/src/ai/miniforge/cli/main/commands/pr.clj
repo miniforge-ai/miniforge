@@ -22,12 +22,14 @@
    [babashka.process :as process]
    [cheshire.core :as json]
    [clojure.string :as str]
+   [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.cli.app-config :as app-config]
    [ai.miniforge.cli.main.display :as display]
    [ai.miniforge.cli.main.commands.pr-review :as pr-review]
    [ai.miniforge.cli.messages :as messages]
    [ai.miniforge.cli.workflow-runner :as workflow-runner]
-   [ai.miniforge.pr-lifecycle.interface :as pr-lifecycle]))
+   [ai.miniforge.pr-lifecycle.interface :as pr-lifecycle]
+   [ai.miniforge.schema.interface :as schema]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Shell helpers
@@ -42,6 +44,13 @@
 
 (defn- push! []
   (zero? (:exit (sh! "git" "push"))))
+
+(defn- remote-origin-url
+  "Return the git remote origin URL for `repo-path`, or nil on failure."
+  [repo-path]
+  (let [r (sh! "git" "-C" repo-path "remote" "get-url" "origin")]
+    (when (zero? (:exit r))
+      (str/trim (:out r)))))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; PR commands
@@ -201,7 +210,7 @@
         (println (messages/t :pr/merge-todo))))))
 
 ;------------------------------------------------------------------------------ Layer 1
-;; PR Monitor (continuous loop)
+;; PR Monitor helpers
 
 (defn- resolve-author
   "Resolve the GitHub author login from --author flag, gh CLI, or config default."
@@ -229,24 +238,26 @@
         (display/print-error (messages/t :pr/monitor-interval-invalid {:value interval-str}))
         nil))))
 
-(defn pr-monitor-cmd
-  "Start the PR monitor loop for autonomous comment resolution.
+(defn- worklist-poll-ms
+  "Derive a poll-interval in milliseconds from the PR entries in a worklist.
+   Takes the minimum :pr/poll-interval (seconds) across all entries.
+   Returns nil when no entries carry that key — caller uses monitor default."
+  [prs]
+  (some->> (seq (keep :pr/poll-interval prs))
+           (apply min)
+           (* 1000)))
 
-   Polls open PRs, classifies new comments, and routes them to handlers
-   (fix change-requests, answer questions, skip noise). Runs continuously
-   until stopped with Ctrl+C, budget exhausted, or no open PRs remain."
-  [opts]
-  (let [{:keys [author poll-interval]} opts
-        cli-cfg    (app-config/pr-monitor-config)
-        cwd        (System/getProperty "user.dir")
-        author     (resolve-author author (:default-self-author cli-cfg))
-        poll-ms    (parse-poll-interval poll-interval cli-cfg)
-        mon-opts   (cond-> {:worktree-path cwd :self-author author}
-                     poll-ms (assoc :poll-interval-ms poll-ms))
-        monitor    (pr-lifecycle/create-pr-monitor mon-opts)
-        eff-ms     (get-in @monitor [:config :poll-interval-ms])]
+(defn- run-monitor!
+  "Create a PR monitor from `mon-opts`, install a shutdown hook, and run the loop.
+
+   Shared by both the fresh-monitor and resume-from-worklist paths.
+   Prints status lines before starting and after stopping."
+  [mon-opts author]
+  (let [monitor (pr-lifecycle/create-pr-monitor mon-opts)
+        eff-ms  (get-in @monitor [:config :poll-interval-ms])
+        path    (:worktree-path mon-opts)]
     (display/print-info (messages/t :pr/monitor-starting {:author author}))
-    (display/print-info (messages/t :pr/monitor-polling {:seconds (/ eff-ms 1000) :dir cwd}))
+    (display/print-info (messages/t :pr/monitor-polling {:seconds (/ eff-ms 1000) :dir path}))
     (display/print-info (messages/t :pr/monitor-stop-hint))
     (let [shutdown (fn []
                      (display/print-info (messages/t :pr/monitor-stopping))
@@ -254,3 +265,79 @@
       (.addShutdownHook (Runtime/getRuntime) (Thread. ^Runnable shutdown))
       (let [evidence (pr-lifecycle/run-pr-monitor-loop monitor author)]
         (display/print-info (messages/t :pr/monitor-stopped {:evidence (pr-str evidence)}))))))
+
+;------------------------------------------------------------------------------ Layer 2
+;; PR Monitor — worklist resume path
+
+(defn- resume-from-worklist!
+  "Load persisted worklist for `repo-path`, prune closed PRs, run monitor.
+
+   Exit codes:
+   - exits 0 when the worklist exists but is empty after pruning
+   - exits 1 when the remote URL is unresolvable, no worklist exists,
+     or the pruning gh call fails"
+  [repo-path cli-cfg]
+  (let [origin-url (remote-origin-url repo-path)]
+    (when-not origin-url
+      (display/print-error (messages/t :pr/monitor-no-remote {:path repo-path}))
+      (System/exit 1))
+    (let [rkey        (pr-lifecycle/worklist-repo-key origin-url)
+          wl-path     (pr-lifecycle/worklist-path (app-config/home-dir) rkey)
+          load-result (pr-lifecycle/load-worklist wl-path)]
+      (when (schema/failed? load-result)
+        (display/print-error (messages/t :pr/monitor-no-worklist))
+        (System/exit 1))
+      (let [worklist       (:worklist load-result)
+            original-count (count (:worklist/prs worklist))]
+        (display/print-info (messages/t :pr/monitor-worklist-loaded {:count original-count}))
+        (display/print-info (messages/t :pr/monitor-worklist-pruning))
+        (let [pruned (pr-lifecycle/prune-closed-prs worklist)]
+          (when (anomaly/anomaly? pruned)
+            (display/print-error
+             (messages/t :pr/monitor-worklist-prune-error
+                         {:error (:anomaly/message pruned)}))
+            (System/exit 1))
+          (let [prs     (:worklist/prs pruned)
+                removed (- original-count (count prs))]
+            (when (pos? removed)
+              (display/print-info
+               (messages/t :pr/monitor-worklist-pruned
+                           {:removed removed :remaining (count prs)})))
+            (if (empty? prs)
+              (display/print-info (messages/t :pr/monitor-worklist-empty))
+              (let [author   (resolve-author nil (:default-self-author cli-cfg))
+                    poll-ms  (worklist-poll-ms prs)
+                    mon-opts (cond-> {:worktree-path repo-path :self-author author}
+                               poll-ms (assoc :poll-interval-ms poll-ms))]
+                (run-monitor! mon-opts author)))))))))
+
+;------------------------------------------------------------------------------ Layer 2
+;; PR Monitor (continuous loop)
+
+(defn pr-monitor-cmd
+  "Start the PR monitor loop for autonomous comment resolution.
+
+   With --author: creates a fresh monitor polling that author's open PRs.
+   Without --author: resumes from a persisted work-list. Uses --repo (or
+   cwd) as the repo path for work-list key derivation.
+
+   Exits 0 when the work-list exists but is empty after pruning closed PRs.
+   Exits 1 when no work-list exists and no --author was supplied.
+
+   Polls open PRs, classifies new comments, and routes them to handlers
+   (fix change-requests, answer questions, skip noise). Runs continuously
+   until stopped with Ctrl+C, budget exhausted, or no open PRs remain."
+  [opts]
+  (let [{:keys [author poll-interval repo]} opts
+        cli-cfg   (app-config/pr-monitor-config)
+        cwd       (System/getProperty "user.dir")
+        repo-path (or repo cwd)]
+    (if author
+      ;; Fresh monitor path — identical to prior behavior
+      (let [resolved (resolve-author author (:default-self-author cli-cfg))
+            poll-ms  (parse-poll-interval poll-interval cli-cfg)
+            mon-opts (cond-> {:worktree-path repo-path :self-author resolved}
+                       poll-ms (assoc :poll-interval-ms poll-ms))]
+        (run-monitor! mon-opts resolved))
+      ;; Worklist resume path
+      (resume-from-worklist! repo-path cli-cfg))))

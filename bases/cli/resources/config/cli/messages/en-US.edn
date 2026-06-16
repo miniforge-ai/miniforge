@@ -563,6 +563,13 @@
   :pr/monitor-stopped "Monitor stopped. Evidence: {evidence}"
   :pr/monitor-interval-bounds "Poll interval must be {min}-{max} seconds, got {value}. Using default."
   :pr/monitor-interval-invalid "Invalid poll interval: {value}. Using default."
+  :pr/monitor-no-remote "Could not read remote origin URL from {path}."
+  :pr/monitor-no-worklist "No --author given and no persisted work-list found. Run with --author to start a fresh monitor."
+  :pr/monitor-worklist-loaded "Resuming from work-list: {count} open PR(s)."
+  :pr/monitor-worklist-pruning "Checking for closed PRs..."
+  :pr/monitor-worklist-pruned "Removed {removed} closed PR(s); {remaining} still open."
+  :pr/monitor-worklist-empty "All PRs in the work-list are merged or closed — nothing to monitor."
+  :pr/monitor-worklist-prune-error "Could not check PR state: {error}"
 
   ;; ── Observability ─────────────────────────────────────────────────────
   :observability/error-tailing "Error tailing file: {error}"
