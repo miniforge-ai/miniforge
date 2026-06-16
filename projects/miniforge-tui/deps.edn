@@ -65,6 +65,7 @@
         ai.miniforge/messages {:local/root "../../components/messages"}
         ai.miniforge/patterns {:local/root "../../components/patterns"}
         ai.miniforge/compliance-scanner {:local/root "../../components/compliance-scanner"}
+        ai.miniforge/workflow-compliance-scanner {:local/root "../../components/workflow-compliance-scanner"}
         ai.miniforge/connector-linter {:local/root "../../components/connector-linter"}
         ai.miniforge/context-pack {:local/root "../../components/context-pack"}
         ai.miniforge/dag-primitives {:local/root "../../components/dag-primitives"}

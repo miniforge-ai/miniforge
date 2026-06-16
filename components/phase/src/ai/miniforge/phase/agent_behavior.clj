@@ -19,8 +19,7 @@
 (ns ai.miniforge.phase.agent-behavior
   "Extract :rule/agent-behavior from policy packs and format as prompt addendum.
 
-   Bridges policy-pack rules and agent prompts. Uses requiring-resolve for
-   the policy-pack dependency (same soft-dependency pattern as event-stream).
+   Bridges policy-pack rules and agent prompts.
    Loads built-in rules and standards rules from classpath EDN resources.
 
    Always-inject semantics:
@@ -42,6 +41,7 @@
    Layer 1: Rule loading (built-in + standards + user/repo/extra packs)
    Layer 2: Full pipeline"
   (:require [ai.miniforge.config.interface :as config]
+            [ai.miniforge.policy-pack.interface :as policy-pack]
             [clojure.edn :as edn]
             [clojure.java.io :as io]
             [clojure.string :as str]))
@@ -206,8 +206,8 @@
 (defn- load-dir-pack-rules
   "Load rules from all pack directories specified in policy-packs-config.
 
-   Calls ai.miniforge.policy-pack.interface/load-all-packs via requiring-resolve
-   (soft dependency). Skips packs whose :pack/id is in disabled-ids.
+   Calls ai.miniforge.policy-pack.interface/load-all-packs. Skips packs whose
+   :pack/id is in disabled-ids.
 
    Arguments:
    - policy-packs-config - Map from :policy-packs section of merged config
@@ -219,15 +219,13 @@
     (let [pack-dirs (collect-pack-dirs policy-packs-config)]
       (if (empty? pack-dirs)
         []
-        (if-let [load-all (requiring-resolve 'ai.miniforge.policy-pack.interface/load-all-packs)]
-          (vec
-           (for [dir      pack-dirs
-                 :let     [result (load-all dir)]
-                 pack     (:loaded result)
-                 :when    (not (contains? disabled-ids (:pack/id pack)))
-                 rule     (:pack/rules pack)]
-             rule))
-          [])))
+        (vec
+         (for [dir      pack-dirs
+               :let     [result (policy-pack/load-all-packs dir)]
+               pack     (:loaded result)
+               :when    (not (contains? disabled-ids (:pack/id pack)))
+               rule     (:pack/rules pack)]
+           rule))))
     (catch Exception _ [])))
 
 ;------------------------------------------------------------------------------ Layer 1
@@ -412,13 +410,9 @@
                                   (or always-inject []))
 
           ;; Other rules: full context filtering
-          other-matched (if-let [filter-fn (requiring-resolve
-                                            'ai.miniforge.policy-pack.core/filter-applicable-rules)]
-                          (filter-fn (or context-gated [])
-                                     (assoc context :phase phase))
-                          ;; Fallback when policy-pack component is unavailable
-                          (filterv #(rule-matches-phase? % phase)
-                                   (or context-gated [])))
+          other-matched (policy-pack/filter-applicable-rules
+                         (or context-gated [])
+                         (assoc context :phase phase))
 
           filtered  (into always-matched other-matched)
           behaviors (extract-agent-behaviors filtered)
