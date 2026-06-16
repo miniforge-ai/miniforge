@@ -27,12 +27,12 @@
    - :multi  - Combine multiple sinks"
   (:require
    [ai.miniforge.config.interface :as config]
+   [ai.miniforge.logging.format :as log-format]
+   [ai.miniforge.logging.http :as http]
+   [ai.miniforge.logging.messages :as messages]
    [cheshire.core :as json]
    [clojure.java.io :as io]
    [clojure.string :as str]
-   [ai.miniforge.logging.core :as core]
-   [ai.miniforge.logging.http :as http]
-   [ai.miniforge.logging.messages :as messages]
    [slingshot.slingshot :refer [try+]])
   (:import
    [java.net.http HttpClient HttpResponse$BodyHandlers]))
@@ -78,9 +78,9 @@
   [& [opts]]
   (let [max-size-mb (:max-size-mb opts 10)
         format-fn (case (:format opts :human)
-                    :edn core/format-edn
-                    :human core/format-human
-                    core/format-human)]
+                    :edn log-format/format-edn
+                    :human log-format/format-human
+                    log-format/format-human)]
     (fn [entry]
       (when-let [workflow-id (:workflow/id entry)]
         (try
@@ -105,12 +105,12 @@
    Returns: Sink function (fn [log-entry] -> nil)"
   [& [opts]]
   (let [format-fn (case (:format opts :human)
-                    :edn core/format-edn
-                    :human core/format-human
-                    core/format-human)
+                    :edn log-format/format-edn
+                    :human log-format/format-human
+                    log-format/format-human)
         min-level (:min-level opts :trace)]
     (fn [entry]
-      (when (core/level-enabled? min-level (:log/level entry))
+      (when (log-format/level-enabled? min-level (:log/level entry))
         (try
           (println (format-fn entry))
           (catch Exception _e
@@ -127,12 +127,12 @@
    Returns: Sink function (fn [log-entry] -> nil)"
   [& [opts]]
   (let [format-fn (case (:format opts :human)
-                    :edn core/format-edn
-                    :human core/format-human
-                    core/format-human)
+                    :edn log-format/format-edn
+                    :human log-format/format-human
+                    log-format/format-human)
         min-level (:min-level opts :warn)]
     (fn [entry]
-      (when (core/level-enabled? min-level (:log/level entry))
+      (when (log-format/level-enabled? min-level (:log/level entry))
         (try
           (binding [*out* *err*]
             (println (format-fn entry)))
