@@ -28,13 +28,14 @@
    [ai.miniforge.agent.protocol :as protocol]
    [ai.miniforge.agent.memory :as memory]
    [ai.miniforge.agent.role-config :as role-config]
+   [ai.miniforge.agent.specialized :as specialized]
    [ai.miniforge.agent.task-classifier :as classifier]
    [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.llm.interface :as llm]
    [ai.miniforge.response.interface :as response]
    [ai.miniforge.tool.interface :as tool]
    [ai.miniforge.logging.interface :as log]
-   [slingshot.slingshot :refer [try+ throw+]]))
+   [slingshot.slingshot :refer [try+]]))
 
 ;; Module-level logger for agent operations
 (def default-logger
@@ -609,8 +610,7 @@ Output execution logs and status reports."})
    Example:
      (cycle-agent planner-agent {} \"Build user login\" :max-iterations 5)"
   [agent context input & {:keys [max-iterations] :or {max-iterations 3}}]
-  (let [cycle-fn (requiring-resolve 'ai.miniforge.agent.specialized/cycle-agent)]
-    (cycle-fn agent context input :max-iterations max-iterations)))
+  (specialized/cycle-agent agent context input :max-iterations max-iterations))
 
 (defn repair
   "Convenience wrapper for repairing agent output.
