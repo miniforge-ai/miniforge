@@ -38,8 +38,6 @@
 (defn- make-stream []
   (es/create-event-stream {:sinks []}))
 
-(def ^:private wf-id (random-uuid))
-
 ;; ---------------------------------------------------------------------------
 ;; Layer 5.5 — Reliability metric schemas
 
