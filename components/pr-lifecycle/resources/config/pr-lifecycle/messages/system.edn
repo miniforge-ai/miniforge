@@ -1,0 +1,40 @@
+{:pr-lifecycle/system
+ {;; WorklistEntry schema validation failure (operator tooling, not user UI)
+  :worklist/validation-failed
+  "WorklistEntry schema validation failed"
+
+  ;; persist-worklist! — schema guard rejected the entry
+  :worklist/invalid-entry
+  "Invalid WorklistEntry"
+
+  ;; persist-worklist! — filesystem write failed
+  :worklist/write-failed
+  "Failed to write worklist"
+
+  ;; load-worklist — path does not exist
+  :worklist/not-found
+  "Worklist not found"
+
+  ;; load-worklist — file exists but EDN is malformed or fails schema
+  :worklist/corrupt
+  "Corrupt worklist"
+
+  ;; load-worklist — filesystem read failed
+  :worklist/read-failed
+  "Failed to read worklist"
+
+  ;; fetch-pr-state — gh exited 0 but --json state field absent
+  :worklist/gh-no-state
+  "gh pr view returned no state field"
+
+  ;; fetch-pr-state — gh exited non-zero
+  :worklist/gh-nonzero-exit
+  "gh pr view exited non-zero"
+
+  ;; fetch-pr-state — gh process could not be started
+  :worklist/gh-start-failed
+  "gh pr view process failed to start"
+
+  ;; prune-closed-prs — a gh call failed; worklist left unchanged
+  :worklist/gh-prune-failed
+  "gh pr view failed during prune — worklist unchanged"}}

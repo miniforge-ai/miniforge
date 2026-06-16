@@ -20,7 +20,8 @@
   "Persisted PR monitor work-list — schema, path helpers, and disk I/O.
 
    Layer 0: WorklistEntry Malli schema and named storage constants.
-   Layer 1: Pure helpers — repo-key derivation, worklist-path computation.
+   Layer 1: Pure helpers — repo-key derivation, worklist-path computation,
+            entry validation.
    Layer 2: Side-effecting persist!/load/prune functions.
 
    The work-list tracks which PRs a monitor instance is watching.
@@ -35,7 +36,12 @@
 
    Boundary contract (rules 3, 4):
    - persist!/load  → schema/success or schema/failure; never throw.
-   - prune-closed-prs → WorklistEntry (pruned or original) or anomaly map."
+   - prune-closed-prs → WorklistEntry (pruned or original) or anomaly map.
+
+   All messages routed through (t :key) from the system message catalog
+   (resources/config/pr-lifecycle/messages/system.edn). Dynamic context
+   (path, pr/number, repo) travels in the anomaly :data map, not the
+   message string (rule 50)."
   (:require
    [babashka.fs :as fs]
    [babashka.process :as process]
@@ -44,6 +50,7 @@
    [malli.error :as me]
    [slingshot.slingshot :refer [try+]]
    [ai.miniforge.anomaly.interface :as anomaly]
+   [ai.miniforge.messages.interface :as msg]
    [ai.miniforge.schema.interface :as schema])
   (:import
    [java.nio.charset StandardCharsets]
@@ -52,9 +59,18 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Named constants and Malli schema
 
+(def ^:private t
+  "Component-scoped message translator. All emitted strings go through this."
+  (msg/create-translator "config/pr-lifecycle/messages/system.edn"
+                         :pr-lifecycle/system))
+
 (def ^:private pr-monitor-dir-name
   "Subdirectory name under home-dir for all work-list files."
   "pr-monitor")
+
+(def ^:private worklist-file-extension
+  "File extension for persisted work-list EDN files."
+  ".edn")
 
 (def ^:private sha-algorithm
   "Hash algorithm for repo-key derivation."
@@ -63,6 +79,10 @@
 (def ^:private repo-key-prefix-length
   "Number of hex characters taken from the SHA-256 digest as the repo-key."
   12)
+
+(def ^:private unsigned-byte-mask
+  "Mask for converting a signed Java byte to unsigned (0–255) for hex formatting."
+  0xff)
 
 (def ^:private open-pr-state
   "GitHub PR state string indicating the PR is still open."
@@ -105,7 +125,7 @@
   [s]
   (let [md    (MessageDigest/getInstance sha-algorithm)
         bytes (.digest md (.getBytes ^String s StandardCharsets/UTF_8))]
-    (apply str (map #(format "%02x" (bit-and % 0xff)) bytes))))
+    (apply str (map #(format "%02x" (bit-and % unsigned-byte-mask)) bytes))))
 
 (defn repo-key
   "Derive a stable, filesystem-safe key from `remote-url` (typically the
@@ -125,24 +145,22 @@
 
    Returns: <home-dir>/pr-monitor/<rkey>.edn"
   [home-dir rkey]
-  (str home-dir "/" pr-monitor-dir-name "/" rkey ".edn"))
-
-;------------------------------------------------------------------------------ Layer 2
-;; Internal validation helper
+  (str (fs/path home-dir pr-monitor-dir-name (str rkey worklist-file-extension))))
 
 (defn- validate-entry
-  "Return `entry` when it satisfies WorklistEntry, or an :invalid-input anomaly."
+  "Return `entry` when it satisfies WorklistEntry, or an :invalid-input anomaly.
+   Pure — no I/O."
   [entry]
   (if (m/validate WorklistEntry entry)
     entry
     (anomaly/validation-anomaly
-     "WorklistEntry schema validation failed"
+     (t :worklist/validation-failed)
      :WorklistEntry
      entry
      (me/humanize (m/explain WorklistEntry entry)))))
 
 ;------------------------------------------------------------------------------ Layer 2
-;; Disk I/O
+;; Disk I/O and GitHub shell calls
 
 (defn persist-worklist!
   "Validate `entry` against WorklistEntry and write it as EDN to `path`.
@@ -150,21 +168,23 @@
 
    Returns:
    - `(schema/success :worklist entry)` on success.
-   - `(schema/failure :worklist <msg>)` on validation or I/O failure."
+   - `(schema/failure :worklist <msg>)` on validation or I/O failure.
+   Dynamic context (path, errors) in the :error value, not the message key."
   [path entry]
   (let [validated (validate-entry entry)]
     (if (anomaly/anomaly? validated)
       (schema/failure :worklist
-                      (str "Invalid WorklistEntry: "
-                           (get-in validated [:anomaly/data :errors])))
+                      {:message (t :worklist/invalid-entry)
+                       :errors  (get-in validated [:anomaly/data :errors])})
       (try+
        (fs/create-dirs (fs/parent path))
        (spit path (pr-str entry))
        (schema/success :worklist entry)
        (catch Object ex
          (schema/failure :worklist
-                         (str "Failed to write worklist to " path ": "
-                              (ex-message ex))))))))
+                         {:message (t :worklist/write-failed)
+                          :path    path
+                          :cause   (ex-message ex)}))))))
 
 (defn load-worklist
   "Read and validate a WorklistEntry EDN from `path`.
@@ -176,29 +196,28 @@
   [path]
   (cond
     (not (fs/exists? path))
-    (schema/failure :worklist (str "Worklist not found: " path))
+    (schema/failure :worklist {:message (t :worklist/not-found) :path path})
 
     :else
     (try+
-     (let [entry (edn/read-string (slurp path))
+     (let [entry     (edn/read-string (slurp path))
            validated (validate-entry entry)]
        (if (anomaly/anomaly? validated)
          (schema/failure :worklist
-                         (str "Corrupt worklist at " path ": "
-                              (get-in validated [:anomaly/data :errors])))
+                         {:message (t :worklist/corrupt)
+                          :path    path
+                          :errors  (get-in validated [:anomaly/data :errors])})
          (schema/success :worklist entry)))
      (catch Object ex
        (schema/failure :worklist
-                       (str "Failed to read worklist at " path ": "
-                            (ex-message ex)))))))
+                       {:message (t :worklist/read-failed)
+                        :path    path
+                        :cause   (ex-message ex)})))))
 
 (defn- fetch-pr-state
   "Shell `gh pr view <number> --repo <repo> --json state` and return the
-   state string (e.g. \"OPEN\", \"MERGED\", \"CLOSED\"), or an anomaly
-   on process failure or missing output field.
-
-   Uses `:throw false` so the process exit code is checked explicitly
-   rather than raising a Java exception for non-zero exits."
+   state string (\"OPEN\", \"MERGED\", \"CLOSED\"), or an anomaly on
+   process failure or missing output field."
   [{:pr/keys [number repo]}]
   (try+
    (let [proc @(process/process ["gh" "pr" "view" (str number)
@@ -207,18 +226,18 @@
      (if (zero? (:exit proc))
        (or (second (re-find gh-state-pattern (:out proc)))
            (anomaly/anomaly :fault
-                            "gh pr view returned no state field"
+                            (t :worklist/gh-no-state)
                             {:pr/number number :pr/repo repo
                              :out (:out proc)}))
        (anomaly/anomaly :fault
-                        "gh pr view exited non-zero"
+                        (t :worklist/gh-nonzero-exit)
                         {:pr/number number :pr/repo repo
                          :exit (:exit proc) :err (:err proc)})))
    (catch Object ex
      (anomaly/anomaly :fault
-                      "gh pr view process failed to start"
+                      (t :worklist/gh-start-failed)
                       {:pr/number number :pr/repo repo
-                       :anomaly/ex-message (ex-message ex)}))))
+                       :cause (ex-message ex)}))))
 
 (defn prune-closed-prs
   "Remove merged or closed PR entries from `entry` by querying GitHub.
@@ -229,8 +248,8 @@
    Returns:
    - The pruned WorklistEntry when all `gh` calls succeed (may be the
      original map when every PR is still open).
-   - An anomaly map if any `gh` invocation fails — safer to leave the
-     list unchanged than to silently drop PRs we could not check."
+   - An anomaly map if any `gh` invocation fails — worklist is left
+     unchanged rather than silently dropping unchecked PRs."
   [entry]
   (let [prs (:worklist/prs entry)]
     (loop [remaining prs
@@ -243,7 +262,7 @@
               state    (fetch-pr-state pr-entry)]
           (if (anomaly/anomaly? state)
             (anomaly/anomaly :fault
-                             "gh pr view failed during prune — worklist unchanged"
+                             (t :worklist/gh-prune-failed)
                              {:failed-pr pr-entry :cause state})
             (recur (rest remaining)
                    (if (= state open-pr-state)
@@ -262,14 +281,14 @@
   ;; => "/Users/chris/.miniforge/pr-monitor/3f8a1c2b0e94.edn"
 
   ;; Construct and persist a worklist
-  (let [entry {:worklist/repo-key    "3f8a1c2b0e94"
-               :worklist/prs         [{:pr/url              "https://github.com/org/repo/pull/42"
-                                       :pr/number           42
-                                       :pr/repo             "org/repo"
-                                       :pr/added-at         (java.util.Date.)
-                                       :pr/poll-interval    60
-                                       :pr/abandon-after-hours 72}]
-               :worklist/updated-at  (java.util.Date.)}
+  (let [entry {:worklist/repo-key   "3f8a1c2b0e94"
+               :worklist/prs        [{:pr/url    "https://github.com/org/repo/pull/42"
+                                      :pr/number 42
+                                      :pr/repo   "org/repo"
+                                      :pr/added-at (java.util.Date.)
+                                      :pr/poll-interval       60
+                                      :pr/abandon-after-hours 72}]
+               :worklist/updated-at (java.util.Date.)}
         path  "/tmp/test-worklist.edn"]
     (persist-worklist! path entry))
   ;; => {:success? true :worklist {...}}
@@ -280,7 +299,7 @@
 
   ;; Missing file
   (load-worklist "/tmp/no-such-file.edn")
-  ;; => {:success? false :worklist nil :error "Worklist not found: ..."}
+  ;; => {:success? false :worklist nil :error {:message "Worklist not found" :path ...}}
 
   ;; Prune closed PRs (requires gh auth)
   ;; (prune-closed-prs entry)
