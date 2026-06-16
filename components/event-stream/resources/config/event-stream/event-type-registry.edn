@@ -348,4 +348,38 @@
   :json-string    "workflow/dag-skipped"
   :browser?       false
   :asymmetry?     true
-  :asymmetry-note "Constructor name implies namespace 'dag'; actual namespace is 'workflow'"}]
+  :asymmetry-note "Constructor name implies namespace 'dag'; actual namespace is 'workflow'"}
+
+ ;; ── Reliability metric events (RN-03, N3 §3.17) ──────────────────────────
+
+ {:constructor "sli-computed"
+  :event-type  :reliability/sli-computed
+  :json-string "reliability/sli-computed"
+  :browser?    false}
+
+ {:constructor "slo-breach"
+  :event-type  :reliability/slo-breach
+  :json-string "reliability/slo-breach"
+  :browser?    false}
+
+ {:constructor "error-budget-update"
+  :event-type  :reliability/error-budget-update
+  :json-string "reliability/error-budget-update"
+  :browser?    false}
+
+ {:constructor "degradation-mode-changed"
+  :event-type  :reliability/degradation-mode-changed
+  :json-string "reliability/degradation-mode-changed"
+  :browser?    false}
+
+ ;; ── Repository intelligence events (RN-19/20, N3 §3.18) ──────────────────
+
+ {:constructor "repo-index-quality-measured"
+  :event-type  :repo-index/quality-measured
+  :json-string "repo-index/quality-measured"
+  :browser?    false}
+
+ {:constructor "repo-index-coverage-changed"
+  :event-type  :repo-index/coverage-changed
+  :json-string "repo-index/coverage-changed"
+  :browser?    false}]

@@ -1242,8 +1242,10 @@
   "Emit when an SLI value is computed over a rolling window."
   [stream sli-name value window & [opts]]
   (-> (create-envelope stream :reliability/sli-computed nil
-                       (format "SLI computed: %s = %.3f over %s"
-                               (name sli-name) (double value) (name window)))
+                       (messages/t :reliability/sli-computed
+                                   {:sli-name (name sli-name)
+                                    :value    value
+                                    :window   (name window)}))
       (assoc :sli/name sli-name
              :sli/value value
              :sli/window window)
@@ -1255,8 +1257,11 @@
   "Emit when an SLO target is missed for :standard or :critical tiers."
   [stream sli-name target actual tier window]
   (-> (create-envelope stream :reliability/slo-breach nil
-                       (format "SLO breach: %s target=%.3f actual=%.3f tier=%s"
-                               (name sli-name) (double target) (double actual) (name tier)))
+                       (messages/t :reliability/slo-breach
+                                   {:sli-name (name sli-name)
+                                    :target   target
+                                    :actual   actual
+                                    :tier     (name tier)}))
       (assoc :slo/sli-name sli-name
              :slo/target target
              :slo/actual actual
@@ -1267,8 +1272,11 @@
   "Emit when error budget state is recomputed."
   [stream tier sli remaining burn-rate window]
   (-> (create-envelope stream :reliability/error-budget-update nil
-                       (format "Error budget: tier=%s sli=%s remaining=%.3f burn-rate=%.2f"
-                               (name tier) (name sli) (double remaining) (double burn-rate)))
+                       (messages/t :reliability/error-budget-update
+                                   {:tier      (name tier)
+                                    :sli       (name sli)
+                                    :remaining remaining
+                                    :burn-rate burn-rate}))
       (assoc :budget/tier tier
              :budget/sli sli
              :budget/remaining remaining
@@ -1279,8 +1287,10 @@
   "Emit when the system transitions between degradation modes (N1 §5.5.5)."
   [stream from-mode to-mode trigger]
   (-> (create-envelope stream :reliability/degradation-mode-changed nil
-                       (format "Degradation mode: %s → %s (%s)"
-                               (name from-mode) (name to-mode) trigger))
+                       (messages/t :reliability/degradation-mode-changed
+                                   {:from    (name from-mode)
+                                    :to      (name to-mode)
+                                    :trigger trigger}))
       (assoc :degradation/from from-mode
              :degradation/to to-mode
              :degradation/trigger trigger)))
@@ -1339,7 +1349,57 @@
                     previous-status
                     :dependency/recovered))
 
-;------------------------------------------------------------------------------ Layer 6
+;------------------------------------------------------------------------------ Layer 6.1
+;; Repository intelligence event constructors (RN-19/20)
+
+(defn repo-index-quality-measured
+  "Build a :repo-index/quality-measured event.
+
+   Emitted by the index quality tracker (RN-19) when it samples the
+   composite quality score for a named index.
+
+   Arguments:
+   - stream:        event-stream atom
+   - index-id:      string slug identifying the index (e.g. \"main-code-index\")
+   - quality-score: number in [0.0, 1.0] — composite quality ratio
+   - coverage:      number in [0.0, 1.0] — fraction of files indexed
+   - staleness-ms:  int — age of oldest document in the index (milliseconds)
+   - opts:          optional map; `:measured-at` adds an explicit inst timestamp"
+  [stream index-id quality-score coverage staleness-ms & [opts]]
+  (-> (create-envelope stream :repo-index/quality-measured nil
+                       (messages/t :repo-index/quality-measured
+                                   {:index-id index-id
+                                    :quality-score quality-score}))
+      (assoc :index/id index-id
+             :index/quality-score quality-score
+             :index/coverage coverage
+             :index/staleness-ms staleness-ms)
+      (cond-> (:measured-at opts) (assoc :index/measured-at (:measured-at opts)))))
+
+(defn repo-index-coverage-changed
+  "Build a :repo-index/coverage-changed event.
+
+   Emitted by the index quality tracker (RN-20) when the coverage ratio
+   of a named index changes beyond the configured threshold.
+
+   Arguments:
+   - stream:             event-stream atom
+   - index-id:           string slug identifying the index
+   - previous-coverage:  number in [0.0, 1.0] — coverage before the change
+   - coverage:           number in [0.0, 1.0] — coverage after the change
+   - opts:               optional map; `:changed-files` adds the count of
+                         files whose index state changed in this transition"
+  [stream index-id previous-coverage coverage & [opts]]
+  (-> (create-envelope stream :repo-index/coverage-changed nil
+                       (messages/t :repo-index/coverage-changed
+                                   {:index-id index-id
+                                    :coverage coverage}))
+      (assoc :index/id index-id
+             :index/previous-coverage previous-coverage
+             :index/coverage coverage)
+      (cond-> (:changed-files opts) (assoc :index/changed-files (:changed-files opts)))))
+
+;------------------------------------------------------------------------------ Layer 6.2
 ;; Meta-loop events
 
 (defn meta-loop-cycle-completed
