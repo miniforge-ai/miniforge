@@ -30,7 +30,8 @@
 ;; -- Store creation --
 (defn create-store
   "Create a pack store. Options:
-     :dir - directory for persistent storage (nil = in-memory for tests)"
+     :dir    - directory for persistent storage (nil = in-memory for tests)
+     :schema - optional Datalevin schema override"
   ([] (datalevin-store/create-store))
   ([opts] (datalevin-store/create-store opts)))
 

@@ -92,11 +92,9 @@
 
 ;; -- Metrics persisted with pack --
 
-(deftest metrics-persisted-test
-  (testing "Metrics from registry are stored"
+(deftest pack-loads-with-metric-registry-test
+  (testing "Pack with metric registry saves and loads"
     (store/save-pack *store* sample-pack)
-    ;; M1 is stored as a metric entity, not a pack entity.
-    ;; For now just verify the pack itself loaded.
     (is (some? (store/load-pack *store* "test-pack")))))
 
 ;; -- Snapshots --
