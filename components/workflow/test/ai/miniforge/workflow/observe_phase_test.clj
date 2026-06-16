@@ -18,7 +18,10 @@
 
 (ns ai.miniforge.workflow.observe-phase-test
   (:require
+   [ai.miniforge.clock.interface :as clock]
+   [ai.miniforge.config.interface :as config]
    [ai.miniforge.pr-lifecycle.interface :as pr-lifecycle]
+   [ai.miniforge.schema.interface :as schema]
    [ai.miniforge.workflow.observe-phase :as sut]
    [clojure.test :refer [deftest is testing]]))
 
@@ -26,6 +29,172 @@
   ;; Mirrors the production :workflow/pr-info shape built in
   ;; phase-software-factory/release.clj (:pr-number/:pr-url/:branch/:commit-sha).
   {:pr-number 42 :pr-url "https://github.com/o/r/pull/42" :branch "mf/x" :commit-sha "deadbeef"})
+
+;;------------------------------------------------------------------------------
+;; pr-url->repo
+
+(deftest pr-url->repo-test
+  (testing "standard GitHub PR URL extracts owner/repo"
+    (is (= "org/repo" (#'sut/pr-url->repo "https://github.com/org/repo/pull/42"))))
+  (testing "URL with numeric PR number still parses"
+    (is (= "myorg/myrepo" (#'sut/pr-url->repo "https://github.com/myorg/myrepo/pull/1"))))
+  (testing "non-GitHub URL without 'pull' segment returns nil"
+    (is (nil? (#'sut/pr-url->repo "https://gitlab.com/org/repo/merge_requests/1"))))
+  (testing "nil returns nil"
+    (is (nil? (#'sut/pr-url->repo nil))))
+  (testing "non-string value returns nil"
+    (is (nil? (#'sut/pr-url->repo 42))))
+  (testing "bare repo URL with no pull path returns nil"
+    (is (nil? (#'sut/pr-url->repo "https://github.com/org/repo"))))
+  (testing "malformed string with no slashes returns nil"
+    (is (nil? (#'sut/pr-url->repo "not-a-url"))))
+  (testing "empty string returns nil"
+    (is (nil? (#'sut/pr-url->repo "")))))
+
+;;------------------------------------------------------------------------------
+;; pr-info->worklist-entry
+
+(deftest pr-info->worklist-entry-test
+  (let [fixed-now (java.util.Date. 0)]
+    (testing ":pr/url + :pr/number key shape (DAG release shape)"
+      (let [entry (#'sut/pr-info->worklist-entry
+                   {:pr/url "https://github.com/org/repo/pull/42" :pr/number 42}
+                   60000 72 fixed-now)]
+        (is (= "https://github.com/org/repo/pull/42" (:pr/url entry)))
+        (is (= 42 (:pr/number entry)))
+        (is (= "org/repo" (:pr/repo entry)))
+        (is (= fixed-now (:pr/added-at entry)))
+        (is (= 60 (:pr/poll-interval entry)))
+        (is (= 72 (:pr/abandon-after-hours entry)))))
+
+    (testing ":pr-url + :pr-number key shape (single-PR release shape)"
+      (let [entry (#'sut/pr-info->worklist-entry
+                   {:pr-url "https://github.com/org/repo/pull/7" :pr-number 7}
+                   30000 48 fixed-now)]
+        (is (= "https://github.com/org/repo/pull/7" (:pr/url entry)))
+        (is (= 7 (:pr/number entry)))
+        (is (= "org/repo" (:pr/repo entry)))))
+
+    (testing "missing url returns nil"
+      (is (nil? (#'sut/pr-info->worklist-entry {:pr/number 1} 60000 72 fixed-now))))
+
+    (testing "missing number returns nil"
+      (is (nil? (#'sut/pr-info->worklist-entry
+                 {:pr/url "https://github.com/org/repo/pull/1"}
+                 60000 72 fixed-now))))
+
+    (testing "non-GitHub URL with no parseable repo and no explicit :pr/repo returns nil"
+      (is (nil? (#'sut/pr-info->worklist-entry
+                 {:pr/url "https://notgithub.example.com/pr/1" :pr/number 1}
+                 60000 72 fixed-now))))
+
+    (testing "explicit :pr/repo overrides URL parsing"
+      (let [entry (#'sut/pr-info->worklist-entry
+                   {:pr/url "https://notgithub.example.com/pr/1"
+                    :pr/number 1
+                    :pr/repo "myorg/myrepo"}
+                   60000 72 fixed-now)]
+        (is (= "myorg/myrepo" (:pr/repo entry)))))
+
+    (testing "nil poll-interval-ms omits :pr/poll-interval key"
+      (let [entry (#'sut/pr-info->worklist-entry
+                   {:pr/url "https://github.com/org/repo/pull/1" :pr/number 1}
+                   nil 72 fixed-now)]
+        (is (some? entry))
+        (is (not (contains? entry :pr/poll-interval)))))
+
+    (testing "nil abandon-after-hours omits :pr/abandon-after-hours key"
+      (let [entry (#'sut/pr-info->worklist-entry
+                   {:pr/url "https://github.com/org/repo/pull/1" :pr/number 1}
+                   60000 nil fixed-now)]
+        (is (some? entry))
+        (is (not (contains? entry :pr/abandon-after-hours)))))
+
+    (testing "timestamp comes from the now argument, not wall clock"
+      (let [t (java.util.Date. 123456789)
+            entry (#'sut/pr-info->worklist-entry
+                   {:pr/url "https://github.com/org/repo/pull/1" :pr/number 1}
+                   60000 72 t)]
+        (is (= t (:pr/added-at entry)))))))
+
+;;------------------------------------------------------------------------------
+;; remote-origin-url
+
+(deftest remote-origin-url-test
+  (testing "blank worktree-path returns nil without shelling out"
+    (is (nil? (#'sut/remote-origin-url ""))))
+  (testing "nil worktree-path returns nil without shelling out"
+    (is (nil? (#'sut/remote-origin-url nil))))
+  (testing "whitespace-only worktree-path returns nil without shelling out"
+    (is (nil? (#'sut/remote-origin-url "   ")))))
+
+;;------------------------------------------------------------------------------
+;; try-persist-worklist! — never-throws contract
+
+(deftest try-persist-worklist!-exception-swallowed-test
+  ;; Access the private remote-origin-url var via ns-resolve to avoid the
+  ;; compile-time private check while still allowing with-redefs-fn to swap it.
+  (let [remote-url-var (ns-resolve 'ai.miniforge.workflow.observe-phase
+                                   'remote-origin-url)]
+    (testing "exception from persist-worklist! is swallowed, not rethrown"
+      (with-redefs-fn
+        {remote-url-var                    (fn [_] "https://github.com/org/repo.git")
+         #'pr-lifecycle/worklist-repo-key  (fn [_] "org/repo")
+         #'pr-lifecycle/worklist-path      (fn [_ _] "/tmp/wl.edn")
+         #'pr-lifecycle/persist-worklist!  (fn [_ _] (throw (ex-info "disk full" {})))
+         #'config/miniforge-home           (constantly "/tmp")
+         #'clock/now-ms                    (constantly 0)}
+        (fn []
+          ;; Must return nil, not rethrow
+          (is (nil? (#'sut/try-persist-worklist!
+                     {:worktree-path "/tmp/repo"
+                      :poll-interval-ms 60000
+                      :abandon-after-hours 72}
+                     "miniforge[bot]"
+                     [{:pr/url "https://github.com/org/repo/pull/1" :pr/number 1}]
+                     nil))
+              "exception from persist-worklist! must not propagate"))))
+
+    (testing "RuntimeException from worklist-repo-key is also swallowed"
+      (with-redefs-fn
+        {remote-url-var                   (fn [_] "https://github.com/org/repo.git")
+         #'pr-lifecycle/worklist-repo-key (fn [_] (throw (RuntimeException. "no key")))
+         #'clock/now-ms                   (constantly 0)}
+        (fn []
+          (is (nil? (#'sut/try-persist-worklist!
+                     {:worktree-path "/tmp/repo"
+                      :poll-interval-ms 60000
+                      :abandon-after-hours 72}
+                     "bot" [] nil))))))
+
+    (testing "blank worktree-path skips the persist block without throwing"
+      ;; remote-origin-url returns nil for blank path → when block is never entered
+      (with-redefs [clock/now-ms (constantly 0)]
+        (is (nil? (#'sut/try-persist-worklist!
+                   {:worktree-path ""
+                    :poll-interval-ms 60000
+                    :abandon-after-hours 72}
+                   "bot" [] nil)))))
+
+    (testing "persist-worklist! returning a success result produces nil with no warning"
+      (with-redefs-fn
+        {remote-url-var                    (fn [_] "https://github.com/org/repo.git")
+         #'pr-lifecycle/worklist-repo-key  (fn [_] "org/repo")
+         #'pr-lifecycle/worklist-path      (fn [_ _] "/tmp/wl.edn")
+         #'pr-lifecycle/persist-worklist!  (fn [_ _] (schema/success {}))
+         #'config/miniforge-home           (constantly "/tmp")
+         #'clock/now-ms                    (constantly 0)}
+        (fn []
+          (is (nil? (#'sut/try-persist-worklist!
+                     {:worktree-path "/tmp/repo"
+                      :poll-interval-ms 60000
+                      :abandon-after-hours 72}
+                     "bot"
+                     [{:pr/url "https://github.com/org/repo/pull/1" :pr/number 1}]
+                     nil))))))))
+
+;;------------------------------------------------------------------------------
+;; resolve-pr-infos
 
 (deftest resolve-pr-infos-test
   (testing "DAG path: returns the populated dag-pr-infos"
@@ -51,11 +220,17 @@
              :execution/phase-results
              {:release {:result {:output {:workflow/pr-info sample-pr}}}}})))))
 
+;;------------------------------------------------------------------------------
+;; default-config
+
 (deftest default-config-loaded-from-edn-test
   (testing "observe phase defaults come from resource config"
     (is (= :default (:agent sut/default-config)))
     (is (= 259200 (get-in sut/default-config [:budget :time-seconds])))
     (is (= [] (:gates sut/default-config)))))
+
+;;------------------------------------------------------------------------------
+;; enter-observe — detached monitor
 
 (deftest enter-observe-detaches-monitor-test
   ;; The 2026-06-15 rn-03 dogfood reached :observe and then "hung" for 45+ min:
@@ -92,12 +267,18 @@
           (is (= {:comments-received 0}
                  (deref (:execution/pr-monitor-future ctx) 2000 :timed-out))))))))
 
+;;------------------------------------------------------------------------------
+;; enter-observe — skip paths
+
 (deftest enter-observe-skips-when-no-prs-test
   (testing "no PRs to observe -> :skipped, no monitor future"
     (let [ctx (sut/enter-observe {})]
       (is (= :completed (get-in ctx [:phase :status])))
       (is (= :skipped (get-in ctx [:phase :result :output :observe/status])))
       (is (nil? (:execution/pr-monitor-future ctx))))))
+
+;;------------------------------------------------------------------------------
+;; resolve-monitor-config
 
 (deftest resolve-monitor-config-test
   (testing "context overrides are merged over shared monitor defaults"
@@ -108,10 +289,10 @@
                      :max-fix-attempts-per-comment 3
                      :max-total-fix-attempts-per-pr 10
                      :abandon-after-hours 72})]
-      (let [config (#'sut/resolve-monitor-config
-                    {:execution/worktree-path "/tmp/repo"
-                     :execution/self-author "miniforge[bot]"
-                     :config {:pr-monitor/poll-interval-ms 15000}} nil nil nil)]
-        (is (= 15000 (:poll-interval-ms config)))
-        (is (= "miniforge[bot]" (:self-author config)))
-        (is (= 10 (:max-total-fix-attempts-per-pr config)))))))
+      (let [cfg (#'sut/resolve-monitor-config
+                 {:execution/worktree-path "/tmp/repo"
+                  :execution/self-author "miniforge[bot]"
+                  :config {:pr-monitor/poll-interval-ms 15000}} nil nil nil)]
+        (is (= 15000 (:poll-interval-ms cfg)))
+        (is (= "miniforge[bot]" (:self-author cfg)))
+        (is (= 10 (:max-total-fix-attempts-per-pr cfg)))))))
