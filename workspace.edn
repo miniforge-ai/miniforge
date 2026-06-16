@@ -71,6 +71,7 @@
                                           "tool-registry"
                                           "tui-views"
                                           "workflow-chain-software-factory"
+                                          "workflow-compliance-scanner"
                                           "workflow-financial-etl"
                                           "workflow-software-factory"]}
             ;; bb-utils is an aggregator — it deliberately bundles every shared Babashka

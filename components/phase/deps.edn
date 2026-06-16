@@ -1,5 +1,6 @@
 {:paths ["src" "resources"]
- :deps {ai.miniforge/config {:local/root "../config"}}
+ :deps {ai.miniforge/config {:local/root "../config"}
+        ai.miniforge/policy-pack {:local/root "../policy-pack"}}
  :aliases
  {:test {:extra-paths ["test"]
          :extra-deps {}}}}
