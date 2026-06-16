@@ -18,6 +18,7 @@
 
 (ns ai.miniforge.workflow.observe-phase-test
   (:require
+   [ai.miniforge.pr-lifecycle.interface :as pr-lifecycle]
    [ai.miniforge.workflow.observe-phase :as sut]
    [clojure.test :refer [deftest is testing]]))
 
@@ -55,6 +56,48 @@
     (is (= :default (:agent sut/default-config)))
     (is (= 259200 (get-in sut/default-config [:budget :time-seconds])))
     (is (= [] (:gates sut/default-config)))))
+
+(deftest enter-observe-detaches-monitor-test
+  ;; The 2026-06-15 rn-03 dogfood reached :observe and then "hung" for 45+ min:
+  ;; the phase ran the PR-monitor loop synchronously, and that loop polls for up
+  ;; to :abandon-after-hours (72h). Observe must NOT block the workflow thread —
+  ;; it starts the monitor on a detached future and returns :monitoring at once.
+  (testing "enter-observe returns :monitoring immediately without waiting on the monitor loop"
+    (let [loop-released (promise)        ; lets the monitor loop finish on demand
+          loop-entered (promise)         ; signals the loop actually ran
+          monitor-sentinel (Object.)]
+      (with-redefs [sut/resolve-monitor-config (fn [& _] {:self-author "miniforge[bot]"})
+                    pr-lifecycle/create-pr-monitor (fn [_] monitor-sentinel)
+                    pr-lifecycle/run-pr-monitor-loop
+                    (fn [monitor author]
+                      (deliver loop-entered {:monitor monitor :author author})
+                      @loop-released      ; block until the test releases it
+                      {:comments-received 0})]
+        (let [ctx (sut/enter-observe {:execution/dag-pr-infos [sample-pr]})
+              result (get-in ctx [:phase :result])]
+          ;; Phase returned while the monitor loop is still blocked — proof it
+          ;; did not run synchronously.
+          (is (= :completed (get-in ctx [:phase :status])))
+          (is (= :monitoring (get-in result [:output :observe/status])))
+          (is (true? (get-in result [:output :observe/monitor-detached?])))
+          (is (= 1 (get-in result [:output :observe/prs-monitored])))
+          (is (future? (:execution/pr-monitor-future ctx)))
+          (is (not (realized? loop-released))
+              "the monitor loop must still be blocked — observe did not await it")
+          ;; The detached loop did receive the monitor + author and is running.
+          (is (= {:monitor monitor-sentinel :author "miniforge[bot]"}
+                 (deref loop-entered 2000 :timed-out)))
+          ;; Release it and confirm the future carries the loop's result.
+          (deliver loop-released true)
+          (is (= {:comments-received 0}
+                 (deref (:execution/pr-monitor-future ctx) 2000 :timed-out))))))))
+
+(deftest enter-observe-skips-when-no-prs-test
+  (testing "no PRs to observe -> :skipped, no monitor future"
+    (let [ctx (sut/enter-observe {})]
+      (is (= :completed (get-in ctx [:phase :status])))
+      (is (= :skipped (get-in ctx [:phase :result :output :observe/status])))
+      (is (nil? (:execution/pr-monitor-future ctx))))))
 
 (deftest resolve-monitor-config-test
   (testing "context overrides are merged over shared monitor defaults"
