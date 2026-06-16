@@ -6,6 +6,7 @@
   "Tests for the scan CLI command — pack resolution, selector parsing, pipeline."
   (:require
    [clojure.test :refer [deftest testing is]]
+   [ai.miniforge.compliance-scanner.interface :as compliance-scanner]
    [ai.miniforge.cli.main.commands.scan :as sut]))
 
 ;; Access private functions via var
@@ -80,9 +81,8 @@
 
 (deftest negative-mode-uses-rule-title-test
   (testing "negative-mode violations use rule title, not hardcoded header message"
-    (let [scan-fn (requiring-resolve 'ai.miniforge.compliance-scanner.interface/scan)
-          k8s     (resolve-pack "kubernetes-1.0.0")
-          result  (scan-fn "." ".standards" {:rules :all :pack k8s})]
+    (let [k8s    (resolve-pack "kubernetes-1.0.0")
+          result (compliance-scanner/scan "." ".standards" {:rules :all :pack k8s})]
       (doseq [v (:violations result)]
         (is (not= "(missing copyright header)" (:current v))
             (str "Violation in " (:file v) " should not use hardcoded header message"))))))
