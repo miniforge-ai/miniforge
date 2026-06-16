@@ -29,7 +29,8 @@
    - Budget: ~500 input tokens, ~100 output tokens per call"
   (:require
    [cheshire.core :as json]
-   [clojure.string :as str]))
+   [clojure.string :as str]
+   [ai.miniforge.llm.interface :as llm]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Prompt construction
@@ -116,12 +117,11 @@ Respond with ONLY a JSON object, no other text:
   [context opts]
   (try
     (let [llm-client (:llm-client opts)
-          complete-fn (requiring-resolve 'ai.miniforge.llm.interface.protocols.llm-client/complete*)
           prompt (build-eval-prompt context)
           request {:prompt prompt
                    :system system-prompt
                    :max-tokens 150}
-          response (complete-fn llm-client request)]
+          response (llm/complete llm-client request)]
       (if (:success response)
         (parse-eval-response (:content response))
         ;; LLM call failed -> allow (fail-open)

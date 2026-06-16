@@ -37,6 +37,7 @@
    [cheshire.core :as json]
    [clojure.string :as str]
    [ai.miniforge.event-stream.interface :as events]
+   [ai.miniforge.llm.interface :as llm]
    [ai.miniforge.agent.meta-evaluator :as meta-eval])
   (:import
    [java.io PushbackReader]))
@@ -241,9 +242,7 @@
                    ;; Meta-eval enabled: two-layer evaluation
                    (let [llm-client (when-let [backend (keyword (get meta-eval-config :backend "claude"))]
                                       (try
-                                        (let [create-client (requiring-resolve
-                                                             'ai.miniforge.llm.protocols.records.llm-client/create-client)]
-                                          (create-client {:backend backend}))
+                                        (llm/create-client {:backend backend})
                                         (catch Exception _e nil)))]
                      (evaluate-with-meta tool-name tool-input-kw
                                          {:llm-client llm-client
