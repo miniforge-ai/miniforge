@@ -21,8 +21,12 @@
    Provides helpers for gathering phase results, artifacts, and metadata."
   (:require
    [ai.miniforge.anomaly.interface :as anomaly]
+   [ai.miniforge.artifact.interface :as artifact]
    [ai.miniforge.content-hash.interface :as content-hash]
+   [ai.miniforge.evidence-bundle.protocols.impl.semantic-validator :as semantic-validator]
    [ai.miniforge.evidence-bundle.schema :as schema]
+   [ai.miniforge.evidence-bundle.scanner :as scanner]
+   [ai.miniforge.event-stream.interface :as event-stream]
    [ai.miniforge.response.interface :as response]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -296,8 +300,7 @@
   [event-stream query]
   (try
     (when event-stream
-      (let [get-events-fn (requiring-resolve 'ai.miniforge.event-stream.core/get-events)]
-        (vec (get-events-fn event-stream query))))
+      (vec (event-stream/get-events event-stream query)))
     (catch Exception _e
       [])))
 
@@ -560,18 +563,15 @@
 
         ;; Get artifacts for semantic validation
         artifacts (when artifact-store
-                    (let [query-fn (requiring-resolve 'ai.miniforge.artifact.interface/query)]
-                      (filter
-                       #(= workflow-id (get-in % [:artifact/provenance :provenance/workflow-id]))
-                       (query-fn artifact-store {}))))
+                    (filter
+                     #(= workflow-id (get-in % [:artifact/provenance :provenance/workflow-id]))
+                     (artifact/query artifact-store {})))
 
         ;; Perform semantic validation if implementer artifacts exist
         impl-artifacts (filter #(= :implement (get-in % [:artifact/provenance :provenance/phase]))
                                artifacts)
         semantic-validation (when (seq impl-artifacts)
-                              (let [validator (requiring-resolve
-                                               'ai.miniforge.evidence-bundle.protocols.impl.semantic-validator/validate-intent-impl)]
-                                (validator intent impl-artifacts)))
+                              (semantic-validator/validate-intent-impl intent impl-artifacts))
 
         base-bundle (merge
                      (schema/create-evidence-bundle-template)
@@ -609,12 +609,9 @@
 
         ;; Run sensitive data scanner before hashing
         scan-result (try
-                      (let [scan-fn (requiring-resolve
-                                      'ai.miniforge.evidence-bundle.scanner/scan-artifact)
-                            compliance-fn (requiring-resolve
-                                            'ai.miniforge.evidence-bundle.scanner/compliance-metadata)]
-                        (compliance-fn (scan-fn bundle)))
-                      (catch Exception _e nil))
+                      (scanner/compliance-metadata (scanner/scan-artifact bundle))
+                      (catch Exception _e
+                        {}))
 
         ;; Merge compliance metadata
         bundle (cond-> bundle
