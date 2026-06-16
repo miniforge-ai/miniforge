@@ -23,7 +23,8 @@
    This is the N2 §7 implementation. The Observe phase is the final
    phase of the standard SDLC workflow: plan → implement → verify →
    review → release → observe."
-  (:require [ai.miniforge.phase.interface :as phase]
+  (:require [ai.miniforge.logging.interface :as log]
+            [ai.miniforge.phase.interface :as phase]
             [ai.miniforge.pr-lifecycle.interface :as pr-lifecycle]
             [ai.miniforge.response.interface :as response]
             [ai.miniforge.schema.interface :as schema]
@@ -141,12 +142,17 @@
 (defn enter-observe
   "Execute the Observe phase.
 
-   Reads PR info from context (set by Release phase), creates and runs
-   the PR monitor loop until a terminal condition is reached:
-   - All PRs merged
-   - Budget exhausted (human escalation emitted)
-   - PRs closed externally
-   - No open PRs remain
+   Reads PR info from context (set by Release phase) and starts the PR
+   monitor loop on a DETACHED future, then returns immediately with
+   `:observe/status :monitoring`. The monitor polls each PR until a
+   terminal condition (all merged, budget exhausted, closed externally,
+   or no open PRs) — but that can take up to :abandon-after-hours, so it
+   must not block the workflow thread. The future is exposed on ctx at
+   `:execution/pr-monitor-future` for a long-lived deployment to await or
+   cancel; a one-shot run completes the SDLC and exits.
+
+   Skips (status :skipped) when there are no PRs to observe or no
+   self-author can be resolved.
 
    pr-lifecycle is a direct dependency of the workflow component."
   [ctx]
@@ -180,23 +186,38 @@
                         {:observe/status :skipped
                          :observe/reason "No self-author resolved (gh unauthenticated?) — cannot poll PRs"})))
          (let [monitor (pr-lifecycle/create-pr-monitor monitor-config)
-               evidence (pr-lifecycle/run-pr-monitor-loop monitor self-author)
-
-               result-data {:observe/status :completed
-                         :observe/evidence evidence
-                         :observe/prs-monitored (count pr-infos)
-                         :observe/duration-hours (:duration-hours evidence)
-                         :observe/comments-received (:comments-received evidence)
-                         :observe/comments-addressed (:comments-addressed evidence)
-                         :observe/fixes-pushed (count (:fixes-pushed evidence))
-                         :observe/questions-answered (count (:questions-answered evidence))}]
-
-        (-> ctx
-            (assoc-in [:phase :name] :observe)
-            (assoc-in [:phase :started-at] start-time)
-            (assoc-in [:phase :status] :completed)
-            (assoc-in [:phase :result] (response/success result-data))
-            (assoc :execution/pr-lifecycle-evidence evidence))))))))
+               ;; Run the monitor OFF the workflow thread. The PR-monitor loop
+               ;; polls for up to :abandon-after-hours (72h by default), so a
+               ;; synchronous call stalls the workflow at :observe for days and
+               ;; the SDLC never reaches :done — on a dogfood/CI run that reads
+               ;; as a hang (the loop sits in a 60s Thread/sleep at 0% CPU).
+               ;; Detach it: the workflow completes immediately and the monitor
+               ;; runs out-of-band for as long as the host process lives. The
+               ;; future is exposed on ctx so a long-lived deployment can
+               ;; await/cancel it; a one-shot run exits and the daemon work
+               ;; stops with it. (pr-lifecycle documents this same
+               ;; `(future (run-pr-monitor-loop ...))` pattern.)
+               monitor-future (future
+                                (try
+                                  (pr-lifecycle/run-pr-monitor-loop monitor self-author)
+                                  (catch Throwable t
+                                    (when logger
+                                      (log/error logger :observe :observe/monitor-failed
+                                                 {:message (ex-message t)}))
+                                    {:observe/monitor-error (ex-message t)})))
+               result-data {:observe/status :monitoring
+                            :observe/prs-monitored (count pr-infos)
+                            :observe/monitor-detached? true}]
+           (when logger
+             (log/info logger :observe :observe/monitor-detached
+                       {:data {:prs-monitored (count pr-infos)
+                               :self-author self-author}}))
+           (-> ctx
+               (assoc-in [:phase :name] :observe)
+               (assoc-in [:phase :started-at] start-time)
+               (assoc-in [:phase :status] :completed)
+               (assoc-in [:phase :result] (response/success result-data))
+               (assoc :execution/pr-monitor-future monitor-future))))))))
 
 (defn leave-observe
   "Post-processing for Observe phase. Records evidence and duration metrics."
