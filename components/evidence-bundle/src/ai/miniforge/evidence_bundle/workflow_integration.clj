@@ -21,7 +21,8 @@
    Provides WorkflowObserver implementation for evidence bundle generation."
   (:require
    [ai.miniforge.evidence-bundle.interface :as evidence]
-   [ai.miniforge.logging.interface :as log]))
+   [ai.miniforge.logging.interface :as log]
+   [ai.miniforge.workflow.interface :as workflow]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Observer Record
@@ -116,16 +117,13 @@
 
    Returns the workflow instance (for chaining).
 
-   Example:
+  Example:
      (-> (workflow/create-workflow)
          (attach-to-workflow evidence-collector)
          (workflow/start spec context))"
-  [workflow collector]
-  (when-let [add-observer (try
-                            (requiring-resolve 'ai.miniforge.workflow.interface/add-observer)
-                            (catch Exception _ nil))]
-    (add-observer workflow collector))
-  workflow)
+  [workflow-instance collector]
+  (workflow/add-observer workflow-instance collector)
+  workflow-instance)
 
 (defn create-and-attach-evidence-collector
   "Create evidence collector and attach to workflow in one step.
@@ -153,8 +151,7 @@
 ;------------------------------------------------------------------------------ Rich Comment
 
 (comment
-  (require '[ai.miniforge.workflow.interface :as workflow]
-           '[ai.miniforge.artifact.interface :as artifact])
+  (require '[ai.miniforge.artifact.interface :as artifact])
 
   ;; Create artifact store
   (def artifact-store (artifact/create-transit-store))

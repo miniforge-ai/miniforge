@@ -18,7 +18,9 @@
 
 (ns ai.miniforge.evidence-bundle.protocols.impl.provenance-tracer
   "Implementation functions for ProvenanceTracer protocol.
-   Traces artifact chains and provenance.")
+   Traces artifact chains and provenance."
+  (:require
+   [ai.miniforge.artifact.interface :as artifact]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Provenance Query Helpers
@@ -26,8 +28,7 @@
 (defn get-artifact-with-provenance
   "Get artifact with full provenance information."
   [artifact-store artifact-id]
-  (when-let [artifact ((requiring-resolve 'ai.miniforge.artifact.interface/load-artifact)
-                       artifact-store artifact-id)]
+  (when-let [artifact (artifact/load-artifact artifact-store artifact-id)]
     artifact))
 
 (defn get-source-artifacts
@@ -40,8 +41,7 @@
 (defn get-workflow-artifacts
   "Get all artifacts for a workflow."
   [artifact-store workflow-id]
-  (let [query-fn (requiring-resolve 'ai.miniforge.artifact.interface/query)
-        artifacts (query-fn artifact-store {})]
+  (let [artifacts (artifact/query artifact-store {})]
     (filter #(= workflow-id (get-in % [:artifact/provenance :provenance/workflow-id]))
             artifacts)))
 
