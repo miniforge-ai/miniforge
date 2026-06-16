@@ -20,7 +20,8 @@
   "Public API for the artifact component."
   (:require
    [ai.miniforge.artifact.core :as core]
-   [ai.miniforge.artifact.interface.protocols.artifact-store :as p]))
+   [ai.miniforge.artifact.interface.protocols.artifact-store :as p]
+   [ai.miniforge.artifact.protocols.records.transit-store :as transit-store]))
 
 ;; Re-export protocol for public API
 (def ArtifactStore
@@ -71,8 +72,8 @@
      (create-transit-store)                              ; Uses ~/.miniforge/artifacts
      (create-transit-store {:dir \"/tmp/test\"})          ; Uses /tmp/test/artifacts
      (create-transit-store {:logger my-logger})"
-  ([] ((requiring-resolve 'ai.miniforge.artifact.protocols.records.transit-store/create-transit-store)))
-  ([opts] ((requiring-resolve 'ai.miniforge.artifact.protocols.records.transit-store/create-transit-store) opts)))
+  ([] (transit-store/create-transit-store))
+  ([opts] (transit-store/create-transit-store opts)))
 
 (defn close-store [store] (p/close store))
 (defn save! [store artifact] (p/save store artifact))
