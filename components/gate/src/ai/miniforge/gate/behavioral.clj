@@ -33,6 +33,7 @@
   (:require [ai.miniforge.gate.messages :as msg]
             [ai.miniforge.gate.policy   :as policy]
             [ai.miniforge.gate.registry :as registry]
+            [ai.miniforge.policy-pack.interface :as policy-pack]
             [ai.miniforge.response.interface :as response]))
 
 ;;------------------------------------------------------------------------------ Layer 1
@@ -66,47 +67,9 @@
            :errors errors
            :message m)))
 
-(defn- soft-dep-resolve-fn
-  "Build a policy-pack-shaped check fn that lazily resolves `sym` at
-   call time.
-
-   `sym` is a fully-qualified Clojure symbol identifying a 3-arg
-   `(check-artifact packs artifact opts)` function in a *soft*
-   dependency — i.e. a namespace that may not be on the classpath
-   (gate's `deps.edn` deliberately omits policy-pack).
-
-   On call, the returned fn:
-     - tries `(requiring-resolve sym)`, wrapping any thrown
-       Exception (FileNotFoundException, ClassNotFoundException, etc.)
-       in a consistent `ex-info` whose message ends with `unavailable`
-       and whose `ex-data` carries `:sym` plus the original cause type;
-     - if `requiring-resolve` returns `nil` (rare, but possible if the
-       ns loads but the var is missing), throws the same ex-info shape;
-     - otherwise calls the resolved fn with the supplied args.
-
-   `check-behavioral`'s outer `try/catch` converts any throw here into
-   a `:behavioral-check-error` warning."
-  [sym]
-  (fn [packs artifact opts]
-    (let [unavailable-msg (msg/t :behavioral/soft-dep-unavailable {:sym sym})
-          resolved (try
-                     (requiring-resolve sym)
-                     (catch Exception e
-                       (throw (ex-info unavailable-msg
-                                       {:sym sym
-                                        :cause-type (some-> e class .getName)}
-                                       e))))]
-      (when-not resolved
-        (throw (ex-info unavailable-msg
-                        {:sym sym})))
-      (resolved packs artifact opts))))
-
 (def ^:private default-check-fn
-  "Production default for `:check-fn`. Lazily resolves
-   `ai.miniforge.policy-pack.core/check-artifact` on each invocation
-   so gate works with policy-pack on the classpath and degrades to a
-   `:behavioral-check-error` warning otherwise."
-  (soft-dep-resolve-fn 'ai.miniforge.policy-pack.core/check-artifact))
+  "Production default for `:check-fn`."
+  #'policy-pack/check-artifact)
 
 (defn check-behavioral
   "Check a telemetry artifact against loaded policy packs for behavioral violations.

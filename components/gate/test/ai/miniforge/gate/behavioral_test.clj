@@ -21,6 +21,7 @@
   (:require [clojure.test :refer [deftest is testing]]
             [ai.miniforge.gate.behavioral :as behavioral]
             [ai.miniforge.gate.registry   :as registry]
+            [ai.miniforge.policy-pack.interface :as policy-pack]
             [ai.miniforge.response.interface :as response]))
 
 ;;------------------------------------------------------------------------------ Fixtures
@@ -50,12 +51,8 @@
       (is (true? (:passed? result)))
       (is (= :no-policy-packs (-> result :warnings first :type))))))
 
-;; Tests inject a `:check-fn` via the ctx map rather than redefining
-;; `clojure.core/requiring-resolve`.  The previous `with-redefs` approach
-;; mutated a global var root and races with any other parallel test that
-;; transitively calls `requiring-resolve` (e.g. dag-executor.state-test
-;; before the soft-dep was removed there).  Local DI keeps the stub scoped
-;; to the call site and removes the cross-brick hazard.
+;; Tests inject a `:check-fn` via the ctx map. Local DI keeps stubs scoped to
+;; the call site and avoids global mutation for normal policy-pack behavior.
 
 (defn- stub-check-fn
   "Build a stub policy-pack check fn that returns the given violations."
@@ -148,27 +145,19 @@
       (is (true? (:passed? result)))
       (is (= :behavioral-check-error (-> result :warnings first :type))))))
 
-(deftest check-behavioral-soft-dep-resolution-failure-test
+(deftest check-behavioral-default-check-fn-exception-test
   (testing
-   (str "Exercises the production default :check-fn path. soft-dep-resolve-fn "
-        "is the factory that builds default-check-fn; calling it with a "
-        "deliberately-bogus symbol gives a check-fn that mirrors the failure "
-        "the production default hits when policy-pack is genuinely absent. "
-        "Deterministic regardless of brick-isolation mode (no classpath "
-        "assumptions). Keeps coverage on the requiring-resolve branch even "
-        "though tests no longer redefine clojure.core/requiring-resolve.")
-    (let [bogus-sym 'no.such.namespace.exists/check-artifact
-          ;; Reach private factory via #'ns/private-fn. Same-namespace
-          ;; access only; no global mutation, no cross-brick risk.
-          check-fn  (#'behavioral/soft-dep-resolve-fn bogus-sym)
-          result    (behavioral/check-behavioral
-                     sample-artifact
-                     {:policy-packs [{:id :test-pack}]
-                      :phase        :observe
-                      :check-fn     check-fn})]
-      (is (true? (:passed? result)))
-      (is (= :behavioral-check-error (-> result :warnings first :type)))
-      (is (re-find #"unavailable" (-> result :warnings first :message))))))
+   "The production default :check-fn path demotes runtime failures to warnings."
+    (with-redefs [policy-pack/check-artifact
+                  (throwing-check-fn "policy-pack unavailable")]
+      (let [result (behavioral/check-behavioral
+                    sample-artifact
+                    {:policy-packs [{:id :test-pack}]
+                     :phase        :observe})]
+        (is (true? (:passed? result)))
+        (is (= :behavioral-check-error (-> result :warnings first :type)))
+        (is (re-find #"policy-pack unavailable"
+                     (-> result :warnings first :message)))))))
 
 (deftest check-behavioral-rejects-non-fn-check-fn-test
   (testing
