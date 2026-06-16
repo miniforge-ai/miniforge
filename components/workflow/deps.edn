@@ -7,6 +7,7 @@
         ai.miniforge/anomaly {:local/root "../anomaly"}    ; Canonical anomaly maps for exceptions-as-data
         ai.miniforge/response {:local/root "../response"}  ; Response chains
         ai.miniforge/fsm {:local/root "../fsm"}            ; State machines
+        ai.miniforge/agent-runtime {:local/root "../agent-runtime"}
         ai.miniforge/agent {:local/root "../agent"}
         ai.miniforge/task {:local/root "../task"}
         ai.miniforge/loop {:local/root "../loop"}

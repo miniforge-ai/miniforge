@@ -26,10 +26,12 @@
    - Layer 2: Batch analysis + rate limit handling
    - Layer 3: Resume — restore DAG progress from machine snapshots"
   (:require
+   [ai.miniforge.agent-runtime.interface :as agent-runtime]
    [ai.miniforge.clock.interface :as clock]
    [ai.miniforge.dag-executor.interface :as dag]
    [ai.miniforge.event-stream.interface :as events]
    [ai.miniforge.logging.interface :as log]
+   [ai.miniforge.self-healing.interface :as self-healing]
    [ai.miniforge.workflow.checkpoint-store :as checkpoint-store]))
 
 ;--- Layer 0: Rate Limit Detection
@@ -38,13 +40,11 @@
   "Load and compile rate-limit patterns from external error patterns.
    Returns a seq of compiled regex patterns."
   []
-  (try
-    (let [load-fn (requiring-resolve 'ai.miniforge.agent-runtime.error-classifier.patterns/external-patterns)]
-      (->> @load-fn
-           (filter :rate-limit?)
-           (map :regex)))
-    (catch Exception _
-      ;; Fallback patterns if error-classifier not available
+  (let [patterns (->> agent-runtime/external-patterns
+                      (filter :rate-limit?)
+                      (map :regex))]
+    (if (seq patterns)
+      patterns
       (map re-pattern
            ["(?i)you've hit your limit"
             "(?i)rate.?limit"
@@ -166,12 +166,11 @@
    Records the current backend's failure, then returns the first candidate."
   [current-backend allowed-backends]
   (try
-    (let [record-call! (requiring-resolve 'ai.miniforge.self-healing.backend-health/record-backend-call!)]
-      (record-call! current-backend false)
-      (first (filter #(not= % (keyword current-backend))
-                     (map keyword allowed-backends))))
+    (self-healing/record-backend-call! current-backend false)
+    (first (filter #(not= % (keyword current-backend))
+                   (map keyword allowed-backends)))
     (catch Exception _
-      ;; If backend-health isn't available, still pick from allowed list
+      ;; If backend-health persistence fails, still pick from the allowed list.
       (first (filter #(not= % (keyword current-backend))
                      (map keyword allowed-backends))))))
 
@@ -200,8 +199,7 @@
     (let [candidate (find-healthy-backend current-backend allowed-backends)]
       (if candidate
         (try
-          (let [trigger-switch! (requiring-resolve 'ai.miniforge.self-healing.backend-health/trigger-backend-switch!)
-                result (trigger-switch! current-backend candidate)]
+          (let [result (self-healing/trigger-backend-switch! current-backend candidate)]
             (log/info logger :dag-resilience :failover/switched
                       {:data {:from current-backend :to candidate}})
             {:switched? true :new-backend candidate :switch-result result})

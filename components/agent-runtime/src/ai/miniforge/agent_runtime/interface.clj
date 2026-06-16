@@ -35,6 +35,7 @@
   (:require
    [ai.miniforge.agent-runtime.error-classifier.core :as core]
    [ai.miniforge.agent-runtime.error-classifier.messages :as messages]
+   [ai.miniforge.agent-runtime.error-classifier.patterns :as patterns]
    [ai.miniforge.agent-runtime.error-classifier.reporting :as reporting]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -66,6 +67,12 @@
          :report-url \"https://github.com/anthropics/claude-code/issues/new?...\"
          :should-retry false}"
   core/classify-error)
+
+(def external-patterns
+  "Compiled external-service error patterns used for shared recovery decisions.
+   Each entry is a pattern map from the error classifier with keys such as
+   :regex, :type, :vendor, and :rate-limit?."
+  patterns/external-patterns)
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Message formatting

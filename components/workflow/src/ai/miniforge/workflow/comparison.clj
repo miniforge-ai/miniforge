@@ -17,7 +17,9 @@
 ;; limitations under the License.
 
 (ns ai.miniforge.workflow.comparison
-  "Workflow execution comparison utilities.")
+  "Workflow execution comparison utilities."
+  (:require
+   [ai.miniforge.heuristic.interface :as heuristic]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Summary creation
@@ -92,6 +94,5 @@
    (save-workflow workflow {}))
   ([workflow opts]
    (let [heuristic-type (keyword "workflow" (name (:workflow/id workflow)))
-         version (:workflow/version workflow)
-         save-heuristic (requiring-resolve 'ai.miniforge.heuristic.interface/save-heuristic)]
-     (save-heuristic heuristic-type version {:data workflow} opts))))
+         version (:workflow/version workflow)]
+     (heuristic/save-heuristic heuristic-type version {:data workflow} opts))))
