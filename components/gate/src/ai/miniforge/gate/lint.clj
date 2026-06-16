@@ -44,8 +44,8 @@
     []))
 
 (defn run-policy-pack-check
-  "Delegate lint checking to policy-pack if available.
-   Returns nil if policy-pack is not loaded."
+  "Delegate lint checking to policy-pack when policy packs are configured.
+   Returns nil when no policy packs are configured or when checking fails."
   [artifact ctx]
   (try
     (let [packs (:policy-packs ctx)]
@@ -56,14 +56,15 @@
           {:passed? (empty? (:blocking result))
            :errors (mapv (fn [v]
                            {:type :policy-violation
-                            :message (:violation/message v)
-                            :severity (:violation/severity v)
-                            :rule-id (:violation/rule-id v)})
+                            :message (:message v)
+                            :severity (:severity v)
+                            :rule-id (:code v)})
                          (:blocking result))
            :warnings (mapv (fn [v]
                              {:type :policy-warning
-                              :message (:violation/message v)
-                              :severity (:violation/severity v)})
+                              :message (:message v)
+                              :severity (:severity v)
+                              :rule-id (:code v)})
                            (:warnings result))})))
     (catch Exception _e nil)))
 
