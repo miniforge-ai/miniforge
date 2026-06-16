@@ -19,29 +19,63 @@
 (ns ai.miniforge.tui-engine.screen.lanterna
   "Lanterna Screen implementation.
 
-   Loaded dynamically by screen/create-screen to avoid Java class loading
-   at namespace load time (required for Babashka/GraalVM compatibility)."
+   Real terminal implementation for screen/create-screen. Java classes are
+   resolved inside the factory path so this namespace remains loadable in
+   Babashka compatibility checks that never instantiate a real terminal."
   (:require
-   [ai.miniforge.tui-engine.screen :as screen])
-  (:import
-   [com.googlecode.lanterna TextCharacter TextColor$ANSI TextColor$Indexed TextColor$RGB]
-   [com.googlecode.lanterna.screen TerminalScreen Screen$RefreshType]
-   [com.googlecode.lanterna.terminal DefaultTerminalFactory]))
+   [ai.miniforge.tui-engine.screen.protocol :as protocol]))
+
+;; ─────────────────────────────────────────────────────────────────────────────
+;; Reflective Lanterna class access
+
+(defn- class-named [class-name]
+  (Class/forName class-name))
+
+(defn- static-field [class-name field-name]
+  (.get (.getField (class-named class-name) field-name) nil))
+
+(defn- arity-match? [arity member]
+  (= arity (count (.getParameterTypes member))))
+
+(defn- construct [class-name & args]
+  (let [constructor (->> (.getConstructors (class-named class-name))
+                         (filter (partial arity-match? (count args)))
+                         first)]
+    (when-not constructor
+      (throw (ex-info "No matching Lanterna constructor."
+                      {:class class-name
+                       :arity (count args)})))
+    (.newInstance constructor (object-array args))))
+
+(defn- invoke [target method-name & args]
+  (let [method (->> (.getMethods (class target))
+                    (filter #(= method-name (.getName %)))
+                    (filter (partial arity-match? (count args)))
+                    first)]
+    (when-not method
+      (throw (ex-info "No matching Lanterna method."
+                      {:class (.getName (class target))
+                       :method method-name
+                       :arity (count args)})))
+    (.invoke method target (object-array args))))
 
 ;; ─────────────────────────────────────────────────────────────────────────────
 ;; Color mapping
 
 (def color-map
   "Map from keyword colors to Lanterna TextColor.ANSI constants."
-  {:black   TextColor$ANSI/BLACK
-   :red     TextColor$ANSI/RED
-   :green   TextColor$ANSI/GREEN
-   :yellow  TextColor$ANSI/YELLOW
-   :blue    TextColor$ANSI/BLUE
-   :magenta TextColor$ANSI/MAGENTA
-   :cyan    TextColor$ANSI/CYAN
-   :white   TextColor$ANSI/WHITE
-   :default TextColor$ANSI/DEFAULT})
+  {:black   "BLACK"
+   :red     "RED"
+   :green   "GREEN"
+   :yellow  "YELLOW"
+   :blue    "BLUE"
+   :magenta "MAGENTA"
+   :cyan    "CYAN"
+   :white   "WHITE"
+   :default "DEFAULT"})
+
+(defn- ansi-color [field-name]
+  (static-field "com.googlecode.lanterna.TextColor$ANSI" field-name))
 
 (defn resolve-lanterna-color
   "Resolve a color value to a Lanterna TextColor.
@@ -51,90 +85,97 @@
    - vector   [r g b]              → TextColor.RGB"
   [color]
   (cond
-    (keyword? color) (get color-map color TextColor$ANSI/DEFAULT)
-    (integer? color) (TextColor$Indexed. (int color))
+    (keyword? color) (ansi-color (get color-map color "DEFAULT"))
+    (integer? color) (construct "com.googlecode.lanterna.TextColor$Indexed" (int color))
     (vector? color)  (let [[r g b] color]
-                       (TextColor$RGB. (int r) (int g) (int b)))
-    :else            TextColor$ANSI/DEFAULT))
+                       (construct "com.googlecode.lanterna.TextColor$RGB"
+                                  (int r) (int g) (int b)))
+    :else            (ansi-color "DEFAULT")))
 
 ;; ─────────────────────────────────────────────────────────────────────────────
-;; Pre-allocated SGR arrays (avoid reflection + allocation on every character)
+;; SGR arrays
 
-(def ^{:tag "[Lcom.googlecode.lanterna.SGR;"} sgr-bold
-  (into-array com.googlecode.lanterna.SGR [com.googlecode.lanterna.SGR/BOLD]))
+(defn- sgr-array [field-names]
+  (let [sgr-class (class-named "com.googlecode.lanterna.SGR")
+        arr (make-array sgr-class (count field-names))]
+    (doseq [[idx field-name] (map-indexed vector field-names)]
+      (aset arr idx (static-field "com.googlecode.lanterna.SGR" field-name)))
+    arr))
 
-(def ^{:tag "[Lcom.googlecode.lanterna.SGR;"} sgr-none
-  (into-array com.googlecode.lanterna.SGR []))
+(def ^:private sgr-bold (delay (sgr-array ["BOLD"])))
+(def ^:private sgr-none (delay (sgr-array [])))
 
 ;; ─────────────────────────────────────────────────────────────────────────────
 ;; Lanterna implementation
 
-(defrecord LanternaScreen [^TerminalScreen screen]
-  screen/IScreen
+(defrecord LanternaScreen [screen]
+  protocol/IScreen
   (start-screen! [_]
-    (.startScreen screen))
+    (invoke screen "startScreen"))
 
   (stop-screen! [_]
-    (.stopScreen screen))
+    (invoke screen "stopScreen"))
 
   (get-size [_]
     ;; doResizeIfNecessary picks up SIGWINCH and updates the cached size.
     ;; Returns non-null only when the terminal was actually resized.
-    (.doResizeIfNecessary screen)
-    (let [size (.getTerminalSize screen)]
-      [(.getColumns size) (.getRows size)]))
+    (invoke screen "doResizeIfNecessary")
+    (let [size (invoke screen "getTerminalSize")]
+      [(invoke size "getColumns") (invoke size "getRows")]))
 
   (put-string! [_ col row text fg bg bold?]
     (let [fg-color (resolve-lanterna-color fg)
           bg-color (resolve-lanterna-color bg)
-          sgr-arr (if bold? sgr-bold sgr-none)]
+          sgr-arr (if bold? @sgr-bold @sgr-none)]
       (dotimes [i (count text)]
         (let [ch (.charAt ^String text i)
-              tc (TextCharacter. ch fg-color bg-color sgr-arr)]
-          (.setCharacter screen (+ col i) row tc)))))
+              tc (construct "com.googlecode.lanterna.TextCharacter"
+                            ch fg-color bg-color sgr-arr)]
+          (invoke screen "setCharacter" (+ col i) row tc)))))
 
   (clear! [_]
-    (.clear screen))
+    (invoke screen "clear"))
 
   (refresh! [_]
-    (.refresh screen Screen$RefreshType/COMPLETE))
+    (invoke screen "refresh"
+            (static-field "com.googlecode.lanterna.screen.Screen$RefreshType" "COMPLETE")))
 
   (poll-input [_]
-    (when-let [key (.pollInput screen)]
-      (let [kind (.getKeyType key)
-            shift? (.isShiftDown key)]
+    (when-let [key (invoke screen "pollInput")]
+      (let [kind (invoke key "getKeyType")
+            shift? (invoke key "isShiftDown")]
         (cond
-          (= kind com.googlecode.lanterna.input.KeyType/Character)
-          {:type :character :char (.getCharacter key)}
+          (= kind (static-field "com.googlecode.lanterna.input.KeyType" "Character"))
+          {:type :character :char (invoke key "getCharacter")}
 
-          (= kind com.googlecode.lanterna.input.KeyType/Enter)
+          (= kind (static-field "com.googlecode.lanterna.input.KeyType" "Enter"))
           {:type :enter}
 
-          (= kind com.googlecode.lanterna.input.KeyType/Escape)
+          (= kind (static-field "com.googlecode.lanterna.input.KeyType" "Escape"))
           {:type :escape}
 
-          (= kind com.googlecode.lanterna.input.KeyType/Backspace)
+          (= kind (static-field "com.googlecode.lanterna.input.KeyType" "Backspace"))
           {:type :backspace}
 
-          (= kind com.googlecode.lanterna.input.KeyType/ArrowUp)
+          (= kind (static-field "com.googlecode.lanterna.input.KeyType" "ArrowUp"))
           {:type (if shift? :shift-arrow-up :arrow-up)}
 
-          (= kind com.googlecode.lanterna.input.KeyType/ArrowDown)
+          (= kind (static-field "com.googlecode.lanterna.input.KeyType" "ArrowDown"))
           {:type (if shift? :shift-arrow-down :arrow-down)}
 
-          (= kind com.googlecode.lanterna.input.KeyType/ArrowLeft)
+          (= kind (static-field "com.googlecode.lanterna.input.KeyType" "ArrowLeft"))
           {:type :arrow-left}
 
-          (= kind com.googlecode.lanterna.input.KeyType/ArrowRight)
+          (= kind (static-field "com.googlecode.lanterna.input.KeyType" "ArrowRight"))
           {:type :arrow-right}
 
-          (= kind com.googlecode.lanterna.input.KeyType/Tab)
+          (= kind (static-field "com.googlecode.lanterna.input.KeyType" "Tab"))
           {:type :tab}
 
-          (= kind com.googlecode.lanterna.input.KeyType/ReverseTab)
+          (= kind (static-field "com.googlecode.lanterna.input.KeyType" "ReverseTab"))
           {:type :reverse-tab}
 
-          (= kind com.googlecode.lanterna.input.KeyType/EOF)
+          (= kind (static-field "com.googlecode.lanterna.input.KeyType" "EOF"))
           {:type :eof}
 
           :else
@@ -146,7 +187,7 @@
 (defn create-lanterna-screen
   "Create a Lanterna terminal screen."
   [_opts]
-  (let [factory (DefaultTerminalFactory.)
-        terminal (.createTerminal factory)
-        screen (TerminalScreen. terminal)]
+  (let [factory (construct "com.googlecode.lanterna.terminal.DefaultTerminalFactory")
+        terminal (invoke factory "createTerminal")
+        screen (construct "com.googlecode.lanterna.screen.TerminalScreen" terminal)]
     (->LanternaScreen screen)))

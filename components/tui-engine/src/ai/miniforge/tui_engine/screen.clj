@@ -20,29 +20,32 @@
   "Screen protocol and mock implementation for TUI rendering.
 
    The protocol defines the terminal abstraction. MockScreen is pure Clojure
-   for testing. LanternaScreen is loaded dynamically via create-screen to
-   avoid Java class loading in Babashka/GraalVM contexts.")
+   for testing. LanternaScreen provides the real terminal implementation."
+  (:require
+   [ai.miniforge.tui-engine.screen.lanterna :as lanterna]
+   [ai.miniforge.tui-engine.screen.protocol :as protocol]))
 
 ;; ─────────────────────────────────────────────────────────────────────────────
 ;; Screen protocol
 
-(defprotocol IScreen
-  "Abstraction over terminal screen for rendering and input.
-   Implementations: LanternaScreen (real terminal), MockScreen (testing)."
-  (start-screen! [this] "Enter alternate screen mode.")
-  (stop-screen! [this] "Exit alternate screen mode, restore terminal.")
-  (get-size [this] "Return [cols rows].")
-  (put-string! [this col row text fg bg bold?] "Write styled string at position.")
-  (clear! [this] "Clear the screen buffer.")
-  (refresh! [this] "Flush buffer to terminal (delta rendering).")
-  (poll-input [this] "Non-blocking read. Returns key map or nil."))
+(def IScreen
+  "Protocol contract for terminal screen implementations."
+  protocol/IScreen)
+
+(def start-screen! "Enter alternate screen mode." protocol/start-screen!)
+(def stop-screen! "Exit alternate screen mode, restore terminal." protocol/stop-screen!)
+(def get-size "Return [cols rows]." protocol/get-size)
+(def put-string! "Write styled string at position." protocol/put-string!)
+(def clear! "Clear the screen buffer." protocol/clear!)
+(def refresh! "Flush buffer to terminal." protocol/refresh!)
+(def poll-input "Non-blocking read. Returns key map or nil." protocol/poll-input)
 
 ;; ─────────────────────────────────────────────────────────────────────────────
 ;; Mock screen for testing
 
 (defrecord MockScreen [state]
   ;; state is an atom: {:started? bool, :cells {[col row] {:char :fg :bg :bold?}}, :size [c r]}
-  IScreen
+  protocol/IScreen
   (start-screen! [_]
     (swap! state assoc :started? true))
 
@@ -109,12 +112,9 @@
   (swap! (:state mock-screen) assoc :put-count 0))
 
 ;; ─────────────────────────────────────────────────────────────────────────────
-;; Factory (dynamically loads Lanterna)
+;; Factory
 
 (defn create-screen
-  "Create a Lanterna terminal screen.
-   Dynamically loads the Lanterna implementation to avoid Java class loading
-   at namespace load time (required for Babashka/GraalVM compatibility)."
+  "Create a Lanterna terminal screen."
   [& [opts]]
-  (let [create-fn (requiring-resolve 'ai.miniforge.tui-engine.screen.lanterna/create-lanterna-screen)]
-    (create-fn opts)))
+  (lanterna/create-lanterna-screen opts))
