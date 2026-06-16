@@ -26,6 +26,7 @@
    - :plan-complete - Plan completeness check"
   (:require [ai.miniforge.gate.messages  :as msg]
             [ai.miniforge.gate.registry  :as registry]
+            [ai.miniforge.policy-pack.interface :as policy-pack]
             [ai.miniforge.response.interface :as response]
             [slingshot.slingshot         :refer [try+]]))
 
@@ -254,14 +255,13 @@
      {:passed? bool :errors [] :warnings [] :approval-required []}"
   [artifact ctx]
   (try+
-    (let [check-fn (requiring-resolve 'ai.miniforge.policy-pack.core/check-artifact)
-          packs (get ctx :policy-packs [])
+    (let [packs (get ctx :policy-packs [])
           task-type (get ctx :task-type :implement)
           phase (get ctx :phase :implement)]
       (if (empty? packs)
         {:passed? true :warnings [{:type :no-policy-packs
                                     :message "No policy packs loaded"}]}
-        (let [result   (check-fn packs artifact {:task-type task-type :phase phase})
+        (let [result   (policy-pack/check-artifact packs artifact {:task-type task-type :phase phase})
               cascade  (evaluate-severity-cascade (:violations result []))
               blocking          (:blocking cascade)
               approval-required (:approval-required cascade)

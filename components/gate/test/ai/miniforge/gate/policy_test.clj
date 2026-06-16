@@ -19,7 +19,8 @@
 (ns ai.miniforge.gate.policy-test
   (:require [clojure.test :refer [deftest is testing]]
             [ai.miniforge.gate.messages :as msg]
-            [ai.miniforge.gate.policy :as policy]))
+            [ai.miniforge.gate.policy :as policy]
+            [ai.miniforge.policy-pack.interface :as policy-pack]))
 
 ;; -------------------------------------------------------------------------- check-review-approved
 ;; Cross-component contract: the reviewer agent (components/agent) produces an
@@ -83,8 +84,9 @@
 
 (deftest check-policy-pack-fails-closed-on-exception
   (testing "any exception during evaluation blocks the artifact"
-    (with-redefs [clojure.core/requiring-resolve
-                  (fn [_sym] (throw (RuntimeException. "policy loader crashed")))]
+    (with-redefs [policy-pack/check-artifact
+                  (fn [_packs _artifact _context]
+                    (throw (RuntimeException. "policy loader crashed")))]
       (let [result (policy/check-policy-pack {:content "test"}
                                              {:policy-packs ["some-pack"]})]
         (is (false? (:passed? result)))
