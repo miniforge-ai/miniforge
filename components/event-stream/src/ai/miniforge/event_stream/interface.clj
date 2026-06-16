@@ -524,6 +524,9 @@
    :action/status :pending, :action/created-at, plus optional
    :action/justification and :action/parameters."
   control/create-control-action)
+(def default-roles
+  "Default RBAC role definitions for structured control actions."
+  control/default-roles)
 (def authorize-action
   "Check RBAC authorization for a control action against role
    definitions. Returns {:authorized? true :reason string} when the
