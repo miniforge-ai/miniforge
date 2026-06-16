@@ -51,6 +51,7 @@
    [ai.miniforge.pr-lifecycle.monitor-events :as mevents]
    [ai.miniforge.pr-lifecycle.monitor-loop :as monitor]
    [ai.miniforge.pr-lifecycle.monitor-budget :as mbudget]
+   [ai.miniforge.pr-lifecycle.monitor-worklist :as mworklist]
    [ai.miniforge.pr-lifecycle.pr-poller :as poller]
    [ai.miniforge.pr-lifecycle.responder :as responder]))
 
@@ -901,6 +902,69 @@
   "Return the shared PR monitor defaults map."
   mconfig/monitor-defaults)
 
+;------------------------------------------------------------------------------ Layer 6
+;; PR Monitor Worklist
+
+(def WorklistEntry
+  "Malli schema for the persisted work-list EDN written to disk.
+
+   - :worklist/repo-key   — 12-hex-char prefix of SHA-256(remote-origin-url)
+   - :worklist/prs        — vector of WorklistPrEntry maps
+   - :worklist/updated-at — last-write instant
+
+   Each PR entry carries its own :pr/poll-interval and
+   :pr/abandon-after-hours so no operational literal is hard-coded
+   in the component (rule 8)."
+  mworklist/WorklistEntry)
+
+(def worklist-path
+  "Compute the absolute path for the work-list EDN file.
+
+   Arguments:
+   - home-dir — miniforge home directory (from app-config/home-dir)
+   - rkey     — repo key returned by `worklist-repo-key`
+
+   Returns: <home-dir>/pr-monitor/<rkey>.edn"
+  mworklist/worklist-path)
+
+(def worklist-repo-key
+  "Derive a stable, filesystem-safe key from `remote-url` (e.g. the
+   value of `git remote get-url origin`).
+
+   Returns a 12-character lowercase hex prefix of the SHA-256 digest."
+  mworklist/repo-key)
+
+(def persist-worklist!
+  "Validate `entry` against WorklistEntry and write it as EDN to `path`.
+   Creates parent directories as needed.
+
+   Returns:
+   - `(schema/success :worklist entry)` on success.
+   - `(schema/failure :worklist <msg>)` on validation or I/O failure."
+  mworklist/persist-worklist!)
+
+(def load-worklist
+  "Read and validate a WorklistEntry EDN from `path`.
+
+   Returns:
+   - `(schema/success :worklist entry)` on success.
+   - `(schema/failure :worklist <msg>)` when path is missing, unreadable,
+     or content does not satisfy WorklistEntry."
+  mworklist/load-worklist)
+
+(def prune-closed-prs
+  "Remove merged or closed PR entries from `entry` by querying GitHub.
+
+   For each PR in `:worklist/prs`, shells `gh pr view <number> --repo
+   <repo> --json state`. Drops entries whose state is not \"OPEN\".
+
+   Returns:
+   - The pruned WorklistEntry when all `gh` calls succeed (may be the
+     original map when every PR is still open).
+   - An anomaly map if any `gh` invocation fails — worklist is left
+     unchanged rather than silently dropping unchecked PRs."
+  mworklist/prune-closed-prs)
+
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
   ;; Quick example: Full PR lifecycle
@@ -966,6 +1030,20 @@
   ;; Get evidence
   (pr-monitor-evidence m)
   ; => {:comments-received 5 :comments-addressed 3 :fixes-pushed [...] ...}
+
+  ;; Monitor worklist example
+  (let [rkey (worklist-repo-key "https://github.com/org/repo.git")
+        path (worklist-path (System/getenv "MINIFORGE_HOME") rkey)]
+    (persist-worklist! path
+                       {:worklist/repo-key   rkey
+                        :worklist/prs        [{:pr/url              "https://github.com/org/repo/pull/42"
+                                               :pr/number           42
+                                               :pr/repo             "org/repo"
+                                               :pr/added-at         (java.util.Date.)
+                                               :pr/poll-interval    60
+                                               :pr/abandon-after-hours 72}]
+                        :worklist/updated-at (java.util.Date.)}))
+  ; => {:success? true :worklist {...}}
 
   :leave-this-here)
 
