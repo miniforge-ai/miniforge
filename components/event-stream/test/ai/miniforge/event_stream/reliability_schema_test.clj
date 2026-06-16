@@ -239,6 +239,71 @@
           "missing :index/previous-coverage should fail"))))
 
 ;; ---------------------------------------------------------------------------
+;; Range-bound rejection (Copilot review on #1172): docstrings promise ratios
+;; in [0.0, 1.0] and non-negative counts/durations; the Malli schemas must
+;; enforce them so out-of-contract telemetry is rejected at validation.
+
+(defn- valid-error-budget [overrides]
+  (merge {:event/type            :reliability/error-budget-update
+          :event/id              (random-uuid)
+          :event/timestamp       (java.util.Date.)
+          :event/version         "1.0.0"
+          :event/sequence-number 0
+          :budget/tier           :standard
+          :budget/sli            :availability
+          :budget/remaining      0.72
+          :budget/burn-rate      1.4
+          :budget/window         :rolling-30d
+          :message               "Error budget update"}
+         overrides))
+
+(defn- valid-quality-measured [overrides]
+  (merge {:event/type            :repo-index/quality-measured
+          :event/id              (random-uuid)
+          :event/timestamp       (java.util.Date.)
+          :event/version         "1.0.0"
+          :event/sequence-number 0
+          :index/id              "main-code-index"
+          :index/quality-score   0.87
+          :index/coverage        0.93
+          :index/staleness-ms    300000
+          :message               "Index quality measured"}
+         overrides))
+
+(defn- valid-coverage-changed [overrides]
+  (merge {:event/type              :repo-index/coverage-changed
+          :event/id                (random-uuid)
+          :event/timestamp         (java.util.Date.)
+          :event/version           "1.0.0"
+          :event/sequence-number   0
+          :index/id                "main-code-index"
+          :index/previous-coverage 0.80
+          :index/coverage          0.93
+          :index/changed-files     12
+          :message                 "Index coverage changed"}
+         overrides))
+
+(deftest range-bounds-rejection-test
+  (testing "ErrorBudgetUpdate :budget/remaining must be a [0.0, 1.0] ratio"
+    (is (m/validate schema/ErrorBudgetUpdate (valid-error-budget {:budget/remaining 0.0})))
+    (is (m/validate schema/ErrorBudgetUpdate (valid-error-budget {:budget/remaining 1.0})))
+    (is (not (m/validate schema/ErrorBudgetUpdate (valid-error-budget {:budget/remaining 1.5}))))
+    (is (not (m/validate schema/ErrorBudgetUpdate (valid-error-budget {:budget/remaining -0.1})))))
+  (testing "ErrorBudgetUpdate :budget/burn-rate is non-negative (0 ok, >1 ok, negative rejected)"
+    (is (m/validate schema/ErrorBudgetUpdate (valid-error-budget {:budget/burn-rate 0})))
+    (is (m/validate schema/ErrorBudgetUpdate (valid-error-budget {:budget/burn-rate 3.2})))
+    (is (not (m/validate schema/ErrorBudgetUpdate (valid-error-budget {:budget/burn-rate -1.0})))))
+  (testing "RepoIndexQualityMeasured ratios and non-negative staleness"
+    (is (not (m/validate schema/RepoIndexQualityMeasured (valid-quality-measured {:index/quality-score 1.4}))))
+    (is (not (m/validate schema/RepoIndexQualityMeasured (valid-quality-measured {:index/coverage -0.2}))))
+    (is (not (m/validate schema/RepoIndexQualityMeasured (valid-quality-measured {:index/staleness-ms -1})))))
+  (testing "RepoIndexCoverageChanged ratios and non-negative changed-files"
+    (is (not (m/validate schema/RepoIndexCoverageChanged (valid-coverage-changed {:index/coverage 2.0}))))
+    (is (not (m/validate schema/RepoIndexCoverageChanged (valid-coverage-changed {:index/previous-coverage -0.5}))))
+    (is (not (m/validate schema/RepoIndexCoverageChanged (valid-coverage-changed {:index/changed-files -3}))))
+    (is (m/validate schema/RepoIndexCoverageChanged (valid-coverage-changed {:index/changed-files 0})))))
+
+;; ---------------------------------------------------------------------------
 ;; Constructor output and round-trip tests
 
 (deftest sli-computed-constructor-test

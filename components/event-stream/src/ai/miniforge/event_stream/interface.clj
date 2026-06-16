@@ -672,6 +672,23 @@
    :safe-mode/workflows-queued)."
   events/safe-mode-exited)
 
+;; Repository intelligence event constructors (RN-19/20)
+(def repo-index-quality-measured
+  "Build and return a :repo-index/quality-measured event envelope map
+   (:workflow/id nil) emitted by the index quality tracker (RN-19) when
+   it samples the composite quality score for a named index
+   (:index/id, :index/quality-score, :index/coverage, :index/staleness-ms);
+   optional opts add :index/measured-at."
+  events/repo-index-quality-measured)
+
+(def repo-index-coverage-changed
+  "Build and return a :repo-index/coverage-changed event envelope map
+   (:workflow/id nil) emitted by the index quality tracker (RN-20) when
+   coverage for a named index changes beyond the configured threshold
+   (:index/id, :index/previous-coverage, :index/coverage); optional opts
+   add :index/changed-files."
+  events/repo-index-coverage-changed)
+
 ;------------------------------------------------------------------------------ Layer 2
 ;; Meta-loop event constructors
 
@@ -754,21 +771,3 @@
    string for empty/nil input). Pure: no IO. Arities: (events) uses a
    60s default gap; (events opts) takes {:gap-threshold-ms long}."
   timeline/render-timeline)
-;------------------------------------------------------------------------------ Layer 2
-;; Repository intelligence event constructors (RN-19/20)
-
-(def repo-index-quality-measured
-  "Build and return a :repo-index/quality-measured event envelope map
-   (:workflow/id nil) emitted by the index quality tracker (RN-19) when
-   it samples the composite quality score for a named index
-   (:index/id, :index/quality-score, :index/coverage, :index/staleness-ms);
-   optional opts add :index/measured-at."
-  events/repo-index-quality-measured)
-
-(def repo-index-coverage-changed
-  "Build and return a :repo-index/coverage-changed event envelope map
-   (:workflow/id nil) emitted by the index quality tracker (RN-20) when
-   coverage for a named index changes beyond the configured threshold
-   (:index/id, :index/previous-coverage, :index/coverage); optional opts
-   add :index/changed-files."
-  events/repo-index-coverage-changed)

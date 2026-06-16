@@ -1349,7 +1349,7 @@
                     previous-status
                     :dependency/recovered))
 
-;------------------------------------------------------------------------------ Layer 6.3
+;------------------------------------------------------------------------------ Layer 6
 ;; Repository intelligence event constructors (RN-19/20)
 
 (defn repo-index-quality-measured

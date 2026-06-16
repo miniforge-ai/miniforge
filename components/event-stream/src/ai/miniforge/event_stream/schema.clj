@@ -973,8 +973,11 @@
   "Schema for :reliability/sli-computed event.
 
    Emitted by the SLI computation engine (RN-04) each time an SLI value
-   is computed over a rolling window.  `:sli/tier` and `:sli/dimensions`
-   are optional; single-tier deployments omit them."
+   is computed over a rolling window.  `:sli/value` is in the SLI's native
+   units — a ratio in [0.0, 1.0] for rate-based SLIs (availability, success
+   rate) or an absolute measure (e.g. latency ms) for others — so it is not
+   range-constrained.  `:sli/tier` and `:sli/dimensions` are optional;
+   single-tier deployments omit them."
   (with-identity
    [:map
     [:event/type [:= :reliability/sli-computed]]
@@ -995,7 +998,9 @@
 
    Emitted when an SLO target is missed for :standard or :critical
    tiers.  All 5 required fields are always present — there is no
-   partial-breach shape."
+   partial-breach shape.  `:slo/target` and `:slo/actual` are in the SLI's
+   native units (a ratio for rate-based SLIs, an absolute measure such as
+   latency ms for others), so they are not range-constrained."
   (with-identity
    [:map
     [:event/type [:= :reliability/slo-breach]]
@@ -1027,8 +1032,10 @@
     [:workflow/id {:optional true} [:maybe uuid?]]
     [:budget/tier keyword?]
     [:budget/sli keyword?]
-    [:budget/remaining number?]
-    [:budget/burn-rate number?]
+    ;; ratio in [0.0, 1.0]; burn-rate is a non-negative multiplier
+    ;; (>1 = burning faster than replenished, 0 = not burning)
+    [:budget/remaining [:and number? [:>= 0] [:<= 1]]]
+    [:budget/burn-rate [:and number? [:>= 0]]]
     [:budget/window keyword?]
     [:message string?]]))
 
@@ -1076,9 +1083,11 @@
     [:event/sequence-number int?]
     [:workflow/id {:optional true} [:maybe uuid?]]
     [:index/id string?]
-    [:index/quality-score number?]
-    [:index/coverage number?]
-    [:index/staleness-ms int?]
+    ;; quality and coverage are ratios in [0.0, 1.0]; staleness is a
+    ;; non-negative elapsed-ms value
+    [:index/quality-score [:and number? [:>= 0] [:<= 1]]]
+    [:index/coverage [:and number? [:>= 0] [:<= 1]]]
+    [:index/staleness-ms [:and int? [:>= 0]]]
     [:index/measured-at {:optional true} inst?]
     [:message string?]]))
 
@@ -1098,9 +1107,10 @@
     [:event/sequence-number int?]
     [:workflow/id {:optional true} [:maybe uuid?]]
     [:index/id string?]
-    [:index/previous-coverage number?]
-    [:index/coverage number?]
-    [:index/changed-files {:optional true} int?]
+    ;; coverage ratios in [0.0, 1.0]; changed-files is a non-negative count
+    [:index/previous-coverage [:and number? [:>= 0] [:<= 1]]]
+    [:index/coverage [:and number? [:>= 0] [:<= 1]]]
+    [:index/changed-files {:optional true} [:and int? [:>= 0]]]
     [:message string?]]))
 
 ;------------------------------------------------------------------------------ Rich Comment
