@@ -25,11 +25,13 @@
    [clojure.test :refer [deftest is testing use-fixtures]]
    [ai.miniforge.event-stream.interface :as es]
    [ai.miniforge.phase.interface]
+   [ai.miniforge.response.interface :as response]
    [ai.miniforge.supervisory-state.interface :as supervisory]
    [ai.miniforge.workflow.checkpoint-store :as checkpoint-store]
    [ai.miniforge.workflow.fsm :as workflow-fsm]
    [ai.miniforge.workflow.phase-test-support :as phase-test-support]
    [ai.miniforge.workflow.runner :as runner]
+   [ai.miniforge.workflow.runner-environment :as runner-environment]
    [ai.miniforge.workflow.context :as ctx]))
 
 (defn- with-stubbed-acquire-environment
@@ -48,10 +50,9 @@
    the safe default. Tests that genuinely need a real acquired env
    override with their own with-redefs."
   [f]
-  (let [acquire-var (requiring-resolve
-                      'ai.miniforge.workflow.runner-environment/acquire-execution-environment!)]
-    (with-redefs-fn {acquire-var (fn [& _] nil)}
-      f)))
+  (with-redefs-fn {#'runner-environment/acquire-execution-environment!
+                   (fn [& _] nil)}
+    f))
 
 ;; Compose phase-test-support's loader setup with the acquire-environment
 ;; stub. clojure.test/use-fixtures REPLACES prior :each fixtures, so both
@@ -335,14 +336,13 @@
           initial-state (workflow-fsm/initialize-execution machine)
           plan-state (workflow-fsm/start-execution machine initial-state)
           fsm-at-implement (workflow-fsm/transition-execution machine plan-state :phase/succeed)
-          response-chain (requiring-resolve 'ai.miniforge.response.interface/create)
           mid-snapshot {:execution/id (random-uuid)
                         :execution/workflow-id (:workflow/id workflow)
                         :execution/workflow-version (:workflow/version workflow)
                         :execution/input {:task "Original"}
                         :execution/status :running
                         :execution/fsm-state fsm-at-implement
-                        :execution/response-chain (response-chain (:workflow/id workflow))
+                        :execution/response-chain (response/create (:workflow/id workflow))
                         :execution/phase-results {}
                         :execution/artifacts []
                         :execution/errors []
