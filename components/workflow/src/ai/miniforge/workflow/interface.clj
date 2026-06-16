@@ -240,6 +240,13 @@
    [workflow]. Returns {:valid? boolean :errors [...] :warnings [...]}."
   pipeline/validate-pipeline)
 
+(def execute-plan-as-dag
+  "Execute a normalized plan through the DAG orchestrator. Args:
+   [plan context]. Returns an aggregate DAG execution summary with
+   :success?, :tasks-completed, :tasks-failed, :tasks-unreached,
+   :artifacts, and :metrics."
+  pipeline/execute-plan-as-dag)
+
 (def load-checkpoint-data
   "Load durable checkpoint data for a run and validate it at the boundary.
    Args: [workflow-run-id] or [workflow-run-id opts]. Returns the validated

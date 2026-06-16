@@ -25,7 +25,7 @@
    [ai.miniforge.event-stream.interface :as es]
    [ai.miniforge.supervisory-state.interface :as supervisory]
    [ai.miniforge.automation-edge-correlator.interface :as correlator]
-   [ai.miniforge.phase.interface :as phase])
+   [ai.miniforge.workflow.interface :as workflow])
   (:import
    [java.util UUID]))
 
@@ -136,13 +136,15 @@
       (display/print-info (str "Executing plan: " plan-id " (" task-count " tasks)"))
       (display/print-info (str "Format: " (name format-type))))
     (try
-      (let [execute-dag (requiring-resolve 'ai.miniforge.workflow.dag-orchestrator/execute-plan-as-dag)
-            result (execute-dag plan ctx)]
+      (let [result (workflow/execute-plan-as-dag plan ctx)]
         (when-not quiet
-          (let [completed (count (filter phase/succeeded? (vals result)))
-                failed (count (filter phase/failed? (vals result)))]
+          (let [completed (:tasks-completed result 0)
+                failed (:tasks-failed result 0)
+                unreached (:tasks-unreached result 0)]
             (display/print-info (str "Plan execution complete: "
-                                     completed " completed, " failed " failed"))))
+                                     completed " completed, " failed " failed"
+                                     (when (pos? unreached)
+                                       (str ", " unreached " unreached"))))))
         result)
       (catch Exception e
         (display/print-error (str "Plan execution failed: " (ex-message e)))
