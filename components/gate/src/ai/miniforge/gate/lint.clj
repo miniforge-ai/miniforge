@@ -20,7 +20,8 @@
   "Lint validation gate.
 
    Checks that code passes linting rules."
-  (:require [ai.miniforge.gate.registry :as registry]))
+  (:require [ai.miniforge.gate.registry :as registry]
+            [ai.miniforge.policy-pack.interface :as policy-pack]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Content extraction helpers
@@ -47,12 +48,11 @@
    Returns nil if policy-pack is not loaded."
   [artifact ctx]
   (try
-    (let [check-fn (requiring-resolve 'ai.miniforge.policy-pack.core/check-artifact)
-          packs (:policy-packs ctx)]
+    (let [packs (:policy-packs ctx)]
       (when (seq packs)
-        (let [result (check-fn packs artifact
-                               {:task-type :implement
-                                :phase :implement})]
+        (let [result (policy-pack/check-artifact packs artifact
+                                                 {:task-type :implement
+                                                  :phase :implement})]
           {:passed? (empty? (:blocking result))
            :errors (mapv (fn [v]
                            {:type :policy-violation
