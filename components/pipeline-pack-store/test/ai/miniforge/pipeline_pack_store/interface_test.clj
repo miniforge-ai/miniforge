@@ -95,11 +95,9 @@
 (deftest metrics-persisted-test
   (testing "Metrics from registry are stored"
     (store/save-pack *store* sample-pack)
-    (let [m1 (store/load-pack *store* "M1")]
-      ;; M1 is stored as a metric entity, not a pack entity
-      ;; But we can query via Datalevin directly through the store
-      ;; For now just verify the pack itself loaded
-      (is (some? (store/load-pack *store* "test-pack"))))))
+    ;; M1 is stored as a metric entity, not a pack entity.
+    ;; For now just verify the pack itself loaded.
+    (is (some? (store/load-pack *store* "test-pack")))))
 
 ;; -- Snapshots --
 
