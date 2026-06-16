@@ -24,7 +24,8 @@
    - :review-approved - Review approval check
    - :release-ready - Release readiness check
    - :plan-complete - Plan completeness check"
-  (:require [ai.miniforge.gate.messages  :as msg]
+  (:require [ai.miniforge.event-stream.interface :as event-stream]
+            [ai.miniforge.gate.messages  :as msg]
             [ai.miniforge.gate.registry  :as registry]
             [ai.miniforge.policy-pack.interface :as policy-pack]
             [ai.miniforge.response.interface :as response]
@@ -199,7 +200,7 @@
    violations))
 
 (defn request-approval-for-violations!
-  "Create approval requests for :high-severity (approval-required) violations.
+  "Create approval requests for :high (approval-required) violations.
 
    Arguments:
      event-stream-atom - Atom used as the approval manager store
@@ -208,21 +209,17 @@
    Returns:
      {:approval-ids [...] :pending-count int}"
   [event-stream-atom violations]
-  (let [create-fn (requiring-resolve
-                    'ai.miniforge.event-stream.approval/create-approval-request)
-        store-fn  (requiring-resolve
-                    'ai.miniforge.event-stream.approval/store-approval!)
-        approvals (mapv (fn [violation]
-                          (create-fn
-                            (random-uuid)
-                            ["policy-reviewer"]
-                            1
-                            {:metadata {:violation/rule-id    (:violation/rule-id violation)
-                                        :violation/message    (:violation/message violation)
-                                        :violation/severity   (:violation/severity violation)
-                                        :violation/remediation (:violation/remediation violation)}}))
+  (let [approvals (mapv (fn [violation]
+                          (event-stream/create-approval-request
+                           (random-uuid)
+                           ["policy-reviewer"]
+                           1
+                           {:metadata {:violation/rule-id    (:violation/rule-id violation)
+                                       :violation/message    (:violation/message violation)
+                                       :violation/severity   (:violation/severity violation)
+                                       :violation/remediation (:violation/remediation violation)}}))
                         violations)]
-    (run! #(store-fn event-stream-atom %) approvals)
+    (run! #(event-stream/store-approval! event-stream-atom %) approvals)
     {:approval-ids  (mapv :approval/id approvals)
      :pending-count (count approvals)}))
 
