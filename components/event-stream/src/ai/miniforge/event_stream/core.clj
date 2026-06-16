@@ -21,7 +21,6 @@
   (:require
    [ai.miniforge.event-stream.messages :as messages]
    [ai.miniforge.event-stream.snowflake :as snowflake]
-   [ai.miniforge.phase.interface :as phase]
    [ai.miniforge.logging.interface :as log]
    [ai.miniforge.response.interface :as response]
    [ai.miniforge.event-stream.sinks :as sinks]))
@@ -34,18 +33,31 @@
 (def ^:private redirect-transition-type
   :transition/redirect)
 
+(def ^:private phase-transition-request-key
+  :phase/transition-request)
+
+(def ^:private transition-type-key
+  :transition/type)
+
+(def ^:private transition-target-key
+  :transition/target)
+
+(defn- phase-transition-request
+  [result]
+  (get result phase-transition-request-key))
+
 (defn- redirect-target
   "Project a redirect target for legacy consumers.
 
    The workflow runner now emits :phase/transition-request. This helper keeps
    :phase/redirect-to available only when the transition request represents a
-   redirect, so older event consumers do not break while the newer event shape
-   remains authoritative."
+  redirect, so older event consumers do not break while the newer event shape
+  remains authoritative."
   [result]
-  (let [transition-request (phase/transition-request result)
-        transition-type (get transition-request :transition/type)]
+  (let [request (phase-transition-request result)
+        transition-type (get request transition-type-key)]
     (when (= redirect-transition-type transition-type)
-      (get transition-request :transition/target))))
+      (get request transition-target-key))))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Event persistence via configurable sinks
@@ -501,7 +513,7 @@
 
 (defn phase-completed [stream workflow-id phase & [result]]
   (let [outcome (get result :outcome :success)
-        transition-request (phase/transition-request result)
+        request (phase-transition-request result)
         redirect-to (or (redirect-target result)
                         (:redirect-to result))]
     (-> (create-envelope stream :workflow/phase-completed workflow-id
@@ -513,7 +525,7 @@
           (:review-decision result) (assoc :phase/review-decision (:review-decision result))
           (:artifacts result) (assoc :phase/artifacts (:artifacts result))
           (:error result) (assoc :phase/error (:error result))
-          transition-request (assoc :phase/transition-request transition-request)
+          request (assoc :phase/transition-request request)
           redirect-to (assoc :phase/redirect-to redirect-to)
           (:tokens result) (assoc :phase/tokens (:tokens result))
           (:cost-usd result) (assoc :phase/cost-usd (:cost-usd result))
