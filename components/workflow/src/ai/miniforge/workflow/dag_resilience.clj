@@ -170,7 +170,7 @@
     (first (filter #(not= % (keyword current-backend))
                    (map keyword allowed-backends)))
     (catch Exception _
-      ;; If backend-health isn't available, still pick from allowed list
+      ;; If backend-health persistence fails, still pick from the allowed list.
       (first (filter #(not= % (keyword current-backend))
                      (map keyword allowed-backends))))))
 
