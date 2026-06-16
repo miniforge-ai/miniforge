@@ -22,6 +22,8 @@
    Layer 1: Logger protocol and default implementation"
   (:require
    [ai.miniforge.config.interface :as config]
+   [ai.miniforge.logging.format :as log-format]
+   [ai.miniforge.logging.sinks :as sinks]
    [clojure.java.io :as io]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -48,24 +50,17 @@
 (defn level-enabled?
   "Check if a log level should be emitted given the configured minimum level."
   [configured-level entry-level]
-  (let [level-order {:trace 0 :debug 1 :info 2 :warn 3 :error 4 :fatal 5}
-        configured-ord (get level-order configured-level 0)
-        entry-ord (get level-order entry-level 0)]
-    (>= entry-ord configured-ord)))
+  (log-format/level-enabled? configured-level entry-level))
 
 (defn format-edn
   "Format a log entry as an EDN string for output."
   [entry]
-  (pr-str entry))
+  (log-format/format-edn entry))
 
 (defn format-human
   "Format a log entry as a human-readable string."
   [entry]
-  (let [{:log/keys [timestamp level category event message]} entry]
-    (str (when timestamp (.toInstant timestamp))
-         " [" (name level) "] "
-         (name category) "/" (name event)
-         (when message (str " - " message)))))
+  (log-format/format-human entry))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Logger protocol and implementations
@@ -252,13 +247,11 @@
    (let [output-fn (cond
                      ;; Explicit sinks provided
                      sinks
-                     (let [multi-sink (requiring-resolve 'ai.miniforge.logging.sinks/multi-sink)]
-                       (multi-sink sinks))
+                     (sinks/multi-sink sinks)
 
                      ;; Create sinks from config
                      config
-                     (let [create-from-config (requiring-resolve 'ai.miniforge.logging.sinks/create-sinks-from-config)]
-                       (create-from-config config))
+                     (sinks/create-sinks-from-config config)
 
                      ;; Legacy output mode
                      :else
