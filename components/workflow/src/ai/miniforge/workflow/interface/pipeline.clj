@@ -21,6 +21,7 @@
   (:require
    [ai.miniforge.workflow.chain :as chain]
    [ai.miniforge.workflow.chain-loader :as chain-loader]
+   [ai.miniforge.workflow.dag-orchestrator :as dag-orchestrator]
    [ai.miniforge.workflow.runner :as runner]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -55,3 +56,12 @@
 (defn list-chains
   []
   (chain-loader/list-chains))
+
+(defn execute-plan-as-dag
+  "Execute a normalized plan through the DAG orchestrator.
+
+   Args: [plan context]. Returns an aggregate DAG execution summary with
+   :success?, :tasks-completed, :tasks-failed, :tasks-unreached,
+   :artifacts, and :metrics."
+  [plan context]
+  (dag-orchestrator/execute-plan-as-dag plan context))
