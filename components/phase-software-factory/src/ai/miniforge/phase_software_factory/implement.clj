@@ -28,6 +28,7 @@
    [ai.miniforge.phase-software-factory.phase-config :as phase-config]
    [ai.miniforge.phase-software-factory.knowledge-helpers :as kb-helpers]
    [ai.miniforge.agent.interface :as agent]
+   [ai.miniforge.agent.interface.protocols.messaging :as messaging]
    [ai.miniforge.context-pack.interface :as context-pack]
    [ai.miniforge.knowledge.interface :as knowledge]
    [ai.miniforge.repo-index.interface :as repo-index]
@@ -255,9 +256,7 @@
   [ctx]
   (when-let [msg-router (:message-router ctx)]
     (try
-      (let [get-msgs (requiring-resolve
-                       'ai.miniforge.agent.interface.protocols.messaging/get-messages-for-agent)
-            msgs (get-msgs msg-router :implementer (:execution/id ctx))]
+      (let [msgs (messaging/get-messages-for-agent msg-router :implementer (:execution/id ctx))]
         (when (seq msgs)
           {:peer-messages (vec msgs)}))
       (catch Exception _e nil))))
