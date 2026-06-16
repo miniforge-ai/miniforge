@@ -20,6 +20,7 @@
   "Core implementation of PR Train management.
    Provides PRTrainManager protocol and in-memory implementation."
   (:require
+   [ai.miniforge.event-stream.interface :as es]
    [ai.miniforge.pr-train.state :as state]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -255,12 +256,11 @@
           (swap! trains assoc train-id final)
           (when event-stream
             (try
-              (when-let [publish! (requiring-resolve 'ai.miniforge.event-stream.interface/publish!)]
-                (publish! event-stream
-                          {:event/type :pr/merged
-                           :pr/number pr-number
-                           :train/id train-id
-                           :timestamp (java.util.Date.)}))
+              (es/publish! event-stream
+                           {:event/type :pr/merged
+                            :pr/number pr-number
+                            :train/id train-id
+                            :timestamp (java.util.Date.)})
               (catch Exception _ nil)))
           final))))
 
