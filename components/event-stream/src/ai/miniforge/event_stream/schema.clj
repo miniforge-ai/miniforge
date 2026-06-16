@@ -694,7 +694,20 @@
    ;; event carries `:zettel/content` directly — Fleet's privacy
    ;; gates (Decision 8) decide whether the zettel is actually
    ;; cleared for cross-instance share, not the local default.
-   :zettel/promoted          :internal})
+   :zettel/promoted          :internal
+
+   ;; Reliability metric events (RN-03). Operator-facing alerts — an SLO
+   ;; breach and a degradation-mode transition — are `:public`; routine SLI
+   ;; reads and error-budget recomputations are `:internal` telemetry.
+   :reliability/sli-computed            :internal
+   :reliability/slo-breach              :public
+   :reliability/error-budget-update     :internal
+   :reliability/degradation-mode-changed :public
+
+   ;; Repository intelligence events (RN-19/20) — routine index-quality
+   ;; telemetry, `:internal`.
+   :repo-index/quality-measured :internal
+   :repo-index/coverage-changed :internal})
 
 (defn create-privacy-config
   "Create a privacy configuration by merging overrides into defaults.

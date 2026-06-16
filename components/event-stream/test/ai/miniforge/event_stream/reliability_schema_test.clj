@@ -237,9 +237,14 @@
           "missing :index/previous-coverage should fail"))))
 
 ;; ---------------------------------------------------------------------------
-;; Range-bound rejection (Copilot review on #1172): docstrings promise ratios
-;; in [0.0, 1.0] and non-negative counts/durations; the Malli schemas must
-;; enforce them so out-of-contract telemetry is rejected at validation.
+;; Range-bound rejection (Copilot review on #1172). The budget/index fields
+;; whose docstrings promise ratios in [0.0, 1.0] or non-negative counts/
+;; durations (:budget/remaining, :budget/burn-rate, :index/quality-score,
+;; :index/coverage, :index/previous-coverage, :index/staleness-ms,
+;; :index/changed-files) must reject out-of-contract values at validation.
+;; :sli/value, :slo/target and :slo/actual are intentionally unconstrained —
+;; they carry SLI-native units (a ratio for rate-based SLIs, an absolute
+;; measure such as latency ms for others) — so they are not covered here.
 
 (defn- valid-error-budget [overrides]
   (merge {:event/type            :reliability/error-budget-update

@@ -1349,7 +1349,7 @@
                     previous-status
                     :dependency/recovered))
 
-;------------------------------------------------------------------------------ Layer 6
+;------------------------------------------------------------------------------ Layer 6.1
 ;; Repository intelligence event constructors (RN-19/20)
 
 (defn repo-index-quality-measured
@@ -1399,7 +1399,7 @@
              :index/coverage coverage)
       (cond-> (:changed-files opts) (assoc :index/changed-files (:changed-files opts)))))
 
-;------------------------------------------------------------------------------ Layer 6
+;------------------------------------------------------------------------------ Layer 6.2
 ;; Meta-loop events
 
 (defn meta-loop-cycle-completed
