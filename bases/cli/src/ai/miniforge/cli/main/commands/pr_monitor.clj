@@ -132,42 +132,42 @@
      - returns normally (exit 0 by default) when worklist is empty after pruning
      - shared/exit! 1 on unresolvable remote, missing worklist, prune failure, nil author"
   [repo-path cli-cfg]
-  (let [origin-url (remote-origin-url repo-path)]
+  (let [origin-url (remote-origin-url repo-path)]     ; A
     (when-not origin-url
       (display/print-error (messages/t :pr/monitor-no-remote {:path repo-path}))
       (shared/exit! 1))
     (let [rkey        (pr-lifecycle/worklist-repo-key origin-url)
           wl-path     (pr-lifecycle/worklist-path (app-config/home-dir) rkey)
-          load-result (pr-lifecycle/load-worklist wl-path)]
+          load-result (pr-lifecycle/load-worklist wl-path)]     ; B
       (when (schema/failed? load-result)
         (display/print-error (messages/t :pr/monitor-no-worklist))
         (shared/exit! 1))
       (let [worklist       (:worklist load-result)
-            original-count (count (:worklist/prs worklist))]
+            original-count (count (:worklist/prs worklist))]    ; C
         (display/print-info (messages/t :pr/monitor-worklist-loaded {:count original-count}))
         (display/print-info (messages/t :pr/monitor-worklist-pruning))
-        (let [pruned (pr-lifecycle/prune-closed-prs worklist)]
+        (let [pruned (pr-lifecycle/prune-closed-prs worklist)]  ; D
           (when (anomaly/anomaly? pruned)
             (display/print-error
              (messages/t :pr/monitor-worklist-prune-error
                          {:error (:anomaly/message pruned)}))
             (shared/exit! 1))
           (let [prs     (:worklist/prs pruned)
-                removed (- original-count (count prs))]
+                removed (- original-count (count prs))]         ; E
             (when (pos? removed)
               (display/print-info
                (messages/t :pr/monitor-worklist-pruned
                            {:removed removed :remaining (count prs)})))
-            (if (empty? prs)
+            (if (empty? prs)                                    ; F
               (display/print-info (messages/t :pr/monitor-worklist-empty))
-              (let [author (resolve-author nil (:default-self-author cli-cfg))]
+              (let [author (resolve-author nil (:default-self-author cli-cfg))]  ; G
                 (when-not author
                   (display/print-error (messages/t :pr/monitor-no-author))
                   (shared/exit! 1))
                 (let [poll-ms  (worklist-poll-ms prs)
                       mon-opts (cond-> {:worktree-path repo-path :self-author author}
-                                 poll-ms (assoc :poll-interval-ms poll-ms))]
-                  (run-monitor! mon-opts author)))))))))
+                                 poll-ms (assoc :poll-interval-ms poll-ms))]    ; H
+                  (run-monitor! mon-opts author))))))))))        ; H G F E D C B A defn
 
 ;------------------------------------------------------------------------------ Layer 2
 ;; Entry point
