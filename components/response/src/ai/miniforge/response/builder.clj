@@ -34,11 +34,20 @@
    documented `{:tokens N :duration-ms N}` shape, which then throws a
    message-less NPE in any downstream arithmetic. Normalizing here, at the
    constructor boundary, means no reader has to defend. (Does not coerce
-   non-nil non-numeric values — callers supply numbers or nil.)"
+   non-nil non-numeric values — callers supply numbers or nil.)
+
+   `:cost-usd` is optional, so it is not forced present — but a PRESENT-and-nil
+   `:cost-usd` is dropped. Every reader coalesces it with a default
+   (`(:cost-usd m 0.0)` or a token-based estimate), and `get`/keyword-with-
+   default returns a present nil rather than the default — so a present-nil
+   cost survived into `(fnil + 0.0) cost` and NPE'd cost accumulation in the
+   implement phase. Dropping it lets each reader's own default/estimate apply."
   [metrics tokens duration-ms]
-  (-> (merge {:tokens (or tokens 0) :duration-ms (or duration-ms 0)} metrics)
-      (update :tokens #(or % 0))
-      (update :duration-ms #(or % 0))))
+  (cond-> (-> (merge {:tokens (or tokens 0) :duration-ms (or duration-ms 0)} metrics)
+              (update :tokens #(or % 0))
+              (update :duration-ms #(or % 0)))
+    (and (contains? metrics :cost-usd) (nil? (:cost-usd metrics)))
+    (dissoc :cost-usd)))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Success responses
