@@ -25,6 +25,7 @@
    [clojure.string :as str]
    [clojure.test :refer [deftest is testing]]
    [babashka.fs :as fs]
+   [babashka.process :as process]
    [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.schema.interface :as schema]
    [ai.miniforge.pr-lifecycle.monitor-worklist :as worklist]))
@@ -159,7 +160,7 @@
 
 (deftest prune-keeps-open-drops-merged-closed-test
   (testing "keeps OPEN entries, drops MERGED and CLOSED"
-    (with-redefs [#'ai.miniforge.pr-lifecycle.monitor-worklist/fetch-pr-state
+    (with-redefs [ai.miniforge.pr-lifecycle.monitor-worklist/fetch-pr-state
                   (fn [{:pr/keys [number]}]
                     (case (int number)
                       1 "OPEN"
@@ -172,15 +173,44 @@
         (is (= [open-pr] (:worklist/prs result))))))
 
   (testing "returns original map identity when all PRs are OPEN"
-    (with-redefs [#'ai.miniforge.pr-lifecycle.monitor-worklist/fetch-pr-state
+    (with-redefs [ai.miniforge.pr-lifecycle.monitor-worklist/fetch-pr-state
                   (fn [_] "OPEN")]
       (let [entry  (make-entry [open-pr])
             result (worklist/prune-closed-prs entry)]
-        (is (= entry result))))))
+        (is (= entry result)))))
+
+  (testing "bumps :worklist/updated-at when PRs are actually dropped (Copilot #1198)"
+    (with-redefs [ai.miniforge.pr-lifecycle.monitor-worklist/fetch-pr-state
+                  (fn [{:pr/keys [number]}] (if (= 1 (int number)) "OPEN" "MERGED"))]
+      (let [entry  (assoc (make-entry [open-pr merged-pr])
+                          :worklist/updated-at #inst "2000-01-01T00:00:00.000-00:00")
+            result (worklist/prune-closed-prs entry)]
+        (is (= [open-pr] (:worklist/prs result)))
+        (is (.after ^java.util.Date (:worklist/updated-at result)
+                    (:worklist/updated-at entry))
+            "dropping a PR must advance the last-write instant")))))
+
+(deftest fetch-pr-state-tolerates-whitespace-json-test
+  ;; Copilot #1198: gh's --json is compact today, but a pretty-printed
+  ;; `"state": "OPEN"` (whitespace around the colon) must still parse.
+  (testing "whitespace around the colon in gh JSON still extracts the state"
+    (with-redefs [process/process (fn [& _] (future {:exit 0
+                                                     :out "{\n  \"state\": \"OPEN\"\n}"
+                                                     :err ""}))]
+      (is (= "OPEN"
+             (#'ai.miniforge.pr-lifecycle.monitor-worklist/fetch-pr-state
+              {:pr/number 1 :pr/repo "org/repo"})))))
+  (testing "compact JSON still parses"
+    (with-redefs [process/process (fn [& _] (future {:exit 0
+                                                     :out "{\"state\":\"MERGED\"}"
+                                                     :err ""}))]
+      (is (= "MERGED"
+             (#'ai.miniforge.pr-lifecycle.monitor-worklist/fetch-pr-state
+              {:pr/number 2 :pr/repo "org/repo"}))))))
 
 (deftest prune-gh-failure-test
   (testing "returns anomaly when fetch-pr-state returns anomaly"
-    (with-redefs [#'ai.miniforge.pr-lifecycle.monitor-worklist/fetch-pr-state
+    (with-redefs [ai.miniforge.pr-lifecycle.monitor-worklist/fetch-pr-state
                   (fn [pr]
                     (anomaly/anomaly :fault "gh failed" {:pr pr}))]
       (let [result (worklist/prune-closed-prs (make-entry [open-pr]))]
@@ -189,7 +219,7 @@
 
   (testing "short-circuits on first failure, does not call gh for remaining PRs"
     (let [call-count (atom 0)]
-      (with-redefs [#'ai.miniforge.pr-lifecycle.monitor-worklist/fetch-pr-state
+      (with-redefs [ai.miniforge.pr-lifecycle.monitor-worklist/fetch-pr-state
                     (fn [_]
                       (swap! call-count inc)
                       (anomaly/anomaly :fault "gh failed" {}))]

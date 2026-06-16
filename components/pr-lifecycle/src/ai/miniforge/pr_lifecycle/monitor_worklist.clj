@@ -89,8 +89,10 @@
   "OPEN")
 
 (def ^:private gh-state-pattern
-  "Regex to extract the state field from `gh pr view --json state` output."
-  #"\"state\":\"([^\"]+)\"")
+  "Regex to extract the state field from `gh pr view --json state` output.
+   Tolerates optional whitespace around the colon — `gh`'s JSON is compact
+   today, but a pretty-printed `\"state\": \"OPEN\"` must still match."
+  #"\"state\"\s*:\s*\"([^\"]+)\"")
 
 (def WorklistPrEntry
   "Malli schema for a single PR entry inside a WorklistEntry.
@@ -257,7 +259,11 @@
       (if (empty? remaining)
         (if (= (count kept) (count prs))
           entry
-          (assoc entry :worklist/prs kept))
+          ;; PRs were dropped — :worklist/prs changed, so bump the
+          ;; last-write instant (matches the persist path's updated-at).
+          (assoc entry
+                 :worklist/prs kept
+                 :worklist/updated-at (java.util.Date.)))
         (let [pr-entry (first remaining)
               state    (fetch-pr-state pr-entry)]
           (if (anomaly/anomaly? state)
