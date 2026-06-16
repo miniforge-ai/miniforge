@@ -25,11 +25,12 @@
 
    Architecture:
    - Fail-open: LLM errors return empty proposals (never block the operator)
-   - Uses requiring-resolve to avoid hard dependency on llm component
+   - Uses the public llm interface
    - Budget: ~1000 input tokens, ~600 output tokens per generation call"
   (:require
    [cheshire.core :as json]
    [clojure.string :as str]
+   [ai.miniforge.llm.interface :as llm]
    [ai.miniforge.operator.defaults :as defaults]
    [ai.miniforge.operator.protocol :as proto]))
 
@@ -131,15 +132,13 @@
     (if (empty? patterns)
       []
       (try
-        (let [complete-fn (requiring-resolve
-                           'ai.miniforge.llm.interface.protocols.llm-client/complete*)
-              sys-prompt  (get config :system-prompt defaults/improvement-generator-system-prompt)
+        (let [sys-prompt  (get config :system-prompt defaults/improvement-generator-system-prompt)
               types       (get config :improvement-types defaults/improvement-types)
               prompt      (build-generate-prompt patterns context)
               request     {:prompt     prompt
                            :system     sys-prompt
                            :max-tokens (get config :max-tokens 600)}
-              response    (complete-fn llm-client request)]
+              response    (llm/complete llm-client request)]
           (if (:success response)
             (parse-generate-response (:content response) types)
             ;; LLM call failed -> fail-open with empty proposals

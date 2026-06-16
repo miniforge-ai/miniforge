@@ -21,6 +21,8 @@
    Manages meta-loop: observe signals, detect patterns, propose improvements."
   (:require
    [ai.miniforge.operator.protocol :as proto]
+   [ai.miniforge.operator.llm-improvement-generator :as llm-improvement-generator]
+   [ai.miniforge.operator.llm-pattern-detector :as llm-pattern-detector]
    [ai.miniforge.workflow.interface :as wf]
    [ai.miniforge.knowledge.interface :as knowledge]
    [ai.miniforge.logging.interface :as log]))
@@ -410,23 +412,19 @@
                                   :reason reason}})))
 
 (defn create-llm-pattern-detector*
-  "Create an LLM-powered pattern detector via requiring-resolve.
-   Returns nil if the namespace cannot be loaded."
+  "Create an LLM-powered pattern detector.
+   Returns nil if construction fails."
   [llm-backend]
   (try
-    (let [create-fn (requiring-resolve
-                     'ai.miniforge.operator.llm-pattern-detector/create-llm-pattern-detector)]
-      (create-fn {:llm-client llm-backend}))
+    (llm-pattern-detector/create-llm-pattern-detector {:llm-client llm-backend})
     (catch Exception _e nil)))
 
 (defn create-llm-improvement-generator*
-  "Create an LLM-powered improvement generator via requiring-resolve.
-   Returns nil if the namespace cannot be loaded."
+  "Create an LLM-powered improvement generator.
+   Returns nil if construction fails."
   [llm-backend]
   (try
-    (let [create-fn (requiring-resolve
-                     'ai.miniforge.operator.llm-improvement-generator/create-llm-improvement-generator)]
-      (create-fn {:llm-client llm-backend}))
+    (llm-improvement-generator/create-llm-improvement-generator {:llm-client llm-backend})
     (catch Exception _e nil)))
 
 (defn create-operator

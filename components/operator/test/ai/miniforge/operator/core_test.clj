@@ -22,6 +22,7 @@
    exercised by intervention_test.clj end-to-end via the public interface; this
    file targets the data-shaping helpers that have no such coupling."
   (:require [clojure.test :refer [deftest is testing]]
+            [ai.miniforge.llm.interface.protocols.llm-client :as llm-client]
             [ai.miniforge.operator.core :as sut]
             [ai.miniforge.operator.protocol :as proto]))
 
@@ -43,6 +44,12 @@
 (defn- repair-signal-for
   [error-type]
   (signal :repair-pattern :error-type error-type))
+
+(defrecord FakeLLMClient [response]
+  llm-client/LLMClient
+  (complete* [_this _request] response)
+  (complete-stream* [_this _request _on-chunk] response)
+  (get-config [_this] {}))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; default-config
@@ -175,6 +182,12 @@
     (is (= #{:repeated-phase-failure :frequent-rollback :recurring-repair}
            (proto/get-pattern-types (sut/create-pattern-detector))))))
 
+(deftest create-llm-pattern-detector-direct-constructor-test
+  (testing "LLM pattern detector construction uses the direct component namespace"
+    (let [detector (sut/create-llm-pattern-detector*
+                    (->FakeLLMClient {:success true :content "[]" }))]
+      (is (satisfies? proto/PatternDetector detector)))))
+
 ;------------------------------------------------------------------------------ Layer 3
 ;; Improvement generators
 
@@ -239,6 +252,12 @@
   (testing "get-supported-patterns reports the three handled pattern types"
     (is (= #{:repeated-phase-failure :frequent-rollback :recurring-repair}
            (proto/get-supported-patterns (sut/create-improvement-generator))))))
+
+(deftest create-llm-improvement-generator-direct-constructor-test
+  (testing "LLM improvement generator construction uses the direct component namespace"
+    (let [generator (sut/create-llm-improvement-generator*
+                     (->FakeLLMClient {:success true :content "[]" }))]
+      (is (satisfies? proto/ImprovementGenerator generator)))))
 
 ;------------------------------------------------------------------------------ Layer 4
 ;; SimpleGovernance
