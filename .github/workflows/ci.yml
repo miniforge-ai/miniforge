@@ -7,8 +7,12 @@ name: CI
 on:
   push:
     branches: [main]
+  # Run on ALL pull requests regardless of base branch. Stacked / autonomous
+  # PRs target intermediate `mf/**` branches (not main); a `branches: [main]`
+  # filter here silently skipped CI on every such PR. A bare `pull_request`
+  # trigger fires for any base, so stacked PRs get linted, tested, and built
+  # like any other.
   pull_request:
-    branches: [main]
 
 permissions:
   contents: read
