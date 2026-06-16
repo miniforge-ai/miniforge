@@ -28,35 +28,53 @@
 ;; ─────────────────────────────────────────────────────────────────────────────
 ;; Reflective Lanterna class access
 
+(def ^:private class-cache (atom {}))
+(def ^:private field-cache (atom {}))
+(def ^:private constructor-cache (atom {}))
+(def ^:private method-cache (atom {}))
+
+(defn- cached [cache key load-fn]
+  (if-let [value (get @cache key)]
+    value
+    (let [value (load-fn)]
+      (swap! cache assoc key value)
+      value)))
+
 (defn- class-named [class-name]
-  (Class/forName class-name))
+  (cached class-cache class-name #(Class/forName class-name)))
 
 (defn- static-field [class-name field-name]
-  (.get (.getField (class-named class-name) field-name) nil))
+  (cached field-cache [class-name field-name]
+          #(.get (.getField (class-named class-name) field-name) nil)))
 
 (defn- arity-match? [arity member]
   (= arity (count (.getParameterTypes member))))
 
 (defn- construct [class-name & args]
-  (let [constructor (->> (.getConstructors (class-named class-name))
-                         (filter (partial arity-match? (count args)))
-                         first)]
+  (let [arity (count args)
+        constructor (cached constructor-cache [class-name arity]
+                            #(->> (.getConstructors (class-named class-name))
+                                  (filter (partial arity-match? arity))
+                                  first))]
     (when-not constructor
       (throw (ex-info "No matching Lanterna constructor."
                       {:class class-name
-                       :arity (count args)})))
+                       :arity arity})))
     (.newInstance constructor (object-array args))))
 
 (defn- invoke [target method-name & args]
-  (let [method (->> (.getMethods (class target))
-                    (filter #(= method-name (.getName %)))
-                    (filter (partial arity-match? (count args)))
-                    first)]
+  (let [target-class (class target)
+        arity (count args)
+        method (cached method-cache [target-class method-name arity]
+                       #(->> (.getMethods target-class)
+                             (filter (fn [method] (= method-name (.getName method))))
+                             (filter (partial arity-match? arity))
+                             first))]
     (when-not method
       (throw (ex-info "No matching Lanterna method."
-                      {:class (.getName (class target))
+                      {:class (.getName target-class)
                        :method method-name
-                       :arity (count args)})))
+                       :arity arity})))
     (.invoke method target (object-array args))))
 
 ;; ─────────────────────────────────────────────────────────────────────────────
