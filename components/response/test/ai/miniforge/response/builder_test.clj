@@ -46,6 +46,29 @@
       (is (= 42 (:tokens m)))
       (is (= 7 (:duration-ms m))))))
 
+(deftest success-metrics-drops-present-nil-cost-usd-test
+  ;; The 2026-06-16 dogfood crashed the implement phase with a message-less
+  ;; NPE: build-code-response wrote :cost-usd nil into metrics (the LLM turn
+  ;; reported no cost), and the cost accumulator `(fnil + 0.0) cost` saw the
+  ;; present nil — readers coalesce cost-usd with a default, but get/keyword-
+  ;; with-default returns a present nil, not the default. Drop a present-nil
+  ;; :cost-usd at the constructor so every reader's default/estimate applies.
+  (testing "present-but-nil :cost-usd is dropped, not passed through"
+    (let [m (metrics (response/success :out {:metrics {:tokens 5 :duration-ms 100 :cost-usd nil}}))]
+      (is (not (contains? m :cost-usd))
+          "a present-nil :cost-usd must not survive — readers fall back to their own default")
+      (is (= 5 (:tokens m)))
+      (is (= 100 (:duration-ms m)))))
+  (testing "a real numeric :cost-usd is preserved"
+    (let [m (metrics (response/success :out {:metrics {:tokens 5 :duration-ms 100 :cost-usd 0.42}}))]
+      (is (= 0.42 (:cost-usd m)))))
+  (testing "absent :cost-usd stays absent (optional)"
+    (let [m (metrics (response/success :out {:metrics {:tokens 5 :duration-ms 100}}))]
+      (is (not (contains? m :cost-usd)))))
+  (testing "error path also drops a present-nil :cost-usd"
+    (let [m (metrics (response/error "boom" {:metrics {:tokens 5 :duration-ms 100 :cost-usd nil}}))]
+      (is (not (contains? m :cost-usd))))))
+
 (deftest error-and-failure-metrics-never-nil-test
   (testing "error normalizes an explicit nil :tokens"
     (let [m (metrics (response/error "boom" {:metrics {:tokens nil :duration-ms nil}}))]
