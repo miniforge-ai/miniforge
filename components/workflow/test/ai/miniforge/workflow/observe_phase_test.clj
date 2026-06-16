@@ -181,7 +181,7 @@
         {remote-url-var                    (fn [_] "https://github.com/org/repo.git")
          #'pr-lifecycle/worklist-repo-key  (fn [_] "org/repo")
          #'pr-lifecycle/worklist-path      (fn [_ _] "/tmp/wl.edn")
-         #'pr-lifecycle/persist-worklist!  (fn [_ _] (schema/success {}))
+         #'pr-lifecycle/persist-worklist!  (fn [_ _] (schema/success :worklist {}))
          #'config/miniforge-home           (constantly "/tmp")
          #'clock/now-ms                    (constantly 0)}
         (fn []
@@ -296,3 +296,97 @@
         (is (= 15000 (:poll-interval-ms cfg)))
         (is (= "miniforge[bot]" (:self-author cfg)))
         (is (= 10 (:max-total-fix-attempts-per-pr cfg)))))))
+
+;;------------------------------------------------------------------------------
+;; enter-observe — persistence wiring
+
+(deftest enter-observe-calls-persist-worklist!-test
+  ;; Verify that the persistence side-effect in enter-observe is wired: when
+  ;; pr-infos are present and self-author resolves, persist-worklist! is called
+  ;; once with an entry that carries the PR data from the input context.
+  (testing "valid pr-infos + resolved self-author → persist-worklist! called with correct entry"
+    (let [persist-calls          (atom [])
+          remote-url-var         (ns-resolve 'ai.miniforge.workflow.observe-phase
+                                             'remote-origin-url)
+          resolve-monitor-var    (ns-resolve 'ai.miniforge.workflow.observe-phase
+                                             'resolve-monitor-config)]
+      (with-redefs-fn
+        {remote-url-var              (fn [_] "https://github.com/org/repo.git")
+         resolve-monitor-var         (fn [& _]
+                                       {:self-author      "miniforge[bot]"
+                                        :worktree-path    "/tmp/repo"
+                                        :poll-interval-ms 60000
+                                        :abandon-after-hours 72})
+         #'pr-lifecycle/worklist-repo-key   (fn [_] "org/repo")
+         #'pr-lifecycle/worklist-path       (fn [_ _] "/tmp/wl.edn")
+         #'pr-lifecycle/persist-worklist!   (fn [path entry]
+                                              (swap! persist-calls conj {:path path :entry entry})
+                                              (schema/success :worklist {}))
+         #'config/miniforge-home            (constantly "/tmp")
+         #'clock/now-ms                     (constantly 0)
+         #'pr-lifecycle/create-pr-monitor   (fn [_] ::sentinel)
+         #'pr-lifecycle/run-pr-monitor-loop (fn [& _] {:done true})}
+        (fn []
+          (sut/enter-observe {:execution/dag-pr-infos [sample-pr]})
+          (is (= 1 (count @persist-calls))
+              "persist-worklist! must be called exactly once")
+          (let [{:keys [path entry]} (first @persist-calls)]
+            (is (= "/tmp/wl.edn" path)
+                "path must come from the worklist-path helper")
+            (is (= "org/repo" (:worklist/repo-key entry))
+                "entry must carry the repo key derived from the git remote")
+            (is (= 1 (count (:worklist/prs entry)))
+                "one pr-info in context → one PR entry in the worklist")
+            (let [pr-entry (first (:worklist/prs entry))]
+              (is (= (:pr-url sample-pr) (:pr/url pr-entry))
+                  "PR url must be propagated to the worklist entry")
+              (is (= (:pr-number sample-pr) (:pr/number pr-entry))
+                  "PR number must be propagated to the worklist entry"))))))))
+
+(deftest enter-observe-empty-prs-skips-persistence-test
+  ;; When there are no pr-infos, enter-observe returns :skipped before reaching
+  ;; the persistence call. persist-worklist! must never be invoked.
+  (testing "no pr-infos → persist-worklist! is never invoked"
+    (let [persist-call-count (atom 0)]
+      (with-redefs [pr-lifecycle/persist-worklist! (fn [& _]
+                                                     (swap! persist-call-count inc)
+                                                     (schema/success :worklist {}))]
+        (sut/enter-observe {})
+        (is (zero? @persist-call-count)
+            "persist-worklist! must not be called when there are no PRs to observe")))))
+
+(deftest enter-observe-persist-failure-result-shape-unchanged-test
+  ;; try-persist-worklist! is best-effort: a failure return from persist-worklist!
+  ;; logs a warning but must not alter the phase result shape. The caller (workflow
+  ;; runner) sees :monitoring with :monitor-detached? true regardless.
+  (testing "persist-worklist! returning a failure anomaly → phase result still :monitoring"
+    (let [remote-url-var      (ns-resolve 'ai.miniforge.workflow.observe-phase
+                                          'remote-origin-url)
+          resolve-monitor-var (ns-resolve 'ai.miniforge.workflow.observe-phase
+                                          'resolve-monitor-config)]
+      (with-redefs-fn
+        {remote-url-var              (fn [_] "https://github.com/org/repo.git")
+         resolve-monitor-var         (fn [& _]
+                                       {:self-author      "miniforge[bot]"
+                                        :worktree-path    "/tmp/repo"
+                                        :poll-interval-ms 60000
+                                        :abandon-after-hours 72})
+         #'pr-lifecycle/worklist-repo-key   (fn [_] "org/repo")
+         #'pr-lifecycle/worklist-path       (fn [_ _] "/tmp/wl.edn")
+         #'pr-lifecycle/persist-worklist!   (fn [_ _]
+                                              (schema/failure :worklist "disk full"))
+         #'config/miniforge-home            (constantly "/tmp")
+         #'clock/now-ms                     (constantly 0)
+         #'pr-lifecycle/create-pr-monitor   (fn [_] ::sentinel)
+         #'pr-lifecycle/run-pr-monitor-loop (fn [& _] {:done true})}
+        (fn []
+          (let [ctx    (sut/enter-observe {:execution/dag-pr-infos [sample-pr]})
+                result (get-in ctx [:phase :result])]
+            (is (= :completed (get-in ctx [:phase :status]))
+                "persist failure must not set phase status to :failed")
+            (is (= :monitoring (get-in result [:output :observe/status]))
+                "observe/status must remain :monitoring despite persist failure")
+            (is (true? (get-in result [:output :observe/monitor-detached?]))
+                ":monitor-detached? must remain true despite persist failure")
+            (is (future? (:execution/pr-monitor-future ctx))
+                "monitor future must still be created despite persist failure")))))))
