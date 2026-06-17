@@ -84,10 +84,19 @@
   [prs]
   {:type :remediate-prs :prs prs})
 
+(defn unavailable-decompose-fn
+  "Explicit no-op decomposer for TUI builds without a PR decomposition component."
+  [_pr _diff _files _llm-fn]
+  {:ok? false
+   :error {:code :decomposition/not-configured
+           :message "No :decompose-fn configured for :decompose-pr effect"}})
+
 (defn decompose-pr
   "Analyze a PR for decomposition into sub-PRs."
-  [pr]
-  {:type :decompose-pr :pr pr})
+  ([pr]
+   (decompose-pr pr unavailable-decompose-fn))
+  ([pr decompose-fn]
+   {:type :decompose-pr :pr pr :decompose-fn decompose-fn}))
 
 (defn control-action
   "Create a control action effect to pause/resume/cancel a workflow.

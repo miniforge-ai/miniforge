@@ -28,6 +28,7 @@
    [ai.miniforge.coerce.interface :as coerce]
    [ai.miniforge.tui-engine.interface :as tui]
    [ai.miniforge.tui-views.model :as model]
+   [ai.miniforge.tui-views.effect :as effect]
    [ai.miniforge.tui-views.msg :as msg]
    [ai.miniforge.tui-views.update :as update]
    [ai.miniforge.tui-views.view :as view]
@@ -154,15 +155,12 @@
 (defn handle-decompose-pr
   "Decompose a large PR into sub-PRs.
    Entire body is wrapped in try/catch — no exceptions leak."
-  [{:keys [pr]}]
+  [{:keys [pr decompose-fn]}]
   (let [pr-id [(:pr/repo pr) (:pr/number pr)]]
     (try
       (let [{:keys [diff detail]} (github/fetch-pr-diff-and-detail
                                    (:pr/repo pr) (:pr/number pr))
-            changed-files (mapv :path (:files detail []))
-            decompose-fn (try (requiring-resolve
-                               'ai.miniforge.pr-decompose.interface/decompose)
-                              (catch Throwable _ nil))]
+            changed-files (mapv :path (:files detail []))]
         (cond
           ;; Both fetches failed
           (and (nil? diff) (nil? detail))
@@ -170,11 +168,11 @@
                                      {:sub-prs []
                                       :message "Failed to fetch PR diff and details"})
 
-          ;; Decompose component not available
+          ;; Decomposer omitted from the effect map
           (nil? decompose-fn)
           (msg/decomposition-started pr-id
                                      {:sub-prs []
-                                      :message "Decomposition component not available"})
+                                      :message "Missing :decompose-fn on :decompose-pr effect"})
 
           :else
           (let [llm-fn (fn [req] (llm/complete @decompose-llm-client req))
@@ -260,7 +258,7 @@
 
                    :decompose
                    (if-let [pr (:pr context)]
-                     (handle-decompose-pr {:pr pr})
+                     (handle-decompose-pr (effect/decompose-pr pr))
                      (msg/chat-action-result {:success? false :message "No PR in context"}))
 
                    (msg/chat-action-result
