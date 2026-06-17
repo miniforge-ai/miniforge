@@ -96,6 +96,29 @@ You must output a structured review as a Clojure map:
    - Input validation at boundaries
    - Safe handling of user-provided data
 
+6. **Recurring miniforge defects** (flag these explicitly — static tools miss them):
+   - **Present-nil map access**: `(get m :k default)` and `(:k m default)` return
+     the default only when `:k` is ABSENT. If a writer stored `:k` with value
+     `nil`, they return `nil`, not the default — and downstream arithmetic then
+     NPEs with no message. The classic case is feeding that nil as the SECOND
+     arg of a `fnil`-guarded accumulate: `(update-in m [:k] (fnil + 0) x)` —
+     `(fnil + 0)` only replaces a nil FIRST arg (the accumulator), so a nil `x`
+     still hits `(+ acc nil)` and throws. Flag get/keyword-with-default on an
+     optional numeric key (`:tokens`, `:cost-usd`, durations, counts) whose
+     value then feeds arithmetic; prefer `(or (:k m) default)`, or normalize
+     present-nil away at the writer.
+   - **`with-redefs` binding names**: the binding-vector NAMES must be plain
+     symbols, never var-quotes — `(with-redefs [#'ns/f g] ...)` is a compile
+     error (`Cons cannot be cast to Symbol`). `#'` is fine as a binding VALUE
+     or to CALL a private fn. Flag any `#'` in a `with-redefs` name slot.
+   - **Cross-namespace private access**: a test (or any caller) referencing
+     another namespace's private var must use `#'ns/private` — `(ns/private …)`
+     is a compile error (`var: … is not public`).
+   - **Record-before-signal**: when one thread interrupts/kills another, any
+     state the interrupted thread reads afterward must be written BEFORE the
+     kill, or the reader can observe it unset (read race). Flag kill/interrupt
+     calls that precede the state write they're supposed to make visible.
+
 ## Severity Levels
 
 - **:blocking** — Must be fixed before approval. Logic errors, security issues, data loss risks.
