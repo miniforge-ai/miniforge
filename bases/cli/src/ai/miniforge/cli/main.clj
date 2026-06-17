@@ -678,7 +678,8 @@
    {:cmds ["pr" "respond"] :fn pr-respond-cmd :args->opts [:url]}
    {:cmds ["pr" "merge"]   :fn pr-merge-cmd   :args->opts [:url]}
    {:cmds ["pr" "monitor"] :fn pr-monitor-cmd :spec {:author {:alias :a}
-                                                      :poll-interval {:alias :p}}}
+                                                      :poll-interval {:alias :p}
+                                                      :repo {}}}
 
    ;; N13 §2.2 Standards Reviewer auto-trigger (single-pass v0)
    {:cmds ["pr" "review-monitor"]

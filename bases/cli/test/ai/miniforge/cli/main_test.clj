@@ -22,7 +22,7 @@
    [ai.miniforge.cli.app-config :as app-config]
    [ai.miniforge.cli.messages :as messages]
    [ai.miniforge.cli.main :as sut]
-   [ai.miniforge.cli.main.commands.pr :as cmd-pr]
+   [ai.miniforge.cli.main.commands.pr-monitor :as cmd-pr-monitor]
    [ai.miniforge.event-stream.interface :as es]
    [ai.miniforge.workflow-resume.interface :as wr]))
 
@@ -76,9 +76,9 @@
     (let [entries (filter #(= ["pr" "monitor"] (:cmds %)) sut/dispatch-table)]
       (is (= 1 (count entries)) "Exactly one pr monitor entry")
       (is (some? (:fn (first entries))) "Has a handler function")
-      (is (= {:author {:alias :a} :poll-interval {:alias :p}}
+      (is (= {:author {:alias :a} :poll-interval {:alias :p} :repo {}}
              (:spec (first entries)))
-          "Spec includes --author and --poll-interval"))))
+          "Spec includes --author, --poll-interval, and --repo"))))
 
 (deftest workflow-status-summary-marks-quiet-running-checkpoints-stale-test
   (testing "running workflows with old last events are surfaced as stale"
@@ -150,14 +150,14 @@
 
 (deftest parse-poll-interval-test
   (testing "Valid interval returns milliseconds"
-    (is (= 30000 (#'cmd-pr/parse-poll-interval "30" test-bounds))))
+    (is (= 30000 (#'cmd-pr-monitor/parse-poll-interval "30" test-bounds))))
   (testing "Nil interval returns nil (domain default applies)"
-    (is (nil? (#'cmd-pr/parse-poll-interval nil test-bounds))))
+    (is (nil? (#'cmd-pr-monitor/parse-poll-interval nil test-bounds))))
   (testing "Out-of-bounds interval returns nil with error message"
     (let [output (with-out-str
-                   (is (nil? (#'cmd-pr/parse-poll-interval "1" test-bounds))))]
+                   (is (nil? (#'cmd-pr-monitor/parse-poll-interval "1" test-bounds))))]
       (is (re-find #"5-3600" output))))
   (testing "Non-numeric interval returns nil with error message"
     (let [output (with-out-str
-                   (is (nil? (#'cmd-pr/parse-poll-interval "abc" test-bounds))))]
+                   (is (nil? (#'cmd-pr-monitor/parse-poll-interval "abc" test-bounds))))]
       (is (re-find #"Invalid" output)))))
