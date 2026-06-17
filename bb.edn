@@ -119,11 +119,19 @@
                (System/exit exit))))}
 
   test:poly
-  {:doc  "Run unit (brick) tests via Polylith (full, serial)"
+  {:doc  "Run ALL brick + project tests via Polylith (full, serial)"
+   ;; `:all` runs every brick's tests + all project tests regardless of
+   ;; change-scope. Plain `poly test` only tests bricks changed since the
+   ;; stable tag — which silently SKIPS a test namespace that is broken but
+   ;; out of scope (e.g. a non-compiling test, or a reverse-dependency test a
+   ;; change breaks). A non-loaded namespace cannot fail, so compile errors
+   ;; and cross-brick breakage passed CI. `:all` loads+runs everything, so the
+   ;; suite actually compiles every test namespace. Matches this task's
+   ;; "full, serial" contract; use `bb test` (since-stable) for fast local runs.
    :task (do
-           (println "🧪 Running tests via poly test...")
-           (println "Command: clojure -M:poly test")
-           (let [exit (run-clojure-stream! "-M:poly" "test")]
+           (println "🧪 Running tests via poly test :all...")
+           (println "Command: clojure -M:poly test :all")
+           (let [exit (run-clojure-stream! "-M:poly" "test" ":all")]
              (when-not (zero? exit)
                (println "❌ Tests failed with exit code:" exit)
                (System/exit exit))))}

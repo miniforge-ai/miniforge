@@ -27,14 +27,14 @@
 
 (deftest binary-for-nil-backend-throws-anomaly
   (testing "nil backend raises :anomalies/incorrect"
-    (let [thrown (try (recovery/binary-for nil) nil (catch ExceptionInfo e e))]
+    (let [thrown (try (#'recovery/binary-for nil) nil (catch ExceptionInfo e e))]
       (is (some? thrown))
       (is (re-find #"backend must not be nil" (.getMessage thrown)))
       (is (= :anomalies/incorrect (:anomaly/category (ex-data thrown)))))))
 
 (deftest binary-for-non-named-backend-throws-anomaly
   (testing "non-keyword non-symbol backend raises :anomalies/incorrect"
-    (let [thrown (try (recovery/binary-for "string-backend")
+    (let [thrown (try (#'recovery/binary-for "string-backend")
                       nil
                       (catch ExceptionInfo e e))]
       (is (some? thrown))

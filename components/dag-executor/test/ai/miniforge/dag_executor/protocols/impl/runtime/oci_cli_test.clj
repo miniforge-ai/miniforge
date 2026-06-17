@@ -373,8 +373,13 @@
       (.start worker)
       (is (= true (deref started? 1000 false)))
       (.interrupt worker)
-      (.join worker 1500)
-      (is (false? (.isAlive worker))))))
+      ;; Join with 4s — comfortably under the 5s child sleep, so a dead worker
+      ;; still proves the interrupt short-circuited the sleep, but with enough
+      ;; headroom that thread-teardown scheduling under a saturated full-suite
+      ;; run doesn't flake (1500ms raced under `poly test :all` load).
+      (.join worker 4000)
+      (is (false? (.isAlive worker))
+          "interrupt must destroy the child and end the worker well before the 5s sleep"))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
