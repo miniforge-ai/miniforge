@@ -61,14 +61,28 @@
   "Changed-files threshold above which a PR is considered medium risk."
   5)
 
+(def optional-functions
+  "Explicitly composed optional CLI providers, keyed by their legacy symbol IDs."
+  {})
+
+(defn register-optional-fn!
+  "Register an optional CLI provider function under `fn-sym`.
+   Optional providers are composed by entry points that know the classpath
+   includes the backing component."
+  [fn-sym f]
+  (when-not (ifn? f)
+    (throw (ex-info "Optional CLI provider must be invokable"
+                    {:fn-sym fn-sym
+                     :provider f})))
+  (alter-var-root #'optional-functions assoc fn-sym f)
+  f)
+
 (defn try-resolve
-  "Attempt to require-resolve a fully-qualified function symbol.
-   Returns the resolved var (a function), or nil when the namespace
-   or var cannot be loaded.  Does NOT call the function."
+  "Look up an explicitly composed optional provider by symbol.
+   Returns the registered function, or nil when no provider is available.
+  Does NOT call the function."
   [fn-sym]
-  (try
-    (requiring-resolve fn-sym)
-    (catch Exception _ nil)))
+  (get optional-functions fn-sym))
 
 (defn exit!
   "Wrapper around System/exit that can be redef'd in tests."
@@ -79,8 +93,8 @@
 ;; Composes Layer 0.
 
 (defn try-resolve-fn
-  "Require-resolve `fn-sym` and immediately apply it to `args`.
-   Returns nil when the namespace or var cannot be loaded."
+  "Look up optional provider `fn-sym` and immediately apply it to `args`.
+   Returns nil when no provider is registered or the provider fails."
   [fn-sym & args]
   (when-let [f (try-resolve fn-sym)]
     (try
