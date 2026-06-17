@@ -120,6 +120,13 @@
 (defn- resume-from-worklist!
   "Load persisted worklist for `repo-path`, prune closed PRs, then run monitor.
 
+   Scope note: the work-list is used as a resume GATE (only resume when a
+   persisted list with still-open PRs exists) and as the POLL-CADENCE source
+   (worklist-poll-ms). The monitor loop itself polls the author's open PRs via
+   pr-poller — the work-list PRs are a subset of that set, not an explicit
+   filter. Strict per-PR scoping would need a pr-lifecycle API that accepts an
+   explicit PR set; tracked as a follow-up.
+
    Return-type contract (see monitor_worklist.clj ns-doc):
      - load-worklist    → schema/success | schema/failure  → checked via schema/failed?
      - prune-closed-prs → WorklistEntry  | anomaly map    → checked via anomaly/anomaly?

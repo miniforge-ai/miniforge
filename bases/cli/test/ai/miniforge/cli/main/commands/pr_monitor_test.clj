@@ -25,7 +25,8 @@
      (c) no-worklist path                  → shared/exit! 1
      (d) no-remote-url path                → shared/exit! 1
      (e) prune anomaly path                → shared/exit! 1
-     (f) nil-author path                   → shared/exit! 1"
+     (f) nil-author path                   → shared/exit! 1
+     (g) fresh --author path               → run-monitor!, no work-list load"
   (:require
    [clojure.test :refer [deftest is testing]]
    [babashka.process :as process]
@@ -60,15 +61,6 @@
    :worklist/updated-at (java.util.Date.)})
 
 (defn- exit-ex [code] (ex-info "exit!" {:code code}))
-
-(defn- capturing-exit
-  "shared/exit! stub that records the exit code and throws so callers stop."
-  []
-  (let [calls (atom [])]
-    {:calls calls
-     :fn    (fn [code]
-               (swap! calls conj code)
-               (throw (exit-ex code)))}))
 
 (defn- capturing-msgs
   "display/print-* stub that records every string."
@@ -232,6 +224,30 @@
       (is (= "/some/repo" (:worktree-path @monitor-opts-seen)))
       (is (= (* 60 1000) (:poll-interval-ms @monitor-opts-seen))
           "poll-interval-ms should derive from the PR entry's :pr/poll-interval (60 s)"))))
+
+(deftest fresh-author-path-skips-worklist-test
+  (testing "(g) --author starts a fresh monitor and never loads a work-list (Copilot #1209)"
+    (let [loaded?           (atom false)
+          monitor-opts-seen (atom nil)
+          loop-author       (atom nil)
+          mon               (fake-monitor)]
+      (with-redefs [pr-lifecycle/load-worklist        (fn [_]
+                                                        (reset! loaded? true)
+                                                        (schema/failure :worklist "should not be called"))
+                    pr-lifecycle/create-pr-monitor    (fn [opts] (reset! monitor-opts-seen opts) mon)
+                    pr-lifecycle/run-pr-monitor-loop  (fn [_monitor author]
+                                                        (reset! loop-author author)
+                                                        {:comments-received 0})
+                    pr-lifecycle/stop-pr-monitor-loop (fn [_] nil)
+                    app-config/pr-monitor-config      (constantly cli-cfg)
+                    display/print-info                (fn [_] nil)
+                    display/print-error               (fn [_] nil)
+                    messages/t                        noop-t]
+        (run-cmd {:author "alice" :repo "/some/repo"}))
+      (is (false? @loaded?) "fresh --author path must NOT load a work-list")
+      (is (= "alice" @loop-author) "monitors the supplied author")
+      (is (= "/some/repo" (:worktree-path @monitor-opts-seen)))
+      (is (= "alice" (:self-author @monitor-opts-seen))))))
 
 (comment
   (clojure.test/run-tests 'ai.miniforge.cli.main.commands.pr-monitor-test)
