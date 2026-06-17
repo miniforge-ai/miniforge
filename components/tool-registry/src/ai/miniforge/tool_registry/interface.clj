@@ -59,6 +59,7 @@
    [ai.miniforge.tool-registry.schema :as schema]
    [ai.miniforge.tool-registry.registry :as registry]
    [ai.miniforge.tool-registry.loader :as loader]
+   [ai.miniforge.tool-registry.lsp.client :as lsp-client]
    [ai.miniforge.tool-registry.lsp.manager :as lsp-manager]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -239,6 +240,11 @@
    Returns LSP client or nil if unavailable."
   [registry tool-id]
   (lsp-manager/get-client registry tool-id))
+
+(defn format-document
+  "Format a document through an LSP client."
+  [client uri options]
+  (lsp-client/format-document client uri options))
 
 (defn list-lsp-servers
   "List all LSP servers with their status.

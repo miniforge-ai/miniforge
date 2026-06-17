@@ -6,6 +6,7 @@
         ai.miniforge/repo-analyzer {:local/root "../repo-analyzer"}
         ai.miniforge/response {:local/root "../response"}
         ai.miniforge/semantic-analyzer {:local/root "../semantic-analyzer"}
+        ai.miniforge/tool-registry {:local/root "../tool-registry"}
         slingshot/slingshot {:mvn/version "0.12.2"}}
  :aliases
  {:test {:extra-paths ["test"]
