@@ -2,7 +2,7 @@
 ;; Copyright 2025-2026 Christopher Lester (christopher@miniforge.ai)
 ;; Licensed under the Apache License, Version 2.0
 
-(ns ai.miniforge.cli.repo-analyzer
+(ns ai.miniforge.repo-analyzer.core
   "Analyze a repository to detect technologies and select policy packs.
 
    All detection rules are data-driven from tech-fingerprints.edn.
@@ -22,7 +22,7 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Fingerprint loading
 
-(def ^:private fingerprints-resource "config/cli/tech-fingerprints.edn")
+(def ^:private fingerprints-resource "repo_analyzer/tech-fingerprints.edn")
 
 (def ^:private always-packs
   "Packs that apply to every repository."

@@ -27,12 +27,12 @@
    [clojure.edn :as edn]
    [clojure.java.io :as io]
    [ai.miniforge.connector-linter.interface :as linter]
+   [ai.miniforge.compliance-scanner.interface :as scanner]
    [ai.miniforge.cli.main.display :as display]
    [ai.miniforge.cli.messages :as messages]
-   [ai.miniforge.cli.repo-analyzer :as analyzer]
-   [ai.miniforge.compliance-scanner.interface :as scanner]
    [ai.miniforge.llm.interface :as llm]
    [ai.miniforge.policy-pack.interface :as policy-pack]
+   [ai.miniforge.repo-analyzer.interface :as analyzer]
    [ai.miniforge.semantic-analyzer.interface :as semantic]))
 
 ;------------------------------------------------------------------------------ Layer 0

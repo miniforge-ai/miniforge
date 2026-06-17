@@ -34,11 +34,11 @@
    [babashka.fs :as fs]
    [babashka.process :as process]
    [clojure.string :as str]
+   [ai.miniforge.response.interface :as response]
    [ai.miniforge.cli.main.commands.shared :as shared]
    [ai.miniforge.cli.main.display :as display]
    [ai.miniforge.cli.messages :as messages]
-   [ai.miniforge.cli.repo-analyzer :as repo-analyzer]
-   [ai.miniforge.response.interface :as response]
+   [ai.miniforge.repo-analyzer.interface :as repo-analyzer]
    [ai.miniforge.schema.interface :as schema]))
 
 ;------------------------------------------------------------------------------ Layer 0

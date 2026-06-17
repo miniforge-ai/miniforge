@@ -75,6 +75,7 @@
         ai.miniforge/improvement {:local/root "../../components/improvement"}
         ai.miniforge/progress-detector {:local/root "../../components/progress-detector"}
         ai.miniforge/reliability {:local/root "../../components/reliability"}
+        ai.miniforge/repo-analyzer {:local/root "../../components/repo-analyzer"}
         ai.miniforge/repo-index {:local/root "../../components/repo-index"}
         ai.miniforge/semantic-analyzer {:local/root "../../components/semantic-analyzer"}
         ai.miniforge/workflow-resume {:local/root "../../components/workflow-resume"}

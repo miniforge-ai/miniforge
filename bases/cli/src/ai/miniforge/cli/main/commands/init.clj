@@ -12,10 +12,10 @@
    Layer 3 — `init-cmd` (public CLI entry)."
   (:require
    [babashka.fs :as fs]
-   [clojure.pprint :as pprint]
    [ai.miniforge.cli.main.display :as display]
    [ai.miniforge.cli.messages :as messages]
-   [ai.miniforge.cli.repo-analyzer :as analyzer]))
+   [ai.miniforge.repo-analyzer.interface :as analyzer]
+   [clojure.pprint :as pprint]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Pure data + helpers with no in-namespace dependencies.
