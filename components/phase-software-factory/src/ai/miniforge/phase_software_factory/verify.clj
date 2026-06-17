@@ -86,7 +86,11 @@
   [output exit-code]
   (cond
     (re-find #"(?i)No changed bricks|nothing to test" output)
-    {:passed? true :test-count 0 :assertion-count 0 :fail-count 0 :error-count 0
+    ;; "Nothing to test" is only a pass when the runner ALSO exited cleanly. A
+    ;; non-zero exit alongside this text means the runner failed to discover or
+    ;; compile the test namespaces (e.g. a load/compile error before any test
+    ;; ran) — that must not be reported as success.
+    {:passed? (zero? exit-code) :test-count 0 :assertion-count 0 :fail-count 0 :error-count 0
      :no-tests? true :output output}
 
     ;; Rust / cargo test
@@ -109,7 +113,13 @@
         (let [test-count  (parse-long (nth ran-match 1))
               fail-count  (parse-long (nth fail-match 1))
               error-count (parse-long (nth fail-match 2))]
-          {:passed? (and (zero? fail-count) (zero? error-count))
+          ;; Exit code is authoritative alongside the parsed counts: a brick
+          ;; whose tests fail to COMPILE (or a runner that exits non-zero for
+          ;; any reason) can still leave a "Ran N tests ... 0 failures, 0
+          ;; errors" line from OTHER bricks in the output. Requiring a zero
+          ;; exit too means such a run fails verify instead of being reported
+          ;; as passing on the text alone.
+          {:passed? (and (zero? fail-count) (zero? error-count) (zero? exit-code))
            :test-count test-count
            :assertion-count (parse-long (nth ran-match 2))
            :fail-count fail-count

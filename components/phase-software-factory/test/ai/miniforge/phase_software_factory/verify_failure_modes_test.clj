@@ -162,6 +162,23 @@
       (is (= 1 (:error-count result)))
       (is (= 0 (:fail-count result))))))
 
+(deftest parse-test-output-exit-code-is-authoritative-test
+  ;; A change-scoped runner can print a clean "Ran N ... 0 failures, 0 errors"
+  ;; line from in-scope bricks while another brick fails to COMPILE and the
+  ;; runner exits non-zero. The parser must not report success on the text
+  ;; alone — exit code is authoritative.
+  (let [clean-text "Ran 5 tests containing 10 assertions.\n0 failures, 0 errors."]
+    (testing "clean counts + zero exit -> pass"
+      (is (true? (:passed? (verify/parse-test-output clean-text 0)))))
+    (testing "clean counts + non-zero exit -> fail"
+      (is (false? (:passed? (verify/parse-test-output clean-text 1)))))
+    (testing "'nothing to test' + zero exit -> pass (legitimately no tests)"
+      (let [r (verify/parse-test-output "No changed bricks to test" 0)]
+        (is (true? (:passed? r)))
+        (is (true? (:no-tests? r)))))
+    (testing "'nothing to test' + non-zero exit -> fail (runner couldn't discover/compile)"
+      (is (false? (:passed? (verify/parse-test-output "nothing to test" 1)))))))
+
 (deftest verify-bounds-unparseable-output-preview-test
   (testing "long unparseable output is bounded in the verify error message"
     (let [run-var (resolve 'ai.miniforge.phase-software-factory.verify/run-tests!)
