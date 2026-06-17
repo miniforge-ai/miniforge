@@ -61,7 +61,7 @@
   ;; Single-PR release key shape (:pr-number/:pr-url/:branch/:commit-sha),
   ;; as built by phase-software-factory/release.clj. Used in tests where the
   ;; specific key shape is not under test.
-  {:pr-number 42 :pr-url "https://github.com/o/r/pull/42" :branch "mf/x" :commit-sha "deadbeef"})
+  {:pr-number 42 :pr-url "https://github.com/org/repo/pull/42" :branch "mf/x" :commit-sha "deadbeef"})
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Private helper tests: pr-url->repo, pr-info->worklist-entry,

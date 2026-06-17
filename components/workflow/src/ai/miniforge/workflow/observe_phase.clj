@@ -227,11 +227,13 @@
              result  (pr-lifecycle/persist-worklist! path entry)]
          (when (and logger (schema/failed? result))
            (log/warn logger :observe :observe/worklist-persist-failed
-                     {:data {:path path}})))
+                     {:data {:path path :remote-url remote-url :result result}})))
        (catch Object e
          (when logger
            (log/warn logger :observe :observe/worklist-persist-failed
-                     {:data {:error (str e)}})))))))
+                     {:data {:error (str e)
+                             :worktree-path worktree-path
+                             :remote-url remote-url}})))))))
 
 (defn enter-observe
   "Execute the Observe phase.
