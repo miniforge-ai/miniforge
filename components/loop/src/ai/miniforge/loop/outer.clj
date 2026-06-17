@@ -146,12 +146,25 @@
 (defn- transition-phase
   "Apply an outer-loop phase transition.
 
-   Returns updated loop state or nil if the transition is forbidden."
+   Returns updated loop state, or nil if the transition is forbidden — the FSM
+   has no such event from the current state (advancing past the terminal
+   :observe phase, rolling back to a later phase, etc.). The FSM raises
+   :anomalies/fsm-unknown-event for a forbidden transition; that one anomaly is
+   converted to the documented nil here (callers — advance-phase, rollback-phase,
+   valid-phase-transition? — branch on nil) rather than letting it escape. Any
+   other failure propagates."
   [loop-state event]
   (let [current-state (phase-fsm-state loop-state)
-        transitioned (fsm/transition phase-machine current-state event)
-        next-phase (fsm/current-state transitioned)]
-    (when (not= (fsm/current-state current-state) next-phase)
+        transitioned (try
+                       (fsm/transition phase-machine current-state event)
+                       (catch clojure.lang.ExceptionInfo e
+                         (if (= :anomalies/fsm-unknown-event
+                                (:anomaly/category (ex-data e)))
+                           nil
+                           (throw e))))
+        next-phase (some-> transitioned fsm/current-state)]
+    (when (and next-phase
+               (not= (fsm/current-state current-state) next-phase))
       (assoc loop-state
              :loop/fsm-state transitioned
              :loop/phase next-phase

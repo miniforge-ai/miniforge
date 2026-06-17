@@ -127,6 +127,12 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        # Full history + tags so Polylith can resolve the stable baseline. The
+        # Test job runs the full `:all` suite (scope-independent), but a shallow
+        # no-tag clone left poly's incremental scope undefined elsewhere and
+        # silently under-tested.
+        with:
+          fetch-depth: 0
 
       - name: Set up Java
         uses: actions/setup-java@v4
