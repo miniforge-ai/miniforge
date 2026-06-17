@@ -1166,3 +1166,73 @@
               collected (sut/dfs-collect graph starts deps-fn
                                         (fn [id _ _ _] id) :visit)]
           (is (= (count visited) (count collected))))))))
+
+;; ---------------------------------------------------------------------------
+;; reachable-count
+;;
+;; Takes a plain adjacency map {node-id [neighbor-ids]} and a start node.
+;; Returns the count of distinct nodes reachable from start, including start.
+;; ---------------------------------------------------------------------------
+
+(defn- ->adj
+  "Convert a fixture graph {node-id {:id _ :deps [...]}} to the plain
+  adjacency map {node-id [neighbor-ids]} that reachable-count expects."
+  [g]
+  (reduce-kv (fn [m k v] (assoc m k (:deps v))) {} g))
+
+;; 1. Empty graph, any start → 0
+(deftest reachable-count-empty-graph
+  (testing "empty adjacency map returns 0 regardless of start"
+    (is (= 0 (sut/reachable-count {} "a")))))
+
+;; 2. Start node absent from graph → 0
+(deftest reachable-count-start-absent
+  (testing "start node not present in adj-map returns 0"
+    (is (= 0 (sut/reachable-count (->adj linear-graph) "z")))))
+
+;; 3. Single node, no edges → 1
+(deftest reachable-count-single-node-no-edges
+  (testing "single node with empty neighbour list counts as 1"
+    (is (= 1 (sut/reachable-count (->adj single-node-graph) "a")))))
+
+;; 4. Single node with self-loop → 1
+(deftest reachable-count-single-node-self-loop
+  (testing "self-loop does not inflate count beyond 1"
+    (is (= 1 (sut/reachable-count (->adj self-cycle-graph) "a")))))
+
+;; 5. Linear chain a→b→c
+(deftest reachable-count-linear-chain
+  (testing "linear chain a→b→c"
+    (let [adj (->adj linear-graph)]
+      (is (= 3 (sut/reachable-count adj "a")))
+      (is (= 2 (sut/reachable-count adj "b")))
+      (is (= 1 (sut/reachable-count adj "c"))))))
+
+;; 6. Diamond graph a→b,c→d → 4 from a (shared node counted once)
+(deftest reachable-count-diamond-graph
+  (testing "diamond graph counts shared node only once"
+    (is (= 4 (sut/reachable-count (->adj diamond-graph) "a")))))
+
+;; 7. Cyclic graph a→b→c→a → terminates and counts 3 from a
+(deftest reachable-count-cyclic-graph
+  (testing "cycle terminates and all 3 nodes are counted from a"
+    (is (= 3 (sut/reachable-count (->adj cyclic-graph) "a")))))
+
+;; 8. Disconnected graph — starting from one component counts only that component
+(deftest reachable-count-disconnected-graph
+  (testing "reachable-count from one component does not cross to the other"
+    (let [adj (->adj disconnected-graph)]
+      (is (= 2 (sut/reachable-count adj "a")))
+      (is (= 2 (sut/reachable-count adj "x"))))))
+
+;; 9. Wide graph (fan-out) root→c1,c2,c3,c4 → 5
+(deftest reachable-count-wide-fan-out
+  (testing "fan-out root with 4 children counts all 5 nodes"
+    (is (= 5 (sut/reachable-count (->adj wide-graph) "root")))))
+
+;; 10. Missing deps — neighbour not present in adj-map is not counted
+(deftest reachable-count-missing-deps
+  (testing "neighbours absent from adj-map are not counted"
+    ;; missing-dep-graph has "a" → ["b" "ghost"]; "ghost" not in map
+    ;; so only "a" and "b" are reachable
+    (is (= 2 (sut/reachable-count (->adj missing-dep-graph) "a")))))
