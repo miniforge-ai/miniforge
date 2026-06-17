@@ -781,22 +781,22 @@
 ;------------------------------------------------------------------------------ Layer 2.5
 ;; Capsule-aware session lifecycle (N11 §6.3-6.4)
 
-(defn- resolve-exec!
-  "Resolve the executor execute! function once. All capsule functions
-   use the :exec! key on the session instead of repeated requiring-resolve."
+(defn- missing-execute-fn!
   []
-  @(requiring-resolve 'ai.miniforge.dag-executor.executor/execute!))
+  (throw (ex-info "Capsule artifact sessions require :execution/execute-fn"
+                  {:missing :execution/execute-fn
+                   :component :agent/artifact-session})))
 
 (defn create-capsule-session!
   "Create an artifact session inside a task capsule.
    Session directory is created inside the capsule's workspace via executor.
    Returns session map with capsule-relative paths and resolved exec! fn.
 
-   Three-arity form resolves execute! from the dag-executor component at runtime.
-   Four-arity form accepts an explicit execute-fn to avoid requiring-resolve
-   at call time (useful in tests and dependency-injection contexts)."
+   Three-arity form fails with a configuration error because agent must not
+   reach upward into dag-executor. Four-arity form accepts the execute-fn
+   injected by workflow."
   ([executor env-id workdir]
-   (create-capsule-session! executor env-id workdir (resolve-exec!)))
+   (create-capsule-session! executor env-id workdir (missing-execute-fn!)))
   ([executor env-id workdir execute-fn]
    (let [exec!       execute-fn
          session-dir (str workdir "/.miniforge-session")
@@ -871,17 +871,23 @@
 
 (defmacro with-capsule-artifact-session
   "Execute body with a capsule-aware artifact session (N11 §6.3).
-   Like with-artifact-session but session files live inside the task capsule."
-  [[session-sym executor env-id workdir] & body]
-  `(let [session# (-> (create-capsule-session! ~executor ~env-id ~workdir)
-                      write-capsule-mcp-config!)
-         ~session-sym session#]
-     (try
-       (let [result# (do ~@body)]
-         {:llm-result result#
-          :artifact (read-capsule-artifact session#)})
-       (finally
-         (cleanup-capsule-session! session#)))))
+   Like with-artifact-session but session files live inside the task capsule.
+   Binding form: [session executor env-id workdir execute-fn]."
+  [[session-sym executor env-id workdir execute-fn] & body]
+  (let [execute-fn-form (or execute-fn
+                            `(throw (ex-info
+                                      "Capsule artifact sessions require :execution/execute-fn"
+                                      {:missing :execution/execute-fn
+                                       :component :agent/artifact-session})))]
+    `(let [session# (-> (create-capsule-session! ~executor ~env-id ~workdir ~execute-fn-form)
+                        write-capsule-mcp-config!)
+           ~session-sym session#]
+       (try
+         (let [result# (do ~@body)]
+           {:llm-result result#
+            :artifact (read-capsule-artifact session#)})
+         (finally
+           (cleanup-capsule-session! session#))))))
 
 (defn cleanup-session!
   "Delete the temporary session directory and clean up injected configs.
@@ -1146,11 +1152,12 @@
    Returns normalized map:
    {:llm-result :artifact :context-misses :pre-session-snapshot :session-mode}"
   [context body-fn]
-  (if (governed? context)
-    (let [executor (:execution/executor context)
-          env-id   (:execution/environment-id context)
-          workdir  (or (:execution/worktree-path context) "/workspace")
-          session  (-> (create-capsule-session! executor env-id workdir)
+    (if (governed? context)
+      (let [executor (:execution/executor context)
+            env-id   (:execution/environment-id context)
+            workdir  (or (:execution/worktree-path context) "/workspace")
+            exec!    (or (:execution/execute-fn context) (missing-execute-fn!))
+            session  (-> (create-capsule-session! executor env-id workdir exec!)
                        write-capsule-mcp-config!)]
       (run-session session body-fn read-capsule-artifact cleanup-capsule-session! :capsule))
     (let [workdir (:execution/worktree-path context)
@@ -1181,7 +1188,8 @@
       (let [executor (:execution/executor context)
             env-id   (:execution/environment-id context)
             workdir  (or (:execution/worktree-path context) "/workspace")
-            session  (-> (create-capsule-session! executor env-id workdir)
+            exec!    (or (:execution/execute-fn context) (missing-execute-fn!))
+            session  (-> (create-capsule-session! executor env-id workdir exec!)
                          write-capsule-mcp-config!)]
         (run session cleanup-capsule-session!))
       (let [workdir (:execution/worktree-path context)

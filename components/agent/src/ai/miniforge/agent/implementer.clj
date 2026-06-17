@@ -719,8 +719,7 @@
   [context session-mode working-dir]
   (let [base-refs (base-ref-candidates context)]
     (if (= :capsule session-mode)
-      (when-let [exec! (or (:execution/execute-fn context)
-                           @(requiring-resolve 'ai.miniforge.dag-executor.executor/execute!))]
+      (when-let [exec! (:execution/execute-fn context)]
         (file-artifacts/collect-worktree-files-via-executor
          exec!
          (:execution/executor context)
@@ -734,12 +733,13 @@
   [context session-mode working-dir pre-session-snapshot]
   (or (collect-promoted-artifact context session-mode working-dir)
       (if (= :capsule session-mode)
-        (file-artifacts/collect-written-files-via-executor
-         pre-session-snapshot
-         @(requiring-resolve 'ai.miniforge.dag-executor.executor/execute!)
-         (:execution/executor context)
-         (:execution/environment-id context)
-         working-dir)
+        (when-let [exec! (:execution/execute-fn context)]
+          (file-artifacts/collect-written-files-via-executor
+           pre-session-snapshot
+           exec!
+           (:execution/executor context)
+           (:execution/environment-id context)
+           working-dir))
         (file-artifacts/collect-written-files pre-session-snapshot
                                               working-dir))))
 
