@@ -79,8 +79,8 @@
 
 (defn- make-test-monitor
   "Build a monitor atom directly, bypassing classpath config and disk I/O.
-   Caller supplies extra-config keys to merge; :event-bus is required for
-   emission assertions."
+   Caller supplies extra-config keys to merge; pass an :event-bus (via
+   extra-config) when asserting on emissions — it defaults to nil otherwise."
   ([] (make-test-monitor {}))
   ([extra-config]
    (atom
@@ -150,7 +150,7 @@
                                           (nil? (:pr/id %)))))]
         (is (= n-iters (count iter-events))
             "one heartbeat per iteration")
-        (is (= [1 2 3] (mapv :iteration iter-events))
+        (is (= (vec (range 1 (inc n-iters))) (mapv :iteration iter-events))
             "iteration values are sequential starting at 1")
         (testing "heartbeat fires even when poll-pr-for-new-comments returns zero comments"
           ;; All no-new-comments stubs return 0; the heartbeat must still appear.

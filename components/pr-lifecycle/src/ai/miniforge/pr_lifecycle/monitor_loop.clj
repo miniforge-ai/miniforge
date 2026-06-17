@@ -252,9 +252,16 @@
           (stop-when-no-open-prs! monitor logger)
 
           :else
-          (let [prs (:prs (:data pr-result))]
-            (run! #(run-pr-cycle! monitor logger %) prs)
-            (finalize-loop-iteration! monitor (count prs))
+          ;; Count PRs actually processed, short-circuiting if the loop is
+          ;; stopped mid-iteration, so :prs-polled reflects work done rather
+          ;; than the open-PR count returned by the poller.
+          (let [prs       (:prs (:data pr-result))
+                processed (reduce (fn [n pr]
+                                    (if (:running? @monitor)
+                                      (do (run-pr-cycle! monitor logger pr) (inc n))
+                                      (reduced n)))
+                                  0 prs)]
+            (finalize-loop-iteration! monitor processed)
             (continue-loop! monitor author poll-interval-ms)))))))
 
 (defn run-monitor-loop
