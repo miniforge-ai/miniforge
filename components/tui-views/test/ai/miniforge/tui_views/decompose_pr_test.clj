@@ -21,10 +21,10 @@
 
    Acceptance criteria verified:
    1. Fetches diff and metadata for the selected PR via GitHub CLI
-   2. Calls pr-decomposer/decompose (via requiring-resolve) with assembled context
+   2. Calls the injected PR decomposition function with assembled context
    3. Returns msg/decomposition-started with real sub-PR proposals on success
    4. Returns msg/decomposition-started with error message on any failure (no exceptions leak)
-   5. Uses requiring-resolve for pr-decomposer dependency (Babashka compat)"
+   5. Leaves composition explicit by taking the decomposition function from the effect"
   (:require
    [clojure.test :refer [deftest testing is]]
    [clojure.string :as str]
@@ -89,13 +89,6 @@
     {:diff sample-diff :detail sample-detail
      :repo "acme/app" :number 42}))
 
-(defn- mock-requiring-resolve
-  "Returns a mock requiring-resolve that returns the given fn for decompose symbol."
-  [decompose-fn]
-  (fn [sym]
-    (when (= sym 'ai.miniforge.pr-decompose.interface/decompose)
-      decompose-fn)))
-
 ;; ---------------------------------------------------------------------------- AC1: Fetches diff and metadata
 
 (deftest handle-decompose-pr-fetches-diff-and-detail-test
@@ -105,25 +98,25 @@
                     (fn [repo number]
                       (reset! fetched-args {:repo repo :number number})
                       {:diff sample-diff :detail sample-detail
-                       :repo repo :number number})
-                    requiring-resolve (mock-requiring-resolve (mock-decompose-success))]
-        (iface/handle-decompose-pr {:pr sample-pr})
+                       :repo repo :number number})]
+        (iface/handle-decompose-pr {:pr sample-pr
+                                    :decompose-fn (mock-decompose-success)})
         (is (= "acme/app" (:repo @fetched-args)))
         (is (= 42 (:number @fetched-args)))))))
 
 (deftest handle-decompose-pr-extracts-changed-files-from-detail-test
   (testing "extracts file paths from the detail response and passes to decompose"
     (let [captured-files (atom nil)]
-      (with-redefs [github/fetch-pr-diff-and-detail (mock-github-success)
-                    requiring-resolve
-                    (mock-requiring-resolve
-                     (fn [_pr _diff files _llm-fn]
-                       (reset! captured-files files)
-                       {:ok? true
-                        :data {:plan sample-plan
-                               :coverage {:covered? true}
-                               :warnings []}}))]
-        (iface/handle-decompose-pr {:pr sample-pr})
+      (with-redefs [github/fetch-pr-diff-and-detail (mock-github-success)]
+        (iface/handle-decompose-pr
+         {:pr sample-pr
+          :decompose-fn
+          (fn [_pr _diff files _llm-fn]
+            (reset! captured-files files)
+            {:ok? true
+             :data {:plan sample-plan
+                    :coverage {:covered? true}
+                    :warnings []}})})
         (is (= ["src/auth.clj" "src/dashboard.clj"] @captured-files))))))
 
 ;; ---------------------------------------------------------------------------- AC2: Calls decompose with assembled context
@@ -131,17 +124,17 @@
 (deftest handle-decompose-pr-calls-decompose-with-pr-and-diff-test
   (testing "passes the PR map and diff text to the decompose function"
     (let [captured (atom nil)]
-      (with-redefs [github/fetch-pr-diff-and-detail (mock-github-success)
-                    requiring-resolve
-                    (mock-requiring-resolve
-                     (fn [pr diff files llm-fn]
-                       (reset! captured {:pr pr :diff diff :files files
-                                         :llm-fn-present? (fn? llm-fn)})
-                       {:ok? true
-                        :data {:plan sample-plan
-                               :coverage {:covered? true}
-                               :warnings []}}))]
-        (iface/handle-decompose-pr {:pr sample-pr})
+      (with-redefs [github/fetch-pr-diff-and-detail (mock-github-success)]
+        (iface/handle-decompose-pr
+         {:pr sample-pr
+          :decompose-fn
+          (fn [pr diff files llm-fn]
+            (reset! captured {:pr pr :diff diff :files files
+                              :llm-fn-present? (fn? llm-fn)})
+            {:ok? true
+             :data {:plan sample-plan
+                    :coverage {:covered? true}
+                    :warnings []}})})
         (is (= sample-pr (:pr @captured)))
         (is (= sample-diff (:diff @captured)))
         (is (= ["src/auth.clj" "src/dashboard.clj"] (:files @captured)))
@@ -151,17 +144,17 @@
 
 (deftest handle-decompose-pr-success-returns-plan-test
   (testing "returns :msg/decomposition-started with the real plan on success"
-    (with-redefs [github/fetch-pr-diff-and-detail (mock-github-success)
-                  requiring-resolve (mock-requiring-resolve (mock-decompose-success))]
-      (let [m (iface/handle-decompose-pr {:pr sample-pr})]
+    (with-redefs [github/fetch-pr-diff-and-detail (mock-github-success)]
+      (let [m (iface/handle-decompose-pr {:pr sample-pr
+                                          :decompose-fn (mock-decompose-success)})]
         (is (= :msg/decomposition-started (msg-type m)))
         (is (= ["acme/app" 42] (:pr-id (msg-payload m))))))))
 
 (deftest handle-decompose-pr-success-has-sub-prs-test
   (testing "successful decomposition includes sub-PR proposals"
-    (with-redefs [github/fetch-pr-diff-and-detail (mock-github-success)
-                  requiring-resolve (mock-requiring-resolve (mock-decompose-success))]
-      (let [m (iface/handle-decompose-pr {:pr sample-pr})
+    (with-redefs [github/fetch-pr-diff-and-detail (mock-github-success)]
+      (let [m (iface/handle-decompose-pr {:pr sample-pr
+                                          :decompose-fn (mock-decompose-success)})
             payload (msg-payload m)]
         (is (= :msg/decomposition-started (msg-type m)))
         (is (some? (:sub-prs payload)))
@@ -169,9 +162,10 @@
 
 (deftest handle-decompose-pr-success-plan-has-expected-fields-test
   (testing "plan payload includes strategy, sub-prs, original-size, coverage"
-    (with-redefs [github/fetch-pr-diff-and-detail (mock-github-success)
-                  requiring-resolve (mock-requiring-resolve (mock-decompose-success))]
-      (let [payload (msg-payload (iface/handle-decompose-pr {:pr sample-pr}))]
+    (with-redefs [github/fetch-pr-diff-and-detail (mock-github-success)]
+      (let [payload (msg-payload (iface/handle-decompose-pr
+                                  {:pr sample-pr
+                                   :decompose-fn (mock-decompose-success)}))]
         ;; The plan is merged into the payload
         (is (= 2 (count (:sub-prs payload))))
         (let [first-sub (first (:sub-prs payload))]
@@ -180,9 +174,10 @@
 
 (deftest handle-decompose-pr-no-longer-returns-stub-message-test
   (testing "does NOT return 'Decomposition analysis not yet wired'"
-    (with-redefs [github/fetch-pr-diff-and-detail (mock-github-success)
-                  requiring-resolve (mock-requiring-resolve (mock-decompose-success))]
-      (let [payload (msg-payload (iface/handle-decompose-pr {:pr sample-pr}))]
+    (with-redefs [github/fetch-pr-diff-and-detail (mock-github-success)]
+      (let [payload (msg-payload (iface/handle-decompose-pr
+                                  {:pr sample-pr
+                                   :decompose-fn (mock-decompose-success)}))]
         (is (not= "Decomposition analysis not yet wired"
                   (:message payload)))))))
 
