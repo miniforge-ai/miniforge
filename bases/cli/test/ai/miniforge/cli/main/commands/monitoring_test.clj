@@ -20,6 +20,7 @@
   (:require
    [clojure.test :refer [deftest is testing]]
    [ai.miniforge.cli.app-config :as app-config]
+   [ai.miniforge.cli.config :as config]
    [ai.miniforge.cli.messages :as messages]
    [ai.miniforge.cli.main.commands.monitoring :as sut]
    [ai.miniforge.cli.main.display :as display]))
@@ -27,6 +28,47 @@
 (defn- exit-ex
   [code]
   (ex-info "exit" {:code code}))
+
+(deftest web-cmd-unavailable-uses-message-catalog-test
+  (testing "Web dashboard is unavailable when the composed launcher is missing"
+    (binding [sut/*web-available?* false
+              sut/*start-web-dashboard!* nil]
+      (with-redefs [config/load-config (constantly {})
+                    messages/t (fn
+                                 ([k]
+                                  (case k
+                                    :web/not-available "WEB-NOT-AVAILABLE"
+                                    :web/requires-jvm "WEB-REQUIRES-JVM"
+                                    (str "UNEXPECTED:" k)))
+                                 ([k params] (str "UNEXPECTED:" k params)))
+                    display/print-error println
+                    sut/exit! (fn [code] (throw (exit-ex code)))]
+        (let [output (with-out-str
+                       (try
+                         (sut/web-cmd {})
+                         (catch clojure.lang.ExceptionInfo e
+                           (is (= 1 (:code (ex-data e)))))))]
+          (is (.contains output "WEB-NOT-AVAILABLE"))
+          (is (.contains output "WEB-REQUIRES-JVM")))))))
+
+(deftest web-cmd-uses-injected-launcher-test
+  (testing "Web startup uses the launcher composed by cli.main"
+    (let [started (atom nil)
+          exit-code (atom nil)]
+      (binding [sut/*web-available?* true
+                sut/*start-web-dashboard!* (fn [opts]
+                                             (reset! started opts)
+                                             (throw (ex-info "stop" {})))]
+        (with-redefs [config/load-config (constantly {:dashboard {:port 9191}})
+                      messages/t (fn
+                                   ([k] (name k))
+                                   ([k params] (str (name k) params)))
+                      display/print-info (fn [& _] nil)
+                      display/print-error (fn [& _] nil)
+                      sut/exit! (fn [code] (reset! exit-code code))]
+          (sut/web-cmd {}))
+        (is (= {:port 9191} @started))
+        (is (= 1 @exit-code))))))
 
 (deftest tui-cmd-unavailable-uses-message-catalog-test
   (testing "TUI unavailable output reads user-facing copy from the message catalog"
