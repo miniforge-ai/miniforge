@@ -33,6 +33,7 @@
   (:require
    [clojure.test :refer [deftest testing is]]
    [clojure.string :as str]
+   [ai.miniforge.tui-views.effect :as effect]
    [ai.miniforge.tui-views.interface :as iface]
    [ai.miniforge.tui-views.persistence :as persistence]
    [ai.miniforge.tui-views.persistence.pr :as persistence-pr]
@@ -443,7 +444,7 @@
 
 (deftest dispatch-effect-routes-decompose-pr-test
   (testing ":decompose-pr routes correctly"
-    (let [m (iface/dispatch-effect nil {:type :decompose-pr :pr (make-pr "r" 1)})]
+    (let [m (iface/dispatch-effect nil (effect/decompose-pr (make-pr "r" 1)))]
       (is (= :msg/decomposition-started (msg-type m))))))
 
 (deftest dispatch-effect-routes-cache-policy-result-test

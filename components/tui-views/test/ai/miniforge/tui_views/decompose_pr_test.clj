@@ -28,6 +28,7 @@
   (:require
    [clojure.test :refer [deftest testing is]]
    [clojure.string :as str]
+   [ai.miniforge.tui-views.effect :as effect]
    [ai.miniforge.tui-views.interface :as iface]
    [ai.miniforge.tui-views.persistence.github :as github]))
 
@@ -235,7 +236,7 @@
         (is (= :msg/decomposition-started (msg-type m)))
         (is (= ["acme/app" 42] (:pr-id (msg-payload m))))
         (is (= [] (:sub-prs (msg-payload m))))
-        (is (str/includes? (:message (msg-payload m)) "not configured"))))))
+        (is (str/includes? (:message (msg-payload m)) ":decompose-fn"))))))
 
 (deftest handle-decompose-pr-decompose-returns-error-test
   (testing "returns error message when decompose pipeline returns {:ok? false}"
@@ -381,9 +382,9 @@
 
 (deftest dispatch-effect-routes-decompose-pr-test
   (testing ":decompose-pr effect type routes to handle-decompose-pr"
-    (with-redefs [github/fetch-pr-diff-and-detail
-                  (fn [_ _] {:diff nil :detail nil :repo "r" :number 1})]
-      (let [m (iface/dispatch-effect nil {:type :decompose-pr :pr sample-pr})]
+    (with-redefs [github/fetch-pr-diff-and-detail (mock-github-success)]
+      (let [m (iface/dispatch-effect nil (effect/decompose-pr sample-pr
+                                                               (mock-decompose-success)))]
         (is (= :msg/decomposition-started (msg-type m)))))))
 
 ;; ---------------------------------------------------------------------------- handle-fetch-pr-diff (related)
