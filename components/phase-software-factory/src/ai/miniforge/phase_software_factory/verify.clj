@@ -90,7 +90,10 @@
     ;; non-zero exit alongside this text means the runner failed to discover or
     ;; compile the test namespaces (e.g. a load/compile error before any test
     ;; ran) — that must not be reported as success.
-    {:passed? (zero? exit-code) :test-count 0 :assertion-count 0 :fail-count 0 :error-count 0
+    ;; A non-zero exit is reflected as one error so the downstream failure
+    ;; message/metrics don't read "0 failures, 0 errors" on a failed run.
+    {:passed? (zero? exit-code) :test-count 0 :assertion-count 0 :fail-count 0
+     :error-count (if (zero? exit-code) 0 1)
      :no-tests? true :output output}
 
     ;; Rust / cargo test

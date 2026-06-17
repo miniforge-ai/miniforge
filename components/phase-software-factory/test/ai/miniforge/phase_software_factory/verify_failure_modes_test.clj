@@ -176,8 +176,10 @@
       (let [r (verify/parse-test-output "No changed bricks to test" 0)]
         (is (true? (:passed? r)))
         (is (true? (:no-tests? r)))))
-    (testing "'nothing to test' + non-zero exit -> fail (runner couldn't discover/compile)"
-      (is (false? (:passed? (verify/parse-test-output "nothing to test" 1)))))))
+    (testing "'nothing to test' + non-zero exit -> fail, reflected as an error (not '0 errors')"
+      (let [r (verify/parse-test-output "nothing to test" 1)]
+        (is (false? (:passed? r)))
+        (is (= 1 (:error-count r)) "a failed run must not report 0 errors")))))
 
 (deftest verify-bounds-unparseable-output-preview-test
   (testing "long unparseable output is bounded in the verify error message"
