@@ -172,9 +172,12 @@
   "Build the Runnable that the scheduler fires every check interval.
 
    When (now − last-event-timestamp) exceeds threshold-ms the task:
-     a. Calls kill-fn (kills the agent subprocess).
-     b. Emits :agent/stream-stalled via event-stream with the measured gap.
-     c. Sets the stalled? atom to true.
+     a. Records the measured gap and sets the stalled? atom — BEFORE killing,
+        so a phase thread interrupted by kill-fn always observes the stall
+        state already set (the reader in enter-implement runs the instant the
+        interrupt unblocks it; recording after the kill is a read race).
+     b. Calls kill-fn (kills the agent subprocess / interrupts the phase thread).
+     c. Emits :agent/stream-stalled via event-stream with the measured gap.
      d. Shuts down the scheduler (one-shot; non-blocking from own thread)."
   [{:keys [^AtomicLong last-event-ts stalled-atom gap-atom
            threshold-ms phase-id backend event-stream workflow-id kill-fn
@@ -189,18 +192,20 @@
                        :stream/gap-threshold-ms threshold-ms
                        :workflow/phase phase-id
                        :agent/backend backend})
-            ;; a. kill the subprocess
+            ;; a. record the measured gap + stalled flag BEFORE killing, so a
+            ;; phase thread that kill-fn interrupts always sees them set when it
+            ;; reads watchdog state the instant the interrupt unblocks it.
+            (clojure.core/reset! gap-atom gap)
+            (clojure.core/reset! stalled-atom true)
+            ;; b. kill the subprocess / interrupt the phase thread
             (try (kill-fn)
                  (catch Exception ex
                    (log/warn logger :stream-watchdog :stream/kill-fn-failed
                              {:workflow/phase phase-id
                               :agent/backend backend
                               :error (ex-message ex)})))
-            ;; b. emit stall event with measured gap (nil-safe)
+            ;; c. emit stall event with measured gap (nil-safe)
             (emit-stall-event! event-stream workflow-id phase-id backend gap logger)
-            ;; c. mark stalled and record the measured gap for the caller
-            (clojure.core/reset! gap-atom gap)
-            (clojure.core/reset! stalled-atom true)
             ;; d. shut down scheduler — non-blocking, safe from own thread
             (.shutdown scheduler))))
       (catch Exception ex
