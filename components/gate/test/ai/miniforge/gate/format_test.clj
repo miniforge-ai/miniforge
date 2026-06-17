@@ -30,6 +30,8 @@
    [ai.miniforge.gate.format :as format-gate]
    [ai.miniforge.gate.interface :as gate]
    [ai.miniforge.response.interface :as response]
+   [ai.miniforge.tool-registry.interface :as tool-registry]
+   [clojure.java.io :as io]
    [clojure.test :refer [deftest is testing]]))
 
 (deftest check-format-returns-canonical-success
@@ -53,3 +55,31 @@
           result (format-gate/check-format artifact {})]
       (is (response/success? result))
       (is (vector? (get-in result [:output :formattable-files]))))))
+
+(deftest repair-format-applies-lsp-text-edits
+  (testing "repair-format writes successful LSP format edits to disk"
+    (let [dir (java.nio.file.Files/createTempDirectory
+               "format-gate-test" (make-array java.nio.file.attribute.FileAttribute 0))
+          src-dir (io/file (.toFile dir) "src")
+          file (io/file src-dir "foo.clj")
+          registry ::registry
+          tool {:tool/id :lsp/clojure
+                :tool/config {:lsp/file-patterns ["**/*.clj"]}}]
+      (.mkdirs src-dir)
+      (spit file "(defn x []\n  1)\n")
+      (with-redefs [tool-registry/find-tools (fn [_ _] [tool])
+                    tool-registry/get-lsp-client (fn [_ _] ::client)
+                    tool-registry/format-document
+                    (fn [_ _ _]
+                      {:success? true
+                       :result [{:range {:start {:line 0 :character 0}
+                                         :end {:line 1 :character 4}}
+                                 :newText "(defn x []\n  2)"}]})]
+        (let [result (format-gate/repair-format
+                      {:code/files [{:path "src/foo.clj"}]}
+                      []
+                      {:execution/worktree-path (.getPath (.toFile dir))
+                       :tool-registry registry})]
+          (is (response/success? result))
+          (is (= ["src/foo.clj"] (get-in result [:output :formatted])))
+          (is (= "(defn x []\n  2)\n" (slurp file))))))))
