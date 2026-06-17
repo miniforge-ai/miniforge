@@ -23,14 +23,18 @@
    This is the N2 §7 implementation. The Observe phase is the final
    phase of the standard SDLC workflow: plan → implement → verify →
    review → release → observe."
-  (:require [ai.miniforge.logging.interface :as log]
+  (:require [ai.miniforge.clock.interface :as clock]
+            [ai.miniforge.config.interface :as config]
+            [ai.miniforge.logging.interface :as log]
             [ai.miniforge.phase.interface :as phase]
             [ai.miniforge.pr-lifecycle.interface :as pr-lifecycle]
             [ai.miniforge.response.interface :as response]
             [ai.miniforge.schema.interface :as schema]
+            [babashka.process :as process]
             [clojure.edn :as edn]
             [clojure.java.io :as io]
-            [clojure.string :as str]))
+            [clojure.string :as str]
+            [slingshot.slingshot :refer [try+]]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Config loading + defaults
@@ -88,6 +92,49 @@
 (phase/register-phase-defaults! :observe default-config)
 
 ;------------------------------------------------------------------------------ Layer 1
+;; Pure worklist helpers
+
+(def ^:private ms-per-second
+  "Milliseconds per second. Converts poll-interval-ms to the integer-seconds
+   value the worklist entry stores under :pr/poll-interval."
+  1000)
+
+(defn- pr-url->repo
+  "Extract `owner/repo` from a GitHub-style PR URL, or nil."
+  [pr-url]
+  (when (string? pr-url)
+    (let [parts (str/split pr-url #"/")]
+      (when-let [pull-idx (some #(when (= "pull" (nth parts % nil)) %)
+                                (range (count parts)))]
+        (when (>= pull-idx 2)
+          (str (nth parts (- pull-idx 2))
+               "/"
+               (nth parts (dec pull-idx))))))))
+
+(defn- pr-info->worklist-entry
+  "Map a pr-info map to a WorklistPrEntry. Returns nil when required
+   fields (url, number, repo) cannot be resolved. Accepts both the
+   `:pr/url`/`:pr/number` (DAG) and `:pr-url`/`:pr-number` (release)
+   key shapes. poll-interval-ms and abandon-after-hours travel from the
+   resolved monitor-config — no operational literal is introduced here.
+
+   `now` is a java.util.Date stamped by the caller; never calls the
+   clock internally so tests can pin the timestamp to a fixed value."
+  [pr-info poll-interval-ms abandon-after-hours now]
+  (let [url    (or (:pr/url pr-info) (:pr-url pr-info))
+        number (some-> (or (:pr/number pr-info) (:pr-number pr-info) (:pr/id pr-info)) int)
+        repo   (or (:pr/repo pr-info) (pr-url->repo url))]
+    (when (and url number repo)
+      (cond-> {:pr/url      url
+               :pr/number   number
+               :pr/repo     repo
+               :pr/added-at now}
+        poll-interval-ms
+        (assoc :pr/poll-interval (int (/ poll-interval-ms ms-per-second)))
+        abandon-after-hours
+        (assoc :pr/abandon-after-hours (int abandon-after-hours))))))
+
+;------------------------------------------------------------------------------ Layer 2
 ;; Interceptor implementation
 
 (defn- resolve-monitor-config
@@ -139,6 +186,55 @@
                                 (get-in ctx [:execution/phase-results :release]))]
               [pr-info]))))
 
+(defn- remote-origin-url
+  "Shell `git config --get remote.origin.url` in worktree-path.
+   Returns the trimmed URL string, or nil on blank/nil path or process failure."
+  [worktree-path]
+  (when-not (str/blank? worktree-path)
+    (try+
+     (let [proc @(process/process ["git" "config" "--get" "remote.origin.url"]
+                                  {:dir worktree-path :out :string :err :string :throw false})]
+       (when (zero? (:exit proc))
+         (str/trim (:out proc))))
+     (catch Object _ nil))))
+
+(defn- try-persist-worklist!
+  "Best-effort: persist the PR monitor worklist before detaching the
+   monitor future. Derives the repo key from the git remote origin URL,
+   resolves the worklist path under `config/miniforge-home`, and writes
+   the entry. Logs a warning on failure but never throws — the in-process
+   monitor continues regardless. All operational values (poll-interval,
+   abandon-after-hours) come from the already-resolved monitor-config.
+
+   Timestamps are obtained from `clock/now-ms` so tests can pin them
+   via `with-redefs`. The self-author is not persisted — resume re-derives
+   it from the git login (`current-github-login`), matching how
+   resolve-monitor-config resolves it here."
+  [monitor-config pr-infos logger]
+  (let [worktree-path  (:worktree-path monitor-config)
+        poll-ms        (:poll-interval-ms monitor-config)
+        abandon-hours  (:abandon-after-hours monitor-config)
+        now            (java.util.Date. (clock/now-ms))
+        remote-url     (remote-origin-url worktree-path)]
+    (when remote-url
+      (try+
+       (let [rkey    (pr-lifecycle/worklist-repo-key remote-url)
+             path    (pr-lifecycle/worklist-path (config/miniforge-home) rkey)
+             entries (keep #(pr-info->worklist-entry % poll-ms abandon-hours now) pr-infos)
+             entry   {:worklist/repo-key   rkey
+                      :worklist/prs        (vec entries)
+                      :worklist/updated-at now}
+             result  (pr-lifecycle/persist-worklist! path entry)]
+         (when (and logger (schema/failed? result))
+           (log/warn logger :observe :observe/worklist-persist-failed
+                     {:data {:path path :remote-url remote-url :result result}})))
+       (catch Object e
+         (when logger
+           (log/warn logger :observe :observe/worklist-persist-failed
+                     {:data {:error (str e)
+                             :worktree-path worktree-path
+                             :remote-url remote-url}})))))))
+
 (defn enter-observe
   "Execute the Observe phase.
 
@@ -150,6 +246,10 @@
    must not block the workflow thread. The future is exposed on ctx at
    `:execution/pr-monitor-future` for a long-lived deployment to await or
    cancel; a one-shot run completes the SDLC and exits.
+
+   Before detaching the monitor future, the PR worklist is persisted to
+   disk (best-effort). This enables resume across process restarts without
+   holding state in memory.
 
    Skips (status :skipped) when there are no PRs to observe or no
    self-author can be resolved.
@@ -185,7 +285,13 @@
                        (response/success
                         {:observe/status :skipped
                          :observe/reason "No self-author resolved (gh unauthenticated?) — cannot poll PRs"})))
-         (let [monitor (pr-lifecycle/create-pr-monitor monitor-config)
+         (let [monitor       (pr-lifecycle/create-pr-monitor monitor-config)
+               ;; Persist the worklist before detaching the future so a
+               ;; process restart can resume monitoring without re-running
+               ;; the full SDLC. Best-effort — failure is logged but the
+               ;; in-process monitor continues regardless. try-persist-worklist!
+               ;; enforces its own never-throws contract via try+.
+               _             (try-persist-worklist! monitor-config pr-infos logger)
                ;; Run the monitor OFF the workflow thread. The PR-monitor loop
                ;; polls for up to :abandon-after-hours (72h by default), so a
                ;; synchronous call stalls the workflow at :observe for days and
@@ -240,7 +346,7 @@
   [ctx ex]
   (phase/handle-error ctx ex 0 false))
 
-;------------------------------------------------------------------------------ Layer 2
+;------------------------------------------------------------------------------ Layer 3
 ;; Registry method
 
 (defmethod phase/get-phase-interceptor-method :observe
@@ -269,5 +375,18 @@
   ;; :execution/event-bus — PR lifecycle event bus
   ;; :execution/self-author — miniforge's GitHub login
   ;; :config :pr-monitor/* — monitor config overrides
+
+  ;; Worklist helper examples
+  (pr-url->repo "https://github.com/org/repo/pull/42")
+  ;; => "org/repo"
+
+  (pr-info->worklist-entry {:pr-url "https://github.com/org/repo/pull/42"
+                            :pr-number 42}
+                           60000
+                           72
+                           (java.util.Date.))
+  ;; => {:pr/url "..." :pr/number 42 :pr/repo "org/repo"
+  ;;     :pr/added-at #inst "..." :pr/poll-interval 60
+  ;;     :pr/abandon-after-hours 72}
 
   :leave-this-here)
