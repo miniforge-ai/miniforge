@@ -684,6 +684,12 @@
                  "components/connector-retry/resources"
                  "components/connector-linter/src"
                  "components/connector-linter/resources"
+                 ;; gate/pre_verify_lint requires repo-analyzer.interface
+                 ;; directly (#1170/#1212); without these the bb `miniforge run`
+                 ;; classpath can't load the gate and the dogfood CLI fails to
+                 ;; start. CI doesn't run `bb miniforge run`, so it went unseen.
+                 "components/repo-analyzer/src"
+                 "components/repo-analyzer/resources"
                  "components/semantic-analyzer/src"
                  "components/semantic-analyzer/resources"
                  "components/failure-classifier/src"
