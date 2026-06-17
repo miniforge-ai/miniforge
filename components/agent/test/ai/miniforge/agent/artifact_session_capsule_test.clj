@@ -24,7 +24,6 @@
    [clojure.test :refer [deftest testing is]]
    [clojure.string :as str]
    [ai.miniforge.agent.artifact-session :as session]
-   [ai.miniforge.dag-executor.executor :as executor]
    [ai.miniforge.dag-executor.result :as result]))
 
 ;------------------------------------------------------------------------------ helpers
@@ -117,51 +116,54 @@
 
 (deftest with-session-governed-mode-test
   (testing "governed mode with executor uses capsule session"
-    (let [log (atom [])]
-      (with-redefs [executor/execute! (mock-execute! log)]
-        (let [context {:execution/mode :governed
-                       :execution/executor :mock-executor
-                       :execution/environment-id "env-123"
-                       :execution/worktree-path capsule-workdir}
-              result (session/with-session context
-                       (fn [session]
-                         (is (true? (:capsule? session)))
-                         (is (= capsule-session-dir (:dir session)))
-                         (is (= :mock-executor (:executor session)))
-                         :capsule-response))]
-          (is (= :capsule-response (:llm-result result)))
-          (is (= :capsule (:session-mode result)))
-          (is (nil? (:context-misses result)))
-          (is (map? (:pre-session-snapshot result)))
-          ;; Should have executed mkdir, config writes, and cleanup
-          (is (pos? (count @log))))))))
+    (let [log (atom [])
+          exec! (mock-execute! log)
+          context {:execution/mode :governed
+                   :execution/executor :mock-executor
+                   :execution/environment-id "env-123"
+                   :execution/worktree-path capsule-workdir
+                   :execution/execute-fn exec!}
+          result (session/with-session context
+                   (fn [session]
+                     (is (true? (:capsule? session)))
+                     (is (= capsule-session-dir (:dir session)))
+                     (is (= :mock-executor (:executor session)))
+                     :capsule-response))]
+      (is (= :capsule-response (:llm-result result)))
+      (is (= :capsule (:session-mode result)))
+      (is (nil? (:context-misses result)))
+      (is (map? (:pre-session-snapshot result)))
+      ;; Should have executed mkdir, config writes, and cleanup
+      (is (pos? (count @log))))))
 
 (deftest with-session-governed-reads-artifact-test
   (testing "governed mode reads and parses artifact from capsule"
-    (let [log (atom [])]
-      (with-redefs [executor/execute! (mock-execute-with-artifact! log)]
-        (let [context {:execution/mode :governed
-                       :execution/executor :mock
-                       :execution/environment-id "env-456"
-                       :execution/worktree-path capsule-workdir}
-              result (session/with-session context
-                       (fn [_session] :done))]
-          (is (some? (:artifact result)))
-          (is (uuid? (:code/id (:artifact result)))))))))
+    (let [log (atom [])
+          exec! (mock-execute-with-artifact! log)
+          context {:execution/mode :governed
+                   :execution/executor :mock
+                   :execution/environment-id "env-456"
+                   :execution/worktree-path capsule-workdir
+                   :execution/execute-fn exec!}
+          result (session/with-session context
+                   (fn [_session] :done))]
+      (is (some? (:artifact result)))
+      (is (uuid? (:code/id (:artifact result)))))))
 
 (deftest with-session-governed-cleanup-on-exception-test
   (testing "capsule session cleans up even on exception"
     (let [log (atom [])
+          exec! (mock-execute! log)
           context {:execution/mode :governed
                    :execution/executor :mock
                    :execution/environment-id "env-789"
-                   :execution/worktree-path capsule-workdir}]
-      (with-redefs [executor/execute! (mock-execute! log)]
-        (is (thrown? Exception
-              (session/with-session context
-                (fn [_session]
-                  (throw (ex-info "test error" {}))))))
-        (is (some #(= capsule-cleanup-command %) @log))))))
+                   :execution/worktree-path capsule-workdir
+                   :execution/execute-fn exec!}]
+      (is (thrown? Exception
+            (session/with-session context
+              (fn [_session]
+                (throw (ex-info "test error" {}))))))
+      (is (some #(= capsule-cleanup-command %) @log)))))
 
 ;------------------------------------------------------------------------------ Layer 2
 ;; Context cache dispatch tests
