@@ -17,7 +17,7 @@
 ;; limitations under the License.
 
 (ns ai.miniforge.phase.telemetry
-  "Soft-dependency telemetry helpers for phase implementations.
+  "Telemetry helpers for phase implementations.
 
    Provides five capabilities for phase interceptors:
    1. Streaming callbacks — relay agent LLM chunks to event-stream subscribers
@@ -26,9 +26,10 @@
    4. Milestone transitions — emit milestone-reached events on successful phases
    5. Event-stream resolution — locate the stream in varied execution contexts
 
-   All functions are safe no-ops when the event-stream component is absent
-   (soft dependency via requiring-resolve)."
-)
+   All functions are safe no-ops when the event stream is absent from the
+   execution context, and when event-stream publishing fails."
+  (:require
+   [ai.miniforge.event-stream.interface :as event-stream]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Event-stream resolution
@@ -62,8 +63,7 @@
   "Publish an event to the stream, swallowing errors to avoid breaking phases."
   [stream event]
   (try
-    (let [publish-fn (requiring-resolve 'ai.miniforge.event-stream.interface/publish!)]
-      (publish-fn stream event))
+    (event-stream/publish! stream event)
     (catch Exception _ nil)))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -72,19 +72,17 @@
 (defn create-streaming-callback
   "Create an event-stream backed streaming callback for a phase agent.
 
-   Returns nil when the execution context has no event stream or the
-   event-stream component is not available."
+   Returns nil when the execution context has no event stream, or when callback
+   construction fails."
   [ctx agent-id]
   (when-let [stream (resolve-event-stream ctx)]
-    (when-let [create-cb (try
-                           (requiring-resolve
-                            'ai.miniforge.event-stream.interface/create-streaming-callback)
-                           (catch Exception _ nil))]
-      (create-cb stream
-                 (resolve-workflow-id ctx)
-                 agent-id
-                 {:print? (not (:quiet ctx))
-                  :quiet? (boolean (:quiet ctx))}))))
+    (try
+      (event-stream/create-streaming-callback stream
+                                              (resolve-workflow-id ctx)
+                                              agent-id
+                                              {:print? (not (:quiet ctx))
+                                               :quiet? (boolean (:quiet ctx))})
+      (catch Exception _ nil))))
 
 (defn create-streaming-callback-or-noop
   "Create a streaming callback, or a no-op function if event stream is unavailable.
@@ -109,8 +107,8 @@
    Also emits a :phase/milestone-started event marking the phase as an
    in-progress milestone checkpoint.
 
-   Safe no-op when no event stream is available or the event-stream
-   component cannot be resolved. Called from phase :enter functions.
+   Safe no-op when no event stream is available or publishing fails.
+   Called from phase :enter functions.
 
    Arguments:
    - ctx      — execution context map
@@ -119,9 +117,7 @@
   (when-let [stream (resolve-event-stream ctx)]
     (let [workflow-id (resolve-workflow-id ctx)]
       (try
-        (let [phase-started-fn (requiring-resolve
-                                 'ai.miniforge.event-stream.interface/phase-started)
-              event            (phase-started-fn stream workflow-id phase-kw)]
+        (let [event (event-stream/phase-started stream workflow-id phase-kw)]
           (safe-publish! stream event))
         (catch Exception _ nil)))
     ;; Milestone checkpoint: phase start = milestone start
@@ -134,8 +130,8 @@
    - On :success — emits :phase/milestone-completed and :workflow/milestone-reached
    - On any other outcome — emits :phase/milestone-failed
 
-   Safe no-op when no event stream is available or the event-stream
-   component cannot be resolved. Called from phase :leave functions.
+   Safe no-op when no event stream is available or publishing fails.
+   Called from phase :leave functions.
 
    Arguments:
    - ctx      — execution context map
@@ -146,9 +142,7 @@
   (when-let [stream (resolve-event-stream ctx)]
     (let [workflow-id (resolve-workflow-id ctx)]
       (try
-        (let [phase-completed-fn (requiring-resolve
-                                   'ai.miniforge.event-stream.interface/phase-completed)
-              event              (phase-completed-fn stream workflow-id phase-kw result)]
+        (let [event (event-stream/phase-completed stream workflow-id phase-kw result)]
           (safe-publish! stream event))
         (catch Exception _ nil))
       ;; Milestone transitions: success = completed, anything else = failed
@@ -168,9 +162,7 @@
   (when-let [stream (resolve-event-stream ctx)]
     (let [workflow-id (resolve-workflow-id ctx)]
       (try
-        (let [agent-started-fn (requiring-resolve
-                                 'ai.miniforge.event-stream.interface/agent-started)
-              event            (agent-started-fn stream workflow-id agent-id)]
+        (let [event (event-stream/agent-started stream workflow-id agent-id)]
           (safe-publish! stream event))
         (catch Exception _ nil)))))
 
@@ -181,9 +173,7 @@
   (when-let [stream (resolve-event-stream ctx)]
     (let [workflow-id (resolve-workflow-id ctx)]
       (try
-        (let [agent-completed-fn (requiring-resolve
-                                   'ai.miniforge.event-stream.interface/agent-completed)
-              event              (agent-completed-fn stream workflow-id agent-id)]
+        (let [event (event-stream/agent-completed stream workflow-id agent-id)]
           (safe-publish! stream event))
         (catch Exception _ nil)))))
 
@@ -196,8 +186,7 @@
    Called automatically from emit-phase-completed! when :outcome is :success.
    Can also be called directly to mark an explicit milestone transition.
 
-   Safe no-op when no event stream is available or the event-stream
-   component cannot be resolved.
+   Safe no-op when no event stream is available or publishing fails.
 
    Arguments:
    - ctx      — execution context map
@@ -207,9 +196,7 @@
   (when-let [stream (resolve-event-stream ctx)]
     (let [workflow-id (resolve-workflow-id ctx)]
       (try
-        (let [milestone-reached-fn (requiring-resolve
-                                     'ai.miniforge.event-stream.interface/milestone-reached)
-              event                (milestone-reached-fn stream workflow-id phase-kw)]
+        (let [event (event-stream/milestone-reached stream workflow-id phase-kw)]
           (safe-publish! stream event))
         (catch Exception _ nil)))))
 
@@ -228,9 +215,7 @@
   (when-let [stream (resolve-event-stream ctx)]
     (let [workflow-id (resolve-workflow-id ctx)]
       (try
-        (let [constructor (requiring-resolve
-                            'ai.miniforge.event-stream.interface/milestone-started)
-              event       (constructor stream workflow-id phase-kw)]
+        (let [event (event-stream/milestone-started stream workflow-id phase-kw)]
           (safe-publish! stream event))
         (catch Exception _ nil)))))
 
@@ -249,10 +234,11 @@
   (when-let [stream (resolve-event-stream ctx)]
     (let [workflow-id (resolve-workflow-id ctx)]
       (try
-        (let [constructor (requiring-resolve
-                            'ai.miniforge.event-stream.interface/milestone-completed)
-              event       (constructor stream workflow-id phase-kw
-                                       (str (name phase-kw) " milestone completed"))]
+        (let [event (event-stream/milestone-completed
+                     stream
+                     workflow-id
+                     phase-kw
+                     (str (name phase-kw) " milestone completed"))]
           (safe-publish! stream event))
         (catch Exception _ nil)))))
 
@@ -273,9 +259,7 @@
           reason      (or (get-in result [:error :message])
                           (str (name phase-kw) " milestone failed"))]
       (try
-        (let [constructor (requiring-resolve
-                            'ai.miniforge.event-stream.interface/milestone-failed)
-              event       (constructor stream workflow-id phase-kw reason)]
+        (let [event (event-stream/milestone-failed stream workflow-id phase-kw reason)]
           (safe-publish! stream event))
         (catch Exception _ nil)))))
 
