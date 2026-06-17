@@ -10,7 +10,8 @@
         ai.miniforge/repo-index {:local/root "../repo-index"}
         ai.miniforge/context-pack {:local/root "../context-pack"}
         ai.miniforge/response {:local/root "../response"}
-        ai.miniforge/release-executor {:local/root "../release-executor"}}
+        ai.miniforge/release-executor {:local/root "../release-executor"}
+        ai.miniforge/workflow {:local/root "../workflow"}}
  :aliases
  {:test {:extra-paths ["test"]
          :extra-deps {babashka/process {:mvn/version "0.5.22"}}}}}
