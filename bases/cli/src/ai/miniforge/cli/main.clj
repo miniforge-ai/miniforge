@@ -117,16 +117,49 @@
 (register-artifact-providers!)
 (register-policy-pack-providers!)
 
+(defn- optional-web-launcher
+  "Compose the dashboard command when the product includes web-dashboard."
+  []
+  (when-let [start! (optional-var 'ai.miniforge.web-dashboard.interface 'start!)]
+    (fn [{:keys [port]}]
+      (let [event-stream (es/create-event-stream)
+            create-pr-manager (optional-var 'ai.miniforge.pr-train.interface
+                                            'create-manager)
+            create-repo-manager (optional-var 'ai.miniforge.repo-dag.interface
+                                              'create-manager)
+            pr-train-manager (when create-pr-manager
+                               (try
+                                 (create-pr-manager)
+                                 (catch Exception e
+                                   (println (messages/t :web/pr-train-warning
+                                                        {:error (.getMessage e)}))
+                                   nil)))
+            repo-dag-manager (when create-repo-manager
+                               (try
+                                 (create-repo-manager)
+                                 (catch Exception e
+                                   (println (messages/t :web/repo-dag-warning
+                                                        {:error (.getMessage e)}))
+                                   nil)))]
+        (start! {:port port
+                 :event-stream event-stream
+                 :pr-train-manager pr-train-manager
+                 :repo-dag-manager repo-dag-manager})))))
+
+(def web-launcher
+  (optional-web-launcher))
+
+(def web-available?
+  (some? web-launcher))
+
+(alter-var-root #'cmd-monitoring/*web-available?* (constantly web-available?))
+(alter-var-root #'cmd-monitoring/*start-web-dashboard!* (constantly web-launcher))
+
 ;; TUI components loaded conditionally (only in JVM/jlink bundled runtime).
 ;; This is an optional composition seam: miniforge-core includes the CLI
 ;; without bundling the JVM TUI component.
 (def tui-launcher
-  (try
-    (require '[ai.miniforge.event-stream.interface :as es])
-    (require '[ai.miniforge.tui-views.interface :as tui])
-    (some-> (find-ns 'ai.miniforge.tui-views.interface)
-            (ns-resolve 'start-standalone-tui!))
-    (catch Throwable _ nil)))
+  (optional-var 'ai.miniforge.tui-views.interface 'start-standalone-tui!))
 
 (def tui-available?
   (some? tui-launcher))

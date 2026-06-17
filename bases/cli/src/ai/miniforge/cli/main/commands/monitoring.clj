@@ -22,9 +22,9 @@
    [babashka.process :as process]
    [clojure.string :as str]
    [ai.miniforge.cli.app-config :as app-config]
-   [ai.miniforge.cli.messages :as messages]
+   [ai.miniforge.cli.config :as config]
    [ai.miniforge.cli.main.display :as display]
-   [ai.miniforge.cli.config :as config]))
+   [ai.miniforge.cli.messages :as messages]))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Web dashboard command
@@ -33,6 +33,12 @@
   [code]
   (System/exit code))
 
+(def ^:dynamic *web-available?* false)
+
+(def ^:dynamic *start-web-dashboard!*
+  "Injected JVM dashboard launcher. Nil when the dashboard component is not on the classpath."
+  nil)
+
 (defn web-cmd
   "Start web dashboard for workflow monitoring."
   [opts]
@@ -40,50 +46,15 @@
         port (or port
                  (get-in (config/load-config) [:dashboard :port])
                  7878)]
-    (try
-      ;; Conditionally require web-dashboard (may not be on classpath in Babashka)
-      (require '[ai.miniforge.web-dashboard.interface :as dashboard])
-      (require '[ai.miniforge.event-stream.interface :as es])
-
-      (let [dashboard-ns (find-ns 'ai.miniforge.web-dashboard.interface)
-            es-ns (find-ns 'ai.miniforge.event-stream.interface)]
-        (when-not (and dashboard-ns es-ns)
-          (display/print-error (messages/t :web/not-available))
-          (println (messages/t :web/requires-jvm))
-          (exit! 1))
-
-        (let [start! (ns-resolve dashboard-ns 'start!)
-              create-stream (ns-resolve es-ns 'create-event-stream)
-              event-stream (create-stream)
-
-              ;; Create PR train manager
-              pr-train-manager (try
-                                 (require '[ai.miniforge.pr-train.interface :as pr-train])
-                                 (when-let [pr-ns (find-ns 'ai.miniforge.pr-train.interface)]
-                                   (when-let [create-fn (ns-resolve pr-ns 'create-manager)]
-                                     (create-fn)))
-                                 (catch Exception e
-                                   (println (messages/t :web/pr-train-warning
-                                                        {:error (.getMessage e)}))
-                                   nil))
-
-              ;; Create repo DAG manager
-              repo-dag-manager (try
-                                 (require '[ai.miniforge.repo-dag.interface :as repo-dag])
-                                 (when-let [dag-ns (find-ns 'ai.miniforge.repo-dag.interface)]
-                                   (when-let [create-fn (ns-resolve dag-ns 'create-manager)]
-                                     (create-fn)))
-                                 (catch Exception e
-                                   (println (messages/t :web/repo-dag-warning
-                                                        {:error (.getMessage e)}))
-                                   nil))
-
-              url (str "http://localhost:" port)]
+    (if-not (and *web-available?* *start-web-dashboard!*)
+      (do
+        (display/print-error (messages/t :web/not-available))
+        (println (messages/t :web/requires-jvm))
+        (exit! 1))
+      (try
+        (let [url (str "http://localhost:" port)]
           (display/print-info (messages/t :web/starting {:port port}))
-          (start! {:port port
-                   :event-stream event-stream
-                   :pr-train-manager pr-train-manager
-                   :repo-dag-manager repo-dag-manager})
+          (*start-web-dashboard!* {:port port})
           (println)
           (println (str "  " url))
           (println)
@@ -102,21 +73,21 @@
               (try
                 (process/sh "open" url)
                 (catch Exception _e nil))
-              @(promise)))))  ; Block until interrupted
-      (catch java.net.BindException _e
-        (display/print-error (messages/t :web/port-in-use {:port port}))
-        (println)
-        (println (messages/t :web/solutions))
-        (println (messages/t :web/use-different-port
-                             {:command (app-config/command-string "web --port"
-                                                                  (str (inc port)))}))
-        (println (messages/t :web/kill-port-header {:port port}))
-        (println (messages/t :web/kill-port-command {:port port}))
-        (exit! 1))
-      (catch Exception e
-        (display/print-error (messages/t :web/start-failed
-                                         {:error (ex-message e)}))
-        (exit! 1)))))
+              @(promise))))  ; Block until interrupted
+        (catch java.net.BindException _e
+          (display/print-error (messages/t :web/port-in-use {:port port}))
+          (println)
+          (println (messages/t :web/solutions))
+          (println (messages/t :web/use-different-port
+                               {:command (app-config/command-string "web --port"
+                                                                    (str (inc port)))}))
+          (println (messages/t :web/kill-port-header {:port port}))
+          (println (messages/t :web/kill-port-command {:port port}))
+          (exit! 1))
+        (catch Exception e
+          (display/print-error (messages/t :web/start-failed
+                                           {:error (ex-message e)}))
+          (exit! 1))))))
 
 ;; TUI availability and launcher are composed by the parent CLI namespace.
 (def ^:dynamic *tui-available?* false)

@@ -983,10 +983,7 @@
           es (or event-stream
                  (when-not dashboard-url
                    (try
-                     (require '[ai.miniforge.event-stream.interface :as es])
-                     (when-let [es-ns (find-ns 'ai.miniforge.event-stream.interface)]
-                       (when-let [create-fn (ns-resolve es-ns 'create-event-stream)]
-                         (create-fn)))
+                     (es/create-event-stream)
                      (catch Exception _ nil))))]
       (display/print-workflow-header workflow-id version quiet)
       (let [workflow-input (context/resolve-input opts)
