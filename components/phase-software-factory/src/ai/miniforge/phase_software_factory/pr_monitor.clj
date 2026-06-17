@@ -25,7 +25,8 @@
    Agent: none (orchestration only)
    Default gates: none"
   (:require [ai.miniforge.phase.interface :as phase]
-            [ai.miniforge.response.interface :as response]))
+            [ai.miniforge.response.interface :as response]
+            [ai.miniforge.workflow.interface.dag-prs :as dag-prs]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Defaults
@@ -60,11 +61,7 @@
                                                          :pr-monitor/reason "No PRs from DAG"})))
 
       ;; Assemble train and monitor
-      (let [;; Resolve at runtime to avoid circular deps
-            create-train (requiring-resolve 'ai.miniforge.workflow.dag-train/create-train-from-dag-result)
-            monitor-dag-prs (requiring-resolve 'ai.miniforge.workflow.dag-monitor/monitor-dag-prs)
-
-            plan-tasks (get-in ctx [:execution/phase-results :plan :artifacts 0 :plan/tasks]
+      (let [plan-tasks (get-in ctx [:execution/phase-results :plan :artifacts 0 :plan/tasks]
                                [])
             dag-result (get-in ctx [:execution/dag-result])
             logger (get-in ctx [:execution/logger])
@@ -72,16 +69,18 @@
                               (get-in ctx [:worktree-path]))
 
             ;; Build train from DAG result
-            train-state (create-train (assoc dag-result :pr-infos pr-infos)
-                                       plan-tasks
-                                       :logger logger)
+            train-state (dag-prs/create-train-from-dag-result
+                         (assoc dag-result :pr-infos pr-infos)
+                         plan-tasks
+                         :logger logger)
 
             ;; Monitor all PRs
-            monitor-result (monitor-dag-prs train-state pr-infos
-                                             {:worktree-path worktree-path
-                                              :logger logger
-                                              :generate-fn (get-in ctx [:execution/generate-fn])
-                                              :event-bus (get-in ctx [:execution/event-bus])})
+            monitor-result (dag-prs/monitor-dag-prs
+                            train-state pr-infos
+                            {:worktree-path worktree-path
+                             :logger logger
+                             :generate-fn (get-in ctx [:execution/generate-fn])
+                             :event-bus (get-in ctx [:execution/event-bus])})
 
             result-data {:pr-monitor/status (if (:success? monitor-result) :completed :failed)
                          :pr-monitor/merged-prs (:merged-prs monitor-result [])
