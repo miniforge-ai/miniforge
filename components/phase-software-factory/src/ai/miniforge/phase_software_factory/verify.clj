@@ -126,7 +126,12 @@
            :test-count test-count
            :assertion-count (parse-long (nth ran-match 2))
            :fail-count fail-count
-           :error-count error-count
+           ;; If the parsed counts are clean but the runner exited non-zero
+           ;; (e.g. another brick failed to compile), reflect that as at least
+           ;; one error so the failure metrics/message don't read "0 errors".
+           :error-count (if (and (zero? error-count) (not (zero? exit-code)))
+                          1
+                          error-count)
            :output output})
         (assoc (test-error-result output) :parse-error? true)))))
 

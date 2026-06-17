@@ -170,8 +170,10 @@
   (let [clean-text "Ran 5 tests containing 10 assertions.\n0 failures, 0 errors."]
     (testing "clean counts + zero exit -> pass"
       (is (true? (:passed? (verify/parse-test-output clean-text 0)))))
-    (testing "clean counts + non-zero exit -> fail"
-      (is (false? (:passed? (verify/parse-test-output clean-text 1)))))
+    (testing "clean counts + non-zero exit -> fail, reflected as an error"
+      (let [r (verify/parse-test-output clean-text 1)]
+        (is (false? (:passed? r)))
+        (is (pos? (:error-count r)) "a non-zero exit must surface as at least one error")))
     (testing "'nothing to test' + zero exit -> pass (legitimately no tests)"
       (let [r (verify/parse-test-output "No changed bricks to test" 0)]
         (is (true? (:passed? r)))
