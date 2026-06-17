@@ -19,18 +19,25 @@
 (ns ai.miniforge.bb-test-runner.core
   "Discover and run every `*_test.clj` file under each `/test` root on
    the Babashka classpath. The discovery helpers here are pure and
-   testable under JVM Clojure; `run-all` calls into `babashka.classpath`
-   lazily via `requiring-resolve` so this file stays JVM-loadable even
-   though the runtime behaviour is Babashka-only.
+   testable under JVM Clojure; `run-all` uses a BB-only direct
+   `babashka.classpath` require while this namespace remains
+   JVM-loadable via reader conditionals.
 
    Layer 0: pure path and deps helpers.
    Layer 1: pure command/config derivation.
    Layer 2: Babashka/JVM runner entry points."
-  (:require [babashka.fs :as fs]
+  (:require #?@(:bb [[babashka.classpath :as bb-classpath]])
+            [babashka.fs :as fs]
             [clojure.edn :as edn]
             [clojure.java.shell :as shell]
             [clojure.string :as str]
-            [clojure.test :as t]))
+            [clojure.test :as t])
+  (:import
+   [clojure.lang PersistentQueue]
+   [java.lang Long NumberFormatException String System]
+   [java.nio.charset StandardCharsets]
+   [java.nio.file Files]
+   [java.util ArrayList Collection Collections Random]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Path and deps helpers (pure)
@@ -305,8 +312,8 @@
 
 (defn- shuffle-projects
   [projects seed]
-  (let [alist (java.util.ArrayList. ^java.util.Collection projects)]
-    (java.util.Collections/shuffle alist (java.util.Random. (long (or seed 0))))
+  (let [alist (ArrayList. ^Collection projects)]
+    (Collections/shuffle alist (Random. (long (or seed 0))))
     (vec alist)))
 
 (defn order-projects
@@ -347,7 +354,7 @@
    order."
   [projects]
   (let [root (vec projects)]
-    (loop [queue (cond-> clojure.lang.PersistentQueue/EMPTY
+    (loop [queue (cond-> PersistentQueue/EMPTY
                    (> (count root) 1) (conj root))
            groups []]
       (if (empty? queue)
@@ -432,7 +439,9 @@
   "Read and parse a repo-local deps.edn file."
   [repo-root]
   (let [deps-path (str (fs/path repo-root "deps.edn"))]
-    (edn/read-string (slurp deps-path))))
+    (edn/read-string
+     (String. (Files/readAllBytes (.toPath (fs/file deps-path)))
+              StandardCharsets/UTF_8))))
 
 (defn coverage-install-args
   "Build the JVM argv that prefetches the Cloverage tool dependency."
@@ -441,13 +450,20 @@
    "-Sdeps"
    (pr-str {:deps {'cloverage/cloverage {:mvn/version cloverage-version}}})])
 
-(defn- classpath-test-roots
-  "Return the `/test` roots on the current Babashka classpath."
-  []
-  (let [get-classpath (requiring-resolve 'babashka.classpath/get-classpath)
-        split-classpath (requiring-resolve 'babashka.classpath/split-classpath)]
-    (->> (split-classpath (get-classpath))
-         (filter #(str/ends-with? % "/test")))))
+#?(:bb
+   (defn- classpath-test-roots
+     "Return the `/test` roots on the current Babashka classpath."
+     []
+     (->> (bb-classpath/split-classpath (bb-classpath/get-classpath))
+          (filter #(str/ends-with? % "/test"))))
+
+   :clj
+   (defn- classpath-test-roots
+     "JVM placeholder for the Babashka-only classpath discovery path."
+     []
+     (throw (ex-info "bb-test-runner run-all is only available under Babashka"
+                     {:runtime :jvm
+                      :namespace 'ai.miniforge.bb-test-runner.core}))))
 
 ;------------------------------------------------------------------------------ Layer 2
 ;; Wiring — the actual task entry points
@@ -474,8 +490,7 @@
         (when-not (str/blank? out)
           (println out))
         (when-not (str/blank? err)
-          (binding [*out* *err*]
-            (println err)))
+          (.println System/err err))
         exit))))
 
 (defn run-coverage
@@ -490,8 +505,7 @@
         (when-not (str/blank? out)
           (println out))
         (when-not (str/blank? err)
-          (binding [*out* *err*]
-            (println err)))
+          (.println System/err err))
         exit))))
 
 ;------------------------------------------------------------------------------ Rich Comment
