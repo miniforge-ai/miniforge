@@ -118,14 +118,18 @@
                                          {:error (ex-message e)}))
         (exit! 1)))))
 
-;; TUI availability check (set at load time by parent ns)
+;; TUI availability and launcher are composed by the parent CLI namespace.
 (def ^:dynamic *tui-available?* false)
+
+(def ^:dynamic *start-standalone-tui!*
+  "Injected JVM TUI launcher. Nil when the TUI component is not on the classpath."
+  nil)
 
 (defn tui-cmd
   "Start terminal UI for workflow monitoring.
    Launches standalone TUI that tail-follows app event files."
   [opts]
-  (if-not *tui-available?*
+  (if-not (and *tui-available?* *start-standalone-tui!*)
     (do
       (display/print-error (messages/t :tui/not-available))
       (println)
@@ -148,13 +152,12 @@
       (display/print-info (messages/t :tui/help-hint))
       (println)
       (try
-        (let [start-standalone! (requiring-resolve 'ai.miniforge.tui-views.interface/start-standalone-tui!)]
-          ;; Start standalone TUI (blocks until quit)
-          (start-standalone! opts)
-          ;; Force immediate JVM exit — Clojure's agent thread pool
-          ;; keeps the process alive for ~60s otherwise
-          (shutdown-agents)
-          (exit! 0))
+        ;; Start standalone TUI (blocks until quit)
+        (*start-standalone-tui!* opts)
+        ;; Force immediate JVM exit — Clojure's agent thread pool
+        ;; keeps the process alive for ~60s otherwise
+        (shutdown-agents)
+        (exit! 0)
         (catch Exception e
           (display/print-error (messages/t :tui/start-failed
                                            {:error (.getMessage e)}))

@@ -56,3 +56,50 @@
           (is (.contains output "TUI-REQUIRES-JVM"))
           (is (.contains output "TUI-INSTALL"))
           (is (.contains output "TUI-USE-WEB")))))))
+
+(deftest tui-cmd-missing-launcher-uses-unavailable-path-test
+  (testing "TUI is unavailable when the composed launcher is missing"
+    (binding [sut/*tui-available?* true
+              sut/*start-standalone-tui!* nil]
+      (with-redefs [messages/t (fn
+                                 ([k]
+                                  (case k
+                                    :tui/not-available "TUI-NOT-AVAILABLE"
+                                    :tui/requires-jvm "TUI-REQUIRES-JVM"
+                                    :tui/install-package "TUI-INSTALL"
+                                    :tui/use-web "TUI-USE-WEB"
+                                    (str "UNEXPECTED:" k)))
+                                 ([k params]
+                                  (case k
+                                    :tui/no-standalone-package (str "NO-STANDALONE:" (:command params))
+                                    (str "UNEXPECTED:" k))))
+                    display/print-error println
+                    app-config/tui-package (constantly "engine-tui")
+                    app-config/command-string identity
+                    sut/exit! (fn [code] (throw (exit-ex code)))]
+        (let [output (with-out-str
+                       (try
+                         (sut/tui-cmd {})
+                         (catch clojure.lang.ExceptionInfo e
+                           (is (= 1 (:code (ex-data e)))))))]
+          (is (.contains output "TUI-NOT-AVAILABLE"))
+          (is (.contains output "TUI-REQUIRES-JVM")))))))
+
+(deftest tui-cmd-uses-injected-launcher-test
+  (testing "TUI startup uses the launcher composed by cli.main"
+    (let [started (atom nil)
+          shut-down? (atom false)
+          exit-code (atom nil)]
+      (binding [sut/*tui-available?* true
+                sut/*start-standalone-tui!* (fn [opts]
+                                              (reset! started opts))]
+        (with-redefs [messages/t (fn
+                                   ([k] (name k))
+                                   ([k params] (str (name k) params)))
+                      display/print-info (fn [& _] nil)
+                      clojure.core/shutdown-agents (fn [] (reset! shut-down? true))
+                      sut/exit! (fn [code] (reset! exit-code code))]
+          (sut/tui-cmd {:events-dir "/tmp/events"}))
+        (is (= {:events-dir "/tmp/events"} @started))
+        (is @shut-down?)
+        (is (= 0 @exit-code))))))
