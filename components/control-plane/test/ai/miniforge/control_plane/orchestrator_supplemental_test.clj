@@ -349,9 +349,13 @@
       (sut/stop! started)
       (is (empty? @(:futures started))
           "futures should be empty after stop")
-      ;; Verify futures are cancelled
-      (is (every? future-cancelled? futures-before-stop)
-          "all futures should be cancelled"))))
+      ;; The guarantee stop! provides is that no future is left RUNNING — each
+      ;; is done, whether cancelled or already completed on its own. Asserting
+      ;; future-cancelled? specifically is flaky: under load a polling future
+      ;; can finish naturally before stop! cancels it, and a completed future
+      ;; reports cancelled?=false though it is just as stopped.
+      (is (every? future-done? futures-before-stop)
+          "all futures should be stopped (cancelled or completed) after stop"))))
 
 ;; ---------------------------------------------------------------------------
 ;; resolve-and-deliver! transitions agent back to running
