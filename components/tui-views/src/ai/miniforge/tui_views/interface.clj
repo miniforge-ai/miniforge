@@ -154,15 +154,12 @@
 (defn handle-decompose-pr
   "Decompose a large PR into sub-PRs.
    Entire body is wrapped in try/catch — no exceptions leak."
-  [{:keys [pr]}]
+  [{:keys [pr decompose-fn]}]
   (let [pr-id [(:pr/repo pr) (:pr/number pr)]]
     (try
       (let [{:keys [diff detail]} (github/fetch-pr-diff-and-detail
                                    (:pr/repo pr) (:pr/number pr))
-            changed-files (mapv :path (:files detail []))
-            decompose-fn (try (requiring-resolve
-                               'ai.miniforge.pr-decompose.interface/decompose)
-                              (catch Throwable _ nil))]
+            changed-files (mapv :path (:files detail []))]
         (cond
           ;; Both fetches failed
           (and (nil? diff) (nil? detail))
@@ -174,7 +171,7 @@
           (nil? decompose-fn)
           (msg/decomposition-started pr-id
                                      {:sub-prs []
-                                      :message "Decomposition component not available"})
+                                      :message "Decomposition function not configured"})
 
           :else
           (let [llm-fn (fn [req] (llm/complete @decompose-llm-client req))
