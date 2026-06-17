@@ -18,6 +18,7 @@
    [cheshire.core :as json]
    [clojure.string :as str]
    [org.httpkit.server :as http]
+   [ai.miniforge.event-stream.interface :as es]
    [ai.miniforge.web-dashboard.state :as state])
   (:import
    [java.time Instant]
@@ -126,16 +127,13 @@
   (when event-stream
     (let [subscriber-id (keyword (str "ws-" (hash ch)))]
       (try
-        (let [es-ns (find-ns 'ai.miniforge.event-stream.interface)]
-          (when es-ns
-            (let [subscribe! (ns-resolve es-ns 'subscribe!)]
-              (subscribe! event-stream subscriber-id
-                          (fn [event]
-                            (try
-                              (http/send! ch (json/generate-string
-                                              (ws-event-envelope event)))
-                              (catch Exception e
-                                (println "Error sending event to WebSocket:" (ex-message e)))))))))
+        (es/subscribe! event-stream subscriber-id
+                       (fn [event]
+                         (try
+                           (http/send! ch (json/generate-string
+                                           (ws-event-envelope event)))
+                           (catch Exception e
+                             (println "Error sending event to WebSocket:" (ex-message e))))))
         (catch Exception e
           (println "Error subscribing to event stream:" (ex-message e)))))))
 
@@ -145,10 +143,7 @@
   (when event-stream
     (let [subscriber-id (keyword (str "ws-" (hash ch)))]
       (try
-        (let [es-ns (find-ns 'ai.miniforge.event-stream.interface)]
-          (when es-ns
-            (let [unsubscribe! (ns-resolve es-ns 'unsubscribe!)]
-              (unsubscribe! event-stream subscriber-id))))
+        (es/unsubscribe! event-stream subscriber-id)
         (catch Exception e
           (println "Error unsubscribing from event stream:" (ex-message e)))))))
 
@@ -191,12 +186,9 @@
     (let [event (json/parse-string data true)
           normalized-event (normalize-workflow-event event)]
       ;; Publish event to dashboard's event stream
-      (when-let [es (:event-stream @state)]
+      (when-let [event-stream (:event-stream @state)]
         (try
-          (let [es-ns (find-ns 'ai.miniforge.event-stream.interface)]
-            (when es-ns
-              (when-let [publish! (ns-resolve es-ns 'publish!)]
-                (publish! es normalized-event))))
+          (es/publish! event-stream normalized-event)
           (catch Exception e
             (println "Error publishing workflow event:" (ex-message e))))))
     (catch Exception e

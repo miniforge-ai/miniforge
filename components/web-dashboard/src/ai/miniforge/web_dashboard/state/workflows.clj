@@ -16,6 +16,7 @@
   "Workflow state from live and historical event streams."
   (:require
    [ai.miniforge.config.interface :as config]
+   [ai.miniforge.event-stream.interface :as es]
    [clojure.java.io :as io]
    [clojure.string :as str]
    [ai.miniforge.web-dashboard.watcher :as watcher]))
@@ -342,22 +343,12 @@
              :dependency-severity (dependency-severity dependency-issues)
              :failure-attribution (first dependency-issues)))))
 
-(def resolved-get-events
-  "Cached reference to event-stream get-events fn."
-  (delay
-    (try
-      (require 'ai.miniforge.event-stream.interface)
-      (ns-resolve (find-ns 'ai.miniforge.event-stream.interface) 'get-events)
-      (catch Exception _ nil))))
-
 (defn live-stream-events
   "Read all currently buffered live events from the in-memory event stream."
   [state]
   (try
     (if-let [stream (:event-stream @state)]
-      (if-let [get-events-fn @resolved-get-events]
-        (get-events-fn stream)
-        [])
+      (es/get-events stream)
       [])
     (catch Exception e
       (println "Error reading live workflow events:" (ex-message e))
