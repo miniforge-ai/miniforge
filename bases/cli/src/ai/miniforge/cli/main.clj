@@ -80,16 +80,23 @@
    [ai.miniforge.lsp-mcp-bridge.tasks :as lsp-tasks]
    [slingshot.slingshot :refer [try+]]))
 
-;; TUI components loaded conditionally (only in JVM/jlink bundled runtime)
-(def tui-available?
+;; TUI components loaded conditionally (only in JVM/jlink bundled runtime).
+;; This is an optional composition seam: miniforge-core includes the CLI
+;; without bundling the JVM TUI component.
+(def tui-launcher
   (try
     (require '[ai.miniforge.event-stream.interface :as es])
     (require '[ai.miniforge.tui-views.interface :as tui])
-    true
-    (catch Exception _ false)))
+    (some-> (find-ns 'ai.miniforge.tui-views.interface)
+            (ns-resolve 'start-standalone-tui!))
+    (catch Throwable _ nil)))
+
+(def tui-available?
+  (some? tui-launcher))
 
 ;; Propagate TUI availability to monitoring commands
 (alter-var-root #'cmd-monitoring/*tui-available?* (constantly tui-available?))
+(alter-var-root #'cmd-monitoring/*start-standalone-tui!* (constantly tui-launcher))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Constants and pure helpers
