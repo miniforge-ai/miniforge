@@ -34,36 +34,71 @@
                       :runtime :bb}))))
 
 #?(:bb
-   (defn init-active [workflow-id] (jvm-only! :init-active))
+   (defn init-active
+     "Build the initial active manifest for workflow-id."
+     [workflow-id]
+     (jvm-only! :init-active))
    :clj
-   (def init-active manifest/init-active))
+   (def init-active
+     "Build the initial active manifest for workflow-id."
+     manifest/init-active))
 
 #?(:bb
-   (defn load-manifest [dir] (jvm-only! :load-manifest))
+   (defn load-manifest
+     "Load the manifest from workflow directory dir, or nil when absent."
+     [dir]
+     (jvm-only! :load-manifest))
    :clj
-   (def load-manifest manifest/load-manifest))
+   (def load-manifest
+     "Load the manifest from workflow directory dir, or nil when absent."
+     manifest/load-manifest))
 
 #?(:bb
-   (defn mark-terminal [manifest status] (jvm-only! :mark-terminal))
+   (defn mark-terminal
+     "Return manifest updated to terminal workflow status."
+     [manifest status]
+     (jvm-only! :mark-terminal))
    :clj
-   (def mark-terminal manifest/mark-terminal))
+   (def mark-terminal
+     "Return manifest updated to terminal workflow status."
+     manifest/mark-terminal))
 
 #?(:bb
-   (defn save-manifest! [dir manifest] (jvm-only! :save-manifest!))
+   (defn save-manifest!
+     "Atomically persist manifest under workflow directory dir."
+     [dir manifest]
+     (jvm-only! :save-manifest!))
    :clj
-   (def save-manifest! manifest/save-manifest!))
+   (def save-manifest!
+     "Atomically persist manifest under workflow directory dir."
+     manifest/save-manifest!))
 
 #?(:bb
-   (defn start-heartbeat! [dir] (jvm-only! :start-heartbeat!))
+   (defn start-heartbeat!
+     "Start the manifest heartbeat for workflow directory dir."
+     [dir]
+     (jvm-only! :start-heartbeat!))
    :clj
-   (def start-heartbeat! manifest/start-heartbeat!))
+   (def start-heartbeat!
+     "Start the manifest heartbeat for workflow directory dir."
+     manifest/start-heartbeat!))
 
 #?(:bb
-   (defn stop-heartbeat! [heartbeat] (jvm-only! :stop-heartbeat!))
+   (defn stop-heartbeat!
+     "Stop a manifest heartbeat handle."
+     [heartbeat]
+     (jvm-only! :stop-heartbeat!))
    :clj
-   (def stop-heartbeat! manifest/stop-heartbeat!))
+   (def stop-heartbeat!
+     "Stop a manifest heartbeat handle."
+     manifest/stop-heartbeat!))
 
 #?(:bb
-   (defn archive-workflow! [workflow-id] (jvm-only! :archive-workflow!))
+   (defn archive-workflow!
+     "Archive the live workflow directory for workflow-id."
+     [workflow-id]
+     (jvm-only! :archive-workflow!))
    :clj
-   (def archive-workflow! archive/archive-workflow!))
+   (def archive-workflow!
+     "Archive the live workflow directory for workflow-id."
+     archive/archive-workflow!))

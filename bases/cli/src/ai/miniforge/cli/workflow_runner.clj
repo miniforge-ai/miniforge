@@ -846,6 +846,18 @@
 
 ;; BD-2b sub-3a: per-workflow manifest lifecycle.
 
+;------------------------------------------------------------------------------ Layer 1 — manifest operations
+
+(def ^:dynamic *manifest-ops*
+  "Manifest operations used by the workflow lifecycle helpers."
+  {:init-active       es-manifest/init-active
+   :load-manifest     es-manifest/load-manifest
+   :mark-terminal     es-manifest/mark-terminal
+   :save-manifest!    es-manifest/save-manifest!
+   :start-heartbeat!  es-manifest/start-heartbeat!
+   :stop-heartbeat!   es-manifest/stop-heartbeat!
+   :archive-workflow! es-manifest/archive-workflow!})
+
 ;------------------------------------------------------------------------------ Layer 2 — lifecycle helpers
 ;; Peers; none calls another. `run-workflow!` composes them at Layer 3.
 
@@ -858,9 +870,9 @@
   [workflow-id event-stream]
   (when event-stream
     (let [dir (es/workflow-dir workflow-id)]
-      (es-manifest/save-manifest! dir (es-manifest/init-active workflow-id))
+      ((:save-manifest! *manifest-ops*) dir ((:init-active *manifest-ops*) workflow-id))
       {:dir       dir
-       :heartbeat (es-manifest/start-heartbeat! dir)
+       :heartbeat ((:start-heartbeat! *manifest-ops*) dir)
        :marked?   (atom false)})))
 
 (defn mark-manifest-terminal!
@@ -876,8 +888,8 @@
    fallback) can still try to write."
   [{:keys [dir marked?]} status]
   (when (and dir (not @marked?))
-    (when-let [m (es-manifest/load-manifest dir)]
-      (es-manifest/save-manifest! dir (es-manifest/mark-terminal m status))
+    (when-let [m ((:load-manifest *manifest-ops*) dir)]
+      ((:save-manifest! *manifest-ops*) dir ((:mark-terminal *manifest-ops*) m status))
       (reset! marked? true))))
 
 (defn finish-workflow-manifest!
@@ -895,7 +907,7 @@
   [{:keys [heartbeat]}]
   (when heartbeat
     (try
-      (es-manifest/stop-heartbeat! heartbeat)
+      ((:stop-heartbeat! *manifest-ops*) heartbeat)
       (catch InterruptedException _
         (.interrupt (Thread/currentThread))
         nil)
@@ -918,7 +930,7 @@
   [{:keys [dir marked?]} workflow-id]
   (when (and dir @marked?)
     (try
-      (es-manifest/archive-workflow! workflow-id)
+      ((:archive-workflow! *manifest-ops*) workflow-id)
       (catch Exception e
         (binding [*out* *err*]
           (println (str "WARNING: archive of workflow " workflow-id
