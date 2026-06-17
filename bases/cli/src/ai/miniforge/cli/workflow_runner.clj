@@ -28,6 +28,7 @@
    [ai.miniforge.supervisory-state.interface :as supervisory]
    [ai.miniforge.automation-edge-correlator.interface :as correlator]
    [ai.miniforge.workflow.interface :as workflow]
+   [ai.miniforge.workflow.interface.resume :as workflow-resume]
    [ai.miniforge.artifact.interface :as artifact]
    [ai.miniforge.agent.interface :as agent]
    [ai.miniforge.cli.messages :as messages]
@@ -1184,9 +1185,7 @@
    - opts: Same opts as run-workflow-from-spec!"
   [workflow-id-str spec {:keys [quiet] :or {quiet false} :as opts}]
   (let [resume-ctx (try
-                     (let [resume-fn (requiring-resolve
-                                      'ai.miniforge.workflow.dag-resilience/resume-context)]
-                       (resume-fn workflow-id-str))
+                     (workflow-resume/resume-context workflow-id-str)
                      (catch Exception e
                        (when-not quiet
                          (println (display/colorize :red
