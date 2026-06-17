@@ -21,10 +21,12 @@
    Verifies that workflow-run/* entity fields are merged into lifecycle events
    so the Rust StateManager can deserialize WorkflowRun projections."
   (:require
+   [cheshire.core :as json]
    [clojure.test :refer [deftest testing is]]
    [ai.miniforge.phase.interface :as phase]
    [ai.miniforge.workflow.runner-events :as events]
-   [ai.miniforge.event-stream.interface :as event-stream]))
+   [ai.miniforge.event-stream.interface :as event-stream]
+   [org.httpkit.server :as http]))
 
 ;------------------------------------------------------------------------------ Helpers
 
@@ -156,6 +158,22 @@
 (deftest publish-phase-started-nil-stream-is-noop-test
   (testing "nil event-stream does not throw"
     (is (nil? (events/publish-phase-started! nil (test-context) :plan)))))
+
+(deftest publish-event-websocket-stream-sends-json-test
+  (testing "WebSocket event streams send serialized events to the channel"
+    (let [sent (atom nil)
+          ch (Object.)
+          event {:event/type :workflow/phase-started
+                 :workflow/id (random-uuid)}]
+      (with-redefs [http/send! (fn [channel payload]
+                                 (reset! sent {:channel channel
+                                               :payload payload})
+                                 true)]
+        (events/publish-event! {:websocket ch} event))
+      (is (= ch (:channel @sent)))
+      (is (= {:event/type "workflow/phase-started"
+              :workflow/id (str (:workflow/id event))}
+             (json/parse-string (:payload @sent) true))))))
 
 (deftest start-phase-heartbeat-websocket-stream-is-noop-test
   (testing "heartbeats require a durable stream because the scheduler derefs it"

@@ -28,7 +28,8 @@
    [ai.miniforge.response.interface :as response]
    [ai.miniforge.self-healing.interface :as self-healing]
    [ai.miniforge.workflow.messages :as messages]
-   [cheshire.core :as json]))
+   [cheshire.core :as json]
+   [org.httpkit.server :as http]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Core event dispatch
@@ -37,11 +38,8 @@
   "Send event JSON to a WebSocket connection."
   [event-stream event]
   (try
-    (require '[org.httpkit.client :as http])
-    (when-let [http-ns (find-ns 'org.httpkit.client)]
-      (when-let [ws (:websocket event-stream)]
-        (when-let [send-fn (ns-resolve http-ns 'send!)]
-          (send-fn ws (json/generate-string event)))))
+    (when-let [ws (:websocket event-stream)]
+      (http/send! ws (json/generate-string event)))
     (catch Exception e
       (println (messages/t :warn/websocket-send {:error (ex-message e)})))))
 
