@@ -114,6 +114,8 @@
                        "components/workflow-security-compliance/src"
                        "components/workflow-security-compliance/resources"
                        "components/gate-classification/src"
+                       "components/repo-analyzer/src"
+                       "components/repo-analyzer/resources"
                        "components/repo-index/src"
                        "components/repo-index/resources"
                        "components/context-pack/src"
@@ -260,6 +262,7 @@
                      ai.miniforge/workflow-compliance-scanner {:local/root "components/workflow-compliance-scanner"}
                      ai.miniforge/workflow-security-compliance {:local/root "components/workflow-security-compliance"}
                      ai.miniforge/gate-classification {:local/root "components/gate-classification"}
+                     ai.miniforge/repo-analyzer {:local/root "components/repo-analyzer"}
                      ai.miniforge/repo-index {:local/root "components/repo-index"}
                      ai.miniforge/context-pack {:local/root "components/context-pack"}
                      ai.miniforge/mcp-context-server {:local/root "bases/mcp-context-server"}
@@ -381,6 +384,7 @@
                        "components/workflow-compliance-scanner/test"
                        "components/workflow-security-compliance/test"
                        "components/gate-classification/test"
+                       "components/repo-analyzer/test"
                        "components/repo-index/test"
                        "components/context-pack/test"
                        "components/bb-dev-tools/test"
@@ -502,6 +506,7 @@
                       ai.miniforge/workflow-compliance-scanner {:local/root "components/workflow-compliance-scanner"}
                       ai.miniforge/workflow-security-compliance {:local/root "components/workflow-security-compliance"}
                       ai.miniforge/gate-classification {:local/root "components/gate-classification"}
+                      ai.miniforge/repo-analyzer {:local/root "components/repo-analyzer"}
                       ai.miniforge/repo-index {:local/root "components/repo-index"}
                       ai.miniforge/context-pack {:local/root "components/context-pack"}
                       ai.miniforge/mcp-context-server {:local/root "bases/mcp-context-server"}

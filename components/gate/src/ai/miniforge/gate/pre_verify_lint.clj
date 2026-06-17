@@ -14,6 +14,7 @@
   (:require
    [ai.miniforge.connector-linter.interface :as linter]
    [ai.miniforge.gate.registry :as registry]
+   [ai.miniforge.repo-analyzer.interface :as repo-analyzer]
    [clojure.string :as str]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -67,7 +68,7 @@
   [artifact ctx]
   (let [worktree   (resolve-worktree ctx)
         techs      (detect-technologies artifact)
-        fps        @@(requiring-resolve 'ai.miniforge.cli.repo-analyzer/fingerprints)
+        fps        @repo-analyzer/fingerprints
         result     (linter/run-all worktree fps techs)
         violations (:violations result)]
     (if (empty? violations)

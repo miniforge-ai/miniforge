@@ -2,11 +2,11 @@
 ;; Copyright 2025-2026 Christopher Lester (christopher@miniforge.ai)
 ;; Licensed under the Apache License, Version 2.0
 
-(ns ai.miniforge.cli.repo-analyzer-test
+(ns ai.miniforge.repo-analyzer.core-test
   "Tests for data-driven repository analysis."
   (:require
-   [clojure.test :refer [deftest testing is]]
-   [ai.miniforge.cli.repo-analyzer :as sut]))
+   [ai.miniforge.repo-analyzer.interface :as sut]
+   [clojure.test :refer [deftest testing is]]))
 
 (deftest fingerprints-load-test
   (testing "fingerprints load from classpath"

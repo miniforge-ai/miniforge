@@ -51,6 +51,7 @@ ai.miniforge/messages {:local/root "../../components/messages"}
         ai.miniforge/connector {:local/root "../../components/connector"}
         ai.miniforge/connector-auth {:local/root "../../components/connector-auth"}
         ai.miniforge/connector-retry {:local/root "../../components/connector-retry"}
+        ai.miniforge/repo-analyzer {:local/root "../../components/repo-analyzer"}
         ai.miniforge/repo-index {:local/root "../../components/repo-index"}
         ai.miniforge/semantic-analyzer {:local/root "../../components/semantic-analyzer"}
         ai.miniforge/context-pack {:local/root "../../components/context-pack"}
