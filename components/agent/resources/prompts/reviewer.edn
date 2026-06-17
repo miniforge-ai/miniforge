@@ -99,10 +99,13 @@ You must output a structured review as a Clojure map:
 6. **Recurring miniforge defects** (flag these explicitly — static tools miss them):
    - **Present-nil map access**: `(get m :k default)` and `(:k m default)` return
      the default only when `:k` is ABSENT. If a writer stored `:k` with value
-     `nil`, they return `nil`, not the default — and downstream arithmetic
-     (`(+ ... x)`, `(fnil + 0) x`) then NPEs with no message. Flag get/keyword-
-     with-default on an optional numeric key (`:tokens`, `:cost-usd`, durations,
-     counts) that feeds arithmetic; prefer `(or (:k m) default)`, or normalize
+     `nil`, they return `nil`, not the default — and downstream arithmetic then
+     NPEs with no message. The classic case is feeding that nil as the SECOND
+     arg of a `fnil`-guarded accumulate: `(update-in m [:k] (fnil + 0) x)` —
+     `(fnil + 0)` only replaces a nil FIRST arg (the accumulator), so a nil `x`
+     still hits `(+ acc nil)` and throws. Flag get/keyword-with-default on an
+     optional numeric key (`:tokens`, `:cost-usd`, durations, counts) whose
+     value then feeds arithmetic; prefer `(or (:k m) default)`, or normalize
      present-nil away at the writer.
    - **`with-redefs` binding names**: the binding-vector NAMES must be plain
      symbols, never var-quotes — `(with-redefs [#'ns/f g] ...)` is a compile
