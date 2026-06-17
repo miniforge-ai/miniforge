@@ -19,6 +19,8 @@
 (ns ai.miniforge.artifact.interface
   "Public API for the artifact component."
   (:require
+   #?@(:bb []
+       :clj [[ai.miniforge.artifact.datalevin-store :as datalevin-store]])
    [ai.miniforge.artifact.core :as core]
    [ai.miniforge.artifact.interface.protocols.artifact-store :as p]
    [ai.miniforge.artifact.protocols.records.transit-store :as transit-store]))
@@ -37,6 +39,19 @@
    currently document argument contracts or failure modes)."
   p/ArtifactStore)
 
+#?(:bb
+   (defn- create-datalevin-store
+     [opts]
+     (throw (ex-info "Datalevin artifact store is JVM-only; use create-transit-store under Babashka"
+                     {:store :datalevin
+                      :runtime :bb
+                      :opts opts})))
+
+   :clj
+   (defn- create-datalevin-store
+     [opts]
+     (datalevin-store/create-datalevin-store opts)))
+
 (defn create-store
   "Create a Datalevin-based artifact store (JVM only).
    For Babashka compatibility, use create-transit-store instead.
@@ -49,8 +64,8 @@
    Examples:
      (create-store)                          ; in-memory
      (create-store {:dir \"data/artifacts\"})  ; persistent"
-  ([] ((requiring-resolve 'ai.miniforge.artifact.datalevin-store/create-datalevin-store)))
-  ([opts] ((requiring-resolve 'ai.miniforge.artifact.datalevin-store/create-datalevin-store) opts)))
+  ([] (create-store {}))
+  ([opts] (create-datalevin-store opts)))
 
 (defn create-transit-store
   "Create a Transit-based artifact store (Babashka compatible).
