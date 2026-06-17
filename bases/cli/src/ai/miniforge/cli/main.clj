@@ -53,6 +53,7 @@
    [ai.miniforge.cli.main.display :as display]
    [ai.miniforge.cli.main.commands.run :as cmd-run]
    [ai.miniforge.cli.main.commands.resume :as cmd-resume]
+   [ai.miniforge.cli.main.commands.shared :as cmd-shared]
    [ai.miniforge.cli.main.commands.monitoring :as cmd-monitoring]
    [ai.miniforge.cli.main.commands.fleet :as cmd-fleet]
    [ai.miniforge.cli.main.commands.pr :as cmd-pr]
@@ -80,6 +81,42 @@
    [ai.miniforge.lsp-mcp-bridge.tasks :as lsp-tasks]
    [slingshot.slingshot :refer [try+]]))
 
+(defn- optional-var
+  "Resolve an optional provider var after loading its namespace."
+  [ns-sym var-sym]
+  (try
+    (require ns-sym)
+    (ns-resolve ns-sym var-sym)
+    (catch Throwable _ nil)))
+
+(defn- register-optional-var!
+  [qualified-sym ns-sym var-sym]
+  (when-let [v (optional-var ns-sym var-sym)]
+    (cmd-shared/register-optional-fn! qualified-sym v)))
+
+(defn- register-artifact-providers! []
+  (when-let [create-store (optional-var 'ai.miniforge.artifact.interface
+                                        'create-transit-store)]
+    (when-let [query (optional-var 'ai.miniforge.artifact.interface 'query)]
+      (cmd-shared/register-optional-fn!
+       'ai.miniforge.artifact.interface/list-artifacts
+       (fn [] (vec (query (create-store) {})))))
+    (when-let [get-provenance (optional-var 'ai.miniforge.artifact.interface
+                                            'get-provenance)]
+      (cmd-shared/register-optional-fn!
+       'ai.miniforge.artifact.interface/get-artifact-provenance
+       (fn [id] (get-provenance (create-store) id))))))
+
+(defn- register-policy-pack-providers! []
+  (when-let [load-all-packs (optional-var 'ai.miniforge.policy-pack.interface
+                                          'load-all-packs)]
+    (cmd-shared/register-optional-fn!
+     'ai.miniforge.policy-pack.interface/list-packs
+     (fn [] (:loaded (load-all-packs (str (app-config/home-dir) "/packs")))))))
+
+(register-artifact-providers!)
+(register-policy-pack-providers!)
+
 ;; TUI components loaded conditionally (only in JVM/jlink bundled runtime).
 ;; This is an optional composition seam: miniforge-core includes the CLI
 ;; without bundling the JVM TUI component.
@@ -97,6 +134,14 @@
 ;; Propagate TUI availability to monitoring commands
 (alter-var-root #'cmd-monitoring/*tui-available?* (constantly tui-available?))
 (alter-var-root #'cmd-monitoring/*start-standalone-tui!* (constantly tui-launcher))
+(when tui-launcher
+  (cmd-shared/register-optional-fn!
+   'ai.miniforge.tui-views.interface/start-standalone-tui!
+   tui-launcher))
+(register-optional-var!
+ 'ai.miniforge.tui-views.interface/start-fleet-tui!
+ 'ai.miniforge.tui-views.interface
+ 'start-fleet-tui!)
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Constants and pure helpers

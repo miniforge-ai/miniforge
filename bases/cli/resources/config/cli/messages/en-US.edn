@@ -220,7 +220,7 @@
   :workflow-runner/bb-help-header "If running with Babashka (bb):"
   :workflow-runner/bb-help-command "  - Try the JVM version: clojure -M:dev -m ai.miniforge.cli.main workflow run <id>"
   :workflow-runner/debug-header "For debugging:"
-  :workflow-runner/debug-command "  - Run with verbose output: bb -e '(requiring-resolve 'ai.miniforge.workflow.interface/load-workflow)'"
+  :workflow-runner/debug-command "  - Run with verbose output: bb -e \"(require 'ai.miniforge.workflow.interface)\""
   :classified-error/error-prefix "Error: {message}"
   :classified-error/agent-backend-header "⚠️  Agent System Error (Not Your Fault!)"
   :classified-error/task-code-header "❌ Task Code Error"
