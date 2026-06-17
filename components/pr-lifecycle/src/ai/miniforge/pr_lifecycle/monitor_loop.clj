@@ -29,6 +29,16 @@
    [ai.miniforge.pr-lifecycle.pr-poller :as poller]
    [ai.miniforge.schema.interface :as schema]))
 
+;; The :pr-monitor/{loop-started,cycle-completed,loop-stopped} events emitted
+;; below are defined in monitor_events/monitor-event-types (this group's source
+;; of truth); no new event types are introduced here.
+;;
+;; Bus caveat: emissions go to monitor.config's :event-bus. When that is a fresh
+;; events/create-event-bus atom it is an in-memory SIDE bus, not the persisted
+;; workflow stream under ~/.miniforge/events — callers (e.g. the observe phase)
+;; must pass the workflow bus for these events to be durable. The wiring here is
+;; correct regardless of which bus is supplied.
+
 ;------------------------------------------------------------------------------ Layer 0
 ;; API compatibility + schemas
 
@@ -181,11 +191,12 @@
   (step-monitor-loop! monitor author))
 
 (defn- stop-when-no-open-prs!
+  "Stop the loop because no open PRs were found. Records :no-open-prs as stop reason."
   [monitor logger]
   (when logger
     (log/info logger :pr-monitor :loop/no-open-prs
               {:message "No open PRs found — stopping monitor loop"}))
-  (swap! monitor assoc :running? false))
+  (swap! monitor assoc :running? false :stop-reason :no-open-prs))
 
 (defn- log-cycle-stop
   [logger pr cycle-result]
@@ -208,11 +219,19 @@
                              :error (.getMessage e)}}))))))
 
 (defn- finalize-loop-iteration!
-  [monitor]
-  (swap! monitor (fn [state-map]
-                   (-> state-map
-                       (update :cycles inc)
-                       (assoc :last-cycle-at (java.util.Date.))))))
+  "Advance cycle counter, record timestamp, and emit an iteration-level heartbeat.
+   prs-polled is the count of PRs processed in this iteration.
+   The nil pr-number distinguishes this iteration-level event from the per-PR
+   cycle-completed events emitted in run-cycle."
+  [monitor prs-polled]
+  ;; Use the swap! return value for :iteration — re-reading @monitor would be a
+  ;; second, non-atomic read that could observe a different :cycles.
+  (let [updated (swap! monitor (fn [state-map]
+                                 (-> state-map
+                                     (update :cycles inc)
+                                     (assoc :last-cycle-at (java.util.Date.)))))]
+    (state/emit! monitor (mevents/cycle-completed nil {:iteration (:cycles updated)
+                                                       :prs-polled prs-polled}))))
 
 (defn- continue-loop!
   [monitor author poll-interval-ms]
@@ -233,18 +252,33 @@
           (stop-when-no-open-prs! monitor logger)
 
           :else
-          (let [prs (:prs (:data pr-result))]
-            (run! #(run-pr-cycle! monitor logger %) prs)
-            (finalize-loop-iteration! monitor)
+          ;; Count PRs actually processed, short-circuiting if the loop is
+          ;; stopped mid-iteration, so :prs-polled reflects work done rather
+          ;; than the open-PR count returned by the poller.
+          (let [prs       (:prs (:data pr-result))
+                processed (reduce (fn [n pr]
+                                    (if (:running? @monitor)
+                                      (do (run-pr-cycle! monitor logger pr) (inc n))
+                                      (reduced n)))
+                                  0 prs)]
+            (finalize-loop-iteration! monitor processed)
             (continue-loop! monitor author poll-interval-ms)))))))
 
 (defn run-monitor-loop
-  "Run the PR monitor loop continuously until stopped."
+  "Run the PR monitor loop continuously until stopped.
+
+   Emits loop-started on entry and loop-stopped on exit (covering all exit
+   paths — no-open-prs, manual stop, or normal completion). The stop reason
+   is written to the monitor atom by whichever path triggers the exit."
   [monitor author]
   (let [{:keys [logger]} (:config @monitor)]
-    (swap! monitor assoc :running? true :started-at (java.util.Date.))
+    ;; Clear any :stop-reason from a prior run on this atom so loop-stopped
+    ;; reports THIS run's reason (nil → :completed at exit), not a stale one.
+    (swap! monitor assoc :running? true :started-at (java.util.Date.) :stop-reason nil)
     (state/log-loop-start! monitor author)
+    (state/emit! monitor (mevents/loop-started nil (:config @monitor)))
     (step-monitor-loop! monitor author)
+    (state/emit! monitor (mevents/loop-stopped nil (get @monitor :stop-reason :completed)))
     (when logger
       (log/info logger :pr-monitor :loop/stopped
                 {:message "PR monitor loop stopped"
@@ -258,9 +292,9 @@
                                    3600000.0))}))))
 
 (defn stop-monitor-loop
-  "Stop a running monitor loop gracefully."
+  "Stop a running monitor loop gracefully. Records :manual-stop as stop reason."
   [monitor]
-  (swap! monitor assoc :running? false))
+  (swap! monitor assoc :running? false :stop-reason :manual-stop))
 
 (defn monitor-running?
   "Check if the monitor loop is currently running."
