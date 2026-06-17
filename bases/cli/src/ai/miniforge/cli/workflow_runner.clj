@@ -24,6 +24,7 @@
    [cheshire.core :as json]
    [ai.miniforge.llm.interface :as llm]
    [ai.miniforge.event-stream.interface :as es]
+   [ai.miniforge.event-stream.interface.manifest :as es-manifest]
    [ai.miniforge.supervisory-state.interface :as supervisory]
    [ai.miniforge.automation-edge-correlator.interface :as correlator]
    [ai.miniforge.workflow.interface :as workflow]
@@ -844,29 +845,20 @@
     (boolean (and v (contains? #{"1" "true" "yes" "on"} (str/lower-case v))))))
 
 ;; BD-2b sub-3a: per-workflow manifest lifecycle.
-;;
-;; `ai.miniforge.event-stream.manifest` is jvm-only (FileLock /
-;; ScheduledExecutorService / java.lang.management). This base loads
-;; under Babashka, so we reach manifest fns via `requiring-resolve`
-;; rather than a top-level `:require`. Same pattern as the other
-;; jvm-only deferrals in this file (event-stream.interface lazy
-;; require around line 853, the resume command at line 1024).
-;;
-;; Stratified-design layering: `manifest-fn` / `archive-fn` are the
-;; lone Layer 1 helpers; `start-/mark-/finish-/archive-workflow-manifest!`
-;; sit at Layer 2 and each independently call the Layer 1 resolvers
-;; (never each other). `run-workflow!` (further down) is the Layer 3
-;; orchestrator that composes them.
 
-;------------------------------------------------------------------------------ Layer 1 — var resolution
+;------------------------------------------------------------------------------ Layer 1 — manifest operations
 
-(defn manifest-fn [sym]
-  (requiring-resolve (symbol "ai.miniforge.event-stream.manifest" (name sym))))
+(def ^:dynamic *manifest-ops*
+  "Manifest operations used by the workflow lifecycle helpers."
+  {:init-active       es-manifest/init-active
+   :load-manifest     es-manifest/load-manifest
+   :mark-terminal     es-manifest/mark-terminal
+   :save-manifest!    es-manifest/save-manifest!
+   :start-heartbeat!  es-manifest/start-heartbeat!
+   :stop-heartbeat!   es-manifest/stop-heartbeat!
+   :archive-workflow! es-manifest/archive-workflow!})
 
-(defn archive-fn [sym]
-  (requiring-resolve (symbol "ai.miniforge.event-stream.archive" (name sym))))
-
-;------------------------------------------------------------------------------ Layer 2 — lifecycle helpers (compose Layer 1)
+;------------------------------------------------------------------------------ Layer 2 — lifecycle helpers
 ;; Peers; none calls another. `run-workflow!` composes them at Layer 3.
 
 (defn start-workflow-manifest!
@@ -877,13 +869,10 @@
    manifest to maintain in that case."
   [workflow-id event-stream]
   (when event-stream
-    (let [dir         (es/workflow-dir workflow-id)
-          init-active (manifest-fn 'init-active)
-          save!       (manifest-fn 'save-manifest!)
-          start-hb!   (manifest-fn 'start-heartbeat!)]
-      (save! dir (init-active workflow-id))
+    (let [dir (es/workflow-dir workflow-id)]
+      ((:save-manifest! *manifest-ops*) dir ((:init-active *manifest-ops*) workflow-id))
       {:dir       dir
-       :heartbeat (start-hb! dir)
+       :heartbeat ((:start-heartbeat! *manifest-ops*) dir)
        :marked?   (atom false)})))
 
 (defn mark-manifest-terminal!
@@ -899,12 +888,9 @@
    fallback) can still try to write."
   [{:keys [dir marked?]} status]
   (when (and dir (not @marked?))
-    (let [load!         (manifest-fn 'load-manifest)
-          mark-terminal (manifest-fn 'mark-terminal)
-          save!         (manifest-fn 'save-manifest!)]
-      (when-let [m (load! dir)]
-        (save! dir (mark-terminal m status))
-        (reset! marked? true)))))
+    (when-let [m ((:load-manifest *manifest-ops*) dir)]
+      ((:save-manifest! *manifest-ops*) dir ((:mark-terminal *manifest-ops*) m status))
+      (reset! marked? true))))
 
 (defn finish-workflow-manifest!
   "Stop the heartbeat. Caller is expected to have already called
@@ -921,7 +907,7 @@
   [{:keys [heartbeat]}]
   (when heartbeat
     (try
-      ((manifest-fn 'stop-heartbeat!) heartbeat)
+      ((:stop-heartbeat! *manifest-ops*) heartbeat)
       (catch InterruptedException _
         (.interrupt (Thread/currentThread))
         nil)
@@ -944,7 +930,7 @@
   [{:keys [dir marked?]} workflow-id]
   (when (and dir @marked?)
     (try
-      ((archive-fn 'archive-workflow!) workflow-id)
+      ((:archive-workflow! *manifest-ops*) workflow-id)
       (catch Exception e
         (binding [*out* *err*]
           (println (str "WARNING: archive of workflow " workflow-id

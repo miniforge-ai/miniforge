@@ -50,12 +50,18 @@
      'stop-heartbeat!  (fn [hb] (swap! calls conj [:stop-heartbeat hb]))}))
 
 (defn- with-mocked-manifest
-  "Bind `manifest-fn` to look up the mock map. Returns whatever `f`
-   returns; the call log is in `calls`."
+  "Bind manifest interface functions. Returns whatever `f` returns;
+   the call log is in `calls`."
   [f]
   (let [calls (atom [])
         mocks (mock-manifest-fns calls)]
-    (with-redefs [sut/manifest-fn (fn [sym] (get mocks sym))
+    (with-redefs [sut/*manifest-ops* {:init-active (get mocks 'init-active)
+                                      :save-manifest! (get mocks 'save-manifest!)
+                                      :load-manifest (get mocks 'load-manifest)
+                                      :mark-terminal (get mocks 'mark-terminal)
+                                      :start-heartbeat! (get mocks 'start-heartbeat!)
+                                      :stop-heartbeat! (get mocks 'stop-heartbeat!)
+                                      :archive-workflow! (fn [& _])}
                   es/workflow-dir (fn [wid] (java.io.File. (str "/tmp/test-" wid)))]
       (f calls))))
 
@@ -108,8 +114,16 @@
   ;; suppressed even though no terminal status ever got written.
   (let [calls (atom [])
         nil-load-mocks (assoc (mock-manifest-fns calls)
-                              'load-manifest (fn [_dir] nil))]
-    (with-redefs [sut/manifest-fn (fn [sym] (get nil-load-mocks sym))
+                              'load-manifest (fn [dir]
+                                               (swap! calls conj [:load dir])
+                                               nil))]
+    (with-redefs [sut/*manifest-ops* {:init-active (get nil-load-mocks 'init-active)
+                                      :save-manifest! (get nil-load-mocks 'save-manifest!)
+                                      :load-manifest (get nil-load-mocks 'load-manifest)
+                                      :mark-terminal (get nil-load-mocks 'mark-terminal)
+                                      :start-heartbeat! (get nil-load-mocks 'start-heartbeat!)
+                                      :stop-heartbeat! (get nil-load-mocks 'stop-heartbeat!)
+                                      :archive-workflow! (fn [& _])}
                   es/workflow-dir (fn [wid] (java.io.File. (str "/tmp/test-" wid)))]
       (let [handle (sut/start-workflow-manifest! :wid :fake-es)]
         (reset! calls [])
@@ -158,7 +172,13 @@
   (let [calls (atom [])
         boom-mocks (assoc (mock-manifest-fns calls)
                           'stop-heartbeat! (fn [_] (throw (RuntimeException. "boom"))))]
-    (with-redefs [sut/manifest-fn (fn [sym] (get boom-mocks sym))
+    (with-redefs [sut/*manifest-ops* {:init-active (get boom-mocks 'init-active)
+                                      :save-manifest! (get boom-mocks 'save-manifest!)
+                                      :load-manifest (get boom-mocks 'load-manifest)
+                                      :mark-terminal (get boom-mocks 'mark-terminal)
+                                      :start-heartbeat! (get boom-mocks 'start-heartbeat!)
+                                      :stop-heartbeat! (get boom-mocks 'stop-heartbeat!)
+                                      :archive-workflow! (fn [& _])}
                   es/workflow-dir (fn [_] (java.io.File. "/tmp/test"))]
       (let [handle (sut/start-workflow-manifest! :wid :fake-es)]
         (is (nil? (sut/finish-workflow-manifest! handle))
@@ -171,9 +191,8 @@
   ;; event stream), there's nothing to archive — the archive op
   ;; would error on the missing manifest. Skip in that case.
   (let [archive-calls (atom [])]
-    (with-redefs [sut/archive-fn (fn [_]
-                                   (fn [& args]
-                                     (swap! archive-calls conj args)))]
+    (with-redefs [sut/*manifest-ops* {:archive-workflow! (fn [& args]
+                                                           (swap! archive-calls conj args))}]
       (let [handle {:dir (java.io.File. "/tmp/x") :marked? (atom false)}]
         (sut/archive-workflow-manifest! handle :wid)
         (is (empty? @archive-calls)
@@ -182,17 +201,15 @@
 (deftest archive-workflow-manifest!-no-op-when-dir-nil
   ;; nil dir means dashboard-only run; no manifest to archive.
   (let [archive-calls (atom [])]
-    (with-redefs [sut/archive-fn (fn [_]
-                                   (fn [& args]
-                                     (swap! archive-calls conj args)))]
+    (with-redefs [sut/*manifest-ops* {:archive-workflow! (fn [& args]
+                                                           (swap! archive-calls conj args))}]
       (sut/archive-workflow-manifest! {:dir nil :marked? (atom true)} :wid)
       (is (empty? @archive-calls)))))
 
 (deftest archive-workflow-manifest!-invokes-archive-workflow!
   (let [archive-calls (atom [])]
-    (with-redefs [sut/archive-fn (fn [_]
-                                   (fn [& args]
-                                     (swap! archive-calls conj args)))]
+    (with-redefs [sut/*manifest-ops* {:archive-workflow! (fn [& args]
+                                                           (swap! archive-calls conj args))}]
       (sut/archive-workflow-manifest!
        {:dir (java.io.File. "/tmp/x") :marked? (atom true)}
        :wid)
@@ -203,9 +220,8 @@
   ;; Per the docstring, archive failures must not propagate — the
   ;; boot-time recovery pass picks up half-finished archives. A
   ;; failing archive should log to stderr and return nil.
-  (with-redefs [sut/archive-fn (fn [_]
-                                 (fn [& _]
-                                   (throw (RuntimeException. "rename failed"))))]
+  (with-redefs [sut/*manifest-ops* {:archive-workflow! (fn [& _]
+                                                         (throw (RuntimeException. "rename failed")))}]
     (binding [*err* (java.io.PrintWriter. (java.io.StringWriter.))]
       (is (nil? (sut/archive-workflow-manifest!
                  {:dir (java.io.File. "/tmp/x") :marked? (atom true)}
@@ -224,13 +240,19 @@
                                                   (throw (InterruptedException. "shutdown"))))]
     ;; Clear any leaked interrupt before the test.
     (Thread/interrupted)
-    (with-redefs [sut/manifest-fn (fn [sym] (get interrupt-mocks sym))
+    (with-redefs [sut/*manifest-ops* {:init-active (get interrupt-mocks 'init-active)
+                                      :save-manifest! (get interrupt-mocks 'save-manifest!)
+                                      :load-manifest (get interrupt-mocks 'load-manifest)
+                                      :mark-terminal (get interrupt-mocks 'mark-terminal)
+                                      :start-heartbeat! (get interrupt-mocks 'start-heartbeat!)
+                                      :stop-heartbeat! (get interrupt-mocks 'stop-heartbeat!)
+                                      :archive-workflow! (fn [& _])}
                   es/workflow-dir (fn [_] (java.io.File. "/tmp/test"))]
-      (let [handle (sut/start-workflow-manifest! :wid :fake-es)]
-        (is (nil? (sut/finish-workflow-manifest! handle))
+      (let [handle (sut/start-workflow-manifest! :wid :fake-es)
+            result (sut/finish-workflow-manifest! handle)
+            interrupted? (Thread/interrupted)]
+        (is (nil? result)
             "InterruptedException is still swallowed (best-effort cleanup)")
-        ;; `Thread/interrupted` reads-and-clears; if we set the flag
-        ;; correctly it should return true now.
-        (is (true? (Thread/interrupted))
+        (is (true? interrupted?)
             "current thread's interrupt flag must be restored
              so cooperative-cancellation callers above us see it")))))
