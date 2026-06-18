@@ -648,9 +648,13 @@
   (core/ttl-memoize 10000
                     (fn [state]
                       (if-let [mgr (:pr-train-manager @state)]
-                        (->> (or (pr-train/list-trains mgr) [])
-                             (map enrich-train)
-                             vec)
+                        (try
+                          (->> (or (pr-train/list-trains mgr) [])
+                               (map enrich-train)
+                               vec)
+                          (catch Exception e
+                            (println "Error listing PR trains:" (ex-message e))
+                            []))
                         []))))
 
 (defn get-train-detail
@@ -662,9 +666,13 @@
                 (catch Exception _ nil))]
       (if-not tid
         {:error "Invalid train id."}
-        (if-let [train (pr-train/get-train mgr tid)]
-          (enrich-train train)
-          {:error "Train not found"})))
+        (try
+          (if-let [train (pr-train/get-train mgr tid)]
+            (enrich-train train)
+            {:error "Train not found"})
+          (catch Exception e
+            (println "Error getting PR train:" (ex-message e))
+            {:error "Train not found"}))))
     {:error "PR train manager not available"}))
 
 (defn train-action!
@@ -685,7 +693,11 @@
   (core/ttl-memoize 10000
                     (fn [state]
                       (if-let [mgr (:repo-dag-manager @state)]
-                        (or (repo-dag/get-all-dags mgr) [])
+                        (try
+                          (or (repo-dag/get-all-dags mgr) [])
+                          (catch Exception e
+                            (println "Error listing repository DAGs:" (ex-message e))
+                            []))
                         []))))
 
 ;------------------------------------------------------------------------------ Layer 3

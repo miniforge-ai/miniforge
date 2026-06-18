@@ -23,6 +23,7 @@
    [cheshire.core :as json]
    [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.pr-train.interface :as pr-train]
+   [ai.miniforge.repo-dag.interface :as repo-dag]
    [ai.miniforge.web-dashboard.state.trains :as sut]))
 
 ;; ---------------------------------------------------------------------------- Fixture text
@@ -625,6 +626,14 @@
 ;; Layer 2: Train/DAG state access tests
 ;; ============================================================================
 
+(deftest get-trains-manager-exception-test
+  (testing "Manager exceptions return an empty train list"
+    (let [state (atom {:pr-train-manager ::boom-manager})]
+      (with-redefs-fn {#'pr-train/list-trains
+                       (fn [& _] (throw (ex-info "boom" {})))}
+        (fn []
+          (is (= [] (sut/get-trains state))))))))
+
 (deftest get-train-detail-invalid-id-test
   (testing "Invalid train id returns error"
     (let [state (atom {:pr-train-manager :mgr})]
@@ -642,6 +651,16 @@
     (let [state (atom {:pr-train-manager :mgr})
           tid (str (random-uuid))]
       (with-redefs-fn {#'pr-train/get-train (fn [_ _] nil)}
+        (fn []
+          (is (= {:error "Train not found"}
+                 (sut/get-train-detail state tid))))))))
+
+(deftest get-train-detail-manager-exception-test
+  (testing "Manager exceptions return the not-found error map"
+    (let [state (atom {:pr-train-manager :mgr})
+          tid (str (random-uuid))]
+      (with-redefs-fn {#'pr-train/get-train
+                       (fn [& _] (throw (ex-info "boom" {})))}
         (fn []
           (is (= {:error "Train not found"}
                  (sut/get-train-detail state tid))))))))
@@ -668,6 +687,14 @@
   (testing "Unknown action returns nil"
     (let [state (atom {:pr-train-manager :mgr})]
       (is (nil? (sut/train-action! state (str (random-uuid)) "unknown"))))))
+
+(deftest get-dags-manager-exception-test
+  (testing "Manager exceptions return an empty DAG list"
+    (let [state (atom {:repo-dag-manager ::boom-manager})]
+      (with-redefs-fn {#'repo-dag/get-all-dags
+                       (fn [& _] (throw (ex-info "boom" {})))}
+        (fn []
+          (is (= [] (sut/get-dags state))))))))
 
 ;; ============================================================================
 ;; Layer 3: Sync status rendering tests
