@@ -670,13 +670,15 @@
 (defn train-action!
   "Execute action on a PR train."
   [state train-id action]
-  (when-let [mgr (:pr-train-manager @state)]
-    (let [tid (parse-uuid train-id)]
-      (case action
-        "pause" (pr-train/pause-train mgr tid "Manual pause")
-        "resume" (pr-train/resume-train mgr tid)
-        "merge-next" (pr-train/merge-next mgr tid)
-        nil))))
+  (try
+    (when-let [mgr (:pr-train-manager @state)]
+      (when-let [tid (parse-uuid train-id)]
+        (case action
+          "pause" (pr-train/pause-train mgr tid "Manual pause")
+          "resume" (pr-train/resume-train mgr tid)
+          "merge-next" (pr-train/merge-next mgr tid)
+          nil)))
+    (catch Exception _ nil)))
 
 (def get-dags
   "Get all repository DAGs (cached 10s)."

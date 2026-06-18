@@ -651,6 +651,19 @@
     (let [state (atom {})]
       (is (nil? (sut/train-action! state (str (random-uuid)) "pause"))))))
 
+(deftest train-action-invalid-id-test
+  (testing "Invalid train id returns nil"
+    (let [state (atom {:pr-train-manager :mgr})]
+      (is (nil? (sut/train-action! state "not-a-uuid" "pause"))))))
+
+(deftest train-action-manager-exception-test
+  (testing "Manager exceptions return nil"
+    (let [state (atom {:pr-train-manager :mgr})]
+      (with-redefs-fn {#'pr-train/pause-train
+                       (fn [& _] (throw (ex-info "boom" {})))}
+        (fn []
+          (is (nil? (sut/train-action! state (str (random-uuid)) "pause"))))))))
+
 (deftest train-action-unknown-action-test
   (testing "Unknown action returns nil"
     (let [state (atom {:pr-train-manager :mgr})]
