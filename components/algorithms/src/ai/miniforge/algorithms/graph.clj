@@ -385,7 +385,7 @@
                :pre + 0)
   ;; => 4
 
-  ;; reachable-count: count nodes reachable from a start in an adjacency map
+  ;; reachable-count examples
   (reachable-count {:a [:b :c] :b [:d] :c [:d] :d []} :a)
   ;; => 4
 

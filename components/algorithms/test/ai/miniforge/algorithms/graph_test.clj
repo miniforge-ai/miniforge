@@ -1166,3 +1166,57 @@
               collected (sut/dfs-collect graph starts deps-fn
                                         (fn [id _ _ _] id) :visit)]
           (is (= (count visited) (count collected))))))))
+
+;; ---------------------------------------------------------------------------
+;; reachable-count
+;; ---------------------------------------------------------------------------
+
+(defn- ->adj
+  "Convert fixture graphs to the adjacency-map shape reachable-count expects."
+  [g]
+  (reduce-kv (fn [m k v] (assoc m k (:deps v))) {} g))
+
+(deftest reachable-count-empty-graph
+  (testing "empty adjacency map returns 0 regardless of start"
+    (is (= 0 (sut/reachable-count empty-graph "a")))))
+
+(deftest reachable-count-start-absent
+  (testing "start node not present in adj-map returns 0"
+    (is (= 0 (sut/reachable-count (->adj linear-graph) "z")))))
+
+(deftest reachable-count-single-node-no-edges
+  (testing "single node with empty neighbor list counts as 1"
+    (is (= 1 (sut/reachable-count (->adj single-node-graph) "a")))))
+
+(deftest reachable-count-single-node-self-loop
+  (testing "self-loop does not inflate count beyond 1"
+    (is (= 1 (sut/reachable-count (->adj self-cycle-graph) "a")))))
+
+(deftest reachable-count-linear-chain
+  (testing "linear chain counts each reachable suffix from the start"
+    (let [adj (->adj linear-graph)]
+      (is (= 3 (sut/reachable-count adj "a")))
+      (is (= 2 (sut/reachable-count adj "b")))
+      (is (= 1 (sut/reachable-count adj "c"))))))
+
+(deftest reachable-count-diamond-graph
+  (testing "diamond graph counts shared node only once"
+    (is (= 4 (sut/reachable-count (->adj diamond-graph) "a")))))
+
+(deftest reachable-count-cyclic-graph
+  (testing "cycle terminates and counts each distinct reachable node"
+    (is (= 3 (sut/reachable-count (->adj cyclic-graph) "a")))))
+
+(deftest reachable-count-disconnected-graph
+  (testing "reachable-count from one component does not cross to another"
+    (let [adj (->adj disconnected-graph)]
+      (is (= 2 (sut/reachable-count adj "a")))
+      (is (= 2 (sut/reachable-count adj "x"))))))
+
+(deftest reachable-count-wide-fan-out
+  (testing "fan-out root counts all children plus the root"
+    (is (= 5 (sut/reachable-count (->adj wide-graph) "root")))))
+
+(deftest reachable-count-missing-deps
+  (testing "neighbors absent from adj-map are not counted"
+    (is (= 2 (sut/reachable-count (->adj missing-dep-graph) "a")))))

@@ -41,7 +41,7 @@
  [{:criterion "reachable-count returns the count of distinct reachable nodes"
    :verification "Unit tests covering chain, disconnected, cycle, absent-start, empty"}
   {:criterion "Built on existing DFS, exposed via the interface"
-   :verification "graph.clj reuses dfs-collect; interface.clj exposes reachable-count"}]
+   :verification "graph.clj reuses dfs; interface.clj exposes reachable-count"}]
 
  :estimated-effort "0.5 day"
  :workflow/type :canonical-sdlc}
