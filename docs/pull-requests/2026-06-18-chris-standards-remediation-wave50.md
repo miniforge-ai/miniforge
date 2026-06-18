@@ -124,6 +124,7 @@ state, policy-pack validation, and artifact transit-store logging.
 
 ## Related Issues/PRs
 
+- This PR: #1230
 - Builds on the standards remediation waves that landed in:
   - #1221
   - #1222
@@ -137,6 +138,6 @@ state, policy-pack validation, and artifact transit-store logging.
 - [x] Tests updated for direct interface calls
 - [x] Broad test suite passed
 - [x] Pre-commit passed
-- [ ] PR opened
+- [x] PR opened
 - [ ] Copilot comments settled
 - [ ] All review comments resolved
