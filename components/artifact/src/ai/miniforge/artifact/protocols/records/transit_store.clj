@@ -37,7 +37,7 @@
    - Fast in-memory access during workflow execution
    - Survives process restarts
    - Can be streamed to central location later
-   - Simple file-based persistence"
+  - Simple file-based persistence"
   (:require
    [ai.miniforge.logging.interface :as log]
    [ai.miniforge.artifact.interface.protocols.artifact-store :as p]
