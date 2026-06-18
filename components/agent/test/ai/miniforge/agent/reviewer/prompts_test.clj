@@ -50,6 +50,50 @@
   (testing "other shapes round-trip via pr-str"
     (is (= "{:k 1}" (reviewer-prompts/format-artifact-for-review {:k 1})))))
 
+;------------------------------------------------------------------------------ format-artifact-manifest (N12 §5 shed path)
+
+(deftest format-artifact-manifest-test
+  (testing "CodeArtifact renders each file as path + action + size, omitting the body"
+    (let [out (reviewer-prompts/format-artifact-manifest
+                {:code/files [{:path "src/a.clj" :content "(def x 1)" :action :create}
+                              {:path "src/b.clj" :content "(def y 2)" :action :modify}]})]
+      (is (re-find #"src/a\.clj \(create\) \(9 chars\)" out))
+      (is (re-find #"src/b\.clj \(modify\) \(9 chars\)" out))
+      ;; the inlined body is gone — only the manifest line remains
+      (is (not (re-find #"\(def x 1\)" out)))
+      (is (not (re-find #"```" out)))
+      ;; and the reviewer is told how to fetch a body on demand
+      (is (re-find #"context_read" out))))
+
+  (testing "missing :action defaults to :unknown"
+    (is (re-find #"\(unknown\)"
+                 (reviewer-prompts/format-artifact-manifest
+                   {:code/files [{:path "p" :content "c"}]}))))
+
+  (testing "non-CodeArtifact shapes have nothing to shed → full rendering"
+    (is (= "literal" (reviewer-prompts/format-artifact-manifest "literal")))
+    (is (= "{:k 1}" (reviewer-prompts/format-artifact-manifest {:k 1})))))
+
+;------------------------------------------------------------------------------ build-review-prompt — manifest artifact formatter
+
+(deftest build-review-prompt-manifest-arity-test
+  (let [input {:task/title "T"
+               :task/scope ["src"]
+               :task/artifact {:code/files [{:path "src/a.clj"
+                                             :content "(def x 1)"
+                                             :action :modify}]}}]
+    (testing "default arity inlines the file body"
+      (let [prompt (reviewer-prompts/build-review-prompt input)]
+        (is (re-find #"\(def x 1\)" prompt))))
+
+    (testing "manifest arity sheds the body but keeps the path + context_read hint"
+      (let [prompt (reviewer-prompts/build-review-prompt
+                     input reviewer-prompts/format-artifact-manifest)]
+        (is (re-find #"## Code to Review" prompt))
+        (is (re-find #"src/a\.clj" prompt))
+        (is (re-find #"context_read" prompt))
+        (is (not (re-find #"\(def x 1\)" prompt)))))))
+
 ;------------------------------------------------------------------------------ build-review-prompt — section rendering
 
 (deftest build-review-prompt-renders-scope-section-test

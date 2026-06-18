@@ -30,6 +30,18 @@
   :max-total-ms                600000
   :min-activity-interval-ms    3000}
 
+ ;; Headroom reserved below the model's context window when deciding whether
+ ;; to shed the reviewer's inlined artifact file bodies to a manifest
+ ;; (N12 §5). The shed/bail estimate covers only miniforge's assembled
+ ;; prompt (system + standards addendum + user); the agent CLI adds its own
+ ;; baseline on top (its system prompt, tool schemas, host plugins/skills)
+ ;; that we can't measure. This reserve fires the shed before that
+ ;; unmeasured baseline pushes the true total over the window. Matches the
+ ;; planner reserve; the reviewer overflowed at 237k input tokens on an
+ ;; aggregated DAG integration-task review (full file contents + the ~38k
+ ;; standards pack) and the CLI hard-errored 'Prompt is too long'.
+ :prompt/context-window-reserve-tokens 50000
+
  :prompt/system
  "You are a Code Review Agent for an autonomous software development team.
 

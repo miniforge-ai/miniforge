@@ -24,7 +24,8 @@
    accessors used by phase-software-factory."
   (:require
    [clojure.test :refer [deftest is testing]]
-   [ai.miniforge.agent.reviewer.artifact :as artifact]))
+   [ai.miniforge.agent.reviewer.artifact :as artifact]
+   [ai.miniforge.logging.interface :as log]))
 
 ;------------------------------------------------------------------------------ Factories
 
@@ -270,3 +271,37 @@
     ;; Callers may pass a nil review artifact when a previous phase failed
     ;; to produce output.  The predicate must return false, not throw.
     (is (not (artifact/rejection-warnings-only? nil)))))
+
+;------------------------------------------------------------------------------ context-overflow-error-result (N12 §5)
+
+(deftest context-overflow-error-result-test
+  (let [logger (log/create-logger {:min-level :error :output (fn [_])})
+        msg (str "Reviewer prompt ~250000 est tokens exceeds the model context "
+                 "window 200000; LLM semantic review skipped, deterministic "
+                 "gates still applied")
+        ;; Mirror the producer: reviewer.clj synthesizes the normalized
+        ;; :llm-error :message AS the overflow message, so error-response
+        ;; surfaces it verbatim (it prefers :llm-error :message over the
+        ;; default arg).
+        normalized {:llm-error {:message msg :data {:context-overflow true}}}]
+    (testing "reports an INFRA failure, never a synthesized code-review rejection"
+      (let [result (artifact/context-overflow-error-result
+                     logger normalized
+                     {:decision :approved :blocking-issues [] :warnings []}
+                     {:passed 4 :failed 0 :total 4} 1234 msg)]
+        (is (= :error (:status result)))
+        (is (= :reviewer/context-overflow (get-in result [:error :data :code])))
+        (is (re-find #"deterministic gates still applied" (get-in result [:error :message])))
+        (testing "still reports the deterministic gate outcome (policy gates applied)"
+          (is (= :approved (get-in result [:metrics :decision])))
+          (is (= 4 (get-in result [:metrics :gates-passed])))
+          (is (= 0 (get-in result [:metrics :gates-failed])))
+          (is (= 4 (get-in result [:metrics :gates-total]))))))
+
+    (testing "a gate-blocking verdict survives the overflow exit — overflow never auto-approves a policy violation"
+      (let [blocked (artifact/context-overflow-error-result
+                      logger normalized
+                      {:decision :rejected :blocking-issues ["secret committed"] :warnings []}
+                      {:passed 3 :failed 1 :total 4} 99 msg)]
+        (is (= :rejected (get-in blocked [:metrics :decision])))
+        (is (= 1 (get-in blocked [:metrics :gates-failed])))))))

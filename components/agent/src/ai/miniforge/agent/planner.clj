@@ -22,6 +22,7 @@
   (:require
    [ai.miniforge.agent.artifact-session :as artifact-session]
    [ai.miniforge.agent.budget :as budget]
+   [ai.miniforge.agent.context-budget :as context-budget]
    [ai.miniforge.agent.model :as model]
    [ai.miniforge.agent.prompts :as prompts]
    [ai.miniforge.agent.result-boundary :as result-boundary]
@@ -213,31 +214,20 @@
    The shed/bail fire against `effective-window = window - reserve`. The
    reserve is clamped to at most half the window so a reserve >= window
    (misconfig, or a tiny-window model) can't zero the effective window and
-   make every prompt look over-budget; `:reserve-clamped?` flags that."
+   make every prompt look over-budget; `:reserve-clamped?` flags that.
+
+   Thin role wrapper over `context-budget/assemble-within-budget`: supplies
+   the planner's full/shed prompt builders and its sheddable-unit count
+   (the eagerly-inlined existing files)."
   [spec-text existing-files effective-system model reserve]
-  (let [window     (llm/context-window-for-model-id model)
-        eff-reserve (when window (min reserve (quot window 2)))
-        clamped?   (boolean (and window (> reserve eff-reserve)))
-        effective  (when window (- window eff-reserve))
-        est        (fn [user] (:estimated-input-tokens
-                               (llm/prompt-size-telemetry effective-system user)))
-        full       (build-user-prompt spec-text existing-files)
-        est-full   (est full)
-        base       {:window window :reserve reserve :effective-window effective
-                    :reserve-clamped? clamped?
-                    :est-full est-full :file-count (count existing-files)}]
-    (cond
-      (or (nil? effective) (< est-full effective))
-      (merge base {:user-prompt full :shed? false :over-after-shed? false :est-final est-full})
-
-      (empty? existing-files)            ; nothing left to shed — irreducibly over
-      (merge base {:user-prompt full :shed? false :over-after-shed? true :est-final est-full})
-
-      :else
-      (let [shed (build-user-prompt spec-text existing-files format-existing-files-manifest)
-            est-shed (est shed)]
-        (merge base {:user-prompt shed :shed? true
-                     :over-after-shed? (>= est-shed effective) :est-final est-shed})))))
+  (context-budget/assemble-within-budget
+   {:effective-system effective-system
+    :model            model
+    :reserve          reserve
+    :build-full       #(build-user-prompt spec-text existing-files)
+    :build-shed       #(build-user-prompt spec-text existing-files
+                                          format-existing-files-manifest)
+    :shed-count       (count existing-files)}))
 
 (defn- emit-prompt-size!
   "Emit an :agent/prompt-size workflow event recording the planner's
