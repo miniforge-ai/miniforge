@@ -139,5 +139,5 @@ state, policy-pack validation, and artifact transit-store logging.
 - [x] Broad test suite passed
 - [x] Pre-commit passed
 - [x] PR opened
-- [ ] Copilot comments settled
-- [ ] All review comments resolved
+- [x] Copilot comments settled
+- [x] All review comments resolved
