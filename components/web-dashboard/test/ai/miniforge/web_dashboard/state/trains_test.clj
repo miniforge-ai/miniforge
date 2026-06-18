@@ -22,7 +22,7 @@
    [clojure.test :refer [deftest is testing]]
    [cheshire.core :as json]
    [ai.miniforge.anomaly.interface :as anomaly]
-   [ai.miniforge.web-dashboard.state.core :as core]
+   [ai.miniforge.pr-train.interface :as pr-train]
    [ai.miniforge.web-dashboard.state.trains :as sut]))
 
 ;; ---------------------------------------------------------------------------- Fixture text
@@ -641,7 +641,7 @@
   (testing "Valid UUID but train not found returns error"
     (let [state (atom {:pr-train-manager :mgr})
           tid (str (random-uuid))]
-      (with-redefs-fn {#'core/safe-call (fn [_ _ & _] nil)}
+      (with-redefs-fn {#'pr-train/get-train (fn [_ _] nil)}
         (fn []
           (is (= {:error "Train not found"}
                  (sut/get-train-detail state tid))))))))
@@ -654,9 +654,7 @@
 (deftest train-action-unknown-action-test
   (testing "Unknown action returns nil"
     (let [state (atom {:pr-train-manager :mgr})]
-      (with-redefs-fn {#'core/safe-call (fn [_ _ & _] nil)}
-        (fn []
-          (is (nil? (sut/train-action! state (str (random-uuid)) "unknown"))))))))
+      (is (nil? (sut/train-action! state (str (random-uuid)) "unknown"))))))
 
 ;; ============================================================================
 ;; Layer 3: Sync status rendering tests
@@ -757,10 +755,14 @@
                         :pr/title "A"}]
               :to-remove [99]
               :status-map {101 {:pr/status :open :pr/ci-status :pending}}}]
-    (with-redefs-fn {#'core/safe-call
-                     (fn [_ns-sym fn-sym & _args]
-                       (swap! calls conj fn-sym)
-                       nil)}
+    (with-redefs-fn {#'pr-train/add-pr
+                     (fn [& _] (swap! calls conj 'add-pr))
+                     #'pr-train/remove-pr
+                     (fn [& _] (swap! calls conj 'remove-pr))
+                     #'pr-train/sync-pr-status
+                     (fn [& _] (swap! calls conj 'sync-pr-status))
+                     #'pr-train/link-prs
+                     (fn [& _] (swap! calls conj 'link-prs))}
       (fn []
         (sut/apply-sync-plan! :manager train-id "acme/service" plan)
         (is (= ['add-pr 'remove-pr 'sync-pr-status 'link-prs]
@@ -907,11 +909,8 @@
                        (fn [_ _ _] nil)
                        #'sut/apply-sync-plan!
                        (fn [_ _ _ _] nil)
-                       #'core/safe-call
-                       (fn [_ fn-sym & _]
-                         (case fn-sym
-                           get-train {:train/prs []}
-                           nil))}
+                       #'pr-train/get-train
+                       (fn [_ _] {:train/prs []})}
         (fn []
           (let [result (sut/sync-configured-repos! state)]
             (is (= 1 (:synced result)))
