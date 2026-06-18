@@ -74,45 +74,39 @@
    ;; GROUP 3b: timeline-based events show
    [ai.miniforge.cli.main.commands.events :as cmd-events]
    [ai.miniforge.agent.interface :as agent]
+   [ai.miniforge.artifact.interface :as artifact]
    [ai.miniforge.event-stream.interface :as es]
    [ai.miniforge.mcp-context-server.interface :as mcp-context-server]
+   [ai.miniforge.policy-pack.interface :as policy-pack]
+   [ai.miniforge.pr-train.interface :as pr-train]
+   [ai.miniforge.repo-dag.interface :as repo-dag]
    [ai.miniforge.workflow-resume.interface :as wr]
    [ai.miniforge.lsp-mcp-bridge.main :as lsp-bridge]
    [ai.miniforge.lsp-mcp-bridge.tasks :as lsp-tasks]
    [slingshot.slingshot :refer [try+]]))
 
-(defn- optional-var
-  "Resolve an optional provider var after loading its namespace."
+(defn- optional-composition-var
+  "Resolve a provider whose entire component is optional for this CLI product.
+   This is the CLI's only late-binding boundary: miniforge-core loads this
+   namespace without web-dashboard or TUI components on its classpath."
   [ns-sym var-sym]
   (try
     (require ns-sym)
     (ns-resolve ns-sym var-sym)
     (catch Throwable _ nil)))
 
-(defn- register-optional-var!
-  [qualified-sym ns-sym var-sym]
-  (when-let [v (optional-var ns-sym var-sym)]
-    (cmd-shared/register-optional-fn! qualified-sym v)))
-
 (defn- register-artifact-providers! []
-  (when-let [create-store (optional-var 'ai.miniforge.artifact.interface
-                                        'create-transit-store)]
-    (when-let [query (optional-var 'ai.miniforge.artifact.interface 'query)]
-      (cmd-shared/register-optional-fn!
-       'ai.miniforge.artifact.interface/list-artifacts
-       (fn [] (vec (query (create-store) {})))))
-    (when-let [get-provenance (optional-var 'ai.miniforge.artifact.interface
-                                            'get-provenance)]
-      (cmd-shared/register-optional-fn!
-       'ai.miniforge.artifact.interface/get-artifact-provenance
-       (fn [id] (get-provenance (create-store) id))))))
+  (cmd-shared/register-optional-fn!
+   'ai.miniforge.artifact.interface/list-artifacts
+   (fn [] (vec (artifact/query (artifact/create-transit-store) {}))))
+  (cmd-shared/register-optional-fn!
+   'ai.miniforge.artifact.interface/get-artifact-provenance
+   (fn [id] (artifact/get-provenance (artifact/create-transit-store) id))))
 
 (defn- register-policy-pack-providers! []
-  (when-let [load-all-packs (optional-var 'ai.miniforge.policy-pack.interface
-                                          'load-all-packs)]
-    (cmd-shared/register-optional-fn!
-     'ai.miniforge.policy-pack.interface/list-packs
-     (fn [] (:loaded (load-all-packs (str (app-config/home-dir) "/packs")))))))
+  (cmd-shared/register-optional-fn!
+   'ai.miniforge.policy-pack.interface/list-packs
+   (fn [] (:loaded (policy-pack/load-all-packs (str (app-config/home-dir) "/packs"))))))
 
 (register-artifact-providers!)
 (register-policy-pack-providers!)
@@ -120,27 +114,23 @@
 (defn- optional-web-launcher
   "Compose the dashboard command when the product includes web-dashboard."
   []
-  (when-let [start! (optional-var 'ai.miniforge.web-dashboard.interface 'start!)]
+  (when-let [start! (optional-composition-var
+                     'ai.miniforge.web-dashboard.interface
+                     'start!)]
     (fn [{:keys [port]}]
       (let [event-stream (es/create-event-stream)
-            create-pr-manager (optional-var 'ai.miniforge.pr-train.interface
-                                            'create-manager)
-            create-repo-manager (optional-var 'ai.miniforge.repo-dag.interface
-                                              'create-manager)
-            pr-train-manager (when create-pr-manager
-                               (try
-                                 (create-pr-manager)
-                                 (catch Exception e
-                                   (println (messages/t :web/pr-train-warning
-                                                        {:error (.getMessage e)}))
-                                   nil)))
-            repo-dag-manager (when create-repo-manager
-                               (try
-                                 (create-repo-manager)
-                                 (catch Exception e
-                                   (println (messages/t :web/repo-dag-warning
-                                                        {:error (.getMessage e)}))
-                                   nil)))]
+            pr-train-manager (try
+                               (pr-train/create-manager)
+                               (catch Exception e
+                                 (println (messages/t :web/pr-train-warning
+                                                      {:error (.getMessage e)}))
+                                 nil))
+            repo-dag-manager (try
+                               (repo-dag/create-manager)
+                               (catch Exception e
+                                 (println (messages/t :web/repo-dag-warning
+                                                      {:error (.getMessage e)}))
+                                 nil))]
         (start! {:port port
                  :event-stream event-stream
                  :pr-train-manager pr-train-manager
@@ -159,7 +149,7 @@
 ;; This is an optional composition seam: miniforge-core includes the CLI
 ;; without bundling the JVM TUI component.
 (def tui-launcher
-  (optional-var 'ai.miniforge.tui-views.interface 'start-standalone-tui!))
+  (optional-composition-var 'ai.miniforge.tui-views.interface 'start-standalone-tui!))
 
 (def tui-available?
   (some? tui-launcher))
@@ -171,10 +161,11 @@
   (cmd-shared/register-optional-fn!
    'ai.miniforge.tui-views.interface/start-standalone-tui!
    tui-launcher))
-(register-optional-var!
- 'ai.miniforge.tui-views.interface/start-fleet-tui!
- 'ai.miniforge.tui-views.interface
- 'start-fleet-tui!)
+(when-let [start-fleet-tui! (optional-composition-var 'ai.miniforge.tui-views.interface
+                                                      'start-fleet-tui!)]
+  (cmd-shared/register-optional-fn!
+   'ai.miniforge.tui-views.interface/start-fleet-tui!
+   start-fleet-tui!))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Constants and pure helpers

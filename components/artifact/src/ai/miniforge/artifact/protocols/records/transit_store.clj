@@ -39,6 +39,7 @@
    - Can be streamed to central location later
    - Simple file-based persistence"
   (:require
+   [ai.miniforge.logging.interface :as log]
    [ai.miniforge.artifact.interface.protocols.artifact-store :as p]
    [ai.miniforge.artifact.protocols.impl.transit-store :as impl]))
 
@@ -70,12 +71,10 @@
      ;; Load existing index
      (let [index (impl/load-index artifacts-dir)]
        (when logger
-         (require '[ai.miniforge.logging.interface :as log])
-         ((resolve 'ai.miniforge.logging.interface/info)
-          logger :system :artifact/store-created
-          {:data {:type :transit
-                  :dir artifacts-dir
-                  :existing-artifacts (count index)}}))
+         (log/info logger :system :artifact/store-created
+                   {:data {:type :transit
+                           :dir artifacts-dir
+                           :existing-artifacts (count index)}}))
 
        (->TransitArtifactStore
         artifacts-dir

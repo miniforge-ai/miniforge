@@ -35,6 +35,7 @@
    [clojure.string :as str]
    [ai.miniforge.config.interface :as config]
    [ai.miniforge.policy-pack.core :as core]
+   [ai.miniforge.policy-pack.schema :as schema]
    [ai.miniforge.policy-pack.rules.pack-dependency-validation :as dep-validation]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -235,10 +236,7 @@
   "Validate pack against PackManifest schema."
   [artifact _context]
   (when-let [pack (:pack artifact)]
-    (require 'ai.miniforge.policy-pack.schema)
-    (let [schema-ns (find-ns 'ai.miniforge.policy-pack.schema)
-          validate-pack (ns-resolve schema-ns 'validate-pack)
-          result (validate-pack pack)]
+    (let [result (schema/validate-pack pack)]
       (when-not (:valid? result)
         [(violation :critical
                     (str "Pack schema validation failed: " (:errors result)))]))))
