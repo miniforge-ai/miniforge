@@ -93,7 +93,7 @@
     (pr-str artifact)))
 
 (defn format-artifact-manifest
-  "Compact manifest of the artifact-under-review for the shed path (N12 §6):
+  "Compact manifest of the artifact-under-review for the shed path (N12 §5):
    each file's path, action, and size — not its inlined body. The reviewer
    runs read-only with native Read/Grep disallowed, so it fetches any file
    on demand via `context_read`, which reads through to the worktree on a
