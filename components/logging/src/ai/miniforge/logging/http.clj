@@ -23,21 +23,28 @@
    aligned existing brick (the fleet sink IS a logging concern) and the
    `event-stream` brick already depends on `logging`. Promote to a
    dedicated `http-utils` brick if a third consumer outside the
-   sink-layer arrives."
-  (:import
-   [java.net URI]
-   [java.net.http HttpRequest HttpRequest$BodyPublishers]
-   [java.time Duration]))
+   sink-layer arrives.")
+
+(defn- invoke-static
+  [class-name method-name param-types args]
+  (.invoke (.getMethod (Class/forName class-name)
+                       method-name
+                       (into-array Class param-types))
+           nil
+           (object-array args)))
 
 (defn build-json-post
   "Build an HTTP POST request with a JSON string `body` and a Bearer
    `api-key` header. `timeout-ms` sets the request-level timeout via
    `HttpRequest.Builder.timeout`."
   [uri body api-key timeout-ms]
-  (-> (HttpRequest/newBuilder)
-      (.uri (URI/create uri))
-      (.timeout (Duration/ofMillis timeout-ms))
+  (-> (invoke-static "java.net.http.HttpRequest" "newBuilder" [] [])
+      (.uri (java.net.URI/create uri))
+      (.timeout (java.time.Duration/ofMillis timeout-ms))
       (.header "Authorization" (str "Bearer " api-key))
       (.header "Content-Type" "application/json")
-      (.POST (HttpRequest$BodyPublishers/ofString body))
+      (.POST (invoke-static "java.net.http.HttpRequest$BodyPublishers"
+                            "ofString"
+                            [String]
+                            [body]))
       (.build)))

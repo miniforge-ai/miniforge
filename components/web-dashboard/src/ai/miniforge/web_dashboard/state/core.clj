@@ -32,17 +32,6 @@
             (swap! cache assoc args {:value result :time now})
             result))))))
 
-(defn safe-call
-  "Safely call a function from a namespace, returning default on error."
-  [ns-sym fn-sym & args]
-  (try
-    (when-let [ns (find-ns ns-sym)]
-      (when-let [f (ns-resolve ns fn-sym)]
-        (apply f args)))
-    (catch Exception e
-      (println "Error calling" fn-sym ":" (ex-message e))
-      nil)))
-
 ;------------------------------------------------------------------------------ Layer 1
 ;; State atom creation and access
 

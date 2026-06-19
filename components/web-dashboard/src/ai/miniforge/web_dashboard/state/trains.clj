@@ -22,7 +22,10 @@
    [clojure.java.shell :as shell]
    [clojure.string :as str]
    [cheshire.core :as json]
-   [ai.miniforge.web-dashboard.state.core :as core]))
+   [ai.miniforge.pr-train.interface :as pr-train]
+   [ai.miniforge.repo-dag.interface :as repo-dag]
+   [ai.miniforge.web-dashboard.state.core :as core]
+   [slingshot.slingshot :refer [try+]]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Fleet repository config and provider helpers
@@ -92,6 +95,13 @@
   (or (.getMessage e)
       (some-> e class .getName)
       "unknown exception"))
+
+(defn caught-message
+  [caught throwable]
+  (cond
+    (instance? Throwable caught) (ex-msg caught)
+    throwable (ex-msg throwable)
+    :else (str caught)))
 
 (defn ensure-message
   [message fallback]
@@ -641,48 +651,90 @@
 ;------------------------------------------------------------------------------ Layer 2
 ;; PR Train and DAG state
 
+(def train-actions
+  {"pause" :pause
+   "resume" :resume
+   "merge-next" :merge-next
+   :pause :pause
+   :resume :resume
+   :merge-next :merge-next})
+
+(defn normalize-train-action
+  [action]
+  (get train-actions action))
+
+(defn parse-train-id
+  [train-id]
+  (try+
+    (parse-uuid train-id)
+    (catch Object _ nil)))
+
+(defn fetch-trains
+  [state]
+  (if-let [mgr (:pr-train-manager @state)]
+    (try+
+      (->> (or (pr-train/list-trains mgr) [])
+           (map enrich-train)
+           vec)
+      (catch Object e
+        (println "Error listing PR trains:"
+                 (caught-message e (:throwable &throw-context)))
+        []))
+    []))
+
 (def get-trains
   "Get all PR trains (cached 10s)."
-  (core/ttl-memoize 10000
-                    (fn [state]
-                      (if-let [mgr (:pr-train-manager @state)]
-                        (->> (or (core/safe-call 'ai.miniforge.pr-train.interface 'list-trains mgr) [])
-                             (map enrich-train)
-                             vec)
-                        []))))
+  (core/ttl-memoize 10000 fetch-trains))
 
 (defn get-train-detail
   "Get detailed view of a PR train."
   [state train-id]
   (if-let [mgr (:pr-train-manager @state)]
-    (let [tid (try
-                (parse-uuid train-id)
-                (catch Exception _ nil))]
+    (let [tid (parse-train-id train-id)]
       (if-not tid
         {:error "Invalid train id."}
-        (if-let [train (core/safe-call 'ai.miniforge.pr-train.interface 'get-train mgr tid)]
-          (enrich-train train)
-          {:error "Train not found"})))
+        (try+
+          (if-let [train (pr-train/get-train mgr tid)]
+            (enrich-train train)
+            {:error "Train not found"})
+          (catch Object e
+            (println "Error getting PR train:"
+                     (caught-message e (:throwable &throw-context)))
+            {:error "Train not found"}))))
     {:error "PR train manager not available"}))
+
+(defn execute-train-action!
+  [mgr tid action]
+  (try+
+    (case action
+      :pause (pr-train/pause-train mgr tid "Manual pause")
+      :resume (pr-train/resume-train mgr tid)
+      :merge-next (pr-train/merge-next mgr tid)
+      nil)
+    (catch Object _ nil)))
 
 (defn train-action!
   "Execute action on a PR train."
   [state train-id action]
   (when-let [mgr (:pr-train-manager @state)]
-    (let [tid (parse-uuid train-id)]
-      (case action
-        "pause" (core/safe-call 'ai.miniforge.pr-train.interface 'pause-train mgr tid "Manual pause")
-        "resume" (core/safe-call 'ai.miniforge.pr-train.interface 'resume-train mgr tid)
-        "merge-next" (core/safe-call 'ai.miniforge.pr-train.interface 'merge-next mgr tid)
-        nil))))
+    (when-let [tid (parse-train-id train-id)]
+      (when-let [normalized-action (normalize-train-action action)]
+        (execute-train-action! mgr tid normalized-action)))))
+
+(defn fetch-dags
+  [state]
+  (if-let [mgr (:repo-dag-manager @state)]
+    (try+
+      (or (repo-dag/get-all-dags mgr) [])
+      (catch Object e
+        (println "Error listing repository DAGs:"
+                 (caught-message e (:throwable &throw-context)))
+        []))
+    []))
 
 (def get-dags
   "Get all repository DAGs (cached 10s)."
-  (core/ttl-memoize 10000
-                    (fn [state]
-                      (if-let [mgr (:repo-dag-manager @state)]
-                        (or (core/safe-call 'ai.miniforge.repo-dag.interface 'get-all-dags mgr) [])
-                        []))))
+  (core/ttl-memoize 10000 fetch-dags))
 
 ;------------------------------------------------------------------------------ Layer 3
 ;; External PR onboarding and sync
@@ -758,11 +810,14 @@
                        (some (fn [dag]
                                (when (= external-dag-name (:dag/name dag))
                                  (:dag/id dag)))
-                             (or (core/safe-call 'ai.miniforge.repo-dag.interface 'get-all-dags mgr) [])))
+                             (fetch-dags state)))
             created (when (and mgr (nil? existing))
-                      (some-> (core/safe-call 'ai.miniforge.repo-dag.interface 'create-dag mgr external-dag-name
-                                              "Externally discovered repositories and PR trains")
-                              :dag/id))
+                      (try+
+                        (some-> (repo-dag/create-dag
+                                  mgr external-dag-name
+                                  "Externally discovered repositories and PR trains")
+                                :dag/id)
+                        (catch Object _ nil)))
             dag-id (or existing created (random-uuid))]
         (swap! state assoc :fleet/default-dag-id dag-id)
         dag-id)))
@@ -770,19 +825,20 @@
 (defn ensure-repo-in-dag!
   [state dag-id repo]
   (when-let [mgr (:repo-dag-manager @state)]
-    (let [dag (core/safe-call 'ai.miniforge.repo-dag.interface 'get-dag mgr dag-id)
+    (let [dag (try+
+                (repo-dag/get-dag mgr dag-id)
+                (catch Object _ nil))
           exists? (some #(= repo (:repo/name %)) (:dag/repos dag))]
       (when-not exists?
         (let [[org _name] (str/split repo #"/" 2)]
-          (try
-            (core/safe-call 'ai.miniforge.repo-dag.interface 'add-repo
-                            mgr dag-id
-                            {:repo/url (str "https://github.com/" repo)
-                             :repo/name repo
-                             :repo/org org
-                             :repo/type :application
-                             :repo/default-branch "main"})
-            (catch Exception _ nil)))))))
+          (try+
+            (repo-dag/add-repo mgr dag-id
+                               {:repo/url (str "https://github.com/" repo)
+                                :repo/name repo
+                                :repo/org org
+                                :repo/type :application
+                                :repo/default-branch "main"})
+            (catch Object _ nil)))))))
 
 (defn train-name-for-repo
   [repo]
@@ -792,10 +848,12 @@
   [state repo]
   (if-let [mgr (:pr-train-manager @state)]
     (let [expected (train-name-for-repo repo)]
-      (some (fn [train]
-              (when (= expected (:train/name train))
-                (:train/id train)))
-            (or (core/safe-call 'ai.miniforge.pr-train.interface 'list-trains mgr) [])))
+      (try+
+        (some (fn [train]
+                (when (= expected (:train/name train))
+                  (:train/id train)))
+              (or (pr-train/list-trains mgr) []))
+        (catch Object _ nil)))
     nil))
 
 (defn ensure-repo-train!
@@ -803,15 +861,18 @@
   (when-let [mgr (:pr-train-manager @state)]
     (let [known-id (get-in @state [:fleet/repo-trains repo])
           known-train (when known-id
-                        (core/safe-call 'ai.miniforge.pr-train.interface 'get-train mgr known-id))
+                        (try+
+                          (pr-train/get-train mgr known-id)
+                          (catch Object _ nil)))
           existing-id (or (when (and known-id known-train) known-id)
                           (find-existing-repo-train-id state repo))
           train-id (or existing-id
-                       (core/safe-call 'ai.miniforge.pr-train.interface 'create-train
-                                       mgr
-                                       (train-name-for-repo repo)
-                                       (ensure-default-dag-id! state)
-                                       (str "Externally managed PR train for " repo)))]
+                       (try+
+                         (pr-train/create-train mgr
+                                                (train-name-for-repo repo)
+                                                (ensure-default-dag-id! state)
+                                                (str "Externally managed PR train for " repo))
+                         (catch Object _ nil)))]
       (when train-id
         (swap! state assoc-in [:fleet/repo-trains repo] train-id)
         train-id))))
@@ -840,22 +901,29 @@
 (defn add-prs!
   [mgr train-id repo prs]
   (doseq [pr prs]
-    (core/safe-call 'ai.miniforge.pr-train.interface 'add-pr
-                    mgr train-id repo (:pr/number pr) (:pr/url pr)
-                    (:pr/branch pr) (:pr/title pr))))
+    (try+
+      (pr-train/add-pr mgr train-id repo (:pr/number pr) (:pr/url pr)
+                       (:pr/branch pr) (:pr/title pr))
+      (catch Object _ nil))))
 
 (defn remove-prs!
   [mgr train-id pr-nums]
   (doseq [pr-num pr-nums]
-    (core/safe-call 'ai.miniforge.pr-train.interface 'remove-pr mgr train-id pr-num)))
+    (try+
+      (pr-train/remove-pr mgr train-id pr-num)
+      (catch Object _ nil))))
 
 (defn apply-sync-plan!
   [mgr train-id repo {:keys [to-add to-remove status-map]}]
   ;; Side effects are intentionally ordered: membership first, then status, then dependency linking.
   (add-prs! mgr train-id repo to-add)
   (remove-prs! mgr train-id to-remove)
-  (core/safe-call 'ai.miniforge.pr-train.interface 'sync-pr-status mgr train-id status-map)
-  (core/safe-call 'ai.miniforge.pr-train.interface 'link-prs mgr train-id))
+  (try+
+    (pr-train/sync-pr-status mgr train-id status-map)
+    (catch Object _ nil))
+  (try+
+    (pr-train/link-prs mgr train-id)
+    (catch Object _ nil)))
 
 (defn fetch-repo-prs
   "Fetch open PRs for a repo, returning a result map."
@@ -873,11 +941,11 @@
   [state mgr train-id repo prs]
   (let [dag-id (ensure-default-dag-id! state)
         _ (ensure-repo-in-dag! state dag-id repo)
-        before-train (or (core/safe-call 'ai.miniforge.pr-train.interface 'get-train mgr train-id)
+        before-train (or (pr-train/get-train mgr train-id)
                          {:train/prs []})
         sync-plan (train-sync-plan before-train prs)
         _ (apply-sync-plan! mgr train-id repo sync-plan)
-        after-train (core/safe-call 'ai.miniforge.pr-train.interface 'get-train mgr train-id)]
+        after-train (pr-train/get-train mgr train-id)]
     (result-success
      {:repo repo
       :train-id train-id

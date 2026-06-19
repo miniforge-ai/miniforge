@@ -22,8 +22,10 @@
    [clojure.test :refer [deftest is testing]]
    [cheshire.core :as json]
    [ai.miniforge.anomaly.interface :as anomaly]
-   [ai.miniforge.web-dashboard.state.core :as core]
-   [ai.miniforge.web-dashboard.state.trains :as sut]))
+   [ai.miniforge.pr-train.interface :as pr-train]
+   [ai.miniforge.repo-dag.interface :as repo-dag]
+   [ai.miniforge.web-dashboard.state.trains :as sut]
+   [slingshot.slingshot :refer [throw+]]))
 
 ;; ---------------------------------------------------------------------------- Fixture text
 
@@ -625,6 +627,32 @@
 ;; Layer 2: Train/DAG state access tests
 ;; ============================================================================
 
+(deftest get-trains-manager-exception-test
+  (testing "Manager exceptions return an empty train list"
+    (let [state (atom {:pr-train-manager ::boom-manager})]
+      (with-redefs-fn {#'pr-train/list-trains
+                       (fn [& _] (throw (ex-info "boom" {})))}
+        (fn []
+          (is (= [] (sut/fetch-trains state))))))))
+
+(deftest fetch-trains-non-throwable-sling-test
+  (testing "Slingshot data throws still return the safe empty list"
+    (let [state (atom {:pr-train-manager ::boom-manager})]
+      (with-redefs-fn {#'pr-train/list-trains
+                       (fn [& _] (throw+ {:type :boom :message "data boom"}))}
+        (fn []
+          (is (= [] (sut/fetch-trains state))))))))
+
+(deftest normalize-train-action-test
+  (testing "Request strings are normalized to app-local action keywords"
+    (is (= :pause (sut/normalize-train-action "pause")))
+    (is (= :resume (sut/normalize-train-action "resume")))
+    (is (= :merge-next (sut/normalize-train-action "merge-next"))))
+  (testing "Already-normalized keyword actions pass through"
+    (is (= :pause (sut/normalize-train-action :pause))))
+  (testing "Unknown actions are rejected"
+    (is (nil? (sut/normalize-train-action "unknown")))))
+
 (deftest get-train-detail-invalid-id-test
   (testing "Invalid train id returns error"
     (let [state (atom {:pr-train-manager :mgr})]
@@ -641,7 +669,27 @@
   (testing "Valid UUID but train not found returns error"
     (let [state (atom {:pr-train-manager :mgr})
           tid (str (random-uuid))]
-      (with-redefs-fn {#'core/safe-call (fn [_ _ & _] nil)}
+      (with-redefs-fn {#'pr-train/get-train (fn [_ _] nil)}
+        (fn []
+          (is (= {:error "Train not found"}
+                 (sut/get-train-detail state tid))))))))
+
+(deftest get-train-detail-manager-exception-test
+  (testing "Manager exceptions return the not-found error map"
+    (let [state (atom {:pr-train-manager :mgr})
+          tid (str (random-uuid))]
+      (with-redefs-fn {#'pr-train/get-train
+                       (fn [& _] (throw (ex-info "boom" {})))}
+        (fn []
+          (is (= {:error "Train not found"}
+                 (sut/get-train-detail state tid))))))))
+
+(deftest get-train-detail-non-throwable-sling-test
+  (testing "Slingshot data throws return the not-found error map"
+    (let [state (atom {:pr-train-manager :mgr})
+          tid (str (random-uuid))]
+      (with-redefs-fn {#'pr-train/get-train
+                       (fn [& _] (throw+ {:type :boom :message "data boom"}))}
         (fn []
           (is (= {:error "Train not found"}
                  (sut/get-train-detail state tid))))))))
@@ -651,12 +699,95 @@
     (let [state (atom {})]
       (is (nil? (sut/train-action! state (str (random-uuid)) "pause"))))))
 
+(deftest train-action-invalid-id-test
+  (testing "Invalid train id returns nil"
+    (let [state (atom {:pr-train-manager :mgr})]
+      (is (nil? (sut/train-action! state "not-a-uuid" "pause"))))))
+
+(deftest train-action-manager-exception-test
+  (testing "Manager exceptions return nil"
+    (let [state (atom {:pr-train-manager :mgr})]
+      (with-redefs-fn {#'pr-train/pause-train
+                       (fn [& _] (throw (ex-info "boom" {})))}
+        (fn []
+          (is (nil? (sut/train-action! state (str (random-uuid)) "pause"))))))))
+
+(deftest train-action-keyword-action-test
+  (testing "Keyword actions are dispatched internally"
+    (let [state (atom {:pr-train-manager :mgr})
+          train-id (random-uuid)
+          captured (atom nil)]
+      (with-redefs-fn {#'pr-train/resume-train
+                       (fn [mgr tid]
+                         (reset! captured [mgr tid])
+                         :resumed)}
+        (fn []
+          (is (= :resumed (sut/train-action! state (str train-id) :resume)))
+          (is (= [:mgr train-id] @captured)))))))
+
 (deftest train-action-unknown-action-test
   (testing "Unknown action returns nil"
     (let [state (atom {:pr-train-manager :mgr})]
-      (with-redefs-fn {#'core/safe-call (fn [_ _ & _] nil)}
+      (is (nil? (sut/train-action! state (str (random-uuid)) "unknown"))))))
+
+(deftest get-dags-manager-exception-test
+  (testing "Manager exceptions return an empty DAG list"
+    (let [state (atom {:repo-dag-manager ::boom-manager})]
+      (with-redefs-fn {#'repo-dag/get-all-dags
+                       (fn [& _] (throw (ex-info "boom" {})))}
         (fn []
-          (is (nil? (sut/train-action! state (str (random-uuid)) "unknown"))))))))
+          (is (= [] (sut/fetch-dags state))))))))
+
+(deftest fetch-dags-non-throwable-sling-test
+  (testing "Slingshot data throws still return the safe empty list"
+    (let [state (atom {:repo-dag-manager ::boom-manager})]
+      (with-redefs-fn {#'repo-dag/get-all-dags
+                       (fn [& _] (throw+ {:type :boom :message "data boom"}))}
+        (fn []
+          (is (= [] (sut/fetch-dags state))))))))
+
+(deftest ensure-default-dag-id-create-exception-test
+  (testing "DAG creation failure falls back to a generated DAG id"
+    (let [state (atom {:repo-dag-manager :mgr})]
+      (with-redefs-fn {#'repo-dag/get-all-dags (fn [_] [])
+                       #'repo-dag/create-dag (fn [& _] (throw+ {:type :boom}))}
+        (fn []
+          (let [dag-id (sut/ensure-default-dag-id! state)]
+            (is (uuid? dag-id))
+            (is (= dag-id (:fleet/default-dag-id @state)))))))))
+
+(deftest ensure-repo-train-create-exception-test
+  (testing "Train creation failure returns nil instead of aborting sync"
+    (let [state (atom {:pr-train-manager :mgr
+                       :repo-dag-manager :dag-mgr
+                       :fleet/default-dag-id (random-uuid)})]
+      (with-redefs-fn {#'pr-train/list-trains (fn [_] [])
+                       #'repo-dag/get-all-dags (fn [_] [])
+                       #'pr-train/create-train (fn [& _] (throw+ {:type :boom}))}
+        (fn []
+          (is (nil? (sut/ensure-repo-train! state "acme/service"))))))))
+
+(deftest apply-sync-plan-continues-through-side-effect-exceptions-test
+  (testing "Sync side effects remain ordered and do not abort on one failure"
+    (let [calls (atom [])
+          train-id (random-uuid)
+          plan {:to-add [{:pr/number 1
+                          :pr/url "https://example.test/pr/1"
+                          :pr/branch "feature"
+                          :pr/title "Feature"}]
+                :to-remove [2]
+                :status-map {1 {:pr/status :open}}}]
+      (with-redefs-fn {#'pr-train/add-pr
+                       (fn [& _] (swap! calls conj :add) (throw+ {:type :add}))
+                       #'pr-train/remove-pr
+                       (fn [& _] (swap! calls conj :remove) (throw+ {:type :remove}))
+                       #'pr-train/sync-pr-status
+                       (fn [& _] (swap! calls conj :sync) (throw+ {:type :sync}))
+                       #'pr-train/link-prs
+                       (fn [& _] (swap! calls conj :link) (throw+ {:type :link}))}
+        (fn []
+          (sut/apply-sync-plan! :mgr train-id "acme/service" plan)
+          (is (= [:add :remove :sync :link] @calls)))))))
 
 ;; ============================================================================
 ;; Layer 3: Sync status rendering tests
@@ -757,10 +888,14 @@
                         :pr/title "A"}]
               :to-remove [99]
               :status-map {101 {:pr/status :open :pr/ci-status :pending}}}]
-    (with-redefs-fn {#'core/safe-call
-                     (fn [_ns-sym fn-sym & _args]
-                       (swap! calls conj fn-sym)
-                       nil)}
+    (with-redefs-fn {#'pr-train/add-pr
+                     (fn [& _] (swap! calls conj 'add-pr))
+                     #'pr-train/remove-pr
+                     (fn [& _] (swap! calls conj 'remove-pr))
+                     #'pr-train/sync-pr-status
+                     (fn [& _] (swap! calls conj 'sync-pr-status))
+                     #'pr-train/link-prs
+                     (fn [& _] (swap! calls conj 'link-prs))}
       (fn []
         (sut/apply-sync-plan! :manager train-id "acme/service" plan)
         (is (= ['add-pr 'remove-pr 'sync-pr-status 'link-prs]
@@ -907,11 +1042,8 @@
                        (fn [_ _ _] nil)
                        #'sut/apply-sync-plan!
                        (fn [_ _ _ _] nil)
-                       #'core/safe-call
-                       (fn [_ fn-sym & _]
-                         (case fn-sym
-                           get-train {:train/prs []}
-                           nil))}
+                       #'pr-train/get-train
+                       (fn [_ _] {:train/prs []})}
         (fn []
           (let [result (sut/sync-configured-repos! state)]
             (is (= 1 (:synced result)))

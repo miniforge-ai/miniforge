@@ -5,6 +5,8 @@
         ai.miniforge/config {:local/root "../config"}
         ai.miniforge/event-stream {:local/root "../event-stream"}
         ai.miniforge/messages {:local/root "../messages"}
+        ai.miniforge/pr-train {:local/root "../pr-train"}
+        ai.miniforge/repo-dag {:local/root "../repo-dag"}
         http-kit/http-kit {:mvn/version "2.8.0"}
         hiccup/hiccup {:mvn/version "2.0.0-RC3"}
         cheshire/cheshire {:mvn/version "5.13.0"}}

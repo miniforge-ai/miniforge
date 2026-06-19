@@ -24,7 +24,10 @@
    [ai.miniforge.cli.main :as sut]
    [ai.miniforge.cli.main.commands.pr-monitor :as cmd-pr-monitor]
    [ai.miniforge.event-stream.interface :as es]
-   [ai.miniforge.workflow-resume.interface :as wr]))
+   [ai.miniforge.pr-train.interface :as pr-train]
+   [ai.miniforge.repo-dag.interface :as repo-dag]
+   [ai.miniforge.workflow-resume.interface :as wr]
+   [slingshot.slingshot :refer [throw+]]))
 
 (deftest help-cmd-uses-generic-workflow-examples-test
   (testing "CLI help shows generic workflow examples instead of SDLC-specific ones"
@@ -61,6 +64,30 @@
         (is (.contains output "CMD:one"))
         (is (.contains output "NOTE:engine"))
         (is (.contains output "TUI:engine-tui"))))))
+
+(deftest create-pr-train-manager-handles-construction-errors-test
+  (testing "manager construction failure logs a warning and returns nil"
+    (with-redefs [pr-train/create-manager
+                  (fn [] (throw (ex-info "train boom" {})))]
+      (let [output (with-out-str
+                     (is (nil? (#'sut/create-pr-train-manager))))]
+        (is (.contains output "train boom"))))))
+
+(deftest create-pr-train-manager-handles-non-throwable-sling-test
+  (testing "slingshot data throws do not break the warning path"
+    (with-redefs [pr-train/create-manager
+                  (fn [] (throw+ {:type :boom :message "train data boom"}))]
+      (let [output (with-out-str
+                     (is (nil? (#'sut/create-pr-train-manager))))]
+        (is (.contains output "train data boom"))))))
+
+(deftest create-repo-dag-manager-handles-construction-errors-test
+  (testing "manager construction failure logs a warning and returns nil"
+    (with-redefs [repo-dag/create-manager
+                  (fn [] (throw (ex-info "dag boom" {})))]
+      (let [output (with-out-str
+                     (is (nil? (#'sut/create-repo-dag-manager))))]
+        (is (.contains output "dag boom"))))))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Dispatch table coverage
