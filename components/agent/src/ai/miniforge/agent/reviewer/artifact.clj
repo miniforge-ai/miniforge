@@ -227,13 +227,12 @@
 
 (defn context-overflow-error-result
   "Reviewer exit when the assembled prompt exceeds the model's context window
-   even after shedding the artifact's inlined file bodies to a manifest
-   (N12 §5). Sibling of `timeout-only-error-result`: the LLM never produced a
+   after every faithful reduction has been tried: artifact bodies shed to a
+   manifest and compiled policy/knowledge addenda split across multiple LLM
+   sessions. Sibling of `timeout-only-error-result`: the LLM never produced a
    verdict, so this reports an INFRA failure (code `:reviewer/context-overflow`)
    rather than a bogus code-review rejection — but it still reports the
-   DETERMINISTIC gate outcome. The compiled policy gates are Miniforge's trust
-   boundary and run regardless of prompt size; only the LLM's semantic pass is
-   skipped here, so policy enforcement is never dropped."
+   deterministic gate outcome."
   [logger normalized gate-result counts duration overflow-message]
   (log/warn logger :reviewer :reviewer/context-overflow
             {:data {:gate-decision (:decision gate-result)
