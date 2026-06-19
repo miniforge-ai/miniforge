@@ -35,6 +35,7 @@
   (let [causes (->> (iterate ex-cause e)
                     rest
                     (take-while some?)
+                    (take 10)
                     (mapv (fn [^Throwable cause]
                             {:error-message (ex-message cause)
                              :error-type    (.getName (class cause))})))]
@@ -117,16 +118,16 @@
                                        (cond-> {:extract/batch-size (get config :connector/page-size
                                                                          (:connector/page-size default-config))}
                                          cursor (assoc :extract/cursor cursor)))]
-              (conn/close connector @handle)
               (stage-result id name :completed
                             (merge (timestamps (get context :started-at))
                                    {:schema-name schema
                                     :records (:records result)
                                     :cursor (:extract/cursor result)}))))
           (catch Exception e
+            (stage-result id name :failed (exception-context e)))
+          (finally
             (when-let [h @handle]
-              (try (conn/close connector h) (catch Exception _)))
-            (stage-result id name :failed (exception-context e))))))))
+              (try (conn/close connector h) (catch Exception _)))))))))
 
 (defn- execute-publish-stage
   "Execute a publish stage using the connector's publish method."
@@ -143,12 +144,12 @@
                           {:publish/mode     (get config :publish-mode
                                                  (:publish/default-mode default-config))
                            :publish/datasets (:publish/datasets context)})
-            (conn/close connector @handle)
             (stage-result id name :completed {:completed-at (Instant/now)}))
           (catch Exception e
+            (stage-result id name :failed (exception-context e)))
+          (finally
             (when-let [h @handle]
-              (try (conn/close connector h) (catch Exception _)))
-            (stage-result id name :failed (exception-context e))))))))
+              (try (conn/close connector h) (catch Exception _)))))))))
 
 (defn- execute-transform-stage
   "Execute a non-connector stage (normalize, transform, aggregate, etc.).
