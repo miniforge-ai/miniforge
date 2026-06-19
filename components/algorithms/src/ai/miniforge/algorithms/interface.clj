@@ -49,3 +49,9 @@
 
    See ai.miniforge.algorithms.graph/dfs-collect for full documentation."
   graph/dfs-collect)
+
+(def reachable-count
+  "Count distinct nodes reachable from start in an adjacency map.
+
+   See ai.miniforge.algorithms.graph/reachable-count for full documentation."
+  graph/reachable-count)

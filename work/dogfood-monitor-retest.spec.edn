@@ -1,0 +1,47 @@
+;; Minimal dogfood spec — exercises the full canonical SDLC to produce a real
+;; PR + a persisted observe worklist, so the autonomous PR-monitor resume path
+;; (observe persist #1206 + `miniforge pr monitor` #1209) can be re-tested
+;; end-to-end. The feature itself is intentionally tiny.
+
+{:spec/title "Add a reachable-node-count helper to the algorithms component"
+ :version "1.0.0"
+ :type :feature
+ :priority :low
+
+ :spec/description
+ "Add a small pure helper `reachable-count` to the algorithms component that,
+  given an adjacency map and a start node, returns the number of distinct nodes
+  reachable from the start (including the start). Build it on the existing DFS
+  traversal in graph.clj — do not reimplement traversal. Expose it through the
+  algorithms interface. This is a self-contained, pure addition with no new
+  dependencies."
+
+ :spec/intent
+ {:type :feature
+  :scope ["components/algorithms/src/ai/miniforge/algorithms/graph.clj"
+          "components/algorithms/src/ai/miniforge/algorithms/interface.clj"
+          "components/algorithms/test/ai/miniforge/algorithms/graph_test.clj"]}
+
+ :spec/constraints
+ ["Reuse the existing DFS traversal (dfs-collect / dfs) — no new traversal logic"
+  "Pure function — no I/O, no state"
+  "Handle edge cases: start node absent from the adjacency map, empty graph,
+   self-loops, and cycles (must terminate)"
+  "Expose via the algorithms interface following the existing `(def name ...)` pattern"]
+
+ :testing-strategy
+ {:unit-tests
+  ["Linear chain a->b->c from a returns 3"
+   "Disconnected node is not counted"
+   "Cycle a->b->a from a returns 2 (terminates)"
+   "Start node absent from adjacency map returns 0"
+   "Empty graph returns 0"]}
+
+ :spec/acceptance-criteria
+ [{:criterion "reachable-count returns the count of distinct reachable nodes"
+   :verification "Unit tests covering chain, disconnected, cycle, absent-start, empty"}
+  {:criterion "Built on existing DFS, exposed via the interface"
+   :verification "graph.clj reuses dfs; interface.clj exposes reachable-count"}]
+
+ :estimated-effort "0.5 day"
+ :workflow/type :canonical-sdlc}

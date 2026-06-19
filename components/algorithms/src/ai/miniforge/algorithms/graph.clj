@@ -317,6 +317,30 @@
                              node-id [] visited visiting)))
        @collected))))
 
+(defn reachable-count
+  "Count distinct nodes reachable from start in an adjacency map.
+
+  adj-map: {node-id [neighbor-node-id ...]}
+  start:   the starting node ID
+
+  Returns a non-negative integer — the count of nodes reachable from start,
+  including start itself. The adjacency map values are the neighbor lists
+  directly, so identity serves as get-deps-fn.
+
+  Handles:
+  - Absent start node  → 0
+  - Empty graph        → 0
+  - Self-loops         → 1 (cycle short-circuits, start is still counted)
+  - General cycles     → terminates; visited set prevents re-entry"
+  [adj-map start]
+  (let [[visited _] (dfs adj-map
+                         start
+                         identity
+                         (fn [_id _node _path _visited _visiting] nil)
+                         (fn [_id _path _visited _visiting] nil)
+                         (fn [_id _visited _visiting] nil))]
+    (count visited)))
+
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
   ;; Example graph
@@ -360,5 +384,24 @@
                (fn [_ _ _ _] 1)
                :pre + 0)
   ;; => 4
+
+  ;; reachable-count examples
+  (reachable-count {:a [:b :c] :b [:d] :c [:d] :d []} :a)
+  ;; => 4
+
+  (reachable-count {:a [:b :c] :b [:d] :c [:d] :d []} :d)
+  ;; => 1
+
+  (reachable-count {:a [:b :c] :b [:d] :c [:d] :d []} :missing)
+  ;; => 0
+
+  (reachable-count {} :a)
+  ;; => 0
+
+  (reachable-count {:a [:a]} :a)
+  ;; => 1  (self-loop: cycle short-circuits, start still counted)
+
+  (reachable-count {:a [:b] :b [:a]} :a)
+  ;; => 2  (two-node cycle: terminates cleanly)
 
   :leave-this-here)
