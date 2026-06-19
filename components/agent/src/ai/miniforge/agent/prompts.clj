@@ -24,7 +24,8 @@
    [ai.miniforge.response.interface :as response]
    [clojure.edn :as edn]
    [clojure.java.io :as io]
-   [selmer.parser :as selmer]))
+   [selmer.parser :as selmer]
+   [selmer.util :as selmer-util]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Prompt loading
@@ -128,11 +129,13 @@
 (defn render-template
   "Render a Selmer template with the given substitutions.
 
-   Prompt resources use Selmer syntax (`{{key}}`, `{% if key %}`,
-   `{% for item in items %}`), with the `safe` filter applied in prompt
-   templates for code or markdown values that must not be HTML-escaped."
+   Prompt resources use Selmer syntax (`{{key}}`, `{% if key %}`, and
+   `{% for item in items %}`). Substitution is intentionally raw by default
+   because these templates target LLM prompts, not HTML, and historical
+   callers pass code, markdown, diffs, and EDN that must not be escaped."
   [template substitutions]
-  (selmer/render (or template "") (template-context substitutions)))
+  (selmer-util/without-escaping
+    (selmer/render (or template "") (template-context substitutions))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

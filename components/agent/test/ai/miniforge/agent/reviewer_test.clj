@@ -1078,3 +1078,39 @@
           (is (= (* 2 (count @captured-systems))
                  (get-in result [:metrics :tokens]))
               "token accounting sums every split LLM session"))))))
+
+(deftest test-reviewer-split-session-summary-fallback
+  (testing "split reviews without per-session summaries still produce a useful summary"
+    (let [combine #'reviewer/combine-parsed-reviews
+          result (combine [{:review/decision :approved
+                            :review/issues []}
+                           {:review/decision :changes-requested
+                            :review/issues []}])]
+      (is (= :changes-requested (:review/decision result)))
+      (is (= "Split reviewer sessions completed."
+             (:review/summary result))))))
+
+(deftest test-reviewer-irreducible-context-overflow-applies-gates-without-llm
+  (testing "irreducible context overflow skips the doomed LLM call but still
+            runs deterministic policy gates"
+    (let [llm-called? (atom false)]
+      (with-redefs [model/resolve-llm-client-for-role (fn [_role client] client)
+                    llm/context-window-for-model-id (fn [_] 100)
+                    llm/chat (fn [_ _ _]
+                               (reset! llm-called? true)
+                               (mock-llm-response valid-review-content))
+                    llm/chat-stream (fn [_ _ _ _]
+                                      (reset! llm-called? true)
+                                      (mock-llm-response valid-review-content))]
+        (let [reviewer (reviewer/create-reviewer
+                        {:llm-backend ::mock-backend
+                         :gates [(passing-gate :policy-check)]})
+              result (core/invoke reviewer {} sample-artifact)]
+          (is (false? @llm-called?) "the doomed LLM call is skipped")
+          (is (= :error (:status result))
+              "returns an infra failure, not a review verdict")
+          (is (= :reviewer/context-overflow
+                 (get-in result [:error :data :code])))
+          (is (= 1 (get-in result [:metrics :gates-passed]))
+              "the deterministic policy gate still ran")
+          (is (= 0 (get-in result [:metrics :tokens]))))))))

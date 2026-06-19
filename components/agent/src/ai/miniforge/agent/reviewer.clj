@@ -228,19 +228,21 @@
 (defn- combine-parsed-reviews
   [reviews]
   (let [multiple? (> (count reviews) 1)
-        summaries (keep :review/summary reviews)]
+        summaries (seq (keep :review/summary reviews))]
     (cond-> {:review/decision (strongest-review-decision reviews)
              :review/issues (vec (mapcat #(get % :review/issues []) reviews))
              :review/out-of-scope-observations
              (vec (mapcat #(get % :review/out-of-scope-observations []) reviews))
              :review/strengths (vec (mapcat #(get % :review/strengths []) reviews))
              :review/summary (if multiple?
-                               (str "Split reviewer sessions:\n"
-                                    (str/join "\n"
-                                              (map-indexed
-                                               (fn [idx summary]
-                                                 (str "- Session " (inc idx) ": " summary))
-                                               summaries)))
+                               (if summaries
+                                 (str "Split reviewer sessions:\n"
+                                      (str/join "\n"
+                                                (map-indexed
+                                                 (fn [idx summary]
+                                                   (str "- Session " (inc idx) ": " summary))
+                                                 summaries)))
+                                 "Split reviewer sessions completed.")
                                (or (first summaries) "Review completed."))}
       (not multiple?) (assoc :review/summary (or (first summaries)
                                                  "Review completed.")))))

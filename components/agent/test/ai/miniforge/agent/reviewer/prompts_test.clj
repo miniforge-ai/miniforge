@@ -25,6 +25,7 @@
    the `## Scope` boundary, and the required-scope contract."
   (:require
    [clojure.test :refer [deftest is testing]]
+   [ai.miniforge.agent.prompts :as prompts]
    [ai.miniforge.agent.reviewer.prompts :as reviewer-prompts]))
 
 ;------------------------------------------------------------------------------ format-artifact-for-review
@@ -75,6 +76,12 @@
     (is (= "{:k 1}" (reviewer-prompts/format-artifact-manifest {:k 1})))))
 
 ;------------------------------------------------------------------------------ build-review-prompt — manifest artifact formatter
+
+(deftest render-template-preserves-raw-prompt-content-test
+  (testing "Selmer prompt rendering does not HTML-escape code, diffs, markdown, or EDN"
+    (is (= "Review <src/a.clj> && {:ok? true}"
+           (prompts/render-template "Review {{content}}"
+                                    {:content "<src/a.clj> && {:ok? true}"})))))
 
 (deftest build-review-prompt-manifest-arity-test
   (let [input {:task/title "T"
