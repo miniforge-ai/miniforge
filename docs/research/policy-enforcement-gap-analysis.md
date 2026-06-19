@@ -5,6 +5,32 @@ Status: draft 2026-06-18. Drives a multi-wave program. The trust boundary:
 through the workflow.** A policy that only warns is a contradiction — that is
 guidance, a different kind of thing.
 
+## Decisions (2026-06-18, from user)
+
+These override the first-pass tiers below where they conflict.
+
+- **Concrete rule ⇒ policy ⇒ hard-halt.** A rule's concreteness (does the
+  standard define it concretely?) and the detector's reliability are different
+  axes. `stratified-design` and `code-quality` are concrete → **hard-halt**, not
+  human-approval. Detector false-positive risk is a *detector-quality* problem,
+  solved by concrete criteria + required `file:line` evidence-to-fire + the
+  ratchet (flip to hard-halt once compliant, monitor FP rate) — never by demoting
+  the rule. Default any objectively-checkable rule to policy; reserve guidance for
+  things that are not a property of the artifact (reviewer-behavior meta) or pure
+  philosophy with no concrete criteria.
+- **`require-approval` ≠ flaky-judge bucket.** It is for policies where
+  *exceptions are legitimate and need human authorization* (e.g. a host bind-mount
+  outside the allowlist). A deliberate per-rule call about whether exceptions
+  exist, independent of detector reliability.
+- **Security rules → hard-halt, flipped immediately** (not ratcheted). Accept
+  short-term blocking for security.
+- **New: a security pack** encoding defense-in-depth, including AI security
+  (prompt-injection, tool-use boundaries, secret handling, data-exfiltration,
+  model/supply-chain). Its own deliverable, same compile/gate machinery.
+- **Semantic scope = in-scope (changed) files only.** And: *if a file is in
+  scope, we fix the gaps we find and gate on them* — an in-scope file must fully
+  comply; a violation there blocks → gets fixed → re-gates.
+
 ## 1. Findings (how enforcement actually works today)
 
 Source of truth: `standards/miniforge/` submodule MDC files → compiled by
@@ -93,6 +119,8 @@ Marked `?` where the rule body must be read to confirm during its wave.
 
 ### P-sem — semantic policy → hard-halt via wired judge, fail-closed
 
+- `:std/stratified-design`, `:std/code-quality` (concrete per the standards →
+  hard-halt; detector reliability handled by evidence + ratchet, not demotion),
 - `:std/exceptions-as-data`, `:std/result-handling`, `:std/named-constants`,
   `:std/no-dead-code`, `:std/localization`, `:std/config-as-data`,
   `:std/validation-boundaries`, `:std/clojure-exception-handling`,
@@ -107,10 +135,19 @@ Marked `?` where the rule body must be read to confirm during its wave.
 - `:std/clojure` — content-scan part is P-det; remainder P-sem.
 - `:std/420-structural-validity` — likely redundant with the verify build/test gates; confirm, then fold in or drop. ?
 
-### P-appr — approval-gated (human confirm) — candidates, user to confirm
+### P-appr — approval-gated: policies with LEGITIMATE exceptions needing human sign-off
 
-- `:std/stratified-design`, `:std/code-quality` — if treated as policy rather
-  than guidance, gate to human approval (judge unreliable for auto-block).
+Not a flaky-judge bucket (see Decisions). Only rules where an exception can be
+valid but must be authorized:
+
+- `:std/runtime-restrict-host-mounts` — host mount outside the allowlist: block
+  unless a human authorizes the specific mount. (The never-allowed mounts —
+  docker socket — stay P-det hard-halt.)
+- Candidates surfaced during the Standards wave where the rule itself admits
+  authorized exceptions. Default remains hard-halt; this tier is opt-in per rule.
+
+`:std/stratified-design` and `:std/code-quality` are NOT here — they are concrete
+policies → P-sem hard-halt (moved per Decisions).
 
 ### G — guidance (not gated; agent-injected; needs guidance tier)
 
@@ -169,13 +206,22 @@ compliance, not by toothlessness.
   Cross-repo: settle the submodule PR and re-pin before the consuming change.
 - **F1..Fn — fix violations:** clear the codebase violations per rule/cluster,
   batched. As each policy reaches zero violations, flip it to `hard-halt` (P-det
-  first — cheap and immediate; then P-sem; security rules prioritized).
+  first — cheap and immediate; then P-sem). Security is the exception: flip to
+  hard-halt immediately, not ratcheted.
+- **SP — security pack (parallel track):** author a defense-in-depth security
+  pack including AI security (prompt-injection, tool-use boundaries, secret
+  handling, data-exfiltration, model/supply-chain), compiled and gated by the
+  same machinery. Security rules ship hard-halt from the start.
 
-## 6. Open questions for the user
+## 6. Open questions — resolved 2026-06-18
 
-- P-appr tier: do architectural-judgment rules (`stratified-design`,
-  `code-quality`) become human-approval gates, or stay guidance?
-- Security rules: flip to `hard-halt` first, ahead of cleaning all violations
-  (accept short-term blocking for security), or ratchet like the rest?
-- Whole-repo vs changed-files semantic scope at the gate — confirm changed-files
-  only (recommended) for cost.
+- ~~P-appr for stratified-design / code-quality?~~ No — they are concrete
+  hard-halt policies (see Decisions).
+- ~~Security: flip immediately or ratchet?~~ Flip immediately.
+- ~~Whole-repo vs changed-files scope?~~ Changed-files only; in-scope files must
+  fully comply (fix gaps + gate).
+
+Remaining to settle during the Standards wave: the exact G-vs-policy line for the
+current guidance list (default to policy for anything that is a property of the
+artifact; keep only reviewer-behavior meta and no-criteria philosophy as
+guidance).
