@@ -56,14 +56,14 @@
 
 (deftest policy-list-cmd-no-component-empty-dir-test
   (testing "list command shows 'no packs' when no packs available"
-    (with-redefs [shared/try-resolve-fn (constantly nil)
+    (with-redefs [sut/component-packs (constantly nil)
                   app-config/home-dir (constantly *tmp-dir*)]
       (let [output (with-out-str (sut/policy-list-cmd {}))]
         (is (re-find #"(?i)no installed" output))))))
 
 (deftest policy-list-cmd-component-results-test
   (testing "list command displays component results when available"
-    (with-redefs [shared/try-resolve-fn
+    (with-redefs [sut/component-packs
                   (constantly [{:pack/id "foundations-1.0.0"
                                 :pack/version "1.0.0"
                                 :pack/description "Core rules"}])]
@@ -80,7 +80,7 @@
 (deftest policy-show-cmd-not-found-test
   (testing "show command reports not found for unknown pack"
     (let [exited? (atom false)]
-      (with-redefs [shared/try-resolve-fn (constantly nil)
+      (with-redefs [sut/load-installed-pack (constantly nil)
                     app-config/home-dir (constantly *tmp-dir*)
                     shared/exit! (fn [_] (reset! exited? true))]
         (with-out-str (sut/policy-show-cmd {:pack-id "nonexistent"}))

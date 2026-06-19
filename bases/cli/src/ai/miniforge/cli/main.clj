@@ -74,10 +74,8 @@
    ;; GROUP 3b: timeline-based events show
    [ai.miniforge.cli.main.commands.events :as cmd-events]
    [ai.miniforge.agent.interface :as agent]
-   [ai.miniforge.artifact.interface :as artifact]
    [ai.miniforge.event-stream.interface :as es]
    [ai.miniforge.mcp-context-server.interface :as mcp-context-server]
-   [ai.miniforge.policy-pack.interface :as policy-pack]
    [ai.miniforge.pr-train.interface :as pr-train]
    [ai.miniforge.repo-dag.interface :as repo-dag]
    [ai.miniforge.workflow-resume.interface :as wr]
@@ -94,22 +92,6 @@
     (require ns-sym)
     (ns-resolve ns-sym var-sym)
     (catch Throwable _ nil)))
-
-(defn- register-artifact-providers! []
-  (cmd-shared/register-optional-fn!
-   'ai.miniforge.artifact.interface/list-artifacts
-   (fn [] (vec (artifact/query (artifact/create-transit-store) {}))))
-  (cmd-shared/register-optional-fn!
-   'ai.miniforge.artifact.interface/get-artifact-provenance
-   (fn [id] (artifact/get-provenance (artifact/create-transit-store) id))))
-
-(defn- register-policy-pack-providers! []
-  (cmd-shared/register-optional-fn!
-   'ai.miniforge.policy-pack.interface/list-packs
-   (fn [] (:loaded (policy-pack/load-all-packs (str (app-config/home-dir) "/packs"))))))
-
-(register-artifact-providers!)
-(register-policy-pack-providers!)
 
 (defn- caught-message
   [caught throwable]

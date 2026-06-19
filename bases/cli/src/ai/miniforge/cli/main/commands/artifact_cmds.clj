@@ -19,9 +19,10 @@
 (ns ai.miniforge.cli.main.commands.artifact-cmds
   "Artifact commands: list, provenance.
 
-   Delegates to ai.miniforge.artifact.interface when available.
-   Falls back to filesystem scanning of the configured artifacts directory."
+   Uses ai.miniforge.artifact.interface directly, falling back to filesystem
+   scanning of the configured artifacts directory when the store cannot be queried."
   (:require
+   [ai.miniforge.artifact.interface :as artifact]
    [clojure.java.io :as io]
    [clojure.string :as str]
    [ai.miniforge.cli.app-config :as app-config]
@@ -44,6 +45,19 @@
            (take shared/max-artifacts-display)
            vec)
       [])))
+
+(defn- create-artifact-store []
+  (artifact/create-transit-store {:dir (app-config/home-dir)}))
+
+(defn- list-component-artifacts []
+  (try
+    (vec (artifact/query (create-artifact-store) {}))
+    (catch Exception _ nil)))
+
+(defn- get-component-provenance [id]
+  (try
+    (artifact/get-provenance (create-artifact-store) id)
+    (catch Exception _ nil)))
 
 (defn format-file-size
   "Format a byte count into a human-readable size string."
@@ -91,7 +105,7 @@
   (println (display/style (messages/t :artifact/header) :foreground :cyan :bold true))
   (println (messages/t :artifact/directory {:dir (artifacts-dir)}))
   (println)
-  (let [component-result (shared/try-resolve-fn 'ai.miniforge.artifact.interface/list-artifacts)]
+  (let [component-result (list-component-artifacts)]
     (cond
       component-result
       (if (seq component-result)
@@ -123,8 +137,7 @@
   (let [{:keys [id]} opts]
     (if-not id
       (shared/usage-error! :artifact/provenance-usage "artifact provenance <id>")
-      (let [provenance (shared/try-resolve-fn
-                        'ai.miniforge.artifact.interface/get-artifact-provenance id)]
+      (let [provenance (get-component-provenance id)]
         (if provenance
           (display-provenance id provenance)
           ;; Fallback: look for artifact file in artifacts dir
