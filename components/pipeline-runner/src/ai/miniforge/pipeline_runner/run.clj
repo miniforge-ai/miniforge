@@ -109,7 +109,10 @@
                                 :records (:records result)
                                 :cursor (:extract/cursor result)})))
         (catch Exception e
-          (stage-result id name :failed {:error-message (.getMessage e)}))))))
+          (stage-result id name :failed
+                        {:error-message (ex-message e)
+                         :error-type    (.getName (class e))
+                         :error-cause   (some-> (ex-cause e) ex-message)}))))))
 
 (defn- execute-publish-stage
   "Execute a publish stage using the connector's publish method."
@@ -128,7 +131,10 @@
           (conn/close connector handle)
           (stage-result id name :completed {:completed-at (Instant/now)}))
         (catch Exception e
-          (stage-result id name :failed {:error-message (.getMessage e)}))))))
+          (stage-result id name :failed
+                        {:error-message (ex-message e)
+                         :error-type    (.getName (class e))
+                         :error-cause   (some-> (ex-cause e) ex-message)}))))))
 
 (defn- execute-transform-stage
   "Execute a non-connector stage (normalize, transform, aggregate, etc.).
@@ -145,7 +151,10 @@
           (stage-result id name :completed
                         (assoc (timestamps) :records result-records)))
         (catch Exception e
-          (stage-result id name :failed {:error-message (.getMessage e)})))
+          (stage-result id name :failed
+                        {:error-message (ex-message e)
+                         :error-type    (.getName (class e))
+                         :error-cause   (some-> (ex-cause e) ex-message)})))
       (stage-result id name :completed
                     (assoc (timestamps) :records input-records)))))
 
