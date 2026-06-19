@@ -23,6 +23,7 @@
   (:require
    [ai.miniforge.agent.artifact-session :as artifact-session]
    [ai.miniforge.agent.budget :as budget]
+   [ai.miniforge.agent.context-budget :as context-budget]
    [ai.miniforge.agent.model :as model]
    [ai.miniforge.agent.result-boundary :as result-boundary]
    [ai.miniforge.agent.reviewer.artifact :as artifact]
@@ -33,6 +34,7 @@
    [ai.miniforge.agent.reviewer.scope :as scope]
    [ai.miniforge.agent.role-config :as role-config]
    [ai.miniforge.agent.specialized :as specialized]
+   [ai.miniforge.event-stream.interface :as es]
    [ai.miniforge.logging.interface :as log]
    [ai.miniforge.llm.interface :as llm]
    [ai.miniforge.loop.interface :as loop]))
@@ -85,6 +87,63 @@
    Bash → off entirely. With cached reads it can check reachability (callers,
    related files) without native exploration or modifying anything."
   ["Read" "Grep" "Glob" "LS" "Agent" "Bash" "Write" "Edit" "MultiEdit"])
+
+(def ^:private default-context-window-reserve-tokens
+  "Fallback when reviewer.edn omits :prompt/context-window-reserve-tokens.
+   Headroom kept below the model's context window for the agent CLI's own
+   unmeasured baseline (system prompt, tool schemas, host plugins/skills).
+   Matches the planner default; authority is the EDN."
+  50000)
+
+(defn- assemble-review-within-budget
+  "Reviewer-side N12 §5 budgeting — parallels the planner's
+   `assemble-within-budget`. The artifact-under-review's eagerly-inlined
+   file bodies are the unbounded contributor: an aggregated DAG integration
+   task's full file contents + the reviewer's exploration + the standards
+   addendum overflowed the 200k window → the CLI hard-errored 'Prompt is too
+   long' and the review phase died. When the assembled prompt would
+   overflow, shed those bodies to a manifest the reviewer fetches on demand
+   via `context_read` (read-only session, native Read/Grep disallowed; the
+   context server reads through to the worktree on a cache miss). The
+   standards addendum lives in `effective-system` and is counted toward the
+   estimate but never trimmed here — bailing pre-flight is preferred to
+   silently dropping enforcement rules. Delegates the ladder to
+   `context-budget/assemble-within-budget`."
+  [input effective-system model reserve]
+  (let [artifact (or (:task/artifact input) input)]
+    (context-budget/assemble-within-budget
+     {:effective-system effective-system
+      :model            model
+      :reserve          reserve
+      :build-full       #(reviewer-prompts/build-review-prompt input)
+      :build-shed       #(reviewer-prompts/build-review-prompt
+                          input reviewer-prompts/format-artifact-manifest)
+      :shed-count       (count (:code/files artifact))})))
+
+(defn- emit-prompt-size!
+  "Emit an :agent/prompt-size workflow event recording the reviewer's
+   pre-flight budget (N12 §3) so estimate-vs-window is visible/queryable.
+   Mirrors the planner emitter. Safe no-op without an event stream."
+  [context budget]
+  (when-let [stream (or (:event-stream context) (:execution/event-stream context))]
+    (when-let [wf-id (or (:execution/id context) (:workflow/id context))]
+      (try
+        (es/publish!
+         stream
+         (-> (es/create-envelope stream :agent/prompt-size wf-id
+                                 (str "reviewer prompt ~" (:est-full budget)
+                                      " est tokens / window " (:window budget)
+                                      (when (:shed? budget) " (shed to manifest)")))
+             (assoc :agent/id :reviewer
+                    :prompt/estimated-input-tokens (:est-full budget)
+                    :prompt/context-window (:window budget)
+                    :prompt/reserve (:reserve budget)
+                    :prompt/reserve-clamped? (:reserve-clamped? budget)
+                    :prompt/effective-window (:effective-window budget)
+                    :prompt/shed? (:shed? budget)
+                    :prompt/estimated-after-shed (:est-final budget)
+                    :prompt/file-count (:file-count budget))))
+        (catch Exception _ nil)))))
 
 (defn- invoke-reviewer-session
   "Read-only session body for the reviewer: force the MCP-read tools, build the
@@ -163,8 +222,7 @@
 
           (if llm-client
             ;; LLM + gates review
-            (let [user-prompt (reviewer-prompts/build-review-prompt input)
-                  monitor (reviewer-prompts/create-reviewer-progress-monitor)
+            (let [monitor (reviewer-prompts/create-reviewer-progress-monitor)
                   max-turns (get @reviewer-prompts/reviewer-prompt-data
                                  :prompt/max-turns
                                  reviewer-prompts/default-reviewer-max-turns)
@@ -175,6 +233,44 @@
                   ;; (legacy callers / no rules apply to :review).
                   effective-system (str @reviewer-prompts/reviewer-system-prompt
                                         (get input :task/behavior-addendum ""))
+                  ;; N12 §5: assemble the user-prompt within the model's
+                  ;; context window, shedding the artifact's inlined file
+                  ;; bodies to a context_read-able manifest before the prompt
+                  ;; overflows. Without this the reviewer balloons past 200k
+                  ;; on aggregated DAG integration tasks (full file contents +
+                  ;; standards addendum) → CLI 'Prompt is too long' kills the
+                  ;; review phase.
+                  prompt-budget (assemble-review-within-budget
+                                 input effective-system (:model review-config)
+                                 (get @reviewer-prompts/reviewer-prompt-data
+                                      :prompt/context-window-reserve-tokens
+                                      default-context-window-reserve-tokens))
+                  user-prompt (:user-prompt prompt-budget)
+                  _ (emit-prompt-size! context prompt-budget)
+                  _ (when (:shed? prompt-budget)
+                      (log/info logger :reviewer :reviewer/context-shed
+                                {:data {:file-count (:file-count prompt-budget)
+                                        :window (:window prompt-budget)
+                                        :estimated-tokens-before (:est-full prompt-budget)
+                                        :estimated-tokens-after (:est-final prompt-budget)}}))
+                  ;; Irreducible overflow: the prompt exceeds the window even
+                  ;; with the artifact shed to a manifest (only reachable on a
+                  ;; tiny-window model — production 200k windows fit the shed
+                  ;; form). Skip the doomed LLM call, but STILL run the
+                  ;; deterministic policy gates below and return an infra
+                  ;; failure. The compiled policy gates are the trust boundary
+                  ;; and MUST always apply; the LLM's semantic pass is the only
+                  ;; thing dropped here, and a 'prompt too long' error must
+                  ;; never be synthesized into a false :rejected. N12 §5.4-5.5.
+                  context-overflow? (:over-after-shed? prompt-budget)
+                  overflow-message (when context-overflow?
+                                     (str "Reviewer prompt ~" (:est-final prompt-budget)
+                                          " est tokens exceeds the model context window "
+                                          (:window prompt-budget)
+                                          (if (:shed? prompt-budget)
+                                            " even after shedding the artifact's file bodies to a manifest"
+                                            " and has no inlined file bodies to shed")
+                                          "; LLM semantic review skipped, deterministic gates still applied"))
                   base-opts (cond-> {:system effective-system
                                      :max-turns max-turns}
                               monitor (assoc :progress-monitor monitor))
@@ -189,19 +285,29 @@
                   ;; product) and returns the LLM result directly. The
                   ;; enumeration-retry below keeps base-opts — it re-asks over
                   ;; the same content and needs no tools/cache.
-                  response (artifact-session/with-readonly-session
-                            context
-                            #(invoke-reviewer-session % llm-client user-prompt on-chunk
-                                                      base-opts budget-usd max-turns))
-                  normalized (result-boundary/normalize-llm-result
-                              {:response response
-                               :parse-response llm-response/parse-review-response})
+                  ;; Skip the LLM call entirely on irreducible overflow — the
+                  ;; synthesized error `normalized` below routes to the
+                  ;; context-overflow infra exit; the gates still run.
+                  response (when-not context-overflow?
+                             (artifact-session/with-readonly-session
+                              context
+                              #(invoke-reviewer-session % llm-client user-prompt on-chunk
+                                                        base-opts budget-usd max-turns)))
+                  normalized (if context-overflow?
+                               {:llm-error {:message overflow-message
+                                            :data {:context-overflow true
+                                                   :estimated-tokens (:est-final prompt-budget)
+                                                   :context-window (:window prompt-budget)}}
+                                :content nil :parsed-content nil :tokens 0 :cost-usd nil}
+                               (result-boundary/normalize-llm-result
+                                {:response response
+                                 :parse-response llm-response/parse-review-response}))
                   content (:content normalized)
                   tokens (:tokens normalized)
                   cost-usd (:cost-usd normalized)]
 
               (log/info logger :reviewer :reviewer/llm-called
-                        {:data {:success (llm/success? response)
+                        {:data {:success (boolean (and response (llm/success? response)))
                                 :tokens tokens
                                 :streaming? (boolean on-chunk)}})
 
@@ -244,7 +350,7 @@
                     ;; `recovered-review` below; these are already normalized,
                     ;; not literally "raw".
                     initial-llm-decision (cond
-                                           backend-timeout? nil
+                                           (or backend-timeout? context-overflow?) nil
                                            parse-failed? :rejected
                                            llm-review (issues/normalize-llm-decision (:review/decision llm-review)))
                     ;; Resolve the task's scope once; partitioning happens
@@ -347,7 +453,7 @@
                     ;; pathology the 2026-06-05 dogfood revealed.
                     all-blocking (cond-> (into (vec (:blocking-issues gate-result))
                                                (issues/llm-issues->blocking-strings llm-issues))
-                                   (and parse-failed? (not backend-timeout?))
+                                   (and parse-failed? (not backend-timeout?) (not context-overflow?))
                                    (conj parse-failure-message)
                                    timeout-only-review?
                                    (conj timeout-failure-message))
@@ -373,10 +479,17 @@
 
                     duration (- (System/currentTimeMillis) start-time)]
 
-                (if backend-timeout?
+                (cond
+                  context-overflow?
+                  (artifact/context-overflow-error-result
+                   logger normalized gate-result counts duration overflow-message)
+
+                  backend-timeout?
                   (artifact/timeout-only-error-result
                    logger normalized llm-review gate-result counts duration tokens cost-usd
                    timeout-failure-message)
+
+                  :else
                   (do
                     ;; Observability — when the deterministic gates flip
                     ;; the LLM's verdict, the operator needs to know

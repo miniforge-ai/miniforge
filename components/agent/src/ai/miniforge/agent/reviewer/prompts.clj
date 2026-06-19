@@ -92,45 +92,74 @@
     :else
     (pr-str artifact)))
 
+(defn format-artifact-manifest
+  "Compact manifest of the artifact-under-review for the shed path (N12 §5):
+   each file's path, action, and size — not its inlined body. The reviewer
+   runs read-only with native Read/Grep disallowed, so it fetches any file
+   on demand via `context_read`, which reads through to the worktree on a
+   cache miss. Mirrors the planner's `format-existing-files-manifest`.
+
+   Only `:code/files` artifacts carry sheddable bodies; plain-string / other
+   shapes have nothing to shed and fall back to the full rendering (the
+   budget ladder treats those as a zero sheddable-unit count, so this
+   fallback is never reached on the shed branch — it just keeps the
+   formatter total over every artifact shape)."
+  [artifact]
+  (if (:code/files artifact)
+    (str "_File bodies omitted to fit the context window — fetch any on "
+         "demand with `context_read`:_\n"
+         (str/join "\n"
+                   (map (fn [{:keys [path content action]}]
+                          (str "- " path " (" (name (or action :unknown)) ")"
+                               (when content (str " (" (count content) " chars)"))))
+                        (:code/files artifact))))
+    (format-artifact-for-review artifact)))
+
 ;------------------------------------------------------------------------------ Layer 2
 ;; User-prompt assembly
 
 (defn build-review-prompt
-  "Construct the user prompt for LLM review from task data."
-  [input]
-  (let [artifact (or (:task/artifact input) input)
-        description (or (:task/description input) "")
-        title (or (:task/title input) "")
-        intent (or (:task/intent input) "")
-        constraints (or (:task/constraints input) "")
-        tests (:task/tests input)
-        review-scope (scope/effective-review-scope input)
-        artifact-text (format-artifact-for-review artifact)]
-    (str "Review the following code implementation.\n\n"
-         (when-not (str/blank? title)
-           (str "## Task: " title "\n\n"))
-         (when-not (str/blank? description)
-           (str "## Description\n\n" description "\n\n"))
-         (when (and intent (not (str/blank? (str intent))))
-           (str "## Intent\n\n" (if (string? intent) intent (pr-str intent)) "\n\n"))
-         (when review-scope
-           (str "## Scope\n\n"
-                "Findings inside these paths/prefixes are in-scope; report them in\n"
-                "`:review/issues` with the appropriate severity\n"
-                "(`:blocking` / `:warning` / `:nit`). Normal severity rules apply —\n"
-                "only `:blocking` issues actually block the verdict.\n\n"
-                "Findings outside the scope are out-of-scope — report them in\n"
-                "`:review/out-of-scope-observations`, NOT in `:review/issues`.\n\n"
-                (str/join "\n" (map #(str "- " %) review-scope))
-                "\n\n"))
-         (when (and constraints (not (str/blank? (str constraints))))
-           (str "## Constraints\n\n" (if (string? constraints) constraints (pr-str constraints)) "\n\n"))
-         "## Code to Review\n\n"
-         artifact-text
-         (when tests
-           (str "\n\n## Test Results\n\n"
-                (if (string? tests) tests (pr-str tests))))
-         "\n\nOutput your review as a Clojure map inside a ```clojure code block.")))
+  "Construct the user prompt for LLM review from task data.
+
+   `artifact-fmt` selects how the artifact-under-review is rendered: full
+   bodies by default (`format-artifact-for-review`), or a compact manifest
+   (`format-artifact-manifest`) on the N12 §5 shed path when the full prompt
+   would overflow the model's context window."
+  ([input] (build-review-prompt input format-artifact-for-review))
+  ([input artifact-fmt]
+   (let [artifact (or (:task/artifact input) input)
+         description (or (:task/description input) "")
+         title (or (:task/title input) "")
+         intent (or (:task/intent input) "")
+         constraints (or (:task/constraints input) "")
+         tests (:task/tests input)
+         review-scope (scope/effective-review-scope input)
+         artifact-text (artifact-fmt artifact)]
+     (str "Review the following code implementation.\n\n"
+          (when-not (str/blank? title)
+            (str "## Task: " title "\n\n"))
+          (when-not (str/blank? description)
+            (str "## Description\n\n" description "\n\n"))
+          (when (and intent (not (str/blank? (str intent))))
+            (str "## Intent\n\n" (if (string? intent) intent (pr-str intent)) "\n\n"))
+          (when review-scope
+            (str "## Scope\n\n"
+                 "Findings inside these paths/prefixes are in-scope; report them in\n"
+                 "`:review/issues` with the appropriate severity\n"
+                 "(`:blocking` / `:warning` / `:nit`). Normal severity rules apply —\n"
+                 "only `:blocking` issues actually block the verdict.\n\n"
+                 "Findings outside the scope are out-of-scope — report them in\n"
+                 "`:review/out-of-scope-observations`, NOT in `:review/issues`.\n\n"
+                 (str/join "\n" (map #(str "- " %) review-scope))
+                 "\n\n"))
+          (when (and constraints (not (str/blank? (str constraints))))
+            (str "## Constraints\n\n" (if (string? constraints) constraints (pr-str constraints)) "\n\n"))
+          "## Code to Review\n\n"
+          artifact-text
+          (when tests
+            (str "\n\n## Test Results\n\n"
+                 (if (string? tests) tests (pr-str tests))))
+          "\n\nOutput your review as a Clojure map inside a ```clojure code block."))))
 
 ;------------------------------------------------------------------------------ Layer 3
 ;; Enumeration retry

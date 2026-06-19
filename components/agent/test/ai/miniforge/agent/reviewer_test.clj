@@ -19,6 +19,7 @@
 (ns ai.miniforge.agent.reviewer-test
   "Tests for the reviewer agent."
   (:require
+   [clojure.string :as str]
    [clojure.test :refer [deftest testing is]]
    [ai.miniforge.agent.model :as model]
    [ai.miniforge.agent.reviewer :as reviewer]
@@ -974,3 +975,93 @@
             cache. Pinned so any change is deliberate."
     (is (= #{"Read" "Grep" "Glob" "LS" "Agent" "Bash" "Write" "Edit" "MultiEdit"}
            (set @#'reviewer/reviewer-disallowed-tools)))))
+
+;------------------------------------------------------------------------------ Context-budget shedding (N12 §5)
+
+(def ^:private assemble-review-within-budget #'reviewer/assemble-review-within-budget)
+
+(defn- code-artifact
+  "n files, each `chars` bytes of body — the inlined contributor the reviewer
+   sheds when the prompt would overflow."
+  [n chars]
+  {:code/files (vec (for [i (range n)]
+                      {:path (str "src/f" i ".clj")
+                       :action :modify
+                       :content (apply str (repeat chars \x))}))})
+
+(defn- review-input [artifact]
+  {:task/title "T" :task/scope ["src"] :task/artifact artifact})
+
+(deftest assemble-review-within-budget-test
+  (testing "uncatalogued model (nil window) → never sheds, full bodies inlined"
+    (let [r (assemble-review-within-budget (review-input (code-artifact 1 100))
+                                           "system" "no-such-model" 0)]
+      (is (false? (:shed? r)))
+      (is (false? (:over-after-shed? r)))
+      (is (str/includes? (:user-prompt r) (apply str (repeat 100 \x))))))
+
+  (testing "a small artifact under the window is not shed"
+    (let [r (assemble-review-within-budget (review-input (code-artifact 1 100))
+                                           "system" "codellama-34b" 0)]
+      (is (false? (:shed? r)))
+      (is (str/includes? (:user-prompt r) (apply str (repeat 100 \x))))))
+
+  (testing "an artifact that blows the window sheds bodies to a manifest: the
+            path + the context_read hint stay, the inlined body drops, the
+            prompt now fits, and the file-count is reported"
+    (let [r (assemble-review-within-budget (review-input (code-artifact 1 300000))
+                                           "system" "codellama-34b" 0)]
+      (is (true? (:shed? r)))
+      (is (false? (:over-after-shed? r)))
+      (is (= 1 (:file-count r)))
+      (is (< (:est-final r) (:est-full r)))
+      (is (str/includes? (:user-prompt r) "src/f0.clj"))
+      (is (str/includes? (:user-prompt r) "context_read"))
+      (is (not (str/includes? (:user-prompt r) (apply str (repeat 5000 \x)))))))
+
+  (testing "the reserve fires the shed earlier — a prompt that fits the full
+            window sheds once the reserve drops the effective window below it"
+    (let [input      (review-input (code-artifact 1 50000))
+          no-reserve (assemble-review-within-budget input "system" "codellama-34b" 0)
+          window     (:window no-reserve)
+          est        (:est-full no-reserve)
+          reserve    (+ (- window est) 1000)
+          reserved   (assemble-review-within-budget input "system" "codellama-34b" reserve)]
+      (is (false? (:shed? no-reserve)) "fits the full window with no reserve")
+      (is (true? (:shed? reserved)) "reserve pushes it past the effective window")
+      (is (false? (:reserve-clamped? reserved)))
+      (is (= (- window reserve) (:effective-window reserved)))))
+
+  (testing "no inlined file bodies (empty :code/files) + a huge description →
+            irreducible overflow, no shed"
+    (let [r (assemble-review-within-budget
+             {:task/title "T" :task/scope ["src"]
+              :task/description (apply str (repeat 300000 \y))
+              :task/artifact {:code/files []}}
+             "system" "codellama-34b" 0)]
+      (is (false? (:shed? r)))
+      (is (true? (:over-after-shed? r))))))
+
+(deftest test-reviewer-context-overflow-applies-gates-without-llm
+  (testing "irreducible context overflow skips the doomed LLM call but STILL
+            runs the deterministic policy gates and returns an infra failure,
+            never a synthesized rejection — policy enforcement is never dropped
+            (the trust boundary)"
+    (let [llm-called? (atom false)]
+      (with-redefs [model/resolve-llm-client-for-role (fn [_role client] client)
+                    ;; Force overflow regardless of the real catalog window.
+                    llm/context-window-for-model-id (fn [_] 100)
+                    llm/chat (fn [_ _ _] (reset! llm-called? true)
+                               (mock-llm-response valid-review-content))
+                    llm/chat-stream (fn [_ _ _ _] (reset! llm-called? true)
+                                      (mock-llm-response valid-review-content))]
+        (let [reviewer (reviewer/create-reviewer
+                        {:llm-backend ::mock-backend
+                         :gates [(passing-gate :policy-check)]})
+              result (core/invoke reviewer {} sample-artifact)]
+          (is (false? @llm-called?) "the doomed LLM call is skipped")
+          (is (= :error (:status result)) "returns an infra failure, not a review verdict")
+          (is (= :reviewer/context-overflow (get-in result [:error :data :code])))
+          (is (= 1 (get-in result [:metrics :gates-passed]))
+              "the deterministic policy gate still ran")
+          (is (= 0 (get-in result [:metrics :tokens]))))))))
