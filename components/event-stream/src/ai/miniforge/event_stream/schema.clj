@@ -649,12 +649,22 @@
    :workflow/phase-started   :public
    :workflow/phase-completed :public
    :workflow/milestone-reached :public
+   ;; Phase-heartbeat is a liveness signal carrying phase metrics — :internal
+   ;; so it stays out of externally visible event logs.
+   :workflow/phase-heartbeat   :internal
    :workspace/persisted :public
    :agent/started    :internal
    :agent/completed  :internal
    :agent/failed     :internal
    :agent/status     :internal
    :agent/chunk      :internal
+   ;; Inter-agent messages carry routing metadata — :internal like other agent events.
+   :agent/message-sent     :internal
+   :agent/message-received :internal
+   ;; Milestone sub-lifecycle events mirror :workflow/milestone-reached → :public.
+   :phase/milestone-started   :public
+   :phase/milestone-completed :public
+   :phase/milestone-failed    :public
    :gate/started     :public
    :gate/passed      :public
    :gate/failed      :public
