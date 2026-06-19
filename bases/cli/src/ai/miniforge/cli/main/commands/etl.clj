@@ -188,7 +188,9 @@
   [url]
   (let [clone-result (git-clone-temp url)]
     (if (schema/failed? clone-result)
-      (display/print-error (messages/t :etl/clone-failed {:error (:error clone-result)}))
+      (do
+        (display/print-error (messages/t :etl/clone-failed {:error (:error clone-result)}))
+        1)
       (let [repo-path (:path clone-result)]
         (try
           (let [analysis (repo-analyzer/analyze-repo repo-path)]
@@ -197,9 +199,11 @@
             (println (messages/t :etl/git-host {:value (get analysis :git-host "unknown")}))
             (println (messages/t :etl/packs {:value (pr-str (:packs analysis))}))
             (println)
-            (println (display/style (messages/t :etl/install-note) :foreground :yellow)))
+            (println (display/style (messages/t :etl/install-note) :foreground :yellow))
+            0)
           (catch Exception e
-            (display/print-error (messages/t :etl/analysis-failed {:error (ex-message e)})))
+            (display/print-error (messages/t :etl/analysis-failed {:error (ex-message e)}))
+            1)
           (finally
             (try (fs/delete-tree repo-path)
                  (catch Exception _ nil))))))))
@@ -224,7 +228,9 @@
             (shared/exit! 1))
         (do
           (display/print-info (messages/t :etl/running {:url url}))
-          (analyze-repo-url! url))))))
+          (let [exit-code (analyze-repo-url! url)]
+            (when (pos? exit-code)
+              (shared/exit! exit-code))))))))
 
 (defn etl-run-cmd
   "Execute a Data Foundry ETL pack.

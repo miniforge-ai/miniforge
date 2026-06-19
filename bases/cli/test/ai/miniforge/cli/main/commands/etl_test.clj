@@ -87,12 +87,51 @@
                          {:technologies [:clojure]
                           :git-host "github"
                           :packs [:foundations]})
-                       #'shared/try-resolve-fn
-                       (fn [& _]
-                         (throw (ex-info "optional provider should not be used" {})))}
+                    #'shared/try-resolve-fn
+                    (fn [& _]
+                      (throw (ex-info "optional provider should not be used" {})))
+                    #'shared/exit!
+                    (fn [code]
+                      (throw (ex-info "unexpected exit" {:code code})))}
         (fn []
           (with-out-str
             (sut/etl-repo-cmd {:url "https://github.com/example/repo"}))
           (is (= [[:clone "https://github.com/example/repo"]
                   [:analyze (.getAbsolutePath repo-dir)]]
                  @calls)))))))
+
+(deftest etl-repo-cmd-exits-on-clone-failure-test
+  (testing "clone failures become a non-zero command exit"
+    (let [exit-code (atom nil)]
+      (with-redefs-fn {#'sut/git-clone-temp
+                       (fn [_url]
+                         (schema/failure :path "clone failed"))
+                       #'shared/exit!
+                       (fn [code]
+                         (reset! exit-code code))}
+        (fn []
+          (with-out-str
+            (sut/etl-repo-cmd {:url "https://github.com/example/repo"}))
+          (is (= 1 @exit-code)))))))
+
+(deftest etl-repo-cmd-exits-on-analysis-failure-test
+  (testing "repo-analyzer failures become a non-zero command exit"
+    (let [repo-dir (.toFile
+                    (java.nio.file.Files/createTempDirectory
+                     "etl-repo-test"
+                     (make-array java.nio.file.attribute.FileAttribute 0)))
+          exit-code (atom nil)]
+      (.deleteOnExit repo-dir)
+      (with-redefs-fn {#'sut/git-clone-temp
+                       (fn [_url]
+                         (schema/success :path (.getAbsolutePath repo-dir)))
+                       #'repo-analyzer/analyze-repo
+                       (fn [_repo-path]
+                         (throw (ex-info "analysis failed" {})))
+                       #'shared/exit!
+                       (fn [code]
+                         (reset! exit-code code))}
+        (fn []
+          (with-out-str
+            (sut/etl-repo-cmd {:url "https://github.com/example/repo"}))
+          (is (= 1 @exit-code)))))))

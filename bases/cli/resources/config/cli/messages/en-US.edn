@@ -393,7 +393,7 @@
   :etl/output-path "  Output: {path}"
   :etl/failed "ETL failed: {error}"
   :etl/clone-failed "Clone failed: {error}"
-  :etl/analysis-complete "Repository analysis complete (ETL fallback)."
+  :etl/analysis-complete "Repository analysis complete."
   :etl/technologies "  Technologies: {value}"
   :etl/git-host "  Git host:     {value}"
   :etl/packs "  Packs:        {value}"
