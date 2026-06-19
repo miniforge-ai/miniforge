@@ -30,7 +30,7 @@
 (defn- a-resolvable-custom-fn [_artifact _context] nil)
 
 #_{:clj-kondo/ignore [:unused-private-var]}
-(defonce ^:private registered-test-custom-fn?
+(def ^:private registered-test-custom-fn?
   (do
     (detection/register-custom-fn!
      'ai.miniforge.policy-pack.compiler-test/a-resolvable-custom-fn

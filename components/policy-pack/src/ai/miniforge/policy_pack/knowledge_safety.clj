@@ -279,7 +279,7 @@
    validate-pack-dependencies-wrapper})
 
 #_{:clj-kondo/ignore [:unused-private-var]}
-(defonce ^:private registered-custom-detectors?
+(def ^:private registered-custom-detectors?
   (do
     (doseq [[custom-fn-sym f] custom-detectors]
       (detection/register-custom-fn! custom-fn-sym f))

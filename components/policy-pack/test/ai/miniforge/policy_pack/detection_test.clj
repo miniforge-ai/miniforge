@@ -311,7 +311,7 @@
   {:matches ["custom-hit"]})
 
 #_{:clj-kondo/ignore [:unused-private-var]}
-(defonce ^:private registered-test-custom-fn?
+(def ^:private registered-test-custom-fn?
   (do
     (detection/register-custom-fn!
      'ai.miniforge.policy-pack.detection-test/a-resolvable-custom-fn
