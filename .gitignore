@@ -70,3 +70,4 @@ work/dogfood-session-*.edn
 work/*-local.spec.edn
 work/*-wip.edn
 .miniforge/
+.worktrees/
