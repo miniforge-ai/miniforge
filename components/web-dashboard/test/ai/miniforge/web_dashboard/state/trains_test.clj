@@ -632,7 +632,17 @@
       (with-redefs-fn {#'pr-train/list-trains
                        (fn [& _] (throw (ex-info "boom" {})))}
         (fn []
-          (is (= [] (sut/get-trains state))))))))
+          (is (= [] (sut/fetch-trains state))))))))
+
+(deftest normalize-train-action-test
+  (testing "Request strings are normalized to app-local action keywords"
+    (is (= :pause (sut/normalize-train-action "pause")))
+    (is (= :resume (sut/normalize-train-action "resume")))
+    (is (= :merge-next (sut/normalize-train-action "merge-next"))))
+  (testing "Already-normalized keyword actions pass through"
+    (is (= :pause (sut/normalize-train-action :pause))))
+  (testing "Unknown actions are rejected"
+    (is (nil? (sut/normalize-train-action "unknown")))))
 
 (deftest get-train-detail-invalid-id-test
   (testing "Invalid train id returns error"
@@ -683,6 +693,19 @@
         (fn []
           (is (nil? (sut/train-action! state (str (random-uuid)) "pause"))))))))
 
+(deftest train-action-keyword-action-test
+  (testing "Keyword actions are dispatched internally"
+    (let [state (atom {:pr-train-manager :mgr})
+          train-id (random-uuid)
+          captured (atom nil)]
+      (with-redefs-fn {#'pr-train/resume-train
+                       (fn [mgr tid]
+                         (reset! captured [mgr tid])
+                         :resumed)}
+        (fn []
+          (is (= :resumed (sut/train-action! state (str train-id) :resume)))
+          (is (= [:mgr train-id] @captured)))))))
+
 (deftest train-action-unknown-action-test
   (testing "Unknown action returns nil"
     (let [state (atom {:pr-train-manager :mgr})]
@@ -694,7 +717,7 @@
       (with-redefs-fn {#'repo-dag/get-all-dags
                        (fn [& _] (throw (ex-info "boom" {})))}
         (fn []
-          (is (= [] (sut/get-dags state))))))))
+          (is (= [] (sut/fetch-dags state))))))))
 
 ;; ============================================================================
 ;; Layer 3: Sync status rendering tests

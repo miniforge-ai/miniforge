@@ -24,7 +24,8 @@
    [cheshire.core :as json]
    [ai.miniforge.pr-train.interface :as pr-train]
    [ai.miniforge.repo-dag.interface :as repo-dag]
-   [ai.miniforge.web-dashboard.state.core :as core]))
+   [ai.miniforge.web-dashboard.state.core :as core]
+   [slingshot.slingshot :refer [try+]]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Fleet repository config and provider helpers
@@ -643,62 +644,90 @@
 ;------------------------------------------------------------------------------ Layer 2
 ;; PR Train and DAG state
 
+(def train-actions
+  {"pause" :pause
+   "resume" :resume
+   "merge-next" :merge-next
+   :pause :pause
+   :resume :resume
+   :merge-next :merge-next})
+
+(defn normalize-train-action
+  [action]
+  (get train-actions action))
+
+(defn parse-train-id
+  [train-id]
+  (try+
+    (parse-uuid train-id)
+    (catch Object _ nil)))
+
+(defn fetch-trains
+  [state]
+  (if-let [mgr (:pr-train-manager @state)]
+    (try+
+      (->> (or (pr-train/list-trains mgr) [])
+           (map enrich-train)
+           vec)
+      (catch Object _
+        (let [e (:throwable &throw-context)]
+          (println "Error listing PR trains:" (ex-message e))
+          [])))
+    []))
+
 (def get-trains
   "Get all PR trains (cached 10s)."
-  (core/ttl-memoize 10000
-                    (fn [state]
-                      (if-let [mgr (:pr-train-manager @state)]
-                        (try
-                          (->> (or (pr-train/list-trains mgr) [])
-                               (map enrich-train)
-                               vec)
-                          (catch Exception e
-                            (println "Error listing PR trains:" (ex-message e))
-                            []))
-                        []))))
+  (core/ttl-memoize 10000 fetch-trains))
 
 (defn get-train-detail
   "Get detailed view of a PR train."
   [state train-id]
   (if-let [mgr (:pr-train-manager @state)]
-    (let [tid (try
-                (parse-uuid train-id)
-                (catch Exception _ nil))]
+    (let [tid (parse-train-id train-id)]
       (if-not tid
         {:error "Invalid train id."}
-        (try
+        (try+
           (if-let [train (pr-train/get-train mgr tid)]
             (enrich-train train)
             {:error "Train not found"})
-          (catch Exception e
-            (println "Error getting PR train:" (ex-message e))
-            {:error "Train not found"}))))
+          (catch Object _
+            (let [e (:throwable &throw-context)]
+              (println "Error getting PR train:" (ex-message e))
+              {:error "Train not found"})))))
     {:error "PR train manager not available"}))
+
+(defn execute-train-action!
+  [mgr tid action]
+  (try+
+    (case action
+      :pause (pr-train/pause-train mgr tid "Manual pause")
+      :resume (pr-train/resume-train mgr tid)
+      :merge-next (pr-train/merge-next mgr tid)
+      nil)
+    (catch Object _ nil)))
 
 (defn train-action!
   "Execute action on a PR train."
   [state train-id action]
-  (try
-    (when-let [mgr (:pr-train-manager @state)]
-      (when-let [tid (parse-uuid train-id)]
-        (case action
-          "pause" (pr-train/pause-train mgr tid "Manual pause")
-          "resume" (pr-train/resume-train mgr tid)
-          "merge-next" (pr-train/merge-next mgr tid)
-          nil)))
-    (catch Exception _ nil)))
+  (when-let [mgr (:pr-train-manager @state)]
+    (when-let [tid (parse-train-id train-id)]
+      (when-let [normalized-action (normalize-train-action action)]
+        (execute-train-action! mgr tid normalized-action)))))
+
+(defn fetch-dags
+  [state]
+  (if-let [mgr (:repo-dag-manager @state)]
+    (try+
+      (or (repo-dag/get-all-dags mgr) [])
+      (catch Object _
+        (let [e (:throwable &throw-context)]
+          (println "Error listing repository DAGs:" (ex-message e))
+          [])))
+    []))
 
 (def get-dags
   "Get all repository DAGs (cached 10s)."
-  (core/ttl-memoize 10000
-                    (fn [state]
-                      (if-let [mgr (:repo-dag-manager @state)]
-                        (try
-                          (or (repo-dag/get-all-dags mgr) [])
-                          (catch Exception e
-                            (println "Error listing repository DAGs:" (ex-message e))
-                            []))
-                        []))))
+  (core/ttl-memoize 10000 fetch-dags))
 
 ;------------------------------------------------------------------------------ Layer 3
 ;; External PR onboarding and sync

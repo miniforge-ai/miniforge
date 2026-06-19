@@ -82,6 +82,10 @@ checks, and fail in the component that owns the broken call.
   composition.
 - Removed dashboard `safe-call` and replaced its call sites with direct
   interfaces.
+- Moved dashboard train/DAG fallback boundaries into small `try+`-based helper
+  functions and kept cached wrappers thin.
+- Normalized request-string train actions to app-local keywords before
+  dispatching PR train operations.
 - Added `pr-train` and `repo-dag` as web-dashboard component dependencies.
 - Updated dashboard train tests to stub concrete `pr-train` functions.
 - Replaced policy-pack schema validation resolver with `schema/validate-pack`.
@@ -109,6 +113,10 @@ checks, and fail in the component that owns the broken call.
 - [x] `bb poly:check`
 - [x] Focused dashboard train state test:
   `clojure -M:dev:test -e "(require 'ai.miniforge.web-dashboard.state.trains-test) (clojure.test/run-tests 'ai.miniforge.web-dashboard.state.trains-test)"`
+- [x] Focused review-comment regression tests:
+  `clojure -Sdeps '{:deps {io.github.cognitect-labs/test-runner {:git/tag "v0.5.1" :git/sha "dfb30dd"}}}' -M:dev:test -m
+  cognitect.test-runner -d components/web-dashboard/test -d bases/cli/test -n
+  ai.miniforge.web-dashboard.state.trains-test -n ai.miniforge.cli.main-test`
 - [x] `bb test`
 - [x] `bb pre-commit`
 

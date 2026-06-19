@@ -111,6 +111,26 @@
 (register-artifact-providers!)
 (register-policy-pack-providers!)
 
+(defn- create-pr-train-manager
+  []
+  (try+
+    (pr-train/create-manager)
+    (catch Object _
+      (let [e (:throwable &throw-context)]
+        (println (messages/t :web/pr-train-warning
+                             {:error (.getMessage ^Throwable e)}))
+        nil))))
+
+(defn- create-repo-dag-manager
+  []
+  (try+
+    (repo-dag/create-manager)
+    (catch Object _
+      (let [e (:throwable &throw-context)]
+        (println (messages/t :web/repo-dag-warning
+                             {:error (.getMessage ^Throwable e)}))
+        nil))))
+
 (defn- optional-web-launcher
   "Compose the dashboard command when the product includes web-dashboard."
   []
@@ -119,18 +139,8 @@
                      'start!)]
     (fn [{:keys [port]}]
       (let [event-stream (es/create-event-stream)
-            pr-train-manager (try
-                               (pr-train/create-manager)
-                               (catch Exception e
-                                 (println (messages/t :web/pr-train-warning
-                                                      {:error (.getMessage e)}))
-                                 nil))
-            repo-dag-manager (try
-                               (repo-dag/create-manager)
-                               (catch Exception e
-                                 (println (messages/t :web/repo-dag-warning
-                                                      {:error (.getMessage e)}))
-                                 nil))]
+            pr-train-manager (create-pr-train-manager)
+            repo-dag-manager (create-repo-dag-manager)]
         (start! {:port port
                  :event-stream event-stream
                  :pr-train-manager pr-train-manager
