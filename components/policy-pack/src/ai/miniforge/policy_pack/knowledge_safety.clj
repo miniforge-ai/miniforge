@@ -35,6 +35,7 @@
    [clojure.string :as str]
    [ai.miniforge.config.interface :as config]
    [ai.miniforge.policy-pack.core :as core]
+   [ai.miniforge.policy-pack.detection :as detection]
    [ai.miniforge.policy-pack.schema :as schema]
    [ai.miniforge.policy-pack.rules.pack-dependency-validation :as dep-validation]))
 
@@ -267,6 +268,22 @@
               (:violations result))
          (map (fn [w] (violation :minor (:message w) :raw w))
               (:warnings result)))))))
+
+(def ^:private custom-detectors
+  {'ai.miniforge.policy-pack.knowledge-safety/check-trust-labels check-trust-labels
+   'ai.miniforge.policy-pack.knowledge-safety/check-instruction-authority check-instruction-authority
+   'ai.miniforge.policy-pack.knowledge-safety/check-agent-source check-agent-source
+   'ai.miniforge.policy-pack.knowledge-safety/validate-pack-schema validate-pack-schema
+   'ai.miniforge.policy-pack.knowledge-safety/check-pack-root check-pack-root
+   'ai.miniforge.policy-pack.knowledge-safety/validate-pack-dependencies-wrapper
+   validate-pack-dependencies-wrapper})
+
+#_{:clj-kondo/ignore [:unused-private-var]}
+(defonce ^:private registered-custom-detectors?
+  (do
+    (doseq [[custom-fn-sym f] custom-detectors]
+      (detection/register-custom-fn! custom-fn-sym f))
+    true))
 
 ;------------------------------------------------------------------------------ Pack Assembly
 

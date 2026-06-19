@@ -30,7 +30,7 @@
    [ai.miniforge.policy-pack.interface.intent :as intent]
    [ai.miniforge.policy-pack.interface.mapping :as mapping]
    [ai.miniforge.policy-pack.interface.prompt-template :as prompt-template]
-   [ai.miniforge.policy-pack.interface.taxonomy :as taxonomy]
+   [ai.miniforge.policy-pack.detection :as detection]
    [ai.miniforge.policy-pack.mdc-compiler :as mdc-compiler]
    [ai.miniforge.policy-pack.software-factory :as software-factory]))
 
@@ -225,6 +225,17 @@
    judge throws, or nil when clean or when the semantic wiring is absent from
    context."
   checking/detect-semantic)
+
+(def register-custom-fn!
+  "Register a custom policy detector implementation for a `:custom-fn` symbol.
+   Explicit registration replaces ambient var resolution for custom detector
+   extension points."
+  detection/register-custom-fn!)
+
+(def unregister-custom-fn!
+  "Remove a custom policy detector registration. Intended for tests and reload
+   hygiene."
+  detection/unregister-custom-fn!)
 
 (def check-rules
   "Check multiple rules against one artifact.

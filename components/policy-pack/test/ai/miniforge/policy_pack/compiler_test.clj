@@ -22,11 +22,20 @@
    [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.policy-pack.capability :as capability]
    [ai.miniforge.policy-pack.compiler :as sut]
+   [ai.miniforge.policy-pack.detection :as detection]
    [clojure.edn :as edn]
    [clojure.java.io :as io]
    [clojure.test :refer [deftest is testing]]))
 
 (defn- a-resolvable-custom-fn [_artifact _context] nil)
+
+#_{:clj-kondo/ignore [:unused-private-var]}
+(defonce ^:private registered-test-custom-fn?
+  (do
+    (detection/register-custom-fn!
+     'ai.miniforge.policy-pack.compiler-test/a-resolvable-custom-fn
+     a-resolvable-custom-fn)
+    true))
 
 (defn- noop-check [_artifact _context] nil)
 
