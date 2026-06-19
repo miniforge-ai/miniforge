@@ -19,10 +19,10 @@
 (ns ai.miniforge.cli.main.commands.policy
   "Policy pack commands: list, show, install.
 
-   Delegates to ai.miniforge.policy-pack.interface when available.
-   Falls back to classpath resource scanning for list/show when the
-   component is not loaded (Babashka-safe)."
+   Uses ai.miniforge.policy-pack.interface directly, with classpath resource
+   scanning as a fallback for built-in packs."
   (:require
+   [ai.miniforge.policy-pack.interface :as policy-pack]
    [babashka.fs :as fs]
    [clojure.edn :as edn]
    [clojure.java.io :as io]
@@ -63,6 +63,18 @@
   []
   ["foundations-1.0.0" "miniforge-standards"])
 
+(defn- component-packs []
+  (try
+    (:loaded (policy-pack/load-all-packs (packs-dir)))
+    (catch Exception _ nil)))
+
+(defn- load-installed-pack [pack-id]
+  (let [result (try
+                 (policy-pack/load-pack (str (packs-dir) "/" pack-id ".pack.edn"))
+                 (catch Exception _ nil))]
+    (when (:success? result)
+      (:pack result))))
+
 ;------------------------------------------------------------------------------ Layer 1
 ;; Command implementations
 
@@ -74,8 +86,8 @@
   (println)
   (println (display/style (messages/t :policy/header) :foreground :cyan :bold true))
   (println)
-  ;; Try the component interface first
-  (let [component-packs (shared/try-resolve-fn 'ai.miniforge.policy-pack.interface/list-packs)]
+  ;; Try the component interface first.
+  (let [component-packs (component-packs)]
     (cond
       component-packs
       (if (seq component-packs)
@@ -119,7 +131,7 @@
       (shared/usage-error! :policy/show-usage "policy show <pack-id>")
       (let [pack (or (load-pack-from-resource pack-id)
                      (load-pack-from-path (str (packs-dir) "/" pack-id ".pack.edn"))
-                     (shared/try-resolve-fn 'ai.miniforge.policy-pack.interface/load-pack pack-id))]
+                     (load-installed-pack pack-id))]
         (if-not pack
           (do (display/print-error
                (messages/t :policy/not-found

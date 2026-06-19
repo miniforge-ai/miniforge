@@ -56,14 +56,14 @@
 
 (deftest artifact-list-cmd-no-component-empty-dir-test
   (testing "list command shows 'no artifacts' when dir is empty"
-    (with-redefs [shared/try-resolve-fn (constantly nil)
+    (with-redefs [sut/list-component-artifacts (constantly nil)
                   app-config/artifacts-dir (constantly "/tmp/nonexistent-artifacts")]
       (let [output (with-out-str (sut/artifact-list-cmd {}))]
         (is (re-find #"(?i)no artifacts" output))))))
 
 (deftest artifact-list-cmd-component-result-test
   (testing "list command displays component results when available"
-    (with-redefs [shared/try-resolve-fn
+    (with-redefs [sut/list-component-artifacts
                   (constantly [{:artifact/id "art-1"
                                 :artifact/type :code
                                 :artifact/workflow-id "wf-1"}])
@@ -81,7 +81,7 @@
 (deftest artifact-provenance-cmd-with-provenance-test
   (testing "provenance command displays provenance data"
     (let [prov (make-provenance)]
-      (with-redefs [shared/try-resolve-fn (constantly prov)
+      (with-redefs [sut/get-component-provenance (constantly prov)
                     app-config/artifacts-dir (constantly "/tmp/test")]
         (let [output (with-out-str (sut/artifact-provenance-cmd {:id "art-1"}))]
           (is (.contains output "wf-123"))
@@ -90,7 +90,7 @@
 (deftest artifact-provenance-cmd-not-found-test
   (testing "provenance command shows error when artifact not found"
     (let [exited? (atom false)]
-      (with-redefs [shared/try-resolve-fn (constantly nil)
+      (with-redefs [sut/get-component-provenance (constantly nil)
                     app-config/artifacts-dir (constantly "/tmp/nonexistent")
                     shared/exit! (fn [_] (reset! exited? true))]
         (with-out-str (sut/artifact-provenance-cmd {:id "missing"}))
