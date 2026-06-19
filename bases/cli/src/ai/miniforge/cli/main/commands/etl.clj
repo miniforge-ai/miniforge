@@ -27,9 +27,9 @@
      - `etl list <search-path>`        — discover pipeline EDN files.
      - `etl validate <pack> --env …`   — load + resolve without running.
 
-   The `etl repo` command delegates to `ai.miniforge.etl-pipe.interface`
-   when available. The `etl run|list|validate` commands shell out to
-   `ai.miniforge.etl.main` on the JVM."
+   The `etl repo` command clones the repository and runs the direct
+   repo-analyzer interface. The `etl run|list|validate` commands shell
+   out to `ai.miniforge.etl.main` on the JVM."
   (:require
    [babashka.fs :as fs]
    [babashka.process :as process]
@@ -181,10 +181,10 @@
         1)))
 
 ;------------------------------------------------------------------------------ Layer 3
-;; Fallback analysis (etl repo)
+;; Repository analysis (etl repo)
 
-(defn- etl-repo-fallback
-  "Clone repo and run repo-analyzer as ETL fallback."
+(defn- analyze-repo-url!
+  "Clone repo and run repo-analyzer against the temporary checkout."
   [url]
   (let [clone-result (git-clone-temp url)]
     (if (schema/failed? clone-result)
@@ -224,21 +224,7 @@
             (shared/exit! 1))
         (do
           (display/print-info (messages/t :etl/running {:url url}))
-          (let [result (shared/try-resolve-fn 'ai.miniforge.etl-pipe.interface/etl-repo url opts)]
-            (cond
-              (and result (schema/succeeded? result))
-              (do
-                (display/print-success (messages/t :etl/complete))
-                (when-let [artifacts (:artifacts result)]
-                  (println (messages/t :etl/artifacts-produced {:count (count artifacts)})))
-                (when-let [path (:output-path result)]
-                  (println (messages/t :etl/output-path {:path path}))))
-
-              (and result (schema/failed? result))
-              (display/print-error (messages/t :etl/failed {:error (get result :error "unknown error")}))
-
-              :else
-              (etl-repo-fallback url))))))))
+          (analyze-repo-url! url))))))
 
 (defn etl-run-cmd
   "Execute a Data Foundry ETL pack.

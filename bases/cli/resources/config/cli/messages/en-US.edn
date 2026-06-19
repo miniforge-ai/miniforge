@@ -397,7 +397,7 @@
   :etl/technologies "  Technologies: {value}"
   :etl/git-host "  Git host:     {value}"
   :etl/packs "  Packs:        {value}"
-  :etl/install-note "Install the etl-pipe component for full ETL support."
+  :etl/install-note "Use etl run with a Data Foundry pack for full pipeline execution."
   :etl/analysis-failed "Analysis failed: {error}"
 
   ;; ── Evidence ──────────────────────────────────────────────────────────

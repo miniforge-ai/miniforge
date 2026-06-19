@@ -19,6 +19,8 @@
 (ns ai.miniforge.cli.main.commands.etl-test
   "Unit tests for ETL CLI commands."
   (:require
+   [ai.miniforge.repo-analyzer.interface :as repo-analyzer]
+   [ai.miniforge.schema.interface :as schema]
    [clojure.test :refer [deftest testing is]]
    [ai.miniforge.cli.main.commands.etl :as sut]
    [ai.miniforge.cli.main.commands.shared :as shared]))
@@ -66,3 +68,31 @@
       (with-redefs [shared/exit! (fn [_] (reset! exited? true))]
         (with-out-str (sut/etl-repo-cmd {:url "bad-url"}))
         (is @exited?)))))
+
+(deftest etl-repo-cmd-analyzes-repo-directly-test
+  (testing "valid repo URLs use the direct repo-analyzer interface"
+    (let [repo-dir (.toFile
+                    (java.nio.file.Files/createTempDirectory
+                     "etl-repo-test"
+                     (make-array java.nio.file.attribute.FileAttribute 0)))
+          calls (atom [])]
+      (.deleteOnExit repo-dir)
+      (with-redefs-fn {#'sut/git-clone-temp
+                       (fn [url]
+                         (swap! calls conj [:clone url])
+                         (schema/success :path (.getAbsolutePath repo-dir)))
+                       #'repo-analyzer/analyze-repo
+                       (fn [repo-path]
+                         (swap! calls conj [:analyze repo-path])
+                         {:technologies [:clojure]
+                          :git-host "github"
+                          :packs [:foundations]})
+                       #'shared/try-resolve-fn
+                       (fn [& _]
+                         (throw (ex-info "optional provider should not be used" {})))}
+        (fn []
+          (with-out-str
+            (sut/etl-repo-cmd {:url "https://github.com/example/repo"}))
+          (is (= [[:clone "https://github.com/example/repo"]
+                  [:analyze (.getAbsolutePath repo-dir)]]
+                 @calls)))))))
