@@ -64,9 +64,11 @@ fallback behavior while making the dependency boundary explicit.
 - [x] `git diff --check`
 - [x] Focused Clojure lint for touched CLI source and tests.
 - [x] Focused CLI command tests:
-  `clojure -Sdeps '{:deps {io.github.cognitect-labs/test-runner {:git/tag "v0.5.1" :git/sha "dfb30dd"}}}' -M:dev:test -m
-  cognitect.test-runner -d bases/cli/test -n ai.miniforge.cli.main.commands.artifact-cmds-test -n
-  ai.miniforge.cli.main.commands.policy-test -n ai.miniforge.cli.main-test`
+
+  ```bash
+  clojure -Sdeps '{:deps {io.github.cognitect-labs/test-runner {:git/tag "v0.5.1" :git/sha "dfb30dd"}}}' -M:dev:test -m cognitect.test-runner -d bases/cli/test -n ai.miniforge.cli.main.commands.artifact-cmds-test -n ai.miniforge.cli.main.commands.policy-test -n ai.miniforge.cli.main-test
+  ```
+
 - [x] `bb pre-commit`
 
 ## Deployment Plan

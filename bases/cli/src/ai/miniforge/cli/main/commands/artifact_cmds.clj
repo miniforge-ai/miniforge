@@ -20,7 +20,7 @@
   "Artifact commands: list, provenance.
 
    Uses ai.miniforge.artifact.interface directly, falling back to filesystem
-   scanning of the configured artifacts directory when the store is empty."
+   scanning of the configured artifacts directory when the store cannot be queried."
   (:require
    [ai.miniforge.artifact.interface :as artifact]
    [clojure.java.io :as io]

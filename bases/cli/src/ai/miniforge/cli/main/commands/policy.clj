@@ -87,11 +87,11 @@
   (println (display/style (messages/t :policy/header) :foreground :cyan :bold true))
   (println)
   ;; Try the component interface first.
-  (let [component-packs (component-packs)]
+  (let [loaded-packs (component-packs)]
     (cond
-      component-packs
-      (if (seq component-packs)
-        (doseq [pack component-packs]
+      loaded-packs
+      (if (seq loaded-packs)
+        (doseq [pack loaded-packs]
           (println (str "  " (display/style (str (get pack :pack/id pack)) :foreground :bold)
                         (when-let [v (:pack/version pack)] (str " v" v))
                         (when-let [d (:pack/description pack)] (str "  —  " d)))))
