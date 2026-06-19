@@ -24,7 +24,7 @@
    [ai.miniforge.response.interface :as response]
    [clojure.edn :as edn]
    [clojure.java.io :as io]
-   [clojure.string :as str]))
+   [selmer.parser :as selmer]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Prompt loading
@@ -114,15 +114,25 @@
   (when-let [config (get prompt-data monitor-key)]
     (llm/create-progress-monitor config)))
 
+(defn- template-context
+  "Normalize keyword-heavy Clojure maps into Selmer's string-key context.
+   Nil still renders as the empty string, matching the historical prompt
+   renderer, while false remains false so `{% if %}` branches behave."
+  [substitutions]
+  (into {}
+        (map (fn [[k v]]
+               [(if (keyword? k) (name k) (str k))
+                (if (nil? v) "" v)]))
+        substitutions))
+
 (defn render-template
-  "Render a `{{key}}`-style template with the given substitutions. Each entry
-   `{kw v}` replaces the literal string \"{{kw}}\" with `v` (nil renders as the
-   empty string). Single source of truth for the agents' prompt templating."
+  "Render a Selmer template with the given substitutions.
+
+   Prompt resources use Selmer syntax (`{{key}}`, `{% if key %}`,
+   `{% for item in items %}`), with the `safe` filter applied in prompt
+   templates for code or markdown values that must not be HTML-escaped."
   [template substitutions]
-  (reduce-kv (fn [text k v]
-               (str/replace text (str "{{" (name k) "}}") (or v "")))
-             (or template "")
-             substitutions))
+  (selmer/render (or template "") (template-context substitutions)))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
