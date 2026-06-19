@@ -415,10 +415,13 @@
           result (runner/execute-pipeline test-pipeline {conn-src failing-conn} {})]
       (is (not (:success? result)))
       (is (= :failed (get-in result [:pipeline-run :pipeline-run/status])))
-      ;; First stage should be failed
-      (let [stage-runs (get-in result [:pipeline-run :pipeline-run/stage-runs])]
-        (is (= :failed (:status (first stage-runs))))
-        (is (some? (:error-message (first stage-runs))))))))
+      ;; First stage should be failed with structured exception context
+      (let [stage-runs (get-in result [:pipeline-run :pipeline-run/stage-runs])
+            failed     (first stage-runs)]
+        (is (= :failed (:status failed)))
+        (is (= "Connection refused" (:error-message failed)))
+        (is (= "clojure.lang.ExceptionInfo" (:error-type failed)))
+        (is (nil? (:error-cause failed)))))))
 
 (deftest execute-pipeline-stops-on-failure-test
   (testing "Pipeline stops executing after first stage failure"
