@@ -29,20 +29,37 @@
      {:started-at   (or started-at now)
       :completed-at now})))
 
+(def ^:private max-exception-causes
+  "Maximum number of nested exception causes preserved in stage failure results."
+  16)
+
 (defn- exception-context
   "Build structured exception metadata for failed stage results."
   [^Throwable e]
-  (let [causes (->> (iterate ex-cause e)
-                    rest
-                    (take-while some?)
-                    (take 10)
-                    (mapv (fn [^Throwable cause]
-                            {:error-message (ex-message cause)
-                             :error-type    (.getName (class cause))})))]
-    {:error-message (ex-message e)
-     :error-type    (.getName (class e))
-     :error-cause   (:error-message (first causes))
-     :error-causes  causes}))
+  (let [bounded-causes (->> (iterate ex-cause e)
+                            rest
+                            (take-while some?)
+                            (take (inc max-exception-causes))
+                            vec)
+        truncated?     (> (count bounded-causes) max-exception-causes)
+        causes         (->> bounded-causes
+                            (take max-exception-causes)
+                            (mapv (fn [^Throwable cause]
+                                    {:error-message (ex-message cause)
+                                     :error-type    (.getName (class cause))})))]
+    (cond-> {:error-message (ex-message e)
+             :error-type    (.getName (class e))
+             :error-cause   (:error-message (first causes))
+             :error-causes  causes}
+      truncated? (assoc :error-causes-truncated? true))))
+
+(defn- close-handle!
+  "Best-effort connector cleanup; close failures must not mask stage outcomes."
+  [connector handle]
+  (when handle
+    (try
+      (conn/close connector handle)
+      (catch Exception _ nil))))
 
 (def ^:private auth-keys
   "Keys that belong to auth config, extracted from stage config."
@@ -126,8 +143,7 @@
           (catch Exception e
             (stage-result id name :failed (exception-context e)))
           (finally
-            (when-let [h @handle]
-              (try (conn/close connector h) (catch Exception _)))))))))
+            (close-handle! connector @handle)))))))
 
 (defn- execute-publish-stage
   "Execute a publish stage using the connector's publish method."
@@ -148,8 +164,7 @@
           (catch Exception e
             (stage-result id name :failed (exception-context e)))
           (finally
-            (when-let [h @handle]
-              (try (conn/close connector h) (catch Exception _)))))))))
+            (close-handle! connector @handle)))))))
 
 (defn- execute-transform-stage
   "Execute a non-connector stage (normalize, transform, aggregate, etc.).

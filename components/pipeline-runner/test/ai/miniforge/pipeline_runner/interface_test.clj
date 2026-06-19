@@ -427,6 +427,56 @@
                  :error-type    "clojure.lang.ExceptionInfo"}]
                (:error-causes failed)))))))
 
+(deftest execute-pipeline-ingest-close-failure-does-not-mask-primary-error-test
+  (testing "Ingest cleanup closes once and preserves the primary extract failure"
+    (let [close-count (atom 0)
+          connector   (reify
+                        conn/Connector
+                        (connect [_ _ _]
+                          {:connection/handle "ingest-handle"
+                           :connector/status :connected})
+                        (close [_ _]
+                          (swap! close-count inc)
+                          (throw (ex-info "Close failed" {})))
+                        conn/SourceConnector
+                        (discover [_ _ _] {:schemas []})
+                        (extract [_ _ _ _]
+                          (throw (ex-info "Extract failed" {}
+                                          (ex-info "Network root" {}))))
+                        (checkpoint [_ _ _ _] {}))
+          result      (runner/execute-pipeline test-pipeline {conn-src connector} {})
+          failed      (first (get-in result [:pipeline-run :pipeline-run/stage-runs]))]
+      (is (not (:success? result)))
+      (is (= 1 @close-count))
+      (is (= "Extract failed" (:error-message failed)))
+      (is (= "Network root" (:error-cause failed))))))
+
+(deftest execute-pipeline-publish-close-failure-does-not-mask-primary-error-test
+  (testing "Publish cleanup closes once and preserves the primary publish failure"
+    (let [close-count (atom 0)
+          mock-source (->MockSourceConnector nil)
+          sink        (reify
+                        conn/Connector
+                        (connect [_ _ _]
+                          {:connection/handle "publish-handle"
+                           :connector/status :connected})
+                        (close [_ _]
+                          (swap! close-count inc)
+                          (throw (ex-info "Close failed" {})))
+                        conn/SinkConnector
+                        (publish [_ _ _ _ _]
+                          (throw (ex-info "Publish failed" {}
+                                          (ex-info "Sink root" {})))))
+          result      (runner/execute-pipeline
+                       three-stage-pipeline
+                       {conn-src mock-source conn-sink sink}
+                       {})
+          failed      (last (get-in result [:pipeline-run :pipeline-run/stage-runs]))]
+      (is (not (:success? result)))
+      (is (= 1 @close-count))
+      (is (= "Publish failed" (:error-message failed)))
+      (is (= "Sink root" (:error-cause failed))))))
+
 (deftest execute-pipeline-transform-exception-test
   (testing "Pipeline preserves structured exception context for transform failures"
     (let [transform-stage-id (java.util.UUID/randomUUID)
