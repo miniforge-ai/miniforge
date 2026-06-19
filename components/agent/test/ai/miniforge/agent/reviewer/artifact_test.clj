@@ -277,7 +277,7 @@
 (deftest context-overflow-error-result-test
   (let [logger (log/create-logger {:min-level :error :output (fn [_])})
         msg (str "Reviewer prompt ~250000 est tokens exceeds the model context "
-                 "window 200000; LLM semantic review skipped, deterministic "
+                 "window 200000; deterministic "
                  "gates still applied")
         ;; Mirror the producer: reviewer.clj synthesizes the normalized
         ;; :llm-error :message AS the overflow message, so error-response

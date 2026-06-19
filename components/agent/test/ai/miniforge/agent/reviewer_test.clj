@@ -84,15 +84,6 @@
 (def ^:private valid-review-content
   (test-t :reviewer-test/valid-review-content))
 
-(def ^:private malformed-review-issue-content
-  (test-t :reviewer-test/malformed-review-issue-content))
-
-(def ^:private approved-with-nil-line-content
-  (test-t :reviewer-test/approved-with-nil-line-content))
-
-(def ^:private approved-with-nil-optional-fields-content
-  (test-t :reviewer-test/approved-with-nil-optional-fields-content))
-
 ;------------------------------------------------------------------------------ Test fixtures
 
 (defn passing-gate
@@ -1042,26 +1033,84 @@
       (is (false? (:shed? r)))
       (is (true? (:over-after-shed? r))))))
 
-(deftest test-reviewer-context-overflow-applies-gates-without-llm
-  (testing "irreducible context overflow skips the doomed LLM call but STILL
-            runs the deterministic policy gates and returns an infra failure,
-            never a synthesized rejection — policy enforcement is never dropped
-            (the trust boundary)"
+(deftest test-reviewer-context-overflow-splits-policy-addendum-across-llm-sessions
+  (testing "an over-budget compiled policy addendum is split across multiple
+            LLM sessions instead of silently skipping semantic policy review"
+    (let [captured-systems (atom [])
+          addendum "\n\n## Policy Rules — Required Behaviors\n\n1. RULE-1: check public API boundaries.\n\n2. RULE-2: check prompt templating.\n\n3. RULE-3: check faithful standards application."]
+      (with-redefs [model/resolve-llm-client-for-role (fn [_role client] client)
+                    ;; Reserve clamps to 100; all three rules overflow
+                    ;; together, while the base prompt and any one rule fit.
+                    llm/context-window-for-model-id (fn [_] 200)
+                    llm/prompt-size-telemetry
+                    (fn [system user-prompt]
+                      {:estimated-input-tokens
+                       (+ 40
+                          (* 30 (count (re-seq #"RULE-" system)))
+                          (if (str/includes? user-prompt "_File bodies omitted")
+                            5
+                            80))})
+                    llm/chat (fn [_ _ opts]
+                               (swap! captured-systems conj (:system opts))
+                               (mock-llm-response valid-review-content
+                                                  :tokens 2))
+                    llm/chat-stream (fn [_ _ _ opts]
+                                      (swap! captured-systems conj (:system opts))
+                                      (mock-llm-response valid-review-content
+                                                         :tokens 2))
+                    llm/success? :success?
+                    llm/get-content :content]
+        (let [reviewer (reviewer/create-reviewer
+                        {:llm-backend ::mock-backend
+                         :gates [(passing-gate :policy-check)]})
+              input (assoc (review-input (code-artifact 1 5000))
+                           :task/behavior-addendum addendum)
+              result (core/invoke reviewer {} input)]
+          (is (= :success (:status result)))
+          (is (< 1 (count @captured-systems))
+              "policy application must be split into multiple LLM sessions")
+          (doseq [rule ["RULE-1" "RULE-2" "RULE-3"]]
+            (is (= 1 (count (filter #(str/includes? % rule)
+                                    @captured-systems)))
+                (str rule " should be applied by exactly one split session")))
+          (is (= 1 (get-in result [:metrics :gates-passed]))
+              "deterministic gates still run alongside split LLM review")
+          (is (= (* 2 (count @captured-systems))
+                 (get-in result [:metrics :tokens]))
+              "token accounting sums every split LLM session"))))))
+
+(deftest test-reviewer-split-session-summary-fallback
+  (testing "split reviews without per-session summaries still produce a useful summary"
+    (let [combine #'reviewer/combine-parsed-reviews
+          result (combine [{:review/decision :approved
+                            :review/issues []}
+                           {:review/decision :changes-requested
+                            :review/issues []}])]
+      (is (= :changes-requested (:review/decision result)))
+      (is (= "Split reviewer sessions completed."
+             (:review/summary result))))))
+
+(deftest test-reviewer-irreducible-context-overflow-applies-gates-without-llm
+  (testing "irreducible context overflow skips the doomed LLM call but still
+            runs deterministic policy gates"
     (let [llm-called? (atom false)]
       (with-redefs [model/resolve-llm-client-for-role (fn [_role client] client)
-                    ;; Force overflow regardless of the real catalog window.
                     llm/context-window-for-model-id (fn [_] 100)
-                    llm/chat (fn [_ _ _] (reset! llm-called? true)
+                    llm/chat (fn [_ _ _]
+                               (reset! llm-called? true)
                                (mock-llm-response valid-review-content))
-                    llm/chat-stream (fn [_ _ _ _] (reset! llm-called? true)
+                    llm/chat-stream (fn [_ _ _ _]
+                                      (reset! llm-called? true)
                                       (mock-llm-response valid-review-content))]
         (let [reviewer (reviewer/create-reviewer
                         {:llm-backend ::mock-backend
                          :gates [(passing-gate :policy-check)]})
               result (core/invoke reviewer {} sample-artifact)]
           (is (false? @llm-called?) "the doomed LLM call is skipped")
-          (is (= :error (:status result)) "returns an infra failure, not a review verdict")
-          (is (= :reviewer/context-overflow (get-in result [:error :data :code])))
+          (is (= :error (:status result))
+              "returns an infra failure, not a review verdict")
+          (is (= :reviewer/context-overflow
+                 (get-in result [:error :data :code])))
           (is (= 1 (get-in result [:metrics :gates-passed]))
               "the deterministic policy gate still ran")
           (is (= 0 (get-in result [:metrics :tokens]))))))))

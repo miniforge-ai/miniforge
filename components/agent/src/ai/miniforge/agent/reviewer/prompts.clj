@@ -135,31 +135,21 @@
          tests (:task/tests input)
          review-scope (scope/effective-review-scope input)
          artifact-text (artifact-fmt artifact)]
-     (str "Review the following code implementation.\n\n"
-          (when-not (str/blank? title)
-            (str "## Task: " title "\n\n"))
-          (when-not (str/blank? description)
-            (str "## Description\n\n" description "\n\n"))
-          (when (and intent (not (str/blank? (str intent))))
-            (str "## Intent\n\n" (if (string? intent) intent (pr-str intent)) "\n\n"))
-          (when review-scope
-            (str "## Scope\n\n"
-                 "Findings inside these paths/prefixes are in-scope; report them in\n"
-                 "`:review/issues` with the appropriate severity\n"
-                 "(`:blocking` / `:warning` / `:nit`). Normal severity rules apply —\n"
-                 "only `:blocking` issues actually block the verdict.\n\n"
-                 "Findings outside the scope are out-of-scope — report them in\n"
-                 "`:review/out-of-scope-observations`, NOT in `:review/issues`.\n\n"
-                 (str/join "\n" (map #(str "- " %) review-scope))
-                 "\n\n"))
-          (when (and constraints (not (str/blank? (str constraints))))
-            (str "## Constraints\n\n" (if (string? constraints) constraints (pr-str constraints)) "\n\n"))
-          "## Code to Review\n\n"
-          artifact-text
-          (when tests
-            (str "\n\n## Test Results\n\n"
-                 (if (string? tests) tests (pr-str tests))))
-          "\n\nOutput your review as a Clojure map inside a ```clojure code block."))))
+     (prompts/render-template
+      (get @reviewer-prompt-data :prompt/user-template)
+      {"title" title
+       "has_title" (not (str/blank? title))
+       "description" description
+       "has_description" (not (str/blank? description))
+       "intent" (if (string? intent) intent (pr-str intent))
+       "has_intent" (not (str/blank? (str intent)))
+       "review_scope" review-scope
+       "constraints" (if (string? constraints) constraints (pr-str constraints))
+       "has_constraints" (not (str/blank? (str constraints)))
+       "artifact_text" artifact-text
+       "has_tests" (some? tests)
+       "tests" (when (some? tests)
+                 (if (string? tests) tests (pr-str tests)))}))))
 
 ;------------------------------------------------------------------------------ Layer 3
 ;; Enumeration retry

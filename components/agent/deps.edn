@@ -14,7 +14,8 @@
         ai.miniforge/self-healing {:local/root "../self-healing"}
         ai.miniforge/llm {:local/root "../llm"}
         ai.miniforge/progress-detector {:local/root "../progress-detector"}
-        slingshot/slingshot {:mvn/version "0.12.2"}}
+        slingshot/slingshot {:mvn/version "0.12.2"}
+        selmer/selmer {:mvn/version "1.13.1"}}
  :aliases
  {:test {:extra-paths ["test"]
          :extra-deps {io.github.cognitect-labs/test-runner

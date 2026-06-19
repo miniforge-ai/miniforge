@@ -37,7 +37,8 @@
    [ai.miniforge.event-stream.interface :as es]
    [ai.miniforge.logging.interface :as log]
    [ai.miniforge.llm.interface :as llm]
-   [ai.miniforge.loop.interface :as loop]))
+   [ai.miniforge.loop.interface :as loop]
+   [clojure.string :as str]))
 
 ;; Schemas (GateFeedback, ReviewIssue, ReviewArtifact) moved to
 ;; ai.miniforge.agent.reviewer.issues (PR-C decomposition).
@@ -120,6 +121,175 @@
                           input reviewer-prompts/format-artifact-manifest)
       :shed-count       (count (:code/files artifact))})))
 
+(defn- estimated-input-tokens
+  [system user-prompt]
+  (:estimated-input-tokens (llm/prompt-size-telemetry system user-prompt)))
+
+(defn- fits-effective-window?
+  [system user-prompt effective-window]
+  (or (nil? effective-window)
+      (< (estimated-input-tokens system user-prompt) effective-window)))
+
+(defn- addendum-units
+  "Split a policy/knowledge addendum at natural markdown paragraph
+   boundaries. The greedy packer below preserves these units whenever
+   possible and only falls back to character chunks for a single oversized
+   paragraph."
+  [addendum]
+  (->> (str/split (or addendum "") #"\n{2,}")
+       (remove str/blank?)
+       vec))
+
+(defn- max-fitting-prefix-length
+  [base-system text user-prompt effective-window]
+  (loop [lo 1
+         hi (count text)
+         best 0]
+    (if (> lo hi)
+      best
+      (let [mid (quot (+ lo hi) 2)
+            prefix (subs text 0 mid)]
+        (if (fits-effective-window? (str base-system prefix) user-prompt effective-window)
+          (recur (inc mid) hi mid)
+          (recur lo (dec mid) best))))))
+
+(defn- split-oversized-addendum-unit
+  [base-system unit user-prompt effective-window]
+  (loop [remaining unit
+         chunks []]
+    (cond
+      (str/blank? remaining)
+      chunks
+
+      (fits-effective-window? (str base-system remaining) user-prompt effective-window)
+      (conj chunks remaining)
+
+      :else
+      (let [n (max-fitting-prefix-length base-system remaining user-prompt effective-window)]
+        (when (pos? n)
+          (recur (subs remaining n)
+                 (conj chunks (subs remaining 0 n))))))))
+
+(defn- split-addendum-into-fitting-chunks
+  "Return addendum chunks that each fit with the base system and user prompt,
+   or nil when even the base system plus user prompt is over budget."
+  [base-system addendum user-prompt effective-window]
+  (when (and (not (str/blank? addendum))
+             (fits-effective-window? base-system user-prompt effective-window))
+    (loop [remaining (addendum-units addendum)
+           current ""
+           chunks []]
+      (if (empty? remaining)
+        (cond-> chunks
+          (not (str/blank? current)) (conj current))
+        (let [unit (first remaining)
+              more (rest remaining)
+              candidate (if (str/blank? current)
+                          unit
+                          (str current "\n\n" unit))]
+          (cond
+            (fits-effective-window? (str base-system candidate) user-prompt effective-window)
+            (recur more candidate chunks)
+
+            (not (str/blank? current))
+            (recur remaining "" (conj chunks current))
+
+            :else
+            (when-let [oversized-chunks
+                       (seq (split-oversized-addendum-unit
+                             base-system unit user-prompt effective-window))]
+              (recur more "" (into chunks oversized-chunks)))))))))
+
+(defn- review-session-systems
+  "Resolve the system prompts to use for the review. Most reviews use one
+   system prompt. If the compiled policy/knowledge addendum pushes the shed
+   prompt over budget, split that addendum across multiple LLM sessions so
+   every compiled rule is still applied."
+  [base-system behavior-addendum user-prompt prompt-budget]
+  (if-not (:over-after-shed? prompt-budget)
+    [(str base-system behavior-addendum)]
+    (when-let [chunks (seq (split-addendum-into-fitting-chunks
+                            base-system behavior-addendum user-prompt
+                            (:effective-window prompt-budget)))]
+      (mapv #(str base-system %) chunks))))
+
+(def ^:private review-decision-rank
+  {:approved 0
+   :conditionally-approved 1
+   :changes-requested 2
+   :rejected 3})
+
+(defn- strongest-review-decision
+  [reviews]
+  (->> reviews
+       (map #(issues/normalize-llm-decision (:review/decision %)))
+       (apply max-key #(get review-decision-rank % 0))))
+
+(defn- combine-parsed-reviews
+  [reviews]
+  (let [multiple? (> (count reviews) 1)
+        summaries (seq (keep :review/summary reviews))]
+    (cond-> {:review/decision (strongest-review-decision reviews)
+             :review/issues (vec (mapcat #(get % :review/issues []) reviews))
+             :review/out-of-scope-observations
+             (vec (mapcat #(get % :review/out-of-scope-observations []) reviews))
+             :review/strengths (vec (mapcat #(get % :review/strengths []) reviews))
+             :review/summary (if multiple?
+                               (if summaries
+                                 (str "Split reviewer sessions:\n"
+                                      (str/join "\n"
+                                                (map-indexed
+                                                 (fn [idx summary]
+                                                   (str "- Session " (inc idx) ": " summary))
+                                                 summaries)))
+                                 "Split reviewer sessions completed.")
+                               (or (first summaries) "Review completed."))}
+      (not multiple?) (assoc :review/summary (or (first summaries)
+                                                 "Review completed.")))))
+
+(defn- aggregate-cost-usd
+  [normalized-results]
+  (when-let [costs (seq (keep :cost-usd normalized-results))]
+    (reduce + 0M costs)))
+
+(defn- combined-review-content
+  [review]
+  (str "```clojure\n" (pr-str review) "\n```"))
+
+(defn- combine-normalized-review-results
+  "Combine split reviewer calls into one normalized result. Any split session
+   that fails to parse or times out keeps the combined result failed; only an
+   all-parseable set is merged into a ReviewArtifact."
+  [normalized-results]
+  (let [tokens (reduce + 0 (map #(or (:tokens %) 0) normalized-results))
+        cost-usd (aggregate-cost-usd normalized-results)
+        joined-content (str/join "\n\n--- split reviewer session ---\n\n"
+                                 (map :content normalized-results))
+        failed (first (remove :parsed-content normalized-results))]
+    (if failed
+      (assoc failed
+             :content joined-content
+             :tokens tokens
+             :cost-usd cost-usd
+             :response (cond-> (assoc (or (:response failed) {})
+                                      :tokens tokens)
+                         cost-usd (assoc :cost-usd cost-usd)))
+      (let [review (combine-parsed-reviews (mapv :parsed-content normalized-results))
+            content (combined-review-content review)
+            response (cond-> {:success true
+                              :success? true
+                              :content content
+                              :tokens tokens}
+                       cost-usd (assoc :cost-usd cost-usd))]
+        {:response response
+         :content content
+         :response-success? true
+         :llm-error nil
+         :parsed-content review
+         :tokens tokens
+         :cost-usd cost-usd
+         :usable? true}))))
+
 (defn- emit-prompt-size!
   "Emit an :agent/prompt-size workflow event recording the reviewer's
    pre-flight budget (N12 §3) so estimate-vs-window is visible/queryable.
@@ -162,6 +332,69 @@
     (if on-chunk
       (llm/chat-stream llm-client user-prompt on-chunk opts)
       (llm/chat llm-client user-prompt opts))))
+
+(defn- invoke-reviewer-with-system
+  [context llm-client user-prompt on-chunk system-prompt monitor
+   budget-usd max-turns]
+  (let [base-opts (cond-> {:system system-prompt
+                           :max-turns max-turns}
+                    monitor (assoc :progress-monitor monitor))]
+    (artifact-session/with-readonly-session
+     context
+     #(invoke-reviewer-session % llm-client user-prompt on-chunk
+                               base-opts budget-usd max-turns))))
+
+(defn- invoke-reviewer-sessions
+  [context llm-client user-prompt on-chunk systems monitor budget-usd max-turns]
+  (let [responses (mapv #(invoke-reviewer-with-system
+                          context llm-client user-prompt on-chunk %
+                          monitor budget-usd max-turns)
+                        systems)]
+    (if (= 1 (count responses))
+      (result-boundary/normalize-llm-result
+       {:response (first responses)
+        :parse-response llm-response/parse-review-response})
+      (combine-normalized-review-results
+       (mapv #(result-boundary/normalize-llm-result
+               {:response %
+                :parse-response llm-response/parse-review-response})
+             responses)))))
+
+(defn- invoke-enumeration-retry-session
+  [llm-client retry-prompt on-chunk system-prompt monitor]
+  (let [retry-opts (cond-> {:system system-prompt
+                            :max-turns
+                            (get @reviewer-prompts/reviewer-prompt-data
+                                 :prompt/enumeration-retry-max-turns
+                                 6)}
+                     monitor (assoc :progress-monitor monitor))]
+    (if on-chunk
+      (llm/chat-stream llm-client retry-prompt on-chunk retry-opts)
+      (llm/chat llm-client retry-prompt retry-opts))))
+
+(defn- recover-review-enumeration-across-sessions
+  [llm-client systems monitor on-chunk user-prompt prior-content]
+  (if (= 1 (count systems))
+    (llm-response/recover-review-enumeration
+     llm-client
+     (cond-> {:system (first systems)
+              :max-turns (get @reviewer-prompts/reviewer-prompt-data
+                              :prompt/max-turns
+                              reviewer-prompts/default-reviewer-max-turns)}
+       monitor (assoc :progress-monitor monitor))
+     on-chunk user-prompt prior-content)
+    (let [retry-prompt (reviewer-prompts/enumeration-retry-prompt
+                        user-prompt prior-content)
+          normalized (combine-normalized-review-results
+                      (mapv #(result-boundary/normalize-llm-result
+                              {:response (invoke-enumeration-retry-session
+                                          llm-client retry-prompt on-chunk %
+                                          monitor)
+                               :parse-response llm-response/parse-review-response})
+                            systems))
+          re-review (:parsed-content normalized)]
+      (when (and re-review (llm-response/well-formed-recovery? re-review))
+        re-review))))
 
 (defn create-reviewer
   "Create a Reviewer agent with optional configuration overrides.
@@ -231,8 +464,9 @@
                   ;; reviewer sees the rules it should be checking
                   ;; against. Empty string when no addendum is present
                   ;; (legacy callers / no rules apply to :review).
-                  effective-system (str @reviewer-prompts/reviewer-system-prompt
-                                        (get input :task/behavior-addendum ""))
+                  base-system @reviewer-prompts/reviewer-system-prompt
+                  behavior-addendum (get input :task/behavior-addendum "")
+                  effective-system (str base-system behavior-addendum)
                   ;; N12 §5: assemble the user-prompt within the model's
                   ;; context window, shedding the artifact's inlined file
                   ;; bodies to a context_read-able manifest before the prompt
@@ -253,27 +487,30 @@
                                         :window (:window prompt-budget)
                                         :estimated-tokens-before (:est-full prompt-budget)
                                         :estimated-tokens-after (:est-final prompt-budget)}}))
-                  ;; Irreducible overflow: the prompt exceeds the window even
-                  ;; with the artifact shed to a manifest (only reachable on a
-                  ;; tiny-window model — production 200k windows fit the shed
-                  ;; form). Skip the doomed LLM call, but STILL run the
-                  ;; deterministic policy gates below and return an infra
-                  ;; failure. The compiled policy gates are the trust boundary
-                  ;; and MUST always apply; the LLM's semantic pass is the only
-                  ;; thing dropped here, and a 'prompt too long' error must
-                  ;; never be synthesized into a false :rejected. N12 §5.4-5.5.
-                  context-overflow? (:over-after-shed? prompt-budget)
+                  session-systems (review-session-systems
+                                   base-system behavior-addendum
+                                   user-prompt prompt-budget)
+                  split-session? (> (count session-systems) 1)
+                  _ (when split-session?
+                      (log/info logger :reviewer :reviewer/context-split
+                                {:data {:session-count (count session-systems)
+                                        :window (:window prompt-budget)
+                                        :estimated-tokens-before (:est-full prompt-budget)
+                                        :estimated-tokens-after (:est-final prompt-budget)}}))
+                  ;; Irreducible overflow: even the base reviewer prompt plus
+                  ;; the shed user prompt exceeds the window, or there is no
+                  ;; compiled addendum to split. Compiled policy addenda are
+                  ;; never dropped; when they are the over-budget contributor,
+                  ;; `session-systems` contains one LLM session per chunk.
+                  context-overflow? (empty? session-systems)
                   overflow-message (when context-overflow?
                                      (str "Reviewer prompt ~" (:est-final prompt-budget)
                                           " est tokens exceeds the model context window "
                                           (:window prompt-budget)
                                           (if (:shed? prompt-budget)
-                                            " even after shedding the artifact's file bodies to a manifest"
+                                            " even after shedding the artifact's file bodies to a manifest and splitting policy addenda was not possible"
                                             " and has no inlined file bodies to shed")
-                                          "; LLM semantic review skipped, deterministic gates still applied"))
-                  base-opts (cond-> {:system effective-system
-                                     :max-turns max-turns}
-                              monitor (assoc :progress-monitor monitor))
+                                          "; deterministic gates still applied"))
                   budget-usd (budget/resolve-cost-budget-usd :reviewer review-config context)
                   ;; Run the main review inside a read-only artifact session so
                   ;; the reviewer reads through the MCP context cache
@@ -283,25 +520,19 @@
                   ;; the cache without modifying anything. with-readonly-session
                   ;; skips artifact promotion/WARN (the reviewer has no work
                   ;; product) and returns the LLM result directly. The
-                  ;; enumeration-retry below keeps base-opts — it re-asks over
-                  ;; the same content and needs no tools/cache.
-                  ;; Skip the LLM call entirely on irreducible overflow — the
-                  ;; synthesized error `normalized` below routes to the
-                  ;; context-overflow infra exit; the gates still run.
-                  response (when-not context-overflow?
-                             (artifact-session/with-readonly-session
-                              context
-                              #(invoke-reviewer-session % llm-client user-prompt on-chunk
-                                                        base-opts budget-usd max-turns)))
+                  ;; enumeration-retry below re-asks over the same content and
+                  ;; needs no tools/cache, but still uses the same split
+                  ;; systems so every compiled policy chunk is applied.
                   normalized (if context-overflow?
                                {:llm-error {:message overflow-message
                                             :data {:context-overflow true
                                                    :estimated-tokens (:est-final prompt-budget)
                                                    :context-window (:window prompt-budget)}}
                                 :content nil :parsed-content nil :tokens 0 :cost-usd nil}
-                               (result-boundary/normalize-llm-result
-                                {:response response
-                                 :parse-response llm-response/parse-review-response}))
+                               (invoke-reviewer-sessions
+                                context llm-client user-prompt on-chunk
+                                session-systems monitor budget-usd max-turns))
+                  response (:response normalized)
                   content (:content normalized)
                   tokens (:tokens normalized)
                   cost-usd (:cost-usd normalized)]
@@ -395,8 +626,8 @@
                                                  {:data {:initial-decision    initial-llm-decision
                                                          :initial-issue-count (count initial-llm-issues)
                                                          :gate-blocking-count (count (:blocking-issues gate-result))}})
-                                       (llm-response/recover-review-enumeration
-                                        llm-client base-opts on-chunk
+                                       (recover-review-enumeration-across-sessions
+                                        llm-client session-systems monitor on-chunk
                                         user-prompt content))
                     ;; When recovery succeeds, the first call's parse failure
                     ;; no longer represents the agent's verdict — clearing

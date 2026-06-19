@@ -223,6 +223,45 @@ artifact.**
 
 Output your review as a Clojure map inside a ```clojure code block."
 
+ :prompt/user-template
+ "Review the following code implementation.
+
+{% if has_title %}## Task: {{title|safe}}
+
+{% endif %}{% if has_description %}## Description
+
+{{description|safe}}
+
+{% endif %}{% if has_intent %}## Intent
+
+{{intent|safe}}
+
+{% endif %}{% if review_scope %}## Scope
+
+Findings inside these paths/prefixes are in-scope; report them in
+`:review/issues` with the appropriate severity
+(`:blocking` / `:warning` / `:nit`). Normal severity rules apply —
+only `:blocking` issues actually block the verdict.
+
+Findings outside the scope are out-of-scope — report them in
+`:review/out-of-scope-observations`, NOT in `:review/issues`.
+
+{% for path in review_scope %}- {{path|safe}}
+{% endfor %}
+{% endif %}{% if has_constraints %}## Constraints
+
+{{constraints|safe}}
+
+{% endif %}## Code to Review
+
+{{artifact_text|safe}}{% if has_tests %}
+
+## Test Results
+
+{{tests|safe}}{% endif %}
+
+Output your review as a Clojure map inside a ```clojure code block."
+
  ;; Bounded enumeration-retry turn — used by the review-output validator when a
  ;; :rejected / :changes-requested decision lands WITHOUT any :blocking items
  ;; in :review/issues. A rejection without enumerated blockers can't tell the
