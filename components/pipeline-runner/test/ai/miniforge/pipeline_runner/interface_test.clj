@@ -86,7 +86,8 @@
   conn/SourceConnector
   (discover [_ handle opts] {:schemas []})
   (extract [_ handle schema-name opts]
-    (throw (ex-info "Connection refused" {:cause :network})))
+    (throw (ex-info "Connection refused" {:cause :network}
+                    (ex-info "Socket closed" {:cause :socket}))))
   (checkpoint [_ handle connector-id cursor-state] {}))
 
 (defrecord InspectableSourceConnector [calls extract-fn]
@@ -421,7 +422,49 @@
         (is (= :failed (:status failed)))
         (is (= "Connection refused" (:error-message failed)))
         (is (= "clojure.lang.ExceptionInfo" (:error-type failed)))
-        (is (nil? (:error-cause failed)))))))
+        (is (= "Socket closed" (:error-cause failed)))
+        (is (= [{:error-message "Socket closed"
+                 :error-type    "clojure.lang.ExceptionInfo"}]
+               (:error-causes failed)))))))
+
+(deftest execute-pipeline-transform-exception-test
+  (testing "Pipeline preserves structured exception context for transform failures"
+    (let [transform-stage-id (java.util.UUID/randomUUID)
+          root-cause         (ex-info "Bad input" {:cause :bad-input})
+          transform-pipeline {:pipeline/id (java.util.UUID/randomUUID)
+                              :pipeline/name "Transform Failure Pipeline"
+                              :pipeline/version "1.0.0"
+                              :pipeline/stages
+                              [{:stage/id transform-stage-id
+                                :stage/name "Transform"
+                                :stage/family :transform
+                                :stage/input-datasets [ds-a]
+                                :stage/output-datasets [ds-b]
+                                :stage/dependencies []
+                                :stage/config {:stage/transform
+                                               {:transform/type :explode}}}]
+                              :pipeline/mode :full-refresh
+                              :pipeline/input-datasets [ds-a]
+                              :pipeline/output-datasets [ds-b]
+                              :pipeline/created-at (java.time.Instant/now)
+                              :pipeline/updated-at (java.time.Instant/now)}
+          result             (runner/execute-pipeline
+                              transform-pipeline
+                              {}
+                              {:transforms
+                               {:explode
+                                (fn [_records _config]
+                                  (throw (ex-info "Transform failed" {} root-cause)))}})
+          failed             (first (get-in result [:pipeline-run :pipeline-run/stage-runs]))]
+      (is (not (:success? result)))
+      (is (= :failed (get-in result [:pipeline-run :pipeline-run/status])))
+      (is (= :failed (:status failed)))
+      (is (= "Transform failed" (:error-message failed)))
+      (is (= "clojure.lang.ExceptionInfo" (:error-type failed)))
+      (is (= "Bad input" (:error-cause failed)))
+      (is (= [{:error-message "Bad input"
+               :error-type    "clojure.lang.ExceptionInfo"}]
+             (:error-causes failed))))))
 
 (deftest execute-pipeline-stops-on-failure-test
   (testing "Pipeline stops executing after first stage failure"

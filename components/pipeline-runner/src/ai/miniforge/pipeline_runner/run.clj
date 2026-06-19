@@ -29,6 +29,20 @@
      {:started-at   (or started-at now)
       :completed-at now})))
 
+(defn- exception-context
+  "Build structured exception metadata for failed stage results."
+  [^Throwable e]
+  (let [causes (->> (iterate ex-cause e)
+                    rest
+                    (take-while some?)
+                    (mapv (fn [^Throwable cause]
+                            {:error-message (ex-message cause)
+                             :error-type    (.getName (class cause))})))]
+    {:error-message (ex-message e)
+     :error-type    (.getName (class e))
+     :error-cause   (:error-message (first causes))
+     :error-causes  causes}))
+
 (def ^:private auth-keys
   "Keys that belong to auth config, extracted from stage config."
   #{:auth/method :auth/credential-id :auth/credential-scope
@@ -112,10 +126,7 @@
           (catch Exception e
             (when-let [h @handle]
               (try (conn/close connector h) (catch Exception _)))
-            (stage-result id name :failed
-                          {:error-message (ex-message e)
-                           :error-type    (.getName (class e))
-                           :error-cause   (some-> (ex-cause e) ex-message)})))))))
+            (stage-result id name :failed (exception-context e))))))))
 
 (defn- execute-publish-stage
   "Execute a publish stage using the connector's publish method."
@@ -137,10 +148,7 @@
           (catch Exception e
             (when-let [h @handle]
               (try (conn/close connector h) (catch Exception _)))
-            (stage-result id name :failed
-                          {:error-message (ex-message e)
-                           :error-type    (.getName (class e))
-                           :error-cause   (some-> (ex-cause e) ex-message)})))))))
+            (stage-result id name :failed (exception-context e))))))))
 
 (defn- execute-transform-stage
   "Execute a non-connector stage (normalize, transform, aggregate, etc.).
@@ -157,10 +165,7 @@
           (stage-result id name :completed
                         (assoc (timestamps) :records result-records)))
         (catch Exception e
-          (stage-result id name :failed
-                        {:error-message (ex-message e)
-                         :error-type    (.getName (class e))
-                         :error-cause   (some-> (ex-cause e) ex-message)})))
+          (stage-result id name :failed (exception-context e))))
       (stage-result id name :completed
                     (assoc (timestamps) :records input-records)))))
 
