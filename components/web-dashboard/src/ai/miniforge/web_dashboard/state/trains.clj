@@ -96,6 +96,13 @@
       (some-> e class .getName)
       "unknown exception"))
 
+(defn caught-message
+  [caught throwable]
+  (cond
+    (instance? Throwable caught) (ex-msg caught)
+    throwable (ex-msg throwable)
+    :else (str caught)))
+
 (defn ensure-message
   [message fallback]
   (or (some-> message str str/trim not-empty)
@@ -669,10 +676,10 @@
       (->> (or (pr-train/list-trains mgr) [])
            (map enrich-train)
            vec)
-      (catch Object _
-        (let [e (:throwable &throw-context)]
-          (println "Error listing PR trains:" (ex-message e))
-          [])))
+      (catch Object e
+        (println "Error listing PR trains:"
+                 (caught-message e (:throwable &throw-context)))
+        []))
     []))
 
 (def get-trains
@@ -690,10 +697,10 @@
           (if-let [train (pr-train/get-train mgr tid)]
             (enrich-train train)
             {:error "Train not found"})
-          (catch Object _
-            (let [e (:throwable &throw-context)]
-              (println "Error getting PR train:" (ex-message e))
-              {:error "Train not found"})))))
+          (catch Object e
+            (println "Error getting PR train:"
+                     (caught-message e (:throwable &throw-context)))
+            {:error "Train not found"}))))
     {:error "PR train manager not available"}))
 
 (defn execute-train-action!
@@ -719,10 +726,10 @@
   (if-let [mgr (:repo-dag-manager @state)]
     (try+
       (or (repo-dag/get-all-dags mgr) [])
-      (catch Object _
-        (let [e (:throwable &throw-context)]
-          (println "Error listing repository DAGs:" (ex-message e))
-          [])))
+      (catch Object e
+        (println "Error listing repository DAGs:"
+                 (caught-message e (:throwable &throw-context)))
+        []))
     []))
 
 (def get-dags
@@ -803,11 +810,14 @@
                        (some (fn [dag]
                                (when (= external-dag-name (:dag/name dag))
                                  (:dag/id dag)))
-                             (or (repo-dag/get-all-dags mgr) [])))
+                             (fetch-dags state)))
             created (when (and mgr (nil? existing))
-                      (some-> (repo-dag/create-dag mgr external-dag-name
-                                                   "Externally discovered repositories and PR trains")
-                              :dag/id))
+                      (try+
+                        (some-> (repo-dag/create-dag
+                                  mgr external-dag-name
+                                  "Externally discovered repositories and PR trains")
+                                :dag/id)
+                        (catch Object _ nil)))
             dag-id (or existing created (random-uuid))]
         (swap! state assoc :fleet/default-dag-id dag-id)
         dag-id)))
@@ -815,18 +825,20 @@
 (defn ensure-repo-in-dag!
   [state dag-id repo]
   (when-let [mgr (:repo-dag-manager @state)]
-    (let [dag (repo-dag/get-dag mgr dag-id)
+    (let [dag (try+
+                (repo-dag/get-dag mgr dag-id)
+                (catch Object _ nil))
           exists? (some #(= repo (:repo/name %)) (:dag/repos dag))]
       (when-not exists?
         (let [[org _name] (str/split repo #"/" 2)]
-          (try
+          (try+
             (repo-dag/add-repo mgr dag-id
                                {:repo/url (str "https://github.com/" repo)
                                 :repo/name repo
                                 :repo/org org
                                 :repo/type :application
                                 :repo/default-branch "main"})
-            (catch Exception _ nil)))))))
+            (catch Object _ nil)))))))
 
 (defn train-name-for-repo
   [repo]
@@ -836,10 +848,12 @@
   [state repo]
   (if-let [mgr (:pr-train-manager @state)]
     (let [expected (train-name-for-repo repo)]
-      (some (fn [train]
-              (when (= expected (:train/name train))
-                (:train/id train)))
-            (or (pr-train/list-trains mgr) [])))
+      (try+
+        (some (fn [train]
+                (when (= expected (:train/name train))
+                  (:train/id train)))
+              (or (pr-train/list-trains mgr) []))
+        (catch Object _ nil)))
     nil))
 
 (defn ensure-repo-train!
@@ -847,14 +861,18 @@
   (when-let [mgr (:pr-train-manager @state)]
     (let [known-id (get-in @state [:fleet/repo-trains repo])
           known-train (when known-id
-                        (pr-train/get-train mgr known-id))
+                        (try+
+                          (pr-train/get-train mgr known-id)
+                          (catch Object _ nil)))
           existing-id (or (when (and known-id known-train) known-id)
                           (find-existing-repo-train-id state repo))
           train-id (or existing-id
-                       (pr-train/create-train mgr
-                                              (train-name-for-repo repo)
-                                              (ensure-default-dag-id! state)
-                                              (str "Externally managed PR train for " repo)))]
+                       (try+
+                         (pr-train/create-train mgr
+                                                (train-name-for-repo repo)
+                                                (ensure-default-dag-id! state)
+                                                (str "Externally managed PR train for " repo))
+                         (catch Object _ nil)))]
       (when train-id
         (swap! state assoc-in [:fleet/repo-trains repo] train-id)
         train-id))))
@@ -883,21 +901,29 @@
 (defn add-prs!
   [mgr train-id repo prs]
   (doseq [pr prs]
-    (pr-train/add-pr mgr train-id repo (:pr/number pr) (:pr/url pr)
-                     (:pr/branch pr) (:pr/title pr))))
+    (try+
+      (pr-train/add-pr mgr train-id repo (:pr/number pr) (:pr/url pr)
+                       (:pr/branch pr) (:pr/title pr))
+      (catch Object _ nil))))
 
 (defn remove-prs!
   [mgr train-id pr-nums]
   (doseq [pr-num pr-nums]
-    (pr-train/remove-pr mgr train-id pr-num)))
+    (try+
+      (pr-train/remove-pr mgr train-id pr-num)
+      (catch Object _ nil))))
 
 (defn apply-sync-plan!
   [mgr train-id repo {:keys [to-add to-remove status-map]}]
   ;; Side effects are intentionally ordered: membership first, then status, then dependency linking.
   (add-prs! mgr train-id repo to-add)
   (remove-prs! mgr train-id to-remove)
-  (pr-train/sync-pr-status mgr train-id status-map)
-  (pr-train/link-prs mgr train-id))
+  (try+
+    (pr-train/sync-pr-status mgr train-id status-map)
+    (catch Object _ nil))
+  (try+
+    (pr-train/link-prs mgr train-id)
+    (catch Object _ nil)))
 
 (defn fetch-repo-prs
   "Fetch open PRs for a repo, returning a result map."

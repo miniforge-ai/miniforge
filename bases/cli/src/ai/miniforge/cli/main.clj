@@ -111,25 +111,39 @@
 (register-artifact-providers!)
 (register-policy-pack-providers!)
 
+(defn- caught-message
+  [caught throwable]
+  (cond
+    (instance? Throwable caught)
+    (or (.getMessage ^Throwable caught)
+        (some-> caught class .getName)
+        "unknown exception")
+
+    throwable
+    (or (.getMessage ^Throwable throwable)
+        (some-> throwable class .getName)
+        "unknown exception")
+
+    :else
+    (str caught)))
+
 (defn- create-pr-train-manager
   []
   (try+
     (pr-train/create-manager)
-    (catch Object _
-      (let [e (:throwable &throw-context)]
-        (println (messages/t :web/pr-train-warning
-                             {:error (.getMessage ^Throwable e)}))
-        nil))))
+    (catch Object e
+      (println (messages/t :web/pr-train-warning
+                           {:error (caught-message e (:throwable &throw-context))}))
+      nil)))
 
 (defn- create-repo-dag-manager
   []
   (try+
     (repo-dag/create-manager)
-    (catch Object _
-      (let [e (:throwable &throw-context)]
-        (println (messages/t :web/repo-dag-warning
-                             {:error (.getMessage ^Throwable e)}))
-        nil))))
+    (catch Object e
+      (println (messages/t :web/repo-dag-warning
+                           {:error (caught-message e (:throwable &throw-context))}))
+      nil)))
 
 (defn- optional-web-launcher
   "Compose the dashboard command when the product includes web-dashboard."

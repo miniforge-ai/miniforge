@@ -26,7 +26,8 @@
    [ai.miniforge.event-stream.interface :as es]
    [ai.miniforge.pr-train.interface :as pr-train]
    [ai.miniforge.repo-dag.interface :as repo-dag]
-   [ai.miniforge.workflow-resume.interface :as wr]))
+   [ai.miniforge.workflow-resume.interface :as wr]
+   [slingshot.slingshot :refer [throw+]]))
 
 (deftest help-cmd-uses-generic-workflow-examples-test
   (testing "CLI help shows generic workflow examples instead of SDLC-specific ones"
@@ -71,6 +72,14 @@
       (let [output (with-out-str
                      (is (nil? (#'sut/create-pr-train-manager))))]
         (is (.contains output "train boom"))))))
+
+(deftest create-pr-train-manager-handles-non-throwable-sling-test
+  (testing "slingshot data throws do not break the warning path"
+    (with-redefs [pr-train/create-manager
+                  (fn [] (throw+ {:type :boom :message "train data boom"}))]
+      (let [output (with-out-str
+                     (is (nil? (#'sut/create-pr-train-manager))))]
+        (is (.contains output "train data boom"))))))
 
 (deftest create-repo-dag-manager-handles-construction-errors-test
   (testing "manager construction failure logs a warning and returns nil"
