@@ -16,6 +16,7 @@ relative to the latest stable tag and falls back to a full sweep if no stable ta
 - Update the Linux CI Test job to run `bb test` for pull requests.
 - Keep `bb test:all` for `main` branch pushes.
 - Preserve the existing full-history checkout so stable tags are available to Polylith.
+- Remove the obsolete Linux standalone `poly` CLI install; the test runner uses `clojure -M:poly`.
 - Update development guidance to describe structural checks, pre-commit smoke tests, PR scoped tests, and main full
   tests accurately.
 

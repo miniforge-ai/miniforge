@@ -155,22 +155,6 @@ jobs:
           restore-keys: |
             clojure-${{ runner.os }}-
 
-      # scripts/test-since-stable.bb shells out to the standalone `poly`
-      # CLI. setup-clojure does not install it, and ubuntu-latest does not
-      # carry it either, so we drop the polylith uberjar onto PATH with a
-      # tiny java -jar wrapper. Pinned version mirrors deps.edn :poly alias.
-      - name: Install polylith CLI
-        run: |
-          POLY_VERSION="0.2.21"
-          sudo curl -sSL -o /usr/local/lib/poly.jar \
-            "https://github.com/polyfy/polylith/releases/download/v${POLY_VERSION}/poly-${POLY_VERSION}.jar"
-          sudo tee /usr/local/bin/poly >/dev/null <<'EOF'
-          #!/bin/sh
-          exec java -jar /usr/local/lib/poly.jar "$@"
-          EOF
-          sudo chmod +x /usr/local/bin/poly
-          poly --help >/dev/null && echo "poly installed at $(command -v poly)"
-
       # Pull requests use stable-derived changed-and-affected scope. Main
       # pushes keep the full suite as the stable-tag authority. GitHub
       # Actions' default Linux shell is `bash -e {0}` — no pipefail; without
