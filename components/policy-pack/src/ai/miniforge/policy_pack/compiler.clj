@@ -89,8 +89,173 @@
       :else
       :none)))
 
+(defn- detector-class
+  [detector]
+  (if (= :semantic detector)
+    :heuristic
+    :deterministic))
+
+(defn- rule-metadata
+  [rule detector]
+  {:rule/id       (:rule/id rule)
+   :rule/severity (:rule/severity rule)
+   :detector      detector
+   :class         (detector-class detector)})
+
+(defn- code-files
+  [artifacts]
+  (or (get artifacts :code/files)
+      (get artifacts :files)))
+
+(defn- file-entry->artifact
+  [file-entry]
+  (let [path    (or (get file-entry :artifact/path)
+                    (get file-entry :path))
+        content (or (get file-entry :artifact/content)
+                    (get file-entry :content))]
+    (cond-> file-entry
+      path    (assoc :artifact/path path)
+      content (assoc :artifact/content content))))
+
+(defn- normalize-artifacts
+  "Normalize N4 check input into artifact maps that existing detectors accept."
+  [artifacts]
+  (cond
+    (sequential? artifacts) (mapv file-entry->artifact artifacts)
+    (seq (code-files artifacts)) (mapv file-entry->artifact (code-files artifacts))
+    (map? artifacts) [(file-entry->artifact artifacts)]
+    :else []))
+
+(defn- artifact-inputs
+  [detector artifacts]
+  (let [normalized (normalize-artifacts artifacts)]
+    (if (and (= :semantic detector) (seq normalized))
+      [(first normalized)]
+      normalized)))
+
+(defn- semantic-context-ready?
+  [context]
+  (and (fn? (:semantic-analyze-fn context))
+       (some? (:llm-client context))
+       (fn? (:complete-fn context))))
+
+(defn- violation-with-rule
+  [rule violation]
+  (assoc violation
+         :rule-id  (or (:rule-id violation) (:rule/id rule))
+         :severity (or (:severity violation) (:rule/severity rule))))
+
+(defn- detect-rule-violations
+  [rule detector artifacts context]
+  (->> (artifact-inputs detector artifacts)
+       (keep #(detection/detect-violation rule % context))
+       (mapv #(violation-with-rule rule %))))
+
+(defn- exception-violation
+  [rule detector e]
+  {:type     :check-error
+   :rule-id  (:rule/id rule)
+   :severity (:rule/severity rule)
+   :detector detector
+   :error    (ex-message e)
+   :message  (str "Policy check failed: " (ex-message e))})
+
+(defn- missing-semantic-wiring-violation
+  [rule]
+  {:type     :semantic-error
+   :rule-id  (:rule/id rule)
+   :severity (:rule/severity rule)
+   :message  "Semantic policy check requires :semantic-analyze-fn, :llm-client, and :complete-fn"})
+
+(defn- check-result
+  [rule detector violations]
+  {:passed?    (empty? violations)
+   :violations violations
+   :metadata   (rule-metadata rule detector)})
+
+(defn- compile-check-fn
+  [rule detector]
+  (fn [artifacts context]
+    (try
+      (if (and (= :semantic detector)
+               (not (semantic-context-ready? context)))
+        (check-result rule detector [(missing-semantic-wiring-violation rule)])
+        (check-result rule detector
+                      (detect-rule-violations rule detector artifacts context)))
+      (catch Exception e
+        (check-result rule detector [(exception-violation rule detector e)])))))
+
+(defn compile-rule-check
+  "Compile one enabled rule into an executable N4 check entry.
+
+   Returns:
+     {:rule rule
+      :detector <mechanism>
+      :check-fn (fn [artifacts context] -> {:passed? bool
+                                            :violations [...]
+                                            :metadata {...}})}
+
+   Returns an :invalid-input anomaly when the rule cannot bind to any
+   mechanism. Disabled rules are not compiled."
+  [rule]
+  (let [detector (resolve-detector rule)]
+    (cond
+      (not (rule-enabled? rule))
+      (anomaly/anomaly :invalid-input
+                       "Disabled rules are not compiled into checks"
+                       {:rule/id (:rule/id rule)})
+
+      (= :none detector)
+      (anomaly/anomaly :invalid-input
+                       "Enabled policy rule binds to no detection mechanism"
+                       {:rule/id (:rule/id rule)})
+
+      :else
+      {:rule     rule
+       :detector detector
+       :check-fn (compile-check-fn rule detector)})))
+
+(defn- anomaly-rule-id
+  [a]
+  (get-in a [:anomaly/data :rule/id]))
+
+(defn- compiled-entry-detector
+  [entry]
+  (:detector entry))
+
 ;------------------------------------------------------------------------------ Layer 1
 ;; Pack-level validation
+
+(defn compile-pack-checks
+  "Compile every enabled rule in `pack` into executable check entries.
+
+   Returns:
+     {:ok true
+      :rule-count n
+      :detector-counts {...}
+      :compiled-rules [{:rule ... :detector ... :check-fn fn} ...]}
+
+   Returns an :invalid-input anomaly when pack shape is malformed or any
+   enabled rule is unbindable."
+  [pack]
+  (if-not (sequential? (:pack/rules pack))
+    (anomaly/anomaly :invalid-input
+                     "Policy pack :pack/rules must be a sequential collection of rules"
+                     {:pack-rules-type (some-> (:pack/rules pack) type str)})
+    (let [enabled    (filter rule-enabled? (:pack/rules pack))
+          compiled   (mapv compile-rule-check enabled)
+          anomalies  (filter anomaly/anomaly? compiled)
+          unbindable (mapv anomaly-rule-id anomalies)]
+      (if (seq anomalies)
+        (anomaly/anomaly :invalid-input
+                         (str "Policy pack has " (count anomalies)
+                              " enabled rule(s) that bind to no detection mechanism")
+                         {:unbindable-rule-ids unbindable
+                          :rule-count          (count enabled)})
+        {:ok              true
+         :rule-count      (count enabled)
+         :detector-counts (frequencies (map compiled-entry-detector compiled))
+         :compiled-rules  compiled}))))
 
 (defn compile-pack
   "Validate that every ENABLED rule in `pack` binds to a detection mechanism.
@@ -106,30 +271,10 @@
    enabled rules resolve to `:none`; its `:anomaly/data` names
    `:unbindable-rule-ids` so the failure is actionable and fails loud."
   [pack]
-  (if-not (sequential? (:pack/rules pack))
-    ;; A validator must fail loud on a malformed pack shape, not treat a
-    ;; missing/garbage :pack/rules as an empty (vacuously-valid) rule list.
-    (anomaly/anomaly :invalid-input
-                     "Policy pack :pack/rules must be a sequential collection of rules"
-                     {:pack-rules-type (some-> (:pack/rules pack) type str)})
-    (let [enabled    (filter rule-enabled? (:pack/rules pack))
-          resolved   (map (fn [rule]
-                            {:rule/id  (:rule/id rule)
-                             :detector (resolve-detector rule)})
-                          enabled)
-          unbindable (->> resolved
-                          (filter #(= :none (:detector %)))
-                          (map :rule/id)
-                          vec)]
-      (if (seq unbindable)
-        (anomaly/anomaly :invalid-input
-                         (str "Policy pack has " (count unbindable)
-                              " enabled rule(s) that bind to no detection mechanism")
-                         {:unbindable-rule-ids unbindable
-                          :rule-count          (count enabled)})
-        {:ok              true
-         :rule-count      (count enabled)
-         :detector-counts (frequencies (map :detector resolved))}))))
+  (let [result (compile-pack-checks pack)]
+    (if (anomaly/anomaly? result)
+      result
+      (dissoc result :compiled-rules))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

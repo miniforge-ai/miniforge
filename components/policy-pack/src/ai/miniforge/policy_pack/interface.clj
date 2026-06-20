@@ -295,6 +295,19 @@
    :rule/enabled? to false; a missing flag means enabled."
   checking/rule-enabled?)
 
+(def compile-rule-check
+  "Compile one enabled rule into an executable N4 check entry.
+   (compile-rule-check rule) returns {:rule :detector :check-fn}, or an
+   :invalid-input anomaly when the rule cannot bind to a detector."
+  checking/compile-rule-check)
+
+(def compile-pack-checks
+  "Compile every enabled rule in a pack into executable N4 check entries.
+   (compile-pack-checks pack) returns {:ok true :rule-count :detector-counts
+   :compiled-rules [...]}, or an :invalid-input anomaly naming unbindable
+   rule ids."
+  checking/compile-pack-checks)
+
 (def compile-pack
   "Validate that every enabled rule in a pack binds to a detection mechanism.
    (compile-pack pack) returns {:ok true :rule-count int :detector-counts {...}}
