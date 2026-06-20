@@ -29,9 +29,9 @@
 
    Registered as two phase-baked gates, `:policy-verify` and `:policy-review`,
    so the generic `apply-gate-validation` path runs the right rule subset per
-   phase. The whole evaluation delegates to
-   `policy-pack/check-artifact`, which already does phase filtering,
-   detection, and severity/enforcement classification — this gate adds no
+   phase. The whole evaluation delegates to compiled policy checks from
+   `policy-pack/compile-pack-checks`, preserving phase/applicability
+   filtering and severity/enforcement classification — this gate adds no
    parallel enforcement channel (N4 reuse constraint).
 
    Pack source: `ctx :policy-packs` when provided (tests / repo packs), else
@@ -40,16 +40,17 @@
    Semantic seam: when the run carries an `:llm-client` and `:complete-fn` in
    ctx, this gate INJECTS `semantic-analyzer/analyze-rule` under
    `:semantic-analyze-fn` so heuristic (`:custom` rules with no resolvable
-   `:custom-fn`) reach the LLM judge. Absent that wiring such rules no-op
-   gracefully (see `policy-pack.detection/detect-semantic`) — they default to
-   non-blocking enforcement, so a run is never hard-blocked on a
-   non-deterministic judge by default.
+   `:custom-fn`) reach the LLM judge. With compiled checks, missing semantic
+   wiring is reported as a policy violation; the pack's enforcement action
+   controls whether that violation blocks, requires approval, warns, or audits.
 
    Fail-safe: a check that throws is converted to a failed gate by
    `gate.interface/check-gate` (mirrors the reviewer fix in #977) — never a
    silent pass."
   (:require
    [ai.miniforge.event-stream.interface :as event-stream]
+   ;; Registers mechanical capability checks before compiled pack evaluation.
+   [ai.miniforge.gate.capabilities]
    [ai.miniforge.gate.messages :as msg]
    [ai.miniforge.gate.registry :as registry]
    [ai.miniforge.policy-pack.interface :as policy-pack]
@@ -101,8 +102,8 @@
   "Inject the LLM-judge seam when the run carries an `:llm-client` and
    `:complete-fn` but no explicit `:semantic-analyze-fn`. Also normalizes the
    repo path the judge scans (`:repo-path`, falling back to the execution
-   worktree). When the LLM seam is absent, leaves ctx untouched — semantic
-   rules then no-op in detection."
+   worktree). When the LLM seam is absent, leaves ctx untouched so compiled
+   semantic checks can fail loud according to pack enforcement."
   [ctx]
   (let [ctx (assoc ctx :repo-path (or (:repo-path ctx)
                                       (:execution/worktree-path ctx)
@@ -118,8 +119,163 @@
   {:type :no-policy-packs
    :message (msg/t :policy-pack/no-policy-packs)})
 
+(defn- artifact-has-code?
+  [artifact]
+  (and (map? artifact)
+       (or (seq (:code/files artifact))
+           (contains? artifact :artifact/content)
+           (contains? artifact :content))))
+
+(defn- implement-artifact
+  [ctx]
+  (get-in ctx [:execution/phase-results :implement :artifact]))
+
+(defn- code-file-entry
+  [worktree-path file-path action]
+  (let [file    (io/file worktree-path file-path)
+        content (when (.exists file) (slurp file))]
+    (cond-> {:path file-path}
+      content (assoc :content content)
+      action  (assoc :action action))))
+
+(defn- rehydrate-code-files
+  [artifact worktree-path]
+  (when-let [paths (seq (:code/file-paths artifact))]
+    (let [actions (get artifact :code/file-actions [])
+          files   (mapv code-file-entry
+                        (repeat worktree-path)
+                        paths
+                        actions)]
+      (assoc artifact :code/files files))))
+
+(defn- policy-artifact
+  "Resolve the artifact that pack-derived policy should evaluate.
+
+   Verify emits test metadata and review emits a verdict, but policy rules
+   target the code-under-review. Prefer an explicit code artifact when present;
+   otherwise use the implement phase artifact, rehydrating paths-only metadata
+   from the execution worktree when available."
+  [artifact ctx]
+  (let [impl-artifact (implement-artifact ctx)
+        worktree-path (:execution/worktree-path ctx)]
+    (cond
+      (artifact-has-code? artifact)
+      artifact
+
+      (and worktree-path (seq (:code/file-paths impl-artifact)))
+      (rehydrate-code-files impl-artifact worktree-path)
+
+      (artifact-has-code? impl-artifact)
+      impl-artifact
+
+      :else
+      artifact)))
+
 ;------------------------------------------------------------------------------ Layer 1.5
-;; Per-rule application evidence
+;; Compiled policy evaluation and per-rule application evidence
+
+(defn- compile-anomaly?
+  [result]
+  (contains? result :anomaly/type))
+
+(defn- compile-anomaly-message
+  [anomaly]
+  (or (:anomaly/message anomaly)
+      (:message anomaly)
+      (name (:anomaly/type anomaly))))
+
+(defn- compile-anomaly-result
+  [anomaly]
+  {:passed?  false
+   :blocking [{:code    :policy-pack/compile-failed
+               :message (msg/t :policy-pack/compile-error
+                               {:message (compile-anomaly-message anomaly)})
+               :data    (:anomaly/data anomaly)}]
+   :warnings []})
+
+(defn- compile-pack-results
+  [packs]
+  (mapv policy-pack/compile-pack-checks packs))
+
+(defn- compiled-rules
+  [compile-results]
+  (mapcat :compiled-rules compile-results))
+
+(defn- phase-compiled-rule?
+  [phase compiled]
+  (policy-pack/rule-applies-to-phase? (:rule compiled) phase))
+
+(defn- phase-compiled-rules
+  [compile-results phase]
+  (filterv #(phase-compiled-rule? phase %) (compiled-rules compile-results)))
+
+(defn- file-entry->artifact
+  [file-entry]
+  (let [path    (or (:artifact/path file-entry) (:path file-entry))
+        content (or (:artifact/content file-entry) (:content file-entry))]
+    (cond-> file-entry
+      path    (assoc :artifact/path path)
+      content (assoc :artifact/content content))))
+
+(defn- artifact-inputs
+  [artifact]
+  (if-let [files (seq (:code/files artifact))]
+    (mapv file-entry->artifact files)
+    [(file-entry->artifact artifact)]))
+
+(defn- rule-applicable-to-artifact?
+  [rule phase context artifact]
+  (seq (policy-pack/filter-applicable-rules
+        [rule]
+        (assoc context :phase phase :artifact artifact))))
+
+(defn- applicable-artifacts
+  [rule phase artifact context]
+  (filterv #(rule-applicable-to-artifact? rule phase context %)
+           (artifact-inputs artifact)))
+
+(defn- violation-entry
+  [compiled violation]
+  {:rule (:rule compiled)
+   :violation violation
+   :timestamp (java.time.Instant/now)})
+
+(defn- run-compiled-rule
+  [artifact context compiled]
+  (let [rule   (:rule compiled)
+        phase  (:phase context)
+        inputs (applicable-artifacts rule phase artifact context)
+        result ((:check-fn compiled) inputs context)]
+    (mapv #(violation-entry compiled %) (:violations result))))
+
+(defn- run-compiled-rules
+  [compiled-rules artifact context]
+  (mapcat #(run-compiled-rule artifact context %) compiled-rules))
+
+(defn- audit-violations
+  [violations]
+  (filter #(= :audit (get-in % [:rule :rule/enforcement :action]))
+          violations))
+
+(defn- compiled-check-result
+  [packs phase artifact context]
+  (let [compile-results (compile-pack-results packs)]
+    (if-let [anomaly (first (filter compile-anomaly? compile-results))]
+      (compile-anomaly-result anomaly)
+      (let [violations (vec (run-compiled-rules
+                             (phase-compiled-rules compile-results phase)
+                             artifact
+                             context))
+            blocking   (policy-pack/blocking-violations violations)
+            approvals  (policy-pack/approval-required-violations violations)
+            warnings   (policy-pack/warning-violations violations)
+            audits     (audit-violations violations)]
+        {:passed?          (empty? blocking)
+         :violations       violations
+         :blocking         (mapv policy-pack/violation->error blocking)
+         :require-approval (mapv policy-pack/violation->error approvals)
+         :warnings         (mapv policy-pack/violation->warning warnings)
+         :audits           (mapv policy-pack/violation->warning audits)}))))
 
 (defn- violation-summary
   "Non-sensitive summary of a violation for an evidence event. Drops :matches
@@ -134,16 +290,16 @@
 
 (defn- classify-rules
   "Per-rule evidence: classify every enabled rule across `packs` for `phase`.
-   `violations` are the {:rule :violation} maps from `check-artifact`.
+   `violations` are the {:rule :violation} maps from compiled check results.
 
      :skipped-by-phase — the rule's :applies-to {:phases} excludes `phase`
      :not-applicable   — phase matches but file-glob/task-type excludes it
      :failed           — considered and violated (carries a violation summary)
      :passed           — considered and clean
 
-   Rules are resolved first (same as `check-artifact`), so override-by-id is
-   honored: evidence is 1:1 with the rules actually evaluated and reports the
-   effective merged :severity/:enforcement, not pre-merge values.
+   Rules are resolved first, so override-by-id is honored: evidence is 1:1
+   with the rules actually evaluated and reports the effective merged
+   :severity/:enforcement, not pre-merge values.
 
    Emitting all four statuses (not just failures) makes the applied policy set
    for a run reconstructable from the event log."
@@ -151,8 +307,9 @@
   (let [enabled        (filterv policy-pack/rule-enabled?
                                 (policy-pack/resolve-rules (mapcat :pack/rules packs)))
         considered-ids (set (map :rule/id
-                                 (policy-pack/filter-applicable-rules
-                                  enabled (assoc context :phase phase :artifact artifact))))
+                                 (filter #(seq (applicable-artifacts
+                                                % phase artifact context))
+                                         enabled)))
         violated       (into {} (map (fn [{:keys [rule violation]}]
                                        [(:rule/id rule) violation]))
                              violations)]
@@ -194,8 +351,8 @@
   "Evaluate the pack against `artifact` for `phase`.
 
    Selects the enabled rules whose `:applies-to {:phases}` includes `phase`
-   (via `policy-pack/check-artifact`'s context filtering), runs their
-   detection, and maps the result to a gate result:
+   (via compiled check phase filtering), runs their executable checks, and
+   maps the result to a gate result:
      :errors   — blocking (`:hard-halt`) violations as gate errors
      :warnings — require-approval / warn / audit violations (record-only here)
      :passed?  — true iff no blocking violations
@@ -206,8 +363,9 @@
   (let [packs (packs-for-gate ctx)]
     (if (empty? packs)
       {:passed? true :warnings [(no-policy-packs-warning)]}
-      (let [context (-> ctx with-semantic-wiring (assoc :phase phase))
-            result  (policy-pack/check-artifact packs artifact context)]
+      (let [artifact (policy-artifact artifact ctx)
+            context  (-> ctx with-semantic-wiring (assoc :phase phase))
+            result   (compiled-check-result packs phase artifact context)]
         (emit-rule-evidence! ctx phase
                              (classify-rules packs phase artifact context
                                              (:violations result)))

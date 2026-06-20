@@ -43,7 +43,11 @@
   :policy-pack/repair-required
   "Policy violations require redirect to :implement phase — no in-place repair"
 
-  ;; Policy-pack gate — exception caught during check-artifact evaluation.
+  ;; Policy-pack gate — exception caught during policy evaluation.
   ;; {message} is the ex-message of the caught exception.
   :policy-pack/check-error
-  "Policy check failed: {message}"}}
+  "Policy check failed: {message}"
+
+  ;; Policy-pack gate — pack compilation failed before evaluation.
+  :policy-pack/compile-error
+  "Policy pack compilation failed: {message}"}}
