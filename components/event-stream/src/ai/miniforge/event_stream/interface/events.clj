@@ -211,6 +211,12 @@
    message-type as :message/type."
   core/inter-agent-message-received)
 
+(def meta-loop-halt-requested
+  "Build and return a :meta-loop/halt-requested event envelope map recording a
+   meta-agent's REFUSE: :halt/halting-agent and :halt/reason-code (RefusalReason);
+   optional opts add :halt/detail and :workflow/phase."
+  core/meta-loop-halt-requested)
+
 (def listener-attached
   "Build and return a :listener/attached event envelope map for a
    listener id; optional listener-type and capability as :listener/type

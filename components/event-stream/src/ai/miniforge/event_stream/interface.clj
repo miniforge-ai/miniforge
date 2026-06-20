@@ -398,6 +398,13 @@
    :supervision/meta-eval?, :supervision/confidence, :workflow/phase."
   events/tool-use-evaluated)
 
+;; Meta-loop supervision events
+(def meta-loop-halt-requested
+  "Build and return a :meta-loop/halt-requested event envelope map recording a
+   meta-agent's REFUSE: :halt/halting-agent and :halt/reason-code (RefusalReason);
+   optional opts add :halt/detail and :workflow/phase."
+  events/meta-loop-halt-requested)
+
 ;; Control plane events
 (def cp-agent-registered
   "Build and return a :control-plane/agent-registered event envelope map

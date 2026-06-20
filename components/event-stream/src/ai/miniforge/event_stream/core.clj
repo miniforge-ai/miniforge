@@ -523,6 +523,7 @@
         (cond->
           (:duration-ms result) (assoc :phase/duration-ms (:duration-ms result))
           (:review-decision result) (assoc :phase/review-decision (:review-decision result))
+          (:phase/blocked-reason result) (assoc :phase/blocked-reason (:phase/blocked-reason result))
           (:artifacts result) (assoc :phase/artifacts (:artifacts result))
           (:error result) (assoc :phase/error (:error result))
           request (assoc :phase/transition-request request)
@@ -1003,6 +1004,23 @@
         (:meta-eval? opts) (assoc :supervision/meta-eval? true)
         (:confidence opts) (assoc :supervision/confidence (:confidence opts))
         (:phase opts)      (assoc :workflow/phase (:phase opts)))))
+
+(defn meta-loop-halt-requested
+  "Emit when a meta-agent signals the meta-loop must halt the workflow.
+
+   The REFUSE act for meta-supervision: makes the halt first-class on the stream
+   rather than only a value in the coordinator result. `reason-code` is a
+   RefusalReason keyword; `opts` may carry :detail (the halting agent's free-text
+   message) and :phase (current workflow phase)."
+  [stream workflow-id halting-agent reason-code & [opts]]
+  (-> (create-envelope stream :meta-loop/halt-requested workflow-id
+                       (str "Meta-loop halt requested by " (name halting-agent)
+                            ": " (name reason-code)))
+      (assoc :halt/halting-agent halting-agent
+             :halt/reason-code reason-code)
+      (cond->
+        (:detail opts) (assoc :halt/detail (:detail opts))
+        (:phase opts)  (assoc :workflow/phase (:phase opts)))))
 
 ;------------------------------------------------------------------------------ Layer 5
 ;; Control plane events

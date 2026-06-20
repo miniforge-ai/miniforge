@@ -142,6 +142,11 @@ Each workflow phase MUST produce phase evidence:
  :phase/event-stream-range {:start-seq long :end-seq long}}  ; Link to events
 ```
 
+A phase's typed outcome — including a `:blocked` refusal and its
+`:phase/blocked-reason` (RefusalReason) — is carried on the linked
+`:workflow/phase-completed` event (N3 §3.1), so refusals are recoverable from
+the audit trail via `:phase/event-stream-range` without a separate field here.
+
 ### 2.4 Semantic Validation Evidence
 
 ```clojure
