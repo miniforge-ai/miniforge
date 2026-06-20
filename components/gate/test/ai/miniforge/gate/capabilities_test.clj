@@ -26,14 +26,11 @@
 (deftest register-mechanical-capabilities-test
   (testing "registers the failing mechanical gates as capabilities"
     (let [available (sut/register-mechanical-capabilities!)]
-      (doseq [capability-kw [:lint :syntax :no-secrets]]
+      (doseq [capability-kw [:lint :format :syntax :no-secrets]]
         (is (contains? available capability-kw))
         (is (policy-pack/capability-available? capability-kw)
             (str capability-kw " should be registered"))
-        (is (fn? (:check (policy-pack/get-capability capability-kw)))))
-      (testing ":format is intentionally NOT registered — its gate never fails"
-        (is (not (contains? available :format)))
-        (is (not (policy-pack/capability-available? :format)))))))
+        (is (fn? (:check (policy-pack/get-capability capability-kw))))))))
 
 (deftest no-secrets-capability-surfaces-violation-test
   (testing "a hardcoded secret surfaces as a capability violation"
@@ -62,6 +59,38 @@
       (is (some? result))
       (is (= :capability (:type result)))
       (is (= :syntax (:capability result))))))
+
+(deftest format-capability-surfaces-format-drift-test
+  (testing "unformatted content surfaces as a deterministic format violation"
+    (sut/register-mechanical-capabilities!)
+    (let [check    (:check (policy-pack/get-capability :format))
+          artifact {:artifact/content           "(defn x []\n42)"
+                    :artifact/formatted-content "(defn x []\n  42)"
+                    :artifact/path              "core.clj"}
+          result   (check artifact {})]
+      (is (some? result))
+      (is (= :capability (:type result)))
+      (is (= :format (:capability result))))))
+
+(deftest format-capability-clean-test
+  (testing "formatted content yields nil"
+    (sut/register-mechanical-capabilities!)
+    (let [check    (:check (policy-pack/get-capability :format))
+          artifact {:artifact/content           "(defn x []\n  42)"
+                    :artifact/formatted-content "(defn x []\n  42)"
+                    :artifact/path              "core.clj"}]
+      (is (nil? (check artifact {}))))))
+
+(deftest format-capability-missing-check-fails-loud-test
+  (testing "format capability never silently passes without a check contract"
+    (sut/register-mechanical-capabilities!)
+    (let [check    (:check (policy-pack/get-capability :format))
+          artifact {:artifact/content "(defn x [] 42)"
+                    :artifact/path    "core.clj"}
+          result   (check artifact {})]
+      (is (some? result))
+      (is (= :format (:capability result)))
+      (is (re-find #"requires" (:message result))))))
 
 (deftest registration-idempotent-test
   (testing "repeated registration is safe and stays stable"

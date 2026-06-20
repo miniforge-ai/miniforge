@@ -27,10 +27,10 @@
    calling `policy-pack/register-capability!`. No requiring-resolve is used:
    the gate checks are reached through ordinary requires.
 
-   Capabilities registered (each wraps the EXISTING tool gate, not a
-   reimplementation):
+   Capabilities registered:
    - :lint       -> gate :lint       (clj-kondo lint gate)
-   - :format     -> gate :format     (cljfmt / LSP format gate)
+   - :format     -> pure format-drift check requiring explicit formatted
+                    content or an injected check function
    - :syntax     -> gate :syntax     (reader/syntax gate)
    - :no-secrets -> gate :no-secrets (policy no-secrets gate)
 
@@ -126,6 +126,53 @@
   [artifact context]
   (run-gate-capability :no-secrets :no-secrets artifact context))
 
+(defn- artifact-content
+  [artifact]
+  (cond
+    (contains? artifact :artifact/content) (get artifact :artifact/content)
+    (contains? artifact :content)          (get artifact :content)
+    :else                                  ""))
+
+(defn- expected-formatted-content
+  [artifact]
+  (or (get artifact :artifact/formatted-content)
+      (get artifact :formatted-content)))
+
+(defn- format-drift-violation
+  [artifact message]
+  {:type          :capability
+   :capability    :format
+   :artifact-path (or (:artifact/path artifact) (:path artifact))
+   :message       message})
+
+(defn- injected-format-result
+  [artifact context]
+  (when-let [check-fn (:format-check-fn context)]
+    (check-fn artifact context)))
+
+(defn- artifact-format-result
+  [artifact]
+  (when-let [formatted (expected-formatted-content artifact)]
+    {:passed? (= formatted (artifact-content artifact))
+     :errors  [{:message "Artifact content is not formatted"}]}))
+
+(defn check-format
+  "Format capability — performs a pure formatting check.
+
+   The existing :format gate repairs via LSP and intentionally reports pass for
+   check-only mode. Policy enforcement needs a check that cannot silently pass,
+   so this capability accepts either an injected pure `:format-check-fn` in the
+   context or an artifact-provided `:artifact/formatted-content` expectation.
+   Without either, the capability returns a violation naming the missing check
+   contract."
+  [artifact context]
+  (let [result (or (injected-format-result artifact context)
+                   (artifact-format-result artifact))]
+    (if result
+      (gate-result->violation :format result artifact)
+      (format-drift-violation artifact
+                              "Format capability requires :format-check-fn or :artifact/formatted-content"))))
+
 ;------------------------------------------------------------------------------ Layer 2
 ;; Injection
 
@@ -133,15 +180,14 @@
   "Capability keyword -> {:meta {...} :check fn} for the mechanical tool
    gates. Injected into the policy-pack registry by
    `register-mechanical-capabilities!`."
-  ;; NOTE: :format is intentionally NOT registered. The :format gate's check
-  ;; "always passes — formatting is repair" (gate/format.clj), so a rule using
-  ;; :format would never produce a violation — a silent no-op, exactly what the
-  ;; policy-gate compiler exists to eliminate. Register :format only once a
-  ;; failing format-CHECK gate (e.g. `cljfmt check`) exists. (Follow-up.)
   {:lint       {:meta  {:tool :clj-kondo
                         :class :deterministic
                         :description "Lint Clojure code via the clj-kondo gate"}
                 :check check-lint}
+   :format     {:meta  {:tool :formatter
+                        :class :deterministic
+                        :description "Detect formatting drift through a pure format check"}
+                :check check-format}
    :syntax     {:meta  {:tool :reader
                         :class :deterministic
                         :description "Parse code via the reader/syntax gate"}
