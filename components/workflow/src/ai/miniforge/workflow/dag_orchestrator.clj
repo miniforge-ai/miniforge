@@ -510,7 +510,7 @@
   (try
     (apply shell/sh "git" "-C" cwd args)
     (catch Exception e
-      {:exit -1 :out "" :err (.getMessage e)})))
+      {:exit -1 :out "" :err (or (ex-message e) (str (class e)))})))
 
 (defn- host-repo-path
   "Resolve the host repository path for orchestrator-level git operations.
@@ -1285,11 +1285,11 @@
         ;; and the DAG batch cleanup can proceed.
         (.interrupt (Thread/currentThread))
         (dag/err :task-cancelled
-                 (str "Task cancelled: " (.getMessage ie))
+                 (str "Task cancelled: " (or (ex-message ie) (str (class ie))))
                  {:task-id task-id}))
       (catch Exception e
         (dag/err :task-execution-failed
-                 (str "Task failed: " (.getMessage e))
+                 (str "Task failed: " (or (ex-message e) (str (class e))))
                  {:task-id task-id})))))
 
 (defn create-task-executor-fn [context opts]
