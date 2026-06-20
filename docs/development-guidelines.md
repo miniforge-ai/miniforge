@@ -328,6 +328,7 @@ $ git commit -m "feat: add new feature"
 - Pre-commit hooks are not suggestions
 - Structural workspace checks are part of pre-commit and CI: `bb poly:check`
 - `poly check` failures are blocking architecture regressions, not optional warnings
+- Pull requests use stable-derived changed-and-affected tests in CI; `main` remains the full-suite stable anchor
 - If check is broken, fix the check, don't disable it
 - "Just this once" becomes "just every time"
 - CI time is expensive - catch issues locally
@@ -601,14 +602,17 @@ These guidelines are enforced through:
 1. **Pre-commit Hooks**
    - Linting (clj-kondo)
    - Formatting (cljfmt for Clojure, markdownlint for docs)
-   - Tests (full suite via `poly test`)
+   - Structural checks (`bb poly:check`)
+   - Curated smoke tests and GraalVM/Babashka compatibility checks
 
 2. **Code Review**
    - Reviewers will flag violations
    - PRs may be rejected if guidelines ignored
 
 3. **CI Validation**
-   - GitHub Actions run same checks
+   - Pull requests run stable-derived changed-and-affected tests via `bb test`
+   - `main` branch pushes run the full suite via `bb test:all`
+   - If no stable tag is available, the PR test path falls back to a full Polylith sweep
    - Cannot merge with failing checks
 
 4. **Documentation**
