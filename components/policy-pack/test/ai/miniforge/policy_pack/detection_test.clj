@@ -20,7 +20,7 @@
   "Tests for the policy-pack detection logic."
   (:require
    [clojure.string]
-   [clojure.test :refer [deftest is testing]]
+   [clojure.test :refer [deftest is testing use-fixtures]]
    [ai.miniforge.policy-pack.capability :as capability]
    [ai.miniforge.policy-pack.detection :as detection]))
 
@@ -304,19 +304,23 @@
 ;------------------------------------------------------------------------------ Layer 1
 ;; Semantic (LLM-as-judge) detection tests
 
+(def ^:private resolvable-custom-fn-sym
+  'ai.miniforge.policy-pack.detection-test/a-resolvable-custom-fn)
+
 (defn a-resolvable-custom-fn
   "A real custom detection fn used to prove resolvable :custom-fn rules stay
    on the deterministic detect-custom path (not routed to the judge)."
   [_artifact _context]
   {:matches ["custom-hit"]})
 
-#_{:clj-kondo/ignore [:unused-private-var]}
-(def ^:private registered-test-custom-fn?
-  (do
-    (detection/register-custom-fn!
-     'ai.miniforge.policy-pack.detection-test/a-resolvable-custom-fn
-     a-resolvable-custom-fn)
-    true))
+(use-fixtures
+  :once
+  (fn [run-tests]
+    (detection/register-custom-fn! resolvable-custom-fn-sym a-resolvable-custom-fn)
+    (try
+      (run-tests)
+      (finally
+        (detection/unregister-custom-fn! resolvable-custom-fn-sym)))))
 
 (deftest register-custom-fn-validates-detector-predicate-test
   (testing "custom detector registration rejects non-functions"
@@ -340,7 +344,7 @@
     (is (detection/custom-fn-resolvable?
          {:rule/detection
           {:type :custom
-           :custom-fn 'ai.miniforge.policy-pack.detection-test/a-resolvable-custom-fn}})))
+           :custom-fn resolvable-custom-fn-sym}})))
   (testing "a :custom rule with no :custom-fn is not resolvable"
     (is (not (detection/custom-fn-resolvable? {:rule/detection {:type :custom}}))))
   (testing "a :custom rule with an unresolvable :custom-fn is not resolvable"
@@ -400,7 +404,7 @@
     (let [rule   {:rule/id :resolvable
                   :rule/detection
                   {:type :custom
-                   :custom-fn 'ai.miniforge.policy-pack.detection-test/a-resolvable-custom-fn}}
+                   :custom-fn resolvable-custom-fn-sym}}
           ;; If this routed to the judge it would NPE on a nil analyze-fn /
           ;; return nil; detect-custom must produce the custom-tagged violation.
           result (detection/detect-violation rule {} {})]

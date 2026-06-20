@@ -269,14 +269,33 @@
          (map (fn [w] (violation :minor (:message w) :raw w))
               (:warnings result)))))))
 
+(defn- first-violation-detector
+  "Adapt legacy knowledge-safety detectors to the custom-detector contract.
+
+   The public helpers in this namespace return a sequence of violations for
+   direct callers. `detect-custom` expects one violation map or nil, so registered
+   detector functions expose the first violation only."
+  [detector]
+  (fn [artifact context]
+    (let [result (detector artifact context)]
+      (cond
+        (map? result) result
+        (seqable? result) (first (seq result))
+        :else nil))))
+
 (def ^:private custom-detectors
-  {'ai.miniforge.policy-pack.knowledge-safety/check-trust-labels check-trust-labels
-   'ai.miniforge.policy-pack.knowledge-safety/check-instruction-authority check-instruction-authority
-   'ai.miniforge.policy-pack.knowledge-safety/check-agent-source check-agent-source
-   'ai.miniforge.policy-pack.knowledge-safety/validate-pack-schema validate-pack-schema
-   'ai.miniforge.policy-pack.knowledge-safety/check-pack-root check-pack-root
+  {'ai.miniforge.policy-pack.knowledge-safety/check-trust-labels
+   (first-violation-detector check-trust-labels)
+   'ai.miniforge.policy-pack.knowledge-safety/check-instruction-authority
+   (first-violation-detector check-instruction-authority)
+   'ai.miniforge.policy-pack.knowledge-safety/check-agent-source
+   (first-violation-detector check-agent-source)
+   'ai.miniforge.policy-pack.knowledge-safety/validate-pack-schema
+   (first-violation-detector validate-pack-schema)
+   'ai.miniforge.policy-pack.knowledge-safety/check-pack-root
+   (first-violation-detector check-pack-root)
    'ai.miniforge.policy-pack.knowledge-safety/validate-pack-dependencies-wrapper
-   validate-pack-dependencies-wrapper})
+   (first-violation-detector validate-pack-dependencies-wrapper)})
 
 #_{:clj-kondo/ignore [:unused-private-var]}
 (def ^:private registered-custom-detectors?
