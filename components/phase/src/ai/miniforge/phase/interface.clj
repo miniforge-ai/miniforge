@@ -154,6 +154,14 @@
   "True when a phase result requests a redirect transition."
   phase-result/redirect-requested?)
 
+(def blocked?
+  "True when a phase result carries a refusal reason (a blocked outcome)."
+  phase-result/blocked?)
+
+(def blocked-reason
+  "Return the RefusalReason keyword for a blocked phase result, if any."
+  phase-result/blocked-reason)
+
 (def create-streaming-callback
   "Create a phase-scoped streaming callback when an event stream is available."
   telemetry/create-streaming-callback)
@@ -224,6 +232,10 @@
 (def error
   "Build an error environment-model phase result."
   phase-result/error)
+
+(def blocked
+  "Build a blocked (refused) phase result tagged with a RefusalReason cause."
+  phase-result/blocked)
 
 (def skipped
   "Build a skipped-phase result for phases that short-circuit."

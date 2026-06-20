@@ -106,6 +106,18 @@
     (or (contains? inner-failure-statuses (get-in result [:result :status]))
         (false? (get-in result [:result :success?])))))
 
+(defn- phase-outcome
+  "Typed act for a completed phase boundary on the observed layer.
+   A refusal (:blocked) and an outright failure are dominant; a successful phase
+   that asks the pipeline elsewhere is :redirected; otherwise :success. The
+   internal phase-result :status stays the 2-valued control flag for the FSM."
+  [result succeeded?]
+  (cond
+    (phase/blocked? result)            :blocked
+    (not succeeded?)                   :failure
+    (phase/redirect-requested? result) :redirected
+    :else                              :success))
+
 (defn- build-phase-event-data
   "Build event data map for a phase completion event.
 
@@ -135,7 +147,8 @@
   [result]
   (let [succeeded? (and (get result :success? (phase/succeeded-or-done? result))
                         (not (inner-result-failed? result)))
-        outcome    (if succeeded? :success :failure)
+        outcome    (phase-outcome result succeeded?)
+        blocked-reason (phase/blocked-reason result)
         duration-ms (get result :duration-ms
                       (get-in result [:phase/metrics :duration-ms]
                         (get-in result [:metrics :duration-ms])))
@@ -180,6 +193,7 @@
                                 tool-call-count       (assoc :tool-call-count tool-call-count))))]
     (cond-> {:outcome outcome :duration-ms duration-ms}
       error-info              (assoc :error error-info)
+      blocked-reason          (assoc :phase/blocked-reason blocked-reason)
       review-decision         (assoc :review-decision review-decision)
       transition-request      (assoc :phase/transition-request transition-request)
       tokens                  (assoc :tokens tokens)

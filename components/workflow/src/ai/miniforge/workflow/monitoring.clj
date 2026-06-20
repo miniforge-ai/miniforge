@@ -22,6 +22,7 @@
    Provides functions for building workflow state, checking health via the
    live supervision runtime, and handling halt conditions."
   (:require [ai.miniforge.agent.interface.supervision :as supervision]
+            [ai.miniforge.event-stream.interface :as es]
             [ai.miniforge.workflow.messages :as messages]
             [ai.miniforge.response.interface :as response]))
 
@@ -123,10 +124,56 @@
    :reason (:reason halt-data)
    :checks (:checks halt-data)})
 
+;;----------------------------------------------------------------------------- Halt emission
+;; Meta-loop halt as a typed REFUSE on the event stream (N3)
+
+(def ^:private halt-reason-codes
+  "Default RefusalReason for each meta-agent that can halt the workflow.
+   A halting agent's health-check :data may override via :halt/reason-code."
+  {:progress-monitor  :no-progress
+   :test-quality      :quality-gate
+   :conflict-detector :conflict})
+
+(defn- halt-reason-code
+  "RefusalReason for a halt: the halting agent's explicit code when supplied,
+   else the per-agent default, else :no-progress."
+  [halt-data]
+  (or (get-in halt-data [:data :halt/reason-code])
+      (get halt-reason-codes (:supervisor halt-data) :no-progress)))
+
+(defn- resolve-event-stream
+  "Find the event stream on the execution context, across the keys the runner
+   and dashboard use to carry it."
+  [ctx]
+  (or (:event-stream ctx)
+      (:execution/event-stream ctx)
+      (get-in ctx [:execution/opts :event-stream])))
+
+(defn- emit-halt-requested!
+  "Publish the typed REFUSE for a meta-loop halt when a stream is present.
+   Best-effort: a telemetry failure must not mask the halt itself."
+  [ctx halt-data]
+  (when-let [stream (resolve-event-stream ctx)]
+    ;; Guard a nil halting agent (key present, value nil): without it,
+    ;; (name halting-agent) in the constructor throws and the catch below
+    ;; silently drops the halt event.
+    (let [halting-agent (if-some [a (:supervisor halt-data)] a :supervision)
+          reason-code   (halt-reason-code halt-data)]
+      (try
+        (es/publish! stream
+                     (es/meta-loop-halt-requested
+                      stream (:execution/id ctx) halting-agent reason-code
+                      {:detail (:reason halt-data)
+                       :phase  (:execution/current-phase ctx)}))
+        (catch Exception _ nil)))))
+
 (defn handle-supervision-halt
-  "Handle supervision halt signal by transitioning workflow to failed state."
+  "Handle supervision halt signal by transitioning workflow to failed state.
+   Emits a :meta-loop/halt-requested REFUSE before transitioning so the refusal
+   is first-class on the stream, not only an error map in the response chain."
   [ctx supervision-result transition-to-failed-fn]
   (let [halt-data (supervision-halt-data supervision-result)]
+    (emit-halt-requested! ctx halt-data)
     (-> ctx
         (update :execution/errors conj
                 (supervision-halt-error halt-data))

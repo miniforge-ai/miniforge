@@ -137,11 +137,19 @@ Implementations MUST emit these event types:
  :workflow/phase :implement
 
  :phase/duration-ms long
- :phase/outcome :success         ; :success, :failure, :skipped
+ :phase/outcome :success         ; :success :failure :skipped :blocked :redirected
+ :phase/blocked-reason keyword   ; OPTIONAL: RefusalReason, present when :blocked
  :phase/artifacts [uuid ...]     ; Artifacts produced
 
  :message "Implementation phase completed"}
 ```
+
+`:phase/outcome` is the typed act of a phase boundary on the observed layer.
+`:success` / `:failure` / `:skipped` INFORM; `:blocked` is a REFUSE carrying a
+machine-readable `:phase/blocked-reason` (a RefusalReason — see
+`§3.7b meta-loop/halt-requested`); `:redirected` is a REQUEST to the pipeline,
+detailed by `:phase/transition-request`. The internal phase-result `:status`
+stays a two-valued control flag; this field carries the full act vocabulary.
 
 #### workflow/completed
 
@@ -341,12 +349,12 @@ All subagent events MUST include `parent-agent/id` and `parent-agent/instance-id
 ```clojure
 {:event/type :agent/message-sent
  :from-agent/id :implementer
- :from-agent/instance-id uuid
+ :from-agent/instance-id uuid           ; OPTIONAL
  :to-agent/id :planner
  :workflow/id uuid
 
- :message-type :clarification-request
- :message-content string
+ :message/type :clarification-request   ; OPTIONAL; open keyword, consumers tolerate unknowns
+ :message/content string                ; OPTIONAL
 
  :message "Asking Planner: Should we create new security group?"}
 ```
@@ -359,10 +367,40 @@ All subagent events MUST include `parent-agent/id` and `parent-agent/instance-id
  :to-agent/id :implementer
  :workflow/id uuid
 
- :message-type :clarification-response
- :message-content string
+ :message/type :clarification-response   ; OPTIONAL; open keyword, consumers tolerate unknowns
+ :message/content string                 ; OPTIONAL
 
  :message "Planner response: Reuse existing security group sg-prod-rds"}
+```
+
+### 3.7b Meta-Loop Halt
+
+The REFUSE act for meta-supervision. A meta-agent (progress monitor,
+test-quality, conflict detector) can stop the workflow; this event makes that
+refusal first-class on the stream with a machine-readable cause, rather than
+leaving it only in the coordinator's return value and the runner's error map.
+
+`:halt/reason-code` is a **RefusalReason** — the closed vocabulary shared with
+`:phase/blocked-reason`:
+
+`:no-progress :quality-gate :conflict :missing-input :ambiguous-intent
+:precondition-failed :resource-unavailable :budget-exhausted :policy-block`
+
+The vocabulary is closed: the schema validates `:halt/reason-code` against exactly
+this set. Adding a reason is a deliberate spec change, not an open extension point.
+
+#### meta-loop/halt-requested
+
+```clojure
+{:event/type :meta-loop/halt-requested
+ :workflow/id uuid
+ :workflow/phase :implement              ; OPTIONAL: phase active at halt
+
+ :halt/halting-agent :conflict-detector  ; meta-agent that refused
+ :halt/reason-code :conflict             ; RefusalReason
+ :halt/detail string                     ; OPTIONAL: free-text from the agent
+
+ :message "Meta-loop halt requested by conflict-detector: conflict"}
 ```
 
 ### 3.8 Milestone Events

@@ -30,6 +30,7 @@
   #{:pr-monitor/poll-completed       ; Poll cycle completed
     :pr-monitor/comment-received     ; New comment detected
     :pr-monitor/comment-classified   ; Comment classified into category
+    :pr-monitor/decision-recorded    ; Classify→act decision (fix/answer/approve/skip)
     :pr-monitor/fix-started          ; Fix cycle initiated for change-request
     :pr-monitor/fix-pushed           ; Fix committed and pushed
     :pr-monitor/reply-posted         ; Reply comment posted to PR
@@ -64,6 +65,18 @@
                        {:pr/id pr-number
                         :comment comment-data
                         :classification classification}))
+
+(defn decision-recorded
+  "Create a decision-recorded event: the typed classify→act decision for a
+   comment. `action` is the chosen verb (:fix :answer :approve :skip), recorded
+   as one act with provenance back to the comment and its classification."
+  [pr-number comment-id action category confidence]
+  (events/create-event :pr-monitor/decision-recorded
+                       {:pr/id pr-number
+                        :comment/id comment-id
+                        :decision/action action
+                        :decision/category category
+                        :decision/confidence confidence}))
 
 (defn fix-started
   "Create a fix-started event."

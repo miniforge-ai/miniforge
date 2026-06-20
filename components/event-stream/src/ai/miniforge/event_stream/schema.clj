@@ -43,6 +43,30 @@
    [:transition/type keyword?]
    [:transition/target keyword?]])
 
+(def RefusalReason
+  "Closed vocabulary for why an agent or phase refuses to proceed.
+
+   One vocabulary shared by every refusal act on the stream — phase
+   `:blocked` outcomes (PhaseCompleted) and meta-loop halts
+   (MetaLoopHaltRequested) — so a refusal carries the same machine-readable
+   cause wherever it originates, rather than only free text in `:message`.
+
+   - :no-progress         — work stalled; no forward movement (progress monitor)
+   - :quality-gate        — a quality threshold is unmet (e.g. test coverage)
+   - :conflict            — an irreconcilable conflict was detected (e.g. merge)
+   - :missing-input       — a required upstream artifact or spec is absent
+   - :ambiguous-intent    — intent/spec underspecified; needs human resolution
+   - :precondition-failed — a declared precondition or gate is not satisfied
+   - :resource-unavailable— runtime, dependency, or executor is unavailable
+   - :budget-exhausted    — the token or time budget is exhausted
+   - :policy-block        — a policy pack forbids proceeding
+
+   Closed: the schema validates against exactly this set, so a typo or a
+   not-yet-added reason fails fast. Producers are all first-party, so catching
+   those beats wire forward-compat. Extending it is a deliberate spec change."
+  [:enum :no-progress :quality-gate :conflict :missing-input :ambiguous-intent
+   :precondition-failed :resource-unavailable :budget-exhausted :policy-block])
+
 ;; ----------------------------------------------------------------------------
 ;; Decision-14 identity quartet (added for miniforge-fleet's Phase E.1
 ;; planning prerequisite #10). Defined ONCE here as a vector of Malli
@@ -152,7 +176,15 @@
     [:workflow/id uuid?]
     [:workflow/phase keyword?]
     [:phase/duration-ms {:optional true} int?]
-    [:phase/outcome {:optional true} [:enum :success :failure :skipped]]
+    ;; `:phase/outcome` is the typed-act surface for a phase boundary on the
+    ;; observed layer (stream + evidence). The internal phase-result `:status`
+    ;; stays a 2-valued control flag for the FSM; this enum carries the full act.
+    ;; INFORM → :success/:failure/:skipped; REFUSE → :blocked (+ :phase/blocked-reason);
+    ;; REQUEST(redirect) → :redirected (+ :phase/transition-request).
+    [:phase/outcome {:optional true}
+     [:enum :success :failure :skipped :blocked :redirected]]
+    ;; Machine-readable cause, present when :phase/outcome is :blocked.
+    [:phase/blocked-reason {:optional true} RefusalReason]
     ;; Review verdict, present only for the review phase. Carried so resume can
     ;; reconstruct a blocked review from events alone — the event is a writer of
     ;; this datum, one canonical location, no lossy reconstruction.
@@ -685,6 +717,9 @@
    ;; the other supervisory snapshots; default `:internal` matches the
    ;; sibling `:supervisory/*-upserted` family.
    :supervisory/automation-edge-upserted :internal
+   ;; Meta-loop halt is a supervision signal — :internal, matching the
+   ;; agent/supervisory families.
+   :meta-loop/halt-requested :internal
    :control-action/requested :confidential
    :control-action/executed  :confidential
    :annotation/created       :internal
@@ -1134,6 +1169,81 @@
     [:index/previous-coverage [:and number? [:>= 0] [:<= 1]]]
     [:index/coverage [:and number? [:>= 0] [:<= 1]]]
     [:index/changed-files {:optional true} [:and int? [:>= 0]]]
+    [:message string?]]))
+
+;; ----------------------------------------------------------------------------
+;; Typed handoff acts
+;;
+;; Inter-agent messages and meta-loop halts are handoff points between agents
+;; and phases. Each is an explicit, typed act on the stream rather than an
+;; implicit signal reconstructed from status flags: INFORM (message) and REFUSE
+;; (halt). Field values stay domain-native; the act lineage is documented, not
+;; imported as a generic performative vocabulary. (The PR-monitor's classify→act
+;; decision is the third such act, but the PR-monitor runs on its own decoupled
+;; event bus — see `pr-lifecycle/monitor-events` `:pr-monitor/decision-recorded`
+;; — so its typed act lives there, not on this stream.)
+
+(def AgentMessageSent
+  "Schema for `:agent/message-sent` event (N3 §3.7).
+
+   Emitted by `core/inter-agent-message-sent` when one agent sends a message to
+   another. `:message/type` is an open keyword — known values `:clarification-request`,
+   `:clarification-response`, `:inform`, `:ack`; consumers MUST tolerate others."
+  (with-identity
+   [:map
+    [:event/type [:= :agent/message-sent]]
+    [:event/id uuid?]
+    [:event/timestamp inst?]
+    [:event/version string?]
+    [:event/sequence-number int?]
+    [:workflow/id {:optional true} [:maybe uuid?]]
+    [:from-agent/id keyword?]
+    [:from-agent/instance-id {:optional true} uuid?]
+    [:to-agent/id keyword?]
+    [:message/type {:optional true} keyword?]
+    [:message/content {:optional true} string?]
+    [:message string?]]))
+
+(def AgentMessageReceived
+  "Schema for `:agent/message-received` event (N3 §3.7).
+
+   Emitted by `core/inter-agent-message-received`. See AgentMessageSent for the
+   `:message/type` vocabulary note."
+  (with-identity
+   [:map
+    [:event/type [:= :agent/message-received]]
+    [:event/id uuid?]
+    [:event/timestamp inst?]
+    [:event/version string?]
+    [:event/sequence-number int?]
+    [:workflow/id {:optional true} [:maybe uuid?]]
+    [:from-agent/id keyword?]
+    [:from-agent/instance-id {:optional true} uuid?]
+    [:to-agent/id keyword?]
+    [:message/type {:optional true} keyword?]
+    [:message/content {:optional true} string?]
+    [:message string?]]))
+
+(def MetaLoopHaltRequested
+  "Schema for `:meta-loop/halt-requested` event.
+
+   The REFUSE act for the meta-loop: a meta-agent (progress monitor, test-quality,
+   conflict detector) has signalled that the workflow must stop. Previously the
+   halt lived only in the coordinator's return value and the runner's error map;
+   this event makes the refusal first-class on the stream with a machine-readable
+   cause (`:halt/reason-code`) alongside the halting agent and its free-text detail."
+  (with-identity
+   [:map
+    [:event/type [:= :meta-loop/halt-requested]]
+    [:event/id uuid?]
+    [:event/timestamp inst?]
+    [:event/version string?]
+    [:event/sequence-number int?]
+    [:workflow/id uuid?]
+    [:workflow/phase {:optional true} keyword?]
+    [:halt/halting-agent keyword?]
+    [:halt/reason-code RefusalReason]
+    [:halt/detail {:optional true} string?]
     [:message string?]]))
 
 ;------------------------------------------------------------------------------ Rich Comment

@@ -114,12 +114,16 @@
                                                             {:phase phase}))
       :workflow/phase-completed (let [outcome (or (:phase/outcome event) :completed)
                                       color   (case outcome
-                                                :failure :red
-                                                :skipped :yellow
+                                                :failure    :red
+                                                :blocked    :red
+                                                :skipped    :yellow
+                                                :redirected :yellow
                                                 :green)
                                       symbol  (case outcome
-                                                :failure "✗"
-                                                :skipped "○"
+                                                :failure    "✗"
+                                                :blocked    "⊘"
+                                                :skipped    "○"
+                                                :redirected "↻"
                                                 "✓")]
                                   (str (colorize color (messages/t :workflow-runner/phase-completed
                                                                    {:symbol symbol

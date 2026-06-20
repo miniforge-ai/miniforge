@@ -19,6 +19,7 @@
 (ns ai.miniforge.workflow.monitoring-test
   (:require
    [ai.miniforge.agent.interface.supervision :as supervision]
+   [ai.miniforge.event-stream.interface :as es]
    [ai.miniforge.response.interface :as response]
    [ai.miniforge.workflow.monitoring :as monitoring]
    [clojure.test :refer [deftest is testing]]))
@@ -91,3 +92,35 @@
               :checks [{:status :halt
                         :data {:elapsed-ms 120000}}]}
              (response/last-response (:execution/response-chain result)))))))
+
+(deftest handle-supervision-halt-emits-typed-refuse-test
+  (testing "handle-supervision-halt publishes a :meta-loop/halt-requested REFUSE"
+    (let [captured (atom nil)
+          stream   (es/create-event-stream {:sinks []})
+          ctx      {:execution/id (random-uuid)
+                    :execution/current-phase :implement
+                    :execution/opts {:event-stream stream}
+                    :execution/errors []
+                    :execution/response-chain (response/create :workflow)}
+          supervision-result {:halt-reason "merge conflict"
+                              :halting-agent :conflict-detector
+                              :checks [{:status :halt :data {}}]}]
+      (with-redefs [es/publish! (fn [_ ev] (reset! captured ev) ev)]
+        (monitoring/handle-supervision-halt ctx supervision-result identity))
+      (is (= :meta-loop/halt-requested (:event/type @captured)))
+      (is (= :conflict-detector (:halt/halting-agent @captured)))
+      (is (= :conflict (:halt/reason-code @captured)))
+      (is (= "merge conflict" (:halt/detail @captured)))
+      (is (= :implement (:workflow/phase @captured))))))
+
+(deftest halt-reason-code-resolution-test
+  (testing "reason-code uses the per-agent default, or an explicit override"
+    (is (= :no-progress  (#'monitoring/halt-reason-code {:supervisor :progress-monitor})))
+    (is (= :quality-gate (#'monitoring/halt-reason-code {:supervisor :test-quality})))
+    (is (= :conflict     (#'monitoring/halt-reason-code {:supervisor :conflict-detector})))
+    (is (= :budget-exhausted
+           (#'monitoring/halt-reason-code {:supervisor :anything
+                                           :data {:halt/reason-code :budget-exhausted}}))
+        "an agent-supplied reason-code overrides the default")
+    (is (= :no-progress (#'monitoring/halt-reason-code {:supervisor :unknown-agent}))
+        "unknown agents fall back to :no-progress")))

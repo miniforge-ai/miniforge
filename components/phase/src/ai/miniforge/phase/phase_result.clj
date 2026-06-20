@@ -44,6 +44,19 @@
   [result]
   (= :error (:status result)))
 
+(defn blocked?
+  "True when a phase result carries a refusal reason (a blocked outcome).
+
+   A block is an error result tagged with a machine-readable cause; it halts
+   the phase like any error but the cause surfaces as :phase/outcome :blocked."
+  [result]
+  (contains? result :phase/blocked-reason))
+
+(defn blocked-reason
+  "Return the RefusalReason keyword for a blocked phase result, if any."
+  [result]
+  (:phase/blocked-reason result))
+
 (def ^:private transition-request-key
   :phase/transition-request)
 
@@ -131,6 +144,17 @@
    :summary        summary
    :error          {:message error-message}
    :metrics        metrics})
+
+(defn blocked
+  "Build a blocked (refused) phase result — the phase cannot proceed.
+
+   `reason` is a RefusalReason keyword (see event-stream schema) recording the
+   machine-readable cause. A block reuses the error result shape so existing
+   non-success handling halts the phase; the cause travels to the event as
+   :phase/outcome :blocked with :phase/blocked-reason."
+  [environment-id summary reason metrics]
+  (assoc (error environment-id summary summary metrics)
+         :phase/blocked-reason reason))
 
 (defn exception-error
   "Build a [:phase :error] map from an unhandled exception.
