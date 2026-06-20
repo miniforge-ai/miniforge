@@ -55,11 +55,22 @@
   [packs]
   {:policy-packs packs})
 
+(defn- ctx-with-implement-artifact
+  [packs artifact]
+  (assoc-in (ctx-with packs)
+            [:execution/phase-results :implement :artifact]
+            artifact))
+
 (def ^:private dirty-artifact
   {:artifact/content "(def x \"FORBIDDEN\")" :artifact/path "core.clj"})
 
 (def ^:private clean-artifact
   {:artifact/content "(def x 42)" :artifact/path "core.clj"})
+
+(def ^:private dirty-code-artifact
+  {:code/files [{:path "src/core.clj"
+                 :content "(def x \"FORBIDDEN\")"
+                 :action :modify}]})
 
 ;------------------------------------------------------------------------------ No packs
 
@@ -79,6 +90,15 @@
       (is (seq (:errors result)))
       (is (= :test/forbidden (-> result :errors first :code))))))
 
+(deftest compile-failure-fails-with-error-test
+  (testing "an unbindable compiled rule fails closed with a gate error"
+    (let [rule   (assoc (content-scan-rule :phases #{:verify})
+                        :rule/detection {:type :not-a-detector})
+          ctx    (ctx-with [(pack rule)])
+          result (sut/check-policy-verify dirty-artifact ctx)]
+      (is (not (:passed? result)))
+      (is (= :policy-pack/compile-failed (-> result :errors first :code))))))
+
 (deftest clean-artifact-passes-test
   (testing "a clean artifact yields zero violations and passes"
     (let [ctx    (ctx-with [(pack (content-scan-rule :phases #{:verify}))])
@@ -95,6 +115,24 @@
           "review-only rule must not gate verify")
       (is (not (:passed? (sut/check-policy-review dirty-artifact ctx)))
           "review-only rule must gate review"))))
+
+(deftest review-policy-uses-implement-artifact-test
+  (testing "review policy evaluates code under review, not the review verdict artifact"
+    (let [ctx    (ctx-with-implement-artifact
+                  [(pack (content-scan-rule :phases #{:review}))]
+                  dirty-code-artifact)
+          result (sut/check-policy-review {:review/decision :approved} ctx)]
+      (is (not (:passed? result)))
+      (is (= :test/forbidden (-> result :errors first :code))))))
+
+(deftest verify-policy-uses-implement-artifact-test
+  (testing "verify policy evaluates code under review when verify output is metadata-only"
+    (let [ctx    (ctx-with-implement-artifact
+                  [(pack (content-scan-rule :phases #{:verify}))]
+                  dirty-code-artifact)
+          result (sut/check-policy-verify {:status :success :summary "tests passed"} ctx)]
+      (is (not (:passed? result)))
+      (is (= :test/forbidden (-> result :errors first :code))))))
 
 ;------------------------------------------------------------------------------ Severity / enforcement routing
 

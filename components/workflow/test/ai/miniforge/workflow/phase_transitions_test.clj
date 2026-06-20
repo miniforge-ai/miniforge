@@ -292,3 +292,40 @@
   (testing "no gates configured → unchanged (nothing to validate)"
     (let [pr {:result {}}]
       (is (= pr (exec/apply-gate-validation {:config {:gates []}} pr {}))))))
+
+(defn- policy-rule
+  []
+  {:rule/id          :test/forbidden
+   :rule/enabled?    true
+   :rule/severity    :critical
+   :rule/applies-to  {:phases #{:review}}
+   :rule/detection   {:type :content-scan :pattern "FORBIDDEN"}
+   :rule/enforcement {:action :hard-halt :message "Forbidden content"}})
+
+(defn- policy-pack
+  []
+  {:pack/id    "test-pack"
+   :pack/name  "Test Pack"
+   :pack/rules [(policy-rule)]})
+
+(defn- implement-code-artifact
+  []
+  {:code/files [{:path "src/core.clj"
+                 :content "(def x \"FORBIDDEN\")"
+                 :action :modify}]})
+
+(defn- policy-review-context
+  []
+  {:policy-packs [(policy-pack)]
+   :execution/phase-results
+   {:implement {:artifact (implement-code-artifact)}}})
+
+(deftest apply-gate-validation-policy-review-uses-implement-artifact
+  (testing "policy-review runs through the normal gate path against implemented code"
+    (let [phase-result {:result {:output {:review/decision :approved}}}
+          out          (exec/apply-gate-validation
+                        {:config {:gates [:policy-review]}}
+                        phase-result
+                        (policy-review-context))]
+      (is (= :failed (:phase/status out)))
+      (is (= :policy-review (get-in out [:phase/gate-errors 0 :gate]))))))
