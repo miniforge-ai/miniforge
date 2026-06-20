@@ -19,7 +19,7 @@
 
 (def batched-system
   (str "You are a code reviewer enforcing engineering standards. Analyze ONE source "
-       "file against a NUMBERED LIST of rules. Return ONLY a valid EDN vector of "
+       "file against a LIST of rules (each rendered as a `### <rule-id>` heading). Return ONLY a valid EDN vector of "
        "violation maps. Each map: {:rule-id <keyword> :line <int> :current <snippet> "
        ":message <why>}. Return [] if the file complies with all rules."))
 (defn batched-rules-block [rules]

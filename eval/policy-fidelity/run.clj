@@ -72,7 +72,7 @@
 ;; ---- strategy B batched prompt ----
 (def batched-system
   (str "You are a code reviewer enforcing engineering standards. Analyze ONE source "
-       "file against a NUMBERED LIST of rules. Return ONLY a valid EDN vector of "
+       "file against a LIST of rules (each rendered as a `### <rule-id>` heading). Return ONLY a valid EDN vector of "
        "violation maps, no prose/markdown. Each map: {:rule-id <keyword> :line <int> "
        ":current <snippet> :message <why>}. Return [] if the file complies with all rules."))
 (defn batched-user [rules path content]
@@ -82,33 +82,43 @@
        "\n\nReturn an EDN vector of violations across ALL rules (tag each :rule-id), or []."))
 
 ;; ---- judges ----
+;; A backend failure ({:success false}) is an infra error, NOT a judge miss —
+;; keep it distinct from :parse-fail (unparseable judge output) so an LLM/CLI
+;; hiccup never silently counts against recall.
 (defn judge-A [client model rule path content]
   (let [{:keys [system user]} (sem/build-judge-prompt rule path content)
-        r (llm/complete client {:system system :messages [{:role "user" :content user}] :model model})
-        v (parse-edn-vec (normalize-content (:content r)))
-        viols (when (vector? v) (vec (filter map? v)))]
-    (cond (= ::parse-fail v) {:flagged? :parse-fail :violations []}
-          (seq viols)        {:flagged? true :violations viols}
-          :else              {:flagged? false :violations []})))
+        r (llm/complete client {:system system :messages [{:role "user" :content user}] :model model})]
+    (if-not (:success r)
+      {:flagged? :error :violations [] :err (:error r)}
+      (let [v (parse-edn-vec (normalize-content (:content r)))
+            viols (when (vector? v) (vec (filter map? v)))]
+        (cond (= ::parse-fail v) {:flagged? :parse-fail :violations []}
+              (seq viols)        {:flagged? true :violations viols}
+              :else              {:flagged? false :violations []})))))
 
 (defn judge-B [client model rules path content]
   (let [r (llm/complete client {:system batched-system
-                                :messages [{:role "user" :content (batched-user rules path content)}] :model model})
-        v (parse-edn-vec (normalize-content (:content r)))]
-    (if (= ::parse-fail v)
-      {:flagged-set :parse-fail :violations []}
-      {:flagged-set (set (keep (comp ->rule-kw :rule-id) (filter map? v)))
-       :violations (vec (filter map? v))})))
+                                :messages [{:role "user" :content (batched-user rules path content)}] :model model})]
+    (if-not (:success r)
+      {:flagged-set :error :violations [] :err (:error r)}
+      (let [v (parse-edn-vec (normalize-content (:content r)))]
+        (if (= ::parse-fail v)
+          {:flagged-set :parse-fail :violations []}
+          {:flagged-set (set (keep (comp ->rule-kw :rule-id) (filter map? v)))
+           :violations (vec (filter map? v))})))))
 
 ;; ---- scoring ----
-(defn confusion [rows]               ; rows: {:seeded? :flagged?(true/false/:parse-fail)}
+(defn confusion [rows]               ; rows: {:seeded? :flagged?(true/false/:parse-fail/:error)}
   (let [hit? (fn [r] (true? (:flagged? r)))
-        pf?  (fn [r] (= :parse-fail (:flagged? r)))]
-    {:tp (count (filter #(and (:seeded? %) (hit? %)) rows))
-     :fn (count (filter #(and (:seeded? %) (not (hit? %))) rows))
-     :fp (count (filter #(and (not (:seeded? %)) (hit? %)) rows))
-     :tn (count (filter #(and (not (:seeded? %)) (not (hit? %)) (not (pf? %))) rows))
-     :parse-fail (count (filter pf? rows))}))
+        pf?  (fn [r] (= :parse-fail (:flagged? r)))
+        err? (fn [r] (= :error (:flagged? r)))
+        ok   (remove err? rows)]      ; backend errors excluded from the judge's confusion matrix
+    {:tp (count (filter #(and (:seeded? %) (hit? %)) ok))
+     :fn (count (filter #(and (:seeded? %) (not (hit? %))) ok))
+     :fp (count (filter #(and (not (:seeded? %)) (hit? %)) ok))
+     :tn (count (filter #(and (not (:seeded? %)) (not (hit? %)) (not (pf? %))) ok))
+     :parse-fail (count (filter pf? ok))
+     :error (count (filter err? rows))}))
 
 (defn rate [n d] (if (pos? d) (/ (double n) d) 1.0))
 (defn r+p [{:keys [tp fn fp]}] {:recall (rate tp (+ tp fn)) :precision (rate tp (+ tp fp))})
@@ -152,6 +162,7 @@
                    {:file (:rel f) :rule (:rule/id r) :trial t
                     :seeded? (contains? (:seeded f) (:rule/id r))
                     :flagged? (cond (= :parse-fail flagged-set) :parse-fail
+                                    (= :error flagged-set) :error
                                     (contains? flagged-set (:rule/id r)) true :else false)})
           ;; per-trial scoring then mean
           per-trial (fn [rows] (for [t (range trials)] (r+p (confusion (filter #(= t (:trial %)) rows)))))

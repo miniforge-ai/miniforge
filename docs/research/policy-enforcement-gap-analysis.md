@@ -34,7 +34,7 @@ These override the first-pass tiers below where they conflict.
 ## 1. Findings (how enforcement actually works today)
 
 Source of truth: `standards/miniforge/` submodule MDC files → compiled by
-`bb standards:pack` (`policy_pack/mdc_compiler.clj`) into
+`bb standards:pack` (`components/policy-pack/src/ai/miniforge/policy_pack/mdc_compiler.clj`) into
 `components/phase/resources/packs/miniforge-standards.pack.edn` (+ a small
 `miniforge-builtin.pack.edn`). 58 rules total, all enabled.
 
@@ -45,7 +45,7 @@ Two enforcement surfaces:
    to the reviewer's prompt. Soft: enforcement depends on the model noticing and
    the reviewer choosing to reject. 55 of 58 rules reach `:review`.
 2. **Deterministic policy gates** `:policy-verify` / `:policy-review`
-   (`gate/policy_pack.clj`), wired into the phase gate lists in
+   (`components/gate/src/ai/miniforge/gate/policy_pack.clj`), wired into the phase gate lists in
    `phase-software-factory/resources/config/phase/defaults.edn`, run via
    `apply-gate-validation`. A rule BLOCKS iff `enabled? ∧ resolved-detector ≠ :none
    ∧ enforcement :action = :hard-halt`.
@@ -228,9 +228,12 @@ guidance).
 
 ## 7. Fidelity eval results (2026-06-19)
 
-Harness + seeded corpus in `eval/policy-fidelity/` (6 fixtures, 5 candidate
-rules, 3 trials; truth in `fixtures/truth.edn`; raw audit log regenerable, not
-committed). Two methodology bugs were caught and fixed by hardening, in order:
+Harness + seeded corpus in `eval/policy-fidelity/`. This section records the
+initial run on a 6-fixture / 5-candidate-rule / 3-trial corpus; the committed
+`fixtures/truth.edn` is the later grown 12-fixture / 9-rule corpus scored in §10,
+so the numbers here are historical, not the current `truth.edn` shape. (Truth in
+`fixtures/truth.edn`; raw audit log regenerable, not committed.) Two methodology bugs were caught and fixed by
+hardening, in order:
 (a) fixture annotation comments leaked the answer key to the judge and induced
 false no-dead-code hits — stripped; (b) the hand-seeded oracle was less thorough
 than the judge — corrected against the real rule text (localization covers
