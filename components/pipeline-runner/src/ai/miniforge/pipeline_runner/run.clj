@@ -29,6 +29,38 @@
      {:started-at   (or started-at now)
       :completed-at now})))
 
+(def ^:private max-exception-causes
+  "Maximum number of nested exception causes preserved in stage failure results."
+  16)
+
+(defn- exception-context
+  "Build structured exception metadata for failed stage results."
+  [^Throwable e]
+  (let [bounded-causes (->> (iterate ex-cause e)
+                            rest
+                            (take-while some?)
+                            (take (inc max-exception-causes))
+                            vec)
+        truncated?     (> (count bounded-causes) max-exception-causes)
+        causes         (->> bounded-causes
+                            (take max-exception-causes)
+                            (mapv (fn [^Throwable cause]
+                                    {:error-message (ex-message cause)
+                                     :error-type    (.getName (class cause))})))]
+    (cond-> {:error-message (ex-message e)
+             :error-type    (.getName (class e))
+             :error-cause   (:error-message (first causes))
+             :error-causes  causes}
+      truncated? (assoc :error-causes-truncated? true))))
+
+(defn- close-handle!
+  "Best-effort connector cleanup; close failures must not mask stage outcomes."
+  [connector handle]
+  (when handle
+    (try
+      (conn/close connector handle)
+      (catch Exception _ nil))))
+
 (def ^:private auth-keys
   "Keys that belong to auth config, extracted from stage config."
   #{:auth/method :auth/credential-id :auth/credential-scope
@@ -89,27 +121,29 @@
     (if (nil? connector)
       (stage-result id name :failed
                     {:error-message (msg/t :run/connector-not-found {:ref connector-ref})})
-      (try
-        (let [auth   (or (extract-auth config) (get context :auth {}))
-              schema (resolve-schema-name config name)
-              cursor (prior-cursor {:stage/id id
-                                    :stage/name name
-                                    :stage/connector-ref connector-ref
-                                    :stage/config config}
-                                   context)
-              handle (:connection/handle (conn/connect connector (or config {}) auth))
-              result (conn/extract connector handle schema
-                                   (cond-> {:extract/batch-size (get config :connector/page-size
-                                                                     (:connector/page-size default-config))}
-                                     cursor (assoc :extract/cursor cursor)))]
-          (conn/close connector handle)
-          (stage-result id name :completed
-                        (merge (timestamps (get context :started-at))
-                               {:schema-name schema
-                                :records (:records result)
-                                :cursor (:extract/cursor result)})))
-        (catch Exception e
-          (stage-result id name :failed {:error-message (.getMessage e)}))))))
+      (let [handle (atom nil)]
+        (try
+          (let [auth   (or (extract-auth config) (get context :auth {}))
+                schema (resolve-schema-name config name)
+                cursor (prior-cursor {:stage/id id
+                                      :stage/name name
+                                      :stage/connector-ref connector-ref
+                                      :stage/config config}
+                                     context)]
+            (reset! handle (:connection/handle (conn/connect connector (or config {}) auth)))
+            (let [result (conn/extract connector @handle schema
+                                       (cond-> {:extract/batch-size (get config :connector/page-size
+                                                                         (:connector/page-size default-config))}
+                                         cursor (assoc :extract/cursor cursor)))]
+              (stage-result id name :completed
+                            (merge (timestamps (get context :started-at))
+                                   {:schema-name schema
+                                    :records (:records result)
+                                    :cursor (:extract/cursor result)}))))
+          (catch Exception e
+            (stage-result id name :failed (exception-context e)))
+          (finally
+            (close-handle! connector @handle)))))))
 
 (defn- execute-publish-stage
   "Execute a publish stage using the connector's publish method."
@@ -118,17 +152,19 @@
     (if (nil? connector)
       (stage-result id name :failed
                     {:error-message (msg/t :run/connector-not-found {:ref connector-ref})})
-      (try
-        (let [auth   (or (extract-auth config) (:auth context {}))
-              handle (:connection/handle (conn/connect connector (or config {}) auth))
-              result (conn/publish connector handle name input-records
-                                   {:publish/mode     (get config :publish-mode
-                                                          (:publish/default-mode default-config))
-                                    :publish/datasets (:publish/datasets context)})]
-          (conn/close connector handle)
-          (stage-result id name :completed {:completed-at (Instant/now)}))
-        (catch Exception e
-          (stage-result id name :failed {:error-message (.getMessage e)}))))))
+      (let [handle (atom nil)]
+        (try
+          (let [auth (or (extract-auth config) (:auth context {}))]
+            (reset! handle (:connection/handle (conn/connect connector (or config {}) auth)))
+            (conn/publish connector @handle name input-records
+                          {:publish/mode     (get config :publish-mode
+                                                 (:publish/default-mode default-config))
+                           :publish/datasets (:publish/datasets context)})
+            (stage-result id name :completed {:completed-at (Instant/now)}))
+          (catch Exception e
+            (stage-result id name :failed (exception-context e)))
+          (finally
+            (close-handle! connector @handle)))))))
 
 (defn- execute-transform-stage
   "Execute a non-connector stage (normalize, transform, aggregate, etc.).
@@ -145,7 +181,7 @@
           (stage-result id name :completed
                         (assoc (timestamps) :records result-records)))
         (catch Exception e
-          (stage-result id name :failed {:error-message (.getMessage e)})))
+          (stage-result id name :failed (exception-context e))))
       (stage-result id name :completed
                     (assoc (timestamps) :records input-records)))))
 

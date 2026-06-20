@@ -86,7 +86,8 @@
   conn/SourceConnector
   (discover [_ handle opts] {:schemas []})
   (extract [_ handle schema-name opts]
-    (throw (ex-info "Connection refused" {:cause :network})))
+    (throw (ex-info "Connection refused" {:cause :network}
+                    (ex-info "Socket closed" {:cause :socket}))))
   (checkpoint [_ handle connector-id cursor-state] {}))
 
 (defrecord InspectableSourceConnector [calls extract-fn]
@@ -415,10 +416,105 @@
           result (runner/execute-pipeline test-pipeline {conn-src failing-conn} {})]
       (is (not (:success? result)))
       (is (= :failed (get-in result [:pipeline-run :pipeline-run/status])))
-      ;; First stage should be failed
-      (let [stage-runs (get-in result [:pipeline-run :pipeline-run/stage-runs])]
-        (is (= :failed (:status (first stage-runs))))
-        (is (some? (:error-message (first stage-runs))))))))
+      ;; First stage should be failed with structured exception context
+      (let [stage-runs (get-in result [:pipeline-run :pipeline-run/stage-runs])
+            failed     (first stage-runs)]
+        (is (= :failed (:status failed)))
+        (is (= "Connection refused" (:error-message failed)))
+        (is (= "clojure.lang.ExceptionInfo" (:error-type failed)))
+        (is (= "Socket closed" (:error-cause failed)))
+        (is (= [{:error-message "Socket closed"
+                 :error-type    "clojure.lang.ExceptionInfo"}]
+               (:error-causes failed)))))))
+
+(deftest execute-pipeline-ingest-close-failure-does-not-mask-primary-error-test
+  (testing "Ingest cleanup closes once and preserves the primary extract failure"
+    (let [close-count (atom 0)
+          connector   (reify
+                        conn/Connector
+                        (connect [_ _ _]
+                          {:connection/handle "ingest-handle"
+                           :connector/status :connected})
+                        (close [_ _]
+                          (swap! close-count inc)
+                          (throw (ex-info "Close failed" {})))
+                        conn/SourceConnector
+                        (discover [_ _ _] {:schemas []})
+                        (extract [_ _ _ _]
+                          (throw (ex-info "Extract failed" {}
+                                          (ex-info "Network root" {}))))
+                        (checkpoint [_ _ _ _] {}))
+          result      (runner/execute-pipeline test-pipeline {conn-src connector} {})
+          failed      (first (get-in result [:pipeline-run :pipeline-run/stage-runs]))]
+      (is (not (:success? result)))
+      (is (= 1 @close-count))
+      (is (= "Extract failed" (:error-message failed)))
+      (is (= "Network root" (:error-cause failed))))))
+
+(deftest execute-pipeline-publish-close-failure-does-not-mask-primary-error-test
+  (testing "Publish cleanup closes once and preserves the primary publish failure"
+    (let [close-count (atom 0)
+          mock-source (->MockSourceConnector nil)
+          sink        (reify
+                        conn/Connector
+                        (connect [_ _ _]
+                          {:connection/handle "publish-handle"
+                           :connector/status :connected})
+                        (close [_ _]
+                          (swap! close-count inc)
+                          (throw (ex-info "Close failed" {})))
+                        conn/SinkConnector
+                        (publish [_ _ _ _ _]
+                          (throw (ex-info "Publish failed" {}
+                                          (ex-info "Sink root" {})))))
+          result      (runner/execute-pipeline
+                       three-stage-pipeline
+                       {conn-src mock-source conn-sink sink}
+                       {})
+          failed      (last (get-in result [:pipeline-run :pipeline-run/stage-runs]))]
+      (is (not (:success? result)))
+      (is (= 1 @close-count))
+      (is (= "Publish failed" (:error-message failed)))
+      (is (= "Sink root" (:error-cause failed))))))
+
+(deftest execute-pipeline-transform-exception-test
+  (testing "Pipeline preserves structured exception context for transform failures"
+    (let [transform-stage-id (java.util.UUID/randomUUID)
+          root-cause         (ex-info "Bad input" {:cause :bad-input})
+          transform-pipeline {:pipeline/id (java.util.UUID/randomUUID)
+                              :pipeline/name "Transform Failure Pipeline"
+                              :pipeline/version "1.0.0"
+                              :pipeline/stages
+                              [{:stage/id transform-stage-id
+                                :stage/name "Transform"
+                                :stage/family :transform
+                                :stage/input-datasets [ds-a]
+                                :stage/output-datasets [ds-b]
+                                :stage/dependencies []
+                                :stage/config {:stage/transform
+                                               {:transform/type :explode}}}]
+                              :pipeline/mode :full-refresh
+                              :pipeline/input-datasets [ds-a]
+                              :pipeline/output-datasets [ds-b]
+                              :pipeline/created-at (java.time.Instant/now)
+                              :pipeline/updated-at (java.time.Instant/now)}
+          result             (runner/execute-pipeline
+                              transform-pipeline
+                              {}
+                              {:transforms
+                               {:explode
+                                (fn [_records _config]
+                                  (throw (ex-info "Transform failed" {} root-cause)))}})
+          failed             (first (get-in result [:pipeline-run :pipeline-run/stage-runs]))]
+      (is (not (:success? result)))
+      (is (= :failed (get-in result [:pipeline-run :pipeline-run/status])))
+      (is (= :failed (:status failed)))
+      (is (= "Transform failed" (:error-message failed)))
+      (is (= "clojure.lang.ExceptionInfo" (:error-type failed)))
+      (is (= "Bad input" (:error-cause failed)))
+      (is (= [{:error-message "Bad input"
+               :error-type    "clojure.lang.ExceptionInfo"}]
+             (:error-causes failed))))))
 
 (deftest execute-pipeline-stops-on-failure-test
   (testing "Pipeline stops executing after first stage failure"
