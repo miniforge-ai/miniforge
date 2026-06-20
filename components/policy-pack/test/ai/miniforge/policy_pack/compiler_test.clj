@@ -50,6 +50,12 @@
      :capability ::compile-lint
      :message "lint failed"}))
 
+(defn- always-violating-capability-check
+  [_artifact _context]
+  {:type :capability
+   :capability ::empty-files
+   :message "capability should not run without artifacts"})
+
 (defn- semantic-violation-analyze
   [_llm-client _complete-fn _repo-path rule]
   {:rule/id (:rule/id rule)
@@ -205,6 +211,23 @@
       (is (= :capability (:detector compiled)))
       (is (false? (:passed? result)))
       (is (= :critical (get-in result [:violations 0 :severity]))))))
+
+(deftest compile-rule-check-empty-files-capability-test
+  (testing "explicit empty file collections do not run capability checks on the envelope"
+    (capability/register-capability!
+     ::empty-files
+     {:meta {:tool :stub}
+      :check always-violating-capability-check})
+    (let [rule     {:rule/id :empty-files
+                    :rule/severity :critical
+                    :rule/detection {:type :capability
+                                     :capability ::empty-files}}
+          compiled (sut/compile-rule-check rule)]
+      (doseq [artifacts [{:code/files []}
+                         {:files []}]]
+        (let [result ((:check-fn compiled) artifacts {})]
+          (is (true? (:passed? result)))
+          (is (= [] (:violations result))))))))
 
 (deftest compile-rule-check-semantic-test
   (testing "a custom heuristic rule with no custom fn compiles to semantic check"

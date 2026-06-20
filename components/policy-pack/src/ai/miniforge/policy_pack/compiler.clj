@@ -107,6 +107,11 @@
   (or (get artifacts :code/files)
       (get artifacts :files)))
 
+(defn- code-files-present?
+  [artifacts]
+  (or (contains? artifacts :code/files)
+      (contains? artifacts :files)))
+
 (defn- file-entry->artifact
   [file-entry]
   (let [path    (or (get file-entry :artifact/path)
@@ -122,7 +127,7 @@
   [artifacts]
   (cond
     (sequential? artifacts) (mapv file-entry->artifact artifacts)
-    (seq (code-files artifacts)) (mapv file-entry->artifact (code-files artifacts))
+    (code-files-present? artifacts) (mapv file-entry->artifact (code-files artifacts))
     (map? artifacts) [(file-entry->artifact artifacts)]
     :else []))
 
