@@ -56,7 +56,8 @@
    [ai.miniforge.policy-pack.interface :as policy-pack]
    [ai.miniforge.semantic-analyzer.interface :as semantic]
    [clojure.edn :as edn]
-   [clojure.java.io :as io]))
+   [clojure.java.io :as io]
+   [clojure.string :as str]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Pack source
@@ -130,10 +131,26 @@
   [ctx]
   (get-in ctx [:execution/phase-results :implement :artifact]))
 
+(defn- path-inside-worktree?
+  [worktree file]
+  (let [root-path (str (.getPath worktree) java.io.File/separator)
+        file-path (.getPath file)]
+    (or (= file-path (.getPath worktree))
+        (str/starts-with? file-path root-path))))
+
+(defn- safe-worktree-file
+  [worktree-path file-path]
+  (let [worktree (.getCanonicalFile (io/file worktree-path))
+        file     (.getCanonicalFile (io/file worktree file-path))]
+    (when (path-inside-worktree? worktree file)
+      file)))
+
 (defn- code-file-entry
   [worktree-path file-path action]
-  (let [file    (io/file worktree-path file-path)
-        content (when (.exists file) (slurp file))]
+  (let [file    (safe-worktree-file worktree-path file-path)
+        content (cond
+                  (= :delete action) ""
+                  (and file (.isFile file)) (slurp file))]
     (cond-> {:path file-path}
       content (assoc :content content)
       action  (assoc :action action))))
@@ -142,10 +159,11 @@
   [artifact worktree-path]
   (when-let [paths (seq (:code/file-paths artifact))]
     (let [actions (get artifact :code/file-actions [])
-          files   (mapv code-file-entry
-                        (repeat worktree-path)
-                        paths
-                        actions)]
+          files   (mapv (fn [idx path]
+                          (code-file-entry worktree-path path
+                                           (or (nth actions idx nil) :modify)))
+                        (range)
+                        paths)]
       (assoc artifact :code/files files))))
 
 (defn- policy-artifact
@@ -187,6 +205,7 @@
 (defn- compile-anomaly-result
   [anomaly]
   {:passed?  false
+   :compiled? false
    :blocking [{:code    :policy-pack/compile-failed
                :message (msg/t :policy-pack/compile-error
                                {:message (compile-anomaly-message anomaly)})
@@ -271,6 +290,7 @@
             warnings   (policy-pack/warning-violations violations)
             audits     (audit-violations violations)]
         {:passed?          (empty? blocking)
+         :compiled?        true
          :violations       violations
          :blocking         (mapv policy-pack/violation->error blocking)
          :require-approval (mapv policy-pack/violation->error approvals)
@@ -366,9 +386,10 @@
       (let [artifact (policy-artifact artifact ctx)
             context  (-> ctx with-semantic-wiring (assoc :phase phase))
             result   (compiled-check-result packs phase artifact context)]
-        (emit-rule-evidence! ctx phase
-                             (classify-rules packs phase artifact context
-                                             (:violations result)))
+        (when (:compiled? result)
+          (emit-rule-evidence! ctx phase
+                               (classify-rules packs phase artifact context
+                                               (:violations result))))
         {:passed?  (:passed? result)
          :errors   (vec (:blocking result))
          :warnings (vec (concat (:require-approval result)

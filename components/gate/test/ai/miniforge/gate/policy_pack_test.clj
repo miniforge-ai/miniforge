@@ -23,6 +23,7 @@
    [ai.miniforge.gate.interface :as gate]
    [ai.miniforge.gate.policy-pack :as sut]
    [ai.miniforge.gate.registry :as registry]
+   [clojure.java.io :as io]
    [clojure.test :refer [deftest is testing]]))
 
 ;------------------------------------------------------------------------------ Factories
@@ -72,6 +73,19 @@
                  :content "(def x \"FORBIDDEN\")"
                  :action :modify}]})
 
+(defn- temp-dir
+  []
+  (.toFile (java.nio.file.Files/createTempDirectory
+            "policy-gate"
+            (make-array java.nio.file.attribute.FileAttribute 0))))
+
+(defn- write-worktree-file!
+  [worktree path content]
+  (let [file (io/file worktree path)]
+    (.mkdirs (.getParentFile file))
+    (spit file content)
+    file))
+
 ;------------------------------------------------------------------------------ No packs
 
 (deftest no-packs-passes-with-warning-test
@@ -98,6 +112,20 @@
           result (sut/check-policy-verify dirty-artifact ctx)]
       (is (not (:passed? result)))
       (is (= :policy-pack/compile-failed (-> result :errors first :code))))))
+
+(deftest compile-failure-does-not-emit-rule-applied-events-test
+  (testing "no per-rule applied evidence is emitted when pack compilation fails"
+    (let [stream      (event-stream/create-event-stream {:sinks []})
+          captured    (atom [])
+          _           (event-stream/subscribe! stream :collector #(swap! captured conj %))
+          broken-rule (assoc (content-scan-rule :phases #{:verify})
+                             :rule/detection {:type :not-a-detector})
+          ctx         (assoc (ctx-with [(pack broken-rule)])
+                             :event-stream stream
+                             :workflow/id "wf-compile-failed")
+          result      (sut/check-policy-verify dirty-artifact ctx)]
+      (is (not (:passed? result)))
+      (is (empty? (filter #(= :gate/rule-applied (:event/type %)) @captured))))))
 
 (deftest clean-artifact-passes-test
   (testing "a clean artifact yields zero violations and passes"
@@ -133,6 +161,46 @@
           result (sut/check-policy-verify {:status :success :summary "tests passed"} ctx)]
       (is (not (:passed? result)))
       (is (= :test/forbidden (-> result :errors first :code))))))
+
+(deftest path-only-implement-artifact-defaults-missing-actions-test
+  (testing "path-only artifacts rehydrate files even when actions are omitted"
+    (let [worktree (temp-dir)
+          _        (write-worktree-file! worktree "src/core.clj"
+                                         "(def x \"FORBIDDEN\")")
+          ctx      (-> (ctx-with-implement-artifact
+                        [(pack (content-scan-rule :phases #{:verify}))]
+                        {:code/file-paths ["src/core.clj"]})
+                       (assoc :execution/worktree-path (.getPath worktree)))
+          result   (sut/check-policy-verify {:status :success} ctx)]
+      (is (not (:passed? result)))
+      (is (= :test/forbidden (-> result :errors first :code))))))
+
+(deftest path-only-implement-artifact-does-not-read-outside-worktree-test
+  (testing "rehydration does not follow path traversal outside the worktree"
+    (let [root     (temp-dir)
+          worktree (io/file root "worktree")
+          secret   (io/file root "secret.clj")
+          _        (.mkdirs worktree)
+          _        (spit secret "(def x \"FORBIDDEN\")")
+          ctx      (-> (ctx-with-implement-artifact
+                        [(pack (content-scan-rule :phases #{:verify}))]
+                        {:code/file-paths ["../secret.clj"]})
+                       (assoc :execution/worktree-path (.getPath worktree)))
+          result   (sut/check-policy-verify {:status :success} ctx)]
+      (is (:passed? result)))))
+
+(deftest path-only-delete-action-rehydrates-empty-content-test
+  (testing "deleted files do not rehydrate old worktree content"
+    (let [worktree (temp-dir)
+          _        (write-worktree-file! worktree "src/core.clj"
+                                         "(def x \"FORBIDDEN\")")
+          ctx      (-> (ctx-with-implement-artifact
+                        [(pack (content-scan-rule :phases #{:verify}))]
+                        {:code/file-paths   ["src/core.clj"]
+                         :code/file-actions [:delete]})
+                       (assoc :execution/worktree-path (.getPath worktree)))
+          result   (sut/check-policy-verify {:status :success} ctx)]
+      (is (:passed? result)))))
 
 ;------------------------------------------------------------------------------ Severity / enforcement routing
 
