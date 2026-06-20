@@ -61,7 +61,9 @@
    - :budget-exhausted    — the token or time budget is exhausted
    - :policy-block        — a policy pack forbids proceeding
 
-   Consumers MUST tolerate unknown values for forward compatibility."
+   Closed: the schema validates against exactly this set, so a typo or a
+   not-yet-added reason fails fast. Producers are all first-party, so catching
+   those beats wire forward-compat. Extending it is a deliberate spec change."
   [:enum :no-progress :quality-gate :conflict :missing-input :ambiguous-intent
    :precondition-failed :resource-unavailable :budget-exhausted :policy-block])
 

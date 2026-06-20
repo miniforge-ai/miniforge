@@ -349,12 +349,12 @@ All subagent events MUST include `parent-agent/id` and `parent-agent/instance-id
 ```clojure
 {:event/type :agent/message-sent
  :from-agent/id :implementer
- :from-agent/instance-id uuid
+ :from-agent/instance-id uuid           ; OPTIONAL
  :to-agent/id :planner
  :workflow/id uuid
 
- :message/type :clarification-request   ; open keyword; consumers tolerate unknowns
- :message/content string
+ :message/type :clarification-request   ; OPTIONAL; open keyword, consumers tolerate unknowns
+ :message/content string                ; OPTIONAL
 
  :message "Asking Planner: Should we create new security group?"}
 ```
@@ -367,8 +367,8 @@ All subagent events MUST include `parent-agent/id` and `parent-agent/instance-id
  :to-agent/id :implementer
  :workflow/id uuid
 
- :message/type :clarification-response
- :message/content string
+ :message/type :clarification-response   ; OPTIONAL; open keyword, consumers tolerate unknowns
+ :message/content string                 ; OPTIONAL
 
  :message "Planner response: Reuse existing security group sg-prod-rds"}
 ```
@@ -386,7 +386,8 @@ leaving it only in the coordinator's return value and the runner's error map.
 `:no-progress :quality-gate :conflict :missing-input :ambiguous-intent
 :precondition-failed :resource-unavailable :budget-exhausted :policy-block`
 
-Consumers MUST tolerate unknown RefusalReason values for forward compatibility.
+The vocabulary is closed: the schema validates `:halt/reason-code` against exactly
+this set. Adding a reason is a deliberate spec change, not an open extension point.
 
 #### meta-loop/halt-requested
 

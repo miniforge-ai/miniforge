@@ -154,7 +154,10 @@
    Best-effort: a telemetry failure must not mask the halt itself."
   [ctx halt-data]
   (when-let [stream (resolve-event-stream ctx)]
-    (let [halting-agent (get halt-data :supervisor :supervisor)
+    ;; Guard a nil halting agent (key present, value nil): without it,
+    ;; (name halting-agent) in the constructor throws and the catch below
+    ;; silently drops the halt event.
+    (let [halting-agent (if-some [a (:supervisor halt-data)] a :supervision)
           reason-code   (halt-reason-code halt-data)]
       (try
         (es/publish! stream
