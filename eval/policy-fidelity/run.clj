@@ -29,9 +29,8 @@
 ;; ---- config ----
 (def trials 3)
 (def max-parallel 5)
-(def models [{:label "sonnet-4.6" :backend :claude :model "claude-sonnet-4-6"}
-             {:label "opus-4.7"   :backend :claude :model "claude-opus-4-7"}
-             {:label "gpt-5.4"    :backend :codex  :model "gpt-5.4"}])
+(def models [{:label "opus-4.8"   :backend :claude :model "claude-opus-4-8"}
+             {:label "sonnet-4.6" :backend :claude :model "claude-sonnet-4-6"}])
 
 (def fixture-root "eval/policy-fidelity/fixtures")
 (def truth (edn/read-string (slurp (io/file fixture-root "truth.edn"))))

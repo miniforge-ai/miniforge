@@ -272,3 +272,58 @@ Residual precision 0.05–0.15 is defensible over-reads (e.g. `:ok` flagged as
 named-constants — right concern, wrong rule); handle before hard-halt via
 rule-scope tightening / accept-cross-rule / evidence-required. Corpus is small;
 grow rules + files before production confidence.
+
+## 8. Locked judge config (2026-06-19) — supersedes §7's recommendation
+
+Confirmation matrix on the production model `claude-opus-4-8` + `claude-sonnet-4-6`,
+corrected truth, 6 fixtures × 5 rules × 3 trials:
+
+| model | strategy | recall | precision | parse-fail | flaky |
+|---|---|---|---|---|---|
+| opus-4.8 | A focused | 1.00 | 0.95 | 0 | 2 |
+| **opus-4.8** | **B batched** | **1.00** | **1.00** | **0** | **0** |
+| sonnet-4.6 | A focused | 1.00 | 0.87 | 0 | 0 |
+| sonnet-4.6 | B batched | 0.95 | 0.90 | 5 | 5 |
+
+opus-4.8 + batched is flawless on this corpus (recall 1.00, precision 1.00, zero
+parse-fails, zero flaky across 3 trials) and the cheapest viable config.
+sonnet-batched stays parse-fail-unreliable (model-bound, ~28%→here 5/18).
+
+**LOCKED:** `claude-opus-4-8` + **batched** (one judge call per changed file,
+all applicable rules in a single prompt), **fail-closed**, **changed-files
+scope**. Caveat: small corpus — grow rules/files before over-trusting precision
+1.00; directionally decisive.
+
+## 9. Cost + caching, per backend path (2026-06-19)
+
+Analytic input-cost model in `eval/policy-fidelity/cost_model.clj` (the CLI
+backend exposes no `cache_control` and reports zero usage, so caching is
+modeled from token structure + published rates: write 1.25×, read 0.1×;
+Opus 4.8 $5/Mtok in, Sonnet 4.6 $3/Mtok). Per review gate, 5-file PR, 26
+applicable rules:
+
+| opus-B variant | input-tok | $/gate |
+|---|---|---|
+| uncached | 205K | $1.03 |
+| within-gate cached | 86K | $0.43 |
+| cross-run warm | 44K | $0.22 |
+
+opus-B is 0.39× sonnet-A uncached, 0.50× cached. Cross-run, the rule-pack write
+(~$0.22) amortizes once per TTL window; steady-state per-gate is dominated by the
+changed files, not the rules — you pay for the diff, not the policy set.
+
+Caching is **backend-conditional** (user decision 2026-06-19 — don't convert free
+quota into metered spend):
+
+- **API / BYOM backend** (cache_control-capable: raw Anthropic key, or
+  opencode/cursor wired to a key): compiled rule-pack as the frozen cache prefix
+  (rules-first, byte-stable) + `cache_control` + 1h TTL + pre-warm
+  (`max_tokens: 0`). ~$0.22/gate steady-state; cross-repo cache sharing on the
+  same model+org. Only **batched** exposes the rule pack as one cacheable prefix.
+- **Subscription CLI** (`claude` print mode): no `cache_control`; plan-covered
+  (constraint is quota, not $). Caching is a no-op. opus-B still wins: 5 calls/gate
+  vs focused's 130 → ~26× less quota burn.
+
+E1 additions implied: an API/HTTP judge backend with `cache_control` prefix
+wiring, gated on backend capability (no-op on the subscription CLI); fail-closed
+semantic detection; changed-files scoping.
