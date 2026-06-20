@@ -28,7 +28,7 @@
                                         (:rule/description r) "\n" (:rule/knowledge-content r))) rules))))
 
 (def fs (java.nio.file.FileSystems/getDefault))
-(defn glob? [g p] (try (.matches (.getPathMatcher fs (str "glob:" g)) (.getPath (io/file p))) (catch Exception _ false)))
+(defn glob? [g p] (try (.matches (.getPathMatcher fs (str "glob:" g)) (.toPath (io/file p))) (catch Exception _ false)))
 (defn applies? [rule phase path]
   (let [phs (get-in rule [:rule/applies-to :phases])
         globs (get-in rule [:rule/applies-to :file-globs])]

@@ -299,17 +299,18 @@ scope**. Caveat: small corpus — grow rules/files before over-trusting precisio
 Analytic input-cost model in `eval/policy-fidelity/cost_model.clj` (the CLI
 backend exposes no `cache_control` and reports zero usage, so caching is
 modeled from token structure + published rates: write 1.25×, read 0.1×;
-Opus 4.8 $5/Mtok in, Sonnet 4.6 $3/Mtok). Per review gate, 5-file PR, 26
-applicable rules:
+Opus 4.8 $5/Mtok in, Sonnet 4.6 $3/Mtok). Per review gate, 5-file PR, 33
+applicable rules (count corrected after the `glob?` String→Path fix — the prior
+26 dropped glob-scoped rules whose matcher silently failed):
 
 | opus-B variant | input-tok | $/gate |
 |---|---|---|
-| uncached | 205K | $1.03 |
-| within-gate cached | 86K | $0.43 |
-| cross-run warm | 44K | $0.22 |
+| uncached | 275K | $1.37 |
+| within-gate cached | 108K | $0.54 |
+| cross-run warm | 51K | $0.26 |
 
-opus-B is 0.39× sonnet-A uncached, 0.50× cached. Cross-run, the rule-pack write
-(~$0.22) amortizes once per TTL window; steady-state per-gate is dominated by the
+opus-B is 0.40× sonnet-A uncached, 0.48× cached. Cross-run, the rule-pack write
+(~$0.26) amortizes once per TTL window; steady-state per-gate is dominated by the
 changed files, not the rules — you pay for the diff, not the policy set.
 
 Caching is **backend-conditional** (user decision 2026-06-19 — don't convert free
@@ -318,7 +319,7 @@ quota into metered spend):
 - **API / BYOM backend** (cache_control-capable: raw Anthropic key, or
   opencode/cursor wired to a key): compiled rule-pack as the frozen cache prefix
   (rules-first, byte-stable) + `cache_control` + 1h TTL + pre-warm
-  (`max_tokens: 0`). ~$0.22/gate steady-state; cross-repo cache sharing on the
+  (`max_tokens: 0`). ~$0.26/gate steady-state; cross-repo cache sharing on the
   same model+org. Only **batched** exposes the rule pack as one cacheable prefix.
 - **Subscription CLI** (`claude` print mode): no `cache_control`; plan-covered
   (constraint is quota, not $). Caching is a no-op. opus-B still wins: 5 calls/gate
