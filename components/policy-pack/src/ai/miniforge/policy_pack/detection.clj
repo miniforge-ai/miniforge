@@ -333,6 +333,27 @@ depending on ambient namespace loading or raw var resolution."}
   custom-fn-registry
   (atom {}))
 
+(defn- declared-method?
+  [method-name arity f]
+  (some (fn [^java.lang.reflect.Method method]
+          (and (= method-name (.getName method))
+               (= arity (count (.getParameterTypes method)))))
+        (.getDeclaredMethods (class f))))
+
+(defn- variadic-accepts-arity?
+  [arity f]
+  (when (declared-method? "getRequiredArity" 0 f)
+    (try
+      (<= (.getRequiredArity f) arity)
+      (catch Throwable _ false))))
+
+(defn- detector-predicate?
+  "True when `f` is a custom detector predicate with a supported 2-arity shape."
+  [f]
+  (and (fn? f)
+       (or (declared-method? "invoke" 2 f)
+           (variadic-accepts-arity? 2 f))))
+
 (defn register-custom-fn!
   "Register `f` as the detector implementation for `custom-fn-sym`.
 
@@ -343,9 +364,10 @@ depending on ambient namespace loading or raw var resolution."}
   (when-not (symbol? custom-fn-sym)
     (throw (ex-info "Custom detector key must be a symbol"
                     {:custom-fn custom-fn-sym})))
-  (when-not (fn? f)
-    (throw (ex-info "Custom detector value must be a function"
-                    {:custom-fn custom-fn-sym})))
+  (when-not (detector-predicate? f)
+    (throw (ex-info "Custom detector value must be a two-arity predicate function"
+                    {:custom-fn custom-fn-sym
+                     :value-type (some-> f class .getName)})))
   (swap! custom-fn-registry assoc custom-fn-sym f)
   f)
 

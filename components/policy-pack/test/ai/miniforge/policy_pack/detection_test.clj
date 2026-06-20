@@ -318,6 +318,23 @@
      a-resolvable-custom-fn)
     true))
 
+(deftest register-custom-fn-validates-detector-predicate-test
+  (testing "custom detector registration rejects non-functions"
+    (is (thrown-with-msg?
+         clojure.lang.ExceptionInfo
+         #"two-arity predicate function"
+         (detection/register-custom-fn! 'test/not-a-detector {:not :a-fn}))))
+  (testing "custom detector registration rejects functions without artifact/context arity"
+    (is (thrown-with-msg?
+         clojure.lang.ExceptionInfo
+         #"two-arity predicate function"
+         (detection/register-custom-fn! 'test/wrong-arity (fn [_artifact] nil)))))
+  (testing "custom detector registration accepts a two-arity detector"
+    (let [detector (fn [_artifact _context] nil)]
+      (is (identical? detector
+                      (detection/register-custom-fn! 'test/two-arity detector)))
+      (detection/unregister-custom-fn! 'test/two-arity))))
+
 (deftest custom-fn-resolvable-test
   (testing "a :custom rule with a resolvable :custom-fn is resolvable"
     (is (detection/custom-fn-resolvable?
