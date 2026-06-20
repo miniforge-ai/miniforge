@@ -22,11 +22,24 @@
    [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.policy-pack.capability :as capability]
    [ai.miniforge.policy-pack.compiler :as sut]
+   [ai.miniforge.policy-pack.detection :as detection]
    [clojure.edn :as edn]
    [clojure.java.io :as io]
-   [clojure.test :refer [deftest is testing]]))
+   [clojure.test :refer [deftest is testing use-fixtures]]))
 
 (defn- a-resolvable-custom-fn [_artifact _context] nil)
+
+(def ^:private resolvable-custom-fn-sym
+  'ai.miniforge.policy-pack.compiler-test/a-resolvable-custom-fn)
+
+(use-fixtures
+  :once
+  (fn [run-tests]
+    (detection/register-custom-fn! resolvable-custom-fn-sym a-resolvable-custom-fn)
+    (try
+      (run-tests)
+      (finally
+        (detection/unregister-custom-fn! resolvable-custom-fn-sym)))))
 
 (defn- noop-check [_artifact _context] nil)
 
@@ -70,7 +83,7 @@
            (sut/resolve-detector
             {:rule/detection
              {:type :custom
-              :custom-fn 'ai.miniforge.policy-pack.compiler-test/a-resolvable-custom-fn}}))))
+              :custom-fn resolvable-custom-fn-sym}}))))
   (testing "a :custom rule with no :custom-fn binds to :semantic (always available)"
     (is (= :semantic (sut/resolve-detector {:rule/detection {:type :custom}}))))
   (testing "a :custom rule with an unresolvable :custom-fn binds to :semantic"

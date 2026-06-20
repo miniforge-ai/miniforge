@@ -30,7 +30,7 @@
    - :ast-analysis - Structural pattern matching via tree-sitter CLI
    - :state-comparison - Drift detection via clojure.data/diff
    - :capability - Mechanical tool-gate check via the capability registry
-   - :custom - Custom detection function (resolvable :custom-fn), else routed
+   - :custom - Registered custom detection function (:custom-fn), else routed
      to the LLM-as-judge semantic detector"
   (:require
    [ai.miniforge.policy-pack.ast :as ast]
@@ -324,13 +324,65 @@
 ;------------------------------------------------------------------------------ Layer 1
 ;; Custom detection
 
+(defonce ^{:private true
+           :doc "Explicit extension registry for custom policy detectors.
+
+Keys are the symbols stored under `:rule/detection :custom-fn`; values are
+2-arity detector functions. This keeps pack manifests data-driven without
+depending on ambient namespace loading or raw var resolution."}
+  custom-fn-registry
+  (atom {}))
+
+(defn- declared-method?
+  [method-name arity f]
+  (some (fn [^java.lang.reflect.Method method]
+          (and (= method-name (.getName method))
+               (= arity (count (.getParameterTypes method)))))
+        (.getDeclaredMethods (class f))))
+
+(defn- variadic-accepts-arity?
+  [arity f]
+  (when (declared-method? "getRequiredArity" 0 f)
+    (try
+      (<= (.getRequiredArity f) arity)
+      (catch Throwable _ false))))
+
+(defn- detector-predicate?
+  "True when `f` is a custom detector predicate with a supported 2-arity shape."
+  [f]
+  (and (fn? f)
+       (or (declared-method? "invoke" 2 f)
+           (variadic-accepts-arity? 2 f))))
+
+(defn register-custom-fn!
+  "Register `f` as the detector implementation for `custom-fn-sym`.
+
+   Custom policy detectors are an explicit extension point. Callers that own a
+   detector namespace should register the symbol they place in policy-pack EDN
+   before compiling or applying packs."
+  [custom-fn-sym f]
+  (when-not (symbol? custom-fn-sym)
+    (throw (ex-info "Custom detector key must be a symbol"
+                    {:custom-fn custom-fn-sym})))
+  (when-not (detector-predicate? f)
+    (throw (ex-info "Custom detector value must be a two-arity predicate function"
+                    {:custom-fn custom-fn-sym
+                     :value-type (some-> f class .getName)})))
+  (swap! custom-fn-registry assoc custom-fn-sym f)
+  f)
+
+(defn unregister-custom-fn!
+  "Remove a registered custom detector. Intended for tests and reload hygiene."
+  [custom-fn-sym]
+  (swap! custom-fn-registry dissoc custom-fn-sym)
+  nil)
+
 (defn- resolve-custom-fn
-  "Resolve a `:custom` rule's `:custom-fn` symbol to a var, or nil. Never
-   throws — an unresolvable symbol is the no-op case routed to the judge."
+  "Look up a `:custom` rule's `:custom-fn` symbol in the explicit registry.
+   Missing registrations are the no-op case routed to the judge."
   [rule]
   (when-let [custom-fn-sym (get-in rule [:rule/detection :custom-fn])]
-    (try (resolve custom-fn-sym)
-         (catch Exception _ nil))))
+    (get @custom-fn-registry custom-fn-sym)))
 
 (defn- run-resolved-custom
   "Run an already-resolved custom fn against `artifact`/`context`, adapting
@@ -352,7 +404,7 @@
 (defn detect-custom
   "Detect violations using a custom function.
 
-   The custom function is specified by symbol in :custom-fn and must:
+   The custom function is specified by registered symbol in :custom-fn and must:
    - Accept [artifact context]
    - Return violation map or nil
 
@@ -368,7 +420,7 @@
     (run-resolved-custom f rule artifact context)))
 
 (defn custom-fn-resolvable?
-  "True when a `:custom` rule names a `:custom-fn` symbol that resolves to a var.
+  "True when a `:custom` rule names a registered `:custom-fn` symbol.
 
    A `:custom` rule with no resolvable `:custom-fn` is the no-op case the
    compiled standards pack is full of (PR #979): such rules route to the
