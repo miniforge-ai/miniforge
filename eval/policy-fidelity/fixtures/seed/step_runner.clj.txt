@@ -1,0 +1,9 @@
+(ns eval.seed.step-runner
+  (:require [ai.miniforge.executor.interface :as executor]))
+
+(defn run-step [step]
+  (try
+    (executor/execute step)
+    (catch Exception e
+      (when (= :transient (:anomaly/category (ex-data e)))
+        (executor/execute step)))))

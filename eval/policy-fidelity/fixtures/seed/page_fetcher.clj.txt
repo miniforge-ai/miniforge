@@ -1,0 +1,15 @@
+(ns eval.seed.page-fetcher
+  (:require [ai.miniforge.schema.interface :as schema]
+            [ai.miniforge.store.interface :as store]))
+
+(def ^:private default-page-size
+  "Rows per page when the caller omits one; matches the dashboard table height."
+  50)
+
+(defn fetch-page
+  "Fetch one page of rows, or pass the store anomaly straight through."
+  [query]
+  (let [result (store/query query)]
+    (if (schema/failed? result)
+      result
+      (take default-page-size (schema/value result)))))

@@ -29,8 +29,10 @@
 ;; ---- config ----
 (def trials 3)
 (def max-parallel 5)
-(def models [{:label "opus-4.8"   :backend :claude :model "claude-opus-4-8"}
-             {:label "sonnet-4.6" :backend :claude :model "claude-sonnet-4-6"}])
+(def models [{:label "opus-4.8" :backend :claude :model "claude-opus-4-8"}])
+;; which strategies to run this pass — A-vs-B is established; #{:B} validates the
+;; locked config's fidelity at scale without paying for A's per-rule call fan-out.
+(def strategies #{:B})
 
 (def fixture-root "eval/policy-fidelity/fixtures")
 (def truth (edn/read-string (slurp (io/file fixture-root "truth.edn"))))
@@ -110,23 +112,27 @@
     (let [client (llm/create-client {:backend backend})
           ;; A jobs: per (file, rule, trial)
           a-jobs (for [f files, r rules, t (range trials)] {:f f :r r :t t})
-          a-out  (bounded-pmap max-parallel
-                               (fn [{:keys [f r t]}]
-                                 (let [{:keys [flagged? violations]} (judge-A client model r (:rel f) (:content f))]
-                                   (swap! audit conj {:model label :strategy :A :file (:rel f) :rule (:rule/id r)
-                                                      :trial t :flagged? flagged? :violations violations})
-                                   {:file (:rel f) :rule (:rule/id r) :trial t
-                                    :seeded? (contains? (:seeded f) (:rule/id r)) :flagged? flagged?}))
-                               a-jobs)
+          a-out  (if (contains? strategies :A)
+                   (bounded-pmap max-parallel
+                                 (fn [{:keys [f r t]}]
+                                   (let [{:keys [flagged? violations]} (judge-A client model r (:rel f) (:content f))]
+                                     (swap! audit conj {:model label :strategy :A :file (:rel f) :rule (:rule/id r)
+                                                        :trial t :flagged? flagged? :violations violations})
+                                     {:file (:rel f) :rule (:rule/id r) :trial t
+                                      :seeded? (contains? (:seeded f) (:rule/id r)) :flagged? flagged?}))
+                                 a-jobs)
+                   [])
           ;; B jobs: per (file, trial) -> expand to rules
           b-jobs (for [f files, t (range trials)] {:f f :t t})
-          b-raw  (bounded-pmap max-parallel
-                               (fn [{:keys [f t]}]
-                                 (let [{:keys [flagged-set violations]} (judge-B client model rules (:rel f) (:content f))]
-                                   (swap! audit conj {:model label :strategy :B :file (:rel f) :trial t
-                                                      :flagged-set flagged-set :violations violations})
-                                   {:f f :t t :flagged-set flagged-set}))
-                               b-jobs)
+          b-raw  (if (contains? strategies :B)
+                   (bounded-pmap max-parallel
+                                 (fn [{:keys [f t]}]
+                                   (let [{:keys [flagged-set violations]} (judge-B client model rules (:rel f) (:content f))]
+                                     (swap! audit conj {:model label :strategy :B :file (:rel f) :trial t
+                                                        :flagged-set flagged-set :violations violations})
+                                     {:f f :t t :flagged-set flagged-set}))
+                                 b-jobs)
+                   [])
           b-out  (for [{:keys [f t flagged-set]} b-raw, r rules]
                    {:file (:rel f) :rule (:rule/id r) :trial t
                     :seeded? (contains? (:seeded f) (:rule/id r))
@@ -142,16 +148,21 @@
                              :recall-range [(apply min (map :recall pt)) (apply max (map :recall pt))]
                              :confusion-allTrials (confusion rows) :flaky-cells (flaky rows)}))]
       (println "=== JUDGE:" label "===")
-      (println "  A (per-rule): " (summ a-out))
-      (println "  B (batched):  " (summ b-out))
-      (println "  per-rule recall  A | B  (mean over trials, seeded only):")
-      (doseq [rid rule-ids]
-        (let [rc (fn [rows] (mean (for [t (range trials)]
-                                    (let [s (filter #(and (= rid (:rule %)) (:seeded? %) (= t (:trial %))) rows)]
-                                      (rate (count (filter #(true? (:flagged? %)) s)) (count s))))))
-              n (count (filter #(and (= rid (:rule %)) (:seeded? %) (= 0 (:trial %))) a-out))]
-          (when (pos? n)
-            (println (format "    %-30s %.2f | %.2f  (n=%d)" (str rid) (rc a-out) (rc b-out) n)))))
+      (when (contains? strategies :A) (println "  A (per-rule): " (summ a-out)))
+      (when (contains? strategies :B) (println "  B (batched):  " (summ b-out)))
+      (println "  per-rule recall (mean over trials, seeded only):")
+      (let [scored (if (seq a-out) a-out b-out)
+            rc (fn [rows rid] (mean (for [t (range trials)]
+                                      (let [s (filter #(and (= rid (:rule %)) (:seeded? %) (= t (:trial %))) rows)]
+                                        (rate (count (filter #(true? (:flagged? %)) s)) (count s))))))]
+        (doseq [rid rule-ids]
+          (let [n (count (filter #(and (= rid (:rule %)) (:seeded? %) (= 0 (:trial %))) scored))]
+            (when (pos? n)
+              (println (format "    %-32s %s  (n=%d)" (str rid)
+                               (str/join " | " (cond-> []
+                                                 (contains? strategies :A) (conj (format "A %.2f" (rc a-out rid)))
+                                                 (contains? strategies :B) (conj (format "B %.2f" (rc b-out rid)))))
+                               n))))))
       (println)))
   (io/make-parents (io/file fixture-root "../results/latest.edn"))
   (spit (io/file fixture-root "../results/latest.edn") (with-out-str (pp/pprint @audit)))

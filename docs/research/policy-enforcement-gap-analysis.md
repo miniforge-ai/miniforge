@@ -327,3 +327,33 @@ quota into metered spend):
 E1 additions implied: an API/HTTP judge backend with `cache_control` prefix
 wiring, gated on backend capability (no-op on the subscription CLI); fail-closed
 semantic detection; changed-files scoping.
+
+## 10. Grown-corpus validation (2026-06-19)
+
+Corpus grown to **12 fixtures × 9 candidate rules × 3 trials** (added
+config-as-data, clojure-exception-handling, self-documenting-code [a deliberately
+fuzzy rule], validation-boundaries; plus 2 clean files + 1 near-miss). Two more
+rigor passes: natural code with no rule-name leaks, and fixture filenames renamed
+domain-neutral (a `clean_*` / `near_miss` name would prime the judge via the path
+it sees). Re-ran the locked config only (opus-4.8 batched).
+
+opus-4.8 + batched on the grown, reconciled corpus: **recall 0.95, precision
+0.92, zero parse-fails** (vs 1.00/1.00 on the 6-file corpus). The 1.00/1.00 was
+small-clean-corpus optimism. Breakdown: clear rules hold at recall 1.00; the dip
+is on subtle/secondary readings — `clojure-exception-handling` 0.67 (the
+ex-info-should-be-throw+ overlap, caught ~2/3 of trials), `localization` 0.92 (one
+flaky miss). Reconciliation again found the judge ≥ a hand-seeded oracle (most raw
+FPs were defensible cross-rule findings my truth had missed — added to truth).
+
+**Implications (do not change the lock; refine the expectation):**
+
+- An LLM judge as a hard gate is **~95% recall, not infallible** — ~5% of
+  violations (concentrated on subtle/overlapping readings) slip a single pass.
+- So treat it as one strong layer, not an oracle: defense-in-depth = deterministic
+  content-scan detectors where a rule allows + the reviewer-LLM layer + the
+  fix-and-gate ratchet (re-gates until an in-scope file complies). Multiple passes
+  / multi-lens verification can lift recall on subtle rules if needed.
+- opus-B remains the locked config: zero parse-fails, strongest both-axis profile,
+  cheapest viable. Corpus is still synthetic + modest — grow toward real
+  agent-output samples for production-grade confidence before flipping subtle
+  semantic rules to hard-halt.

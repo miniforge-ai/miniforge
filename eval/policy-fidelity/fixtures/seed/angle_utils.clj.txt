@@ -1,4 +1,4 @@
-(ns eval.seed.clean-geometry)
+(ns eval.seed.angle-utils)
 
 (def ^:private full-turn-degrees
   "Degrees in one full rotation — the wrap modulus for angle normalization."
