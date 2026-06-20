@@ -1,4 +1,5 @@
-(ns eval.seed.config-loader)
+(ns eval.seed.config-loader
+  (:require [clojure.string :as str]))
 
 ;; (defn load-config-v1 [path]
 ;;   (read-string (slurp path)))
@@ -13,7 +14,7 @@
   3600000)
 
 (defn- normalize-legacy-key [k]
-  (keyword (clojure.string/lower-case (name k))))
+  (keyword (str/lower-case (name k))))
 
 (defn with-cache-ttl
   "Attach the cache TTL to a config map."
