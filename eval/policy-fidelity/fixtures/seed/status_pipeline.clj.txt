@@ -1,0 +1,16 @@
+(ns eval.seed.status-pipeline
+  (:require [ai.miniforge.fetcher.interface :as fetcher]
+            [ai.miniforge.transform.interface :as transform]))
+
+(defn run-stage
+  "Fetch, then transform when the fetch succeeded."
+  [input]
+  (let [fetched (fetcher/fetch input)]
+    (if (= :ok (:status fetched))
+      (transform/apply-rules (:body fetched))
+      (throw (ex-info "fetch did not succeed" {:input input})))))
+
+(defn pipeline
+  "Run two stages and combine."
+  [a b]
+  {:left (run-stage a) :right (run-stage b)})

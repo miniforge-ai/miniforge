@@ -225,3 +225,50 @@ Remaining to settle during the Standards wave: the exact G-vs-policy line for th
 current guidance list (default to policy for anything that is a property of the
 artifact; keep only reviewer-behavior meta and no-criteria philosophy as
 guidance).
+
+## 7. Fidelity eval results (2026-06-19)
+
+Harness + seeded corpus in `eval/policy-fidelity/` (6 fixtures, 5 candidate
+rules, 3 trials; truth in `fixtures/truth.edn`; raw audit log regenerable, not
+committed). Two methodology bugs were caught and fixed by hardening, in order:
+(a) fixture annotation comments leaked the answer key to the judge and induced
+false no-dead-code hits — stripped; (b) the hand-seeded oracle was less thorough
+than the judge — corrected against the real rule text (localization covers
+exception payloads; named-constants requires const docstrings). Lesson: the
+oracle must be at least as good as the judge.
+
+Matrix (recall/precision against corrected truth; parse-fail = unparseable
+output = miss):
+
+| model | strategy | recall | precision | parse-fail | flaky | stable |
+|---|---|---|---|---|---|---|
+| sonnet-4.6 | A focused | 1.00 | 0.89 | 0 | 1 | yes |
+| sonnet-4.6 | B batched | 0.82 | 0.91 | 15 | 11 | no |
+| opus-4.7 | A focused | 1.00 | 0.85 | 0 | 3 | yes |
+| opus-4.7 | B batched | 1.00 | 0.95 | 0 | 1 | yes |
+| gpt-5.4 | A focused | 0.95 | 0.80 | 2 | 2 | ~ |
+| gpt-5.4 | B batched | 0.87 | 0.90 | 10 | 11 | no |
+
+Conclusions:
+
+- An LLM judge with focused prompts is reliable enough to hard-gate (recall 1.00,
+  stable, zero parse-fails on both Claude models) — de-risks the whole program.
+- Batched-B's reliability is model-bound: it parse-fails ~a third of the time on
+  sonnet/gpt but zero on opus. "Reject B" only holds below a model strong enough
+  to parse the large batched prompt.
+- Stronger ≠ uniformly better: opus-A precision (0.85) < sonnet-A (0.89). Best
+  model is per-strategy.
+- gpt-5.4 weakest on both axes here, plus codex returns raw JSONL (`:content`
+  needs agent-message extraction — a real backend gap if GPT ever judges).
+
+Two Pareto-optimal production configs (both clear recall 1.00):
+
+- **opus-4.7 + batched-B** — precision 0.95, fewest calls (~5/gate). Best if opus
+  cost is acceptable.
+- **sonnet-4.6 + focused-A** — precision 0.89, cheaper model; focused call-cost
+  recoverable via file-prefix caching.
+
+Residual precision 0.05–0.15 is defensible over-reads (e.g. `:ok` flagged as
+named-constants — right concern, wrong rule); handle before hard-halt via
+rule-scope tightening / accept-cross-rule / evidence-required. Corpus is small;
+grow rules + files before production confidence.

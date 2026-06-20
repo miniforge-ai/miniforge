@@ -1,0 +1,21 @@
+(ns eval.seed.config-loader)
+
+;; (defn load-config-v1 [path]
+;;   (read-string (slurp path)))
+
+(defn retry-budget
+  "Backoff for an attempt, or nil once exhausted."
+  [attempt]
+  (when (< attempt 5)
+    (* attempt 250)))
+
+(defn cache-ttl-ms []
+  3600000)
+
+(defn- normalize-legacy-key [k]
+  (keyword (clojure.string/lower-case (name k))))
+
+(defn with-cache-ttl
+  "Attach the cache TTL to a config map."
+  [config]
+  (assoc config :ttl-ms (cache-ttl-ms)))

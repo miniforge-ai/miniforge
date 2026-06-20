@@ -1,0 +1,26 @@
+(ns eval.seed.clean-geometry)
+
+(def ^:private full-turn-degrees
+  "Degrees in one full rotation — the wrap modulus for angle normalization."
+  360)
+
+(def ^:private right-angle-degrees
+  "Degrees in a quarter turn — the complementary-angle ceiling and quadrant unit."
+  90)
+
+(defn normalize-degrees
+  "Wrap an angle into [0, 360)."
+  [deg]
+  (mod deg full-turn-degrees))
+
+(defn complementary
+  "The complementary angle, or nil when none exists."
+  [deg]
+  (let [d (normalize-degrees deg)]
+    (when (<= d right-angle-degrees)
+      (- right-angle-degrees d))))
+
+(defn quadrant
+  "Quadrant index 0-3 for a normalized angle."
+  [deg]
+  (quot (normalize-degrees deg) right-angle-degrees))
