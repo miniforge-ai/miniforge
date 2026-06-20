@@ -37,10 +37,23 @@
 (def fixture-root "eval/policy-fidelity/fixtures")
 (def truth (edn/read-string (slurp (io/file fixture-root "truth.edn"))))
 
+(defn ->rule-kw
+  "Coerce a model-emitted :rule-id to a keyword — accepts a keyword, a
+   \":std/foo\" string, or a \"std/foo\" string. nil for anything else."
+  [x]
+  (cond (keyword? x) x
+        (string? x)  (keyword (str/replace x #"^:" ""))
+        :else        nil))
+
 (defn load-candidate-rules []
   (let [by-id (into {} (map (juxt :rule/id identity))
-                    (into (ab/load-builtin-rules) (ab/load-standards-rules)))]
-    (mapv by-id (:candidate-rules truth))))
+                    (into (ab/load-builtin-rules) (ab/load-standards-rules)))
+        ids (:candidate-rules truth)
+        missing (remove by-id ids)]
+    (when (seq missing)
+      (throw (ex-info (str "candidate rules missing from packs: " (vec missing))
+                      {:missing (vec missing)})))
+    (mapv by-id ids)))
 
 (defn bounded-pmap [n f coll]
   (vec (mapcat (fn [batch] (mapv deref (mapv #(future (f %)) batch)))
@@ -72,9 +85,10 @@
 (defn judge-A [client model rule path content]
   (let [{:keys [system user]} (sem/build-judge-prompt rule path content)
         r (llm/complete client {:system system :messages [{:role "user" :content user}] :model model})
-        v (parse-edn-vec (normalize-content (:content r)))]
+        v (parse-edn-vec (normalize-content (:content r)))
+        viols (when (vector? v) (vec (filter map? v)))]
     (cond (= ::parse-fail v) {:flagged? :parse-fail :violations []}
-          (seq v)            {:flagged? true :violations (vec v)}
+          (seq viols)        {:flagged? true :violations viols}
           :else              {:flagged? false :violations []})))
 
 (defn judge-B [client model rules path content]
@@ -83,7 +97,8 @@
         v (parse-edn-vec (normalize-content (:content r)))]
     (if (= ::parse-fail v)
       {:flagged-set :parse-fail :violations []}
-      {:flagged-set (set (keep :rule-id (filter map? v))) :violations (vec (filter map? v))})))
+      {:flagged-set (set (keep (comp ->rule-kw :rule-id) (filter map? v)))
+       :violations (vec (filter map? v))})))
 
 ;; ---- scoring ----
 (defn confusion [rows]               ; rows: {:seeded? :flagged?(true/false/:parse-fail)}

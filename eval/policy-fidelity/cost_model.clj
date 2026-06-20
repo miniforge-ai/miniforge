@@ -43,6 +43,8 @@
              "components/agent/src/ai/miniforge/agent/planner.clj"]
       f0    (first files)
       rules (filterv #(applies? % :review f0) all)
+      _ (when (empty? rules)
+          (throw (ex-info "no review-applicable rules — pack load or applies? drift" {})))
       nf    (count files)
       nr    (count rules)
       ;; component token sizes

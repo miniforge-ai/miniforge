@@ -1,4 +1,5 @@
-(ns eval.seed.greeting-view)
+(ns eval.seed.greeting-view
+  (:require [clojure.string]))
 
 ;; (defn old-greeting [user]
 ;;   (str "Hi " (:name user)))

@@ -338,12 +338,18 @@ domain-neutral (a `clean_*` / `near_miss` name would prime the judge via the pat
 it sees). Re-ran the locked config only (opus-4.8 batched).
 
 opus-4.8 + batched on the grown, reconciled corpus: **recall 0.95, precision
-0.92, zero parse-fails** (vs 1.00/1.00 on the 6-file corpus). The 1.00/1.00 was
-small-clean-corpus optimism. Breakdown: clear rules hold at recall 1.00; the dip
-is on subtle/secondary readings — `clojure-exception-handling` 0.67 (the
-ex-info-should-be-throw+ overlap, caught ~2/3 of trials), `localization` 0.92 (one
-flaky miss). Reconciliation again found the judge ≥ a hand-seeded oracle (most raw
-FPs were defensible cross-rule findings my truth had missed — added to truth).
+~0.90–0.92, zero parse-fails** (vs 1.00/1.00 on the 6-file corpus). Recall is
+stable at 0.952 across draws; precision varies 0.90–0.92 run-to-run (6 flaky
+cells over 3 trials — an LLM judge is stochastic, not deterministic). The
+1.00/1.00 was small-clean-corpus optimism. Breakdown: clear rules hold at recall
+1.00; the dip is on subtle/secondary readings — `clojure-exception-handling` 0.67
+(the ex-info-should-be-throw+ overlap, caught ~2/3 of trials), `localization`
+0.92 (one flaky miss). Reconciliation again found the judge ≥ a hand-seeded
+oracle (most raw FPs were defensible cross-rule findings my truth had missed —
+added to truth). Numbers reproduced on the post-review harness (the Copilot-fix
+commit: nil-safe rule coercion, map-filtered violation parsing, fail-fast on
+missing candidate rules) — those guards are no-ops on opus's clean EDN output, so
+fidelity is unchanged.
 
 **Implications (do not change the lock; refine the expectation):**
 
