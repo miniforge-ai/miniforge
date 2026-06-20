@@ -127,10 +127,9 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-        # Full history + tags so Polylith can resolve the stable baseline. The
-        # Test job runs the full `:all` suite (scope-independent), but a shallow
-        # no-tag clone left poly's incremental scope undefined elsewhere and
-        # silently under-tested.
+        # Full history + tags so Polylith can resolve the stable baseline for
+        # PR-scoped tests. When no stable tag is present, `bb test` falls back
+        # to a full Polylith test sweep rather than failing or under-testing.
         with:
           fetch-depth: 0
 
@@ -156,9 +155,9 @@ jobs:
           restore-keys: |
             clojure-${{ runner.os }}-
 
-      # scripts/test-changed-bricks.bb shells out to the standalone `poly`
+      # scripts/test-since-stable.bb shells out to the standalone `poly`
       # CLI. setup-clojure does not install it, and ubuntu-latest does not
-      # carry it either — so we drop the polylith uberjar onto PATH with a
+      # carry it either, so we drop the polylith uberjar onto PATH with a
       # tiny java -jar wrapper. Pinned version mirrors deps.edn :poly alias.
       - name: Install polylith CLI
         run: |
@@ -172,17 +171,20 @@ jobs:
           sudo chmod +x /usr/local/bin/poly
           poly --help >/dev/null && echo "poly installed at $(command -v poly)"
 
-      # GitHub Actions' default Linux shell is `bash -e {0}` — no pipefail.
-      # Without `set -o pipefail`, `bb test:all 2>&1 | tee` reports the exit
-      # code of `tee` (always 0), masking test failures and turning the
-      # job green even when nothing ran. This caused poly-missing failures
-      # to silently pass for an unknown stretch of time before being
-      # surfaced by the Windows fidelity work.
+      # Pull requests use stable-derived changed-and-affected scope. Main
+      # pushes keep the full suite as the stable-tag authority. GitHub
+      # Actions' default Linux shell is `bash -e {0}` — no pipefail; without
+      # `set -o pipefail`, `bb ... | tee` reports the exit code of `tee`
+      # instead of the test command.
       - name: Run tests
         run: |
           set -o pipefail
           echo "::group::Running Tests"
-          bb test:all 2>&1 | tee test-output.log
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            bb test 2>&1 | tee test-output.log
+          else
+            bb test:all 2>&1 | tee test-output.log
+          fi
           echo "::endgroup::"
 
       - name: Upload test logs
