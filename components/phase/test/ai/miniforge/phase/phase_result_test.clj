@@ -35,3 +35,19 @@
     (is (not (pr/blocked? (pr/success "env-1" "done"))))
     (is (not (pr/blocked? (pr/error "env-1" "boom" "boom" {}))))
     (is (nil? (pr/blocked-reason (pr/success "env-1" "done"))))))
+
+(deftest outcome-resolves-the-typed-act-test
+  (testing "a succeeding phase reports :success"
+    (is (= :success (pr/outcome (pr/success "env-1" "done") true))))
+  (testing "a non-succeeding phase reports :failure"
+    (is (= :failure (pr/outcome (pr/error "env-1" "boom" "boom" {}) false))))
+  (testing "a refusal dominates — :blocked regardless of the success verdict"
+    (let [result (pr/blocked "env-1" "refused" :missing-input {})]
+      (is (= :blocked (pr/outcome result false)))
+      (is (= :blocked (pr/outcome result true)))))
+  (testing "a redirect from a succeeding phase reports :redirected"
+    (let [result (pr/request-redirect (pr/success "env-1" "done") :verify)]
+      (is (= :redirected (pr/outcome result true)))))
+  (testing "an outright failure dominates a pending redirect"
+    (let [result (pr/request-redirect (pr/success "env-1" "done") :verify)]
+      (is (= :failure (pr/outcome result false))))))

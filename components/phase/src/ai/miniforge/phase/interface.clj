@@ -162,6 +162,12 @@
   "Return the RefusalReason keyword for a blocked phase result, if any."
   phase-result/blocked-reason)
 
+(def outcome
+  "Resolve a completed phase's typed act (:phase/outcome) from its result and
+   a success verdict — the single derivation shared by the event stream and
+   the views. See phase-result/outcome for the precedence rules."
+  phase-result/outcome)
+
 (def create-streaming-callback
   "Create a phase-scoped streaming callback when an event stream is available."
   telemetry/create-streaming-callback)
