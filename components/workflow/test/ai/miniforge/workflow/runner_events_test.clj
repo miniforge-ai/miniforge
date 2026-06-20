@@ -278,3 +278,28 @@
         (is (nil? (:final-message-preview meta)))
         (is (nil? (:turn-count meta)))
         (is (nil? (:tool-call-count meta)))))))
+
+(deftest phase-completed-blocked-carries-refusal-test
+  (testing "a blocked phase result emits :phase/outcome :blocked with its reason"
+    (let [stream (create-stream)
+          ctx    (test-context)
+          result (phase/blocked "env-1" "spec missing" :missing-input
+                                {:tokens 0 :duration-ms 0})]
+      (events/publish-phase-completed! stream ctx :plan result)
+      (let [event (first-event stream)]
+        (is (some? event) "event must be published — stream must be non-empty")
+        (is (= :blocked (:phase/outcome event)))
+        (is (= :missing-input (:phase/blocked-reason event)))))))
+
+(deftest phase-completed-redirected-names-the-act-test
+  (testing "a successful phase requesting a redirect emits :phase/outcome :redirected"
+    (let [stream (create-stream)
+          ctx    (test-context)
+          result (-> {:status :completed :success? true
+                      :result {:status :success :output {}
+                               :metrics {:tokens 0 :duration-ms 0}}}
+                     (phase/request-redirect :plan))]
+      (events/publish-phase-completed! stream ctx :review result)
+      (let [event (first-event stream)]
+        (is (some? event) "event must be published — stream must be non-empty")
+        (is (= :redirected (:phase/outcome event)))))))
