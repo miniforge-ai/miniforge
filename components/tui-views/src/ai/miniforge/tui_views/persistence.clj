@@ -174,10 +174,12 @@
 (defn phase-status
   [outcome]
   (case outcome
-    :failure :failed
-    :failed  :failed
-    :skipped :skipped
-    :success :success
+    :failure    :failed
+    :failed     :failed
+    :blocked    :failed
+    :skipped    :skipped
+    :success    :success
+    :redirected :success
     :running))
 
 (defn update-phase-entry

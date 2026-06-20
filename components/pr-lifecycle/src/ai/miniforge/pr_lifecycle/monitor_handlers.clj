@@ -34,6 +34,20 @@
   [result]
   (true? (:success? result)))
 
+(def ^:private category->action
+  "The PR-monitor's action verb for each classified-comment category. The
+   closed vocabulary the classify→act decision records."
+  {:change-request :fix
+   :question       :answer
+   :approval       :approve
+   :bot-comment    :skip
+   :noise          :skip})
+
+(defn- decision-action
+  "Action verb for a classified comment's category; unknown categories → :skip."
+  [category]
+  (get category->action category :skip))
+
 ;------------------------------------------------------------------------------ Layer 1
 ;; Comment handlers
 
@@ -200,13 +214,21 @@
 ;; Routing
 
 (defn route-comment
-  "Route a classified comment to the appropriate handler."
+  "Route a classified comment to the appropriate handler, recording the typed
+   classify→act decision first so the choice is one explicit act with provenance
+   rather than an inference from which handler ran."
   [monitor pr-info classified]
-  (case (:category classified)
-    :change-request (handle-change-request monitor pr-info classified)
-    :question (handle-question monitor pr-info classified)
-    :bot-comment (handle-bot-comment monitor pr-info classified)
-    :approval (handle-approval monitor pr-info classified)
-    :noise {:success? true :type :noise-skipped}
-    {:success? true :type :unknown-skipped :category (:category classified)}))
+  (let [category   (:category classified)
+        comment-id (get-in classified [:comment :comment/id])]
+    (state/emit! monitor
+                 (mevents/decision-recorded (:pr/number pr-info) comment-id
+                                            (decision-action category)
+                                            category (:confidence classified)))
+    (case category
+      :change-request (handle-change-request monitor pr-info classified)
+      :question (handle-question monitor pr-info classified)
+      :bot-comment (handle-bot-comment monitor pr-info classified)
+      :approval (handle-approval monitor pr-info classified)
+      :noise {:success? true :type :noise-skipped}
+      {:success? true :type :unknown-skipped :category category})))
 
