@@ -494,3 +494,34 @@
           task {:spec/provenance {:source-file path}}]
       (is (nil? (runner/validate-spec! "task-1" task nil))
           "Should accept path nested under :spec/provenance"))))
+
+;------------------------------------------------------------------------------ calculate-cost-usd Tests
+;; Pin reported costs to the current :token-pricing in defaults.edn (input 3.0 /
+;; output 15.0 per million, 0.7/0.3 split). A future EDN pricing edit that would
+;; silently change reported costs must fail these assertions.
+
+(deftest calculate-cost-usd-pinned-test
+  (testing "1,000,000 tokens at the configured pricing"
+    ;; 700k input * 3.0/M + 300k output * 15.0/M = 2.1 + 4.5 = 6.6
+    (is (= 6.6 (runner/calculate-cost-usd 1000000))))
+  (testing "mixed case: 500,000 tokens"
+    ;; 350k input * 3.0/M + 150k output * 15.0/M = 1.05 + 2.25 = 3.3
+    (is (= 3.3 (runner/calculate-cost-usd 500000))))
+  (testing "zero tokens costs nothing"
+    (is (= 0.0 (runner/calculate-cost-usd 0)))))
+
+;------------------------------------------------------------------------------ load-config Tests
+;; The defaults EDN is loaded fail-fast at namespace load; a missing classpath
+;; resource must throw a clear ex-info rather than a low-signal NPE.
+
+(deftest load-config-missing-resource-test
+  (testing "loading the runner namespace pinned defaults without NPE"
+    ;; If defaults failed to load, the ns would not have compiled and this test
+    ;; file would not run — so reaching here means the resource loaded.
+    (is (number? (runner/calculate-cost-usd 1000))
+        "defaults resource loaded; cost calc works"))
+  (testing "missing config resource throws a clear ex-info, not an NPE"
+    (is (thrown-with-msg?
+         clojure.lang.ExceptionInfo #"Missing config resource on classpath"
+         (#'runner/load-config "config/task-executor/does-not-exist.edn"
+                               [:worktree-acquire-timeout-ms])))))

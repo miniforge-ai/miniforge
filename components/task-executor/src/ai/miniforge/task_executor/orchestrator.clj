@@ -30,8 +30,31 @@
             [clojure.edn :as edn]
             [clojure.java.io :as io]))
 
+(defn- load-config
+  "Read an EDN config resource, failing fast with a clear ex-info when the
+   resource is absent from the classpath, malformed, not a map, or missing
+   a required key — rather than a low-signal NPE at load."
+  [path required-keys]
+  (let [url (io/resource path)]
+    (when (nil? url)
+      (throw (ex-info (str "Missing config resource on classpath: " path)
+                      {:config/resource path})))
+    (let [parsed (try
+                   (edn/read-string (slurp url))
+                   (catch Exception e
+                     (throw (ex-info (str "Malformed EDN config resource: " path)
+                                     {:config/resource path} e))))]
+      (when-not (map? parsed)
+        (throw (ex-info (str "Config resource is not a map: " path) {:config/resource path})))
+      (let [missing (remove #(contains? parsed %) required-keys)]
+        (when (seq missing)
+          (throw (ex-info (str "Config resource " path " missing keys: " (vec missing))
+                          {:config/resource path :config/missing-keys (vec missing)})))
+        parsed))))
+
 (def ^:private defaults
-  (-> (io/resource "config/task-executor/defaults.edn") slurp edn/read-string))
+  (load-config "config/task-executor/defaults.edn"
+               [:max-parallel :scheduler-poll-interval-ms]))
 
 (defn create-run-context
   [run-atom config]
