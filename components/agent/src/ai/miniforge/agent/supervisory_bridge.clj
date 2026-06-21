@@ -26,7 +26,9 @@
   when a workflow event-stream is present."
   (:require
    [ai.miniforge.agent.core :as core]
-   [ai.miniforge.event-stream.interface :as events])
+   [ai.miniforge.event-stream.interface :as events]
+   [clojure.edn :as edn]
+   [clojure.java.io :as io])
   (:import
    (java.nio ByteBuffer)
    (java.security MessageDigest)
@@ -38,8 +40,20 @@
 (def ^:private direct-agent-vendor
   :miniforge)
 
-(def ^:private default-heartbeat-interval-ms
+(def ^:private fallback-heartbeat-interval-ms
+  "In-code fallback used when config/agent/supervisory-bridge.edn is absent
+   or omits :heartbeat-interval-ms."
   30000)
+
+(def ^:private default-heartbeat-interval-ms
+  "Interval between heartbeat events for direct in-process agents. Loaded
+   from config/agent/supervisory-bridge.edn at ns load, falling back to
+   fallback-heartbeat-interval-ms."
+  (or (some-> (io/resource "config/agent/supervisory-bridge.edn")
+              slurp
+              edn/read-string
+              :heartbeat-interval-ms)
+      fallback-heartbeat-interval-ms))
 
 (def ^:private agent-session-namespace
   (UUID/fromString "4882f381-e57d-582f-95ab-3a9b36e11df8"))

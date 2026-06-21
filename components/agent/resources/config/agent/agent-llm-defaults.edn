@@ -16,9 +16,16 @@
 ;;   nothing — 32000 is a heuristic unblocker.
 ;; - reviewer/implementer max-tokens are bumped so structured output isn't
 ;;   truncated.
+;;
+;; :curator is not a role in the create-{role} sense; it is the curator's
+;; LLM-enrichment call site, whose tuning previously lived inline. It carries
+;; the same {:temperature :max-tokens} shape as the role entries and reads
+;; its config through the same loader. The meta-evaluator call site has a
+;; different shape (no :temperature) and lives in meta-eval-tuning.edn.
 
 {:planner     {:temperature 0.3 :max-tokens 32000}
  :implementer {:temperature 0.2 :max-tokens 32000}
  :releaser    {:temperature 0.3 :max-tokens 2000}
  :tester      {:temperature 0.2 :max-tokens 6000}
- :reviewer    {:temperature 0.1 :max-tokens 16000}}
+ :reviewer    {:temperature 0.1 :max-tokens 16000}
+ :curator     {:temperature 0.1 :max-tokens 800}}
