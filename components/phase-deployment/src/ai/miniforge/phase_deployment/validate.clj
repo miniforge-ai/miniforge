@@ -23,21 +23,11 @@
             [ai.miniforge.phase-deployment.evidence :as evidence]
             [ai.miniforge.phase-deployment.messages :as msg]
             [ai.miniforge.phase-deployment.shell :as shell]
+            [ai.miniforge.phase-deployment.shell.timeouts :as timeouts]
             [ai.miniforge.phase.interface :as phase]
             [ai.miniforge.schema.interface :as schema]
-            [clojure.edn :as edn]
-            [clojure.java.io :as io]
             [clojure.string :as str])
   (:import [java.net HttpURLConnection URL]))
-
-;------------------------------------------------------------------------------ Layer 0
-;; Timeout configuration
-
-(def ^:private timeouts
-  "Validation command timeouts (ms), loaded from EDN."
-  (if-let [resource (io/resource "config/phase-deployment/timeouts.edn")]
-    (edn/read-string (slurp resource))
-    {}))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Defaults + schemas
@@ -154,7 +144,7 @@
 
 (defn- http-health-check
   "Execute an HTTP health check against an endpoint."
-  [url & {:keys [timeout-ms] :or {timeout-ms (get timeouts :health-check-ms 10000)}}]
+  [url & {:keys [timeout-ms] :or {timeout-ms (get timeouts/timeouts :health-check-ms 10000)}}]
   (let [start (System/currentTimeMillis)]
     (try
       (let [conn (doto ^HttpURLConnection (.openConnection (URL. url))
@@ -195,7 +185,7 @@
   (let [results (mapv (fn [cmd]
                         (let [[bin & args] (str/split cmd #"\s+")
                               result (shell/sh-with-timeout bin (vec args)
-                                                            :timeout-ms (get timeouts :smoke-test-ms 30000))]
+                                                            :timeout-ms (get timeouts/timeouts :smoke-test-ms 30000))]
                           (smoke-test-result cmd result)))
                       commands)]
     (batch-result SmokeTestResult results)))
