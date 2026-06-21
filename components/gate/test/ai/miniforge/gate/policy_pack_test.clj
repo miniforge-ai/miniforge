@@ -197,6 +197,25 @@
       (is (not (:passed? result)))
       (is (seq (:errors result))))))
 
+(deftest semantic-judge-scoped-to-changed-files-test
+  (testing "with no explicit analyze-fn, the gate injects a changed-files-scoped
+            judge: the LLM prompt carries the artifact's changed file content,
+            not a whole-repo scan"
+    (let [seen          (atom nil)
+          fake-complete (fn [_client request]
+                          (reset! seen request)
+                          {:content "[{:line 1 :message \"semantic issue\"}]"})
+          ctx           (assoc (ctx-with [(pack (semantic-rule :phases #{:verify}
+                                                              :action :hard-halt))])
+                               :llm-backend ::client
+                               :complete-fn fake-complete)
+          result        (sut/check-policy-verify dirty-code-artifact ctx)]
+      (is (not (:passed? result)))
+      (is (seq (:errors result)))
+      (is (re-find #"FORBIDDEN"
+                   (-> @seen :messages first :content))
+          "judge prompt must contain the changed file's content"))))
+
 ;------------------------------------------------------------------------------ Phase scoping
 
 (deftest phase-scoping-test

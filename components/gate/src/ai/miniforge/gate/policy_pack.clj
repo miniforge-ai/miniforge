@@ -40,11 +40,12 @@
    Semantic seam: this gate is the layer that depends on both the policy pack
    and the LLM, so it INJECTS the LLM-judge wiring the policy-pack detector
    needs — `:llm-client` (from the run's `:llm-backend`), `:complete-fn`
-   (`llm/complete`), and `semantic-analyzer/analyze-rule` under
-   `:semantic-analyze-fn` — so heuristic (`:custom` rules with no resolvable
-   `:custom-fn`) reach the LLM judge. With compiled checks, missing semantic
-   wiring is reported as a policy violation; the pack's enforcement action
-   controls whether that violation blocks, requires approval, warns, or audits.
+   (`llm/complete`), and a `:semantic-analyze-fn` that scopes the judge to the
+   run's CHANGED files (not the whole repo) — so heuristic (`:custom` rules with
+   no resolvable `:custom-fn`) reach the LLM judge over exactly the artifact
+   under review. With compiled checks, missing semantic wiring is reported as a
+   policy violation; the pack's enforcement action controls whether that
+   violation blocks, requires approval, warns, or audits.
 
    Cost discipline: the judge runs only for semantic rules the run intends to
    ACT on — `:hard-halt` / `:require-approval`. A semantic rule that only warns
@@ -109,15 +110,39 @@
 ;------------------------------------------------------------------------------ Layer 1
 ;; Context wiring
 
+(defn- artifact-changed-files
+  "The changed files [{:path :content}] this gate evaluates, taken from the
+   resolved policy artifact (its code files, or a single content artifact).
+   This is the changed-files scope handed to the judge."
+  [artifact]
+  (cond
+    (seq (:code/files artifact))
+    (mapv (fn [f] {:path    (or (:path f) (:artifact/path f))
+                   :content (or (:content f) (:artifact/content f))})
+          (:code/files artifact))
+
+    (or (:artifact/path artifact) (:path artifact))
+    [{:path    (or (:artifact/path artifact) (:path artifact))
+      :content (or (:artifact/content artifact) (:content artifact))}]
+
+    :else []))
+
+(defn- changed-files-analyzer
+  "An `analyze-rule`-shaped fn (repo-path ignored) that scopes the judge to the
+   run's changed files instead of scanning the whole repo."
+  [files]
+  (fn [llm-client complete-fn _repo-path rule]
+    (semantic/analyze-rule-on-files llm-client complete-fn rule files)))
+
 (defn- with-semantic-wiring
   "Inject the LLM-judge seam the policy-pack semantic detector needs. Derives
    `:llm-client` from the run's `:llm-backend` when absent, sets `:complete-fn`
-   to `llm/complete`, and injects `semantic-analyzer/analyze-rule` under
-   `:semantic-analyze-fn`. Also normalizes the repo path the judge scans
-   (`:repo-path`, falling back to the execution worktree). When the run carries
+   to `llm/complete`, and injects a `:semantic-analyze-fn` that scopes the judge
+   to `artifact`'s changed files (not the whole repo). Also normalizes
+   `:repo-path` (falling back to the execution worktree). When the run carries
    no LLM backend, the seam stays unwired so compiled semantic checks fail loud
    according to pack enforcement (fail-closed)."
-  [ctx]
+  [ctx artifact]
   (let [ctx (assoc ctx :repo-path (or (:repo-path ctx)
                                       (:execution/worktree-path ctx)
                                       "."))
@@ -130,7 +155,8 @@
     (if (and (:llm-client ctx)
              (:complete-fn ctx)
              (not (:semantic-analyze-fn ctx)))
-      (assoc ctx :semantic-analyze-fn semantic/analyze-rule)
+      (assoc ctx :semantic-analyze-fn (changed-files-analyzer
+                                       (artifact-changed-files artifact)))
       ctx)))
 
 (defn- no-policy-packs-warning
@@ -420,7 +446,7 @@
     (if (empty? packs)
       {:passed? true :warnings [(no-policy-packs-warning)]}
       (let [artifact (policy-artifact artifact ctx)
-            context  (-> ctx with-semantic-wiring (assoc :phase phase))
+            context  (-> (with-semantic-wiring ctx artifact) (assoc :phase phase))
             result   (compiled-check-result packs phase artifact context)]
         (when (:compiled? result)
           (emit-rule-evidence! ctx phase
