@@ -80,7 +80,7 @@
 (defn optional-provider
   "Look up an explicitly composed optional provider by symbol.
    Returns the registered function, or nil when no provider is available.
-  Does NOT call the function."
+   Does NOT call the function."
   [fn-sym]
   (get optional-functions fn-sym))
 
@@ -99,6 +99,9 @@
   (when-let [f (optional-provider fn-sym)]
     (try
       (apply f args)
+      (catch InterruptedException _
+        (.interrupt (Thread/currentThread))
+        nil)
       (catch Exception _ nil))))
 
 (defn usage-error!

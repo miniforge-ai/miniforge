@@ -33,4 +33,13 @@
     (with-redefs [sut/optional-functions {'example/failing (fn [] (throw (ex-info "boom" {})))}]
       (is (nil? (sut/optional-provider 'example/missing)))
       (is (nil? (sut/call-optional-provider 'example/missing)))
-      (is (nil? (sut/call-optional-provider 'example/failing))))))
+      (is (nil? (sut/call-optional-provider 'example/failing)))))
+
+  (testing "interrupted providers restore the thread interrupt flag"
+    (with-redefs [sut/optional-functions {'example/interrupted
+                                           (fn []
+                                             (throw (InterruptedException. "stop")))}]
+      (let [result       (sut/call-optional-provider 'example/interrupted)
+            interrupted? (Thread/interrupted)]
+        (is (nil? result))
+        (is interrupted?)))))
