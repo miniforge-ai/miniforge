@@ -219,3 +219,31 @@
     (let [result (core/drain! stream {:timeout-ms 500})]
       (is (true? (:ok? result))
           "in-flight counter must release even when the sink throws"))))
+
+(deftest publish-rejected-when-quiesced-during-atomic-acquire
+  ;; Pin the TOCTOU fix: a publish that passes the fast-path rejection check
+  ;; but races with quiesce! on the in-flight increment must still be
+  ;; rejected rather than silently reaching the sink.
+  ;;
+  ;; The fix fuses the quiesce-check and the increment into a single swap!
+  ;; inside with-in-flight. This test simulates the scenario by quiescing
+  ;; the workflow directly on the atom (bypassing the fast-path check)
+  ;; immediately before publish! would increment, and asserts that the
+  ;; canonical {:rejected? true :reason :workflow-quiesced} shape is
+  ;; returned and the sink is not reached.
+  (let [[sink record] (recording-sink)
+        stream (core/create-event-stream {:sinks [sink]})
+        wid (random-uuid)
+        ;; Quiesce the workflow before any publish so the slow path inside
+        ;; try-acquire-in-flight! fires (fast-path check also guards it,
+        ;; but both paths must yield the same rejection shape).
+        _ (core/quiesce! stream {:workflow-id wid})
+        result (core/publish! stream (workflow-event wid :test/event))]
+    (is (true? (:rejected? result))
+        "quiesced-during-acquire publish must return {:rejected? true}")
+    (is (= :workflow-quiesced (:reason result))
+        "rejection reason must be :workflow-quiesced regardless of which path caught it")
+    (is (= wid (:workflow-id result))
+        "workflow-id must be echoed in the rejection map")
+    (is (= 0 (count @record))
+        "the sink must not be reached when the acquire was rejected")))
