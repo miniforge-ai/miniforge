@@ -20,6 +20,7 @@
   "Kustomize CLI wrappers for deployment phases."
   (:require [ai.miniforge.phase-deployment.messages :as msg]
             [ai.miniforge.phase-deployment.shell.exec :as exec]
+            [ai.miniforge.phase-deployment.shell.timeouts :as timeouts]
             [ai.miniforge.schema.interface :as schema])
   (:import [java.io File]))
 
@@ -40,7 +41,7 @@
   (schema/validate KustomizeApplyResult result))
 
 (defn kustomize-build!
-  [kustomize-dir & {:keys [timeout-ms] :or {timeout-ms 60000}}]
+  [kustomize-dir & {:keys [timeout-ms] :or {timeout-ms (get timeouts/timeouts :kustomize-build-ms 60000)}}]
   (exec/sh-with-timeout "kustomize" ["build" kustomize-dir] :timeout-ms timeout-ms))
 
 (defn kustomize-apply!
@@ -64,7 +65,7 @@
                                                 (-> (subvec apply-args 0 1)
                                                     (into ["-f" (.getAbsolutePath tmp-file)])
                                                     (into (subvec apply-args 3)))
-                                                :timeout-ms 120000)]
+                                                :timeout-ms (get timeouts/timeouts :kustomize-apply-ms 120000))]
         (try
           (.delete tmp-file)
           (catch Exception _ nil))

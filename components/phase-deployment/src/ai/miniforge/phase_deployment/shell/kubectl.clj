@@ -18,7 +18,8 @@
 
 (ns ai.miniforge.phase-deployment.shell.kubectl
   "kubectl CLI wrappers for deployment phases."
-  (:require [ai.miniforge.phase-deployment.shell.exec :as exec]))
+  (:require [ai.miniforge.phase-deployment.shell.exec :as exec]
+            [ai.miniforge.phase-deployment.shell.timeouts :as timeouts]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; kubectl wrappers
@@ -26,7 +27,7 @@
 (defn kubectl!
   "Execute a kubectl command."
   [subcommand & {:keys [namespace context output extra-args timeout-ms]
-                 :or {timeout-ms 120000}}]
+                 :or {timeout-ms (get timeouts/timeouts :kubectl-default-ms 120000)}}]
   (let [args (cond-> [subcommand]
                namespace  (into ["--namespace" namespace])
                context    (into ["--context" context])

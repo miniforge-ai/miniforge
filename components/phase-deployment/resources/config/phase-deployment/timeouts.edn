@@ -1,0 +1,28 @@
+;; Title: Miniforge.ai
+;; Subtitle: An agentic SDLC / fleet-control platform
+;; Author: Christopher Lester
+;; Line: Founder, Miniforge.ai (project)
+;; Copyright 2025-2026 Christopher Lester (christopher@miniforge.ai)
+;;
+;; Licensed under the Apache License, Version 2.0 (the "License");
+;; you may not use this file except in compliance with the License.
+;; You may obtain a copy of the License at
+;;
+;;     http://www.apache.org/licenses/LICENSE-2.0
+;;
+;; Unless required by applicable law or agreed to in writing, software
+;; distributed under the License is distributed on an "AS IS" BASIS,
+;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+;; See the License for the specific language governing permissions and
+;; limitations under the License.
+
+;; Deployment shell command timeouts in milliseconds, tuned per environment by
+;; the operator. Keyed per use-site/tool.
+{:exec-default-ms 300000
+ :pulumi-default-ms 900000
+ :pulumi-outputs-ms 30000
+ :kubectl-default-ms 120000
+ :kustomize-build-ms 60000
+ :kustomize-apply-ms 120000
+ :health-check-ms 10000
+ :smoke-test-ms 30000}

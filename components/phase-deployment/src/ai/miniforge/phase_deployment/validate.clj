@@ -23,6 +23,7 @@
             [ai.miniforge.phase-deployment.evidence :as evidence]
             [ai.miniforge.phase-deployment.messages :as msg]
             [ai.miniforge.phase-deployment.shell :as shell]
+            [ai.miniforge.phase-deployment.shell.timeouts :as timeouts]
             [ai.miniforge.phase.interface :as phase]
             [ai.miniforge.schema.interface :as schema]
             [clojure.string :as str])
@@ -143,7 +144,7 @@
 
 (defn- http-health-check
   "Execute an HTTP health check against an endpoint."
-  [url & {:keys [timeout-ms] :or {timeout-ms 10000}}]
+  [url & {:keys [timeout-ms] :or {timeout-ms (get timeouts/timeouts :health-check-ms 10000)}}]
   (let [start (System/currentTimeMillis)]
     (try
       (let [conn (doto ^HttpURLConnection (.openConnection (URL. url))
@@ -183,7 +184,8 @@
   [commands]
   (let [results (mapv (fn [cmd]
                         (let [[bin & args] (str/split cmd #"\s+")
-                              result (shell/sh-with-timeout bin (vec args) :timeout-ms 30000)]
+                              result (shell/sh-with-timeout bin (vec args)
+                                                            :timeout-ms (get timeouts/timeouts :smoke-test-ms 30000))]
                           (smoke-test-result cmd result)))
                       commands)]
     (batch-result SmokeTestResult results)))
