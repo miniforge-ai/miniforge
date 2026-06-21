@@ -77,7 +77,7 @@
   (alter-var-root #'optional-functions assoc fn-sym f)
   f)
 
-(defn try-resolve
+(defn optional-provider
   "Look up an explicitly composed optional provider by symbol.
    Returns the registered function, or nil when no provider is available.
   Does NOT call the function."
@@ -92,11 +92,11 @@
 ;------------------------------------------------------------------------------ Layer 1
 ;; Composes Layer 0.
 
-(defn try-resolve-fn
+(defn call-optional-provider
   "Look up optional provider `fn-sym` and immediately apply it to `args`.
    Returns nil when no provider is registered or the provider fails."
   [fn-sym & args]
-  (when-let [f (try-resolve fn-sym)]
+  (when-let [f (optional-provider fn-sym)]
     (try
       (apply f args)
       (catch Exception _ nil))))

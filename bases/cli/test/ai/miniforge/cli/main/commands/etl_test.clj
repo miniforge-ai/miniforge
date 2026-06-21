@@ -87,7 +87,7 @@
                          {:technologies [:clojure]
                           :git-host "github"
                           :packs [:foundations]})
-                    #'shared/try-resolve-fn
+                    #'shared/call-optional-provider
                     (fn [& _]
                       (throw (ex-info "optional provider should not be used" {})))
                     #'shared/exit!

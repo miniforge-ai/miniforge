@@ -119,8 +119,8 @@
   [opts]
   (display/print-info (messages/t :fleet/watch-starting))
   (display/print-info (messages/t :fleet/watch-events-dir {:dir (app-config/events-dir)}))
-  (let [fleet-tui!  (shared/try-resolve 'ai.miniforge.tui-views.interface/start-fleet-tui!)
-        standalone! (shared/try-resolve 'ai.miniforge.tui-views.interface/start-standalone-tui!)]
+  (let [fleet-tui!  (shared/optional-provider 'ai.miniforge.tui-views.interface/start-fleet-tui!)
+        standalone! (shared/optional-provider 'ai.miniforge.tui-views.interface/start-standalone-tui!)]
     (cond
       fleet-tui!
       (fleet-tui! opts)
