@@ -7,9 +7,12 @@ Moves the LSP client request, initialize, and shutdown timeouts in the
 Behavior-preserving: the loaded values match the originals
 (`30000`/`60000`/`10000`).
 
-This is the follow-up to PR #1253, which externalized the same three timeouts
-for the `tool-registry` component. The base carried a duplicate of those magic
-numbers.
+This is the follow-up to PR #1253, which externalized the same three
+timeouts for the `tool-registry` component (adding
+`components/tool-registry/resources/config/tool-registry/lsp.edn` and the
+matching client changes). That PR is still open at the time of writing, so
+the paths it introduces are not yet on `main`. The base carried a
+duplicate of the same three magic numbers.
 
 ## Motivation
 
@@ -31,25 +34,36 @@ the `bb.edn` LSP tasks. This PR does that path wiring.
   `bases/lsp-mcp-bridge/resources/config/lsp-mcp-bridge/lsp.edn` holding
   `{:request-timeout-ms 30000 :init-timeout-ms 60000 :shutdown-timeout-ms 10000}`,
   with the Apache-2.0 header and a comment describing each key. Values and
-  structure mirror the `tool-registry` LSP timeout config introduced in PR #1253.
+  structure match the `tool-registry` resource introduced by PR #1253.
+- New message catalog
+  `bases/lsp-mcp-bridge/resources/config/lsp-mcp-bridge/messages/en-US.edn`
+  holding the config-load diagnostic strings, so the fail-fast `ex-info`
+  messages are catalog-data (operator/system-locale, auditable and overridable)
+  rather than raw English string literals in source. Follows the event-stream
+  `:fleet-sink.system/*` precedent.
 - `bases/lsp-mcp-bridge/src/ai/miniforge/lsp_mcp_bridge/lsp/client.clj`:
-  - requires `clojure.edn` and `clojure.java.io`
+  - requires `clojure.edn`, `clojure.java.io`, and `messages.interface`
   - adds a private `load-config` helper that reads the EDN via
     `(io/resource ...) slurp edn/read-string`, failing fast with a clear
-    `ex-info` when the resource is missing, malformed, not a map, or missing a
-    required key (mirrors the `tool-registry` client)
+    `ex-info` (message routed through the catalog) when the resource is missing,
+    malformed, not a map, missing a required key, or carries a
+    non-positive-integer timeout value
   - `default-timeout-ms` now sources `:request-timeout-ms`; new `init-timeout-ms`
     and `shutdown-timeout-ms` defs source their keys
   - the `60000` in `initialize` and the `10000` in `shutdown` now reference the
     new defs
-- Path wiring so the new resource is on every classpath that already lists the
+- Path wiring so the new resources are on every classpath that already lists the
   base `src`:
   - `bases/lsp-mcp-bridge/deps.edn` `:paths` → `["src" "resources"]` (the three
     projects reference the base via `:local/root`, so they inherit this — no
-    project `deps.edn` edits needed)
-  - workspace `deps.edn` `:dev` and `:test` path lists
+    project `deps.edn` edits needed; `messages`, like `response`, is already
+    supplied by each project and the workspace, so it follows the Polylith
+    base convention of not being listed in the base `deps.edn`)
+  - workspace `deps.edn` `:dev` and `:test` path lists (already carry
+    `components/messages/*`)
   - the four `bb.edn` LSP tasks (`lsp-mcp-bridge`, `lsp:status`, `lsp:install`,
-    `lsp:setup`) and the `miniforge` dev task, each of which loads the base
+    `lsp:setup`) gain `components/messages/{src,resources}` plus the base
+    `resources`; the `miniforge` dev task already carried `messages`
 
 ## Verification
 
@@ -57,7 +71,11 @@ the `bb.edn` LSP tasks. This PR does that path wiring.
   equal `30000`/`60000`/`10000`, matching the originals.
 - bb resource resolution: `io/resource` + `edn/read-string` of
   `config/lsp-mcp-bridge/lsp.edn` returns the expected map under Babashka.
-- Base isolated tests (client, config, protocol, installer): 31 tests, 111
+- `load-config` negative paths exercised: a missing key and a
+  non-positive-integer value each throw the catalog-routed `ex-info` (not a
+  later low-signal `deref` failure), and the resolved message comes from the
+  catalog.
+- Base isolated tests (client, config, protocol, installer): 32 tests, 124
   assertions, 0 failures, 0 errors.
 - `bb poly:check`: OK.
 

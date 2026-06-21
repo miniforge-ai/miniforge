@@ -1,0 +1,21 @@
+{:lsp-mcp-bridge/messages
+ {;; Config-load fail-fast diagnostics raised at namespace init by
+  ;; lsp.client/load-config. Operator-facing (system-locale, not
+  ;; user-localized), but routed through the catalog — per
+  ;; .standards/foundations/localization.mdc and the event-stream
+  ;; :fleet-sink.system/* precedent — so the one place to audit or
+  ;; override them is data, not source.
+  :lsp-config.system/missing-resource
+  "Missing config resource on classpath: {path}"
+
+  :lsp-config.system/malformed
+  "Malformed EDN config resource: {path}"
+
+  :lsp-config.system/not-a-map
+  "Config resource is not a map: {path}"
+
+  :lsp-config.system/missing-keys
+  "Config resource {path} missing keys: {keys}"
+
+  :lsp-config.system/invalid-values
+  "Config resource {path} timeout values must be positive integer milliseconds; invalid: {keys}"}}

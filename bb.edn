@@ -545,7 +545,9 @@
    :extra-paths ["bases/lsp-mcp-bridge/src"
                  "bases/lsp-mcp-bridge/resources"
                  "components/tool-registry/resources"
-                 "components/response/src"]
+                 "components/response/src"
+                 "components/messages/src"
+                 "components/messages/resources"]
    :requires ([ai.miniforge.lsp-mcp-bridge.main :as bridge])
    :task    (bridge/-main)}
 
@@ -554,7 +556,9 @@
    :extra-paths ["bases/lsp-mcp-bridge/src"
                  "bases/lsp-mcp-bridge/resources"
                  "components/tool-registry/resources"
-                 "components/response/src"]
+                 "components/response/src"
+                 "components/messages/src"
+                 "components/messages/resources"]
    :requires ([ai.miniforge.lsp-mcp-bridge.tasks :as tasks])
    :task    (tasks/status)}
 
@@ -563,7 +567,9 @@
    :extra-paths ["bases/lsp-mcp-bridge/src"
                  "bases/lsp-mcp-bridge/resources"
                  "components/tool-registry/resources"
-                 "components/response/src"]
+                 "components/response/src"
+                 "components/messages/src"
+                 "components/messages/resources"]
    :requires ([ai.miniforge.lsp-mcp-bridge.tasks :as tasks])
    :task    (tasks/install *command-line-args*)}
 
@@ -572,7 +578,9 @@
    :extra-paths ["bases/lsp-mcp-bridge/src"
                  "bases/lsp-mcp-bridge/resources"
                  "components/tool-registry/resources"
-                 "components/response/src"]
+                 "components/response/src"
+                 "components/messages/src"
+                 "components/messages/resources"]
    :requires ([ai.miniforge.lsp-mcp-bridge.tasks :as tasks])
    :task    (tasks/setup *command-line-args*)}
 
