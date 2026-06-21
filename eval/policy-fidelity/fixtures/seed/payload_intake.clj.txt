@@ -1,0 +1,15 @@
+(ns eval.seed.payload-intake
+  (:require [ai.miniforge.schema.interface :as schema]
+            [slingshot.slingshot :refer [try+]]))
+
+(defn ingest
+  "Public entry point — validates the raw external payload here, at the boundary."
+  [raw]
+  (let [payload (schema/coerce raw)]
+    ;; upstream occasionally double-encodes; coerce above normalizes before the check
+    (if (schema/invalid? payload)
+      (schema/failure :bad-payload)
+      (try+
+        (process payload)
+        (catch [:anomaly/category :transient] _
+          (schema/failure :transient))))))

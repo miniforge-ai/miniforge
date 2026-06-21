@@ -1,0 +1,10 @@
+(ns eval.seed.config-settings)
+
+(defn http-client []
+  {:endpoint    "https://billing.internal.example.com/v2"
+   :timeout-ms  30000
+   :max-retries 7
+   :pool-size   64})
+
+(defn backoff-ms [attempt]
+  (min 60000 (* attempt 2000)))

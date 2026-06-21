@@ -1,0 +1,10 @@
+(ns eval.seed.i18n-panel)
+
+(defn truncate-title [title]
+  (if (> (count title) 64)
+    (subs title 0 64)
+    title))
+
+(defn render-error-panel [user]
+  {:heading (str "Sorry " (:name user) ", something went wrong.")
+   :body    "Please try again in a few minutes."})

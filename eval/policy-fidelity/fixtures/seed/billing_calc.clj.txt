@@ -1,0 +1,11 @@
+(ns eval.seed.billing-calc)
+
+(defn line-tax [amount rate]
+  ;; multiply the amount by the rate to compute the tax
+  (* amount rate))
+
+(defn line-total [amount rate]
+  ;; add the tax to the original amount and return the sum
+  (let [t (line-tax amount rate)]
+    ;; now add them together
+    (+ amount t)))

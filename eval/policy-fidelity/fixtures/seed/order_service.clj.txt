@@ -1,0 +1,10 @@
+(ns eval.seed.order-service
+  (:require [ai.miniforge.payments.interface :as payments]))
+
+(defn charge-order
+  "Charge an order. Returns the payment result."
+  [order]
+  (let [result (payments/charge (:amount order))]
+    (if (= :error (:status result))
+      (throw (ex-info "charge failed" {:order order}))
+      (assoc order :charged? true :tier "gold" :loyalty-days 90))))

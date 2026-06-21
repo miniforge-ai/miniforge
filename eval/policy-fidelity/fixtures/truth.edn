@@ -1,0 +1,66 @@
+;; Ground truth for the seeded-synthetic policy-judge fidelity eval.
+;; Each fixture violates exactly the listed rules from :candidate-rules and is
+;; clean w.r.t. every other candidate rule. Scoring is rule-level per file:
+;; recall = seeded ∧ flagged; precision = flagged ∧ seeded. A clean fixture
+;; (empty :violates) tests specificity. Keys are the realistic .clj path the
+;; judge sees; on disk each fixture is <key>.txt (harness appends .txt) so the
+;; *.clj staged-lint skips these intentional rule-violations.
+{:candidate-rules
+ [:std/named-constants
+  :std/exceptions-as-data
+  :std/result-handling
+  :std/localization
+  :std/no-dead-code
+  :std/config-as-data
+  :std/clojure-exception-handling
+  :std/self-documenting-code
+  :std/validation-boundaries]
+
+ :fixtures
+ {"seed/order_service.clj"
+  {:violates #{:std/named-constants :std/exceptions-as-data :std/result-handling :std/localization :std/clojure-exception-handling}
+   :notes "magic 90 + \"gold\" enum; throw in normal flow; manual :status check; ex-info string is an emitted literal"}
+
+  "seed/greeting_view.clj"
+  {:violates #{:std/no-dead-code :std/localization}
+   :notes "commented-out + unused private fn; hardcoded user-facing welcome string"}
+
+  "seed/config_loader.clj"
+  {:violates #{:std/named-constants :std/no-dead-code :std/config-as-data}
+   :notes "magic 5/250/3600000 are operational (retry count, backoff, TTL) → config-as-data + named-constants; commented-out + unused private fn"}
+
+  "seed/status_pipeline.clj"
+  {:violates #{:std/result-handling :std/exceptions-as-data :std/localization}
+   :notes "manual :status = :ok check; throw on non-success; ex-info string is emitted"}
+
+  "seed/i18n_panel.clj"
+  {:violates #{:std/localization :std/named-constants}
+   :notes "hardcoded user-facing error strings; magic 64 truncation length (display constant, not operational)"}
+
+  "seed/config_settings.clj"
+  {:violates #{:std/config-as-data :std/named-constants}
+   :notes "endpoint URL + timeout-ms 30000 + max-retries 7 + pool 64 + backoff literals = operator-tunable operational values"}
+
+  "seed/row_aggregator.clj"
+  {:violates #{:std/validation-boundaries}
+   :notes "map?/nil? guards on internal data inside the component (should validate at the interface, not internals); no throw"}
+
+  "seed/step_runner.clj"
+  {:violates #{:std/clojure-exception-handling :std/exceptions-as-data}
+   :notes "plain try + class-only (catch Exception e) digging ex-data for :anomaly/category — should be try+"}
+
+  "seed/billing_calc.clj"
+  {:violates #{:std/self-documenting-code}
+   :notes "comments narrate WHAT the code does (multiply, add) — restate the code, no real why"}
+
+  "seed/angle_utils.clj"
+  {:violates #{}
+   :notes "clean — named constants with docstrings, pure functions, no user strings/throws/dead code/internal validation"}
+
+  "seed/page_fetcher.clj"
+  {:violates #{}
+   :notes "clean — failed? predicate, anomaly passthrough, named const w/ docstring, boundary-only, no redundant comments"}
+
+  "seed/payload_intake.clj"
+  {:violates #{}
+   :notes "near-miss precision test: legit WHY comment, validation AT the boundary, correct try+ keyword catch, named const w/ rationale — a faithful judge flags nothing"}}}

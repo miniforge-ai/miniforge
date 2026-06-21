@@ -1,0 +1,13 @@
+(ns eval.seed.row-aggregator)
+
+(defn summarize-rows
+  "Roll up rows the interface already validated upstream."
+  [rows]
+  (if (map? rows)
+    (reduce-kv (fn [acc _ v] (+ acc v)) 0 rows)
+    0))
+
+(defn merge-summaries [a b]
+  (if (nil? a)
+    b
+    (merge-with + a b)))

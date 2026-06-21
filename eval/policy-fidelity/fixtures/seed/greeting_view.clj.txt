@@ -1,0 +1,13 @@
+(ns eval.seed.greeting-view
+  (:require [clojure.string]))
+
+;; (defn old-greeting [user]
+;;   (str "Hi " (:name user)))
+
+(defn- format-legacy-banner [s]
+  (clojure.string/upper-case s))
+
+(defn welcome-banner
+  "Render the welcome banner shown to the signed-in user."
+  [user]
+  (str "Welcome back, " (:name user) "! Your dashboard is ready."))
