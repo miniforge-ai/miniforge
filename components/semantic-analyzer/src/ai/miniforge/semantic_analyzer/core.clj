@@ -101,15 +101,19 @@
 ;------------------------------------------------------------------------------ Layer 2
 ;; File selection and batch analysis
 
-(def ^:private limits-resource "config/semantic-analyzer/limits.edn")
+(defn- load-limits
+  "Read the limits EDN, returning {} if the resource is absent,
+   unreadable, malformed, or not a map — so the call-site literal
+   defaults remain authoritative (fail-open, matching the prior
+   inline-literal behavior)."
+  [path]
+  (try
+    (let [url    (io/resource path)
+          parsed (when url (edn/read-string (slurp url)))]
+      (if (map? parsed) parsed {}))
+    (catch Exception _ {})))
 
-(def ^:private limits
-  "Operational scan limits loaded from classpath."
-  (if-let [url (io/resource limits-resource)]
-    (edn/read-string (slurp url))
-    {:max-file-size-bytes 50000
-     :max-files-per-rule 5
-     :default-rule-timeout-ms 300000}))
+(def ^:private limits (load-limits "config/semantic-analyzer/limits.edn"))
 
 (def ^:private max-file-size-bytes
   "Maximum file size to send to LLM. Files larger than this are skipped."
