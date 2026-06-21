@@ -31,7 +31,12 @@
             [ai.miniforge.dag-executor.interface :as dag]
             [ai.miniforge.logging.interface :as log]
             [ai.miniforge.agent-runtime.interface :as error-classifier]
-            [ai.miniforge.spec-parser.interface :as spec-parser]))
+            [ai.miniforge.spec-parser.interface :as spec-parser]
+            [clojure.edn :as edn]
+            [clojure.java.io :as io]))
+
+(def ^:private defaults
+  (-> (io/resource "config/task-executor/defaults.edn") slurp edn/read-string))
 
 (defn create-task-context
   [task-id task run-context]
@@ -64,8 +69,10 @@
   [task-id lock-pool executor logger config]
   (log-event logger :acquiring-resources task-id {})
 
-  ;; Acquire worktree semaphore (60 second timeout)
-  (let [worktree-result (dag/acquire-worktree! lock-pool task-id 60000 logger)]
+  ;; Acquire worktree semaphore (timeout from config defaults)
+  (let [worktree-result (dag/acquire-worktree! lock-pool task-id
+                                               (:worktree-acquire-timeout-ms defaults)
+                                               logger)]
     (when (dag/err? worktree-result)
       (throw (ex-info "Failed to acquire worktree"
                       {:task-id task-id
@@ -218,10 +225,11 @@
    Using Claude Sonnet pricing as baseline: ~$3/million input, ~$15/million output.
    Assume 70% input / 30% output ratio for simplicity."
   [total-tokens]
-  (let [input-tokens (* total-tokens 0.7)
-        output-tokens (* total-tokens 0.3)
-        input-cost-per-million 3.0
-        output-cost-per-million 15.0
+  (let [{:keys [input-cost-per-million output-cost-per-million
+                input-token-share output-token-share]}
+        (:token-pricing defaults)
+        input-tokens (* total-tokens input-token-share)
+        output-tokens (* total-tokens output-token-share)
         cost (+ (/ (* input-tokens input-cost-per-million) 1000000.0)
                 (/ (* output-tokens output-cost-per-million) 1000000.0))]
     (double cost)))

@@ -26,13 +26,18 @@
   - Handles task failures and cascading to dependents"
   (:require [ai.miniforge.task-executor.runner :as runner]
             [ai.miniforge.dag-executor.interface :as dag]
-            [ai.miniforge.logging.interface :as log]))
+            [ai.miniforge.logging.interface :as log]
+            [clojure.edn :as edn]
+            [clojure.java.io :as io]))
+
+(def ^:private defaults
+  (-> (io/resource "config/task-executor/defaults.edn") slurp edn/read-string))
 
 (defn create-run-context
   [run-atom config]
   (let [lock-pool (or (:lock-pool config)
                       (dag/create-lock-pool
-                        :max-worktrees (:max-parallel config 4)))]
+                        :max-worktrees (:max-parallel config (:max-parallel defaults))))]
     {:run-atom run-atom
      :workflow-id (:workflow-id config)
      :executor (:executor config)
@@ -129,7 +134,7 @@
         execute-task-fn (make-execute-task-fn run-context)]
     {:run-atom run-atom
      :execute-task-fn execute-task-fn
-     :max-parallel (:max-parallel config 4)
+     :max-parallel (:max-parallel config (:max-parallel defaults))
      :config config}))
 
 (defn execute-dag!
@@ -166,7 +171,7 @@
 
               ;; Continue if not terminal
               (when-not (#{:completed :failed :budget-exceeded} status)
-                (Thread/sleep 1000) ; Poll interval
+                (Thread/sleep (:scheduler-poll-interval-ms defaults)) ; Poll interval
                 (recur (inc iteration)))))))
 
       (catch Exception e
