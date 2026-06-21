@@ -85,6 +85,16 @@
   (= redirect-transition-type
      (get-in result [transition-request-key transition-type-key])))
 
+(defn skipped?
+  "True when a phase result is a skip — the phase short-circuited because its
+   work was already done. The marker lives on the result's :output. This checks
+   both the bare result (as a leave-handler holds it) and the result nested
+   under :result (as the event builder receives it), so the same predicate
+   answers on either emission path."
+  [result]
+  (boolean (or (get-in result [:output :skipped])
+               (get-in result [:result :output :skipped]))))
+
 (defn outcome
   "Resolve a completed phase's typed act — the one derivation of the
    :phase/outcome value from a phase result and a success verdict.
@@ -95,13 +105,15 @@
    it in keeps this function a pure reduction over the result's own markers.
 
    Precedence is deliberate: a refusal dominates any other act; an outright
-   failure dominates a pending redirect; a phase that did its work but hands
-   control elsewhere is :redirected. This is the only place the precedence is
-   decided — the event stream and the views read the result, never re-derive it."
+   failure dominates the rest; a phase that short-circuited because its work was
+   already done is :skipped; a phase that did its work but hands control
+   elsewhere is :redirected. This is the only place the precedence is decided —
+   the event stream and the views read the result, never re-derive it."
   [result succeeded-verdict?]
   (cond
     (blocked? result)            :blocked
     (not succeeded-verdict?)     :failure
+    (skipped? result)            :skipped
     (redirect-requested? result) :redirected
     :else                        :success))
 

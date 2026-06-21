@@ -51,3 +51,21 @@
   (testing "an outright failure dominates a pending redirect"
     (let [result (pr/request-redirect (pr/success "env-1" "done") :verify)]
       (is (= :failure (pr/outcome result false))))))
+
+(deftest outcome-skipped-test
+  (testing "a skipped phase reports :skipped"
+    (is (= :skipped (pr/outcome (pr/skipped :already-implemented) true))))
+  (testing "a skip nested under :result (event-builder shape) is detected"
+    (is (= :skipped (pr/outcome {:status :completed
+                                 :result (pr/skipped :already-implemented)}
+                                true))))
+  (testing "an outright failure still dominates a skip-shaped result"
+    (is (= :failure (pr/outcome (pr/skipped :already-implemented) false)))))
+
+(deftest skipped?-predicate-test
+  (testing "true for a bare skip result and for one nested under :result"
+    (is (pr/skipped? (pr/skipped :already-implemented)))
+    (is (pr/skipped? {:result (pr/skipped :already-implemented)})))
+  (testing "false for plain success/error results"
+    (is (not (pr/skipped? (pr/success "env-1" "done"))))
+    (is (not (pr/skipped? (pr/error "env-1" "boom" "boom" {}))))))
