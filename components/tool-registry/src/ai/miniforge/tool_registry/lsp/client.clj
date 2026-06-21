@@ -24,12 +24,11 @@
    Layer 2: Request/response handling
    Layer 3: High-level operations"
   (:require
+   [ai.miniforge.config.interface :as config]
    [ai.miniforge.tool-registry.lsp.protocol :as proto]
    [ai.miniforge.tool-registry.lsp.process :as process]
    [ai.miniforge.tool-registry.schema :as schema]
-   [clojure.core.async :as async :refer [go-loop]]
-   [clojure.edn :as edn]
-   [clojure.java.io :as io]
+   [clojure.core.async :refer [go-loop]]
    [clojure.string :as str])
   (:import
    [java.io BufferedReader InputStreamReader BufferedWriter OutputStreamWriter]))
@@ -47,40 +46,13 @@
    initialized?
    notification-handler])
 
-(defn- load-config
-  "Read an EDN config resource, failing fast with a clear ex-info when the
-   resource is absent from the classpath, malformed, not a map, or missing
-   a required key — rather than a low-signal NPE/reader error at load."
-  [path required-keys]
-  (let [url (io/resource path)]
-    (when (nil? url)
-      (throw (ex-info (str "Missing config resource on classpath: " path)
-                      {:config/resource path})))
-    (let [parsed (try
-                   (edn/read-string (slurp url :encoding "UTF-8"))
-                   (catch InterruptedException e
-                     ;; Never swallow cancellation — restore the flag and
-                     ;; propagate rather than wrap it as a read error.
-                     (.interrupt (Thread/currentThread))
-                     (throw e))
-                   (catch Exception e
-                     ;; Covers both I/O (slurp) and parse (read-string)
-                     ;; failures, so the message names both.
-                     (throw (ex-info (str "Failed to read/parse config resource: " path)
-                                     {:config/resource path} e))))]
-      (when-not (map? parsed)
-        (throw (ex-info (str "Config resource is not a map: " path)
-                        {:config/resource path})))
-      (let [missing (vec (remove #(contains? parsed %) required-keys))]
-        (when (seq missing)
-          (throw (ex-info (str "Config resource " path " missing keys: " missing)
-                          {:config/resource path :config/missing-keys missing})))
-        parsed))))
-
 (def ^:private timeouts
-  "LSP client timeouts, loaded from EDN so operators can tune per environment."
-  (load-config "config/tool-registry/lsp.edn"
-               [:request-timeout-ms :init-timeout-ms :shutdown-timeout-ms]))
+  "LSP client timeouts, loaded from EDN so operators can tune per environment.
+   Uses the shared config-resource loader (fails fast with a clear ex-info on
+   a missing/malformed/non-map resource or a missing required key)."
+  (config/load-config-resource
+   "config/tool-registry/lsp.edn"
+   [:request-timeout-ms :init-timeout-ms :shutdown-timeout-ms]))
 
 (def default-timeout-ms
   "Default deadline (ms) for synchronous LSP requests."

@@ -595,7 +595,8 @@
       ;; count can observe the agent in the window before the callback runs
       ;; and then race stop!, leaving `discovered` empty. Waiting on the
       ;; callback's own effect makes both assertions deterministic.
-      (wait-until-count discovered 1)
+      (is (wait-until-count discovered 1)
+          "discovery callback should fire before the wait times out")
       (sut/stop! orch)
       (is (pos? (registry/count-agents reg))
           "discovery loop should have registered agents")
