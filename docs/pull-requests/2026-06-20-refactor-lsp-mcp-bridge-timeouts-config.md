@@ -7,10 +7,8 @@ Moves the LSP client request, initialize, and shutdown timeouts in the
 Behavior-preserving: the loaded values match the originals
 (`30000`/`60000`/`10000`).
 
-This is the follow-up named in
-`docs/pull-requests/2026-06-20-refactor-lsp-client-timeouts-config.md`
-(PR 1253), which externalized the same three timeouts for the
-`tool-registry` component. The base carried a duplicate of those magic
+This is the follow-up to PR #1253, which externalized the same three timeouts
+for the `tool-registry` component. The base carried a duplicate of those magic
 numbers.
 
 ## Motivation
