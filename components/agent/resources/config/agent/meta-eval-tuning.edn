@@ -1,0 +1,8 @@
+;; Tuning for the meta-evaluator LLM call (meta_evaluator.clj/evaluate).
+;;
+;; Loaded at namespace load. The meta-evaluator makes a single focused
+;; call (~500 input tokens, ~100 output tokens) to judge tool-use
+;; relevance. Only :max-tokens is set; the call site does not pass a
+;; temperature.
+
+{:max-tokens 150}
