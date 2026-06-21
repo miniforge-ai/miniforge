@@ -33,7 +33,7 @@ the `bb.edn` LSP tasks. This PR does that path wiring.
   `bases/lsp-mcp-bridge/resources/config/lsp-mcp-bridge/lsp.edn` holding
   `{:request-timeout-ms 30000 :init-timeout-ms 60000 :shutdown-timeout-ms 10000}`,
   with the Apache-2.0 header and a comment describing each key. Values and
-  structure mirror `components/tool-registry/resources/config/tool-registry/lsp.edn`.
+  structure mirror the `tool-registry` LSP timeout config introduced in PR #1253.
 - `bases/lsp-mcp-bridge/src/ai/miniforge/lsp_mcp_bridge/lsp/client.clj`:
   - requires `clojure.edn` and `clojure.java.io`
   - adds a private `load-config` helper that reads the EDN via
