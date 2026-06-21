@@ -472,7 +472,9 @@
   "Require every discovered test namespace, run `clojure.test`, and
    exit non-zero via `System/exit` on any failure or error.
 
-   Babashka-only: relies on `babashka.classpath`."
+   Babashka-only: relies on `babashka.classpath`. The function-local require is
+   the intentional test discovery boundary; discovered test namespaces are data,
+   not static product dependencies."
   []
   (let [files (discover-test-namespaces (classpath-test-roots))]
     (doseq [{:keys [ns]} files]
