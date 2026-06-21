@@ -349,6 +349,15 @@
               "raw matches must be redacted from evidence")
           (is (= :critical (:severity fail-rec))))))))
 
+(deftest classify-rules-guidance-status-test
+  (testing "an applicable non-acting semantic rule is classified :guidance, not
+            :passed — the judge was skipped, so evidence must not imply it ran"
+    (let [r-guid     (semantic-rule :id :r/guid :phases #{:verify} :action :warn)
+          classified (#'sut/classify-rules [(pack r-guid)] :verify
+                                           dirty-code-artifact {} [])
+          by-id      (into {} (map (juxt :rule-id :status)) classified)]
+      (is (= :guidance (by-id :r/guid))))))
+
 (deftest emits-rule-applied-events-test
   (testing "evaluation publishes one :gate/rule-applied event per enabled rule"
     (let [stream    (event-stream/create-event-stream {:sinks []})

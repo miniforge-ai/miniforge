@@ -370,6 +370,16 @@
      :artifact-path (:artifact-path violation)
      :match-count   (count (:matches violation))}))
 
+(defn- guidance-only-semantic?
+  "A semantic-detector rule with a non-acting enforcement action — surfaced as
+   guidance (behavior injection), never evaluated by the judge (see
+   `semantic-judge-applies?`). Evidence marks these `:guidance`, not `:passed`,
+   so the event log never claims the judge cleared a rule it skipped."
+  [rule]
+  (and (= :semantic (policy-pack/resolve-detector rule))
+       (not (contains? judge-acting-actions
+                       (get-in rule [:rule/enforcement :action])))))
+
 (defn- classify-rules
   "Per-rule evidence: classify every enabled rule across `packs` for `phase`.
    `violations` are the {:rule :violation} maps from compiled check results.
@@ -377,6 +387,9 @@
      :skipped-by-phase — the rule's :applies-to {:phases} excludes `phase`
      :not-applicable   — phase matches but file-glob/task-type excludes it
      :failed           — considered and violated (carries a violation summary)
+     :guidance         — applicable semantic rule the judge skips (non-acting
+                         action): surfaced as guidance, not gated. NOT `:passed`
+                         — the judge never ran, so evidence must not imply it did
      :passed           — considered and clean
 
    Rules are resolved first, so override-by-id is honored: evidence is 1:1
@@ -401,6 +414,8 @@
                :status      (cond
                               (not (policy-pack/rule-applies-to-phase? rule phase)) :skipped-by-phase
                               (contains? violated id)                               :failed
+                              (and (contains? considered-ids id)
+                                   (guidance-only-semantic? rule))                 :guidance
                               (contains? considered-ids id)                         :passed
                               :else                                                 :not-applicable)
                :severity    (:rule/severity rule)
