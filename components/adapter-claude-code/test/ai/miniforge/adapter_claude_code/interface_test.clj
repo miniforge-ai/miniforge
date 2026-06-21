@@ -20,6 +20,7 @@
   (:require
    [clojure.test :refer [deftest is testing]]
    [clojure.java.io :as io]
+   [ai.miniforge.adapter-claude-code.discovery :as discovery]
    [ai.miniforge.adapter-claude-code.interface :as sut]
    [ai.miniforge.control-plane-adapter.interface :as proto]))
 
@@ -193,3 +194,32 @@
       ;; or fail depending on the environment; we just assert the shape.
       (is (contains? ret :success?))
       (is (boolean? (:success? ret))))))
+
+;------------------------------------------------------------------------------ Layer 0
+;; load-config — fail-fast config loading
+
+(deftest load-config-throws-on-missing-resource-test
+  (testing "Absent classpath resource raises an ex-info, not an NPE"
+    (let [ex (try
+               (#'discovery/load-config "config/adapter_claude_code/does-not-exist.edn"
+                                        [:k])
+               nil
+               (catch clojure.lang.ExceptionInfo e e))]
+      (is (instance? clojure.lang.ExceptionInfo ex))
+      (is (= "config/adapter_claude_code/does-not-exist.edn"
+             (:config/resource (ex-data ex)))))))
+
+(deftest load-config-throws-on-missing-key-test
+  (testing "Present resource missing a required key raises an ex-info"
+    (let [ex (try
+               (#'discovery/load-config "config/adapter_claude_code/staleness.edn"
+                                        [:nope])
+               nil
+               (catch clojure.lang.ExceptionInfo e e))]
+      (is (instance? clojure.lang.ExceptionInfo ex))
+      (is (= [:nope] (:config/missing-keys (ex-data ex)))))))
+
+(deftest staleness-windows-loads-test
+  (testing "Valid resource still loads the expected window keys"
+    (is (= #{:session-activity-window-ms :running-window-ms :idle-window-ms}
+           (set (keys discovery/staleness-windows))))))
