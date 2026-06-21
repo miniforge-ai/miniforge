@@ -26,11 +26,20 @@
     (let [provider (fn [x] [:ok x])]
       (with-redefs [sut/optional-functions {}]
         (sut/register-optional-fn! 'example/provider provider)
-        (is (identical? provider (sut/try-resolve 'example/provider)))
-        (is (= [:ok 42] (sut/try-resolve-fn 'example/provider 42))))))
+        (is (identical? provider (sut/optional-provider 'example/provider)))
+        (is (= [:ok 42] (sut/call-optional-provider 'example/provider 42))))))
 
   (testing "missing or failing providers return nil to preserve fallback flow"
     (with-redefs [sut/optional-functions {'example/failing (fn [] (throw (ex-info "boom" {})))}]
-      (is (nil? (sut/try-resolve 'example/missing)))
-      (is (nil? (sut/try-resolve-fn 'example/missing)))
-      (is (nil? (sut/try-resolve-fn 'example/failing))))))
+      (is (nil? (sut/optional-provider 'example/missing)))
+      (is (nil? (sut/call-optional-provider 'example/missing)))
+      (is (nil? (sut/call-optional-provider 'example/failing)))))
+
+  (testing "interrupted providers restore the thread interrupt flag"
+    (with-redefs [sut/optional-functions {'example/interrupted
+                                           (fn []
+                                             (throw (InterruptedException. "stop")))}]
+      (let [result       (sut/call-optional-provider 'example/interrupted)
+            interrupted? (Thread/interrupted)]
+        (is (nil? result))
+        (is interrupted?)))))

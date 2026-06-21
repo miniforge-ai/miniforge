@@ -148,7 +148,7 @@
 (defn- load-bundle-for-show
   "Load a bundle from the component interface or the filesystem."
   [id]
-  (or (shared/try-resolve-fn 'ai.miniforge.evidence-bundle.interface/get-bundle id)
+  (or (shared/call-optional-provider 'ai.miniforge.evidence-bundle.interface/get-bundle id)
       (let [f (io/file (str (evidence-dir) "/" id ".edn"))]
         (when (.exists f) (load-bundle-from-file f)))))
 
@@ -197,7 +197,8 @@
   (println)
   (println (display/style (messages/t :evidence/header) :foreground :cyan :bold true))
   (println)
-  (let [component-result (shared/try-resolve-fn 'ai.miniforge.evidence-bundle.interface/list-bundles)]
+  (let [component-result (shared/call-optional-provider
+                          'ai.miniforge.evidence-bundle.interface/list-bundles)]
     (if component-result
       (display-component-bundles component-result)
       (display-filesystem-bundles)))
@@ -238,7 +239,7 @@
         fmt (or format "edn")]
     (if-not id
       (shared/usage-error! :evidence/export-usage "evidence export <id> <format>")
-      (let [result (shared/try-resolve-fn
+      (let [result (shared/call-optional-provider
                     'ai.miniforge.evidence-bundle.interface/export-bundle id fmt)]
         (if result
           (do

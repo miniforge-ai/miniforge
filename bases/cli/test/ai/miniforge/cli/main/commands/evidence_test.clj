@@ -87,7 +87,7 @@
          overrides))
 
 (defn- make-list-bundle
-  "Factory for the minimal bundle shape returned by the resolver in list output."
+  "Factory for the minimal bundle shape returned by the optional provider in list output."
   [& {:as overrides}]
   (merge {:bundle/id          "b-1"
           :bundle/workflow-id "wf-1"
@@ -112,14 +112,14 @@
 
 (deftest evidence-list-cmd-no-component-empty-dir-test
   (testing "list command shows 'no bundles' when dir is empty"
-    (with-redefs [shared/try-resolve-fn (constantly nil)
+    (with-redefs [shared/call-optional-provider (constantly nil)
                   app-config/home-dir (constantly *tmp-dir*)]
       (let [output (with-out-str (sut/evidence-list-cmd {}))]
         (is (re-find #"(?i)no evidence" output))))))
 
 (deftest evidence-list-cmd-component-results-test
   (testing "list command displays component results when available"
-    (with-redefs [shared/try-resolve-fn
+    (with-redefs [shared/call-optional-provider
                   (constantly [(make-list-bundle)])]
       (let [output (with-out-str (sut/evidence-list-cmd {}))]
         (is (.contains output "b-1"))))))
@@ -134,7 +134,7 @@
 (deftest evidence-show-cmd-not-found-test
   (testing "show command reports not found for unknown bundle"
     (let [exited? (atom false)]
-      (with-redefs [shared/try-resolve-fn (constantly nil)
+      (with-redefs [shared/call-optional-provider (constantly nil)
                     app-config/home-dir (constantly *tmp-dir*)
                     shared/exit! (fn [_] (reset! exited? true))]
         (with-out-str (sut/evidence-show-cmd {:id "missing"}))
@@ -145,7 +145,7 @@
     (let [evidence-path (str *tmp-dir* "/evidence")]
       (fs/create-dirs evidence-path)
       (spit (str evidence-path "/test-bundle.edn") (pr-str (make-bundle)))
-      (with-redefs [shared/try-resolve-fn (constantly nil)
+      (with-redefs [shared/call-optional-provider (constantly nil)
                     app-config/home-dir (constantly *tmp-dir*)]
         (let [output (with-out-str (sut/evidence-show-cmd {:id "test-bundle"}))]
           (is (.contains output "wf-1")))))))
@@ -155,7 +155,7 @@
     (let [evidence-path (str *tmp-dir* "/evidence")]
       (fs/create-dirs evidence-path)
       (spit (str evidence-path "/canonical-bundle.edn") (pr-str (make-canonical-bundle)))
-      (with-redefs [shared/try-resolve-fn (constantly nil)
+      (with-redefs [shared/call-optional-provider (constantly nil)
                     app-config/home-dir (constantly *tmp-dir*)]
         (let [output (with-out-str (sut/evidence-show-cmd {:id "canonical-bundle"}))]
           (is (.contains output "wf-2"))
