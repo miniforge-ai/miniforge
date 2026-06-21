@@ -39,8 +39,10 @@
     {:enabled (get config :enabled true)
      :auto-apply (get config :workaround-auto-apply true)
      :auto-switch (get config :backend-auto-switch true)
-     :threshold (get config :backend-health-threshold 0.90)
-     :cooldown-ms (get config :backend-switch-cooldown-ms 1800000)}))
+     :threshold (get config :backend-health-threshold
+                     (:success-rate-threshold health/config))
+     :cooldown-ms (get config :backend-switch-cooldown-ms
+                       (:switch-cooldown-ms health/config))}))
 
 (defn get-current-backend
   "Get current backend from context or config.

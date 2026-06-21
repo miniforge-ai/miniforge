@@ -215,8 +215,10 @@
                              {:ctx ctx}))
   (let [count       @hang-count
         backend-kw  (keyword backend)
-        cooldown-ms (get config :backend-switch-cooldown-ms 1800000)
-        threshold   (get config :backend-health-threshold 0.90)
+        cooldown-ms (get config :backend-switch-cooldown-ms
+                         (:switch-cooldown-ms backend-health/config))
+        threshold   (get config :backend-health-threshold
+                         (:success-rate-threshold backend-health/config))
         resumable?  (and (string? session-id)
                          (not (str/blank? session-id)))]
     (cond
